@@ -1,0 +1,8 @@
+# Environments
+.env
+.venv
+__pycache__/
+
+# IDE specific files
+.idea/
+*.swp
