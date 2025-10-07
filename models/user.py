@@ -1,5 +1,5 @@
 # models/user.py
-from sqlalchemy import Column, Integer, String, BigInteger, Enum, Boolean
+from sqlalchemy import Column, Integer, String, BigInteger, Enum, Boolean, DateTime
 from .database import Base
 from core.enums import UserRole
 
@@ -13,3 +13,4 @@ class User(Base):
     full_name = Column(String, nullable=False)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.WATCH)
     has_bot_access = Column(Boolean, default=True, nullable=False)
+    trading_restricted_until = Column(DateTime, nullable=True, default=None)
