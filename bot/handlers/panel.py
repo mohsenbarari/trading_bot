@@ -1,31 +1,24 @@
-# bot/handlers/panel.py
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from models.user import User
-from bot.keyboards import get_main_menu_keyboard, get_mini_app_keyboard # کیبورد جدید را وارد می‌کنیم
+from bot.keyboards import get_main_menu_keyboard, get_mini_app_keyboard
 from typing import Optional
 
 router = Router()
 
+# --- نسخه نهایی و اصلاح شده ---
 @router.message(Command("panel"))
+@router.message(F.text == "پنل کاربری") # به متن جدید گوش می‌دهد
 async def show_panel(message: types.Message, user: Optional[User]):
-    """
-    بر اساس دسترسی کاربر، پنل مناسب را نمایش می‌دهد.
-    """
     if not user:
-        # این حالت توسط default_handler مدیریت می‌شود
         return
-
     if user.has_bot_access:
-        # اگر کاربر دسترسی به بات دارد، منوی کامل را نشان بده
         keyboard = get_main_menu_keyboard(user.role)
         await message.answer(f"سلام {user.full_name}!\nبه پنل کاربری خود خوش آمدید.", reply_markup=keyboard)
     else:
-        # اگر کاربر دسترسی به بات ندارد، فقط دکمه ورود به Mini App را نشان بده
         keyboard = get_mini_app_keyboard()
         await message.answer(
-            f"سلام {user.full_name}!\n"
-            "برای دسترسی به امکانات، لطفاً از طریق پنل امن تحت وب وارد شوید.",
+            f"سلام {user.full_name}!\nبرای دسترسی به امکانات، لطفاً از طریق پنل امن وارد شوید.",
             reply_markup=keyboard
         )
 

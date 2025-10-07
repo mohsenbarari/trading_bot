@@ -4,8 +4,9 @@ from core.enums import UserRole
 from models.session import Platform
 
 class InvitationBase(BaseModel):
-    account_name: str  # <-- فیلد جدید اضافه شد
+    account_name: str  
     mobile_number: str
+    role: UserRole
 
 class InvitationCreate(InvitationBase):
     pass
@@ -29,6 +30,7 @@ class User(UserBase):
     role: UserRole
     class Config:
         from_attributes = True
+        use_enum_values = True
 
 class OTPRequest(BaseModel):
     mobile_number: str
@@ -42,3 +44,6 @@ class OTPVerify(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+class WebAppInitData(BaseModel):
+    init_data: str

@@ -1,54 +1,78 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fa" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Device Verification</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@fingerprintjs/fingerprintjs@3/dist/fp.min.js"></script>
-    <style>
-        body { font-family: sans-serif; text-align: center; padding: 20px; }
-    </style>
-</head>
+    </head>
 <body>
-    <h1>Verifying your device...</h1>
-    <p id="status">Please wait.</p>
+    <div class="container">
+        <h1>پنل کاربری تحت وب</h1>
+        <div id="userInfo" class="user-info">
+            <p>در حال بارگذاری اطلاعات...</p>
+        </div>
+
+        <div id="adminPanel" class="admin-panel" style="display: none;">
+            </div>
+
+        <div id="result" class="result" style="display: none;"></div>
+    </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const tg = window.Telegram.WebApp;
-            tg.ready();
+        const API_BASE_URL = ""; // چون در یک دامنه هستیم، پیشوند لازم نیست
+        let jwtToken = null;
+        const tg = window.Telegram.WebApp;
 
-            FingerprintJS.load()
-                .then(fp => fp.get())
-                .then(result => {
-                    const visitorId = result.visitorId;
-                    document.getElementById('status').innerText = `Device ID: ${visitorId}`;
+        // --- تابع جدید برای دریافت اطلاعات کاربر ---
+        function fetchUserDetails(token) {
+            fetch(`${API_BASE_URL}/api/routers/auth/me`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            })
+            .then(response => response.json())
+            .then(user => {
+                if (user && user.role) {
+                    document.getElementById('userInfo').innerHTML = `<p>خوش آمدید, <strong>${user.full_name}</strong>!</p><p>سطح دسترسی: ${user.role}</p>`;
                     
-                    // Here you would send the visitorId and tg.initData to your backend
-                    // For example:
-                    /*
-                    fetch('/api/auth/verify-mini-app', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            fingerprint: visitorId,
-                            init_data: tg.initData
-                        })
-                    }).then(response => response.json())
-                      .then(data => {
-                          if(data.success) {
-                              document.getElementById('status').innerText = "Device verified successfully!";
-                              tg.close();
-                          } else {
-                              document.getElementById('status').innerText = `Error: ${data.message}`;
-                          }
-                      });
-                    */
-                })
-                .catch(error => {
-                    document.getElementById('status').innerText = `Error: ${error}`;
-                });
+                    // --- بخش کلیدی: بررسی سطح دسترسی به صورت پویا ---
+                    if (user.role === 'مدیر ارشد') { // مقایسه با مقدار فارسی Enum
+                        document.getElementById('adminPanel').style.display = 'block';
+                    }
+                } else {
+                     document.getElementById('userInfo').innerHTML = `<p>خطا در دریافت اطلاعات کاربر.</p>`;
+                }
+            })
+            .catch(error => {
+                document.getElementById('userInfo').innerHTML = `<p>خطای ارتباط با سرور: ${error}</p>`;
+            });
+        }
+        
+        document.addEventListener('DOMContentLoaded', function () {
+            tg.ready();
+            tg.expand();
+
+            if (!tg.initData) {
+                document.getElementById('userInfo').innerHTML = "<p>خطا: لطفاً این صفحه را از طریق ربات تلگرام باز کنید.</p>";
+                return;
+            }
+
+            // ۱. احراز هویت و دریافت توکن
+            fetch(`${API_BASE_URL}/api/routers/auth/webapp-login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ init_data: tg.initData })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.access_token) {
+                    jwtToken = data.access_token;
+                    // ۲. حالا اطلاعات کامل کاربر را با توکن دریافت می‌کنیم
+                    fetchUserDetails(jwtToken);
+                } else {
+                    document.getElementById('userInfo').innerHTML = `<p>خطا در احراز هویت: ${data.detail}</p>`;
+                }
+            })
+            .catch(error => {
+                document.getElementById('userInfo').innerHTML = `<p>خطای ارتباط با سرور: ${error}</p>`;
+            });
+
+            // ... (کد مربوط به event listener فرم بدون تغییر باقی می‌ماند) ...
         });
     </script>
 </body>

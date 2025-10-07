@@ -8,6 +8,7 @@ app = FastAPI(title="Trading Bot API")
 origins = [
     "http://localhost:3000",    # For local web development
     "http://localhost:8080",    # Another common local port
+    "https://telegram.362514.ir"
     # Add your production frontend URLs here
 ]
 app.add_middleware(

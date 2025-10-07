@@ -22,9 +22,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 def verify_token(token: str, credentials_exception):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
+        # user_id: str = payload.get("sub") # این خط را کامنت یا حذف کنید
+        if payload.get("sub") is None:
             raise credentials_exception
-        return user_id
+        return payload 
     except JWTError:
         raise credentials_exception

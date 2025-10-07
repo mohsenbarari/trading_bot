@@ -1,38 +1,52 @@
-# manage.py
+# manage.py (نسخه نهایی و کامل)
 import argparse
+import os
 from alembic.config import Config
 from alembic import command
-import os
+from core.config import settings
 
 def main():
+    # ساخت یک کانفیگ Alembic به صورت برنامه‌نویسی
     alembic_cfg = Config("alembic.ini")
-    sync_db_url = os.getenv("SYNC_DATABASE_URL")
-    if not sync_db_url:
-        raise ValueError("SYNC_DATABASE_URL environment variable is not set for Alembic.")
-    alembic_cfg.set_main_option('sqlalchemy.url', sync_db_url)
+    
+    # تنظیم آدرس دیتابیس به صورت دستی تا Alembic سردرگم نشود
+    alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
 
-    parser = argparse.ArgumentParser(description="Run Alembic database migrations.")
-    subparsers = parser.add_subparsers(dest="action", required=True, help="Alembic command")
+    parser = argparse.ArgumentParser(description="Manage database migrations.")
+    subparsers = parser.add_subparsers(dest="action", required=True)
+
+    # دستور revision
+    parser_revision = subparsers.add_parser("revision", help="Create a new revision file.")
+    parser_revision.add_argument("--autogenerate", action="store_true", help="Autogenerate revision from models.")
+    parser_revision.add_argument("-m", "--message", type=str, help="Revision message.")
+
+    # دستور upgrade
+    parser_upgrade = subparsers.add_parser("upgrade", help="Upgrade to a later version.")
+    parser_upgrade.add_argument("revision", type=str, nargs="?", default="head", help="The revision to upgrade to.")
+
+    # --- دستور جدید downgrade ---
+    parser_downgrade = subparsers.add_parser("downgrade", help="Revert to a previous version.")
+    parser_downgrade.add_argument("revision", type=str, nargs="?", help="The revision to downgrade to (e.g., -1, base).")
     
-    rev_parser = subparsers.add_parser("revision", help="Create a new revision file.")
-    rev_parser.add_argument("--autogenerate", action="store_true", help="Autogenerate revision.")
-    rev_parser.add_argument("-m", "--message", type=str, required=True, help="Revision message.")
-    
-    up_parser = subparsers.add_parser("upgrade", help="Upgrade to a revision.")
-    up_parser.add_argument("revision", type=str, default="head", nargs="?", help="Revision ID.")
-    
-    subparsers.add_parser("current", help="Display the current revision.")
+    # دستور current
+    parser_current = subparsers.add_parser("current", help="Display the current revision.")
 
     args = parser.parse_args()
-    
+    action = args.action
+
     try:
-        if args.action == "revision":
+        if action == "revision":
             command.revision(alembic_cfg, message=args.message, autogenerate=args.autogenerate)
-        elif args.action == "upgrade":
+        elif action == "upgrade":
             command.upgrade(alembic_cfg, args.revision)
-        elif args.action == "current":
+        # --- منطق جدید برای downgrade ---
+        elif action == "downgrade":
+            if not args.revision:
+                print("Error: downgrade command requires a revision (e.g., -1 or a specific hash).")
+                return
+            command.downgrade(alembic_cfg, args.revision)
+        elif action == "current":
             command.current(alembic_cfg)
-        print(f"Alembic command '{args.action}' executed successfully.")
     except Exception as e:
         print(f"An error occurred: {e}")
 

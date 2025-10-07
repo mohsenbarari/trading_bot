@@ -1,4 +1,4 @@
-# run.py (نسخه نهایی و قطعی)
+# run.py (نسخه نهایی و اصلاح شده)
 import asyncio
 import logging
 import uvicorn
@@ -7,11 +7,13 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from core.config import settings
 from main import app as fastapi_app
+from core.db import AsyncSessionLocal # <-- این import را اضافه کنید
 
 # وارد کردن تمام روترها
 from bot.handlers.start import router as start_router
 from bot.handlers.panel import router as panel_router
 from bot.handlers.default import router as default_router
+from bot.handlers.admin import router as admin_router # <-- روتر ادمین را وارد کنید
 
 from bot.middlewares.auth import AuthMiddleware
 
@@ -22,15 +24,14 @@ async def main():
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
 
-    # --- بخش کلیدی اصلاح شده ---
     # میدل‌ور را مستقیماً روی روتر اصلی برای پیام‌ها و کلیک‌ها ثبت می‌کنیم
     dp.message.middleware(AuthMiddleware())
     dp.callback_query.middleware(AuthMiddleware())
-    # --------------------------
     
     # ثبت روترها با اولویت مشخص
     dp.include_router(start_router)
     dp.include_router(panel_router)
+    dp.include_router(admin_router) # <-- روتر ادمین را اینجا ثبت کنید
     
     # روتر پیش‌فرض باید همیشه در آخر ثبت شود
     dp.include_router(default_router)
