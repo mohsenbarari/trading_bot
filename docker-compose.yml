@@ -16,6 +16,10 @@ services:
     networks:
       - trading_net
 
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+
   db:
     image: postgres:15-alpine
     container_name: trading_bot_db
