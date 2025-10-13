@@ -3,7 +3,7 @@ services:
     build: .
     container_name: trading_bot_app
     restart: always
-    command: python run.py
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
     volumes:
       - .:/app
     ports:
@@ -11,14 +11,40 @@ services:
     env_file:
       - .env
     depends_on:
+      migration:
+        condition: service_completed_successfully
+    networks:
+      - trading_net
+
+  bot:
+    build: .
+    container_name: trading_bot_bot
+    restart: always
+    command: python run_bot.py
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+    networks:
+      - trading_net
+
+  migration:
+    build: .
+    container_name: trading_bot_migration
+
+    command: ["python", "-c", "import manage; manage.main()"]
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
       db:
         condition: service_healthy
     networks:
       - trading_net
-
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
 
   db:
     image: postgres:15-alpine
@@ -30,8 +56,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data/
-    ports:
-      - "5432:5432"
     networks:
       - trading_net
     healthcheck:
@@ -43,8 +67,6 @@ services:
 networks:
   trading_net:
     driver: bridge
-    driver_opts:
-      com.docker.network.driver.mtu: "1400"
 
 volumes:
   postgres_data:

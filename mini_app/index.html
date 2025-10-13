@@ -1,78 +1,121 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
-    </head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>پنل کاربری</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 15px; background-color: var(--tg-theme-bg-color); color: var(--tg-theme-text-color); }
+        .container { max-width: 600px; margin: 0 auto; }
+        .user-info, .admin-panel, .result { background-color: var(--tg-theme-secondary-bg-color); border-radius: 10px; padding: 15px; margin-bottom: 15px; }
+        h1, h2 { color: var(--tg-theme-text-color); border-bottom: 1px solid var(--tg-theme-hint-color); padding-bottom: 10px; }
+        .form-group { margin-bottom: 10px; }
+        label { display: block; margin-bottom: 5px; }
+        input, select, button { width: 100%; padding: 10px; border-radius: 5px; border: 1px solid var(--tg-theme-hint-color); background-color: var(--tg-theme-bg-color); color: var(--tg-theme-text-color); box-sizing: border-box; }
+        button { background-color: var(--tg-theme-button-color); color: var(--tg-theme-button-text-color); cursor: pointer; border: none; font-weight: bold; }
+        #adminPanel { display: none; }
+        a { color: var(--tg-theme-link-color); }
+    </style>
+</head>
 <body>
     <div class="container">
         <h1>پنل کاربری تحت وب</h1>
-        <div id="userInfo" class="user-info">
-            <p>در حال بارگذاری اطلاعات...</p>
+        <div id="userInfo" class="user-info"><p>در حال احراز هویت...</p></div>
+        <div id="adminPanel" class="admin-panel">
+            <h2>ساخت دعوتنامه جدید</h2>
+            <form id="invitationForm">
+                <div class="form-group"><label for="accountName">نام کاربری:</label><input type="text" id="accountName" required></div>
+                <div class="form-group"><label for="mobileNumber">شماره موبایل (مثال: 0912...):</label><input type="text" id="mobileNumber" required></div>
+                <div class="form-group">
+                    <label for="role">سطح دسترسی:</label>
+                    <select id="role" required>
+                        <option value="تماشا">تماشا</option><option value="عادی">عادی</option><option value="پلیس">پلیس</option><option value="مدیر میانی">مدیر میانی</option>
+                    </select>
+                </div>
+                <button type="submit">ساخت دعوتنامه</button>
+            </form>
         </div>
-
-        <div id="adminPanel" class="admin-panel" style="display: none;">
-            </div>
-
         <div id="result" class="result" style="display: none;"></div>
     </div>
-
     <script>
-        const API_BASE_URL = ""; // چون در یک دامنه هستیم، پیشوند لازم نیست
         let jwtToken = null;
         const tg = window.Telegram.WebApp;
 
-        // --- تابع جدید برای دریافت اطلاعات کاربر ---
         function fetchUserDetails(token) {
-            fetch(`${API_BASE_URL}/api/routers/auth/me`, {
-                headers: { 'Authorization': `Bearer ${token}` }
+            fetch(`/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } })
+            .then(response => {
+                if (!response.ok) throw new Error('Network response was not ok');
+                return response.json();
             })
-            .then(response => response.json())
             .then(user => {
                 if (user && user.role) {
                     document.getElementById('userInfo').innerHTML = `<p>خوش آمدید, <strong>${user.full_name}</strong>!</p><p>سطح دسترسی: ${user.role}</p>`;
-                    
-                    // --- بخش کلیدی: بررسی سطح دسترسی به صورت پویا ---
-                    if (user.role === 'مدیر ارشد') { // مقایسه با مقدار فارسی Enum
+                    if (user.role === 'مدیر ارشد') {
                         document.getElementById('adminPanel').style.display = 'block';
                     }
-                } else {
-                     document.getElementById('userInfo').innerHTML = `<p>خطا در دریافت اطلاعات کاربر.</p>`;
-                }
+                } else { document.getElementById('userInfo').innerHTML = `<p>خطا: اطلاعات کاربر دریافت نشد.</p>`; }
             })
-            .catch(error => {
-                document.getElementById('userInfo').innerHTML = `<p>خطای ارتباط با سرور: ${error}</p>`;
-            });
+            .catch(error => { document.getElementById('userInfo').innerHTML = `<p>خطای ارتباط با سرور (دریافت کاربر): ${error}</p>`; });
         }
         
         document.addEventListener('DOMContentLoaded', function () {
             tg.ready();
             tg.expand();
-
             if (!tg.initData) {
                 document.getElementById('userInfo').innerHTML = "<p>خطا: لطفاً این صفحه را از طریق ربات تلگرام باز کنید.</p>";
                 return;
             }
-
-            // ۱. احراز هویت و دریافت توکن
-            fetch(`${API_BASE_URL}/api/routers/auth/webapp-login`, {
+            fetch(`/api/auth/webapp-login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ init_data: tg.initData })
             })
-            .then(response => response.json())
+            .then(response => {
+                 if (!response.ok) { return response.json().then(err => { throw new Error(err.detail || 'Failed to login'); }); }
+                 return response.json();
+            })
             .then(data => {
                 if (data.access_token) {
                     jwtToken = data.access_token;
-                    // ۲. حالا اطلاعات کامل کاربر را با توکن دریافت می‌کنیم
                     fetchUserDetails(jwtToken);
-                } else {
-                    document.getElementById('userInfo').innerHTML = `<p>خطا در احراز هویت: ${data.detail}</p>`;
-                }
+                } else { document.getElementById('userInfo').innerHTML = `<p>خطا در احراز هویت: ${data.detail || 'توکن دریافت نشد'}</p>`; }
             })
-            .catch(error => {
-                document.getElementById('userInfo').innerHTML = `<p>خطای ارتباط با سرور: ${error}</p>`;
-            });
+            .catch(error => { document.getElementById('userInfo').innerHTML = `<p>خطای ارتباط با سرور (لاگین): ${error}</p>`; });
 
-            // ... (کد مربوط به event listener فرم بدون تغییر باقی می‌ماند) ...
+            document.getElementById('invitationForm').addEventListener('submit', function (event) {
+                event.preventDefault();
+                const resultDiv = document.getElementById('result');
+                resultDiv.style.display = 'none';
+                if (!jwtToken) {
+                    resultDiv.innerHTML = '❌ خطا: شما احراز هویت نشده‌اید.';
+                    resultDiv.style.display = 'block';
+                    return;
+                }
+                const payload = {
+                    account_name: document.getElementById('accountName').value,
+                    mobile_number: document.getElementById('mobileNumber').value,
+                    role: document.getElementById('role').value
+                };
+                fetch(`/api/invitations/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwtToken}` },
+                    body: JSON.stringify(payload)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    resultDiv.style.display = 'block';
+                    if (data.token) {
+                        const bot_username = tg.initDataUnsafe.bot_username || 'YOUR_BOT_USERNAME';
+                        const bot_link = `https://t.me/${bot_username}?start=${data.token}`;
+                        resultDiv.innerHTML = `✅ دعوتنامه با موفقیت ساخته شد.<br>لینک: <a href="${bot_link}" target="_blank">${bot_link}</a>`;
+                    } else { resultDiv.innerHTML = `❌ خطا: ${data.detail}`; }
+                })
+                .catch(error => {
+                     resultDiv.style.display = 'block';
+                     resultDiv.innerHTML = `❌ خطای ارتباط با سرور (ساخت دعوتنامه): ${error}`;
+                });
+            });
         });
     </script>
 </body>

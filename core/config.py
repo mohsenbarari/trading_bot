@@ -1,6 +1,5 @@
-
+# core/config.py
 from pydantic_settings import BaseSettings
-
 
 class Settings(BaseSettings):
     bot_token: str
@@ -10,8 +9,8 @@ class Settings(BaseSettings):
     postgres_user: str
     postgres_password: str
     
-    # JWT settings
-    jwt_secret_key: str = "a_very_secret_key" # In production, use a strong, random key
+
+    jwt_secret_key: str = "a_very_secret_key"
     jwt_algorithm: str = "HS256"
 
     class Config:

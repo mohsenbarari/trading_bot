@@ -52,7 +52,7 @@ async def process_role_and_create(callback_query: types.CallbackQuery, state: FS
     account_name = user_data.get("account_name")
     mobile_number = user_data.get("mobile_number")
 
-    api_url = "http://app:8000/invitations/"
+    api_url = "http://app:8000/api/invitations/"
     payload = {
         "account_name": account_name,
         "mobile_number": mobile_number,
