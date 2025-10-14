@@ -57,7 +57,7 @@ async def process_role_and_create(callback_query: types.CallbackQuery, state: FS
         "account_name": account_name,
         "mobile_number": mobile_number,
         # --- بخش کلیدی اصلاح شده ---
-        "role": role.value  # ارسال مقدار فارسی ENUM به API
+        "role": role.name  
     }
     
     try:
