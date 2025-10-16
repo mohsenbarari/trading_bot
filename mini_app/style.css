@@ -1,0 +1,120 @@
+:root {
+    --toast-success-bg: #28a745;
+    --toast-error-bg: #dc3545;
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: var(--tg-theme-bg-color);
+    color: var(--tg-theme-text-color);
+}
+.container {
+    max-width: 600px;
+    margin: 0 auto;
+}
+.card {
+    background-color: var(--tg-theme-secondary-bg-color);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+h1 {
+    text-align: center;
+    margin-bottom: 25px;
+    font-size: 1.5rem;
+}
+h2 {
+    color: var(--tg-theme-text-color);
+    border-bottom: 1px solid var(--tg-theme-hint-color);
+    padding-bottom: 10px;
+    margin-top: 0;
+    font-size: 1.2rem;
+}
+.form-group {
+    margin-bottom: 15px;
+}
+label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+input, select, button {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--tg-theme-hint-color);
+    background-color: var(--tg-theme-bg-color);
+    color: var(--tg-theme-text-color);
+    box-sizing: border-box;
+    font-size: 1rem;
+}
+button {
+    background-color: var(--tg-theme-button-color);
+    color: var(--tg-theme-button-text-color);
+    cursor: pointer;
+    border: none;
+    font-weight: bold;
+    margin-top: 10px;
+}
+button:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+a {
+    color: var(--tg-theme-link-color);
+    text-decoration: none;
+}
+#adminPanel {
+    display: none;
+}
+.result-link {
+    word-wrap: break-word;
+    background: var(--tg-theme-bg-color);
+    padding: 10px;
+    border-radius: 5px;
+    margin-top: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.copy-btn {
+    padding: 5px 10px;
+    font-size: 0.8rem;
+    width: auto;
+    margin: 0;
+}
+.spinner {
+    border: 4px solid var(--tg-theme-hint-color);
+    border-top: 4px solid var(--tg-theme-button-color);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 20px auto;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+.toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 10px 20px;
+    border-radius: 8px;
+    color: white;
+    font-weight: bold;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.3s, top 0.3s;
+}
+.toast.show {
+    opacity: 1;
+    top: 30px;
+}
+.toast.success { background-color: var(--toast-success-bg); }
+.toast.error { background-color: var(--toast-error-bg); }
