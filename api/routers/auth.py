@@ -43,7 +43,6 @@ async def request_otp(request: schemas.OTPRequest, db: AsyncSession = Depends(ge
     if not user:
         raise HTTPException(status_code=404, detail="User with this mobile number not found.")
     
-    # --- کد امن‌شده برای اطمینان از وجود user ---
     otp = str(random.randint(100000, 999999))
     otp_storage[user.telegram_id] = otp
     bot_token = settings.bot_token
@@ -56,11 +55,8 @@ async def request_otp(request: schemas.OTPRequest, db: AsyncSession = Depends(ge
 @router.post("/verify-otp", response_model=schemas.Token)
 async def verify_otp(request: schemas.OTPVerify, db: AsyncSession = Depends(get_db)):
     user = (await db.execute(select(User).where(User.mobile_number == request.mobile_number))).scalar_one_or_none()
-    
-    # --- کد امن‌شده برای اطمینان از وجود user ---
     if not user:
         raise HTTPException(status_code=400, detail="User not found.")
-        
     stored_otp = otp_storage.get(user.telegram_id)
     if not stored_otp or stored_otp != request.otp:
         raise HTTPException(status_code=400, detail="Invalid OTP.")

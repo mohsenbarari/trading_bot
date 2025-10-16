@@ -1,8 +1,25 @@
+# Git files
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Python cache
 __pycache__/
 *.pyc
-.env
-.venv/
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv
+venv/
+env/
+
+# IDE files
 .idea/
-.gitignore
-.dockerignore
-check-dns/
+.vscode/
+
+# Other
+.env

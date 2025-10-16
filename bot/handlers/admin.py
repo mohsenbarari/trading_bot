@@ -1,4 +1,4 @@
-# bot/handlers/admin.py (نسخه اصلاح شده)
+# bot/handlers/admin.py (نسخه اصلاح شده نهایی)
 import httpx
 from typing import Optional
 from aiogram import Router, types, F
@@ -57,7 +57,7 @@ async def process_role_and_create(callback_query: types.CallbackQuery, state: FS
         "account_name": account_name,
         "mobile_number": mobile_number,
         # --- بخش کلیدی اصلاح شده ---
-        "role": role.name  
+        "role": role.value  # از .value برای ارسال مقدار فارسی ("تماشا", "عادی" و...) استفاده می‌کنیم
     }
     
     try:

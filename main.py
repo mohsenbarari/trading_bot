@@ -1,35 +1,62 @@
-# main.py (نسخه نهایی و فقط برای وب)
-import os
+# trading_bot/main.py (نسخه نهایی)
 import logging
+from pathlib import Path
 import uvicorn
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-
 from api.routers import invitations, auth
+from core.config import settings
+import schemas
 
-# --- پیکربندی اولیه ---
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("trading_bot.main")
 
-# --- تعریف اپلیکیشن FastAPI ---
-app = FastAPI(title="Trading Bot API")
+BASE_DIR = Path(__file__).resolve().parent
+INDEX_FILE = BASE_DIR / "mini_app" / "index.html"
+TEMPLATES_DIR = BASE_DIR / "templates"
 
-# --- پیکربندی‌های FastAPI ---
-origins = ["http://localhost:3000", "http://localhost:8080", "https://telegram.362514.ir"]
-app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="Trading Bot Backend", version="1.0")
 
-api_router = APIRouter(prefix="/api")
-api_router.include_router(invitations.router)
-api_router.include_router(auth.router)
-app.include_router(api_router)
+# --- CORS (بخش اصلاح شده) ---
+# آدرس از فایل env خوانده می‌شود
+origins = [settings.frontend_url]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-static_files_path = os.path.join(os.path.dirname(__file__), "mini_app")
-if os.path.exists(static_files_path):
-    app.mount("/", StaticFiles(directory=static_files_path, html=True), name="static")
+# --- Include routers (api) ---
+app.include_router(invitations.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
 
-logger.info("--> FastAPI application configured and ready.")
+@app.get("/api/config", response_model=schemas.AppConfig)
+async def get_app_config():
+    return {"bot_username": settings.bot_username}
 
-# --- نقطه شروع برای Uvicorn ---
+# --- Serve the mini app ---
+@app.get("/", include_in_schema=False)
+@app.get("/webapp", include_in_schema=False)
+@app.get("/webapp/{path:path}", include_in_schema=False)
+async def serve_webapp(request: Request):
+    if INDEX_FILE.exists():
+        return FileResponse(str(INDEX_FILE))
+    return JSONResponse({"detail": "index.html not found"}, status_code=404)
+
+# --- Catch-all 404 ---
+@app.get("/{full_path:path}", include_in_schema=False)
+async def catch_all_404(full_path: str):
+    not_found_page = TEMPLATES_DIR / "404.html"
+    if not_found_page.is_file():
+        return FileResponse(str(not_found_page), status_code=404)
+    return JSONResponse({"detail": f"Not Found: {full_path}"}, status_code=404)
+
+@app.on_event("startup")
+async def on_startup():
+    logger.info("--> FastAPI application configured and ready.")
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

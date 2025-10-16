@@ -47,3 +47,6 @@ class Token(BaseModel):
 
 class WebAppInitData(BaseModel):
     init_data: str
+
+class AppConfig(BaseModel):
+    bot_username: str

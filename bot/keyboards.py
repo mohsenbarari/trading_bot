@@ -2,7 +2,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 from core.enums import UserRole
 
-MINI_APP_URL = "https://telegram.362514.ir/" 
+MINI_APP_URL = "https://telegram.362514.ir/webapp" 
 
 def get_role_selection_keyboard() -> InlineKeyboardMarkup:
     """یک کیبورد برای انتخاب سطح دسترسی کاربر جدید می‌سازد."""

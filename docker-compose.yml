@@ -35,11 +35,13 @@ services:
     build: .
     container_name: trading_bot_migration
 
-    command: ["python", "-c", "import manage; manage.main()"]
+    command: ["python", "manage.py"]
     volumes:
       - .:/app
     env_file:
       - .env
+    environment:
+      - SYNC_DATABASE_URL=${SYNC_DATABASE_URL}
     depends_on:
       db:
         condition: service_healthy
