@@ -4,8 +4,13 @@ services:
     container_name: trading_bot_app
     restart: always
     command: uvicorn main:app --host 0.0.0.0 --port 8000
+
     volumes:
-      - .:/app
+      - ./api:/app/api
+      - ./bot:/app/bot
+      - ./core:/app/core
+      - ./models:/app/models
+      - ./main.py:/app/main.py
     ports:
       - "8000:8000"
     env_file:

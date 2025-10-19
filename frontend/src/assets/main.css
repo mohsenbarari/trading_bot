@@ -1,3 +1,7 @@
+body {
+  font-family: 'Vazirmatn', system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
 @import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v36.0.0/Vazirmatn-font-face.css');
 
 :root {
@@ -156,3 +160,4 @@ button:hover {
   background: #f9fafb;
   border: 1px solid #e5e7eb;
 }
+
