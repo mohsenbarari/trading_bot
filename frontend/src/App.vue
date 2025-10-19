@@ -60,7 +60,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, reactive } from 'vue' // reactive را اضافه کنید
 
 const API_BASE_URL = 'https://telegram.362514.ir'
 const tg = (window as any).Telegram?.WebApp
@@ -69,15 +69,23 @@ const user = ref<any>(null)
 const loading = ref(true)
 const showAdmin = ref(false)
 const inviteResult = ref('')
-const invite = ref({ name: '', phone: '', role: 'عادی' })
+
+// از reactive برای آبجکت‌ها استفاده می‌کنیم که خواناتر است
+const invite = reactive({
+  name: '',
+  phone: '',
+  role: 'عادی'
+})
 
 function resetForm() {
-  invite.value = { name: '', phone: '', role: 'عادی' }
+  invite.name = ''
+  invite.phone = ''
+  invite.role = 'عادی'
   inviteResult.value = ''
 }
 
 async function createInvite() {
-  if (!/^09[0-9]{9}$/.test(invite.value.phone)) {
+  if (!/^09[0-9]{9}$/.test(invite.phone)) {
     inviteResult.value = 'شماره موبایل نامعتبر است. فرمت: 09xxxxxxxxx'
     return
   }
@@ -89,15 +97,26 @@ async function createInvite() {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${jwtToken.value}`,
       },
+      // --- بخش اصلاح شده ---
       body: JSON.stringify({
-        invitee_name: invite.value.name,
-        phone_number: invite.value.phone,
-        role: invite.value.role,
+        account_name: invite.name,      // <-- اصلاح شد
+        mobile_number: invite.phone,    // <-- اصلاح شد
+        role: invite.role,
       }),
     })
-    if (!resp.ok) throw new Error('خطا در ایجاد دعوت‌نامه')
-    const data = await resp.json()
-    inviteResult.value = `✅ لینک دعوت ایجاد شد:<br><a href="${data.invite_link}" target="_blank">${data.invite_link}</a>`
+
+    const data = await resp.json(); // همیشه پاسخ را بخوانید
+    if (!resp.ok) {
+        // از پیام خطای سرور استفاده کنید
+        throw new Error(data.detail || 'خطا در ایجاد دعوت‌نامه');
+    }
+
+    // دریافت نام کاربری ربات برای ساخت لینک
+    const configResp = await fetch(`/api/config`);
+    const config = await configResp.json();
+
+    const inviteLink = `https://t.me/${config.bot_username}?start=${data.token}`;
+    inviteResult.value = `✅ لینک دعوت ایجاد شد:<br><a href="${inviteLink}" target="_blank">${inviteLink}</a>`
   } catch (e: any) {
     inviteResult.value = `❌ ${e.message}`
   }
@@ -108,28 +127,48 @@ function showAdminIfAllowed(role: string) {
 }
 
 onMounted(async () => {
-  if (tg) {
-    try { tg.ready(); tg.expand(); } catch (e) {}
-  }
-  try {
-    const loginResp = await fetch(`${API_BASE_URL}/api/auth/webapp-login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ init_data: tg?.initData }),
-    })
-    const loginJson = await loginResp.json()
-    jwtToken.value = loginJson.access_token
+    // اعمال تم روشن
+    setTimeout(() => {
+        const root = document.documentElement;
+        const applyLightTheme = () => {
+            root.style.setProperty('--tg-theme-bg-color', '#ffffff', 'important');
+            root.style.setProperty('--tg-theme-text-color', '#111827', 'important');
+            document.body.style.backgroundColor = '#ffffff';
+            document.body.style.color = '#111827';
+        };
+        applyLightTheme();
+        if (tg && tg.onEvent) tg.onEvent('themeChanged', applyLightTheme);
+    }, 100);
 
-    const userResp = await fetch(`${API_BASE_URL}/api/auth/me`, {
-      headers: { Authorization: `Bearer ${jwtToken.value}` },
-    })
-    user.value = await userResp.json()
-    showAdminIfAllowed(user.value.role)
-  } catch (e) {
-    console.error(e)
-  } finally {
-    loading.value = false
-  }
+    if (tg) {
+        try { tg.ready(); tg.expand(); } catch (e) {}
+    }
+
+    try {
+        if (!tg || !tg.initData) {
+            throw new Error("لطفاً این صفحه را از داخل تلگرام باز کنید.");
+        }
+        
+        const loginResp = await fetch(`${API_BASE_URL}/api/auth/webapp-login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ init_data: tg.initData }),
+        })
+        if (!loginResp.ok) throw new Error("خطا در احراز هویت اولیه.");
+        const loginJson = await loginResp.json()
+        jwtToken.value = loginJson.access_token
+
+        const userResp = await fetch(`${API_BASE_URL}/api/auth/me`, {
+            headers: { Authorization: `Bearer ${jwtToken.value}` },
+        })
+        if (!userResp.ok) throw new Error("خطا در دریافت اطلاعات کاربر.");
+        user.value = await userResp.json()
+        showAdminIfAllowed(user.value.role)
+    } catch (e: any) {
+        user.value = { full_name: e.message, role: 'خطا' };
+    } finally {
+        loading.value = false
+    }
 })
 </script>
 
