@@ -7,35 +7,28 @@ const props = defineProps<{
 
 const emit = defineEmits(['navigate'])
 
-// بر اساس نقش کاربر، دکمه‌های مجاز را مشخص می‌کنیم
+// بر اساس نقش کاربر، دکمه‌های جدید را مشخص می‌کنیم
 const menuItems = computed(() => {
-  const role = props.userRole;
-  let items = [
-    { id: 'home', icon: 'home', label: 'خانه' },
-    { id: 'profile', icon: 'profile', label: 'پروفایل' }
-  ];
-
-  if (role === 'SUPER_ADMIN') {
-    items.push({ id: 'create_invitation', icon: 'add', label: 'دعوت' });
-  } else if (role !== 'WATCH') {
-    items.push({ id: 'view_my_trades', icon: 'trades', label: 'معاملات' });
-    items.push({ id: 'create_trade_offer', icon: 'offer', label: 'پیشنهاد' });
-    if (role === 'MIDDLE_MANAGER') {
-      items.push({ id: 'manage_users', icon: 'users', label: 'کاربران' });
-    }
+  // برای نقش "تماشا"، هیچ دکمه‌ای در نوار ناوبری نمایش داده نمی‌شود
+  if (props.userRole === 'WATCH') {
+    return [];
   }
   
-  return items;
+  // برای سایر نقش‌ها، منوی اصلی و ساده شده نمایش داده می‌شود
+  return [
+    { id: 'home', icon: 'home', label: 'خانه' },
+    { id: 'trade', icon: 'trades', label: 'معامله' },
+    { id: 'profile', icon: 'profile', label: 'پنل کاربر' },
+    { id: 'settings', icon: 'settings', label: 'تنظیمات' },
+  ];
 });
 
-// آیکون‌های SVG برای دکمه‌ها
+// آیکون‌های SVG برای دکمه‌ها (آیکون تنظیمات اضافه شد)
 const icons = {
   home: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
-  profile: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
-  add: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`,
   trades: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>`,
-  offer: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 15-4-4h8l-4 4zM12 7v8"/></svg>`,
-  users: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+  profile: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
+  settings: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
 };
 </script>
 
@@ -98,4 +91,3 @@ const icons = {
   height: 24px;
 }
 </style>
-
