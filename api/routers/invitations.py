@@ -6,8 +6,14 @@ from sqlalchemy import select
 from schemas import Invitation, InvitationCreate
 from models.invitation import Invitation as InvitationModel
 from core.db import get_db
+from .auth import verify_dev_key
 
-router = APIRouter(prefix="/invitations", tags=["Invitations"])
+router = APIRouter(
+    prefix="/invitations", 
+    tags=["Invitations"],
+    # === این خط را اضافه کنید ===
+    dependencies=[Depends(verify_dev_key)]
+)
 
 @router.post("/", response_model=Invitation, status_code=201)
 async def create_invitation(invitation: InvitationCreate, db: AsyncSession = Depends(get_db)):

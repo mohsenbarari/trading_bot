@@ -7,8 +7,8 @@ import random
 import httpx
 from typing import Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi.security import OAuth2PasswordBearer, APIKeyHeader
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, delete
 
@@ -23,6 +23,24 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 otp_storage = {}
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
+
+api_key_scheme = APIKeyHeader(name="X-Dev-Key", auto_error=False)
+
+async def verify_dev_key(x_dev_key: str | None = Depends(api_key_scheme)):
+    """
+    این وابستگی چک می‌کند که آیا کلید توسعه در هدرها ارسال شده یا خیر.
+    """
+    # اگر کلیدی در .env تعریف نشده باشد، این چک را رد می‌کنیم
+    if not settings.dev_api_key:
+        return
+
+    # اگر کلید در .env تعریف شده باشد، هدر ارسالی باید با آن مطابقت داشته باشد
+    if not x_dev_key or x_dev_key != settings.dev_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing X-Dev-Key header"
+        )
+    return True
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
     credentials_exception = HTTPException(
