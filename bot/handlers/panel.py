@@ -1,44 +1,28 @@
+# bot/handlers/panel.py (هماهنگ شده با کیبورد دائمی)
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from models.user import User
-from bot.keyboards import get_main_menu_keyboard, get_mini_app_keyboard
+from bot.keyboards import get_main_menu_keyboard
 from typing import Optional
-from core.enums import UserRole  # <-- اصلاح ۱: UserRole ایمپورت شد
-from core.config import settings # <-- اصلاح ۲: settings ایمپورت شد
+from core.enums import UserRole
+from core.config import settings
 
 router = Router()
 
+# این handler اکنون هم به دستور /panel و هم به دکمه متنی "پنل کاربر" پاسخ می‌دهد
 @router.message(Command("panel"))
-@router.message(F.text == "پنل کاربری")
-async def show_panel(message: types.Message, user: Optional[User]):
+@router.message(F.text == "👤 پنل کاربر")
+async def show_my_profile(message: types.Message, user: Optional[User]):
+    """
+    اطلاعات پروفایل کاربر را نمایش می‌دهد.
+    """
     if not user:
-        return
-    
-    # آدرس Mini App به صورت پویا از تنظیمات خوانده می‌شود
-    mini_app_url = settings.frontend_url 
-    
-    if user.has_bot_access:
-        keyboard = get_main_menu_keyboard(user.role)
-        await message.answer(f"سلام {user.full_name}!\nبه پنل کاربری خود خوش آمدید.", reply_markup=keyboard)
-    else:
-        # آدرس به تابع پاس داده می‌شود
-        keyboard = get_mini_app_keyboard(mini_app_url)
-        await message.answer(
-            f"سلام {user.full_name}!\nبرای دسترسی به امکانات، لطفاً از طریق پنل امن وارد شوید.",
-            reply_markup=keyboard
-        )
-
-@router.callback_query(F.data == "my_profile")
-async def show_my_profile(callback_query: types.CallbackQuery, user: Optional[User]):
-    if not user:
-        await callback_query.answer("خطا: اطلاعات شما یافت نشد.", show_alert=True)
         return
         
     if not user.has_bot_access:
-        await callback_query.answer("شما دسترسی لازم برای استفاده از این بخش را ندارید.", show_alert=True)
+        await message.answer("شما دسترسی لازم برای استفاده از این بخش را ندارید.")
         return
 
-    await callback_query.answer()
     profile_text = (
         f"👤 **پروفایل شما**\n\n"
         f"🔸 **نام کاربری:** `{user.account_name}`\n"
@@ -46,20 +30,31 @@ async def show_my_profile(callback_query: types.CallbackQuery, user: Optional[Us
         f"🔹 **آیدی تلگرام:** `{user.telegram_id}`\n"
         f"🔹 **سطح دسترسی:** {user.role.value}"
     )
-    await callback_query.message.answer(profile_text, parse_mode="Markdown")
+    await message.answer(profile_text, parse_mode="Markdown")
+    
+    # اگر کاربر ادمین ارشد باشد، یک منوی اینلاین جداگانه برای اقدامات خاص
+    # مانند "ساخت توکن دعوت" نمایش داده می‌شود تا کیبورد اصلی شلوغ نشود.
+    if user.role == UserRole.SUPER_ADMIN:
+        inline_keyboard = get_main_menu_keyboard(user.role)
+        if inline_keyboard:
+            await message.answer("اقدامات مدیریتی:", reply_markup=inline_keyboard)
 
-@router.callback_query(F.data == "start_trade")
-async def handle_trade_button(callback_query: types.CallbackQuery, user: Optional[User]):
-    if not user or user.role == UserRole.WATCH:
-        await callback_query.answer("دسترسی غیرمجاز.", show_alert=True)
-        return
-    await callback_query.answer()
-    await callback_query.message.answer("🚧 بخش معاملات در حال توسعه است و به زودی فعال خواهد شد.")
 
-@router.callback_query(F.data == "settings")
-async def handle_settings_button(callback_query: types.CallbackQuery, user: Optional[User]):
+@router.message(F.text == "📈 معامله")
+async def handle_trade_button(message: types.Message, user: Optional[User]):
+    """
+    به کلیک روی دکمه "معامله" پاسخ می‌دهد.
+    """
     if not user or user.role == UserRole.WATCH:
-        await callback_query.answer("دسترسی غیرمجاز.", show_alert=True)
+        # برای کاربران "تماشا" این دکمه نمایش داده نمی‌شود، اما این بررسی امنیتی باقی می‌ماند
         return
-    await callback_query.answer()
-    await callback_query.message.answer("🚧 بخش تنظیمات در حال توسعه است و به زودی فعال خواهد شد.")
+    await message.answer("🚧 بخش معاملات در حال توسعه است و به زودی فعال خواهد شد.")
+
+@router.message(F.text == "⚙️ تنظیمات")
+async def handle_settings_button(message: types.Message, user: Optional[User]):
+    """
+    به کلیک روی دکمه "تنظیمات" پاسخ می‌دهد.
+    """
+    if not user or user.role == UserRole.WATCH:
+        return
+    await message.answer("🚧 بخش تنظیمات در حال توسعه است و به زودی فعال خواهد شد.")

@@ -6,7 +6,7 @@ from sqlalchemy import select
 from typing import Optional
 
 from core.db import AsyncSessionLocal
-from core.config import settings  # <-- اصلاح: settings ایمپورت شد
+from core.config import settings
 from models.invitation import Invitation
 from models.user import User
 from bot.states import Registration
@@ -19,10 +19,11 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
     if user:
         await message.answer(
             "شما قبلاً ثبت‌نام کرده‌اید. برای دسترسی به پنل از دکمه زیر استفاده کنید.",
-            # آدرس Mini App به تابع پاس داده می‌شود
-            reply_markup=get_persistent_menu_keyboard(settings.frontend_url)
+            # اصلاح: ارسال هر دو پارامتر 'نقش کاربر' و 'آدرس'
+            reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url)
         )
         return
+        
     token = command.args
     async with AsyncSessionLocal() as session:
         inv_stmt = select(Invitation).where(Invitation.token == token)
@@ -42,11 +43,11 @@ async def handle_start_without_token(message: types.Message, user: Optional[User
     if user:
         await message.answer(
             f"سلام {user.full_name}! به پنل کاربری خود خوش آمدید. برای دسترسی به امکانات از دکمه زیر استفاده کنید.",
-            # آدرس Mini App به تابع پاس داده می‌شود
-            reply_markup=get_persistent_menu_keyboard(settings.frontend_url)
+            # اصلاح: ارسال هر دو پارامتر 'نقش کاربر' و 'آدرس'
+            reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url)
         )
     else:
-        # اگر کاربر وجود ندارد، هیچ پاسخی نمی‌دهیم تا handler پیش‌فرض آن را مدیریت کند
+        # اگر کاربر ثبت‌نام نکرده، handler پیش‌فرض پاسخ می‌دهد
         pass
 
 @router.message(Registration.awaiting_contact, F.contact)
@@ -88,12 +89,12 @@ async def handle_contact(message: types.Message, state: FSMContext):
         )
 
         invitation.is_used = True
-
         session.add(new_user)
         await session.commit()
+        
         await message.answer(
             f"✅ خوش آمدید، {message.from_user.full_name}! ثبت‌نام شما با موفقیت انجام شد.\n"
-            "برای دسترسی به امکانات، از دکمه زیر استفاده کنید.",
-            # آدرس Mini App به تابع پاس داده می‌شود
-            reply_markup=get_persistent_menu_keyboard(settings.frontend_url)
+            "برای دسترسی به امکانات، از دکمه‌های زیر استفاده کنید.",
+            # اصلاح: ارسال هر دو پارامتر 'نقش کاربر' (از دعوتنامه) و 'آدرس'
+            reply_markup=get_persistent_menu_keyboard(invitation.role, settings.frontend_url)
         )

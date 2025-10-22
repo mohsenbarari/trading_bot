@@ -1,4 +1,4 @@
-# bot/handlers/admin.py (نسخه اصلاح شده نهایی)
+# bot/handlers/admin.py (هماهنگ شده با کیبورد دائمی)
 import httpx
 from typing import Optional
 from aiogram import Router, types, F
@@ -10,15 +10,17 @@ from bot.keyboards import get_role_selection_keyboard
 
 router = Router()
 
-@router.callback_query(F.data == "create_invitation")
-async def start_invitation_creation(callback_query: types.CallbackQuery, user: Optional[User], state: FSMContext):
+# اصلاح: این handler اکنون به پیام متنی گوش می‌دهد
+@router.message(F.text == "➕ ساخت توکن دعوت")
+async def start_invitation_creation(message: types.Message, user: Optional[User], state: FSMContext):
     if not user or user.role != UserRole.SUPER_ADMIN:
-        await callback_query.answer("شما دسترسی لازم برای این کار را ندارید.", show_alert=True)
+        # این پیام نباید برای کاربران عادی نمایش داده شود چون دکمه را ندارند
         return
-    await callback_query.answer()
+    
     await state.set_state(InvitationCreation.awaiting_account_name)
-    await callback_query.message.answer("لطفاً نام کاربری منحصر به فرد (account_name) کاربر جدید را وارد کنید:")
+    await message.answer("لطفاً نام کاربری منحصر به فرد (account_name) کاربر جدید را وارد کنید:")
 
+# ... بقیه کدهای این فایل بدون تغییر باقی می‌مانند ...
 @router.message(InvitationCreation.awaiting_account_name)
 async def process_account_name(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN:
@@ -56,8 +58,7 @@ async def process_role_and_create(callback_query: types.CallbackQuery, state: FS
     payload = {
         "account_name": account_name,
         "mobile_number": mobile_number,
-        # --- بخش کلیدی اصلاح شده ---
-        "role": role.value  # از .value برای ارسال مقدار فارسی ("تماشا", "عادی" و...) استفاده می‌کنیم
+        "role": role.value
     }
     
     try:
