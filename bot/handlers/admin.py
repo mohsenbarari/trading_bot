@@ -11,7 +11,7 @@ from bot.keyboards import get_role_selection_keyboard
 router = Router()
 
 # اصلاح: این handler اکنون به پیام متنی گوش می‌دهد
-@router.message(F.text == "➕ ساخت توکن دعوت")
+@router.message(F.text == "➕ ارسال لینک دعوت")
 async def start_invitation_creation(message: types.Message, user: Optional[User], state: FSMContext):
     if not user or user.role != UserRole.SUPER_ADMIN:
         # این پیام نباید برای کاربران عادی نمایش داده شود چون دکمه را ندارند

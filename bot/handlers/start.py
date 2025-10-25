@@ -4,13 +4,15 @@ from aiogram.filters.command import CommandObject
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import select
 from typing import Optional
-
+import logging
 from core.db import AsyncSessionLocal
 from core.config import settings
 from models.invitation import Invitation
 from models.user import User
 from bot.states import Registration
 from bot.keyboards import get_share_contact_keyboard, get_persistent_menu_keyboard
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -41,6 +43,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
 @router.message(CommandStart(deep_link=False))
 async def handle_start_without_token(message: types.Message, user: Optional[User]):
     if user:
+        logger.warning(f"DEBUG: Building keyboard with URL: '{settings.frontend_url}'")
         await message.answer(
             f"سلام {user.full_name}! به پنل کاربری خود خوش آمدید. برای دسترسی به امکانات از دکمه زیر استفاده کنید.",
             # اصلاح: ارسال هر دو پارامتر 'نقش کاربر' و 'آدرس'

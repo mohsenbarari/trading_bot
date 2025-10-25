@@ -2,6 +2,8 @@
 defineProps<{
   user: any;
 }>();
+// --- امیت را برای دکمه جدید اضافه کنید ---
+const emit = defineEmits(['navigate'])
 </script>
 
 <template>
@@ -9,27 +11,15 @@ defineProps<{
     <h2>پروفایل کاربری</h2>
     <div class="profile-details">
       <div class="detail-item">
-        <span class="label">نام کامل</span>
-        <span class="value">{{ user.full_name }}</span>
-      </div>
-      <div class="detail-item">
-        <span class="label">نام کاربری حساب</span>
-        <span class="value">{{ user.account_name }}</span>
-      </div>
-      <div class="detail-item">
-        <span class="label">شماره موبایل</span>
-        <span class="value">{{ user.mobile_number }}</span>
-      </div>
-      <div class="detail-item">
-        <span class="label">نقش</span>
-        <span class="value">{{ user.role }}</span>
-      </div>
-      <div class="detail-item">
         <span class="label">آیدی تلگرام</span>
         <span class="value code">{{ user.telegram_id }}</span>
       </div>
     </div>
-  </div>
+
+    <button class="settings-button" @click="emit('navigate', 'settings')">
+      ⚙️ تنظیمات
+    </button>
+    </div>
 </template>
 
 <style scoped>
@@ -70,6 +60,31 @@ h2 {
 .value.code {
   direction: ltr;
   font-family: monospace;
+}
+.settings-button {
+  width: 100%;
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  background-color: var(--card-bg);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s ease-in-out;
+  margin-top: 20px; /* فاصله از بالا */
+}
+.settings-button:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+.settings-button:active {
+  background-color: #f0f0f0;
+  transform: translateY(1px);
 }
 </style>
 

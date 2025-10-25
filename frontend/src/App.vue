@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 
-// کامپوننت BottomNav حذف و MainMenu اضافه شد
 import MainMenu from './components/MainMenu.vue'
 import UserProfile from './components/UserProfile.vue'
-import CreateInvitationView from './components/CreateInvitationView.vue'
+import AdminPanel from './components/AdminPanel.vue'
 import PlaceholderView from './components/PlaceholderView.vue'
 
 const user = ref<any>(null)
@@ -15,24 +14,43 @@ const API_BASE_URL = 'https://telegram.362514.ir'
 const tg = (window as any).Telegram?.WebApp
 const isLoading = computed(() => !user.value && loadingMessage.value)
 
+// --- متغیر جدید برای کنترل نمایش صفحه معاملات ---
+const showTradePage = ref(true) 
+
 function handleNavigation(view: string) {
+  // اگر به صفحه‌ای غیر از معامله می‌رویم، صفحه معامله را نشان بده (برای دفعه بعد)
+  if (view !== 'trade') {
+    showTradePage.value = true; 
+  }
   activeView.value = view
 }
 
 function onInviteCreated(message: string) {
-  activeView.value = 'trade'; // بازگشت به صفحه معامله
   alert('دعوت‌نامه با موفقیت ایجاد شد!');
 }
 
+// --- تابع جدید برای دکمه بستن/مشاهده صفحه معاملات ---
+function toggleTradePageView() {
+  showTradePage.value = !showTradePage.value;
+  // اگر صفحه معاملات بسته شد و کاربر در حال مشاهده آن بود، به پروفایل برو
+  if (!showTradePage.value && activeView.value === 'trade') {
+    activeView.value = 'profile'; 
+  }
+  // اگر صفحه معاملات باز شد، به آن برو
+  else if (showTradePage.value) {
+     activeView.value = 'trade';
+  }
+}
+
 onMounted(async () => {
-  // کدهای onMounted بدون تغییر باقی می‌مانند
   setTimeout(() => { document.body.style.backgroundColor = '#f0f2f5'; }, 100);
   if (tg) {
     try {
       tg.ready();
       tg.expand();
-      tg.setHeaderColor('#ffffff');
-      tg.setBackgroundColor('#f0f2f5');
+      // --- تنظیم رنگ هدر و پس‌زمینه تلگرام (حتی اگر هدر ما حذف شود) ---
+      tg.setHeaderColor('#ffffff'); // رنگ بالای صفحه در اپ تلگرام
+      tg.setBackgroundColor('#f0f2f5'); // رنگ پس‌زمینه کلی در اپ تلگرام
     } catch (e) { console.error("Telegram API error:", e); }
   }
   try {
@@ -53,6 +71,13 @@ onMounted(async () => {
     if (!userResp.ok) throw new Error("دریافت اطلاعات کاربر ناموفق بود.");
     user.value = await userResp.json();
     loadingMessage.value = '';
+    
+    // --- اگر نقش کاربر "تماشا" بود، صفحه پیش‌فرض را به پروفایل تغییر بده ---
+    if (user.value?.role === 'WATCH') {
+      activeView.value = 'profile';
+      showTradePage.value = false; // صفحه معاملات را هم ببند
+    }
+
   } catch (e: any) {
     loadingMessage.value = `⚠️ ${e.message}`;
   }
@@ -61,46 +86,53 @@ onMounted(async () => {
 
 <template>
   <div class="app-container">
-    <header class="app-header">
-      <h1>Trading Bot</h1>
-      <div v-if="user" class="user-welcome">
-        {{ user.full_name }}
-      </div>
-    </header>
-
-    <!-- منوی اصلی جدید جایگزین نوار پایین شد -->
-    <MainMenu 
-      v-if="user && user.role !== 'WATCH'" 
-      :user-role="user.role"
-      @navigate="handleNavigation" 
-    />
-
+    
     <main class="main-content">
       <div v-if="isLoading" class="loading-container">
         <div class="spinner"></div>
         <p>{{ loadingMessage }}</p>
       </div>
       <template v-else-if="user">
-        <!-- مدیریت نمایش صفحات -->
-        <PlaceholderView v-if="activeView === 'trade'" title="معاملات" />
-        <UserProfile v-else-if="activeView === 'profile'" :user="user" />
+        
+        <PlaceholderView v-if="activeView === 'trade' && showTradePage" title="معاملات" />
+        
+        <UserProfile 
+          v-else-if="activeView === 'profile'" 
+          :user="user" 
+          @navigate="handleNavigation"
+        />
+        
         <PlaceholderView v-else-if="activeView === 'settings'" title="تنظیمات" />
-        <CreateInvitationView 
-          v-else-if="activeView === 'create_invitation'" 
+        
+        <AdminPanel
+          v-else-if="activeView === 'admin_panel' && user.role === 'SUPER_ADMIN'"
           :api-base-url="API_BASE_URL" 
           :jwt-token="jwtToken"
           @invite-created="onInviteCreated"
+          @navigate="handleNavigation"
         />
-        <!-- اگر هیچ گزینه‌ای انتخاب نشده بود، صفحه معاملات را نشان بده -->
-        <PlaceholderView v-else title="معاملات" />
+        
+        <UserProfile 
+          v-else-if="!showTradePage || activeView === 'profile'" 
+          :user="user" 
+          @navigate="handleNavigation" 
+        />
+
+        <PlaceholderView v-else title="صفحه اصلی" />
+
       </template>
     </main>
 
+    <MainMenu 
+      v-if="user && user.role !== 'WATCH'" 
+      :user-role="user.role"
+      :is-trade-page-visible="showTradePage" @navigate="handleNavigation" 
+      @toggle-trade-view="toggleTradePageView" />
   </div>
 </template>
 
 <style>
-/* استایل‌های کلی با اصلاح جزئی */
+/* ... (استایل‌های کلی شما) ... */
 @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700&display=swap');
 :root { --primary-color: #007AFF; --bg-color: #f0f2f5; --card-bg: #ffffff; --text-color: #1c1c1e; --text-secondary: #8a8a8e; --border-color: #e5e5e5; }
 html { box-sizing: border-box; }
@@ -115,6 +147,8 @@ body { margin: 0; font-family: 'Vazirmatn', -apple-system, BlinkMacSystemFont, "
   overflow: hidden; 
 }
 
+/* === هدر حذف شد، نیازی به استایل آن نیست === */
+/*
 .app-header { 
   background-color: var(--card-bg); 
   padding: 12px 16px; 
@@ -127,12 +161,15 @@ body { margin: 0; font-family: 'Vazirmatn', -apple-system, BlinkMacSystemFont, "
 }
 .app-header h1 { font-size: 18px; font-weight: 700; margin: 0; color: var(--primary-color); }
 .user-welcome { font-size: 14px; font-weight: 500; color: var(--text-secondary); }
+*/
 
 .main-content {
-  flex-grow: 1; /* باعث می‌شود این بخش باقی‌مانده فضا را پر کند */
-  overflow-y: auto; /* فقط این بخش اسکرول می‌خورد */
+  flex-grow: 1; 
+  overflow-y: auto; 
   padding: 16px;
   position: relative;
+  /* === اضافه کردن کمی پدینگ پایین برای جلوگیری از همپوشانی با منو === */
+  padding-bottom: 80px; /* این مقدار را متناسب با ارتفاع منو تنظیم کنید */
 }
 
 .loading-container { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; color: var(--text-secondary); }

@@ -23,3 +23,4 @@ env/
 
 # Other
 .env
+frontend/node_modules
