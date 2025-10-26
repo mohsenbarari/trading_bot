@@ -50,3 +50,34 @@ class WebAppInitData(BaseModel):
 
 class AppConfig(BaseModel):
     bot_username: str
+
+class CommodityAliasBase(BaseModel):
+    alias: str
+
+class CommodityAliasCreate(CommodityAliasBase):
+    pass
+
+class CommodityAliasRead(CommodityAliasBase):
+    id: int
+    commodity_id: int
+    
+    class Config:
+        from_attributes = True
+
+# --- Schemas for Commodity ---
+class CommodityBase(BaseModel):
+    name: str
+
+class CommodityCreate(CommodityBase):
+    aliases: list[str] = [] # لیستی از نام‌های مستعار هنگام ایجاد
+
+class CommodityUpdate(CommodityBase):
+    name: str | None = None # نام را می‌توان آپدیت کرد
+    aliases: list[str] | None = None # لیست نام‌های مستعار را می‌توان آپدیت کرد
+
+class CommodityRead(CommodityBase):
+    id: int
+    aliases: list[CommodityAliasRead] = [] # نمایش نام‌های مستعار مرتبط
+    
+    class Config:
+        from_attributes = True
