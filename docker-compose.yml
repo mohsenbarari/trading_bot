@@ -71,6 +71,17 @@ services:
       timeout: 5s
       retries: 5
 
+  adminer:
+      image: adminer
+      container_name: trading_bot_adminer
+      restart: always
+      ports:
+        - "8080:8080"
+      networks:
+        - trading_net
+      depends_on:
+        - db
+
 networks:
   trading_net:
     driver: bridge

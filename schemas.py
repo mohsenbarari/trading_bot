@@ -65,6 +65,9 @@ class CommodityAliasRead(CommodityAliasBase):
         from_attributes = True
 
 # --- Schemas for Commodity ---
+class CommodityAliasUpdate(BaseModel):
+    alias: str
+    
 class CommodityBase(BaseModel):
     name: str
 
