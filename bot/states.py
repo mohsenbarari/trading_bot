@@ -20,7 +20,10 @@ class CommodityManagement(StatesGroup):
     # FSM حذف کالا (بدون تغییر)
     awaiting_delete_confirmation = State()
     
+    
     # === State Group جدید برای مدیریت Alias ===
     awaiting_alias_add_name = State()   # برای افزودن یک alias
     awaiting_alias_edit_name = State()  # برای ویرایش یک alias
     awaiting_alias_delete_confirm = State() # برای تایید حذف یک alias
+    # === State جدید برای ویرایش نام اصلی کالا ===
+    awaiting_commodity_edit_name = State()
