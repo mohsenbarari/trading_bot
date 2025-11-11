@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue';
+import { ref, onMounted, reactive, computed } from 'vue';
 
 const props = defineProps<{
   apiBaseUrl: string;
   jwtToken: string | null;
 }>();
+const emit = defineEmits(['navigate']);
 
-// --- اینترفیس‌های داده ---
+// --- اینترفیس‌ها ---
 interface CommodityAlias {
   id: number;
   alias: string;
@@ -17,261 +18,469 @@ interface Commodity {
   name: string;
   aliases: CommodityAlias[];
 }
-
-// === شروع اصلاح ===
-// اینترفیس جدید برای فرم ویرایش که شامل فیلد کمکی ماست
-interface CommodityForEdit extends Commodity {
-  aliasesInput?: string; // فیلد کمکی برای input
+interface FormState {
+  name: string;
+  aliasesText: string;
 }
 
-const commodities = ref<Commodity[]>([]);
+// --- متغیرهای State ---
+type ViewMode = 'list' | 'aliases' | 'add_commodity' | 'edit_commodity_name' | 'add_alias' | 'edit_alias' | 'delete_commodity' | 'delete_alias';
+const viewMode = ref<ViewMode>('list');
 const isLoading = ref(false);
 const errorMessage = ref('');
 const successMessage = ref('');
+const commodities = ref<Commodity[]>([]);
+const selectedCommodity = ref<Commodity | null>(null);
+const selectedAlias = ref<CommodityAlias | null>(null);
+const form = reactive<FormState>({ name: '', aliasesText: '' });
 
-// ref اکنون از نوع اینترفیس جدید است
-const editingCommodity = ref<CommodityForEdit | null>(null);
-// === پایان اصلاح ===
+const API_HEADERS = computed(() => ({
+  'Content-Type': 'application/json',
+  Authorization: `Bearer ${props.jwtToken}`,
+}));
 
-const newCommodity = reactive({ name: '', aliases: '' }); // برای فرم افزودن
-
-// --- Fetch Commodities ---
-async function fetchCommodities() {
-  if (!props.jwtToken) return;
-  isLoading.value = true;
+// --- توابع کمکی ---
+function resetMessages() {
   errorMessage.value = '';
   successMessage.value = '';
+}
+function resetForm() {
+  form.name = '';
+  form.aliasesText = '';
+}
+function getErrorDetail(error: any, defaultMsg: string): string {
+    return error.detail || error.message || defaultMsg;
+}
+
+// --- 1. جریان اصلی (لیست کالاها) ---
+async function fetchCommodities() {
+  viewMode.value = 'list';
+  isLoading.value = true;
+  resetMessages();
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/commodities/`, {
-      headers: { Authorization: `Bearer ${props.jwtToken}` },
-    });
-    if (!response.ok) throw new Error('Failed to fetch commodities');
+    const response = await fetch(`${props.apiBaseUrl}/api/commodities/`, { headers: API_HEADERS.value });
+    if (!response.ok) throw new Error('خطا در بارگیری لیست کالاها');
     commodities.value = await response.json();
   } catch (e: any) {
-    errorMessage.value = e.message;
+    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
   } finally {
     isLoading.value = false;
   }
 }
 
-// --- Add Commodity ---
-async function addCommodity() {
-  if (!props.jwtToken || !newCommodity.name) return;
+// --- 2. جریان مشاهده نام‌های مستعار ---
+async function onManageAliases(commodity: Commodity) {
   isLoading.value = true;
-  errorMessage.value = '';
-  successMessage.value = '';
+  resetMessages();
   try {
-    const aliasList = newCommodity.aliases.split(',')
+    // واکشی مجدد اطلاعات کالا برای اطمینان از به‌روز بودن
+    const response = await fetch(`${props.apiBaseUrl}/api/commodities/${commodity.id}`, { headers: API_HEADERS.value });
+    if (!response.ok) throw new Error('خطا در دریافت اطلاعات کالا');
+    selectedCommodity.value = await response.json();
+    viewMode.value = 'aliases';
+  } catch (e: any) {
+    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
+    viewMode.value = 'list'; // در صورت خطا به لیست برگرد
+  } finally {
+    isLoading.value = false;
+  }
+}
+
+// --- 3. افزودن کالای جدید ---
+function onAddCommodityStart() {
+  resetMessages();
+  resetForm();
+  viewMode.value = 'add_commodity';
+}
+async function onAddCommoditySubmit() {
+  isLoading.value = true;
+  resetMessages();
+  try {
+    const aliasList = form.aliasesText.split(/[،-]/)
                            .map(a => a.trim())
                            .filter(a => a.length > 0);
-
+    // افزودن نام اصلی به لیست alias ها (طبق منطق بات)
+    const commodityName = form.name.trim();
+    if (commodityName && !aliasList.includes(commodityName)) {
+        aliasList.unshift(commodityName);
+    }
+    
     const response = await fetch(`${props.apiBaseUrl}/api/commodities/`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${props.jwtToken}`,
-      },
-      body: JSON.stringify({ name: newCommodity.name, aliases: aliasList }),
+      headers: API_HEADERS.value,
+      body: JSON.stringify({ name: commodityName, aliases: aliasList }),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'Failed to add commodity');
-    successMessage.value = `کالای '${data.name}' با موفقیت اضافه شد.`;
-    newCommodity.name = ''; // Reset form
-    newCommodity.aliases = '';
-    await fetchCommodities(); // Refresh list
+    if (!response.ok) throw new Error(data.detail || 'خطا در افزودن کالا');
+    
+    successMessage.value = `کالا «${data.name}» با موفقیت افزوده شد.`;
+    await fetchCommodities(); // بازگشت به لیست اصلی
   } catch (e: any) {
-    errorMessage.value = e.message;
+    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
+    viewMode.value = 'add_commodity'; // در فرم بمان
   } finally {
     isLoading.value = false;
   }
 }
 
-// --- Start Editing ---
-function startEdit(commodity: Commodity) {
-  // === شروع اصلاح ===
-  // کپی عمیق و تخصیص نوع جدید
-  const commodityToEdit: CommodityForEdit = JSON.parse(JSON.stringify(commodity));
-  // تبدیل آرایه alias ها به رشته برای نمایش در input
-  commodityToEdit.aliasesInput = commodityToEdit.aliases.map(a => a.alias).join(', ');
-  editingCommodity.value = commodityToEdit;
-  // === پایان اصلاح ===
+// --- 4. ویرایش نام اصلی کالا ---
+function onEditCommodityNameStart() {
+  if (!selectedCommodity.value) return;
+  resetMessages();
+  form.name = selectedCommodity.value.name;
+  viewMode.value = 'edit_commodity_name';
 }
-
-// --- Save Edit ---
-async function saveEdit() {
-  if (!props.jwtToken || !editingCommodity.value) return;
+async function onEditCommodityNameSubmit() {
+  if (!selectedCommodity.value) return;
   isLoading.value = true;
-  errorMessage.value = '';
-  successMessage.value = '';
+  resetMessages();
   try {
-    const commodityToUpdate = editingCommodity.value;
-    // === اصلاح: دسترسی به aliasesInput که اکنون در نوع تعریف شده ===
-    const aliasList = (commodityToUpdate.aliasesInput || '').split(',')
-                           .map(a => a.trim())
-                           .filter(a => a.length > 0);
-
-    const response = await fetch(`${props.apiBaseUrl}/api/commodities/${commodityToUpdate.id}`, {
+    const response = await fetch(`${props.apiBaseUrl}/api/commodities/${selectedCommodity.value.id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${props.jwtToken}`,
-      },
-      body: JSON.stringify({ name: commodityToUpdate.name, aliases: aliasList }),
+      headers: API_HEADERS.value,
+      body: JSON.stringify({ name: form.name.trim() }), // فقط نام را می‌فرستیم
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'Failed to update commodity');
-    successMessage.value = `کالای '${data.name}' با موفقیت ویرایش شد.`;
-    editingCommodity.value = null; // Exit edit mode
-    await fetchCommodities(); // Refresh list
+    if (!response.ok) throw new Error(data.detail || 'خطا در ویرایش نام');
+    
+    successMessage.value = `نام کالا با موفقیت به «${data.name}» تغییر یافت.`;
+    await onManageAliases(data); // بازگشت به لیست نام‌های مستعار
   } catch (e: any) {
-    errorMessage.value = `خطا در ویرایش: ${e.message}`;
+    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
+    viewMode.value = 'edit_commodity_name'; // در فرم بمان
   } finally {
     isLoading.value = false;
   }
 }
 
-// --- Delete Commodity ---
-async function deleteCommodity(commodityId: number, commodityName: string) {
-  if (!props.jwtToken || !confirm(`آیا از حذف کالای '${commodityName}' مطمئن هستید؟`)) return;
+// --- 5. افزودن نام مستعار ---
+function onAddAliasStart() {
+  if (!selectedCommodity.value) return;
+  resetMessages();
+  resetForm();
+  viewMode.value = 'add_alias';
+}
+async function onAddAliasSubmit() {
+  if (!selectedCommodity.value) return;
   isLoading.value = true;
-  errorMessage.value = '';
-  successMessage.value = '';
+  resetMessages();
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/commodities/${commodityId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${props.jwtToken}` },
+    const response = await fetch(`${props.apiBaseUrl}/api/commodities/${selectedCommodity.value.id}/aliases`, {
+      method: 'POST',
+      headers: API_HEADERS.value,
+      body: JSON.stringify({ alias: form.name.trim() }),
     });
-    if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.detail || `Failed to delete commodity (Status: ${response.status})`);
-    }
-    successMessage.value = `کالای '${commodityName}' با موفقیت حذف شد.`;
-    await fetchCommodities(); // Refresh list
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'خطا در افزودن نام مستعار');
+
+    successMessage.value = `نام مستعار «${data.alias}» با موفقیت افزوده شد.`;
+    await onManageAliases(selectedCommodity.value); // بازگشت به لیست نام‌های مستعار
   } catch (e: any) {
-    errorMessage.value = e.message;
+    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
+    viewMode.value = 'add_alias'; // در فرم بمان
   } finally {
     isLoading.value = false;
   }
 }
 
-onMounted(fetchCommodities);
-
-// Helper to display aliases
-function formatAliases(aliases: CommodityAlias[]): string {
-  return aliases.map(a => a.alias).join(', ') || '-';
+// --- 6. ویرایش نام مستعار ---
+function onEditAliasStart(alias: CommodityAlias) {
+  if (!selectedCommodity.value) return;
+  resetMessages();
+  selectedAlias.value = alias;
+  form.name = alias.alias;
+  viewMode.value = 'edit_alias';
 }
+async function onEditAliasSubmit() {
+  if (!selectedCommodity.value || !selectedAlias.value) return;
+  isLoading.value = true;
+  resetMessages();
+  try {
+     const response = await fetch(`${props.apiBaseUrl}/api/commodities/aliases/${selectedAlias.value.id}`, {
+      method: 'PUT',
+      headers: API_HEADERS.value,
+      body: JSON.stringify({ alias: form.name.trim() }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'خطا در ویرایش نام مستعار');
+    
+    successMessage.value = `نام مستعار با موفقیت به «${data.alias}» تغییر یافت.`;
+    await onManageAliases(selectedCommodity.value); // بازگشت به لیست نام‌های مستعار
+  } catch (e: any) {
+    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
+    viewMode.value = 'edit_alias'; // در فرم بمان
+  } finally {
+    isLoading.value = false;
+  }
+}
+
+// --- 7. حذف کالا ---
+function onDeleteCommodityStart() {
+  if (!selectedCommodity.value) return;
+  resetMessages();
+  viewMode.value = 'delete_commodity';
+}
+async function onDeleteCommodityConfirm() {
+  if (!selectedCommodity.value) return;
+  isLoading.value = true;
+  resetMessages();
+  try {
+    const response = await fetch(`${props.apiBaseUrl}/api/commodities/${selectedCommodity.value.id}`, {
+      method: 'DELETE',
+      headers: API_HEADERS.value,
+    });
+    if (!response.ok) { // 204 (No Content) هم OK است
+        const data = response.status !== 204 ? await response.json() : null;
+        if (data) throw new Error(data.detail || 'خطا در حذف کالا');
+    }
+    
+    successMessage.value = `کالا «${selectedCommodity.value.name}» با موفقیت حذف شد.`;
+    await fetchCommodities(); // بازگشت به لیست اصلی
+  } catch (e: any) {
+    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
+    await onManageAliases(selectedCommodity.value); // بازگشت به لیست نام‌های مستعار در صورت خطا
+  } finally {
+    isLoading.value = false;
+  }
+}
+
+// --- 8. حذف نام مستعار ---
+function onDeleteAliasStart(alias: CommodityAlias) {
+  if (!selectedCommodity.value) return;
+  resetMessages();
+  selectedAlias.value = alias;
+  viewMode.value = 'delete_alias';
+}
+async function onDeleteAliasConfirm() {
+  if (!selectedCommodity.value || !selectedAlias.value) return;
+  isLoading.value = true;
+  resetMessages();
+  try {
+    const response = await fetch(`${props.apiBaseUrl}/api/commodities/aliases/${selectedAlias.value.id}`, {
+      method: 'DELETE',
+      headers: API_HEADERS.value,
+    });
+    if (!response.ok) { // 204 (No Content) هم OK است
+        const data = response.status !== 204 ? await response.json() : null;
+        if (data) throw new Error(data.detail || 'خطا در حذف نام مستعار');
+    }
+    
+    successMessage.value = `نام مستعار «${selectedAlias.value.alias}» با موفقیت حذف شد.`;
+    await onManageAliases(selectedCommodity.value); // بازگشت به لیست نام‌های مستعار
+  } catch (e: any) {
+    errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
+    await onManageAliases(selectedCommodity.value); // بازگشت به لیست نام‌های مستعار در صورت خطا
+  } finally {
+    isLoading.value = false;
+  }
+}
+
+// --- بارگیری اولیه ---
+onMounted(fetchCommodities);
 
 </script>
 
 <template>
-  <div class="card commodity-manager">
-    <h2>مدیریت کالاها</h2>
-
-    <div v-if="isLoading" class="loading-inline">در حال بارگذاری...</div>
-    <div v-if="errorMessage" class="message error">{{ errorMessage }}</div>
+  <div class="commodity-manager-container">
+    
     <div v-if="successMessage" class="message success">{{ successMessage }}</div>
+    <div v-if="errorMessage" class="message error" v-html="errorMessage.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')"></div>
+    <div v-if="isLoading" class="loading-container"><div class="spinner"></div></div>
 
-    <form @submit.prevent="addCommodity" class="add-form" v-if="!editingCommodity">
-      <h3>افزودن کالای جدید</h3>
-      <div class="form-row">
-        <input v-model="newCommodity.name" placeholder="نام کالا (مثلا: سکه امامی)" required />
-        <input v-model="newCommodity.aliases" placeholder="نام‌های مستعار (جدا با ویرگول)" />
-        <button type="submit" :disabled="isLoading">افزودن</button>
+    <div v-if="viewMode === 'list' && !isLoading" class="card">
+      <h2>مدیریت کالاها</h2>
+      <div v-if="commodities.length === 0" class="no-data">هیچ کالایی ثبت نشده است.</div>
+      <div class="button-list">
+        <button v-for="comm in commodities" :key="comm.id" @click="onManageAliases(comm)" class="list-button">
+          <span>📦 {{ comm.name }}</span>
+          <span>&rsaquo;</span>
+        </button>
       </div>
-    </form>
-
-    <form @submit.prevent="saveEdit" class="edit-form" v-if="editingCommodity">
-       <h3>ویرایش: {{ editingCommodity.name }}</h3>
-       <div class="form-group">
-         <label>نام کالا:</label>
-         <input v-model="editingCommodity.name" required />
-       </div>
-       <div class="form-group">
-         <label>نام‌های مستعار (جدا با ویرگول):</label>
-         <input v-model="editingCommodity.aliasesInput" />
-       </div>
-       <div class="form-actions">
-         <button type="submit" :disabled="isLoading">ذخیره تغییرات</button>
-         <button type="button" class="secondary" @click="editingCommodity = null" :disabled="isLoading">لغو</button>
-       </div>
-    </form>
-
-    <div class="commodity-list" v-if="!editingCommodity && commodities.length > 0">
-      <h3>لیست کالاها</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>نام کالا</th>
-            <th>نام‌های مستعار</th>
-            <th>عملیات</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="comm in commodities" :key="comm.id">
-            <td>{{ comm.name }}</td>
-            <td>{{ formatAliases(comm.aliases) }}</td>
-            <td>
-              <button class="action-btn edit" @click="startEdit(comm)" :disabled="isLoading">ویرایش</button>
-              <button class="action-btn delete" @click="deleteCommodity(comm.id, comm.name)" :disabled="isLoading">حذف</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <hr class="divider" />
+      <button class="list-button add-button" @click="onAddCommodityStart">
+        <span>➕ افزودن کالای جدید</span>
+      </button>
     </div>
-     <div v-if="!isLoading && commodities.length === 0 && !editingCommodity" class="no-data">
-        هنوز کالایی ثبت نشده است.
+
+    <div v-if="viewMode === 'aliases' && selectedCommodity && !isLoading" class="card">
+      <h2 class="alias-header">
+        <button @click="fetchCommodities" class="back-button">&lsaquo;</button>
+        مدیریت: {{ selectedCommodity.name }}
+      </h2>
+      <div v-if="selectedCommodity.aliases.length === 0" class="no-data">هیچ نام مستعاری ثبت نشده است.</div>
+      <div class="alias-list">
+        <div v-for="alias in selectedCommodity.aliases" :key="alias.id" class="alias-item">
+          <span>{{ alias.alias }}</span>
+          <div class="alias-actions">
+            <button @click="onEditAliasStart(alias)" class="action-btn edit">✏️</button>
+            <button @click="onDeleteAliasStart(alias)" class="action-btn delete">❌</button>
+          </div>
+        </div>
+      </div>
+      <hr class="divider" />
+      <div class="button-list stacked">
+        <button class="list-button add-button" @click="onAddAliasStart">
+          <span>➕ افزودن نام مستعار جدید</span>
+        </button>
+        <button class="list-button edit-button" @click="onEditCommodityNameStart">
+          <span>✏️ ویرایش نام اصلی کالا</span>
+        </button>
+        <button class="list-button delete-button" @click="onDeleteCommodityStart">
+          <span>❌ حذف کامل این کالا</span>
+        </button>
+      </div>
+    </div>
+    
+    <div v-if="viewMode === 'add_commodity'" class="card">
+      <h2>افزودن کالای جدید</h2>
+      <form @submit.prevent="onAddCommoditySubmit">
+        <div class="form-group">
+          <label for="comm_name">نام اصلی کالا</label>
+          <input v-model="form.name" id="comm_name" type="text" placeholder="مثلاً: سکه امامی" required />
+        </div>
+        <div class="form-group">
+          <label for="comm_aliases">نام‌های مستعار (جدا با `،` یا `-`)</label>
+          <input v-model="form.aliasesText" id="comm_aliases" type="text" placeholder="مثال: سکه جدید ، امامی - سکه بانکی" />
+        </div>
+        <div class="form-actions">
+          <button type="submit" :disabled="isLoading">
+            {{ isLoading ? 'در حال افزودن...' : 'افزودن کالا' }}
+          </button>
+          <button type="button" class="secondary" @click="fetchCommodities" :disabled="isLoading">لغو</button>
+        </div>
+      </form>
+    </div>
+
+    <div v-if="viewMode === 'edit_commodity_name' && selectedCommodity" class="card">
+      <h2>ویرایش نام کالا</h2>
+      <form @submit.prevent="onEditCommodityNameSubmit">
+        <div class="form-group">
+          <label for="comm_edit_name">نام جدید برای «{{ selectedCommodity.name }}»</label>
+          <input v-model="form.name" id="comm_edit_name" type="text" required />
+        </div>
+        <div class="form-actions">
+          <button type="submit" :disabled="isLoading">
+            {{ isLoading ? 'در حال ذخیره...' : 'ذخیره نام' }}
+          </button>
+          <button type="button" class="secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
+        </div>
+      </form>
+    </div>
+    
+    <div v-if="viewMode === 'add_alias' && selectedCommodity" class="card">
+      <h2>افزودن نام مستعار به «{{ selectedCommodity.name }}»</h2>
+      <form @submit.prevent="onAddAliasSubmit">
+        <div class="form-group">
+          <label for="alias_add_name">نام مستعار جدید</label>
+          <input v-model="form.name" id="alias_add_name" type="text" required />
+        </div>
+        <div class="form-actions">
+          <button type="submit" :disabled="isLoading">
+            {{ isLoading ? 'در حال افزودن...' : 'افزودن' }}
+          </button>
+          <button type="button" class="secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
+        </div>
+      </form>
+    </div>
+    
+    <div v-if="viewMode === 'edit_alias' && selectedCommodity && selectedAlias" class="card">
+      <h2>ویرایش نام مستعار</h2>
+      <form @submit.prevent="onEditAliasSubmit">
+        <div class="form-group">
+          <label for="alias_edit_name">نام جدید برای «{{ selectedAlias.alias }}»</label>
+          <input v-model="form.name" id="alias_edit_name" type="text" required />
+        </div>
+        <div class="form-actions">
+          <button type="submit" :disabled="isLoading">
+            {{ isLoading ? 'در حال ذخیره...' : 'ذخیره' }}
+          </button>
+          <button type="button" class="secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
+        </div>
+      </form>
+    </div>
+
+    <div v-if="viewMode === 'delete_commodity' && selectedCommodity" class="card confirmation-dialog">
+      <h2>حذف کالا</h2>
+      <p>⚠️ آیا از حذف کامل کالا **«{{ selectedCommodity.name }}»** مطمئن هستید؟ (تمام نام‌های مستعار آن نیز حذف خواهند شد)</p>
+      <div class="form-actions">
+        <button @click="onDeleteCommodityConfirm" :disabled="isLoading" class="delete-confirm">
+          {{ isLoading ? 'در حال حذف...' : ' بله، حذف کامل' }}
+        </button>
+        <button type="button" class="secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
+      </div>
+    </div>
+    
+    <div v-if="viewMode === 'delete_alias' && selectedCommodity && selectedAlias" class="card confirmation-dialog">
+      <h2>حذف نام مستعار</h2>
+      <p>⚠️ آیا از حذف نام مستعار **«{{ selectedAlias.alias }}»** مطمئن هستید؟</p>
+      <div class="form-actions">
+        <button @click="onDeleteAliasConfirm" :disabled="isLoading" class="delete-confirm">
+          {{ isLoading ? 'در حال حذف...' : ' بله، حذف شود' }}
+        </button>
+        <button type="button" class="secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
+      </div>
     </div>
 
   </div>
 </template>
 
 <style scoped>
-/* ... (تمام استایل‌های شما بدون تغییر باقی می‌ماند) ... */
-.commodity-manager { /* Inherits .card styles */ }
-h2 { margin-top: 0; margin-bottom: 20px; }
-h3 { margin-top: 25px; margin-bottom: 10px; font-size: 16px; border-bottom: 1px solid var(--border-color); padding-bottom: 5px; }
-
-.loading-inline { color: var(--text-secondary); margin-bottom: 15px; }
+/* استایل‌های پایه کارت و فرم */
+.card { background-color: var(--card-bg); border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+.form-group { margin-bottom: 16px; }
+label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; }
+input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: #f7f7f7; font-size: 15px; font-family: inherit; }
+.form-actions { display: flex; gap: 12px; margin-top: 24px; }
+button { flex-grow: 1; background: var(--primary-color); color: white; border: none; cursor: pointer; font-weight: 600; padding: 12px; border-radius: 8px; font-size: 15px; }
+button:disabled { background-color: #a0a0a0; cursor: not-allowed; }
+button.secondary { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); flex-grow: 0; }
 .message { padding: 10px; border-radius: 6px; margin-bottom: 15px; font-size: 14px; }
 .message.error { background-color: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
 .message.success { background-color: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+.loading-container { display: flex; justify-content: center; padding: 20px; }
+.spinner { width: 30px; height: 30px; border: 3px solid rgba(0, 0, 0, 0.1); border-left-color: var(--primary-color); border-radius: 50%; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.no-data { text-align: center; color: var(--text-secondary); padding: 20px 0; }
+.divider { border: none; border-top: 1px solid var(--border-color); margin: 16px 0; }
 
-/* Add/Edit Forms */
-.add-form .form-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; margin-bottom: 20px;}
-.edit-form .form-group { margin-bottom: 15px; }
-.edit-form label { display: block; margin-bottom: 5px; font-size: 13px; color: var(--text-secondary); }
-.edit-form .form-actions { display: flex; gap: 10px; margin-top: 15px; }
+/* 1. لیست کالاها */
+.button-list { display: flex; flex-direction: column; gap: 10px; }
+.list-button {
+  width: 100%; background: #f9fafb; color: var(--text-color); border: 1px solid var(--border-color);
+  padding: 14px; font-size: 16px; font-weight: 500; text-align: right;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.list-button:hover { border-color: var(--primary-color); color: var(--primary-color); background: #f0f9ff; }
+.list-button span:last-child { color: var(--text-secondary); }
+.list-button.add-button { color: var(--primary-color); justify-content: center; }
+.list-button.edit-button { color: #e67e22; justify-content: center; }
+.list-button.delete-button { color: #e74c3c; justify-content: center; }
 
-input, select, button { /* Inherits base styles */ }
-button[type="submit"] { background-color: var(--primary-color); color: white; }
-button.secondary { background-color: var(--card-bg); color: var(--text-secondary); border: 1px solid var(--border-color); }
-button:disabled { background-color: #e5e7eb; cursor: not-allowed; color: #9ca3af; border-color: #e5e7eb; }
-
-/* Commodity List Table */
-.commodity-list { margin-top: 20px; }
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { text-align: right; padding: 10px 8px; border-bottom: 1px solid var(--border-color); }
-th { color: var(--text-secondary); font-weight: 500; font-size: 13px; }
-td:last-child { text-align: left; white-space: nowrap; } /* Align actions to left */
-
+/* 2. لیست نام‌های مستعار */
+.alias-header { display: flex; align-items: center; gap: 10px; }
+.back-button {
+  flex-grow: 0; font-size: 24px; font-weight: 700; color: var(--primary-color);
+  background: transparent; border: none; padding: 0 10px; margin: 0;
+}
+.alias-list { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+.alias-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px; background: #f9fafb; border-radius: 8px;
+}
+.alias-item span { font-weight: 500; }
+.alias-actions { display: flex; gap: 8px; }
 .action-btn {
-  padding: 4px 8px;
-  font-size: 12px;
-  border-radius: 6px;
-  margin-right: 5px;
-  cursor: pointer;
-  border: none;
+  padding: 6px 10px; font-size: 14px; border-radius: 6px;
+  flex-grow: 0; border: none; background: transparent; cursor: pointer;
 }
-.action-btn.edit { background-color: #e0f2fe; color: #075985; }
-.action-btn.delete { background-color: #fee2e2; color: #991b1b; }
-.action-btn:disabled { background-color: #f3f4f6; color: #9ca3af; }
+.action-btn.edit { color: #007aff; background: #e0f2fe; }
+.action-btn.delete { color: #e74c3c; background: #fee2e2; }
 
-.no-data {
-    text-align: center;
-    color: var(--text-secondary);
-    margin-top: 20px;
-    padding: 15px;
-    background-color: #f9fafb;
-    border-radius: 8px;
-}
+.button-list.stacked { margin-top: 20px; }
+
+/* 7 & 8. پنجره تأیید حذف */
+.confirmation-dialog p { font-size: 15px; line-height: 1.6; }
+.confirmation-dialog p strong { color: #c0392b; }
+button.delete-confirm { background-color: #e74c3c; }
+button.delete-confirm:hover { background-color: #c0392b; }
 </style>

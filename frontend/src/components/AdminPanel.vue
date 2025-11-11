@@ -1,29 +1,20 @@
 <script setup lang="ts">
-import CreateInvitationView from './CreateInvitationView.vue';
-
-defineProps<{
-  apiBaseUrl: string;
-  jwtToken: string | null;
-}>();
-        
-const emit = defineEmits(['invite-created', 'navigate']);
+defineEmits(['navigate']);
 </script>
 
 <template>
   <div class="admin-panel-container">
     
-    <CreateInvitationView 
-      :api-base-url="apiBaseUrl"
-      :jwt-token="jwtToken"
-      @invite-created="(msg) => emit('invite-created', msg)"
-    />
-
     <div class="card management-card">
+      <h2>پنل مدیریت</h2>
+      <p>لطفاً بخش مورد نظر خود را انتخاب کنید:</p>
+      
       <div class="button-group">
-        <button class="management-button" @click="emit('navigate', 'manage_commodities')">
+        <button class="management-button" @click="$emit('navigate', 'manage_commodities')">
           📦 مدیریت کالاها
         </button>
-        <button class="management-button" @click="emit('navigate', 'settings')">
+        
+        <button class="management-button" @click="$emit('navigate', 'settings')">
           ⚙️ تنظیمات مدیریت
         </button>
       </div>
@@ -41,38 +32,49 @@ const emit = defineEmits(['invite-created', 'navigate']);
 .card.management-card {
   background-color: var(--card-bg);
   border-radius: 12px;
-  padding: 15px; /* کمی پدینگ کمتر */
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06); /* سایه کمتر */
+  padding: 20px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+}
+h2 {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 24px;
 }
 .button-group {
     display: grid;
-    /* دو ستون مساوی */
-    grid-template-columns: repeat(2, 1fr); 
-    gap: 12px; /* فاصله بین دکمه‌ها */
+    /* یک ستونه شبیه به بات */
+    grid-template-columns: 1fr; 
+    gap: 12px;
 }
-.management-button { /* تغییر نام از settings-button */
+.management-button {
   width: 100%;
-  padding: 12px 10px; /* کمی پدینگ افقی کمتر */
-  font-size: 14px; /* کمی فونت کوچکتر */
-  font-weight: 500; /* وزن معمولی‌تر */
-  background-color: #f9fafb; /* پس‌زمینه کمی متفاوت */
+  padding: 14px;
+  font-size: 16px;
+  font-weight: 500;
+  background-color: #f9fafb;
   color: var(--text-color);
   border: 1px solid var(--border-color);
   border-radius: 10px; 
   cursor: pointer;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  /* متن را راست‌چین می‌کنیم و آیکون در سمت راست قرار می‌گیرد */
+  justify-content: flex-start;
+  direction: rtl; 
+  gap: 10px;
   transition: all 0.2s ease-in-out;
 }
 .management-button:hover {
   border-color: var(--primary-color);
   color: var(--primary-color);
-  background-color: #f0f9ff; /* هاور با رنگ آبی کم‌رنگ */
+  background-color: #f0f9ff;
 }
 .management-button:active {
-  background-color: #e0f2fe; /* فعال شدن با رنگ آبی پررنگ‌تر */
+  background-color: #e0f2fe;
   transform: translateY(1px);
 }
 </style>

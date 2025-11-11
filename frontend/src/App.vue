@@ -4,8 +4,8 @@ import { ref, onMounted, computed } from 'vue'
 import MainMenu from './components/MainMenu.vue'
 import UserProfile from './components/UserProfile.vue'
 import AdminPanel from './components/AdminPanel.vue'
-// --- کامپوننت جدید را import کنید ---
 import CommodityManager from './components/CommodityManager.vue' 
+import CreateInvitationView from './components/CreateInvitationView.vue'
 import PlaceholderView from './components/PlaceholderView.vue'
 
 const user = ref<any>(null)
@@ -21,17 +21,12 @@ function handleNavigation(view: string) {
   if (view !== 'trade') {
     showTradePage.value = true; 
   }
-  // اگر از پنل ادمین به ساخت دعوت رفتیم، view را به پنل ادمین برگردان
-  // (چون ساخت دعوت حالا داخل پنل ادمین است)
-  if (view === 'create_invitation') {
-      activeView.value = 'admin_panel';
-      // Optionally show a confirmation for creation within the admin panel itself
-  } else {
-      activeView.value = view;
-  }
+  activeView.value = view
 }
 
 function onInviteCreated(message: string) {
+  // پس از ایجاد موفق، به پنل ادمین برمی‌گردیم
+  activeView.value = 'admin_panel'; 
   alert('دعوت‌نامه با موفقیت ایجاد شد!');
 }
 
@@ -46,8 +41,8 @@ function toggleTradePageView() {
 }
 
 onMounted(async () => {
+  // ... (کد onMounted شما بدون تغییر) ...
   setTimeout(() => { document.body.style.backgroundColor = '#f0f2f5'; }, 100);
-  // ... (بقیه کد onMounted بدون تغییر) ...
   if (tg) { try { tg.ready(); tg.expand(); tg.setHeaderColor('#ffffff'); tg.setBackgroundColor('#f0f2f5'); } catch (e) { console.error("Telegram API error:", e); } }
   try {
     if (!tg || !tg.initData) throw new Error("لطفاً این برنامه را از طریق تلگرام باز کنید.");
@@ -87,18 +82,23 @@ onMounted(async () => {
         <PlaceholderView v-else-if="activeView === 'settings'" title="تنظیمات" />
         
         <AdminPanel
-          v-else-if="activeView === 'admin_panel' && user.role === 'SUPER_ADMIN'"
-          :api-base-url="API_BASE_URL" 
-          :jwt-token="jwtToken"
-          @invite-created="onInviteCreated"
+          v-else-if="activeView === 'admin_panel' && user.role === 'مدیر ارشد'"
           @navigate="handleNavigation"
         />
 
+        <CreateInvitationView
+          v-else-if="activeView === 'create_invitation' && user.role === 'مدیر ارشد'"
+          :api-base-url="API_BASE_URL" 
+          :jwt-token="jwtToken"
+          @invite-created="onInviteCreated"
+        />
         <CommodityManager
-            v-else-if="activeView === 'manage_commodities' && user.role === 'SUPER_ADMIN'"
+            v-else-if="activeView === 'manage_commodities' && user.role === 'مدیر ارشد'"
             :api-base-url="API_BASE_URL"
             :jwt-token="jwtToken"
+            @navigate="handleNavigation" 
         />
+        
         <UserProfile 
           v-else-if="!showTradePage || activeView === 'profile'" 
           :user="user" 
