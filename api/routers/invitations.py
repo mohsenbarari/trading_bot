@@ -1,4 +1,4 @@
-# trading_bot/api/routers/invitations.py (نسخه نهایی و ساده‌شده)
+# api/routers/invitations.py (نسخه نهایی با احراز هویت دوگانه)
 import secrets
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,13 +6,14 @@ from sqlalchemy import select
 from schemas import Invitation, InvitationCreate
 from models.invitation import Invitation as InvitationModel
 from core.db import get_db
-from .auth import verify_dev_key
+# --- وابستگی قدیمی را حذف و وابستگی جدید را اضافه کنید ---
+from .auth import verify_super_admin_or_dev_key
 
 router = APIRouter(
     prefix="/invitations", 
     tags=["Invitations"],
-    # === این خط را اضافه کنید ===
-    dependencies=[Depends(verify_dev_key)]
+    # === این خط را تغییر دهید ===
+    dependencies=[Depends(verify_super_admin_or_dev_key)]
 )
 
 @router.post("/", response_model=Invitation, status_code=201)

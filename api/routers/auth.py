@@ -6,6 +6,7 @@ from urllib.parse import unquote
 import random
 import httpx
 from typing import Tuple
+from core.enums import UserRole 
 
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordBearer, APIKeyHeader
@@ -89,7 +90,27 @@ async def verify_dev_key_optional(x_dev_key: str | None = Depends(api_key_scheme
         return True
     return False
 
-# --- بقیه اندپوینت‌های auth (بدون تغییر) ---
+async def verify_super_admin_or_dev_key(
+    current_user: User | None = Depends(get_current_user_optional),
+    is_dev: bool = Depends(verify_dev_key_optional)
+) -> User | None:
+    """
+    Dependency that authorizes if user is EITHER a Super Admin (via JWT)
+    OR if the request has a valid Dev Key (via X-Dev-Key header).
+    """
+    # Option 1: Valid Dev Key (from bot or other internal service)
+    if is_dev:
+        return None # Authorized (as dev)
+
+    # Option 2: Valid Super Admin JWT (from Mini App)
+    if current_user and current_user.role == UserRole.SUPER_ADMIN:
+        return current_user # Authorized (as user)
+
+    # If neither:
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated as Super Admin or with valid Dev Key"
+    )
 
 @router.post("/request-otp", status_code=200)
 async def request_otp(request: schemas.OTPRequest, db: AsyncSession = Depends(get_db)):

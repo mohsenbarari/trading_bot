@@ -1,4 +1,4 @@
-# bot/handlers/admin.py (هماهنگ شده با کیبورد دائمی)
+# bot/handlers/admin.py (نسخه نهایی با ارسال هدر احراز هویت)
 import httpx
 from typing import Optional
 from aiogram import Router, types, F
@@ -7,20 +7,26 @@ from models.user import User
 from core.enums import UserRole
 from bot.states import InvitationCreation
 from bot.keyboards import get_role_selection_keyboard
+from core.config import settings # <-- Import settings
 
 router = Router()
 
-# اصلاح: این handler اکنون به پیام متنی گوش می‌دهد
+# === تابع کمکی برای هدر ===
+def get_auth_headers() -> dict:
+    """هدر احراز هویت را با استفاده از DEV_API_KEY می‌سازد."""
+    if not settings.dev_api_key:
+        return {"X-Dev-Key": "NOT_SET"} 
+    return {"X-Dev-Key": settings.dev_api_key}
+# === پایان تابع کمکی ===
+
 @router.message(F.text == "➕ ارسال لینک دعوت")
 async def start_invitation_creation(message: types.Message, user: Optional[User], state: FSMContext):
     if not user or user.role != UserRole.SUPER_ADMIN:
-        # این پیام نباید برای کاربران عادی نمایش داده شود چون دکمه را ندارند
         return
     
     await state.set_state(InvitationCreation.awaiting_account_name)
     await message.answer("لطفاً نام کاربری منحصر به فرد (account_name) کاربر جدید را وارد کنید:")
 
-# ... بقیه کدهای این فایل بدون تغییر باقی می‌مانند ...
 @router.message(InvitationCreation.awaiting_account_name)
 async def process_account_name(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN:
@@ -61,9 +67,13 @@ async def process_role_and_create(callback_query: types.CallbackQuery, state: FS
         "role": role.value
     }
     
+    # === ارسال هدر ===
+    headers = get_auth_headers()
+    
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(api_url, json=payload, timeout=30.0)
+            # === هدر به درخواست اضافه شد ===
+            response = await client.post(api_url, json=payload, timeout=30.0, headers=headers)
 
         if response.status_code == 201:
             invitation_data = response.json()
@@ -79,8 +89,12 @@ async def process_role_and_create(callback_query: types.CallbackQuery, state: FS
                 parse_mode="Markdown"
             )
         else:
-            error_detail = response.json().get("detail", "خطای نامشخص")
-            await callback_query.message.edit_text(f"❌ خطا در ساخت دعوتنامه: {error_detail}")
+            # === مدیریت خطای خواناتر ===
+            try:
+                error_detail = response.json().get("detail", "خطای نامشخص")
+            except Exception:
+                error_detail = response.text
+            await callback_query.message.edit_text(f"❌ خطا در ساخت دعوتنامه ({response.status_code}): {error_detail}")
 
     except httpx.RequestError as e:
         await callback_query.message.edit_text(f"خطای ارتباط با سرور: {e}")
