@@ -59,21 +59,21 @@ const toggleButtonText = computed(() => {
 </template>
 
 <style scoped>
-/* === تمام استایل‌های قبلی بدون تغییر باقی می‌مانند === */
+/* === کانتینر اصلی فشرده‌تر شد === */
 .main-menu-container {
-  padding: 16px 16px 12px 16px;
+  padding: 12px 12px 8px 12px; /* کاهش پدینگ */
   background-color: var(--bg-color);
   flex-shrink: 0;
-  display: flex; /* برای چیدمان عمودی ردیف‌ها */
+  display: flex;
   flex-direction: column;
-  gap: 12px; /* فاصله بین ردیف‌ها */
+  gap: 8px; /* کاهش فاصله بین ردیف‌ها */
 }
 
-/* --- استایل دکمه بزرگ معامله (بدون تغییر) --- */
+/* --- استایل دکمه بزرگ معامله (فشرده‌تر) --- */
 .trade-button {
   width: 100%;
-  padding: 20px;
-  font-size: 20px;
+  padding: 16px; /* کاهش پدینگ */
+  font-size: 18px; /* کاهش فونت */
   font-weight: 700;
   background: linear-gradient(45deg, #007aff, #0056b3);
   color: white;
@@ -84,12 +84,11 @@ const toggleButtonText = computed(() => {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  /* margin-bottom حذف شد چون از gap در کانتینر استفاده می‌کنیم */
   box-shadow: 0 4px 14px rgba(0, 122, 255, 0.3);
   transition: all 0.2s ease-in-out;
 }
 .trade-button span {
-  font-size: 24px;
+  font-size: 20px; /* کاهش فونت آیکون */
 }
 .trade-button:hover {
   transform: translateY(-2px);
@@ -100,25 +99,25 @@ const toggleButtonText = computed(() => {
   box-shadow: 0 2px 8px rgba(0, 122, 255, 0.2);
 }
 
-/* --- کانتینر چیدمان ادمین --- */
+/* --- کانتینر چیدمان ادمین (فشرده‌تر) --- */
 .admin-layout {
   display: flex;
   flex-direction: column;
-  gap: 10px; /* فاصله بین ردیف دوم و سوم ادمین */
+  gap: 8px; /* کاهش فاصله */
 }
 
-/* --- استایل ردیف پایین (مشترک برای همه حالت‌ها) --- */
+/* --- استایل ردیف پایین (مشترک) --- */
 .bottom-row {
   display: grid;
-  gap: 10px; 
+  gap: 8px; /* کاهش فاصله */
 }
 
-/* حالت عادی: دو ستون مساوی */
+/* حالت عادی: دو ستون */
 .standard-row {
   grid-template-columns: repeat(2, 1fr);
 }
 
-/* استایل جدید: سه ستون مساوی برای ردیف دوم ادمین */
+/* استایل جدید: سه ستون برای ردیف دوم ادمین */
 .three-cols {
   grid-template-columns: repeat(3, 1fr);
 }
@@ -127,23 +126,23 @@ const toggleButtonText = computed(() => {
 .single-col {
   grid-template-columns: 1fr;
 }
-/* استایل دکمه سرتاسری در ردیف سوم ادمین */
+/* استایل دکمه سرتاسری (فشرده‌تر) */
 .single-col button {
-  padding: 15px 10px !important; 
-  font-size: 15px !important; 
+  padding: 12px 10px !important; /* کاهش پدینگ */
+  font-size: 14px !important; /* کاهش فونت */
   flex-direction: row !important; 
   gap: 8px !important; 
 }
 .single-col button span {
-    font-size: 20px !important; 
+    font-size: 18px !important; /* کاهش فونت آیکون */
     margin-bottom: 0 !important; 
 }
 
 
-/* --- استایل دکمه‌های کوچک در ردیف پایین (مشترک برای همه) --- */
+/* --- استایل دکمه‌های کوچک (فشرده‌تر) --- */
 .bottom-row button {
-  padding: 12px 5px; 
-  font-size: 13px;  
+  padding: 10px 5px; /* کاهش پدینگ */
+  font-size: 12px;  /* کاهش فونت */
   font-weight: 500; 
   background-color: var(--card-bg);
   color: var(--text-color);
@@ -157,13 +156,13 @@ const toggleButtonText = computed(() => {
   gap: 4px; 
   transition: all 0.2s ease-in-out;
   box-shadow: 0 1px 4px rgba(0,0,0,0.04);
-  min-height: 65px; 
+  min-height: 55px; /* کاهش ارتفاع حداقلی */
   text-align: center; 
   line-height: 1.3; 
 }
 
 .bottom-row button span {
-  font-size: 18px; 
+  font-size: 16px; /* کاهش فونت آیکون */
   margin-bottom: 2px;
 }
 
@@ -178,5 +177,4 @@ const toggleButtonText = computed(() => {
   background-color: #f5f5f5; 
   box-shadow: 0 1px 4px rgba(0,0,0,0.04);
 }
-
 </style>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+// --- تغییر ۱: تمام کدهای مربوط به isKeyboardVisible و onViewportChanged حذف شد ---
+import { ref, onMounted, computed, onUnmounted } from 'vue'
 
 import MainMenu from './components/MainMenu.vue'
 import UserProfile from './components/UserProfile.vue'
@@ -16,6 +17,9 @@ const API_BASE_URL = 'https://telegram.362514.ir'
 const tg = (window as any).Telegram?.WebApp
 const isLoading = computed(() => !user.value && loadingMessage.value)
 const showTradePage = ref(true) 
+// const isKeyboardVisible = ref(false) // <-- حذف شد
+
+// const onViewportChanged = () => { ... } // <-- حذف شد
 
 function handleNavigation(view: string) {
   if (view !== 'trade') {
@@ -25,9 +29,7 @@ function handleNavigation(view: string) {
 }
 
 function onInviteCreated(message: string) {
-  // پس از ایجاد موفق، به پنل ادمین برمی‌گردیم
-  activeView.value = 'admin_panel'; 
-  alert('دعوت‌نامه با موفقیت ایجاد شد!');
+  // این تابع اکنون خالی است
 }
 
 function toggleTradePageView() {
@@ -41,10 +43,23 @@ function toggleTradePageView() {
 }
 
 onMounted(async () => {
-  // ... (کد onMounted شما بدون تغییر) ...
   setTimeout(() => { document.body.style.backgroundColor = '#f0f2f5'; }, 100);
-  if (tg) { try { tg.ready(); tg.expand(); tg.setHeaderColor('#ffffff'); tg.setBackgroundColor('#f0f2f5'); } catch (e) { console.error("Telegram API error:", e); } }
+  if (tg) { 
+    try { 
+      // tg.ready(); // (در main.ts هستند)
+      // tg.expand(); // (در main.ts هستند)
+      
+      tg.setHeaderColor('#ffffff'); 
+      tg.setBackgroundColor('#f0f2f5');
+      
+      // tg.onEvent('viewportChanged', onViewportChanged); // <-- حذف شد
+      // onViewportChanged(); // <-- حذف شد
+
+    } catch (e) { console.error("Telegram API error:", e); } 
+  }
+  
   try {
+    // ... (بقیه کد onMounted برای احراز هویت بدون تغییر) ...
     if (!tg || !tg.initData) throw new Error("لطفاً این برنامه را از طریق تلگرام باز کنید.");
     loadingMessage.value = 'در حال احراز هویت...';
     const loginResp = await fetch(`${API_BASE_URL}/api/auth/webapp-login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: tg.initData }), });
@@ -59,6 +74,12 @@ onMounted(async () => {
     if (user.value?.role === 'WATCH') { activeView.value = 'profile'; showTradePage.value = false; }
   } catch (e: any) { loadingMessage.value = `⚠️ ${e.message}`; }
 });
+
+onUnmounted(() => {
+  // if (tg) { // <-- حذف شد
+  //   tg.offEvent('viewportChanged', onViewportChanged);
+  // }
+});
 </script>
 
 <template>
@@ -72,20 +93,16 @@ onMounted(async () => {
       <template v-else-if="user">
         
         <PlaceholderView v-if="activeView === 'trade' && showTradePage" title="معاملات" />
-        
         <UserProfile 
           v-else-if="activeView === 'profile'" 
           :user="user" 
           @navigate="handleNavigation"
         />
-        
         <PlaceholderView v-else-if="activeView === 'settings'" title="تنظیمات" />
-        
         <AdminPanel
           v-else-if="activeView === 'admin_panel' && user.role === 'مدیر ارشد'"
           @navigate="handleNavigation"
         />
-
         <CreateInvitationView
           v-else-if="activeView === 'create_invitation' && user.role === 'مدیر ارشد'"
           :api-base-url="API_BASE_URL" 
@@ -98,13 +115,11 @@ onMounted(async () => {
             :jwt-token="jwtToken"
             @navigate="handleNavigation" 
         />
-        
         <UserProfile 
           v-else-if="!showTradePage || activeView === 'profile'" 
           :user="user" 
           @navigate="handleNavigation" 
         />
-
         <PlaceholderView v-else title="صفحه اصلی" />
 
       </template>
@@ -125,7 +140,23 @@ onMounted(async () => {
 @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700&display=swap');
 :root { --primary-color: #007AFF; --bg-color: #f0f2f5; --card-bg: #ffffff; --text-color: #1c1c1e; --text-secondary: #8a8a8e; --border-color: #e5e5e5; }
 html { box-sizing: border-box; } *, *:before, *:after { box-sizing: inherit; } body { margin: 0; font-family: 'Vazirmatn', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg-color); color: var(--text-color); overscroll-behavior-y: none; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-.app-container { display: flex; flex-direction: column; height: 100vh; max-height: 100dvh; overflow: hidden; }
-.main-content { flex-grow: 1; overflow-y: auto; padding: 16px; position: relative; padding-bottom: 80px; }
+
+/* --- تغییر ۳: استایل کانتینر اصلی اصلاح شد --- */
+.app-container { 
+  display: flex; 
+  flex-direction: column; 
+  min-height: 100dvh; /* تغییر: اجازه اسکرول کل صفحه */
+  /* height: 100vh; */ /* حذف شد */
+  /* max-height: 100dvh; */ /* حذف شد */
+  /* overflow: hidden; */ /* حذف شد */
+}
+.main-content { 
+  flex-grow: 1; /* این باعث میشود منو به پایین هل داده شود */
+  /* overflow-y: auto; */ /* حذف شد - کل صفحه اسکرول میشود */
+  padding: 16px; 
+  position: relative; 
+  padding-bottom: 16px; /* تغییر: منو دیگر روی این بخش قرار نمیگیرد */
+}
+
 .loading-container { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; color: var(--text-secondary); } .spinner { width: 40px; height: 40px; border: 4px solid rgba(0, 0, 0, 0.1); border-left-color: var(--primary-color); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px; } @keyframes spin { to { transform: rotate(360deg); } }
 </style>

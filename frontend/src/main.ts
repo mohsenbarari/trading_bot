@@ -1,3 +1,4 @@
+// frontend/src/main.ts (نسخه صحیح)
 import { createApp } from 'vue'
 import App from './App.vue'
 import './assets/main.css'
@@ -7,7 +8,9 @@ const tg = (window as any).Telegram?.WebApp
 if (tg) {
   try {
     tg.ready()
-    tg.expand()
+    // --- این خط باید اینجا باشد و از کامنت خارج شود ---
+    tg.expand() 
+    
     // اعمال تم روشن به‌صورت اجباری
     const root = document.documentElement
     const applyLightTheme = () => {
