@@ -1,5 +1,4 @@
 <script setup lang="ts">
-// --- تغییر ۱: تمام کدهای مربوط به isKeyboardVisible و onViewportChanged حذف شد ---
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 
 import MainMenu from './components/MainMenu.vue'
@@ -18,9 +17,34 @@ const API_BASE_URL = 'https://telegram.362514.ir'
 const tg = (window as any).Telegram?.WebApp
 const isLoading = computed(() => !user.value && loadingMessage.value)
 const showTradePage = ref(true) 
-// const isKeyboardVisible = ref(false) // <-- حذف شد
 
-// const onViewportChanged = () => { ... } // <-- حذف شد
+// --- متغیرهای مربوط به نوتیفیکیشن ---
+const notificationMessage = ref<string | null>(null);
+let notificationInterval: any = null;
+
+// --- تابع دریافت نوتیفیکیشن ---
+async function checkNotifications() {
+  if (!jwtToken.value) return;
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/notifications/unread`, {
+      headers: { Authorization: `Bearer ${jwtToken.value}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.length > 0) {
+        // آخرین پیام را نمایش بده
+        // حذف کاراکترهای Markdown (مثل ** و `) برای نمایش بهتر در HTML ساده
+        notificationMessage.value = data[0].message.replace(/\*\*/g, '').replace(/`/g, '');
+        
+        // مخفی کردن پیام بعد از 8 ثانیه
+        setTimeout(() => { notificationMessage.value = null; }, 8000);
+      }
+    }
+  } catch (e) {
+    console.error("Notification check failed", e);
+  }
+}
+// -------------------------------
 
 function handleNavigation(view: string) {
   if (view !== 'trade') {
@@ -47,20 +71,12 @@ onMounted(async () => {
   setTimeout(() => { document.body.style.backgroundColor = '#f0f2f5'; }, 100);
   if (tg) { 
     try { 
-      // tg.ready(); // (در main.ts هستند)
-      // tg.expand(); // (در main.ts هستند)
-      
       tg.setHeaderColor('#ffffff'); 
       tg.setBackgroundColor('#f0f2f5');
-      
-      // tg.onEvent('viewportChanged', onViewportChanged); // <-- حذف شد
-      // onViewportChanged(); // <-- حذف شد
-
     } catch (e) { console.error("Telegram API error:", e); } 
   }
   
   try {
-    // ... (بقیه کد onMounted برای احراز هویت بدون تغییر) ...
     if (!tg || !tg.initData) throw new Error("لطفاً این برنامه را از طریق تلگرام باز کنید.");
     loadingMessage.value = 'در حال احراز هویت...';
     const loginResp = await fetch(`${API_BASE_URL}/api/auth/webapp-login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: tg.initData }), });
@@ -73,19 +89,31 @@ onMounted(async () => {
     user.value = await userResp.json();
     loadingMessage.value = '';
     if (user.value?.role === 'WATCH') { activeView.value = 'profile'; showTradePage.value = false; }
+    
+    // --- شروع سرویس نوتیفیکیشن (هر 10 ثانیه) ---
+    notificationInterval = setInterval(checkNotifications, 10000);
+    // -----------------------------------------
+    
   } catch (e: any) { loadingMessage.value = `⚠️ ${e.message}`; }
 });
 
 onUnmounted(() => {
-  // if (tg) { // <-- حذف شد
-  //   tg.offEvent('viewportChanged', onViewportChanged);
-  // }
+  // پاک کردن تایمر هنگام خروج
+  if (notificationInterval) clearInterval(notificationInterval);
 });
 </script>
 
 <template>
   <div class="app-container">
     
+    <transition name="fade">
+      <div v-if="notificationMessage" class="app-notification">
+        <div class="notif-content">
+          {{ notificationMessage }}
+        </div>
+        <button @click="notificationMessage = null" class="close-notif">×</button>
+      </div>
+    </transition>
     <main class="main-content">
       <div v-if="isLoading" class="loading-container">
         <div class="spinner"></div>
@@ -144,27 +172,66 @@ onUnmounted(() => {
 </template>
 
 <style>
-/* ... (استایل‌های کلی شما بدون تغییر) ... */
+/* ... (استایل‌های قبلی) ... */
 @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700&display=swap');
 :root { --primary-color: #007AFF; --bg-color: #f0f2f5; --card-bg: #ffffff; --text-color: #1c1c1e; --text-secondary: #8a8a8e; --border-color: #e5e5e5; }
 html { box-sizing: border-box; } *, *:before, *:after { box-sizing: inherit; } body { margin: 0; font-family: 'Vazirmatn', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg-color); color: var(--text-color); overscroll-behavior-y: none; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
-/* --- تغییر ۳: استایل کانتینر اصلی اصلاح شد --- */
 .app-container { 
   display: flex; 
   flex-direction: column; 
-  min-height: 100dvh; /* تغییر: اجازه اسکرول کل صفحه */
-  /* height: 100vh; */ /* حذف شد */
-  /* max-height: 100dvh; */ /* حذف شد */
-  /* overflow: hidden; */ /* حذف شد */
+  min-height: 100dvh; 
 }
 .main-content { 
-  flex-grow: 1; /* این باعث میشود منو به پایین هل داده شود */
-  /* overflow-y: auto; */ /* حذف شد - کل صفحه اسکرول میشود */
+  flex-grow: 1; 
   padding: 16px; 
   position: relative; 
-  padding-bottom: 16px; /* تغییر: منو دیگر روی این بخش قرار نمیگیرد */
+  padding-bottom: 16px; 
 }
 
 .loading-container { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; color: var(--text-secondary); } .spinner { width: 40px; height: 40px; border: 4px solid rgba(0, 0, 0, 0.1); border-left-color: var(--primary-color); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px; } @keyframes spin { to { transform: rotate(360deg); } }
+
+/* --- استایل‌های جدید برای نوتیفیکیشن --- */
+.app-notification {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  background-color: #333; /* رنگ پس‌زمینه تیره */
+  color: white;
+  padding: 14px 16px;
+  border-radius: 12px;
+  z-index: 9999;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  font-size: 14px;
+  line-height: 1.6;
+  direction: rtl;
+  border: 1px solid #444;
+}
+.notif-content {
+  flex-grow: 1;
+  white-space: pre-line; /* برای نمایش خط جدید */
+}
+.close-notif {
+  background: none;
+  border: none;
+  color: #bbb;
+  font-size: 24px;
+  line-height: 1;
+  margin-right: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-20px) scale(0.95);
+}
 </style>
