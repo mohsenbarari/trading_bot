@@ -2,7 +2,6 @@
 defineProps<{
   user: any;
 }>();
-// --- امیت را برای دکمه جدید اضافه کنید ---
 const emit = defineEmits(['navigate'])
 </script>
 
@@ -16,10 +15,14 @@ const emit = defineEmits(['navigate'])
       </div>
     </div>
 
-    <button class="settings-button" @click="emit('navigate', 'settings')">
+    <button class="menu-button notification-btn" @click="emit('navigate', 'notifications')">
+      🔔 صندوق پیام‌ها
+    </button>
+
+    <button class="menu-button settings-btn" @click="emit('navigate', 'settings')">
       ⚙️ تنظیمات
     </button>
-    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -38,6 +41,7 @@ h2 {
 .profile-details {
   display: grid;
   gap: 16px;
+  margin-bottom: 24px;
 }
 .detail-item {
   display: flex;
@@ -61,30 +65,35 @@ h2 {
   direction: ltr;
   font-family: monospace;
 }
-.settings-button {
+
+.menu-button {
   width: 100%;
-  padding: 12px;
+  padding: 14px;
   font-size: 15px;
   font-weight: 600;
   background-color: var(--card-bg);
   color: var(--text-color);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: 10px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   transition: all 0.2s ease-in-out;
-  margin-top: 20px; /* فاصله از بالا */
+  margin-bottom: 12px;
 }
-.settings-button:hover {
+.menu-button:hover {
   border-color: var(--primary-color);
   color: var(--primary-color);
+  background-color: #f0f9ff;
 }
-.settings-button:active {
-  background-color: #f0f0f0;
+.menu-button:active {
+  background-color: #e0f2fe;
   transform: translateY(1px);
 }
+/* حذف فاصله از آخرین دکمه */
+.menu-button:last-child {
+  margin-bottom: 0;
+}
 </style>
-

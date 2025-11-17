@@ -85,6 +85,16 @@ class InvitationRead(InvitationBase):
     class Config:
         from_attributes = True
 
+class NotificationRead(BaseModel):
+    id: int
+    message: str
+    is_read: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+        
+
 # --- Commodity Schemas ---
 class CommodityAliasBase(BaseModel):
     alias: str
@@ -111,3 +121,4 @@ class Commodity(CommodityBase):
 
     class Config:
         from_attributes = True
+
