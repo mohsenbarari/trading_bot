@@ -76,7 +76,7 @@ services:
       container_name: trading_bot_adminer
       restart: always
       ports:
-        - "8080:8080"
+        - "127.0.0.1:8080:8080"
       networks:
         - trading_net
       depends_on:

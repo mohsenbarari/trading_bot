@@ -1,10 +1,11 @@
-# bot/keyboards.py (نسخه نهایی با دکمه ویرایش نام کالا)
+# trading_bot/bot/keyboards.py (کد کامل و به‌روزرسانی شده)
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 from core.enums import UserRole
 from core.config import settings
+from math import ceil
 
-# --- توابع کیبورد دائمی (بدون تغییر) ---
+# --- توابع کیبورد دائمی ---
 def get_create_token_inline_keyboard() -> InlineKeyboardMarkup | None:
     buttons = [[InlineKeyboardButton(text="➕ ارسال لینک دعوت (شیشه‌ای)", callback_data="create_invitation_inline")]]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -28,10 +29,69 @@ def get_user_panel_keyboard() -> ReplyKeyboardMarkup:
 def get_admin_panel_keyboard() -> ReplyKeyboardMarkup:
     keyboard_layout = [
         [KeyboardButton(text="📦 مدیریت کالاها")],
+        [KeyboardButton(text="👥 مدیریت کاربران")], # <--- دکمه جدید اضافه شد
         [KeyboardButton(text="⚙️ تنظیمات مدیریت")],
         [KeyboardButton(text="🔙 بازگشت")]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
+
+# --- تابع جدید برای کیبورد مدیریت کاربران ---
+def get_users_management_keyboard() -> ReplyKeyboardMarkup:
+    keyboard_layout = [
+        [KeyboardButton(text="📋 لیست کاربران")],
+        [KeyboardButton(text="🔍 جستجوی کاربر")],
+        [KeyboardButton(text="🔙 بازگشت به پنل مدیریت")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
+# ------------------------------------------
+
+def get_users_list_inline_keyboard(users: list, page: int, total_count: int, limit: int = 10) -> InlineKeyboardMarkup:
+    keyboard_rows = []
+    
+    # 1. ساخت دکمه‌ها برای کاربران
+    user_buttons = []
+    for user in users:
+        # نمایش نام کاربری (account_name) طبق درخواست
+        # اگر account_name نداشت، نام کامل یا موبایل را نمایش می‌دهیم
+        display_name = user.account_name or user.full_name or user.mobile_number or f"User {user.id}"
+        
+        user_buttons.append(InlineKeyboardButton(text=display_name, callback_data=f"user_profile_{user.id}"))
+    
+    # 2. تقسیم دکمه‌ها به ردیف‌های 3 تایی (3 ستونه)
+    # این کار باعث می‌شود دکمه‌ها کوچکتر و فشرده‌تر دیده شوند
+    for i in range(0, len(user_buttons), 3):
+        keyboard_rows.append(user_buttons[i:i+3])
+    
+    # 3. دکمه‌های صفحه‌بندی (Pagination)
+    pagination_buttons = []
+    total_pages = ceil(total_count / limit)
+    
+    if total_pages > 1:
+        # دکمه صفحه قبل
+        if page > 1:
+            pagination_buttons.append(InlineKeyboardButton(text="➡️ قبلی", callback_data=f"users_page_{page - 1}"))
+        else:
+            pagination_buttons.append(InlineKeyboardButton(text="⏺", callback_data="noop"))
+
+        # نشانگر صفحه فعلی
+        pagination_buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
+        
+        # دکمه صفحه بعد
+        if page < total_pages:
+            pagination_buttons.append(InlineKeyboardButton(text="بعدی ⬅️", callback_data=f"users_page_{page + 1}"))
+        else:
+            pagination_buttons.append(InlineKeyboardButton(text="⏺", callback_data="noop"))
+
+        # افزودن ردیف صفحه‌بندی به کیبورد
+        keyboard_rows.append(pagination_buttons)
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+
+def get_user_profile_return_keyboard(back_to_page: int = 1) -> InlineKeyboardMarkup:
+    """دکمه بازگشت از پروفایل به لیست کاربران"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 بازگشت به لیست", callback_data=f"users_page_{back_to_page}")]
+    ])
 
 def get_role_selection_keyboard() -> InlineKeyboardMarkup:
     buttons = []
@@ -61,7 +121,6 @@ def get_commodity_delete_confirm_keyboard(commodity_id: int) -> InlineKeyboardMa
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# === شروع تغییر در این تابع ===
 def get_aliases_list_keyboard(commodity: dict) -> InlineKeyboardMarkup:
     """
     "جدول" نام‌های مستعار را به همراه دکمه‌های مدیریت هر alias می‌سازد.
@@ -81,11 +140,10 @@ def get_aliases_list_keyboard(commodity: dict) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="➕ افزودن نام مستعار جدید", callback_data=f"alias_add_{commodity_id}")
     ])
     
-    # === دکمه جدید: ویرایش نام اصلی کالا ===
+    # ویرایش نام اصلی کالا
     buttons.append([
         InlineKeyboardButton(text="✏️ ویرایش نام اصلی کالا", callback_data=f"comm_edit_name_{commodity_id}")
     ])
-    # === پایان افزودن ===
     
     # دکمه حذف کل کالا
     buttons.append([
@@ -98,7 +156,6 @@ def get_aliases_list_keyboard(commodity: dict) -> InlineKeyboardMarkup:
     ])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-# === پایان تغییر ===
 
 def get_alias_delete_confirm_keyboard(commodity_id: int, alias_id: int) -> InlineKeyboardMarkup:
     """دکمه‌های تأیید یا لغو حذف یک نام مستعار."""

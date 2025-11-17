@@ -8,8 +8,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from core.config import settings
 from core.db import AsyncSessionLocal
 from bot.middlewares.auth import AuthMiddleware
-# --- هندلرهای جدید را import کنید ---
-from bot.handlers import start, panel, default, admin, admin_commodities
+from bot.handlers import start, panel, default, admin, admin_commodities, admin_users
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,9 +26,9 @@ async def main():
     dp.include_router(start.router)
     dp.include_router(panel.router)
     dp.include_router(admin.router)
-    # --- روتر جدید را ثبت کنید ---
     dp.include_router(admin_commodities.router)
-    # --- پایان ثبت ---
+    dp.include_router(admin_users.router)
+
     dp.include_router(default.router) # default باید آخرین روتر باشد
 
     logger.info("--> Starting Bot polling...")

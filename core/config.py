@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "a_very_secret_key"
     jwt_algorithm: str = "HS256"
     dev_api_key: str | None = None
+    invitation_expiry_days: int = 1
     
     class Config:
         env_file = ".env"

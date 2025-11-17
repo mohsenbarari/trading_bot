@@ -6,6 +6,7 @@ import MainMenu from './components/MainMenu.vue'
 import UserProfile from './components/UserProfile.vue'
 import AdminPanel from './components/AdminPanel.vue'
 import CommodityManager from './components/CommodityManager.vue' 
+import UserManager from './components/UserManager.vue'
 import CreateInvitationView from './components/CreateInvitationView.vue'
 import PlaceholderView from './components/PlaceholderView.vue'
 
@@ -115,6 +116,13 @@ onUnmounted(() => {
             :jwt-token="jwtToken"
             @navigate="handleNavigation" 
         />
+        <UserManager
+            v-else-if="activeView === 'manage_users' && user.role === 'مدیر ارشد'"
+            :api-base-url="API_BASE_URL"
+            :jwt-token="jwtToken"
+            @navigate="handleNavigation" 
+        />
+
         <UserProfile 
           v-else-if="!showTradePage || activeView === 'profile'" 
           :user="user" 

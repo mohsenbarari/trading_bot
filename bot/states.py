@@ -27,3 +27,6 @@ class CommodityManagement(StatesGroup):
     awaiting_alias_delete_confirm = State() # برای تایید حذف یک alias
     # === State جدید برای ویرایش نام اصلی کالا ===
     awaiting_commodity_edit_name = State()
+
+class UserManagement(StatesGroup):
+    awaiting_search_query = State()

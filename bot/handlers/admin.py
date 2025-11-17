@@ -1,185 +1,292 @@
-# bot/handlers/admin.py (نسخه نهایی با پاکسازی پیام لغو)
-import httpx
-import logging
-import asyncio 
-import re
-from typing import Optional
+# trading_bot/bot/handlers/admin.py (کامل و اصلاح شده)
+
 from aiogram import Router, types, F, Bot
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.filters import StateFilter
-from aiogram.exceptions import TelegramBadRequest
+from typing import Optional
+import re
+import asyncio
+from fastapi import HTTPException, BackgroundTasks
+from core.db import AsyncSessionLocal
 from models.user import User
 from core.enums import UserRole
-from bot.states import InvitationCreation
-from bot.keyboards import get_role_selection_keyboard, get_commodity_fsm_cancel_keyboard
 from core.config import settings
+from core.utils import normalize_account_name, normalize_persian_numerals
+from bot.states import InvitationCreation
+from bot.keyboards import (
+    get_role_selection_keyboard, 
+    get_commodity_fsm_cancel_keyboard,
+    get_admin_panel_keyboard 
+)
+from api.routers.invitations import create_invitation
+from schemas import InvitationCreate
 
 router = Router()
-logger = logging.getLogger(__name__)
 
-# === توابع کمکی (بدون تغییر) ===
-PERSIAN_TO_ENGLISH_MAP = {
-    '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
-    '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
-    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', # ارقام عربی
-    '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9', # ارقام عربی
-}
-MOBILE_REGEX = r"^09[0-9]{9}$"
-
-def normalize_mobile(mobile: str) -> str:
-    if not mobile: return ""
-    return mobile.translate(str.maketrans(PERSIAN_TO_ENGLISH_MAP))
-
-def get_auth_headers() -> dict:
-    if not settings.dev_api_key: return {"X-Dev-Key": "NOT_SET"} 
-    return {"X-Dev-Key": settings.dev_api_key}
-
-async def safe_delete_message(bot: Bot, chat_id: int, message_id: int):
+async def delete_message_after_delay(message: types.Message, delay: int):
+    """پیام را پس از چند ثانیه حذف می‌کند."""
+    await asyncio.sleep(delay)
     try:
-        await bot.delete_message(chat_id, message_id)
-    except (TelegramBadRequest, Exception) as e:
-        logger.warning(f"Could not delete message {message_id} in chat {chat_id}: {e}")
+        await message.delete()
+    except Exception:
+        pass
 
-# === هندلر لغو (اصلاح شد) ===
-@router.callback_query(F.data == "comm_fsm_cancel", StateFilter(InvitationCreation))
-@router.message(F.text == "لغو", StateFilter(InvitationCreation))
-async def handle_cancel_invitation_fsm(event: types.Message | types.CallbackQuery, state: FSMContext, user: Optional[User]):
-    """فرایند ساخت دعوت‌نامه را لغو و پیام‌ها را پاک می‌کند."""
-    if not user: return
+# --- ۱. تابع کمکی (اصلاح شد) ---
+async def _return_to_admin_panel(message: types.Message | types.CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    لنگر قبلی را حذف می‌کند و لنگر پنل مدیریت را ارسال می‌کند.
+    """
     
+    # --- تشخیص chat_id بر اساس نوع ورودی ---
+    if isinstance(message, types.Message):
+        chat_id = message.chat.id
+    elif isinstance(message, types.CallbackQuery):
+        chat_id = message.message.chat.id
+    else:
+        # اگر نوع ورودی ناشناخته بود، کاری انجام نده
+        return
+        
+    # --- حذف لنگر قبلی (مثلاً منوی اصلی) ---
     data = await state.get_data()
-    await state.clear()
+    last_anchor_id = data.get("anchor_message_id")
+    if last_anchor_id:
+        try:
+            await bot.delete_message(chat_id, last_anchor_id)
+        except Exception:
+            pass
+            
+    # --- ارسال لنگر جدید پنل مدیریت ---
+    return_msg = await bot.send_message(
+        chat_id=chat_id,
+        text="...بازگشت به پنل مدیریت",
+        reply_markup=get_admin_panel_keyboard()
+    )
     
-    target_message = event.message if isinstance(event, types.CallbackQuery) else event
-    
-    # حذف پیام پرامپت (که دکمه لغو داشت)
-    if isinstance(event, types.CallbackQuery):
-        await event.answer("لغو شد")
-        await safe_delete_message(event.bot, event.message.chat.id, event.message.message_id)
-    elif isinstance(event, types.Message):
-        await event.delete() # حذف پیام "لغو" کاربر
-        prompt_message_id = data.get("prompt_message_id")
-        if prompt_message_id:
-            await safe_delete_message(event.bot, event.chat.id, prompt_message_id)
+    # --- ذخیره ID لنگر جدید ---
+    await state.update_data(anchor_message_id=return_msg.message_id)
 
-    # --- شروع اصلاح: حذف پیام لغو پس از 30 ثانیه ---
-    # ۱. پیام لغو را ارسال و ذخیره کن
-    cancel_msg = await target_message.answer("عملیات ساخت دعوت‌نامه لغو شد.")
-    
-    # ۲. 30 ثانیه صبر کن
-    await asyncio.sleep(30)
-    
-    # ۳. پیام لغو را حذف کن
-    await safe_delete_message(target_message.bot, cancel_msg.chat.id, cancel_msg.message_id)
-    # --- پایان اصلاح ---
-
-# === FSM (بدون تغییر) ===
+# --- شروع FSM ---
 @router.message(F.text == "➕ ارسال لینک دعوت")
-async def start_invitation_creation(message: types.Message, user: Optional[User], state: FSMContext):
+async def start_invitation_creation(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN:
         return
-    await message.delete() 
+        
+    asyncio.create_task(delete_message_after_delay(message, 30))
+    
     await state.set_state(InvitationCreation.awaiting_account_name)
-    prompt_msg = await message.answer("لطفاً نام کاربری منحصر به فرد (account_name) کاربر جدید را وارد کنید:", reply_markup=get_commodity_fsm_cancel_keyboard())
-    await state.update_data(prompt_message_id=prompt_msg.message_id)
+    prompt_msg = await message.answer(
+        "لطفاً **نام کاربری (Account Name)** را وارد کنید.\n"
+        "(حروف و اعداد فارسی و انگلیسی مجاز است، حداقل ۳ کاراکتر)",
+        reply_markup=get_commodity_fsm_cancel_keyboard(),
+        parse_mode="Markdown"
+    )
+    await state.update_data(last_prompt_message_id=prompt_msg.message_id)
 
+@router.callback_query(F.data == "create_invitation_inline")
+async def start_invitation_creation_inline(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+    if not user or user.role != UserRole.SUPER_ADMIN:
+        await callback.answer("شما مجاز به این کار نیستید.", show_alert=True)
+        return
+    
+    await state.set_state(InvitationCreation.awaiting_account_name)
+    await callback.message.edit_text(
+        "لطفاً **نام کاربری (Account Name)** را وارد کنید.\n"
+        "(حروف و اعداد فارسی و انگلیسی مجاز است، حداقل ۳ کارکتر)",
+        reply_markup=get_commodity_fsm_cancel_keyboard(),
+        parse_mode="Markdown"
+    )
+    await state.update_data(last_prompt_message_id=callback.message.message_id)
+    await callback.answer()
+
+# --- دریافت نام کاربری ---
 @router.message(InvitationCreation.awaiting_account_name)
-async def process_account_name(message: types.Message, state: FSMContext, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN:
-        await state.clear(); return
+async def process_invitation_account_name(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    prompt_message_id = data.get("prompt_message_id")
-    await message.delete()
-    if prompt_message_id:
-        await safe_delete_message(message.bot, message.chat.id, prompt_message_id)
-    await state.update_data(account_name=message.text)
-    await state.set_state(InvitationCreation.awaiting_mobile_number)
-    prompt_msg = await message.answer("عالی! حالا لطفاً شماره موبایل کاربر جدید را وارد کنید (مثال: 09123456789):", reply_markup=get_commodity_fsm_cancel_keyboard())
-    await state.update_data(prompt_message_id=prompt_msg.message_id)
-
-@router.message(InvitationCreation.awaiting_mobile_number)
-async def process_mobile_number(message: types.Message, state: FSMContext, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN:
-        await state.clear(); return
-
-    data = await state.get_data()
-    prompt_message_id = data.get("prompt_message_id")
-
-    await message.delete()
-    if prompt_message_id:
-        await safe_delete_message(message.bot, message.chat.id, prompt_message_id)
+    last_prompt_id = data.get("last_prompt_message_id")
     
-    normalized_mobile = normalize_mobile(message.text)
+    asyncio.create_task(delete_message_after_delay(message, 0)) # حذف فوری
+    if last_prompt_id:
+        try:
+            await message.bot.delete_message(message.chat.id, last_prompt_id)
+        except Exception:
+            pass
+
+    account_name_raw = message.text.strip()
     
-    if not re.match(MOBILE_REGEX, normalized_mobile):
-        prompt_msg = await message.answer(
-            f"❌ شماره موبایل **'{message.text}'** نامعتبر است.\n\n"
-            "لطفاً یک شماره ۱۱ رقمی صحیح (فارسی یا انگلیسی) که با 09 شروع می‌شود وارد کنید:",
+    if not re.match(r"^[a-zA-Z0-9_\u0600-\u06FF۰-۹٠-٩]{3,32}$", account_name_raw):
+        error_msg = await message.answer(
+            "❌ **نام کاربری نامعتبر است.**\n"
+            "لطفاً فقط از حروف و اعداد (فارسی یا انگلیسی) و آندرلاین استفاده کنید (حداقل ۳ کاراکتر).",
             reply_markup=get_commodity_fsm_cancel_keyboard(),
             parse_mode="Markdown"
         )
-        await state.set_state(InvitationCreation.awaiting_mobile_number)
-        await state.update_data(prompt_message_id=prompt_msg.message_id)
+        await state.update_data(last_prompt_message_id=error_msg.message_id)
         return
 
+    normalized_name = normalize_account_name(account_name_raw)
+    await state.update_data(account_name=normalized_name)
+    await state.set_state(InvitationCreation.awaiting_mobile_number)
+    
+    prompt_msg = await message.answer(
+        f"✅ نام کاربری `{normalized_name}` ثبت شد.\n"
+        "حالا **شماره موبایل** کاربر را وارد کنید (مثال: 09123456789):",
+        reply_markup=get_commodity_fsm_cancel_keyboard(),
+        parse_mode="Markdown"
+    )
+    await state.update_data(last_prompt_message_id=prompt_msg.message_id)
+
+# --- دریافت شماره موبایل ---
+@router.message(InvitationCreation.awaiting_mobile_number)
+async def process_invitation_mobile(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    last_prompt_id = data.get("last_prompt_message_id")
+    
+    asyncio.create_task(delete_message_after_delay(message, 0)) # حذف فوری
+    if last_prompt_id:
+        try:
+            await message.bot.delete_message(message.chat.id, last_prompt_id)
+        except Exception:
+            pass
+
+    mobile_number_raw = message.text.strip()
+    
+    if not re.match(r"^[0۰٠][9۹٩][0-9۰-۹٠-٩]{9}$", mobile_number_raw):
+        error_msg = await message.answer(
+            "❌ **شماره موبایل نامعتبر است.**\n"
+            "لطفاً شماره را با فرمت 09123456789 (فارسی یا انگلیسی) وارد کنید.",
+            reply_markup=get_commodity_fsm_cancel_keyboard(),
+            parse_mode="Markdown"
+        )
+        await state.update_data(last_prompt_message_id=error_msg.message_id)
+        return
+    
+    normalized_mobile = normalize_persian_numerals(mobile_number_raw)
     await state.update_data(mobile_number=normalized_mobile)
     await state.set_state(InvitationCreation.awaiting_role)
     
-    await message.answer("بسیار خب. حالا سطح دسترسی کاربر جدید را انتخاب کنید:", reply_markup=get_role_selection_keyboard())
+    prompt_msg = await message.answer(
+        f"✅ شماره موبایل `{normalized_mobile}` ثبت شد.\n"
+        "لطفاً **نقش (سطح دسترسی)** کاربر را انتخاب کنید:",
+        reply_markup=get_role_selection_keyboard(),
+        parse_mode="Markdown"
+    )
+    await state.update_data(last_prompt_message_id=prompt_msg.message_id)
 
-@router.callback_query(F.data.startswith("set_role_"), InvitationCreation.awaiting_role)
-async def process_role_and_create(callback_query: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+# --- دریافت نقش و ایجاد دعوت‌نامه ---
+@router.callback_query(InvitationCreation.awaiting_role)
+async def process_invitation_role(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
     if not user or user.role != UserRole.SUPER_ADMIN:
-        await state.clear(); return
-    
-    await callback_query.answer("در حال بررسی اطلاعات...")
-    
-    role_name = callback_query.data.split("_")[-1]
-    role = UserRole[role_name]
-    
-    user_data = await state.get_data()
-    account_name = user_data.get("account_name")
-    mobile_number = user_data.get("mobile_number")
+        await callback.answer("عدم دسترسی", show_alert=True)
+        return
 
-    api_url = "http://app:8000/api/invitations/"
-    payload = {"account_name": account_name, "mobile_number": mobile_number, "role": role.value}
-    headers = get_auth_headers()
+    data = await state.get_data()
+    last_prompt_id = data.get("last_prompt_message_id")
     
+    if last_prompt_id:
+        try:
+            await callback.message.edit_text("⏳ در حال ساخت لینک...")
+            await callback.message.delete()
+        except Exception:
+            pass
+
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(api_url, json=payload, timeout=30.0, headers=headers)
+        role_name = callback.data.split("set_role_")[1]
+        role = UserRole[role_name]
+    except (IndexError, KeyError):
+        await callback.answer("نقش انتخاب شده نامعتبر است.", show_alert=True)
+        return
 
-        if response.status_code == 201:
-            invitation_data = response.json()
-            token = invitation_data.get("token")
-            bot_username = (await callback_query.bot.get_me()).username
-            invitation_link = f"https://t.me/{bot_username}?start={token}"
-            
-            await callback_query.message.edit_text(
-                f"✅ دعوتنامه با موفقیت برای **{role.value}** ساخته شد!\n\n"
-                f"**نام کاربری:** `{account_name}`\n"
-                f"**شماره موبایل:** `{mobile_number}`\n\n"
-                f"لینک دعوت:\n`{invitation_link}`",
-                parse_mode="Markdown"
+    account_name = data.get("account_name")
+    mobile_number = data.get("mobile_number")
+
+    await state.clear()
+
+    if not account_name or not mobile_number:
+        error_msg = await callback.message.answer("خطایی رخ داد، اطلاعات ناقص است. لطفاً دوباره تلاش کنید.")
+        asyncio.create_task(delete_message_after_delay(error_msg, 30))
+        await _return_to_admin_panel(callback, state, bot)
+        return
+
+    invitation_data = InvitationCreate(
+        account_name=account_name,
+        mobile_number=mobile_number,
+        role=role
+    )
+
+    async with AsyncSessionLocal() as db:
+        try:
+            code = await create_invitation(
+                invitation=invitation_data,
+                current_user=user,
+                db=db,
+                background_tasks=BackgroundTasks()
             )
-        else:
-            try:
-                error_detail = response.json().get("detail", "خطای نامشخص")
-            except Exception:
-                error_detail = response.text
             
-            error_msg_text = f"❌ {error_detail}"
-            error_msg = await callback_query.message.answer(error_msg_text, parse_mode="Markdown")
-            await safe_delete_message(callback_query.bot, callback_query.message.chat.id, callback_query.message.message_id)
-            
-            await asyncio.sleep(30)
-            await safe_delete_message(callback_query.bot, error_msg.chat.id, error_msg.message_id)
+            bot_user = await bot.get_me()
+            bot_username = bot_user.username
+            invite_link = f"https://t.me/{bot_username}?start={code.token}" 
 
-    except httpx.RequestError as e:
-        error_msg = await callback_query.message.answer(f"❌ خطای ارتباط با سرور: {e}")
-        await safe_delete_message(callback_query.bot, callback_query.message.chat.id, callback_query.message.message_id)
-        await asyncio.sleep(30)
-        await safe_delete_message(callback_query.bot, error_msg.chat.id, error_msg.message_id)
+            await callback.message.answer(
+                f"✅ لینک دعوت با موفقیت برای نقش **{role.value}** ایجاد شد:\n\n"
+                f"**نام کاربری:** `{account_name}`\n"
+                f"**موبایل:** `{mobile_number}`\n\n"
+                f"لینک مستقیم:\n`{invite_link}`",
+                parse_mode="Markdown",
+                reply_markup=None 
+            )
+
+        except HTTPException as e:
+            if e.detail.startswith("EXISTING_ACTIVE_LINK::"):
+                try:
+                    _, acc_name, token = e.detail.split("::")
+                    bot_user = await bot.get_me()
+                    bot_username = bot_user.username
+                    invite_link = f"https://t.me/{bot_username}?start={token}"
+                    
+                    await callback.message.answer(
+                        f"⚠️ **لینک قبلی هنوز فعال است**\n\n"
+                        f"کاربر **{acc_name}** قبلاً دعوت شده اما هنوز ثبت‌نام نکرده است.\n"
+                        f"لینک دعوت فعال برای ایشان مجدداً ارسال می‌شود:\n\n"
+                        f"`{invite_link}`",
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    error_msg = await callback.message.answer(f"❌ خطای سیستمی: {str(e)}", parse_mode=None)
+                    asyncio.create_task(delete_message_after_delay(error_msg, 30))
+            
+            else:
+                error_msg = await callback.message.answer(
+                    f"❌ **خطا در ایجاد دعوت‌نامه:**\n\n{e.detail.replace('**', '')}",
+                    parse_mode="Markdown"
+                )
+                asyncio.create_task(delete_message_after_delay(error_msg, 30))
+            
+        except Exception as e:
+            error_msg = await callback.message.answer(
+                f"❌ خطای سیستمی: {str(e)}",
+                parse_mode=None
+            )
+            asyncio.create_task(delete_message_after_delay(error_msg, 30))
+            
+    await _return_to_admin_panel(callback, state, bot)
+    await callback.answer()
+
+# --- هندلر لغو عملیات ---
+@router.callback_query(F.data == "comm_fsm_cancel", StateFilter(InvitationCreation))
+async def cancel_invitation_creation(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    last_prompt_id = data.get("last_prompt_message_id")
+
+    await state.clear()
     
-    finally:
-        await state.clear()
+    if last_prompt_id:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+    cancel_msg = await callback.message.answer("عملیات لغو شد.")
+    asyncio.create_task(delete_message_after_delay(cancel_msg, 30))
+    
+    await _return_to_admin_panel(callback, state, bot)
+    await callback.answer("لغو شد")

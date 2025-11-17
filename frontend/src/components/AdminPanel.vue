@@ -13,6 +13,10 @@ defineEmits(['navigate']);
         <button class="management-button" @click="$emit('navigate', 'manage_commodities')">
           📦 مدیریت کالاها
         </button>
+
+        <button class="management-button" @click="$emit('navigate', 'manage_users')">
+          👥 مدیریت کاربران
+        </button>
         
         <button class="management-button" @click="$emit('navigate', 'settings')">
           ⚙️ تنظیمات مدیریت
