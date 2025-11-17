@@ -4,7 +4,7 @@ from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from api.routers import auth, invitations, commodities, users
+from api.routers import auth, invitations, commodities, users, notifications
 from core.config import settings
 import schemas
 
@@ -42,6 +42,7 @@ api_router.include_router(auth.router)
 api_router.include_router(invitations.router)
 api_router.include_router(commodities.router)
 api_router.include_router(users.router)
+api_router.include_router(notifications.router)
 
 # 3. اندپوینت config را به همین روتر اصلی اضافه می‌کنیم
 @api_router.get("/config", response_model=schemas.AppConfig)
