@@ -61,19 +61,25 @@ const toggleButtonText = computed(() => {
 <style scoped>
 /* === کانتینر اصلی فشرده‌تر شد === */
 .main-menu-container {
-  padding: 12px 12px 8px 12px; /* کاهش پدینگ */
+  /* پدینگ بالا و فاصله بین ردیف‌ها کمتر شد */
+  padding: 8px 12px; 
   background-color: var(--bg-color);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px; /* کاهش فاصله بین ردیف‌ها */
+  gap: 6px; /* کاهش فاصله بین ردیف دکمه‌ها */
+  
+  /* اضافه کردن یک خط جداکننده در بالا */
+  border-top: 1px solid var(--border-color);
+  /* (اختیاری) سایه برای برجستگی */
+  /* box-shadow: 0 -2px 10px rgba(0,0,0,0.04); */
 }
 
 /* --- استایل دکمه بزرگ معامله (فشرده‌تر) --- */
 .trade-button {
   width: 100%;
-  padding: 16px; /* کاهش پدینگ */
-  font-size: 18px; /* کاهش فونت */
+  padding: 14px; /* کاهش پدینگ */
+  font-size: 16px; /* کاهش فونت */
   font-weight: 700;
   background: linear-gradient(45deg, #007aff, #0056b3);
   color: white;
@@ -83,12 +89,12 @@ const toggleButtonText = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   box-shadow: 0 4px 14px rgba(0, 122, 255, 0.3);
   transition: all 0.2s ease-in-out;
 }
 .trade-button span {
-  font-size: 20px; /* کاهش فونت آیکون */
+  font-size: 18px; /* کاهش فونت آیکون */
 }
 .trade-button:hover {
   transform: translateY(-2px);
@@ -103,13 +109,13 @@ const toggleButtonText = computed(() => {
 .admin-layout {
   display: flex;
   flex-direction: column;
-  gap: 8px; /* کاهش فاصله */
+  gap: 6px; /* کاهش فاصله */
 }
 
 /* --- استایل ردیف پایین (مشترک) --- */
 .bottom-row {
   display: grid;
-  gap: 8px; /* کاهش فاصله */
+  gap: 6px; /* کاهش فاصله */
 }
 
 /* حالت عادی: دو ستون */
@@ -126,23 +132,24 @@ const toggleButtonText = computed(() => {
 .single-col {
   grid-template-columns: 1fr;
 }
+
 /* استایل دکمه سرتاسری (فشرده‌تر) */
 .single-col button {
-  padding: 12px 10px !important; /* کاهش پدینگ */
-  font-size: 14px !important; /* کاهش فونت */
+  padding: 10px !important; /* کاهش پدینگ */
+  font-size: 13px !important; /* کاهش فونت */
   flex-direction: row !important; 
   gap: 8px !important; 
 }
 .single-col button span {
-    font-size: 18px !important; /* کاهش فونت آیکون */
+    font-size: 16px !important; /* کاهش فونت آیکون */
     margin-bottom: 0 !important; 
 }
 
 
 /* --- استایل دکمه‌های کوچک (فشرده‌تر) --- */
 .bottom-row button {
-  padding: 10px 5px; /* کاهش پدینگ */
-  font-size: 12px;  /* کاهش فونت */
+  padding: 8px 5px; /* کاهش شدید پدینگ عمودی */
+  font-size: 11px;  /* کاهش فونت */
   font-weight: 500; 
   background-color: var(--card-bg);
   color: var(--text-color);
@@ -153,17 +160,17 @@ const toggleButtonText = computed(() => {
   flex-direction: column; 
   align-items: center;
   justify-content: center;
-  gap: 4px; 
+  gap: 2px; /* کاهش فاصله آیکون و متن */
   transition: all 0.2s ease-in-out;
   box-shadow: 0 1px 4px rgba(0,0,0,0.04);
-  min-height: 55px; /* کاهش ارتفاع حداقلی */
+  /* min-height: 55px; */ /* حذف ارتفاع حداقلی */
   text-align: center; 
   line-height: 1.3; 
 }
 
 .bottom-row button span {
-  font-size: 16px; /* کاهش فونت آیکون */
-  margin-bottom: 2px;
+  font-size: 14px; /* کاهش فونت آیکون */
+  margin-bottom: 0; /* حذف مارجین */
 }
 
 .bottom-row button:hover {
