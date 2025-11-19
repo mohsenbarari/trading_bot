@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from typing import List
 from pydantic import BaseModel
 from datetime import datetime
@@ -73,6 +73,25 @@ async def mark_notification_read(
         await db.commit()
     return None
 # ---------------------------------------
+@router.post("/mark-all-read", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_all_notifications_read(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    تمام پیام‌های خوانده نشده کاربر را به 'خوانده شده' تغییر می‌دهد.
+    """
+    stmt = update(Notification).where(
+        Notification.user_id == current_user.id,
+        Notification.is_read == False
+    ).values(
+        is_read = True
+    )
+    
+    await db.execute(stmt)
+    await db.commit()
+    return None
+
 
 @router.delete("/{notification_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_notification(
