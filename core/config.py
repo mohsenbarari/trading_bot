@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     postgres_user: str
     postgres_password: str
     frontend_url: str  
+    redis_url: str
 
     jwt_secret_key: str = "a_very_secret_key"
     jwt_algorithm: str = "HS256"

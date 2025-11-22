@@ -1,11 +1,16 @@
-# trading_bot/core/utils.py (کامل و اصلاح شده)
 import asyncio
 from aiogram import Bot
 from aiogram.types import Message
 from aiogram.exceptions import TelegramBadRequest
+from sqlalchemy.ext.asyncio import AsyncSession
+from models.notification import Notification
+from core.enums import NotificationLevel, NotificationCategory
 
 
-# نگاشت اعداد فارسی و عربی به انگلیسی
+import redis.asyncio as redis
+from core.redis import pool 
+
+# نگاشت اعداد فارسی
 PERSIAN_NUM_MAP = {
     '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
     '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
@@ -14,47 +19,56 @@ PERSIAN_NUM_MAP = {
 }
 
 def normalize_persian_numerals(text: str) -> str:
-    """اعداد فارسی/عربی در یک رشته را به انگلیسی تبدیل می‌کند."""
-    if not text:
-        return text
+    if not text: return text
     for p, e in PERSIAN_NUM_MAP.items():
         text = text.replace(p, e)
     return text
 
 def normalize_account_name(text: str) -> str:
-    """اعداد فارسی/عربی را به انگلیسی تبدیل کرده و حروف را کوچک می‌کند."""
-    if not text:
-        return text
+    if not text: return text
     normalized_text = normalize_persian_numerals(text)
     return normalized_text.lower()
 
-
-# --- تابع جدید برای حذف خودکار پیام ---
-async def send_deletable_message(
-    bot: Bot, 
-    chat_id: int, 
-    text: str, 
-    delay_seconds: int = 30, 
-    **kwargs
-):
-    """
-    یک پیام ارسال می‌کند و یک وظیفه (task) مستقل برای حذف آن
-    پس از X ثانیه ایجاد می‌کند.
-    """
+async def send_deletable_message(bot: Bot, chat_id: int, text: str, delay_seconds: int = 30, **kwargs):
     async def _delete_task(message: Message, delay: int):
-        """تسک حذف پیام پس از تاخیر"""
         await asyncio.sleep(delay)
         try:
             await message.delete()
         except TelegramBadRequest:
-            # اگر پیام در این فاصله به صورت دستی حذف شده بود
             pass
 
     try:
-        # ارسال پیام
         msg = await bot.send_message(chat_id, text, **kwargs)
-        # ایجاد تسک مستقل برای حذف آن
         asyncio.create_task(_delete_task(msg, delay_seconds))
     except TelegramBadRequest as e:
-        # اگر در ارسال پیام خطایی رخ داد (مثلا پارس کردن Markdown)
         print(f"Error sending deletable message: {e}")
+
+# --- 👇 تابع اصلی برای ایجاد نوتیفیکیشن و افزایش شمارنده ---
+async def create_user_notification(
+    db: AsyncSession, 
+    user_id: int, 
+    message: str,
+    level: NotificationLevel = NotificationLevel.INFO,    
+    category: NotificationCategory = NotificationCategory.SYSTEM 
+):
+    new_notif = Notification(
+        user_id=user_id, 
+        message=message, 
+        is_read=False,
+        level=level,      
+        category=category
+
+    )
+    db.add(new_notif)
+    await db.commit() # ذخیره قطعی برای گرفتن ID
+    
+    # 2. افزایش شمارنده در Redis
+    try:
+        # اتصال سریع به ردیس از طریق Pool
+        async with redis.Redis(connection_pool=pool) as redis_client:
+            count_key = f"user:{user_id}:unread_count"
+            await redis_client.incr(count_key)
+    except Exception as e:
+        print(f"⚠️ Redis Error (Increment Count): {e}")
+
+    return new_notif

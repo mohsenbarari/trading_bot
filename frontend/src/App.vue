@@ -15,30 +15,49 @@ interface Notification {
   message: string;
   is_read: boolean;
   created_at: string;
+  level?: string;
+  category?: string;
 }
 
 const user = ref<any>(null)
 const loadingMessage = ref('در حال اتصال...')
-const activeView = ref('trade') // منبع حقیقت واحد
+const activeView = ref('trade')
 const jwtToken = ref<string | null>(null)
 const API_BASE_URL = 'https://telegram.362514.ir'
 const tg = (window as any).Telegram?.WebApp
 
-// 'showTradePage' حالا یک متغیر محاسباتی است
 const showTradePage = computed(() => activeView.value === 'trade');
 const isLoading = computed(() => !user.value && loadingMessage.value)
 
 // --- نوتیفیکیشن ---
-const notificationMessage = ref<string | null>(null);
+const bannerTitle = ref<string>('');
+const bannerBody = ref<string>('');
+const notificationLevel = ref<string>('info');
+const notificationCategory = ref<string>('system');
+
+// نگهداری آبجکت کامل نوتیفیکیشنِ در حال نمایش (برای کلیک روی بنر)
+const currentBannerNotification = ref<Notification | null>(null);
+
+// نگهداری نوتیفیکیشنی که کاربر برای خواندن انتخاب کرده (مودال)
+const selectedNotification = ref<Notification | null>(null);
+
 const shownBannerIds = ref(new Set<number>());
-const unreadCount = ref(0); // تعداد خوانده نشده‌ها برای بج
+const unreadCount = ref(0);
+const bannerQueue = ref<Notification[]>([]);
+const isBannerActive = ref(false);
 let notificationInterval: any = null;
 
-// --- پاپ‌اور نوتیفیکیشن ---
-const isPopoverOpen = ref(false);
-const popoverNotifications = ref<any[]>([]); // لیست پیام‌های داخل پاپ‌اور
+// --- متغیرهای Swipe ---
+const bannerRef = ref<HTMLElement | null>(null);
+const startX = ref(0);
+const currentX = ref(0);
+const isSwiping = ref(false);
+const swipeThreshold = 100;
 
-// عنوان داینامیک صفحه
+// --- پاپ‌اور ---
+const isPopoverOpen = ref(false);
+const popoverNotifications = ref<any[]>([]);
+
 const computePageTitle = computed(() => {
   switch (activeView.value) {
     case 'trade': return 'معاملات';
@@ -53,93 +72,213 @@ const computePageTitle = computed(() => {
   }
 });
 
+function getIcon(level: string, category: string) {
+  if (category === 'system') return '🛡️';
+  if (level === 'success') return '✅';
+  if (level === 'warning') return '⚠️';
+  if (level === 'error') return '⛔';
+  return '📌';
+}
+
+function parseNotificationMessage(rawMessage: string) {
+  const cleanText = rawMessage.replace(/\*\*/g, '').replace(/`/g, '');
+  const lines = cleanText.split('\n').map(l => l.trim()).filter(l => l);
+  let title = lines[0] || 'پیام جدید';
+  let body = '';
+  if (lines.length > 1) {
+    const userLine = lines.find(l => l.includes('نام کاربری:'));
+    const secondLine = lines[1] || ''; 
+    body = userLine ? userLine : secondLine.substring(0, 40) + (secondLine.length > 40 ? '...' : '');
+  } else {
+    body = cleanText.substring(0, 50);
+  }
+  return { title, body };
+}
+
+// --- 👇 تابع باز کردن و خواندن پیام (بدون نویگیشن) 👇 ---
+async function openNotificationDetails(notif: Notification) {
+  // 1. باز کردن مودال
+  selectedNotification.value = notif;
+  isPopoverOpen.value = false; // بستن پاپ‌اور زنگوله
+  
+  // اگر بنر باز است، آن را ببندیم تا مزاحم مودال نباشد
+  if (isBannerActive.value) {
+      closeNotificationBanner();
+  }
+
+  // 2. اگر پیام خوانده نشده است، آن را خوانده شده کن
+  if (!notif.is_read) {
+    // آپدیت لوکال (برای سرعت UI)
+    notif.is_read = true;
+    if (unreadCount.value > 0) unreadCount.value--;
+    
+    // آپدیت سرور
+    try {
+      await fetch(`${API_BASE_URL}/api/notifications/${notif.id}/read`, {
+         method: 'PATCH',
+         headers: { Authorization: `Bearer ${jwtToken.value}` }
+      });
+    } catch (e) {
+      console.error("Failed to mark as read", e);
+    }
+  }
+}
+
+function closeNotificationModal() {
+  selectedNotification.value = null;
+}
+// -------------------------------------------------------
+
+const onTouchStart = (e: TouchEvent) => {
+  const firstTouch = e.touches[0];
+  if (firstTouch) {
+    startX.value = firstTouch.clientX;
+    isSwiping.value = true;
+  }
+};
+
+const onTouchMove = (e: TouchEvent) => {
+  if (!isSwiping.value) return;
+  const firstTouch = e.touches[0];
+  if (firstTouch) {
+    currentX.value = firstTouch.clientX - startX.value;
+  }
+};
+
+const onTouchEnd = () => {
+  if (!isSwiping.value) return;
+  isSwiping.value = false;
+  
+  if (Math.abs(currentX.value) > swipeThreshold) {
+    const endX = currentX.value > 0 ? window.innerWidth : -window.innerWidth;
+    if (bannerRef.value) {
+        bannerRef.value.style.transition = 'transform 0.3s ease-out';
+        bannerRef.value.style.transform = `translateX(${endX}px)`;
+    }
+    setTimeout(() => {
+      closeNotificationBanner();
+      setTimeout(() => {
+          if (bannerRef.value) {
+            bannerRef.value.style.transition = '';
+            bannerRef.value.style.transform = '';
+          }
+          currentX.value = 0;
+      }, 300);
+    }, 300);
+    
+  } else {
+    currentX.value = 0;
+  }
+};
+
+const bannerStyle = computed(() => {
+  if (isSwiping.value) {
+    return {
+      transform: `translateX(${currentX.value}px)`,
+      transition: 'none', 
+      opacity: `${1 - Math.abs(currentX.value) / (window.innerWidth * 0.8)}`
+    };
+  }
+  return {
+      transform: `translateX(${currentX.value}px)`,
+      transition: 'transform 0.3s cubic-bezier(0.25, 0.8, 0.5, 1), opacity 0.3s ease'
+  };
+});
+
+const enqueueBanners = (messages: Notification[]) => {
+  let added = false;
+  messages.sort((a, b) => a.id - b.id);
+  for (const msg of messages) {
+    const alreadyInQueue = bannerQueue.value.some(q => q.id === msg.id);
+    if (!alreadyInQueue) {
+      bannerQueue.value.push(msg);
+      shownBannerIds.value.add(msg.id);
+      added = true;
+    }
+  }
+  if (added) processQueue();
+};
+
+const processQueue = () => {
+  if (isBannerActive.value || bannerQueue.value.length === 0) return;
+  const nextMsg = bannerQueue.value.shift();
+  if (!nextMsg) return;
+  
+  // ذخیره برای استفاده در کلیک
+  currentBannerNotification.value = nextMsg;
+
+  currentX.value = 0;
+  if (bannerRef.value) {
+      bannerRef.value.style.transform = '';
+      bannerRef.value.style.transition = '';
+  }
+
+  isBannerActive.value = true;
+  const parsed = parseNotificationMessage(nextMsg.message);
+  bannerTitle.value = parsed.title;
+  bannerBody.value = parsed.body;
+  notificationLevel.value = (nextMsg.level || 'info').toLowerCase();
+  notificationCategory.value = (nextMsg.category || 'system').toLowerCase();
+  setTimeout(() => { closeNotificationBanner(); }, 5000);
+};
+
+function closeNotificationBanner() {
+  if (isSwiping.value && Math.abs(currentX.value) > swipeThreshold) return;
+
+  isBannerActive.value = false;
+  setTimeout(() => { processQueue(); }, 500); 
+}
+
 async function checkNotifications() {
   if (!jwtToken.value) return;
-  
   if (activeView.value === 'notifications') {
     unreadCount.value = 0;
     popoverNotifications.value = []; 
     return;
   }
-
   try {
-    const res = await fetch(`${API_BASE_URL}/api/notifications/unread`, {
-      headers: { Authorization: `Bearer ${jwtToken.value}` }
-    });
-    if (res.ok) {
-      const data = await res.json(); // مثلا: [notifB(101), notifA(100)]
-      unreadCount.value = data.length; 
-      popoverNotifications.value = data; 
-      
-      // --- 👇 منطق نمایش بنر را با این جایگزین کنید 👇 ---
-
-      // اگر بنری در حال حاضر فعال است، بنر جدیدی نشان نده (صبر کن تا محو شود)
-      if (notificationMessage.value !== null) {
-        return; 
+    const countRes = await fetch(`${API_BASE_URL}/api/notifications/unread-count`, { headers: { Authorization: `Bearer ${jwtToken.value}` } });
+    if (countRes.ok) {
+      const serverCount = await countRes.json();
+      if (serverCount !== unreadCount.value || (serverCount > 0 && popoverNotifications.value.length === 0)) {
+          unreadCount.value = serverCount;
+          const listRes = await fetch(`${API_BASE_URL}/api/notifications/unread`, { headers: { Authorization: `Bearer ${jwtToken.value}` } });
+          if (listRes.ok) {
+              const data: Notification[] = await listRes.json();
+              popoverNotifications.value = data; 
+              const newMessages = data.filter(n => !shownBannerIds.value.has(n.id));
+              if (newMessages.length > 0) enqueueBanners(newMessages);
+          }
       }
-
-      // پیدا کردن اولین پیام خوانده‌نشده که *هنوز در بنر نشان داده نشده*
-      const messageToShow = data.find((notif: Notification) => !shownBannerIds.value.has(notif.id));
-
-      if (messageToShow) {
-        // ما یک پیام جدید برای نمایش پیدا کردیم
-        notificationMessage.value = messageToShow.message.replace(/\*\*/g, '').replace(/`/g, '');
-        shownBannerIds.value.add(messageToShow.id); // این ID را به "نشان داده شده" اضافه کن
-        
-        setTimeout(() => { 
-          notificationMessage.value = null; 
-        }, 8000);
-      }
-      
-      // --- 👆 پایان بخش جایگزین 👆 ---
     }
-  } catch (e) {
-    console.error("Notification check failed", e);
-  }
+  } catch (e) { console.error("Notification check failed", e); }
 }
 
 function handleNavigation(view: string) {
-  isPopoverOpen.value = false; // در هر ناوبری (رفتن به صفحه جدید)، پاپ‌اور را ببند
+  isPopoverOpen.value = false; 
   activeView.value = view;
-  
-  // وقتی کاربر *واقعا* وارد صندوق پیام می‌شود، تعداد را صفر می‌کنیم
   if (view === 'notifications') {
     unreadCount.value = 0;
-    shownBannerIds.value.clear(); // بنر را هم ریست کن
-    // TODO: در onMounted کامپوننت NotificationCenter.vue یک درخواست "mark-all-read" به بک‌اند بزنید
+    shownBannerIds.value.clear(); 
+    bannerQueue.value = []; 
+    isBannerActive.value = false;
   }
 }
 
-// این فانکشن برای دکمه‌های منوی پایین (MainMenu) استفاده می‌شود
 function toggleTradePageView() {
-  // اگر در صفحه معامله هستیم، به پروفایل برو
   if (activeView.value === 'trade') {
     activeView.value = 'profile';
   } else {
-    // اگر در هر صفحه دیگری هستیم (پروفایل، تنظیمات، نوتیفیکیشن)، به معامله برگرد
     activeView.value = 'trade';
   }
 }
 
-// این فانکشن برای کامپوننت CreateInvitationView استفاده می‌شود
-function onInviteCreated(message: string) {
-  // TODO: می‌توانید اینجا یک بنر موقت (شبیه نوتیفیکیشن) برای ادمین نشان دهید
-  // notificationMessage.value = message;
-  // setTimeout(() => { notificationMessage.value = null; }, 5000);
-}
-
-// فانکشن برای باز/بسته کردن پاپ‌اور زنگوله
+function onInviteCreated(message: string) {}
 function togglePopover() {
   isPopoverOpen.value = !isPopoverOpen.value;
-  // اگر پاپ‌اور باز می‌شود، لیست را یکبار رفرش می‌کنیم
-  if (isPopoverOpen.value) {
-    checkNotifications();
-  }
+  if (isPopoverOpen.value) checkNotifications();
 }
-
-// فانکشن کمکی برای خلاصه‌سازی متن پیام در پاپ‌اور
 function truncateMessage(message: string, length = 50) {
-  // فرمت‌بندی را حذف می‌کند
   const cleanMessage = message.replace(/\*\*(.*?)\*\*/g, '$1').replace(/`/g, '').replace(/\n/g, ' ');
   if (cleanMessage.length <= length) return cleanMessage;
   return cleanMessage.substring(0, length) + '...';
@@ -147,13 +286,7 @@ function truncateMessage(message: string, length = 50) {
 
 onMounted(async () => {
   setTimeout(() => { document.body.style.backgroundColor = '#f0f2f5'; }, 100);
-  if (tg) { 
-    try { 
-      tg.setHeaderColor('#ffffff'); 
-      tg.setBackgroundColor('#f0f2f5');
-    } catch (e) { console.error("Telegram API error:", e); } 
-  }
-  
+  if (tg) { try { tg.setHeaderColor('#ffffff'); tg.setBackgroundColor('#f0f2f5'); } catch (e) { console.error("Telegram API error:", e); } }
   try {
     if (!tg || !tg.initData) throw new Error("لطفاً این برنامه را از طریق تلگرام باز کنید.");
     loadingMessage.value = 'در حال احراز هویت...';
@@ -166,13 +299,9 @@ onMounted(async () => {
     if (!userResp.ok) throw new Error("دریافت اطلاعات کاربر ناموفق بود.");
     user.value = await userResp.json();
     loadingMessage.value = '';
-    if (user.value?.role === 'WATCH') { 
-        activeView.value = 'profile'; 
-    }
-    
-    notificationInterval = setInterval(checkNotifications, 10000); // چک کردن دوره‌ای نوتیفیکیشن‌ها
-    checkNotifications(); // چک کردن در لحظه اول لود شدن
-    
+    if (user.value?.role === 'WATCH') activeView.value = 'profile'; 
+    notificationInterval = setInterval(checkNotifications, 3000); 
+    checkNotifications(); 
   } catch (e: any) { loadingMessage.value = `⚠️ ${e.message}`; }
 });
 
@@ -185,14 +314,52 @@ onUnmounted(() => {
   <div class="app-container">
     
     <transition name="fade">
-      <div v-if="notificationMessage" class="app-notification">
-        <div class="notif-content">
-          {{ notificationMessage }}
+      <div 
+        v-if="isBannerActive" 
+        ref="bannerRef"
+        class="app-notification" 
+        :class="[`type-${notificationLevel}`, `cat-${notificationCategory}`]"
+        :style="bannerStyle"
+        @touchstart="onTouchStart"
+        @touchmove="onTouchMove"
+        @touchend="onTouchEnd"
+      >
+        <button @click.stop="closeNotificationBanner" class="close-notif">×</button>
+
+        <div class="notif-content-wrapper" @click="currentBannerNotification && openNotificationDetails(currentBannerNotification)">
+          <div class="notif-icon-col">
+             <span class="icon">{{ getIcon(notificationLevel, notificationCategory) }}</span>
+          </div>
+          
+          <div class="notif-text-col">
+             <div v-if="notificationCategory === 'system'" class="banner-meta-row">
+                <span class="badge-system-banner">مدیریت</span>
+             </div>
+             <div class="banner-title-row">
+                <span class="banner-title">{{ bannerTitle }}</span>
+             </div>
+             <div class="notif-content">
+               {{ bannerBody }}
+             </div>
+          </div>
         </div>
-        <button @click="notificationMessage = null" class="close-notif">×</button>
       </div>
     </transition>
-    
+
+    <transition name="fade">
+      <div v-if="selectedNotification" class="details-modal-backdrop" @click="closeNotificationModal">
+        <div class="details-modal-card" @click.stop>
+          <div class="details-modal-header">
+            <span class="details-title">جزئیات پیام</span>
+            <button class="details-close-btn" @click="closeNotificationModal">×</button>
+          </div>
+          <div class="details-modal-body" v-html="selectedNotification.message.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')"></div>
+          <div class="details-modal-footer">
+             <span class="details-date">{{ new Date(selectedNotification.created_at).toLocaleDateString('fa-IR') + ' ' + new Date(selectedNotification.created_at).toLocaleTimeString('fa-IR', {hour:'2-digit', minute:'2-digit'}) }}</span>
+          </div>
+        </div>
+      </div>
+    </transition>
     <header class="app-header" v-if="user">
       <div class="header-content">
         
@@ -225,7 +392,8 @@ onUnmounted(() => {
               v-for="notif in popoverNotifications.slice(0, 5)" 
               :key="notif.id" 
               class="popover-item"
-              @click="handleNavigation('notifications')"
+              :class="{ 'unread-item': !notif.is_read }"
+              @click="openNotificationDetails(notif)" 
             >
               <span class="popover-item-text">{{ truncateMessage(notif.message) }}</span>
               <span class="popover-item-date">{{ new Date(notif.created_at).toLocaleTimeString('fa-IR', {hour: '2-digit', minute:'2-digit'}) }}</span>
@@ -332,255 +500,323 @@ body {
   overscroll-behavior-y: none; 
   -webkit-font-smoothing: antialiased; 
   -moz-osx-font-smoothing: grayscale; 
-  direction: rtl; /* تنظیم جهت کل برنامه به راست-به-چپ */
+  direction: rtl;
 }
 
 .app-container { 
   display: flex; 
   flex-direction: column; 
   min-height: 100dvh; 
-  position: relative; /* برای موقعیت‌دهی پاپ‌اور */
+  position: relative; 
 }
 .main-content { 
   flex-grow: 1; 
   padding: 16px; 
   position: relative; 
-  /* پدینگ بالا برای هدر ثابت در نظر گرفته می‌شود */
-  /* (ارتفاع هدر حدود 57 پیکسل است) */
-  padding-top: 73px; /* 57 + 16 */
-  padding-bottom: 100px; /* فضای کافی برای منوی پایین */
+  padding-top: 73px; 
+  padding-bottom: 100px; 
 }
 
 .loading-container { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; color: var(--text-secondary); padding-top: 73px; } 
 .spinner { width: 40px; height: 40px; border: 4px solid rgba(0, 0, 0, 0.1); border-left-color: var(--primary-color); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px; } 
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* بنر نوتیفیکیشن موقت */
+/* --- استایل‌های بنر --- */
 .app-notification {
   position: fixed;
   top: 16px;
   left: 16px;
   right: 16px;
-  background-color: #333;
-  color: white;
-  padding: 14px 16px;
-  border-radius: 12px;
-  z-index: 9999;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  background-color: rgba(255, 255, 255, 0.75) !important; 
+  backdrop-filter: blur(20px) saturate(180%); 
+  -webkit-backdrop-filter: blur(20px) saturate(180%); 
+  padding: 12px;
+  border-radius: 14px; 
+  z-index: 10000;
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.5;
   direction: rtl;
-  border: 1px solid #444;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-right-width: 5px;
+  border-right-style: solid; 
+  display: flex;
+  flex-direction: column;
+  user-select: none; 
 }
-.notif-content {
-  flex-grow: 1;
-  white-space: pre-line;
+
+.app-notification.type-success { border-right-color: #34c759; }
+.app-notification.type-warning { border-right-color: #ffcc00; }
+.app-notification.type-error   { border-right-color: #ff3b30; }
+.app-notification.type-info    { border-right-color: #007aff; }
+
+.notif-content-wrapper {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding-left: 24px; 
+  cursor: pointer; /* نشان دادن قابل کلیک بودن */
 }
-.close-notif {
-  background: none;
-  border: none;
-  color: #bbb;
+
+.notif-icon-col {
   font-size: 24px;
   line-height: 1;
-  margin-right: 12px; /* تغییر به راست */
-  margin-left: 0; /* حذف مارجین چپ */
-  cursor: pointer;
-  padding: 0;
+  padding-top: 2px;
 }
+
+.notif-text-col {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px; 
+}
+
+.banner-meta-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.banner-title-row {
+  display: flex;
+  align-items: center;
+}
+
+.banner-title {
+    font-weight: 800;
+    font-size: 13.5px;
+    color: var(--text-color);
+}
+
+.notif-content {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  white-space: pre-line;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.badge-system-banner {
+  background-color: #333;
+  color: #fff;
+  font-size: 9px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-weight: bold;
+  line-height: 1;
+  opacity: 0.8; 
+}
+
+.close-notif {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  width: 24px !important;
+  height: 24px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  color: #999;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.6;
+  border-radius: 50%;
+  transition: all 0.2s;
+  z-index: 10;
+}
+.close-notif:hover {
+  opacity: 1;
+  background-color: rgba(0,0,0,0.05) !important;
+  color: #ff3b30;
+}
+.close-notif:active {
+  transform: scale(0.9);
+}
+
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transition: opacity 0.4s cubic-bezier(0.25, 0.8, 0.5, 1), transform 0.4s cubic-bezier(0.25, 0.8, 0.5, 1);
 }
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
-  transform: translateY(-20px) scale(0.95);
+  transform: translateY(-30px) scale(0.9); 
 }
 
-/* هدر ثابت */
-.app-header {
-  position: fixed; /* ثابت در بالای صفحه */
-  top: 0;
-  left: 0;
-  right: 0;
-  background-color: var(--card-bg, #ffffff);
-  border-bottom: 1px solid var(--border-color, #e5e5e5);
-  padding: 5px 16px;
-  z-index: 10; /* پایین‌تر از پاپ‌اور و نوتیفیکیشن */
-  /* padding-top: calc(12px + env(safe-area-inset-top)); */ /* برای آیفون X */
+/* --- استایل‌های مودال جزئیات (جدید) --- */
+.details-modal-backdrop {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  z-index: 11000; /* بالاتر از همه چیز */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  padding: 20px;
 }
 
-.header-content {
+.details-modal-card {
+  background-color: #fff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  animation: slideUp 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.details-modal-header {
+  padding: 16px;
+  border-bottom: 1px solid #eee;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  min-height: 32px; 
+}
+
+.details-title {
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.details-close-btn {
+  background: #f5f5f5;
+  border: none;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  font-size: 18px;
+  color: #666;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.details-modal-body {
+  padding: 20px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #333;
+  overflow-y: auto;
+}
+
+.details-modal-footer {
+  padding: 12px 16px;
+  background-color: #fafafa;
+  border-top: 1px solid #eee;
+  text-align: left;
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
+}
+
+.details-date {
+  font-size: 12px;
+  color: #999;
+}
+
+/* --- پاپ‌اور و هدر --- */
+.app-header {
+  position: fixed; top: 0; left: 0; right: 0;
+  background-color: var(--card-bg, #ffffff);
+  border-bottom: 1px solid var(--border-color, #e5e5e5);
+  padding: 5px 16px;
+  z-index: 10; 
+}
+
+.header-content {
+  display: flex; justify-content: space-between; align-items: center; min-height: 32px; 
 }
 
 .header-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-color);
-  text-align: right; /* اطمینان از تراز راست */
+  font-size: 18px; font-weight: 700; color: var(--text-color); text-align: right; 
 }
 
-/* دکمه زنگوله */
 .notification-bell-btn {
-  position: relative;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 22px; 
-  padding: 0; 
-  width: 32px; 
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-  transition: all 0.2s;
-  line-height: 1; 
-  border-radius: 50%; 
+  position: relative; background: none; border: none; cursor: pointer; font-size: 22px; 
+  padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary); transition: all 0.2s; line-height: 1; border-radius: 50%; 
 }
 .notification-bell-btn:hover {
-  background-color: #f0f0f0; 
-  color: var(--text-color);
+  background-color: #f0f0f0; color: var(--text-color);
 }
 
-/* بج عددی روی زنگوله */
 .notification-badge {
-  position: absolute;
-  top: 0;
-  right: 0;
-  background-color: #f44336; 
-  color: white;
-  border-radius: 50%;
-  width: 18px;
-  height: 18px;
-  font-size: 11px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-  border: 2px solid var(--card-bg, #ffffff); 
-  transform: translate(15%, -15%);
+  position: absolute; top: 0; right: 0; background-color: #f44336; color: white;
+  border-radius: 50%; width: 18px; height: 18px; font-size: 11px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+  border: 2px solid var(--card-bg, #ffffff); transform: translate(15%, -15%);
 }
 
-/* استایل‌های پاپ‌اور */
 .popover-backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.1);
-  z-index: 100;
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.1); z-index: 100;
   backdrop-filter: blur(2px);
 }
 
 .notification-popover {
-  position: absolute;
-  /* (57px ارتفاع هدر) + 8px فاصله = 65px */
-  top: 65px; 
-  left: 16px; 
-  width: 320px; 
-  max-width: calc(100% - 32px); 
-  background: var(--card-bg, #ffffff);
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-  z-index: 101; 
-  display: flex;
-  flex-direction: column;
-  overflow: hidden; 
+  position: absolute; top: 65px; left: 16px; width: 320px; max-width: calc(100% - 32px);
+  background: var(--card-bg, #ffffff); border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15); z-index: 101; 
+  display: flex; flex-direction: column; overflow: hidden; 
 }
 
 .popover-header {
-  padding: 12px 16px;
-  font-weight: 700;
-  font-size: 16px;
-  border-bottom: 1px solid var(--border-color, #e5e5e5);
-  text-align: right;
+  padding: 12px 16px; font-weight: 700; font-size: 16px;
+  border-bottom: 1px solid var(--border-color, #e5e5e5); text-align: right;
 }
 
 .popover-list {
-  max-height: 300px; 
-  overflow-y: auto;
+  max-height: 300px; overflow-y: auto;
 }
 
 .popover-empty, .popover-loading {
-  padding: 24px;
-  text-align: center;
-  color: var(--text-secondary);
+  padding: 24px; text-align: center; color: var(--text-secondary);
 }
 
 .popover-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid #f0f0f0;
-  cursor: pointer;
-  transition: background-color 0.15s;
-  text-align: right;
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; padding: 12px 16px; border-bottom: 1px solid #f0f0f0;
+  cursor: pointer; transition: background-color 0.15s; text-align: right;
 }
-.popover-item:hover {
-  background-color: #f9f9f9;
-}
-.popover-item:last-child {
-  border-bottom: none;
+.popover-item:hover { background-color: #f9f9f9; }
+.popover-item:last-child { border-bottom: none; }
+
+.unread-item {
+    background-color: #f0f9ff;
+    font-weight: 500;
 }
 
 .popover-item-text {
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--text-color);
-  flex-grow: 1;
+  font-size: 14px; line-height: 1.5; color: var(--text-color); flex-grow: 1;
 }
 
 .popover-item-date {
-  font-size: 12px;
-  color: var(--text-secondary);
-  flex-shrink: 0; 
-  direction: ltr; /* برای نمایش صحیح ساعت */
-  text-align: left;
+  font-size: 12px; color: var(--text-secondary); flex-shrink: 0; 
+  direction: ltr; text-align: left;
 }
 
 .popover-footer {
-  padding: 8px;
-  background-color: #f9f9f9;
-  border-top: 1px solid var(--border-color, #e5e5e5);
+  padding: 8px; background-color: #f9f9f9; border-top: 1px solid var(--border-color, #e5e5e5);
 }
 .popover-footer button {
-  width: 100%;
-  padding: 10px;
-  border: none;
-  background: transparent;
-  color: var(--primary-color, #007AFF);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  border-radius: 8px;
-  transition: background-color 0.15s;
-  font-family: 'Vazirmatn', sans-serif; /* اطمینان از فونت */
+  width: 100%; padding: 10px; border: none; background: transparent;
+  color: var(--primary-color, #007AFF); font-size: 14px; font-weight: 600;
+  cursor: pointer; border-radius: 8px; transition: background-color 0.15s;
+  font-family: 'Vazirmatn', sans-serif; 
 }
-.popover-footer button:hover {
-  background-color: #eef;
-}
-
-/* انیمیشن پاپ‌اور */
-.popover-fade-enter-active,
-.popover-fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-.popover-fade-enter-from,
-.popover-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-10px) scale(0.95);
-}
-
+.popover-footer button:hover { background-color: #eef; }
 </style>

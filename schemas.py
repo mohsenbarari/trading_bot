@@ -1,10 +1,10 @@
 # trading_bot/schemas.py (کامل و اصلاح شده)
 
 from pydantic import BaseModel, Field, field_validator
-from core.enums import UserRole
 from typing import List, Optional
 from datetime import datetime
-from core.utils import normalize_persian_numerals # <--- ۱. ایمپورت تابع کمکی
+from core.utils import normalize_persian_numerals
+from core.enums import UserRole, NotificationLevel, NotificationCategory
 
 # --- Token Schemas ---
 class Token(BaseModel):
@@ -15,6 +15,7 @@ class TokenData(BaseModel):
     telegram_id: int | None = None
     session_key: str | None = None
     role: UserRole | None = None
+    source: str | None = None
 
 # --- WebApp Schemas ---
 class WebAppInitData(BaseModel):
@@ -90,6 +91,8 @@ class NotificationRead(BaseModel):
     message: str
     is_read: bool
     created_at: datetime
+    level: NotificationLevel     
+    category: NotificationCategory
 
     class Config:
         from_attributes = True

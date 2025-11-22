@@ -1,4 +1,4 @@
-# trading_bot/api/routers/notifications.py (کامل و اصلاح شده)
+# trading_bot/api/routers/notifications.py
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,8 @@ from core.db import get_db
 from models.notification import Notification
 from models.user import User
 from .auth import get_current_user
+from core.redis import get_redis, Redis 
+from core.enums import NotificationLevel, NotificationCategory
 
 router = APIRouter(
     prefix="/notifications",
@@ -23,6 +25,24 @@ class NotificationRead(BaseModel):
     message: str
     is_read: bool
     created_at: datetime
+    # 👇 این دو خط حیاتی هستند تا فرانت‌اند بتواند استایل را اعمال کند
+    level: NotificationLevel 
+    category: NotificationCategory
+
+    class Config:
+        from_attributes = True 
+
+@router.get("/unread-count", response_model=int)
+async def get_unread_count(
+    current_user: User = Depends(get_current_user),
+    redis: Redis = Depends(get_redis)
+):
+    """
+    تعداد پیام‌های خوانده نشده را مستقیماً از Redis می‌خواند.
+    """
+    count_key = f"user:{current_user.id}:unread_count"
+    count = await redis.get(count_key)
+    return int(count or 0)
 
 @router.get("/unread", response_model=List[NotificationRead])
 async def get_unread_notifications(
@@ -54,11 +74,13 @@ async def get_all_notifications(
     return notifications
 
 # --- اندپوینت جدید برای رفع مشکل تکرار ---
+
 @router.patch("/{notification_id}/read", status_code=status.HTTP_204_NO_CONTENT)
 async def mark_notification_read(
     notification_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis) # ✅ اصلاح شد: aioredis.Redis -> Redis
 ):
     """یک پیام خاص را به عنوان خوانده شده علامت می‌زند."""
     stmt = select(Notification).where(
@@ -71,25 +93,41 @@ async def mark_notification_read(
     if notification and not notification.is_read:
         notification.is_read = True
         await db.commit()
+        
+        # کاهش شمارنده در Redis
+        count_key = f"user:{current_user.id}:unread_count"
+        await redis.decr(count_key)
+        
+        # اطمینان از منفی نشدن
+        current_count = await redis.get(count_key)
+        if current_count and int(current_count) < 0:
+            await redis.set(count_key, 0)
+
     return None
-# ---------------------------------------
+
 @router.post("/mark-all-read", status_code=status.HTTP_204_NO_CONTENT)
 async def mark_all_notifications_read(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis)
 ):
     """
-    تمام پیام‌های خوانده نشده کاربر را به 'خوانده شده' تغییر می‌دهد.
+    تمام پیام‌ها را در دیتابیس خوانده شده ثبت می‌کند و شمارنده Redis را صفر می‌کند.
     """
+    # ۱. آپدیت دیتابیس
     stmt = update(Notification).where(
         Notification.user_id == current_user.id,
         Notification.is_read == False
     ).values(
         is_read = True
     )
-    
     await db.execute(stmt)
     await db.commit()
+    
+    # ۲. ریست کردن شمارنده در Redis
+    count_key = f"user:{current_user.id}:unread_count"
+    await redis.set(count_key, 0)
+    
     return None
 
 

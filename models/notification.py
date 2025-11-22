@@ -1,8 +1,9 @@
 # trading_bot/models/notification.py (فایل جدید)
 
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Enum
 from sqlalchemy.sql import func
 from .database import Base
+from core.enums import NotificationLevel, NotificationCategory
 
 class Notification(Base):
     __tablename__ = "notifications"
@@ -12,3 +13,5 @@ class Notification(Base):
     message = Column(String, nullable=False)
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    level = Column(Enum(NotificationLevel), default=NotificationLevel.INFO, nullable=False)
+    category = Column(Enum(NotificationCategory), default=NotificationCategory.SYSTEM, nullable=False)

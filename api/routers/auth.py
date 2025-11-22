@@ -184,5 +184,21 @@ async def webapp_login(init_data_obj: schemas.WebAppInitData, db: AsyncSession =
         raise HTTPException(status_code=403, detail="Access denied")
 
     # تبدیل telegram_id به رشته برای ذخیره در توکن
-    access_token = create_access_token(data={"sub": str(user.telegram_id), "role": user.role.value})
+    access_token = create_access_token(
+        data={
+            "sub": str(user.telegram_id), 
+            "role": user.role.value,
+            "source": "miniapp"
+        }
+    )
     return {"access_token": access_token, "token_type": "bearer"}
+
+async def get_request_source(token: str = Depends(oauth2_scheme)) -> str:
+    """
+    منبع درخواست (مثلاً miniapp) را از توکن استخراج می‌کند.
+    """
+    try:
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        return payload.get("source", "unknown")
+    except JWTError:
+        return "unknown"

@@ -18,6 +18,8 @@ services:
     depends_on:
       migration:
         condition: service_completed_successfully
+      redis:  
+        condition: service_started
     networks:
       - trading_net
 
@@ -81,6 +83,14 @@ services:
         - trading_net
       depends_on:
         - db
+  redis: 
+    image: redis:7-alpine
+    container_name: trading_bot_redis
+    volumes:
+      - redis_data:/data
+    restart: always
+    networks:
+      - trading_net
 
 networks:
   trading_net:
@@ -88,3 +98,4 @@ networks:
 
 volumes:
   postgres_data:
+  redis_data:

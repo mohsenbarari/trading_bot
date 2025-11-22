@@ -13,6 +13,8 @@ interface Notification {
   message: string;
   is_read: boolean;
   created_at: string;
+  level: 'info' | 'success' | 'warning' | 'error';
+  category: 'system' | 'user' | 'trade';
 }
 
 const notifications = ref<Notification[]>([]);
@@ -49,7 +51,6 @@ async function markAllAsRead() {
 }
 
 async function deleteNotification(id: number) {
-  // حذف خوش‌بینانه (Optimistic UI Update)
   const originalList = [...notifications.value];
   notifications.value = notifications.value.filter(n => n.id !== id);
 
@@ -60,7 +61,6 @@ async function deleteNotification(id: number) {
     });
     if (!response.ok) throw new Error();
   } catch (e) {
-    // اگر خطا داد، برگردان
     notifications.value = originalList;
     alert("خطا در حذف پیام");
   }
@@ -72,165 +72,226 @@ function formatDate(dateString: string) {
 }
 
 onMounted(async () => {
-  // ۱. اول لیست پیام‌ها را بگیر و به کاربر نشان بده
   await fetchNotifications();
-  
-  // ۲. حالا که کاربر آن‌ها را دیده، در پس‌زمینه به بک‌اند بگو خوانده شدند
   await markAllAsRead();
 });
+
+function getIcon(level: string, category: string) {
+  if (category === 'system') return '🛡️';
+  if (level === 'success') return '✅';
+  if (level === 'warning') return '⚠️';
+  if (level === 'error') return '⛔';
+  return '📌';
+}
 </script>
 
 <template>
   <div class="notif-center-container">
     <div class="card">
-      
-      <div class="header-row">
-        <button class="back-button" @click="$emit('navigate', 'profile')">
-          <span>🔙</span>
-          بازگشت
-        </button>
-      </div>
-      
-      <div v-if="isLoading" class="loading">در حال دریافت...</div>
-      <div v-else-if="notifications.length === 0" class="no-data">پیامی ندارید.</div>
-      
-      <div v-else class="notif-list">
-        <div v-for="notif in notifications" :key="notif.id" class="notif-item" :class="{ unread: !notif.is_read }">
-          
-          <button class="delete-btn" @click="deleteNotification(notif.id)">❌</button>
-
-          <div class="notif-header">
-            <span class="date">{{ formatDate(notif.created_at) }}</span>
-          </div>
-          <div class="notif-body" v-html="notif.message.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')"></div>
+       
+       <div class="header-row">
+         <span class="page-title">صندوق پیام‌ها</span>
+         
+         <button class="back-button" @click="$emit('navigate', 'profile')">
+           🔙
+         </button>
+       </div>
+       
+       <div v-if="isLoading" class="loading">در حال دریافت...</div>
+       <div v-else-if="notifications.length === 0" class="no-data">پیامی ندارید.</div>
+       
+       <div v-else class="notif-list">
+        <div 
+          v-for="notif in notifications" 
+          :key="notif.id" 
+          class="notif-item" 
+          :class="[`type-${notif.level}`, `cat-${notif.category}`, { unread: !notif.is_read }]"
+        >
+           
+           <button class="delete-btn" @click="deleteNotification(notif.id)">❌</button>
+ 
+           <div class="notif-content-wrapper">
+             <div class="notif-icon-col">
+               <span class="icon">{{ getIcon(notif.level, notif.category) }}</span>
+             </div>
+             <div class="notif-text-col">
+                <div class="notif-header">
+                   <span v-if="notif.category === 'system'" class="badge-system">مدیریت</span>
+                   <span class="date">{{ formatDate(notif.created_at) }}</span>
+                </div>
+                <div class="notif-body" v-html="notif.message.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')"></div>
+             </div>
+           </div>
+ 
         </div>
       </div>
     </div>
   </div>
-</template>
-
-<style scoped>
-.notif-center-container { 
+ </template>
+ 
+ <style scoped>
+ .notif-center-container { 
   display: flex; 
   flex-direction: column; 
   gap: 16px; 
-}
-.card { 
+ }
+ .card { 
   background-color: var(--card-bg); 
   border-radius: 12px; 
   padding: 16px; 
   box-shadow: 0 4px 12px rgba(0,0,0,0.08); 
-  /* درخواست ۲ (هدر ثابت): 
-    اگر می‌خواهید هدر ثابت باشد و کارت اسکرول بخورد، 
-    باید به 'card' یک 'max-height' بدهید و 'overflow-y: auto'
-    و هدر را 'position: sticky; top: 0; background: white; z-index: 1;' کنید.
-  */
-}
-
-/* --- درخواست ۱: اصلاح هدر --- */
-.header-row { 
+ }
+ 
+ /* --- هدر اصلاح شده --- */
+ .header-row { 
   display: flex; 
-  justify-content: flex-end; /* دکمه بازگشت را به راست می‌برد (چون h2 حذف شد) */
+  justify-content: space-between; /* فاصله بین عنوان و دکمه */
   align-items: center; 
   margin-bottom: 16px; 
   padding-bottom: 10px;
   border-bottom: 1px solid var(--border-color);
-}
-.back-button { 
+ }
+
+ .page-title {
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--text-color);
+ }
+
+ /* دکمه بازگشت کوچک */
+ .back-button { 
   background: transparent; 
   border: none; 
-  font-size: 15px; /* اندازه فونت متن */
-  font-weight: 600;
-  color: var(--primary-color);
+  font-size: 20px; /* اندازه آیکون */
   cursor: pointer; 
+  padding: 4px;    /* پدینگ کم */
+  border-radius: 50%; /* گرد */
+  transition: background-color 0.2s;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 8px;
-  transition: background-color 0.2s;
-}
-.back-button span {
-  font-size: 18px; /* اندازه آیکون */
-}
-.back-button:hover {
+  justify-content: center;
+  width: 32px;     /* عرض ثابت کوچک */
+  height: 32px;    /* ارتفاع ثابت کوچک */
+ }
+ .back-button:hover {
   background-color: #f0f5ff;
-}
-
-.loading, .no-data { 
+ }
+ 
+ .loading, .no-data { 
   text-align: center; 
   padding: 20px; 
   color: var(--text-secondary); 
-}
-.notif-list { 
+ }
+ .notif-list { 
   display: flex; 
   flex-direction: column; 
   gap: 12px; 
-}
-
-/* --- درخواست ۳: فشرده‌سازی کادر پیام --- */
-.notif-item { 
-  background-color: #f9fafb; 
+ }
+ 
+ /* --- کادر پیام --- */
+ .notif-item { 
+  background-color: #ffffff; 
   border: 1px solid var(--border-color); 
-  border-radius: 10px; 
-  padding: 10px 12px; /* پدینگ عمودی و افقی کمتر شد */
-  position: relative; /* برای دکمه حذف */
+  border-radius: 12px; 
+  padding: 12px; 
+  position: relative; 
   transition: all 0.2s;
-  padding-left: 36px; /* فضای خالی برای دکمه حذف در سمت چپ */
-}
-.notif-item.unread { 
-  background-color: #f0f9ff; 
-  border-color: #bae6fd; 
+  display: flex;
+  flex-direction: column;
+  
+  /* نوار رنگی سمت راست */
   border-right: 4px solid #007aff; 
-}
-
-/* --- درخواست ۴: دکمه حذف (ضربدر) --- */
-.delete-btn {
+ }
+ 
+ /* --- دکمه حذف (اصلاح شده) --- */
+ .delete-btn {
   position: absolute;
-  top: 8px;  /* فاصله از بالا */
-  left: 8px; /* انتقال به منتهی‌الیه چپ */
+  top: 6px; 
+  left: 6px; 
   
-  background: transparent;
-  border: none;
-  cursor: pointer;
+  background-color: transparent !important; 
+  border: none !important;
+  box-shadow: none !important;
+  width: 24px !important;
+  height: 24px !important;
+  padding: 0 !important;
+  min-width: auto !important;
   
-  font-size: 14px; /* اندازه خود آیکون ❌ */
-  padding: 0;      /* حذف پدینگ برای فیت شدن کادر */
-  
-  /* یک کادر مربعی برای کلیک راحت‌تر */
-  width: 26px; 
-  height: 26px;
-  
-  /* وسط‌چینی آیکون در کادر */
+  font-size: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
   
-  opacity: 0.5;
-  border-radius: 50%; /* گرد کردن کادر */
+  color: #999; 
+  opacity: 0.7;
+  border-radius: 50%; 
+  cursor: pointer;
   transition: all 0.2s;
-}
-.delete-btn:hover { 
+  z-index: 5; 
+ }
+ 
+ .delete-btn:hover { 
   opacity: 1; 
+  color: #ff3b30; 
+  background-color: #f0f0f0 !important; 
   transform: scale(1.1);
-  background-color: #f0f0f0; /* نمایش محدوده کلیک در هاور */
-}
-
-/* --- اصلاحات جانبی برای درخواست ۴ --- */
-.notif-header { 
+ }
+ 
+ /* --- استایل‌های رنگی بر اساس Level --- */
+ .notif-item.type-success { border-right-color: #34c759; background-color: #f2fcf5; }
+ .notif-item.type-warning { border-right-color: #ffcc00; background-color: #fffdf2; }
+ .notif-item.type-error   { border-right-color: #ff3b30; background-color: #fff2f2; }
+ .notif-item.type-info    { border-right-color: #007aff; background-color: #f0f9ff; }
+ 
+ .notif-item.cat-system {
+  background-color: #f8f9fa; 
+  border-style: dashed; 
+ }
+ 
+ /* لی‌اوت داخلی */
+ .notif-content-wrapper {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding-left: 20px; 
+ }
+ 
+ .notif-icon-col {
+  font-size: 24px;
+  line-height: 1;
+  padding-top: 4px;
+ }
+ 
+ .notif-text-col {
+  flex-grow: 1;
+ }
+ 
+ .notif-header { 
   display: flex; 
-  justify-content: flex-end; /* دکمه حذف از جریان خارج شد، تاریخ به راست می‌رود */
+  justify-content: space-between; 
   align-items: center; 
-  margin-bottom: 6px; /* فاصله کمتر */
-}
-.date { 
-  font-size: 12px; 
-  color: var(--text-secondary); 
-}
-.notif-body { 
-  font-size: 13px; /* فونت کمی کوچک‌تر */
-  line-height: 1.5; /* فاصله خطوط فشرده‌تر */
+  margin-bottom: 4px; 
+ }
+ 
+ .badge-system {
+  background-color: #333;
+  color: #fff;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: bold;
+ }
+ 
+ .date { font-size: 11px; color: var(--text-secondary); }
+ 
+ .notif-body { 
+  font-size: 13px; 
+  line-height: 1.6; 
   color: var(--text-color); 
-  word-wrap: break-word; 
-}
-</style>
+ }
+ 
+ .notif-item.unread { 
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  font-weight: 500;
+ }
+ </style>
