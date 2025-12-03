@@ -20,6 +20,8 @@ interface User {
 const users = ref<User[]>([]);
 const isLoading = ref(false);
 const errorMessage = ref('');
+const searchQuery = ref('');
+const showSearch = ref(false);
 
 const API_HEADERS = computed(() => ({
   'Content-Type': 'application/json',
@@ -30,7 +32,12 @@ async function fetchUsers() {
   isLoading.value = true;
   errorMessage.value = '';
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/users/`, {
+    let url = `${props.apiBaseUrl}/api/users/`;
+    if (searchQuery.value.trim()) {
+      url += `?search=${encodeURIComponent(searchQuery.value.trim())}`;
+    }
+    
+    const response = await fetch(url, {
       headers: API_HEADERS.value
     });
     if (!response.ok) throw new Error('خطا در دریافت لیست کاربران');
@@ -42,9 +49,16 @@ async function fetchUsers() {
   }
 }
 
-function onSearchClick() {
-    // فعلاً فقط یک آلرت نمایش می‌دهیم تا در مرحله بعد توسعه دهیم
-    alert("بخش جستجو در مرحله بعد توسعه داده خواهد شد.");
+function toggleSearch() {
+  showSearch.value = !showSearch.value;
+  if (!showSearch.value) {
+    searchQuery.value = '';
+    fetchUsers();
+  }
+}
+
+function selectUser(user: User) {
+  emit('navigate', 'user_profile', user);
 }
 
 onMounted(fetchUsers);
@@ -59,9 +73,19 @@ onMounted(fetchUsers);
         <button class="back-button" @click="$emit('navigate', 'admin_panel')">🔙</button>
       </div>
 
-      <button class="search-button" @click="onSearchClick">
-        🔍 جستجوی کاربر
+      <button class="search-button" @click="toggleSearch">
+        {{ showSearch ? '❌ بستن جستجو' : '🔍 جستجوی کاربر' }}
       </button>
+
+      <div v-if="showSearch" class="search-box">
+        <input 
+          v-model="searchQuery" 
+          @keyup.enter="fetchUsers" 
+          placeholder="نام، نام کاربری یا موبایل..." 
+          class="search-input"
+        />
+        <button @click="fetchUsers" class="do-search-btn">جستجو</button>
+      </div>
 
       <div v-if="isLoading" class="loading">در حال بارگیری...</div>
       <div v-else-if="errorMessage" class="error">{{ errorMessage }}</div>
@@ -69,15 +93,15 @@ onMounted(fetchUsers);
       <div v-else class="users-list">
         <div v-if="users.length === 0" class="no-data">کاربری یافت نشد.</div>
         
-        <div v-for="user in users" :key="user.id" class="user-item">
+        <div v-for="user in users" :key="user.id" class="user-item" @click="selectUser(user)">
           <div class="user-info">
-            <div class="name">👤 {{ user.full_name }}</div>
+            <div class="name">👤 {{ user.account_name }}</div>
             <div class="details">
-              <span>🆔 {{ user.account_name }}</span> | 
               <span>📱 {{ user.mobile_number }}</span>
             </div>
             <div class="role-badge" :class="user.role">{{ user.role }}</div>
           </div>
+          <div class="arrow">👈</div>
         </div>
       </div>
     </div>
@@ -132,6 +156,28 @@ h2 { margin: 0; font-size: 18px; }
   background-color: #bae6fd;
 }
 
+.search-box {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  animation: fadeIn 0.3s ease;
+}
+.search-input {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-family: inherit;
+}
+.do-search-btn {
+  padding: 0 16px;
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
 .users-list {
   display: flex;
   flex-direction: column;
@@ -143,8 +189,29 @@ h2 { margin: 0; font-size: 18px; }
   border-radius: 10px;
   padding: 12px;
   display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.user-item:hover {
+  background-color: #f0f9ff;
+  border-color: #bae6fd;
+}
+.user-item:active {
+  transform: scale(0.99);
+}
+
+.user-info {
+  display: flex;
   flex-direction: column;
 }
+
+.arrow {
+  font-size: 18px;
+  opacity: 0.5;
+}
+
 .name {
   font-weight: 700;
   font-size: 15px;
@@ -172,4 +239,9 @@ h2 { margin: 0; font-size: 18px; }
 
 .loading, .error, .no-data { text-align: center; padding: 20px; color: var(--text-secondary); }
 .error { color: #ef4444; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 </style>

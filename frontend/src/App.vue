@@ -45,7 +45,9 @@ const shownBannerIds = ref(new Set<number>());
 const unreadCount = ref(0);
 const bannerQueue = ref<Notification[]>([]);
 const isBannerActive = ref(false);
-let notificationInterval: any = null;
+
+// برای کنترل SSE (قطع اتصال هنگام خروج)
+let sseController: AbortController | null = null;
 
 // --- متغیرهای Swipe ---
 const bannerRef = ref<HTMLElement | null>(null);
@@ -68,6 +70,7 @@ const computePageTitle = computed(() => {
     case 'create_invitation': return 'ایجاد دعوت‌نامه';
     case 'manage_commodities': return 'مدیریت کالاها';
     case 'manage_users': return 'مدیریت کاربران';
+    case 'user_profile': return 'پروفایل کاربر';
     default: return 'Trading Bot';
   }
 });
@@ -229,6 +232,9 @@ function closeNotificationBanner() {
   setTimeout(() => { processQueue(); }, 500); 
 }
 
+// --- 👇 سیستم دریافت نوتیفیکیشن (اصلاح شده برای SSE) 👇 ---
+
+// 1. دریافت وضعیت اولیه (هنوز لازم است تا لیست پر شود)
 async function checkNotifications() {
   if (!jwtToken.value) return;
   if (activeView.value === 'notifications') {
@@ -240,23 +246,99 @@ async function checkNotifications() {
     const countRes = await fetch(`${API_BASE_URL}/api/notifications/unread-count`, { headers: { Authorization: `Bearer ${jwtToken.value}` } });
     if (countRes.ok) {
       const serverCount = await countRes.json();
-      if (serverCount !== unreadCount.value || (serverCount > 0 && popoverNotifications.value.length === 0)) {
-          unreadCount.value = serverCount;
-          const listRes = await fetch(`${API_BASE_URL}/api/notifications/unread`, { headers: { Authorization: `Bearer ${jwtToken.value}` } });
-          if (listRes.ok) {
-              const data: Notification[] = await listRes.json();
-              popoverNotifications.value = data; 
-              const newMessages = data.filter(n => !shownBannerIds.value.has(n.id));
-              if (newMessages.length > 0) enqueueBanners(newMessages);
-          }
+      unreadCount.value = serverCount;
+      const listRes = await fetch(`${API_BASE_URL}/api/notifications/unread`, { headers: { Authorization: `Bearer ${jwtToken.value}` } });
+      if (listRes.ok) {
+          const data: Notification[] = await listRes.json();
+          popoverNotifications.value = data; 
+          // بنر برای پیام‌های قدیمی نشان نمی‌دهیم، فقط در حافظه نگه می‌داریم
+          data.forEach(n => shownBannerIds.value.add(n.id));
       }
     }
-  } catch (e) { console.error("Notification check failed", e); }
+  } catch (e) { console.error("Initial check failed", e); }
 }
 
-function handleNavigation(view: string) {
+// 2. اتصال زنده و امن به SSE (بدون نیاز به کتابخانه اضافی)
+async function startSSE() {
+  if (!jwtToken.value) return;
+  
+  // اگر اتصال قبلی باز است، ببندیم
+  if (sseController) sseController.abort();
+  sseController = new AbortController();
+  
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/notifications/stream`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${jwtToken.value}`,
+        'Accept': 'text/event-stream',
+      },
+      signal: sseController.signal,
+    });
+
+    if (!response.ok) throw new Error(response.statusText);
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder("utf-8");
+    if (!reader) return;
+
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      
+      // دیکود کردن چانک دریافتی
+      buffer += decoder.decode(value, { stream: true });
+      
+      // پردازش خط به خط (ممکن است چند پیام همزمان بیاید)
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() || ''; // بخش ناقص آخر را نگه دار
+
+      for (const part of parts) {
+        if (part.startsWith('data: ')) {
+          try {
+             const jsonStr = part.substring(6).trim(); // حذف "data: "
+             if (!jsonStr) continue;
+             
+             const newNotif: Notification = JSON.parse(jsonStr);
+             
+             // اقداماتی که پس از دریافت پیام جدید انجام می‌شود:
+             
+             // 1. اضافه کردن به لیست
+             popoverNotifications.value.unshift(newNotif);
+             
+             // 2. افزایش عدد بج
+             unreadCount.value++;
+             
+             // 3. نمایش بنر (اگر قبلا نمایش داده نشده)
+             if (!shownBannerIds.value.has(newNotif.id)) {
+                enqueueBanners([newNotif]);
+             }
+             
+          } catch (err) {
+            console.error("SSE Parse Error:", err, part);
+          }
+        }
+      }
+    }
+  } catch (error: any) {
+    if (error.name === 'AbortError') return; // لغو دستی
+    console.error("SSE Connection lost. Retrying in 5s...", error);
+    // تلاش مجدد بعد از 5 ثانیه
+    setTimeout(() => {
+       if (user.value) startSSE(); 
+    }, 5000);
+  }
+}
+// -------------------------------------------------------------
+
+const navigationPayload = ref<any>(null);
+
+function handleNavigation(view: string, payload: any = null) {
   isPopoverOpen.value = false; 
   activeView.value = view;
+  navigationPayload.value = payload;
   if (view === 'notifications') {
     unreadCount.value = 0;
     shownBannerIds.value.clear(); 
@@ -276,8 +358,9 @@ function toggleTradePageView() {
 function onInviteCreated(message: string) {}
 function togglePopover() {
   isPopoverOpen.value = !isPopoverOpen.value;
-  if (isPopoverOpen.value) checkNotifications();
+  // وقتی پاپ‌اور باز می‌شود، لیست را رفرش نمی‌کنیم چون SSE آن را آپدیت نگه داشته
 }
+
 function truncateMessage(message: string, length = 50) {
   const cleanMessage = message.replace(/\*\*(.*?)\*\*/g, '$1').replace(/`/g, '').replace(/\n/g, ' ');
   if (cleanMessage.length <= length) return cleanMessage;
@@ -294,19 +377,27 @@ onMounted(async () => {
     if (!loginResp.ok) throw new Error("احراز هویت اولیه ناموفق بود.");
     const loginJson = await loginResp.json();
     jwtToken.value = loginJson.access_token;
+    
     loadingMessage.value = 'در حال دریافت اطلاعات کاربر...';
     const userResp = await fetch(`${API_BASE_URL}/api/auth/me`, { headers: { Authorization: `Bearer ${jwtToken.value}` }, });
     if (!userResp.ok) throw new Error("دریافت اطلاعات کاربر ناموفق بود.");
     user.value = await userResp.json();
     loadingMessage.value = '';
+    
     if (user.value?.role === 'WATCH') activeView.value = 'profile'; 
-    notificationInterval = setInterval(checkNotifications, 3000); 
-    checkNotifications(); 
+    
+    // --- شروع سیستم نوتیفیکیشن ---
+    // 1. دریافت وضعیت فعلی
+    await checkNotifications();
+    // 2. اتصال دائمی برای دریافت پیام‌های جدید
+    startSSE();
+    
   } catch (e: any) { loadingMessage.value = `⚠️ ${e.message}`; }
 });
 
 onUnmounted(() => {
-  if (notificationInterval) clearInterval(notificationInterval);
+  // قطع اتصال SSE هنگام بسته شدن کامپوننت
+  if (sseController) sseController.abort();
 });
 </script>
 
@@ -424,6 +515,15 @@ onUnmounted(() => {
           <UserProfile
             v-if="activeView === 'profile'"
             :user="user"
+            @navigate="handleNavigation"
+          />
+
+          <UserProfile
+            v-else-if="activeView === 'user_profile'"
+            :user="navigationPayload"
+            :is-admin-view="true"
+            :api-base-url="API_BASE_URL"
+            :jwt-token="jwtToken"
             @navigate="handleNavigation"
           />
 

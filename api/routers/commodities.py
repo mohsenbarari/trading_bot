@@ -1,22 +1,51 @@
-# trading_bot/api/routers/commodities.py (کامل و اصلاح شده)
+# trading_bot/api/routers/commodities.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
-from typing import List
+from typing import List, Optional
+from jose import jwt, JWTError
+import logging
 
 from core.db import get_db
+from core.config import settings
 from models.commodity import Commodity, CommodityAlias
 from models.user import User
-from .auth import verify_super_admin_or_dev_key
+from .auth import verify_super_admin_or_dev_key, oauth2_scheme
 import schemas
+
+# تنظیم لاگر
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/commodities",
     tags=["Commodities"],
     dependencies=[Depends(verify_super_admin_or_dev_key)]
 )
+
+# --- 👇 تابع جدید برای تشخیص منبع درخواست 👇 ---
+async def get_request_source(
+    api_key: Optional[str] = Header(None, alias="x-api-key"),
+    token: Optional[str] = Depends(oauth2_scheme)
+) -> str:
+    """
+    منبع درخواست را تشخیص می‌دهد:
+    - اگر x-api-key باشد -> 'bot'
+    - اگر Token باشد -> مقدار source داخل توکن (مثلاً 'miniapp')
+    """
+    if api_key:
+        return "bot"
+    
+    if token:
+        try:
+            payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+            return payload.get("source", "miniapp") # پیش‌فرض miniapp
+        except JWTError:
+            return "unknown"
+            
+    return "unknown"
+# -------------------------------------------------------
 
 @router.get("/", response_model=List[schemas.Commodity])
 async def read_all_commodities(db: AsyncSession = Depends(get_db)):
@@ -40,15 +69,18 @@ async def read_commodity(commodity_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="کالا یافت نشد")
     return commodity
 
-@router.post("/", response_model=schemas.Commodity, status_code=status.HTTP_201_CREATED) # <--- ۱. اصلاح شد
+@router.post("/", response_model=schemas.Commodity, status_code=status.HTTP_201_CREATED)
 async def create_commodity(
     commodity_data: schemas.CommodityCreate,
     aliases: List[str],
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    source: str = Depends(get_request_source) # 👈 دریافت منبع
 ):
     """
     ایجاد یک کالای جدید به همراه لیستی از نام‌های مستعار.
     """
+    logger.info(f"Creating commodity '{commodity_data.name}' via source: {source}") # لاگ کردن منبع
+
     # بررسی تکراری بودن نام اصلی
     stmt = select(Commodity).where(Commodity.name == commodity_data.name)
     existing = (await db.execute(stmt)).scalar_one_or_none()
@@ -58,7 +90,7 @@ async def create_commodity(
     db_commodity = Commodity(name=commodity_data.name)
     
     # افزودن نام‌های مستعار
-    for alias_name in set(aliases): # استفاده از set برای جلوگیری از تکرار در ورودی
+    for alias_name in set(aliases): 
         db_commodity.aliases.append(CommodityAlias(alias=alias_name))
         
     db.add(db_commodity)
@@ -66,16 +98,19 @@ async def create_commodity(
     await db.refresh(db_commodity, ['aliases'])
     return db_commodity
 
-@router.put("/{commodity_id}", response_model=schemas.Commodity) # <--- ۲. اصلاح شد
+@router.put("/{commodity_id}", response_model=schemas.Commodity)
 async def update_commodity_name(
     commodity_id: int,
-    commodity_update: schemas.CommodityCreate, # فقط نام را آپدیت می‌کنیم
-    db: AsyncSession = Depends(get_db)
+    commodity_update: schemas.CommodityCreate, 
+    db: AsyncSession = Depends(get_db),
+    source: str = Depends(get_request_source) # 👈 دریافت منبع
 ):
     """
     ویرایش نام اصلی یک کالا.
     """
-    stmt = select(Commodity).where(Commodity.id == commodity_id)
+    logger.info(f"Updating commodity ID {commodity_id} name to '{commodity_update.name}' via source: {source}")
+
+    stmt = select(Commodity).options(selectinload(Commodity.aliases)).where(Commodity.id == commodity_id)
     db_commodity = (await db.execute(stmt)).scalar_one_or_none()
     
     if not db_commodity:
@@ -94,17 +129,22 @@ async def update_commodity_name(
     return db_commodity
 
 @router.delete("/{commodity_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_commodity(commodity_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_commodity(
+    commodity_id: int, 
+    db: AsyncSession = Depends(get_db),
+    source: str = Depends(get_request_source) # 👈 دریافت منبع
+):
     """
     حذف کامل یک کالا (به همراه تمام نام‌های مستعار آن).
     """
+    logger.info(f"Deleting commodity ID {commodity_id} via source: {source}")
+
     stmt = select(Commodity).where(Commodity.id == commodity_id)
     db_commodity = (await db.execute(stmt)).scalar_one_or_none()
     
     if not db_commodity:
         raise HTTPException(status_code=404, detail="کالا یافت نشد")
     
-    # (نام‌های مستعار به صورت خودکار به دلیل cascade delete حذف می‌شوند)
     await db.delete(db_commodity)
     await db.commit()
     return None
@@ -115,12 +155,14 @@ async def delete_commodity(commodity_id: int, db: AsyncSession = Depends(get_db)
 async def add_alias_to_commodity(
     commodity_id: int,
     alias: schemas.CommodityAliasCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    source: str = Depends(get_request_source) # 👈 دریافت منبع
 ):
     """
     افزودن یک نام مستعار جدید به کالای موجود.
     """
-    # بررسی تکراری بودن نام مستعار در کل جدول
+    logger.info(f"Adding alias '{alias.alias}' to commodity ID {commodity_id} via source: {source}")
+
     stmt_check = select(CommodityAlias).where(CommodityAlias.alias == alias.alias)
     existing_alias = (await db.execute(stmt_check)).scalar_one_or_none()
     if existing_alias:
@@ -133,7 +175,7 @@ async def add_alias_to_commodity(
         await db.commit()
         await db.refresh(db_alias)
         return db_alias
-    except Exception: # اگر commodity_id معتبر نباشد
+    except Exception:
         await db.rollback()
         raise HTTPException(status_code=404, detail="کالایی با این ID برای افزودن نام مستعار یافت نشد")
 
@@ -142,18 +184,20 @@ async def add_alias_to_commodity(
 async def update_alias(
     alias_id: int,
     alias_update: schemas.CommodityAliasCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    source: str = Depends(get_request_source) # 👈 دریافت منبع
 ):
     """
     ویرایش متن یک نام مستعار.
     """
+    logger.info(f"Updating alias ID {alias_id} to '{alias_update.alias}' via source: {source}")
+
     stmt = select(CommodityAlias).where(CommodityAlias.id == alias_id)
     db_alias = (await db.execute(stmt)).scalar_one_or_none()
     
     if not db_alias:
         raise HTTPException(status_code=404, detail="نام مستعار یافت نشد")
         
-    # بررسی تکراری بودن نام مستعار جدید
     if alias_update.alias != db_alias.alias:
         stmt_check = select(CommodityAlias).where(CommodityAlias.alias == alias_update.alias)
         existing = (await db.execute(stmt_check)).scalar_one_or_none()
@@ -166,10 +210,16 @@ async def update_alias(
     return db_alias
 
 @router.delete("/aliases/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_alias(alias_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_alias(
+    alias_id: int, 
+    db: AsyncSession = Depends(get_db),
+    source: str = Depends(get_request_source) # 👈 دریافت منبع
+):
     """
     حذف یک نام مستعار.
     """
+    logger.info(f"Deleting alias ID {alias_id} via source: {source}")
+
     stmt = select(CommodityAlias).where(CommodityAlias.id == alias_id)
     db_alias = (await db.execute(stmt)).scalar_one_or_none()
     

@@ -48,8 +48,20 @@ function resetForm() {
   form.name = '';
   form.aliasesText = '';
 }
+
+// نمایش صحیح خطاها (رفع مشکل [object Object])
 function getErrorDetail(error: any, defaultMsg: string): string {
-    return error.detail || error.message || defaultMsg;
+    const detail = error.detail || error.message;
+    if (!detail) return defaultMsg;
+    
+    if (typeof detail === 'object') {
+        try {
+            return JSON.stringify(detail, null, 2);
+        } catch (e) {
+            return defaultMsg;
+        }
+    }
+    return detail;
 }
 
 // --- 1. جریان اصلی (لیست کالاها) ---
@@ -73,20 +85,19 @@ async function onManageAliases(commodity: Commodity) {
   isLoading.value = true;
   resetMessages();
   try {
-    // واکشی مجدد اطلاعات کالا برای اطمینان از به‌روز بودن
     const response = await fetch(`${props.apiBaseUrl}/api/commodities/${commodity.id}`, { headers: API_HEADERS.value });
     if (!response.ok) throw new Error('خطا در دریافت اطلاعات کالا');
     selectedCommodity.value = await response.json();
     viewMode.value = 'aliases';
   } catch (e: any) {
     errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
-    viewMode.value = 'list'; // در صورت خطا به لیست برگرد
+    viewMode.value = 'list';
   } finally {
     isLoading.value = false;
   }
 }
 
-// --- 3. افزودن کالای جدید ---
+// --- 3. افزودن کالای جدید (با Payload اصلاح شده) ---
 function onAddCommodityStart() {
   resetMessages();
   resetForm();
@@ -99,25 +110,36 @@ async function onAddCommoditySubmit() {
     const aliasList = form.aliasesText.split(/[،-]/)
                            .map(a => a.trim())
                            .filter(a => a.length > 0);
-    // افزودن نام اصلی به لیست alias ها (طبق منطق بات)
+    
     const commodityName = form.name.trim();
     if (commodityName && !aliasList.includes(commodityName)) {
         aliasList.unshift(commodityName);
     }
     
+    // فرمت صحیح برای API
+    const payload = {
+        commodity_data: { name: commodityName },
+        aliases: aliasList
+    };
+
     const response = await fetch(`${props.apiBaseUrl}/api/commodities/`, {
       method: 'POST',
       headers: API_HEADERS.value,
-      body: JSON.stringify({ name: commodityName, aliases: aliasList }),
+      body: JSON.stringify(payload),
     });
+    
     const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'خطا در افزودن کالا');
+    
+    if (!response.ok) {
+        const errorObj = { detail: data.detail || 'خطا در افزودن کالا' }; 
+        throw errorObj;
+    }
     
     successMessage.value = `کالا «${data.name}» با موفقیت افزوده شد.`;
-    await fetchCommodities(); // بازگشت به لیست اصلی
+    await fetchCommodities(); 
   } catch (e: any) {
     errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
-    viewMode.value = 'add_commodity'; // در فرم بمان
+    viewMode.value = 'add_commodity'; 
   } finally {
     isLoading.value = false;
   }
@@ -138,16 +160,19 @@ async function onEditCommodityNameSubmit() {
     const response = await fetch(`${props.apiBaseUrl}/api/commodities/${selectedCommodity.value.id}`, {
       method: 'PUT',
       headers: API_HEADERS.value,
-      body: JSON.stringify({ name: form.name.trim() }), // فقط نام را می‌فرستیم
+      body: JSON.stringify({ name: form.name.trim() }),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'خطا در ویرایش نام');
+    if (!response.ok) {
+         const errorObj = { detail: data.detail || 'خطا در ویرایش نام' };
+         throw errorObj;
+    }
     
     successMessage.value = `نام کالا با موفقیت به «${data.name}» تغییر یافت.`;
-    await onManageAliases(data); // بازگشت به لیست نام‌های مستعار
+    await onManageAliases(data);
   } catch (e: any) {
     errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
-    viewMode.value = 'edit_commodity_name'; // در فرم بمان
+    viewMode.value = 'edit_commodity_name';
   } finally {
     isLoading.value = false;
   }
@@ -171,13 +196,16 @@ async function onAddAliasSubmit() {
       body: JSON.stringify({ alias: form.name.trim() }),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'خطا در افزودن نام مستعار');
+    if (!response.ok) {
+         const errorObj = { detail: data.detail || 'خطا در افزودن نام مستعار' };
+         throw errorObj;
+    }
 
     successMessage.value = `نام مستعار «${data.alias}» با موفقیت افزوده شد.`;
-    await onManageAliases(selectedCommodity.value); // بازگشت به لیست نام‌های مستعار
+    await onManageAliases(selectedCommodity.value);
   } catch (e: any) {
     errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
-    viewMode.value = 'add_alias'; // در فرم بمان
+    viewMode.value = 'add_alias';
   } finally {
     isLoading.value = false;
   }
@@ -202,13 +230,16 @@ async function onEditAliasSubmit() {
       body: JSON.stringify({ alias: form.name.trim() }),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'خطا در ویرایش نام مستعار');
+    if (!response.ok) {
+         const errorObj = { detail: data.detail || 'خطا در ویرایش نام مستعار' };
+         throw errorObj;
+    }
     
     successMessage.value = `نام مستعار با موفقیت به «${data.alias}» تغییر یافت.`;
-    await onManageAliases(selectedCommodity.value); // بازگشت به لیست نام‌های مستعار
+    await onManageAliases(selectedCommodity.value);
   } catch (e: any) {
     errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
-    viewMode.value = 'edit_alias'; // در فرم بمان
+    viewMode.value = 'edit_alias';
   } finally {
     isLoading.value = false;
   }
@@ -229,16 +260,19 @@ async function onDeleteCommodityConfirm() {
       method: 'DELETE',
       headers: API_HEADERS.value,
     });
-    if (!response.ok) { // 204 (No Content) هم OK است
+    if (!response.ok) {
         const data = response.status !== 204 ? await response.json() : null;
-        if (data) throw new Error(data.detail || 'خطا در حذف کالا');
+        if (data) {
+             const errorObj = { detail: data.detail || 'خطا در حذف کالا' };
+             throw errorObj;
+        }
     }
     
     successMessage.value = `کالا «${selectedCommodity.value.name}» با موفقیت حذف شد.`;
-    await fetchCommodities(); // بازگشت به لیست اصلی
+    await fetchCommodities();
   } catch (e: any) {
     errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
-    await onManageAliases(selectedCommodity.value); // بازگشت به لیست نام‌های مستعار در صورت خطا
+    await onManageAliases(selectedCommodity.value);
   } finally {
     isLoading.value = false;
   }
@@ -260,16 +294,19 @@ async function onDeleteAliasConfirm() {
       method: 'DELETE',
       headers: API_HEADERS.value,
     });
-    if (!response.ok) { // 204 (No Content) هم OK است
+    if (!response.ok) {
         const data = response.status !== 204 ? await response.json() : null;
-        if (data) throw new Error(data.detail || 'خطا در حذف نام مستعار');
+        if (data) {
+             const errorObj = { detail: data.detail || 'خطا در حذف نام مستعار' };
+             throw errorObj;
+        }
     }
     
     successMessage.value = `نام مستعار «${selectedAlias.value.alias}» با موفقیت حذف شد.`;
-    await onManageAliases(selectedCommodity.value); // بازگشت به لیست نام‌های مستعار
+    await onManageAliases(selectedCommodity.value);
   } catch (e: any) {
     errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
-    await onManageAliases(selectedCommodity.value); // بازگشت به لیست نام‌های مستعار در صورت خطا
+    await onManageAliases(selectedCommodity.value);
   } finally {
     isLoading.value = false;
   }
@@ -284,11 +321,17 @@ onMounted(fetchCommodities);
   <div class="commodity-manager-container">
     
     <div v-if="successMessage" class="message success">{{ successMessage }}</div>
-    <div v-if="errorMessage" class="message error" v-html="errorMessage.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')"></div>
+    <div v-if="errorMessage" class="message error">
+       <pre style="white-space: pre-wrap; margin: 0;">{{ errorMessage }}</pre>
+    </div>
     <div v-if="isLoading" class="loading-container"><div class="spinner"></div></div>
 
     <div v-if="viewMode === 'list' && !isLoading" class="card">
-      <h2>مدیریت کالاها</h2>
+      <div class="header-row">
+        <h2 class="page-title">مدیریت کالاها</h2>
+        <button class="back-button" @click="$emit('navigate', 'admin_panel')">🔙</button>
+      </div>
+
       <div v-if="commodities.length === 0" class="no-data">هیچ کالایی ثبت نشده است.</div>
       <div class="button-list">
         <button v-for="comm in commodities" :key="comm.id" @click="onManageAliases(comm)" class="list-button">
@@ -303,10 +346,11 @@ onMounted(fetchCommodities);
     </div>
 
     <div v-if="viewMode === 'aliases' && selectedCommodity && !isLoading" class="card">
-      <h2 class="alias-header">
-        <button @click="fetchCommodities" class="back-button">&lsaquo;</button>
-        مدیریت: {{ selectedCommodity.name }}
-      </h2>
+      <div class="header-row">
+        <h2 class="page-title">مدیریت: {{ selectedCommodity.name }}</h2>
+        <button @click="fetchCommodities" class="back-button">🔙</button>
+      </div>
+
       <div v-if="selectedCommodity.aliases.length === 0" class="no-data">هیچ نام مستعاری ثبت نشده است.</div>
       <div class="alias-list">
         <div v-for="alias in selectedCommodity.aliases" :key="alias.id" class="alias-item">
@@ -443,7 +487,35 @@ button.secondary { background: transparent; color: var(--text-secondary); border
 .no-data { text-align: center; color: var(--text-secondary); padding: 20px 0; }
 .divider { border: none; border-top: 1px solid var(--border-color); margin: 16px 0; }
 
-/* 1. لیست کالاها */
+/* استایل‌های هدر و دکمه بازگشت */
+.header-row {
+  display: flex;
+  justify-content: space-between; /* عنوان راست، دکمه چپ */
+  align-items: center;
+  margin-bottom: 16px;
+}
+.page-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-color);
+  margin: 0;
+}
+.back-button {
+  flex-grow: 0;
+  width: auto;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--text-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* لیست کالاها */
 .button-list { display: flex; flex-direction: column; gap: 10px; }
 .list-button {
   width: 100%; background: #f9fafb; color: var(--text-color); border: 1px solid var(--border-color);
@@ -456,12 +528,7 @@ button.secondary { background: transparent; color: var(--text-secondary); border
 .list-button.edit-button { color: #e67e22; justify-content: center; }
 .list-button.delete-button { color: #e74c3c; justify-content: center; }
 
-/* 2. لیست نام‌های مستعار */
-.alias-header { display: flex; align-items: center; gap: 10px; }
-.back-button {
-  flex-grow: 0; font-size: 24px; font-weight: 700; color: var(--primary-color);
-  background: transparent; border: none; padding: 0 10px; margin: 0;
-}
+/* لیست نام‌های مستعار */
 .alias-list { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
 .alias-item {
   display: flex; justify-content: space-between; align-items: center;
@@ -478,7 +545,7 @@ button.secondary { background: transparent; color: var(--text-secondary); border
 
 .button-list.stacked { margin-top: 20px; }
 
-/* 7 & 8. پنجره تأیید حذف */
+/* پنجره تأیید حذف */
 .confirmation-dialog p { font-size: 15px; line-height: 1.6; }
 .confirmation-dialog p strong { color: #c0392b; }
 button.delete-confirm { background-color: #e74c3c; }

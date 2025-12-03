@@ -15,4 +15,11 @@ class User(Base):
     role = Column(Enum(UserRole), nullable=False, default=UserRole.WATCH)
     has_bot_access = Column(Boolean, default=True, nullable=False)
     trading_restricted_until = Column(DateTime, nullable=True, default=None)
+    
+    # Limitations
+    max_daily_trades = Column(Integer, nullable=True, default=None)
+    max_active_commodities = Column(Integer, nullable=True, default=None)
+    max_daily_requests = Column(Integer, nullable=True, default=None)
+    limitations_expire_at = Column(DateTime, nullable=True, default=None)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

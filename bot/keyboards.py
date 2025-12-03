@@ -87,17 +87,94 @@ def get_users_list_inline_keyboard(users: list, page: int, total_count: int, lim
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
-def get_user_profile_return_keyboard(back_to_page: int = 1) -> InlineKeyboardMarkup:
-    """دکمه بازگشت از پروفایل به لیست کاربران"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 بازگشت به لیست", callback_data=f"users_page_{back_to_page}")]
-    ])
+def get_user_profile_return_keyboard(user_id: int, back_to_page: int = 1) -> InlineKeyboardMarkup:
+    keyboard = [
+        [
+            InlineKeyboardButton(text="⚙️ تنظیمات کاربر", callback_data=f"user_settings_{user_id}")
+        ],
+        [
+            InlineKeyboardButton(text="❌ حذف کاربر", callback_data=f"user_ask_delete_{user_id}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 بازگشت به لیست", callback_data=f"users_page_{back_to_page}")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_user_settings_keyboard(user_id: int, is_restricted: bool = False) -> InlineKeyboardMarkup:
+    # تعیین متن و اکشن دکمه مسدودسازی
+    block_text = "🔓 رفع مسدودیت" if is_restricted else "⛔ مسدود کردن"
+    block_callback = f"user_unblock_{user_id}" if is_restricted else f"user_block_{user_id}"
+
+    keyboard = [
+        [
+            InlineKeyboardButton(text="🤖 تغییر دسترسی بات", callback_data=f"user_toggle_bot_{user_id}")
+        ],
+        [
+            InlineKeyboardButton(text="✏️ ویرایش نقش", callback_data=f"user_edit_role_{user_id}")
+        ],
+        [
+            InlineKeyboardButton(text=block_text, callback_data=block_callback)
+        ],
+        [
+            InlineKeyboardButton(text="⚠️ اعمال محدودیت", callback_data=f"user_limit_{user_id}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 بازگشت", callback_data=f"user_profile_{user_id}")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_block_duration_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    # گزینه‌های زمانی: (متن، دقیقه)
+    # 0 دقیقه به معنی نامحدود (مثلاً 100 سال)
+    durations = [
+        ("1 ساعت", 60),
+        ("6 ساعت", 360),
+        ("12 ساعت", 720),
+        ("1 روز", 1440),
+        ("3 روز", 4320),
+        ("1 هفته", 10080),
+        ("نامحدود", 0)
+    ]
+    
+    keyboard = []
+    row = []
+    for text, minutes in durations:
+        row.append(InlineKeyboardButton(text=text, callback_data=f"user_block_apply_{user_id}_{minutes}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+        
+    keyboard.append([InlineKeyboardButton(text="🔙 انصراف", callback_data=f"user_settings_{user_id}")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_role_selection_keyboard() -> InlineKeyboardMarkup:
     buttons = []
     for role in UserRole:
         if role != UserRole.SUPER_ADMIN:
             buttons.append([InlineKeyboardButton(text=role.value, callback_data=f"set_role_{role.name}")])
+    # دکمه انصراف برای فلو دعوت‌نامه
+    buttons.append([InlineKeyboardButton(text="❌ انصراف", callback_data="comm_fsm_cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_user_role_edit_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    buttons = []
+    for role in UserRole:
+        # دکمه برای هر نقش
+        buttons.append([InlineKeyboardButton(text=role.value, callback_data=f"set_user_role_{user_id}_{role.name}")])
+    
+    buttons.append([InlineKeyboardButton(text="🔙 انصراف", callback_data=f"user_profile_{user_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_user_delete_confirm_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(text="✅ بله، حذف شود", callback_data=f"user_delete_confirm_{user_id}")],
+        [InlineKeyboardButton(text="❌ خیر، انصراف", callback_data=f"user_profile_{user_id}")]
+    ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_mini_app_keyboard(mini_app_url: str) -> InlineKeyboardMarkup:
@@ -164,3 +241,33 @@ def get_alias_delete_confirm_keyboard(commodity_id: int, alias_id: int) -> Inlin
         [InlineKeyboardButton(text=" خیر، لغو", callback_data="comm_fsm_cancel")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_limit_duration_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    # Reuse durations but with different callback
+    durations = [
+        ("1 ساعت", 60),
+        ("6 ساعت", 360),
+        ("12 ساعت", 720),
+        ("1 روز", 1440),
+        ("3 روز", 4320),
+        ("1 هفته", 10080),
+        ("نامحدود", 0)
+    ]
+    
+    keyboard = []
+    row = []
+    for text, minutes in durations:
+        row.append(InlineKeyboardButton(text=text, callback_data=f"user_limit_dur_{user_id}_{minutes}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+        
+    keyboard.append([InlineKeyboardButton(text="🔙 انصراف", callback_data=f"user_settings_{user_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_skip_keyboard(callback_data: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭ رد کردن (بدون محدودیت)", callback_data=callback_data)]
+    ])

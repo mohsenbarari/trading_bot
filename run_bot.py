@@ -2,12 +2,12 @@
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
-from sqlalchemy import select
-
+from sqlalchemy import select, delete
+from models.notification import Notification, NotificationLevel, NotificationCategory
 from core.config import settings
 from core.db import AsyncSessionLocal
 from core.enums import UserRole, NotificationLevel, NotificationCategory # <-- ایمپورت جدید
@@ -69,7 +69,38 @@ async def monitor_expired_invitations(bot: Bot):
         except Exception as e:
             logger.error(f"Error in monitor task: {e}")
 
-        await asyncio.sleep(5)
+        await asyncio.sleep(60)
+
+async def cleanup_old_notifications(retention_days: int = 90):
+    """
+    تسک پس‌زمینه برای حذف نوتیفیکیشن‌های قدیمی‌تر از ۹۰ روز.
+    این تسک هر ۲۴ ساعت یک‌بار اجرا می‌شود.
+    """
+    logger.info(f"--> Notification Cleanup Task Started (Retention: {retention_days} days)...")
+    
+    while True:
+        try:
+            # محاسبه تاریخ آستانه (مثلاً امروز منهای ۹۰ روز)
+            cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+            
+            async with AsyncSessionLocal() as session:
+                # دستور حذف
+                stmt = delete(Notification).where(Notification.created_at < cutoff_date)
+                result = await session.execute(stmt)
+                deleted_count = result.rowcount
+                
+                await session.commit()
+                
+                if deleted_count > 0:
+                    logger.info(f"🧹 Cleanup: Deleted {deleted_count} old notifications created before {cutoff_date.date()}.")
+                
+        except Exception as e:
+            logger.error(f"Error in cleanup task: {e}")
+
+        # خوابیدن برای ۲۴ ساعت (۸۶۴۰۰ ثانیه)
+        # چون این عملیات سنگین نیست ولی نیازی هم نیست تند تند اجرا شود
+        await asyncio.sleep(86400)
+
 
 async def main():
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode="Markdown"))
@@ -87,6 +118,7 @@ async def main():
     dp.include_router(default.router) 
 
     asyncio.create_task(monitor_expired_invitations(bot))
+    asyncio.create_task(cleanup_old_notifications())
 
     logger.info("--> Starting Bot polling...")
     await bot.delete_webhook(drop_pending_updates=True)

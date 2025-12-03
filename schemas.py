@@ -59,9 +59,28 @@ class UserRead(UserBase):
     id: int
     role: UserRole
     has_bot_access: bool
+    trading_restricted_until: datetime | None = None
+    
+    # Limitations
+    max_daily_trades: int | None = None
+    max_active_commodities: int | None = None
+    max_daily_requests: int | None = None
+    limitations_expire_at: datetime | None = None
     
     class Config:
         from_attributes = True
+
+class UserUpdate(BaseModel):
+    role: Optional[UserRole] = None
+    has_bot_access: Optional[bool] = None
+    trading_restricted_until: Optional[datetime] = None
+    
+    # Limitations
+    max_daily_trades: Optional[int] = None
+    max_active_commodities: Optional[int] = None
+    max_daily_requests: Optional[int] = None
+    limitations_expire_at: Optional[datetime] = None
+
 
 # --- ۳. اعتبارسنج (validator) اضافه شد ---
 class InvitationBase(BaseModel):

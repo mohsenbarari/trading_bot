@@ -6,7 +6,8 @@ from sqlalchemy import select, delete, update
 from typing import List
 from pydantic import BaseModel
 from datetime import datetime
-
+from fastapi.responses import StreamingResponse
+import asyncio
 from core.db import get_db
 from models.notification import Notification
 from models.user import User
@@ -151,3 +152,33 @@ async def delete_notification(
     await db.delete(notification)
     await db.commit()
     return None
+
+
+@router.get("/stream")
+async def stream_notifications(
+    current_user: User = Depends(get_current_user),
+    redis: Redis = Depends(get_redis)
+):
+    """
+    اتصال SSE برای دریافت زنده نوتیفیکیشن‌ها
+    """
+    async def event_generator():
+        pubsub = redis.pubsub()
+        channel_key = f"notifications:{current_user.id}"
+        await pubsub.subscribe(channel_key)
+        
+        try:
+            # گوش دادن به کانال
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    # فرمت استاندارد SSE: "data: ... \n\n"
+                    data = message["data"]
+                    yield f"data: {data}\n\n"
+                    
+                # هرت‌بیت (Heartbeat) برای زنده نگه داشتن اتصال (اختیاری)
+                # await asyncio.sleep(0.1) 
+        except asyncio.CancelledError:
+            # اگر کلاینت قطع شد
+            await pubsub.unsubscribe(channel_key)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

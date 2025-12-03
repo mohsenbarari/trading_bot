@@ -1,4 +1,5 @@
 import asyncio
+import json
 from aiogram import Bot
 from aiogram.types import Message
 from aiogram.exceptions import TelegramBadRequest
@@ -48,27 +49,44 @@ async def create_user_notification(
     db: AsyncSession, 
     user_id: int, 
     message: str,
-    level: NotificationLevel = NotificationLevel.INFO,    
+    level: NotificationLevel = NotificationLevel.INFO,      
     category: NotificationCategory = NotificationCategory.SYSTEM 
 ):
+    # 1. ذخیره در دیتابیس (مانند قبل)
     new_notif = Notification(
         user_id=user_id, 
         message=message, 
         is_read=False,
-        level=level,      
+        level=level,       
         category=category
-
     )
     db.add(new_notif)
-    await db.commit() # ذخیره قطعی برای گرفتن ID
+    await db.commit()
+    await db.refresh(new_notif) # 👈 رفرش می‌کنیم تا created_at و id را بگیریم
     
-    # 2. افزایش شمارنده در Redis
     try:
-        # اتصال سریع به ردیس از طریق Pool
         async with redis.Redis(connection_pool=pool) as redis_client:
+            # الف: افزایش شمارنده (مانند قبل)
             count_key = f"user:{user_id}:unread_count"
             await redis_client.incr(count_key)
+            
+            # ب: 👇 انتشار پیام در کانال اختصاصی کاربر (Pub/Sub) 👇
+            channel_key = f"notifications:{user_id}"
+            
+            # داده‌ای که به فرانت می‌فرستیم
+            payload = {
+                "id": new_notif.id,
+                "message": new_notif.message,
+                "is_read": False,
+                "created_at": new_notif.created_at.isoformat(),
+                "level": new_notif.level.value,
+                "category": new_notif.category.value
+            }
+            
+            # انتشار در کانال
+            await redis_client.publish(channel_key, json.dumps(payload))
+            
     except Exception as e:
-        print(f"⚠️ Redis Error (Increment Count): {e}")
+        print(f"⚠️ Redis Error: {e}")
 
     return new_notif

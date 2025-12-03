@@ -1,7 +1,9 @@
-# bot/handlers/admin_commodities.py (نسخه نهایی با اصلاح ویرایش نام کالا)
-import httpx
+# trading_bot/bot/handlers/admin_commodities.py
 import re
+import httpx
 import logging
+import asyncio
+import json
 from aiogram import Router, types, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -17,8 +19,6 @@ from bot.keyboards import (
     get_alias_delete_confirm_keyboard
 )
 from aiogram.filters import StateFilter
-from aiogram.exceptions import TelegramBadRequest
-import json
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -26,70 +26,103 @@ router = Router()
 COMMODITIES_API_URL = "http://app:8000/api/commodities/"
 ALIASES_API_URL = "http://app:8000/api/commodities/aliases/"
 
+# --- توابع کمکی مدیریت پیام ---
+
 def get_auth_headers() -> dict:
-    if not settings.dev_api_key: return {"X-Dev-Key": "NOT_SET"}
-    return {"X-Dev-Key": settings.dev_api_key}
+    if not settings.dev_api_key: 
+        return {"x-api-key": "NOT_SET"}
+    return {"x-api-key": settings.dev_api_key}
 
 def get_error_detail(e: httpx.HTTPStatusError) -> str:
-    """جزئیات خطا را به صورت ایمن از پاسخ HTTP استخراج می‌کند."""
     try:
-        detail = e.response.json().get("detail", e.response.text)
+        response_json = e.response.json()
+        detail = response_json.get("detail")
+        if not detail:
+            return e.response.text
+        if isinstance(detail, (list, dict)):
+            return json.dumps(detail, ensure_ascii=False)
+        return str(detail)
     except json.JSONDecodeError:
-        detail = e.response.text
-    return detail
+        return e.response.text
 
-async def safe_delete_message(bot: Bot, chat_id: int, message_id: int):
-    """تلاش می‌کند پیامی را حذف کند و خطاهای احتمالی را نادیده می‌گیرد."""
+async def safe_delete_message(bot: Bot, chat_id: int, message_id: int, delay: int = 0):
+    """پیام را با تأخیر اختیاری حذف می‌کند و خطاها را نادیده می‌گیرد."""
+    if delay > 0:
+        await asyncio.sleep(delay)
     try:
         await bot.delete_message(chat_id, message_id)
-    except (TelegramBadRequest, Exception) as e:
-        logger.warning(f"Could not delete message {message_id} in chat {chat_id}: {e}")
+    except Exception:
+        pass
 
-# === 1. جریان اصلی مدیریت کالاها (بدون تغییر) ===
-async def show_commodity_list(target_message: types.Message, user: User, edit: bool = False):
+async def update_anchor(state: FSMContext, new_message_id: int, bot: Bot, chat_id: int):
+    """
+    لنگر جدید را ثبت و لنگر قدیمی را با تاخیر ۳۰ ثانیه حذف می‌کند.
+    """
+    data = await state.get_data()
+    old_anchor_id = data.get("anchor_id")
+    
+    # 1. ثبت لنگر جدید
+    await state.update_data(anchor_id=new_message_id)
+    
+    # 2. حذف لنگر قدیمی با تاخیر ۳۰ ثانیه
+    if old_anchor_id and old_anchor_id != new_message_id:
+        asyncio.create_task(safe_delete_message(bot, chat_id, old_anchor_id, delay=30))
+
+async def clear_state_retain_anchor(state: FSMContext):
+    """استیت را پاک می‌کند اما لنگر (anchor_id) را نگه می‌دارد."""
+    data = await state.get_data()
+    anchor_id = data.get("anchor_id")
+    await state.clear()
+    if anchor_id:
+        await state.update_data(anchor_id=anchor_id)
+
+async def delete_user_message(message: types.Message):
+    """پیام کاربر را بلافاصله حذف می‌کند."""
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+# --- توابع نمایش (Views) ---
+
+async def show_commodity_list(bot: Bot, chat_id: int, user: User, state: FSMContext):
+    """لیست کالاها را نمایش می‌دهد."""
     if user.role != UserRole.SUPER_ADMIN: return
-    logger.info("Showing commodity list...")
+    
     try:
         headers = get_auth_headers()
         async with httpx.AsyncClient() as client:
             response = await client.get(COMMODITIES_API_URL, timeout=10.0, headers=headers)
             response.raise_for_status()
             commodities = response.json()
-        text = "لیست کالاهای ثبت شده:\n\n"
+        
+        text = "📦 **مدیریت کالاها**\n\nلیست کالاهای ثبت شده:"
         buttons = []
         if not commodities:
-            text = "هیچ کالایی ثبت نشده است."
+            text = "📦 **مدیریت کالاها**\n\nهیچ کالایی ثبت نشده است."
         else:
             for comm in commodities:
                 buttons.append([
                     InlineKeyboardButton(text=f"📦 {comm['name']}", callback_data=f"comm_manage_aliases_{comm['id']}"),
                 ])
         buttons.append([InlineKeyboardButton(text="➕ افزودن کالای جدید", callback_data="comm_add_new")])
+        
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-        if edit:
-            await target_message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-        else:
-            await target_message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
-    except httpx.RequestError as e: logger.error(f"Network error showing list: {e}"); await target_message.answer(f"❌ خطای شبکه. لطفاً اتصال اینترنت خود را بررسی کنید.")
-    except httpx.HTTPStatusError as e: 
-        detail = get_error_detail(e)
-        logger.error(f"API error showing list: {detail}"); await target_message.answer(f"❌ {detail}\n\nعملیات بارگیری لیست ناموفق بود.", parse_mode="Markdown")
-    except Exception as e: logger.exception("Unexpected error showing list"); await target_message.answer(f"❌ خطای پیش‌بینی نشده: {e}")
+        
+        # ارسال پیام جدید
+        msg = await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode="Markdown")
+        
+        # این پیام می‌شود لنگر جدید؛ لنگر قبلی ۳۰ ثانیه دیگر پاک می‌شود
+        await update_anchor(state, msg.message_id, bot, chat_id)
+            
+    except Exception as e:
+        logger.exception("Error showing list")
+        err = await bot.send_message(chat_id, f"❌ خطای سیستمی: {e}")
+        asyncio.create_task(safe_delete_message(bot, chat_id, err.message_id, delay=30))
 
-@router.message(F.text == "📦 مدیریت کالاها")
-async def handle_manage_commodities(message: types.Message, user: Optional[User]):
-    if not user: return
-    await show_commodity_list(message, user)
 
-@router.callback_query(F.data == "comm_back_to_list", StateFilter("*"))
-async def handle_back_to_list(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user: return
-    await state.clear() 
-    await show_commodity_list(query.message, user, edit=True)
-    await query.answer()
-
-# === 2. نمایش و مدیریت نام‌های مستعار (بدون تغییر) ===
-async def show_aliases_list(query: types.CallbackQuery, user: User, commodity_id: int, edit: bool = True):
+async def show_aliases_list(bot: Bot, chat_id: int, user: User, state: FSMContext, commodity_id: int):
+    """لیست نام‌های مستعار را نمایش می‌دهد."""
     if not user: return
     try:
         headers = get_auth_headers()
@@ -97,314 +130,282 @@ async def show_aliases_list(query: types.CallbackQuery, user: User, commodity_id
             response = await client.get(f"{COMMODITIES_API_URL}{commodity_id}", headers=headers)
             response.raise_for_status()
         commodity = response.json()
-        aliases = commodity.get('aliases', [])
-        text = f"مدیریت نام‌های مستعار برای: **{commodity['name']}**\n\n"
-        if not aliases: text += "<i>هیچ نام مستعاری ثبت نشده است.</i>"
-        else: text += "لیست نام‌های مستعار:"
+        
+        text = f"🔧 مدیریت کالا: **{commodity['name']}**\n\nلیست نام‌های مستعار:"
+        if not commodity.get('aliases'):
+            text += "\n_(هیچ نام مستعاری ثبت نشده)_"
+            
         keyboard = get_aliases_list_keyboard(commodity)
-        if edit:
-            await query.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown")
-        else:
-            await query.message.answer(text, reply_markup=keyboard, parse_mode="Markdown")
-    except Exception as e:
-        logger.exception("Error showing aliases list")
-        await query.message.edit_text(f"❌ خطا در دریافت اطلاعات کالا: {e}")
-    await query.answer()
+        
+        msg = await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode="Markdown")
+        
+        # این پیام می‌شود لنگر جدید؛ لنگر قبلی (مثلاً لیست کالاها) ۳۰ ثانیه دیگر پاک می‌شود
+        await update_anchor(state, msg.message_id, bot, chat_id)
+
+    except Exception:
+        await show_commodity_list(bot, chat_id, user, state)
+
+
+# === هندلرهای اصلی ===
+
+@router.message(F.text == "📦 مدیریت کالاها")
+async def handle_manage_commodities(message: types.Message, user: Optional[User], state: FSMContext):
+    if not user: return
+    await delete_user_message(message)
+    # نمایش لیست جدید (لیست قبلی اگر وجود داشته باشد توسط update_anchor پاک می‌شود)
+    await show_commodity_list(message.bot, message.chat.id, user, state)
+
+@router.callback_query(F.data == "comm_back_to_list", StateFilter("*"))
+async def handle_back_to_list(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
+    if not user: return
+    await clear_state_retain_anchor(state)
+    # نکته: پیام فعلی (لیست نام‌های مستعار) را دستی پاک نمی‌کنیم.
+    # وقتی show_commodity_list پیام جدید بفرستد، این پیام به عنوان anchor قدیمی ۳۰ ثانیه بعد پاک می‌شود.
+    await show_commodity_list(query.bot, query.message.chat.id, user, state)
 
 @router.callback_query(F.data.startswith("comm_manage_aliases_"))
-async def handle_manage_aliases(query: types.CallbackQuery, user: Optional[User]):
+async def handle_manage_aliases(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
     if not user: return
     commodity_id = int(query.data.split("_")[-1])
-    await show_aliases_list(query, user, commodity_id, edit=True)
+    # اینجا هم دستی پاک نمی‌کنیم تا ۳۰ ثانیه بماند
+    await show_aliases_list(query.bot, query.message.chat.id, user, state, commodity_id)
 
-# === 3. افزودن نام مستعار (Alias ADD) (بدون تغییر) ===
+
+# === 3. افزودن نام مستعار ===
 @router.callback_query(F.data.startswith("alias_add_"), StateFilter(None))
 async def handle_alias_add_start(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
     if not user or user.role != UserRole.SUPER_ADMIN: return
     commodity_id = int(query.data.split("_")[-1])
     await state.set_state(CommodityManagement.awaiting_alias_add_name)
-    await state.update_data(commodity_id=commodity_id, list_message_id=query.message.message_id)
-    await query.message.edit_text("--- افزودن نام مستعار ---\n\nلطفاً **نام مستعار (alias)** جدید را وارد کنید:", reply_markup=get_commodity_fsm_cancel_keyboard(), parse_mode="Markdown")
-    await query.answer()
+    await state.update_data(commodity_id=commodity_id)
+    
+    # در اینجا چون edit_text استفاده شده، anchor_id تغییر نمی‌کند و پیام باقی می‌ماند (که درست است)
+    await query.message.edit_text(
+        "➕ **افزودن نام مستعار**\n\nلطفاً نام مستعار جدید را وارد کنید:", 
+        reply_markup=get_commodity_fsm_cancel_keyboard(), 
+        parse_mode="Markdown"
+    )
 
 @router.message(CommodityManagement.awaiting_alias_add_name)
 async def handle_alias_add_name(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user: return
+    await delete_user_message(message)
+    
     new_alias_name = message.text
     data = await state.get_data()
     commodity_id = data.get("commodity_id")
-    list_message_id = data.get("list_message_id")
-    await state.clear()
-    await message.delete()
-    if list_message_id: await safe_delete_message(message.bot, message.chat.id, list_message_id)
-    status_msg = await message.answer(f"در حال افزودن نام مستعار **'{new_alias_name}'**...", parse_mode="Markdown")
-    headers = get_auth_headers()
-    payload = {"alias": new_alias_name}
+    
+    # پیام وضعیت ارسال می‌شود و تبدیل به لنگر جدید می‌شود. فرم قبلی ۳۰ ثانیه دیگر پاک می‌شود.
+    status_msg = await message.answer(f"⏳ در حال افزودن **'{new_alias_name}'**...", parse_mode="Markdown")
+    await update_anchor(state, status_msg.message_id, message.bot, message.chat.id)
+    await clear_state_retain_anchor(state)
+    
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(f"{COMMODITIES_API_URL}{commodity_id}/aliases", json=payload, headers=headers)
+            response = await client.post(f"{COMMODITIES_API_URL}{commodity_id}/aliases", json={"alias": new_alias_name}, headers=get_auth_headers())
             response.raise_for_status()
-        await status_msg.edit_text(f"✅ نام مستعار **'{new_alias_name}'** با موفقیت افزوده شد.", parse_mode="Markdown")
+        
+        await status_msg.edit_text(f"✅ نام مستعار **'{new_alias_name}'** افزوده شد.", parse_mode="Markdown")
+        
     except httpx.HTTPStatusError as e:
         detail = get_error_detail(e)
-        await status_msg.edit_text(f"❌ {detail}\n\nعملیات ثبت نشد. لطفاً دوباره امتحان کنید.", parse_mode="Markdown")
+        await status_msg.edit_text(f"❌ خطا: {detail}", parse_mode="Markdown")
     except Exception as e:
-        await status_msg.edit_text(f"❌ خطای پیش‌بینی نشده: {e}\n\nعملیات انجام نشد.")
-    await show_commodity_list(message, user)
+        await status_msg.edit_text(f"❌ خطای سیستمی: {e}", parse_mode="Markdown")
+    
+    # کمی مکث برای خواندن پیام موفقیت
+    await asyncio.sleep(1.5)
+    # نمایش لیست جدید (پیام موفقیت ۳۰ ثانیه دیگر پاک می‌شود)
+    await show_aliases_list(message.bot, message.chat.id, user, state, commodity_id)
 
-# === 4. ویرایش نام مستعار (Alias EDIT) (بدون تغییر) ===
+
+# === 4. ویرایش نام مستعار ===
 @router.callback_query(F.data.startswith("alias_edit_"), StateFilter(None))
 async def handle_alias_edit_start(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
     if not user or user.role != UserRole.SUPER_ADMIN: return
     parts = query.data.split("_"); commodity_id = int(parts[2]); alias_id = int(parts[3])
-    alias_name = f"(ID: {alias_id})" 
+    
+    alias_name = "---"
     try:
         for row in query.message.reply_markup.inline_keyboard:
             if len(row) == 3 and row[1].callback_data == query.data:
                 alias_name = row[0].text; break
-    except Exception as e: logger.warning(f"Could not parse alias name from keyboard for edit: {e}")
+    except Exception: pass
+
     await state.set_state(CommodityManagement.awaiting_alias_edit_name)
-    await state.update_data(alias_id=alias_id, alias_name=alias_name, commodity_id=commodity_id, list_message_id=query.message.message_id) 
-    await query.message.edit_text(f"--- ویرایش نام مستعار ---\n\nنام فعلی: **{alias_name}**\n\nلطفاً **نام جدید** را وارد کنید:", reply_markup=get_commodity_fsm_cancel_keyboard(), parse_mode="Markdown")
-    await query.answer()
+    await state.update_data(alias_id=alias_id, alias_name=alias_name, commodity_id=commodity_id)
+    
+    await query.message.edit_text(
+        f"✏️ **ویرایش نام مستعار**\n\nنام فعلی: {alias_name}\n\nلطفاً نام جدید را وارد کنید:", 
+        reply_markup=get_commodity_fsm_cancel_keyboard(), parse_mode="Markdown"
+    )
 
 @router.message(CommodityManagement.awaiting_alias_edit_name)
 async def handle_alias_edit_name(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user: return
-    new_alias_name = message.text
+    await delete_user_message(message)
+    
+    new_name = message.text
     data = await state.get_data()
     alias_id = data.get("alias_id")
-    old_alias_name = data.get("alias_name", f"(ID: {alias_id})")
-    list_message_id = data.get("list_message_id")
-    await state.clear()
-    await message.delete()
-    if list_message_id: await safe_delete_message(message.bot, message.chat.id, list_message_id)
-    status_msg = await message.answer(f"در حال ویرایش **'{old_alias_name}'** به **'{new_alias_name}'**...", parse_mode="Markdown")
-    headers = get_auth_headers()
-    payload = {"alias": new_alias_name}
+    commodity_id = data.get("commodity_id")
+    
+    status_msg = await message.answer(f"⏳ در حال ویرایش...", parse_mode="Markdown")
+    await update_anchor(state, status_msg.message_id, message.bot, message.chat.id)
+    await clear_state_retain_anchor(state)
+    
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.put(f"{ALIASES_API_URL}{alias_id}", json=payload, headers=headers)
+            response = await client.put(f"{ALIASES_API_URL}{alias_id}", json={"alias": new_name}, headers=get_auth_headers())
             response.raise_for_status()
-        await status_msg.edit_text(f"✅ نام مستعار **'{old_alias_name}'** با موفقیت به **'{new_alias_name}'** ویرایش شد.", parse_mode="Markdown")
-    except httpx.HTTPStatusError as e:
-        detail = get_error_detail(e)
-        await status_msg.edit_text(f"❌ {detail}\n\nعملیات ثبت نشد. لطفاً دوباره امتحان کنید.", parse_mode="Markdown")
+        await status_msg.edit_text(f"✅ ویرایش شد.", parse_mode="Markdown")
     except Exception as e:
-        await status_msg.edit_text(f"❌ خطای پیش‌بینی نشده: {e}\n\nعملیات انجام نشد.")
-    await show_commodity_list(message, user)
+        await status_msg.edit_text(f"❌ خطا: {e}", parse_mode="Markdown")
+        
+    await asyncio.sleep(1.5)
+    await show_aliases_list(message.bot, message.chat.id, user, state, commodity_id)
 
-# === 5. حذف نام مستعار (Alias DELETE) (بدون تغییر) ===
+
+# === 5. حذف نام مستعار ===
 @router.callback_query(F.data.startswith("alias_delete_"), StateFilter(None))
 async def handle_alias_delete_start(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
     if not user or user.role != UserRole.SUPER_ADMIN: return
     parts = query.data.split("_"); commodity_id = int(parts[2]); alias_id = int(parts[3])
-    alias_name = f"(ID: {alias_id})"
+    
+    alias_name = "---"
     try:
         for row in query.message.reply_markup.inline_keyboard:
             if len(row) == 3 and row[2].callback_data == query.data:
                 alias_name = row[0].text; break
-    except Exception as e:
-        logger.warning(f"Could not parse alias name from keyboard for delete: {e}")
+    except Exception: pass
+        
     await state.set_state(CommodityManagement.awaiting_alias_delete_confirm)
-    await state.update_data(alias_to_delete_id=alias_id, alias_to_delete_name=alias_name, commodity_id=commodity_id, list_message_id=query.message.message_id)
-    await query.message.edit_text(f"--- حذف نام مستعار ---\n\n⚠️ آیا از حذف نام مستعار **'{alias_name}'** مطمئن هستید؟", reply_markup=get_alias_delete_confirm_keyboard(commodity_id, alias_id), parse_mode="Markdown")
-    await query.answer()
+    await state.update_data(alias_to_delete_id=alias_id, commodity_id=commodity_id)
+    
+    await query.message.edit_text(
+        f"❌ **حذف نام مستعار**\n\nآیا از حذف **'{alias_name}'** مطمئن هستید؟", 
+        reply_markup=get_alias_delete_confirm_keyboard(commodity_id, alias_id), parse_mode="Markdown"
+    )
 
 @router.callback_query(F.data.startswith("alias_delete_confirm_yes_"), StateFilter(CommodityManagement.awaiting_alias_delete_confirm))
 async def handle_alias_delete_yes(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
     if not user: return
     data = await state.get_data()
     alias_id = data.get("alias_to_delete_id")
-    alias_name = data.get("alias_to_delete_name", f"(ID: {alias_id})")
     commodity_id = data.get("commodity_id")
-    await state.clear()
-    if alias_id is None or commodity_id is None:
-        await query.answer("خطا: ID نام مستعار یا کالا یافت نشد.", show_alert=True)
-        await safe_delete_message(query.bot, query.message.chat.id, query.message.message_id); await show_commodity_list(query.message, user)
-        return
-    parts = query.data.split("_"); button_commodity_id = int(parts[4]); button_alias_id = int(parts[5])
-    if button_alias_id != alias_id or button_commodity_id != commodity_id:
-        await query.answer("خطا: عدم تطابق ID.", show_alert=True)
-        await safe_delete_message(query.bot, query.message.chat.id, query.message.message_id); await show_commodity_list(query.message, user)
-        return
-    await query.answer(f"در حال حذف **'{alias_name}'**...", parse_mode="Markdown")
-    headers = get_auth_headers()
+    
+    status_msg = await query.message.edit_text("⏳ در حال حذف...", reply_markup=None)
+    await update_anchor(state, status_msg.message_id, query.bot, query.message.chat.id)
+    await clear_state_retain_anchor(state)
+    
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.delete(f"{ALIASES_API_URL}{alias_id}", headers=headers)
+            response = await client.delete(f"{ALIASES_API_URL}{alias_id}", headers=get_auth_headers())
             response.raise_for_status()
-        await query.message.answer(f"✅ نام مستعار **'{alias_name}'** با موفقیت حذف شد.", parse_mode="Markdown")
-        await safe_delete_message(query.bot, query.message.chat.id, query.message.message_id)
-        await show_aliases_list(query, user, commodity_id, edit=False)
-    except httpx.HTTPStatusError as e:
-        detail = get_error_detail(e)
-        await query.message.edit_text(f"❌ {detail}\n\nعملیات حذف ناموفق بود.", parse_mode="Markdown")
+        await status_msg.edit_text("✅ حذف شد.")
     except Exception as e:
-        await query.message.edit_text(f"❌ خطای پیش‌بینی نشده: {e}")
+        await status_msg.edit_text(f"❌ خطا: {e}")
+        
+    await asyncio.sleep(1.5)
+    await show_aliases_list(query.bot, query.message.chat.id, user, state, commodity_id)
 
-# === 7. ویرایش نام اصلی کالا (اصلاح شد) ===
 
+# === 6. ویرایش نام اصلی کالا ===
 @router.callback_query(F.data.startswith("comm_edit_name_"), StateFilter(None))
 async def handle_commodity_edit_start(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    """FSM را برای ویرایش نام اصلی کالا آغاز می‌کند."""
     if not user or user.role != UserRole.SUPER_ADMIN: return
     commodity_id = int(query.data.split("_")[-1])
     
-    # === شروع اصلاح: واکشی نام کالا از API ===
-    await query.answer("در حال دریافت اطلاعات کالا...")
-    headers = get_auth_headers()
-    commodity_name = f"(ID: {commodity_id})" # Fallback
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{COMMODITIES_API_URL}{commodity_id}", headers=headers)
-            response.raise_for_status()
-        commodity = response.json()
-        commodity_name = commodity.get('name', commodity_id)
-    except Exception as e:
-        logger.error(f"Could not fetch commodity name for edit: {e}")
-        await query.message.answer(f"خطا در دریافت اطلاعات کالا: {e}")
-        return
-    # === پایان اصلاح ===
-            
     await state.set_state(CommodityManagement.awaiting_commodity_edit_name)
-    await state.update_data(
-        commodity_id=commodity_id,
-        commodity_name=commodity_name,
-        list_message_id=query.message.message_id
-    )
+    await state.update_data(commodity_id=commodity_id)
     
     await query.message.edit_text(
-        f"--- ویرایش نام کالا ---\n\n"
-        f"نام فعلی کالا: **{commodity_name}**\n\n" # <-- نام صحیح نمایش داده می‌شود
-        "لطفاً **نام جدید** را وارد کنید:",
-        reply_markup=get_commodity_fsm_cancel_keyboard(),
-        parse_mode="Markdown"
+        f"✏️ **ویرایش نام کالا**\n\nلطفاً نام جدید کالا را وارد کنید:",
+        reply_markup=get_commodity_fsm_cancel_keyboard(), parse_mode="Markdown"
     )
 
 @router.message(CommodityManagement.awaiting_commodity_edit_name)
 async def handle_commodity_edit_name(message: types.Message, state: FSMContext, user: Optional[User]):
-    """نام جدید کالا را دریافت و API را فراخوانی می‌کند."""
     if not user: return
-    new_commodity_name = message.text
+    await delete_user_message(message)
     
+    new_name = message.text
     data = await state.get_data()
     commodity_id = data.get("commodity_id")
-    old_commodity_name = data.get("commodity_name", f"(ID: {commodity_id})")
-    list_message_id = data.get("list_message_id")
     
-    await state.clear()
-    
-    await message.delete()
-    if list_message_id:
-        await safe_delete_message(message.bot, message.chat.id, list_message_id)
-
-    status_msg = await message.answer(f"در حال ویرایش نام کالا از **'{old_commodity_name}'** به **'{new_commodity_name}'**...", parse_mode="Markdown")
-    
-    headers = get_auth_headers()
-    payload = {"name": new_commodity_name}
+    status_msg = await message.answer(f"⏳ در حال تغییر نام...", parse_mode="Markdown")
+    await update_anchor(state, status_msg.message_id, message.bot, message.chat.id)
+    await clear_state_retain_anchor(state)
     
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.put(f"{COMMODITIES_API_URL}{commodity_id}", json=payload, headers=headers)
+            response = await client.put(f"{COMMODITIES_API_URL}{commodity_id}", json={"name": new_name}, headers=get_auth_headers())
             response.raise_for_status()
-        
-        await status_msg.edit_text(f"✅ نام کالا با موفقیت به **'{new_commodity_name}'** تغییر یافت.", parse_mode="Markdown")
-        await show_commodity_list(message, user) # بازگشت به لیست اصلی
-
-    except httpx.HTTPStatusError as e:
-        # === اصلاح شد: بازگشت به لیست در صورت خطا ===
-        detail = get_error_detail(e)
-        await status_msg.edit_text(f"❌ {detail}\n\nعملیات ویرایش ناموفق بود.", parse_mode="Markdown")
-        await show_commodity_list(message, user) # بازگشت به لیست اصلی
+        await status_msg.edit_text(f"✅ نام کالا تغییر یافت.", parse_mode="Markdown")
     except Exception as e:
-        # === اصلاح شد: بازگشت به لیست در صورت خطا ===
-        await status_msg.edit_text(f"❌ خطای پیش‌بینی نشده: {e}")
-        await show_commodity_list(message, user) # بازگشت به لیست اصلی
-
-
-# === 8. FSM های قدیمی (افزودن/حذف کل کالا) ===
-@router.callback_query(F.data == "comm_fsm_cancel", StateFilter("*"))
-@router.message(F.text == "لغو", StateFilter("*"))
-async def handle_cancel_fsm(event: types.Message | types.CallbackQuery, state: FSMContext, user: Optional[User]):
-    if not user: return
-    current_state = await state.get_state()
-    target_message = event.message if isinstance(event, types.CallbackQuery) else event
-    data = await state.get_data()
-    await state.clear()
-    logger.info(f"Cancel FSM requested. Current state: {current_state}")
-    
-    edit_message_existed = False
-    commodity_id_to_return = None
-    
-    if isinstance(event, types.CallbackQuery):
-        await event.answer("لغو شد")
+        await status_msg.edit_text(f"❌ خطا: {e}", parse_mode="Markdown")
         
-        # === State جدید را به لیست اضافه کنید ===
-        if current_state in (
-            CommodityManagement.awaiting_alias_add_name.state, 
-            CommodityManagement.awaiting_alias_edit_name.state,
-            CommodityManagement.awaiting_alias_delete_confirm.state,
-            CommodityManagement.awaiting_commodity_edit_name.state # <-- اضافه شد
-        ):
-            commodity_id_to_return = data.get("commodity_id")
-        
-        try: 
-            await event.message.edit_text("عملیات لغو شد. در حال بازگشت...")
-            edit_message_existed = True
-        except TelegramBadRequest: 
-             try: await event.message.delete()
-             except TelegramBadRequest: pass
-    
-    elif isinstance(event, types.Message):
-        await event.delete()
-        prompt_message_id = data.get("prompt_message_id")
-        if prompt_message_id:
-            await safe_delete_message(event.bot, event.chat.id, prompt_message_id)
-            
-    if not edit_message_existed:
-         await target_message.answer("عملیات لغو شد.")
+    await asyncio.sleep(1.5)
+    await show_commodity_list(message.bot, message.chat.id, user, state)
 
-    if commodity_id_to_return and isinstance(event, types.CallbackQuery):
-        await show_aliases_list(event, user, commodity_id_to_return, edit=True)
-    else:
-        await show_commodity_list(target_message, user, edit=edit_message_existed)
 
-# --- افزودن کالا (بدون تغییر) ---
+# === 7. افزودن کالا ===
 @router.callback_query(F.data == "comm_add_new", StateFilter(None))
 async def handle_add_start(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
     if not user or user.role != UserRole.SUPER_ADMIN: return
-    logger.info("Starting add commodity flow")
     await state.set_state(CommodityManagement.awaiting_add_name)
-    await state.update_data(prompt_message_id=query.message.message_id) 
-    await query.message.edit_text("--- افزودن کالای جدید ---\n\nلطفاً **نام اصلی** کالا را وارد کنید:", reply_markup=get_commodity_fsm_cancel_keyboard(), parse_mode="Markdown")
-    await query.answer()
+    
+    await query.message.edit_text(
+        "➕ **افزودن کالای جدید**\n\nلطفاً **نام اصلی** کالا را وارد کنید:", 
+        reply_markup=get_commodity_fsm_cancel_keyboard(), parse_mode="Markdown"
+    )
 
 @router.message(CommodityManagement.awaiting_add_name)
 async def handle_add_name(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user: return
-    logger.info(f"Received commodity name: {message.text}")
-    data = await state.get_data()
-    prompt_message_id = data.get("prompt_message_id")
-    await message.delete()
-    if prompt_message_id: await safe_delete_message(message.bot, message.chat.id, prompt_message_id)
-    await state.update_data(name=message.text)
+    await delete_user_message(message)
+    
+    name = message.text.strip()
+    
+    # بررسی تکراری بودن نام
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(COMMODITIES_API_URL, headers=get_auth_headers())
+            response.raise_for_status()
+            all_commodities = response.json()
+            
+            if any(c['name'] == name for c in all_commodities):
+                error_msg = await message.answer(
+                    f"❌ کالایی با نام **'{name}'** قبلاً ثبت شده است.\nلطفاً یک نام **جدید** وارد کنید:",
+                    reply_markup=get_commodity_fsm_cancel_keyboard(),
+                    parse_mode="Markdown"
+                )
+                await update_anchor(state, error_msg.message_id, message.bot, message.chat.id)
+                return
+    except Exception:
+        pass 
+    
+    await state.update_data(name=name)
     await state.set_state(CommodityManagement.awaiting_add_aliases)
-    new_prompt = await message.answer(f"نام کالا: **{message.text}**\n\nحالا **نام‌های مستعار (alias)** را وارد کنید (جدا با `،` یا `-`). اگر ندارد، **ندارد** را ارسال کنید:", reply_markup=get_commodity_fsm_cancel_keyboard(), parse_mode="Markdown")
-    await state.update_data(prompt_message_id=new_prompt.message_id)
+    
+    msg = await message.answer(
+        f"نام کالا: **{name}**\n\nحالا **نام‌های مستعار** را وارد کنید (جدا با `،` یا `-`). اگر ندارد، **ندارد** را ارسال کنید:",
+        reply_markup=get_commodity_fsm_cancel_keyboard(), parse_mode="Markdown"
+    )
+    await update_anchor(state, msg.message_id, message.bot, message.chat.id)
 
 @router.message(CommodityManagement.awaiting_add_aliases)
 async def handle_add_aliases_and_create(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user: return
-    logger.info(f"Received commodity aliases: {message.text}. Creating...")
+    await delete_user_message(message)
+    
     data = await state.get_data()
-    prompt_message_id = data.get("prompt_message_id")
     commodity_name = data.get("name")
-    await message.delete()
-    if prompt_message_id:
-        await safe_delete_message(message.bot, message.chat.id, prompt_message_id)
-    await state.clear()
-    status_msg = await message.answer(f"در حال ثبت کالا **'{commodity_name}'**...", parse_mode="Markdown")
+    
+    status_msg = await message.answer(f"⏳ در حال ثبت کالا...", parse_mode="Markdown")
+    await update_anchor(state, status_msg.message_id, message.bot, message.chat.id)
+    await clear_state_retain_anchor(state)
+    
     aliases_text = message.text.strip()
     final_aliases = [commodity_name.strip()]
     if aliases_text.lower() != "ندارد":
@@ -412,84 +413,75 @@ async def handle_add_aliases_and_create(message: types.Message, state: FSMContex
         for alias in additional_aliases:
             if alias not in final_aliases:
                 final_aliases.append(alias)
-    alias_list = final_aliases
-    payload = {"name": commodity_name, "aliases": alias_list}
-    headers = get_auth_headers()
+    
+    payload = {
+        "commodity_data": {"name": commodity_name},
+        "aliases": final_aliases
+    }
+    
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(COMMODITIES_API_URL, json=payload, headers=headers)
+            response = await client.post(COMMODITIES_API_URL, json=payload, headers=get_auth_headers())
             response.raise_for_status()
-        logger.info(f"Commodity '{commodity_name}' created successfully.")
-        await status_msg.edit_text(f"✅ کالا **'{commodity_name}'** با موفقیت ثبت شد.", parse_mode="Markdown")
+        await status_msg.edit_text(f"✅ کالا **'{commodity_name}'** ثبت شد.", parse_mode="Markdown")
     except httpx.HTTPStatusError as e:
         detail = get_error_detail(e)
-        logger.error(f"API error creating commodity: {detail}"); await status_msg.edit_text(f"❌ {detail}\n\nعملیات ثبت نشد. لطفاً دوباره امتحان کنید.", parse_mode="Markdown")
-    except Exception as e: 
-        logger.exception("Unexpected error creating commodity"); await status_msg.edit_text(f"❌ خطای پیش‌بینی نشده: {e}\n\nعملیات انجام نشد.")
-    await show_commodity_list(message, user)
+        await status_msg.edit_text(f"❌ خطا: {detail}", parse_mode="Markdown")
+    except Exception as e:
+        await status_msg.edit_text(f"❌ خطا: {e}", parse_mode="Markdown")
+    
+    await asyncio.sleep(1.5)
+    await show_commodity_list(message.bot, message.chat.id, user, state)
 
-# --- 9. حذف کل کالا (بدون تغییر) ---
+
+# === 8. حذف کل کالا ===
 @router.callback_query(F.data.startswith("comm_delete_"), StateFilter(None))
 async def handle_delete_confirm(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
     if not user or user.role != UserRole.SUPER_ADMIN: return
     commodity_id = int(query.data.split("_")[-1])
-    logger.info(f"Delete requested for ENTIRE commodity ID: {commodity_id}. Setting state.")
-    await query.answer("در حال دریافت اطلاعات کالا...")
-    headers = get_auth_headers()
-    commodity_name = f"(ID: {commodity_id})"
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{COMMODITIES_API_URL}{commodity_id}", headers=headers)
-            response.raise_for_status()
-        commodity = response.json()
-        commodity_name = commodity.get('name', commodity_id)
-    except Exception as e:
-        logger.error(f"Could not fetch commodity name for delete confirmation: {e}")
-        await query.message.answer(f"خطا در دریافت اطلاعات کالا: {e}")
-        return
+    
     await state.set_state(CommodityManagement.awaiting_delete_confirmation)
-    await state.update_data(commodity_to_delete_id=commodity_id, commodity_to_delete_name=commodity_name, list_message_id=query.message.message_id)
-    logger.info(f"State is now set to: {await state.get_state()}")
-    await query.message.edit_text(f"--- حذف کالا ---\n\n⚠️ **هشدار:** آیا از حذف کامل کالا **'{commodity_name}'** مطمئن هستید؟", reply_markup=get_commodity_delete_confirm_keyboard(commodity_id), parse_mode="Markdown")
+    await state.update_data(commodity_to_delete_id=commodity_id)
+    
+    await query.message.edit_text(
+        f"🗑 **حذف کالا**\n\n⚠️ آیا از حذف کامل این کالا و تمام نام‌های مستعار آن مطمئن هستید؟", 
+        reply_markup=get_commodity_delete_confirm_keyboard(commodity_id), parse_mode="Markdown"
+    )
 
 @router.callback_query(F.data.startswith("comm_delete_confirm_yes_"), StateFilter(CommodityManagement.awaiting_delete_confirmation))
 async def handle_delete_yes(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
     if not user: return
-    logger.info(f"Handling delete confirmation for ENTIRE commodity. Callback data: {query.data}")
     data = await state.get_data()
     commodity_id = data.get("commodity_to_delete_id")
-    commodity_name = data.get("commodity_to_delete_name", f"(ID: {commodity_id})")
-    await state.clear()
-    logger.info("State cleared.")
-    await safe_delete_message(query.bot, query.message.chat.id, query.message.message_id)
-    if commodity_id is None:
-        logger.error("Commodity ID not found in state during delete confirmation.")
-        await query.message.answer("خطا: ID کالا برای حذف یافت نشد.")
-        await show_commodity_list(query.message, user)
-        return
-    button_commodity_id = int(query.data.split("_")[-1])
-    if button_commodity_id != commodity_id:
-        logger.warning(f"Button ID ({button_commodity_id}) mismatch with state ID ({commodity_id}). Aborting.")
-        await query.message.answer("خطا: عدم تطابق ID. لطفاً دوباره امتحان کنید.")
-        await show_commodity_list(query.message, user)
-        return
-    await query.answer(f"در حال حذف کالا **'{commodity_name}'**...", show_alert=False, parse_mode="Markdown")
-    headers = get_auth_headers()
+    
+    status_msg = await query.message.edit_text("⏳ در حال حذف کالا...", reply_markup=None)
+    await update_anchor(state, status_msg.message_id, query.bot, query.message.chat.id)
+    await clear_state_retain_anchor(state)
+    
     try:
-        logger.info(f"Calling DELETE API for commodity ID: {commodity_id}")
         async with httpx.AsyncClient() as client:
-            response = await client.delete(f"{COMMODITIES_API_URL}{commodity_id}", headers=headers)
+            response = await client.delete(f"{COMMODITIES_API_URL}{commodity_id}", headers=get_auth_headers())
             response.raise_for_status()
-        logger.info(f"Commodity ID {commodity_id} deleted successfully via API.")
-        await query.message.answer(f"✅ کالا **'{commodity_name}'** با موفقیت حذف شد.", parse_mode="Markdown")
-    except httpx.HTTPStatusError as e:
-        detail = get_error_detail(e)
-        logger.error(f"API error deleting commodity: {detail}")
-        await query.message.answer(f"❌ {detail}\n\nعملیات حذف ناموفق بود.", parse_mode="Markdown")
-    except TelegramBadRequest as e:
-        logger.warning(f"Telegram error during delete process: {e}")
-        await query.message.answer(f"❌ خطای تلگرام در حین پردازش حذف: {e}")
+        await status_msg.edit_text("✅ کالا حذف شد.")
     except Exception as e:
-        logger.exception("Unexpected error during delete process")
-        await query.message.answer(f"❌ خطای پیش‌بینی نشده: {e}\n\nعملیات انجام نشد.")
-    await show_commodity_list(query.message, user)
+        await status_msg.edit_text(f"❌ خطا: {e}")
+        
+    await asyncio.sleep(1.5)
+    await show_commodity_list(query.bot, query.message.chat.id, user, state)
+
+
+# === لغو عملیات ===
+@router.callback_query(F.data == "comm_fsm_cancel", StateFilter("*"))
+async def handle_cancel_fsm(query: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+    if not user: return
+    data = await state.get_data()
+    commodity_id = data.get("commodity_id")
+    await clear_state_retain_anchor(state)
+    
+    # پیام فعلی را با تاخیر ۳۰ ثانیه پاک کن (توسط update_anchor در توابع بعدی مدیریت می‌شود)
+    # اینجا مستقیماً تابع نمایش را صدا می‌زنیم که پیام جدید می‌سازد و قبلی را پاک می‌کند.
+    
+    if commodity_id:
+        await show_aliases_list(query.bot, query.message.chat.id, user, state, commodity_id)
+    else:
+        await show_commodity_list(query.bot, query.message.chat.id, user, state)
