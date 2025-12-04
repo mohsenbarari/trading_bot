@@ -328,7 +328,7 @@ async function deleteUser() {
               <span>درخواست‌های روزانه:</span> <span>{{ user.max_daily_requests }}</span>
           </div>
           <div v-if="user.limitations_expire_at" class="limit-expiry">
-              <span>انقضا:</span> <span>{{ new Date(user.limitations_expire_at).toLocaleString('fa-IR') }}</span>
+              <span>انقضا:</span> <span>{{ user.limitations_expire_at }}</span>
           </div>
       </div>
 
