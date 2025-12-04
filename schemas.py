@@ -1,9 +1,9 @@
 # trading_bot/schemas.py (کامل و اصلاح شده)
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, field_serializer
 from typing import List, Optional
 from datetime import datetime
-from core.utils import normalize_persian_numerals
+from core.utils import normalize_persian_numerals, to_jalali_str
 from core.enums import UserRole, NotificationLevel, NotificationCategory
 
 # --- Token Schemas ---
@@ -21,7 +21,7 @@ class TokenData(BaseModel):
 class WebAppInitData(BaseModel):
     init_data: str
 
-# --- ۲. اعتبارسنج (validator) اضافه شد ---
+# --- OTP Schemas ---
 class OTPRequest(BaseModel):
     mobile_number: str = Field(..., pattern=r"^09[0-9]{9}$")
 
@@ -38,11 +38,11 @@ class OTPVerify(BaseModel):
     @classmethod
     def normalize_mobile_otp(cls, v):
         return normalize_persian_numerals(v)
-# ---------------------------------------------
-    
+
 # --- AppConfig Schema ---
 class AppConfig(BaseModel):
     bot_username: str
+
 
 # --- User Schemas ---
 class UserBase(BaseModel):
@@ -59,6 +59,7 @@ class UserRead(UserBase):
     id: int
     role: UserRole
     has_bot_access: bool
+    created_at: datetime
     trading_restricted_until: datetime | None = None
     
     # Limitations
@@ -67,6 +68,10 @@ class UserRead(UserBase):
     max_daily_requests: int | None = None
     limitations_expire_at: datetime | None = None
     
+    @field_serializer('created_at', 'trading_restricted_until', 'limitations_expire_at')
+    def serialize_dt(self, dt: datetime | None, _info):
+        return to_jalali_str(dt)
+
     class Config:
         from_attributes = True
 
@@ -102,6 +107,10 @@ class InvitationRead(InvitationBase):
     expires_at: datetime
     created_by_id: int
     
+    @field_serializer('expires_at')
+    def serialize_dt(self, dt: datetime, _info):
+        return to_jalali_str(dt)
+
     class Config:
         from_attributes = True
 
@@ -112,6 +121,10 @@ class NotificationRead(BaseModel):
     created_at: datetime
     level: NotificationLevel     
     category: NotificationCategory
+
+    @field_serializer('created_at')
+    def serialize_dt(self, dt: datetime, _info):
+        return to_jalali_str(dt)
 
     class Config:
         from_attributes = True

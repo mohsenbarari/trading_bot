@@ -77,10 +77,16 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
         user.has_bot_access = update_data['has_bot_access']
     if 'trading_restricted_until' in update_data:
         restricted_until = update_data['trading_restricted_until']
-        if restricted_until is not None and restricted_until.tzinfo is not None:
-             # تبدیل به UTC و حذف اطلاعات منطقه زمانی برای سازگاری با دیتابیس
-             from datetime import timezone
-             restricted_until = restricted_until.astimezone(timezone.utc).replace(tzinfo=None)
+        if restricted_until is not None:
+            import pytz
+            from datetime import timezone
+            if restricted_until.tzinfo is None:
+                # اگر naive است، فرض می‌کنیم تایم ایران است -> تبدیل به UTC
+                iran_tz = pytz.timezone('Asia/Tehran')
+                restricted_until = iran_tz.localize(restricted_until).astimezone(timezone.utc).replace(tzinfo=None)
+            else:
+                # اگر aware است -> تبدیل به UTC
+                restricted_until = restricted_until.astimezone(timezone.utc).replace(tzinfo=None)
         user.trading_restricted_until = restricted_until
     
     # Limitations
@@ -92,9 +98,16 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
         user.max_daily_requests = update_data['max_daily_requests']
     if 'limitations_expire_at' in update_data:
         expire_at = update_data['limitations_expire_at']
-        if expire_at is not None and expire_at.tzinfo is not None:
-             from datetime import timezone
-             expire_at = expire_at.astimezone(timezone.utc).replace(tzinfo=None)
+        if expire_at is not None:
+            import pytz
+            from datetime import timezone
+            if expire_at.tzinfo is None:
+                # اگر naive است، فرض می‌کنیم تایم ایران است -> تبدیل به UTC
+                iran_tz = pytz.timezone('Asia/Tehran')
+                expire_at = iran_tz.localize(expire_at).astimezone(timezone.utc).replace(tzinfo=None)
+            else:
+                # اگر aware است -> تبدیل به UTC
+                expire_at = expire_at.astimezone(timezone.utc).replace(tzinfo=None)
         user.limitations_expire_at = expire_at
         
     await db.commit()

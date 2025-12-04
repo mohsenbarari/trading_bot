@@ -90,3 +90,52 @@ async def create_user_notification(
         print(f"⚠️ Redis Error: {e}")
 
     return new_notif
+
+# --- توابع کمکی تاریخ و زمان (ایران/جلالی) ---
+import jdatetime
+import pytz
+from datetime import datetime
+
+IRAN_TZ = pytz.timezone('Asia/Tehran')
+
+def get_iran_time() -> datetime:
+    """زمان فعلی ایران را برمی‌گرداند."""
+    return datetime.now(IRAN_TZ)
+
+def to_iran_time(dt: datetime) -> datetime:
+    """یک آبجکت datetime را به تایم‌زون ایران تبدیل می‌کند."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        # اگر naive است، فرض می‌کنیم UTC است
+        dt = pytz.utc.localize(dt)
+    return dt.astimezone(IRAN_TZ)
+
+def to_jalali_str(dt: datetime, format: str = "%Y/%m/%d %H:%M") -> str | None:
+    """تاریخ میلادی را به رشته شمسی تبدیل می‌کند."""
+    if dt is None:
+        return None
+    iran_dt = to_iran_time(dt)
+    # حذف timezone info برای سازگاری با jdatetime
+    iran_dt_naive = iran_dt.replace(tzinfo=None)
+    return jdatetime.datetime.fromgregorian(datetime=iran_dt_naive).strftime(format)
+
+def parse_jalali_str(date_str: str) -> datetime | None:
+    """رشته تاریخ شمسی را به datetime میلادی (UTC) تبدیل می‌کند."""
+    if not date_str:
+        return None
+    try:
+        # فرض فرمت: 1403/09/14 12:30
+        # اگر فقط تاریخ باشد، ساعت 00:00 در نظر گرفته می‌شود
+        if " " not in date_str:
+            date_str += " 00:00"
+            
+        j_dt = jdatetime.datetime.strptime(date_str, "%Y/%m/%d %H:%M")
+        # تبدیل به میلادی
+        g_dt = j_dt.togregorian()
+        # تنظیم تایم‌زون ایران
+        g_dt = IRAN_TZ.localize(g_dt)
+        # تبدیل به UTC
+        return g_dt.astimezone(pytz.utc)
+    except Exception:
+        return None
