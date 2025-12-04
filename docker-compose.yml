@@ -11,6 +11,7 @@ services:
       - ./core:/app/core
       - ./models:/app/models
       - ./main.py:/app/main.py
+      - ./schemas.py:/app/schemas.py
     ports:
       - "8000:8000"
     env_file:
@@ -18,7 +19,7 @@ services:
     depends_on:
       migration:
         condition: service_completed_successfully
-      redis:  
+      redis:
         condition: service_started
     networks:
       - trading_net
@@ -42,7 +43,7 @@ services:
     build: .
     container_name: trading_bot_migration
 
-    command: ["python", "manage.py"]
+    command: [ "python", "manage.py" ]
     volumes:
       - .:/app
     env_file:
@@ -68,22 +69,22 @@ services:
     networks:
       - trading_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
       interval: 10s
       timeout: 5s
       retries: 5
 
   adminer:
-      image: adminer
-      container_name: trading_bot_adminer
-      restart: always
-      ports:
-        - "127.0.0.1:8080:8080"
-      networks:
-        - trading_net
-      depends_on:
-        - db
-  redis: 
+    image: adminer
+    container_name: trading_bot_adminer
+    restart: always
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - trading_net
+    depends_on:
+      - db
+  redis:
     image: redis:7-alpine
     container_name: trading_bot_redis
     volumes:
