@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import DatePicker from 'vue3-persian-datetime-picker';
+import moment from 'moment-jalaali';
 
 const props = defineProps<{
   user: any;
@@ -148,8 +150,10 @@ async function blockUserCustom() {
     }
     isLoading.value = true;
     try {
-        const date = new Date(customDate.value);
-        if (isNaN(date.getTime())) {
+        // Parse Jalali date string to ISO
+        const date = moment(customDate.value, 'jYYYY/jMM/jDD HH:mm').utc();
+        
+        if (!date.isValid()) {
              alert('تاریخ نامعتبر است.');
              return;
         }
@@ -191,7 +195,7 @@ async function saveLimitations() {
                  isLoading.value = false;
                  return;
              }
-             expireAt = new Date(customLimitDate.value).toISOString();
+             expireAt = moment(customLimitDate.value, 'jYYYY/jMM/jDD HH:mm').utc().toISOString();
         } else if (limitDurationMinutes.value > 0) {
              const date = new Date();
              date.setMinutes(date.getMinutes() + limitDurationMinutes.value);
@@ -390,7 +394,7 @@ async function deleteUser() {
             
             <div v-else class="custom-date-section">
                 <label>تاریخ و زمان پایان مسدودیت:</label>
-                <input type="datetime-local" v-model="customDate" class="form-select" />
+                <date-picker v-model="customDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" />
                 <div class="action-buttons">
                      <button @click="blockUserCustom" class="save-btn">تایید</button>
                      <button @click="showCustomDateInput = false" class="cancel-btn">بازگشت</button>
@@ -430,7 +434,7 @@ async function deleteUser() {
             
             <div v-if="limitDurationMinutes === -1" class="custom-date-section">
                 <label>تاریخ پایان:</label>
-                <input type="datetime-local" v-model="customLimitDate" class="form-select" />
+                <date-picker v-model="customLimitDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" />
             </div>
 
             <div class="action-buttons">
