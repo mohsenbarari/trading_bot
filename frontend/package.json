@@ -12,9 +12,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "moment-jalaali": "^0.10.4",
     "pinia": "^3.0.3",
     "three": "^0.180.0",
-    "vue": "^3.5.22"
+    "vue": "^3.5.22",
+    "vue3-persian-datetime-picker": "^1.2.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.1",
