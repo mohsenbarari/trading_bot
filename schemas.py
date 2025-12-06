@@ -68,9 +68,17 @@ class UserRead(UserBase):
     max_daily_requests: int | None = None
     limitations_expire_at: datetime | None = None
     
-    @field_serializer('created_at', 'trading_restricted_until', 'limitations_expire_at')
-    def serialize_dt(self, dt: datetime | None, _info):
-        return to_jalali_str(dt)
+    @computed_field
+    def created_at_jalali(self) -> str | None:
+        return to_jalali_str(self.created_at)
+
+    @computed_field
+    def trading_restricted_until_jalali(self) -> str | None:
+        return to_jalali_str(self.trading_restricted_until)
+
+    @computed_field
+    def limitations_expire_at_jalali(self) -> str | None:
+        return to_jalali_str(self.limitations_expire_at)
 
     class Config:
         from_attributes = True
@@ -107,9 +115,9 @@ class InvitationRead(InvitationBase):
     expires_at: datetime
     created_by_id: int
     
-    @field_serializer('expires_at')
-    def serialize_dt(self, dt: datetime, _info):
-        return to_jalali_str(dt)
+    @computed_field
+    def expires_at_jalali(self) -> str | None:
+        return to_jalali_str(self.expires_at)
 
     class Config:
         from_attributes = True
@@ -122,9 +130,9 @@ class NotificationRead(BaseModel):
     level: NotificationLevel     
     category: NotificationCategory
 
-    @field_serializer('created_at')
-    def serialize_dt(self, dt: datetime, _info):
-        return to_jalali_str(dt)
+    @computed_field
+    def created_at_jalali(self) -> str | None:
+        return to_jalali_str(self.created_at)
 
     class Config:
         from_attributes = True

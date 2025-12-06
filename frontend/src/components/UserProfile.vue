@@ -57,7 +57,7 @@ const restrictionText = computed(() => {
   if (!isRestricted.value) return '✅ آزاد';
   const date = new Date(props.user.trading_restricted_until);
   if (date.getFullYear() > 2100) return '⛔ مسدود دائم';
-  return `⛔ تا ${date.toLocaleString('fa-IR')}`;
+  return `⛔ تا ${props.user.trading_restricted_until_jalali}`;
 });
 
 async function saveRole() {
@@ -328,7 +328,7 @@ async function deleteUser() {
               <span>درخواست‌های روزانه:</span> <span>{{ user.max_daily_requests }}</span>
           </div>
           <div v-if="user.limitations_expire_at" class="limit-expiry">
-              <span>انقضا:</span> <span>{{ user.limitations_expire_at }}</span>
+              <span>انقضا:</span> <span>{{ user.limitations_expire_at_jalali }}</span>
           </div>
       </div>
 
