@@ -1,6 +1,6 @@
 # trading_bot/schemas.py (کامل و اصلاح شده)
 
-from pydantic import BaseModel, Field, field_validator, field_serializer
+from pydantic import BaseModel, Field, field_validator, field_serializer, computed_field
 from typing import List, Optional
 from datetime import datetime
 from core.utils import normalize_persian_numerals, to_jalali_str
