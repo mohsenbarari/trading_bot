@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from core.db import AsyncSessionLocal
 from models.user import User
 from core.enums import UserRole
-from core.utils import normalize_account_name, normalize_persian_numerals
+from core.utils import normalize_account_name, normalize_persian_numerals, to_jalali_str
 from bot.keyboards import (
     get_users_management_keyboard, 
     get_admin_panel_keyboard, 
@@ -120,36 +120,38 @@ async def show_users_list(bot: Bot, chat_id: int, state: FSMContext, page: int, 
 
 
 async def get_user_profile_text(target_user: User) -> str:
-    join_date = "نامشخص"
-    if target_user.created_at:
-        try:
-            iran_tz = pytz.timezone('Asia/Tehran')
-            iran_time = target_user.created_at.astimezone(iran_tz)
-            jalali_date = jdatetime.datetime.fromgregorian(datetime=iran_time)
-            join_date = jalali_date.strftime("%Y/%m/%d - %H:%M")
-        except Exception:
-            join_date = target_user.created_at.strftime("%Y-%m-%d %H:%M") + " (UTC)"
+    # استفاده از تابع کمکی to_jalali_str برای تبدیل تاریخ
+    join_date = to_jalali_str(target_user.created_at, "%Y/%m/%d - %H:%M") if target_user.created_at else "نامشخص"
 
     restriction_text = "✅ آزاد"
     if target_user.trading_restricted_until:
         # فرض بر این است که زمان در دیتابیس به صورت UTC ذخیره شده است (naive)
         # برای مقایسه، از datetime.utcnow() استفاده می‌کنیم که naive است.
         if target_user.trading_restricted_until > datetime.utcnow():
-            try:
-                iran_tz = pytz.timezone('Asia/Tehran')
-                # تبدیل زمان naive (که UTC است) به aware
-                utc_time = target_user.trading_restricted_until.replace(tzinfo=pytz.utc)
-                iran_time = utc_time.astimezone(iran_tz)
-                jalali_date = jdatetime.datetime.fromgregorian(datetime=iran_time)
-                
-                if target_user.trading_restricted_until.year > 2100:
-                     restriction_text = "⛔ مسدود دائم"
-                else:
-                    restriction_text = f"⛔ تا {jalali_date.strftime('%Y/%m/%d - %H:%M')}"
-            except Exception:
-                 restriction_text = "⛔ مسدود"
+            if target_user.trading_restricted_until.year > 2100:
+                restriction_text = "⛔ مسدود دائم"
+            else:
+                jalali_str = to_jalali_str(target_user.trading_restricted_until, "%Y/%m/%d - %H:%M")
+                restriction_text = f"⛔ تا {jalali_str}"
         else:
-             restriction_text = "✅ آزاد (منقضی شده)"
+            restriction_text = "✅ آزاد (منقضی شده)"
+    
+    # نمایش محدودیت‌ها
+    limitations_text = ""
+    if target_user.max_daily_trades or target_user.max_active_commodities or target_user.max_daily_requests:
+        limitations_parts = []
+        if target_user.max_daily_trades:
+            limitations_parts.append(f"معاملات روزانه: {target_user.max_daily_trades}")
+        if target_user.max_active_commodities:
+            limitations_parts.append(f"کالاهای فعال: {target_user.max_active_commodities}")
+        if target_user.max_daily_requests:
+            limitations_parts.append(f"درخواست‌های روزانه: {target_user.max_daily_requests}")
+        
+        limitations_text = "\n⚠️ **محدودیت‌های فعال:**\n" + "\n".join([f"   • {part}" for part in limitations_parts])
+        
+        if target_user.limitations_expire_at:
+            expire_str = to_jalali_str(target_user.limitations_expire_at, "%Y/%m/%d - %H:%M")
+            limitations_text += f"\n   📅 انقضا: {expire_str}"
 
     profile_text = (
         f"👤 **پروفایل کاربر**\n"
@@ -160,6 +162,7 @@ async def get_user_profile_text(target_user: User) -> str:
         f"🤖 **دسترسی بات:** {'✅ فعال' if target_user.has_bot_access else '❌ غیرفعال'}\n"
         f"🔒 **وضعیت حساب:** {restriction_text}\n"
         f"📅 **تاریخ عضویت:** {join_date}\n"
+        f"{limitations_text}"
     )
     return profile_text
 
