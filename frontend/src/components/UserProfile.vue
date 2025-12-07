@@ -295,23 +295,6 @@ async function deleteUser() {
     isLoading.value = false;
   }
 }
-const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-
-
-onMounted(() => {
-  // Monkey-patch scrollIntoView to prevent page jump on mobile when datepicker tries to center items
-  HTMLElement.prototype.scrollIntoView = function(arg?: boolean | ScrollIntoViewOptions) {
-    // AGGRESSIVE FIX: usage inside the datepicker is strictly forbidden to touch scroll
-    if (this.classList.contains('vpd-selected') || this.closest('.vpd-wrapper')) {
-      return; // Do nothing. Do not pass Go. Do not scroll page.
-    }
-    return originalScrollIntoView.apply(this, arguments as any);
-  };
-});
-
-onUnmounted(() => {
-  HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-});
 </script>
 
 <template>
@@ -421,29 +404,32 @@ onUnmounted(() => {
                 <div 
                     id="block-date-input" 
                     class="form-select pointer-cursor"
-                    style="-webkit-tap-highlight-color: transparent; user-select: none;"
-                    tabindex="-1"
-                    @click.stop.prevent="blockDatePicker.visible = true"
+                    @click="showBlockDateModal = true"
                 >
                     {{ customDate || 'انتخاب تاریخ...' }}
                 </div>
-                <date-picker 
-                    ref="blockDatePicker"
-                    v-model="customDate" 
-                    class="hidden-picker"
-                    type="datetime" 
-                    format="jYYYY/jMM/jDD HH:mm" 
-                    display-format="jYYYY/jMM/jDD HH:mm" 
-                    :editable="false" 
-                    :auto-submit="false" 
-                    append-to="body"
-                >
-                    <template #submit-btn="{ submit }">
-                        <button type="button" class="vpd-submit-btn" @click.stop.prevent="submit">✔️ تایید</button>
-                    </template>
-                </date-picker>
+                
+                <!-- Custom Inline Date Picker Modal -->
+                <div v-if="showBlockDateModal" class="modal-overlay" style="z-index: 2000;">
+                    <div class="modal-content date-modal-content">
+                        <h3>📅 انتخاب تاریخ</h3>
+                        <date-picker 
+                            v-model="customDate" 
+                            type="datetime" 
+                            format="jYYYY/jMM/jDD HH:mm" 
+                            display-format="jYYYY/jMM/jDD HH:mm" 
+                            :inline="true"
+                            :auto-submit="true"
+                        />
+                        <div class="action-buttons" style="margin-top: 20px;">
+                             <button @click="showBlockDateModal = false" class="save-btn">تایید</button>
+                             <button @click="showBlockDateModal = false; customDate = ''" class="cancel-btn">پاک کردن</button>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="action-buttons">
-                     <button @click="blockUserCustom" class="save-btn">تایید</button>
+                     <button @click="blockUserCustom" class="save-btn">تایید نهایی</button>
                      <button @click="showCustomDateInput = false" class="cancel-btn">بازگشت</button>
                 </div>
             </div>
@@ -484,27 +470,29 @@ onUnmounted(() => {
                 <div 
                     id="limit-date-input" 
                     class="form-select pointer-cursor"
-                    style="-webkit-tap-highlight-color: transparent; user-select: none;"
-                    tabindex="-1"
-                    @click.stop.prevent="limitDatePicker.visible = true"
+                    @click="showLimitDateModal = true"
                 >
                     {{ customLimitDate || 'انتخاب تاریخ...' }}
                 </div>
-                <date-picker 
-                    ref="limitDatePicker"
-                    v-model="customLimitDate" 
-                    class="hidden-picker"
-                    type="datetime" 
-                    format="jYYYY/jMM/jDD HH:mm" 
-                    display-format="jYYYY/jMM/jDD HH:mm" 
-                    :editable="false" 
-                    :auto-submit="false" 
-                    append-to="body"
-                >
-                    <template #submit-btn="{ submit }">
-                        <button type="button" class="vpd-submit-btn" @click.stop.prevent="submit">✔️ تایید</button>
-                    </template>
-                </date-picker>
+
+                <!-- Custom Inline Date Picker Modal -->
+                <div v-if="showLimitDateModal" class="modal-overlay" style="z-index: 2000;">
+                    <div class="modal-content date-modal-content">
+                        <h3>📅 انتخاب تاریخ</h3>
+                        <date-picker 
+                            v-model="customLimitDate" 
+                            type="datetime" 
+                            format="jYYYY/jMM/jDD HH:mm" 
+                            display-format="jYYYY/jMM/jDD HH:mm" 
+                            :inline="true"
+                            :auto-submit="true"
+                        />
+                        <div class="action-buttons" style="margin-top: 20px;">
+                             <button @click="showLimitDateModal = false" class="save-btn">تایید</button>
+                             <button @click="showLimitDateModal = false; customLimitDate = ''" class="cancel-btn">پاک کردن</button>
+                        </div>
+                    </div>
+                </div>
             </div>
             
             <div class="action-buttons">
@@ -559,14 +547,15 @@ onUnmounted(() => {
     position: relative !important;
 }
 
-.hidden-picker .vpd-input-group {
-    display: none !important;
-    position: absolute !important;
-    visibility: hidden !important;
-    pointer-events: none !important;
-    width: 0 !important;
-    height: 0 !important;
-    overflow: hidden !important;
+.date-modal-content {
+    max-width: 350px !important;
+    padding: 10px !important;
+}
+
+/* Ensure inline picker fits */
+.vpd-main {
+    box-shadow: none !important;
+    border: none !important;
 }
 </style>
 
