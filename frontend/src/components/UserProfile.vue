@@ -395,7 +395,25 @@ async function deleteUser() {
             
             <div v-else class="custom-date-section">
                 <label>تاریخ و زمان پایان مسدودیت:</label>
-                <date-picker v-model="customDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" :editable="false" :input-attrs="{ readonly: true, inputmode: 'none', type: 'button' }" :auto-submit="false" append-to="body">
+                <input 
+                    id="block-date-input" 
+                    type="text" 
+                    class="form-select" 
+                    :value="customDate" 
+                    readonly 
+                    inputmode="none" 
+                    placeholder="انتخاب تاریخ..." 
+                />
+                <date-picker 
+                    v-model="customDate" 
+                    custom-input="#block-date-input"
+                    type="datetime" 
+                    format="jYYYY/jMM/jDD HH:mm" 
+                    display-format="jYYYY/jMM/jDD HH:mm" 
+                    :editable="false" 
+                    :auto-submit="false" 
+                    append-to="body"
+                >
                     <template #submit-btn="{ submit }">
                         <button class="vpd-submit-btn" @click="submit">✔️ تایید</button>
                     </template>
@@ -439,7 +457,25 @@ async function deleteUser() {
             
             <div v-if="limitDurationMinutes === -1" class="custom-date-section">
                 <label>تاریخ پایان:</label>
-                <date-picker v-model="customLimitDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" :editable="false" :input-attrs="{ readonly: true, inputmode: 'none', type: 'button' }" :auto-submit="false" append-to="body">
+                <input 
+                    id="limit-date-input" 
+                    type="text" 
+                    class="form-select" 
+                    :value="customLimitDate" 
+                    readonly 
+                    inputmode="none" 
+                    placeholder="انتخاب تاریخ..." 
+                />
+                <date-picker 
+                    v-model="customLimitDate" 
+                    custom-input="#limit-date-input"
+                    type="datetime" 
+                    format="jYYYY/jMM/jDD HH:mm" 
+                    display-format="jYYYY/jMM/jDD HH:mm" 
+                    :editable="false" 
+                    :auto-submit="false" 
+                    append-to="body"
+                >
                     <template #submit-btn="{ submit }">
                         <button class="vpd-submit-btn" @click="submit">✔️ تایید</button>
                     </template>
