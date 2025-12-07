@@ -610,6 +610,7 @@ h2 {
   padding: 10px;
   border-radius: 8px;
   border: 1px solid #ddd;
+  background-color: #fff;
   font-family: inherit;
   font-size: 14px;
   width: 100%; /* Ensure full width for inputs */
