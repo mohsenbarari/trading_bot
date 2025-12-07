@@ -52,12 +52,14 @@ const customDate = ref('');
 
 const isRestricted = computed(() => {
   if (!props.user.trading_restricted_until) return false;
-  return new Date(props.user.trading_restricted_until) > new Date();
+  // Backend returns naive UTC string (e.g., "2023-01-01T12:00:00").
+  // Append 'Z' to force browser to interpret it as UTC.
+  return new Date(props.user.trading_restricted_until + 'Z') > new Date();
 });
 
 const restrictionText = computed(() => {
   if (!isRestricted.value) return '✅ آزاد';
-  const date = new Date(props.user.trading_restricted_until);
+  const date = new Date(props.user.trading_restricted_until + 'Z');
   if (date.getFullYear() > 2100) return '⛔ مسدود دائم';
   return `⛔ تا ${props.user.trading_restricted_until_jalali}`;
 });
@@ -180,7 +182,6 @@ async function sendBlockRequest(restrictedUntil: string) {
     Object.assign(props.user, updatedUser);
     showBlockModal.value = false;
     showCustomDateInput.value = false;
-    alert('کاربر مسدود شد.');
     alert('کاربر مسدود شد.');
 }
 
@@ -394,7 +395,7 @@ async function deleteUser() {
             
             <div v-else class="custom-date-section">
                 <label>تاریخ و زمان پایان مسدودیت:</label>
-                <date-picker v-model="customDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" />
+                <date-picker v-model="customDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" :auto-submit="true" append-to="body" />
                 <div class="action-buttons">
                      <button @click="blockUserCustom" class="save-btn">تایید</button>
                      <button @click="showCustomDateInput = false" class="cancel-btn">بازگشت</button>
@@ -434,7 +435,7 @@ async function deleteUser() {
             
             <div v-if="limitDurationMinutes === -1" class="custom-date-section">
                 <label>تاریخ پایان:</label>
-                <date-picker v-model="customLimitDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" />
+                <date-picker v-model="customLimitDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" :auto-submit="true" append-to="body" />
             </div>
 
             <div class="action-buttons">
