@@ -461,10 +461,20 @@ async function deleteUser() {
 .vpd-actions {
     display: flex !important;
     justify-content: space-between !important;
+    position: absolute !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    z-index: 1000 !important;
+    background: #fff !important;
+    border-top: 1px solid #eee !important;
+    padding: 0 10px !important;
     min-height: 40px !important;
-    padding: 10px !important;
-    background: #fff;
-    border-top: 1px solid #eee;
+}
+
+.vpd-content {
+    padding-bottom: 40px !important; /* Space for the footer */
+    position: relative !important;
 }
 </style>
 
