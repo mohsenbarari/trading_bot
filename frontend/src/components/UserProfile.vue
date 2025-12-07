@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import DatePicker from 'vue3-persian-datetime-picker';
 import moment from 'moment-jalaali';
 
 const props = defineProps<{
@@ -11,9 +10,6 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits(['navigate']);
-
-const blockDatePicker = ref();
-const limitDatePicker = ref();
 
 const isEditingRole = ref(false);
 const showSettings = ref(false);
@@ -31,6 +27,62 @@ const showLimitDateModal = ref(false);
 const customLimitDate = ref('');
 const selectedRole = ref(props.user?.role || 'تماشا');
 const hasBotAccess = ref(props.user?.has_bot_access ?? true);
+
+// --- Native Date Picker Logic ---
+const jalaliMonths = [
+    'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
+    'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'
+];
+const years = computed(() => {
+    const currentYear = moment().jYear();
+    const list = [];
+    for (let i = currentYear; i <= currentYear + 10; i++) list.push(i);
+    return list;
+});
+const days = Array.from({ length: 31 }, (_, i) => i + 1);
+const hours = Array.from({ length: 24 }, (_, i) => i);
+const minutes = Array.from({ length: 60 }, (_, i) => i);
+
+const pYear = ref(1403);
+const pMonth = ref(1);
+const pDay = ref(1);
+const pHour = ref(12);
+const pMinute = ref(0);
+
+function initDatePicker(currentValue: string) {
+    const now = moment();
+    let m = now;
+    
+    if (currentValue) {
+        m = moment(currentValue, 'jYYYY/jMM/jDD HH:mm');
+        if (!m.isValid()) m = now;
+    }
+
+    pYear.value = m.jYear();
+    pMonth.value = m.jMonth() + 1; // 0-indexed
+    pDay.value = m.jDate();
+    pHour.value = m.hour();
+    pMinute.value = m.minute();
+}
+
+function saveDateSelection(target: 'block' | 'limit') {
+    // Format: 1403/05/21 15:30
+    const y = pYear.value;
+    const mo = String(pMonth.value).padStart(2, '0');
+    const d = String(pDay.value).padStart(2, '0');
+    const h = String(pHour.value).padStart(2, '0');
+    const mi = String(pMinute.value).padStart(2, '0');
+    
+    const finalDate = `${y}/${mo}/${d} ${h}:${mi}`;
+    
+    if (target === 'block') {
+        customDate.value = finalDate;
+        showBlockDateModal.value = false;
+    } else {
+        customLimitDate.value = finalDate;
+        showLimitDateModal.value = false;
+    }
+}
 
 const roles = [
   { value: 'تماشا', label: 'تماشا' },
@@ -251,22 +303,7 @@ function openLimitationsModal() {
     showLimitationsModal.value = true;
 }
 
-const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
 
-onMounted(() => {
-  // Monkey-patch scrollIntoView to prevent page jump on mobile when datepicker tries to center items
-  HTMLElement.prototype.scrollIntoView = function(arg?: boolean | ScrollIntoViewOptions) {
-    // AGGRESSIVE FIX: usage inside the datepicker is strictly forbidden to touch scroll
-    if (this.classList.contains('vpd-selected') || this.closest('.vpd-wrapper') || this.closest('.vpd-container')) {
-      return; // Do nothing. Do not pass Go. Do not scroll page.
-    }
-    return originalScrollIntoView.apply(this, arguments as any);
-  };
-});
-
-onUnmounted(() => {
-  HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-});
 
 async function unblockUser() {
   if (!confirm('آیا از رفع مسدودیت اطمینان دارید؟')) return;
@@ -427,53 +464,7 @@ async function deleteUser() {
                     {{ customDate || 'انتخاب تاریخ...' }}
                 </div>
                 
-                <!-- Native Dropdown Modal -->
-                <div v-if="showBlockDateModal" class="modal-overlay" style="z-index: 2000;">
-                    <div class="modal-content date-modal-content">
-                        <h3>📅 انتخاب تاریخ</h3>
-                        
-                        <div class="date-columns">
-                            <div class="date-col">
-                                <label>سال</label>
-                                <select v-model="pYear" class="native-select">
-                                    <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
-                                </select>
-                            </div>
-                            <div class="date-col">
-                                <label>ماه</label>
-                                <select v-model="pMonth" class="native-select">
-                                    <option v-for="(m, i) in jalaliMonths" :key="i" :value="i+1">{{ m }}</option>
-                                </select>
-                            </div>
-                            <div class="date-col">
-                                <label>روز</label>
-                                <select v-model="pDay" class="native-select">
-                                    <option v-for="d in days" :key="d" :value="d">{{ d }}</option>
-                                </select>
-                            </div>
-                        </div>
 
-                        <div class="date-columns" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
-                            <div class="date-col">
-                                <label>ساعت</label>
-                                <select v-model="pHour" class="native-select">
-                                    <option v-for="h in hours" :key="h" :value="h">{{ String(h).padStart(2, '0') }}</option>
-                                </select>
-                            </div>
-                            <div class="date-col">
-                                <label>دقیقه</label>
-                                <select v-model="pMinute" class="native-select">
-                                    <option v-for="m in minutes" :key="m" :value="m">{{ String(m).padStart(2, '0') }}</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="action-buttons" style="margin-top: 20px;">
-                             <button @click="saveDateSelection('block')" class="save-btn">تایید</button>
-                             <button @click="showBlockDateModal = false" class="cancel-btn">لغو</button>
-                        </div>
-                    </div>
-                </div>
 
                 <div class="action-buttons">
                      <button @click="blockUserCustom" class="save-btn">تایید نهایی</button>
@@ -521,53 +512,7 @@ async function deleteUser() {
                     {{ customLimitDate || 'انتخاب تاریخ...' }}
                 </div>
 
-                <!-- Native Dropdown Modal -->
-                <div v-if="showLimitDateModal" class="modal-overlay" style="z-index: 2000;">
-                    <div class="modal-content date-modal-content">
-                        <h3>📅 انتخاب تاریخ</h3>
-                        
-                        <div class="date-columns">
-                            <div class="date-col">
-                                <label>سال</label>
-                                <select v-model="pYear" class="native-select">
-                                    <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
-                                </select>
-                            </div>
-                            <div class="date-col">
-                                <label>ماه</label>
-                                <select v-model="pMonth" class="native-select">
-                                    <option v-for="(m, i) in jalaliMonths" :key="i" :value="i+1">{{ m }}</option>
-                                </select>
-                            </div>
-                            <div class="date-col">
-                                <label>روز</label>
-                                <select v-model="pDay" class="native-select">
-                                    <option v-for="d in days" :key="d" :value="d">{{ d }}</option>
-                                </select>
-                            </div>
-                        </div>
 
-                        <div class="date-columns" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
-                            <div class="date-col">
-                                <label>ساعت</label>
-                                <select v-model="pHour" class="native-select">
-                                    <option v-for="h in hours" :key="h" :value="h">{{ String(h).padStart(2, '0') }}</option>
-                                </select>
-                            </div>
-                            <div class="date-col">
-                                <label>دقیقه</label>
-                                <select v-model="pMinute" class="native-select">
-                                    <option v-for="m in minutes" :key="m" :value="m">{{ String(m).padStart(2, '0') }}</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="action-buttons" style="margin-top: 20px;">
-                             <button @click="saveDateSelection('limit')" class="save-btn">تایید</button>
-                             <button @click="showLimitDateModal = false" class="cancel-btn">لغو</button>
-                        </div>
-                    </div>
-                </div>
             </div>
             
             <div class="action-buttons">
@@ -586,6 +531,102 @@ async function deleteUser() {
         </button>
     </template>
   </div>
+
+    <!-- Moved Block Date Modal -->
+    <div v-if="showBlockDateModal" class="modal-overlay" style="z-index: 2010;">
+        <div class="modal-content date-modal-content">
+            <h3>📅 انتخاب تاریخ</h3>
+            
+            <div class="date-columns">
+                <div class="date-col">
+                    <label>سال</label>
+                    <select v-model="pYear" class="native-select">
+                        <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
+                    </select>
+                </div>
+                <div class="date-col">
+                    <label>ماه</label>
+                    <select v-model="pMonth" class="native-select">
+                        <option v-for="(m, i) in jalaliMonths" :key="i" :value="i+1">{{ m }}</option>
+                    </select>
+                </div>
+                <div class="date-col">
+                    <label>روز</label>
+                    <select v-model="pDay" class="native-select">
+                        <option v-for="d in days" :key="d" :value="d">{{ d }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="date-columns" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
+                <div class="date-col">
+                    <label>ساعت</label>
+                    <select v-model="pHour" class="native-select">
+                        <option v-for="h in hours" :key="h" :value="h">{{ String(h).padStart(2, '0') }}</option>
+                    </select>
+                </div>
+                <div class="date-col">
+                    <label>دقیقه</label>
+                    <select v-model="pMinute" class="native-select">
+                        <option v-for="m in minutes" :key="m" :value="m">{{ String(m).padStart(2, '0') }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="action-buttons" style="margin-top: 20px;">
+                 <button @click="saveDateSelection('block')" class="save-btn">تایید</button>
+                 <button @click="showBlockDateModal = false" class="cancel-btn">لغو</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Moved Limit Date Modal -->
+    <div v-if="showLimitDateModal" class="modal-overlay" style="z-index: 2010;">
+        <div class="modal-content date-modal-content">
+            <h3>📅 انتخاب تاریخ</h3>
+            
+            <div class="date-columns">
+                <div class="date-col">
+                    <label>سال</label>
+                    <select v-model="pYear" class="native-select">
+                        <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
+                    </select>
+                </div>
+                <div class="date-col">
+                    <label>ماه</label>
+                    <select v-model="pMonth" class="native-select">
+                        <option v-for="(m, i) in jalaliMonths" :key="i" :value="i+1">{{ m }}</option>
+                    </select>
+                </div>
+                <div class="date-col">
+                    <label>روز</label>
+                    <select v-model="pDay" class="native-select">
+                        <option v-for="d in days" :key="d" :value="d">{{ d }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="date-columns" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
+                <div class="date-col">
+                    <label>ساعت</label>
+                    <select v-model="pHour" class="native-select">
+                        <option v-for="h in hours" :key="h" :value="h">{{ String(h).padStart(2, '0') }}</option>
+                    </select>
+                </div>
+                <div class="date-col">
+                    <label>دقیقه</label>
+                    <select v-model="pMinute" class="native-select">
+                        <option v-for="m in minutes" :key="m" :value="m">{{ String(m).padStart(2, '0') }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="action-buttons" style="margin-top: 20px;">
+                 <button @click="saveDateSelection('limit')" class="save-btn">تایید</button>
+                 <button @click="showLimitDateModal = false" class="cancel-btn">لغو</button>
+            </div>
+        </div>
+    </div>
 </template>
 
 <style>
