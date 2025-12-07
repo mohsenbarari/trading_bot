@@ -395,15 +395,12 @@ async function deleteUser() {
             
             <div v-else class="custom-date-section">
                 <label>تاریخ و زمان پایان مسدودیت:</label>
-                <input 
+                <div 
                     id="block-date-input" 
-                    type="text" 
-                    class="form-select" 
-                    :value="customDate" 
-                    readonly 
-                    inputmode="none" 
-                    placeholder="انتخاب تاریخ..." 
-                />
+                    class="form-select pointer-cursor"
+                >
+                    {{ customDate || 'انتخاب تاریخ...' }}
+                </div>
                 <date-picker 
                     v-model="customDate" 
                     custom-input="#block-date-input"
@@ -457,15 +454,12 @@ async function deleteUser() {
             
             <div v-if="limitDurationMinutes === -1" class="custom-date-section">
                 <label>تاریخ پایان:</label>
-                <input 
+                <div 
                     id="limit-date-input" 
-                    type="text" 
-                    class="form-select" 
-                    :value="customLimitDate" 
-                    readonly 
-                    inputmode="none" 
-                    placeholder="انتخاب تاریخ..." 
-                />
+                    class="form-select pointer-cursor"
+                >
+                    {{ customLimitDate || 'انتخاب تاریخ...' }}
+                </div>
                 <date-picker 
                     v-model="customLimitDate" 
                     custom-input="#limit-date-input"
@@ -602,6 +596,10 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.pointer-cursor {
+    cursor: pointer;
 }
 .form-group label {
   font-size: 13px;
