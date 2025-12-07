@@ -297,16 +297,13 @@ async function deleteUser() {
 }
 const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
 
+
 onMounted(() => {
   // Monkey-patch scrollIntoView to prevent page jump on mobile when datepicker tries to center items
   HTMLElement.prototype.scrollIntoView = function(arg?: boolean | ScrollIntoViewOptions) {
+    // AGGRESSIVE FIX: usage inside the datepicker is strictly forbidden to touch scroll
     if (this.classList.contains('vpd-selected') || this.closest('.vpd-wrapper')) {
-      const parent = this.parentElement;
-      if (parent) {
-         // Manual soft scroll to center
-         parent.scrollTop = this.offsetTop - parent.clientHeight / 2 + this.clientHeight / 2;
-      }
-      return;
+      return; // Do nothing. Do not pass Go. Do not scroll page.
     }
     return originalScrollIntoView.apply(this, arguments as any);
   };
@@ -424,6 +421,8 @@ onUnmounted(() => {
                 <div 
                     id="block-date-input" 
                     class="form-select pointer-cursor"
+                    style="-webkit-tap-highlight-color: transparent; user-select: none;"
+                    tabindex="-1"
                     @click.stop.prevent="blockDatePicker.visible = true"
                 >
                     {{ customDate || 'انتخاب تاریخ...' }}
@@ -485,6 +484,8 @@ onUnmounted(() => {
                 <div 
                     id="limit-date-input" 
                     class="form-select pointer-cursor"
+                    style="-webkit-tap-highlight-color: transparent; user-select: none;"
+                    tabindex="-1"
                     @click.stop.prevent="limitDatePicker.visible = true"
                 >
                     {{ customLimitDate || 'انتخاب تاریخ...' }}
