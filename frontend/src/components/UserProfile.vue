@@ -119,6 +119,7 @@ async function blockUser(minutes: number) {
   if (!props.apiBaseUrl || !props.jwtToken) return;
 
   if (minutes === -1) {
+      customDate.value = ''; // Reset custom date
       showCustomDateInput.value = true;
       return;
   }
@@ -241,6 +242,7 @@ function openLimitationsModal() {
     limitMaxRequests.value = props.user.max_daily_requests;
     // We don't easily know the duration from expire_at, so reset duration to default
     limitDurationMinutes.value = 0; 
+    customLimitDate.value = ''; // Reset custom date
     showLimitationsModal.value = true;
 }
 
@@ -261,6 +263,7 @@ async function unblockUser() {
     if (!response.ok) throw new Error('خطا در رفع مسدودیت');
     const updatedUser = await response.json();
     Object.assign(props.user, updatedUser);
+    customDate.value = ''; // Reset custom date
     alert('رفع مسدودیت انجام شد.');
   } catch (e) {
     alert('خطا در انجام عملیات');
