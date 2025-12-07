@@ -27,6 +27,7 @@ const limitMaxCommodities = ref<number | null>(null);
 const limitMaxRequests = ref<number | null>(null);
 const limitDurationMinutes = ref(0); // 0 = Unlimited
 const showCustomLimitDateInput = ref(false);
+const showLimitDateModal = ref(false);
 const customLimitDate = ref('');
 const selectedRole = ref(props.user?.role || 'تماشا');
 const hasBotAccess = ref(props.user?.has_bot_access ?? true);
@@ -51,6 +52,7 @@ const blockDurations = [
 ];
 
 const showCustomDateInput = ref(false);
+const showBlockDateModal = ref(false);
 const customDate = ref('');
 
 const isRestricted = computed(() => {
@@ -248,6 +250,23 @@ function openLimitationsModal() {
     customLimitDate.value = ''; // Reset custom date
     showLimitationsModal.value = true;
 }
+
+const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+
+onMounted(() => {
+  // Monkey-patch scrollIntoView to prevent page jump on mobile when datepicker tries to center items
+  HTMLElement.prototype.scrollIntoView = function(arg?: boolean | ScrollIntoViewOptions) {
+    // AGGRESSIVE FIX: usage inside the datepicker is strictly forbidden to touch scroll
+    if (this.classList.contains('vpd-selected') || this.closest('.vpd-wrapper') || this.closest('.vpd-container')) {
+      return; // Do nothing. Do not pass Go. Do not scroll page.
+    }
+    return originalScrollIntoView.apply(this, arguments as any);
+  };
+});
+
+onUnmounted(() => {
+  HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+});
 
 async function unblockUser() {
   if (!confirm('آیا از رفع مسدودیت اطمینان دارید؟')) return;
