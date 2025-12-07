@@ -12,6 +12,9 @@ const props = defineProps<{
 
 const emit = defineEmits(['navigate']);
 
+const blockDatePicker = ref();
+const limitDatePicker = ref();
+
 const isEditingRole = ref(false);
 const showSettings = ref(false);
 const showBlockModal = ref(false);
@@ -401,12 +404,14 @@ async function deleteUser() {
                 <div 
                     id="block-date-input" 
                     class="form-select pointer-cursor"
+                    @click="blockDatePicker.visible = true"
                 >
                     {{ customDate || 'انتخاب تاریخ...' }}
                 </div>
                 <date-picker 
+                    ref="blockDatePicker"
                     v-model="customDate" 
-                    custom-input="#block-date-input"
+                    class="hidden-picker"
                     type="datetime" 
                     format="jYYYY/jMM/jDD HH:mm" 
                     display-format="jYYYY/jMM/jDD HH:mm" 
@@ -460,12 +465,14 @@ async function deleteUser() {
                 <div 
                     id="limit-date-input" 
                     class="form-select pointer-cursor"
+                    @click="limitDatePicker.visible = true"
                 >
                     {{ customLimitDate || 'انتخاب تاریخ...' }}
                 </div>
                 <date-picker 
+                    ref="limitDatePicker"
                     v-model="customLimitDate" 
-                    custom-input="#limit-date-input"
+                    class="hidden-picker"
                     type="datetime" 
                     format="jYYYY/jMM/jDD HH:mm" 
                     display-format="jYYYY/jMM/jDD HH:mm" 
@@ -529,6 +536,10 @@ async function deleteUser() {
 .vpd-content {
     padding-bottom: 40px !important; /* Space for the footer */
     position: relative !important;
+}
+
+.hidden-picker .vpd-input-group {
+    display: none !important;
 }
 </style>
 
