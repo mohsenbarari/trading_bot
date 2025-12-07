@@ -422,26 +422,55 @@ async function deleteUser() {
                 <label>تاریخ و زمان پایان مسدودیت:</label>
                 <div 
                     class="custom-date-trigger"
-                    @click="showBlockDateModal = true"
+                    @click="initDatePicker(customDate); showBlockDateModal = true"
                 >
                     {{ customDate || 'انتخاب تاریخ...' }}
                 </div>
                 
-                <!-- Custom Inline Date Picker Modal -->
+                <!-- Native Dropdown Modal -->
                 <div v-if="showBlockDateModal" class="modal-overlay" style="z-index: 2000;">
                     <div class="modal-content date-modal-content">
                         <h3>📅 انتخاب تاریخ</h3>
-                        <date-picker 
-                            v-model="customDate" 
-                            type="datetime" 
-                            format="jYYYY/jMM/jDD HH:mm" 
-                            display-format="jYYYY/jMM/jDD HH:mm" 
-                            :inline="true"
-                            :auto-submit="true"
-                        />
+                        
+                        <div class="date-columns">
+                            <div class="date-col">
+                                <label>سال</label>
+                                <select v-model="pYear" class="native-select">
+                                    <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
+                                </select>
+                            </div>
+                            <div class="date-col">
+                                <label>ماه</label>
+                                <select v-model="pMonth" class="native-select">
+                                    <option v-for="(m, i) in jalaliMonths" :key="i" :value="i+1">{{ m }}</option>
+                                </select>
+                            </div>
+                            <div class="date-col">
+                                <label>روز</label>
+                                <select v-model="pDay" class="native-select">
+                                    <option v-for="d in days" :key="d" :value="d">{{ d }}</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="date-columns" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
+                            <div class="date-col">
+                                <label>ساعت</label>
+                                <select v-model="pHour" class="native-select">
+                                    <option v-for="h in hours" :key="h" :value="h">{{ String(h).padStart(2, '0') }}</option>
+                                </select>
+                            </div>
+                            <div class="date-col">
+                                <label>دقیقه</label>
+                                <select v-model="pMinute" class="native-select">
+                                    <option v-for="m in minutes" :key="m" :value="m">{{ String(m).padStart(2, '0') }}</option>
+                                </select>
+                            </div>
+                        </div>
+
                         <div class="action-buttons" style="margin-top: 20px;">
-                             <button @click="showBlockDateModal = false" class="save-btn">تایید</button>
-                             <button @click="showBlockDateModal = false; customDate = ''" class="cancel-btn">پاک کردن</button>
+                             <button @click="saveDateSelection('block')" class="save-btn">تایید</button>
+                             <button @click="showBlockDateModal = false" class="cancel-btn">لغو</button>
                         </div>
                     </div>
                 </div>
@@ -487,26 +516,55 @@ async function deleteUser() {
                 <label>تاریخ پایان:</label>
                 <div 
                     class="custom-date-trigger"
-                    @click="showLimitDateModal = true"
+                    @click="initDatePicker(customLimitDate); showLimitDateModal = true"
                 >
                     {{ customLimitDate || 'انتخاب تاریخ...' }}
                 </div>
 
-                <!-- Custom Inline Date Picker Modal -->
+                <!-- Native Dropdown Modal -->
                 <div v-if="showLimitDateModal" class="modal-overlay" style="z-index: 2000;">
                     <div class="modal-content date-modal-content">
                         <h3>📅 انتخاب تاریخ</h3>
-                        <date-picker 
-                            v-model="customLimitDate" 
-                            type="datetime" 
-                            format="jYYYY/jMM/jDD HH:mm" 
-                            display-format="jYYYY/jMM/jDD HH:mm" 
-                            :inline="true"
-                            :auto-submit="true"
-                        />
+                        
+                        <div class="date-columns">
+                            <div class="date-col">
+                                <label>سال</label>
+                                <select v-model="pYear" class="native-select">
+                                    <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
+                                </select>
+                            </div>
+                            <div class="date-col">
+                                <label>ماه</label>
+                                <select v-model="pMonth" class="native-select">
+                                    <option v-for="(m, i) in jalaliMonths" :key="i" :value="i+1">{{ m }}</option>
+                                </select>
+                            </div>
+                            <div class="date-col">
+                                <label>روز</label>
+                                <select v-model="pDay" class="native-select">
+                                    <option v-for="d in days" :key="d" :value="d">{{ d }}</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="date-columns" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
+                            <div class="date-col">
+                                <label>ساعت</label>
+                                <select v-model="pHour" class="native-select">
+                                    <option v-for="h in hours" :key="h" :value="h">{{ String(h).padStart(2, '0') }}</option>
+                                </select>
+                            </div>
+                            <div class="date-col">
+                                <label>دقیقه</label>
+                                <select v-model="pMinute" class="native-select">
+                                    <option v-for="m in minutes" :key="m" :value="m">{{ String(m).padStart(2, '0') }}</option>
+                                </select>
+                            </div>
+                        </div>
+
                         <div class="action-buttons" style="margin-top: 20px;">
-                             <button @click="showLimitDateModal = false" class="save-btn">تایید</button>
-                             <button @click="showLimitDateModal = false; customLimitDate = ''" class="cancel-btn">پاک کردن</button>
+                             <button @click="saveDateSelection('limit')" class="save-btn">تایید</button>
+                             <button @click="showLimitDateModal = false" class="cancel-btn">لغو</button>
                         </div>
                     </div>
                 </div>
@@ -593,6 +651,33 @@ async function deleteUser() {
 .custom-date-trigger:active {
     background-color: #f8f9fa;
     border-color: #86b7fe;
+}
+
+.date-columns {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+.date-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+.date-col label {
+    font-size: 0.8rem;
+    color: #666;
+    margin-bottom: 2px;
+}
+.native-select {
+    width: 100%;
+    padding: 8px;
+    font-size: 1.1rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background: #fff;
+    text-align: center;
+    direction: ltr; /* numbers ltr */
 }
 
 /* Ensure inline picker fits */
