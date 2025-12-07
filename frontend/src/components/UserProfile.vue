@@ -395,7 +395,7 @@ async function deleteUser() {
             
             <div v-else class="custom-date-section">
                 <label>تاریخ و زمان پایان مسدودیت:</label>
-                <date-picker v-model="customDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" :editable="false" append-to="body" />
+                <date-picker v-model="customDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" :editable="false" :auto-submit="false" append-to="body" />
                 <div class="action-buttons">
                      <button @click="blockUserCustom" class="save-btn">تایید</button>
                      <button @click="showCustomDateInput = false" class="cancel-btn">بازگشت</button>
@@ -435,9 +435,9 @@ async function deleteUser() {
             
             <div v-if="limitDurationMinutes === -1" class="custom-date-section">
                 <label>تاریخ پایان:</label>
-                <date-picker v-model="customLimitDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" :editable="false" append-to="body" />
+                <date-picker v-model="customLimitDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" :editable="false" :auto-submit="false" append-to="body" />
             </div>
-
+            
             <div class="action-buttons">
                 <button @click="saveLimitations" :disabled="isLoading" class="save-btn">ذخیره</button>
                 <button @click="showLimitationsModal = false" class="cancel-btn">انصراف</button>
@@ -455,6 +455,18 @@ async function deleteUser() {
     </template>
   </div>
 </template>
+
+<style>
+/* Global fix for datepicker buttons */
+.vpd-actions {
+    display: flex !important;
+    justify-content: space-between !important;
+    min-height: 40px !important;
+    padding: 10px !important;
+    background: #fff;
+    border-top: 1px solid #eee;
+}
+</style>
 
 <style scoped>
 .card {
