@@ -404,7 +404,7 @@ async function deleteUser() {
                 <div 
                     id="block-date-input" 
                     class="form-select pointer-cursor"
-                    @click="blockDatePicker.visible = true"
+                    @click.stop.prevent="blockDatePicker.visible = true"
                 >
                     {{ customDate || 'انتخاب تاریخ...' }}
                 </div>
@@ -420,7 +420,7 @@ async function deleteUser() {
                     append-to="body"
                 >
                     <template #submit-btn="{ submit }">
-                        <button class="vpd-submit-btn" @click="submit">✔️ تایید</button>
+                        <button type="button" class="vpd-submit-btn" @click.stop.prevent="submit">✔️ تایید</button>
                     </template>
                 </date-picker>
                 <div class="action-buttons">
@@ -465,7 +465,7 @@ async function deleteUser() {
                 <div 
                     id="limit-date-input" 
                     class="form-select pointer-cursor"
-                    @click="limitDatePicker.visible = true"
+                    @click.stop.prevent="limitDatePicker.visible = true"
                 >
                     {{ customLimitDate || 'انتخاب تاریخ...' }}
                 </div>
@@ -481,7 +481,7 @@ async function deleteUser() {
                     append-to="body"
                 >
                     <template #submit-btn="{ submit }">
-                        <button class="vpd-submit-btn" @click="submit">✔️ تایید</button>
+                        <button type="button" class="vpd-submit-btn" @click.stop.prevent="submit">✔️ تایید</button>
                     </template>
                 </date-picker>
             </div>
@@ -540,6 +540,12 @@ async function deleteUser() {
 
 .hidden-picker .vpd-input-group {
     display: none !important;
+    position: absolute !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
 }
 </style>
 
