@@ -421,8 +421,7 @@ async function deleteUser() {
             <div v-else class="custom-date-section">
                 <label>تاریخ و زمان پایان مسدودیت:</label>
                 <div 
-                    id="block-date-input" 
-                    class="form-select pointer-cursor"
+                    class="custom-date-trigger"
                     @click="showBlockDateModal = true"
                 >
                     {{ customDate || 'انتخاب تاریخ...' }}
@@ -487,8 +486,7 @@ async function deleteUser() {
             <div v-if="limitDurationMinutes === -1" class="custom-date-section">
                 <label>تاریخ پایان:</label>
                 <div 
-                    id="limit-date-input" 
-                    class="form-select pointer-cursor"
+                    class="custom-date-trigger"
                     @click="showLimitDateModal = true"
                 >
                     {{ customLimitDate || 'انتخاب تاریخ...' }}
@@ -569,6 +567,32 @@ async function deleteUser() {
 .date-modal-content {
     max-width: 350px !important;
     padding: 10px !important;
+}
+
+/* Neutral trigger that looks like an input but acts like a div */
+.custom-date-trigger {
+    display: block;
+    width: 100%;
+    padding: 0.375rem 0.75rem; /* Match Bootstrap/form-select padding */
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5;
+    color: #212529;
+    background-color: #fff;
+    background-clip: padding-box;
+    border: 1px solid #ced4da;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: border-color .15s ease-in-out,box-shadow .15s ease-in-out;
+    text-align: center; /* Center text for better mobile look */
+}
+
+.custom-date-trigger:active {
+    background-color: #f8f9fa;
+    border-color: #86b7fe;
 }
 
 /* Ensure inline picker fits */
