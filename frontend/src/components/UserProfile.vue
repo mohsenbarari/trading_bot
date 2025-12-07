@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import DatePicker from 'vue3-persian-datetime-picker';
 import moment from 'moment-jalaali';
 
@@ -295,6 +295,26 @@ async function deleteUser() {
     isLoading.value = false;
   }
 }
+const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+
+onMounted(() => {
+  // Monkey-patch scrollIntoView to prevent page jump on mobile when datepicker tries to center items
+  HTMLElement.prototype.scrollIntoView = function(arg?: boolean | ScrollIntoViewOptions) {
+    if (this.classList.contains('vpd-selected') || this.closest('.vpd-wrapper')) {
+      const parent = this.parentElement;
+      if (parent) {
+         // Manual soft scroll to center
+         parent.scrollTop = this.offsetTop - parent.clientHeight / 2 + this.clientHeight / 2;
+      }
+      return;
+    }
+    return originalScrollIntoView.apply(this, arguments as any);
+  };
+});
+
+onUnmounted(() => {
+  HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+});
 </script>
 
 <template>
