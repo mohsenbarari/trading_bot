@@ -395,7 +395,7 @@ async function deleteUser() {
             
             <div v-else class="custom-date-section">
                 <label>تاریخ و زمان پایان مسدودیت:</label>
-                <date-picker v-model="customDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" :editable="false" :input-attrs="{ readonly: true }" :auto-submit="false" append-to="body">
+                <date-picker v-model="customDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" :editable="false" :input-attrs="{ readonly: true, inputmode: 'none' }" :auto-submit="false" append-to="body">
                     <template #submit-btn="{ submit }">
                         <button class="vpd-submit-btn" @click="submit">✔️ تایید</button>
                     </template>
@@ -439,7 +439,7 @@ async function deleteUser() {
             
             <div v-if="limitDurationMinutes === -1" class="custom-date-section">
                 <label>تاریخ پایان:</label>
-                <date-picker v-model="customLimitDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" :editable="false" :input-attrs="{ readonly: true }" :auto-submit="false" append-to="body">
+                <date-picker v-model="customLimitDate" type="datetime" format="jYYYY/jMM/jDD HH:mm" display-format="jYYYY/jMM/jDD HH:mm" :editable="false" :input-attrs="{ readonly: true, inputmode: 'none' }" :auto-submit="false" append-to="body">
                     <template #submit-btn="{ submit }">
                         <button class="vpd-submit-btn" @click="submit">✔️ تایید</button>
                     </template>
