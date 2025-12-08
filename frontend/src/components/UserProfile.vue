@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watchEffect, onUnmounted } from 'vue';
 import moment from 'moment-jalaali';
 
 const props = defineProps<{
@@ -106,6 +106,17 @@ const blockDurations = [
 const showCustomDateInput = ref(false);
 const showBlockDateModal = ref(false);
 const customDate = ref('');
+
+// Lock body scroll when any modal is open
+watchEffect(() => {
+    const anyModalOpen = showBlockModal.value || showLimitationsModal.value || showBlockDateModal.value || showLimitDateModal.value;
+    document.body.style.overflow = anyModalOpen ? 'hidden' : '';
+});
+
+// Cleanup on unmount
+onUnmounted(() => {
+    document.body.style.overflow = '';
+});
 
 const isRestricted = computed(() => {
   if (!props.user.trading_restricted_until) return false;
