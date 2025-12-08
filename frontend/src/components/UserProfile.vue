@@ -937,6 +937,7 @@ h2 {
     padding: 20px;
     width: 100%;
     max-width: 320px;
+    min-height: 450px; /* Increased to Stabilize height during content switch */
     box-shadow: 0 10px 25px rgba(0,0,0,0.2);
     text-align: center;
 }
