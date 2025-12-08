@@ -34,6 +34,8 @@ const showCustomDateInput = ref(false);
 const showBlockDateModal = ref(false);
 const customDate = ref('');
 const tempDateRef = ref(''); // Intermediate ref
+const blockDatePicker = ref<any>(null); // Ref for block date picker
+const limitDatePicker = ref<any>(null); // Ref for limit date picker
 
 function initDatePicker(currentValue: string) {
     if (currentValue) {
@@ -43,16 +45,40 @@ function initDatePicker(currentValue: string) {
     }
 }
 
+
 function saveDateSelection(target: 'block' | 'limit') {
-    const finalDate = tempDateRef.value;
-    
-    if (target === 'block') {
-        customDate.value = finalDate;
-        showBlockDateModal.value = false;
-    } else {
-        customLimitDate.value = finalDate;
-        showLimitDateModal.value = false;
+    // Manually trigger the picker's submit to update the model if it hasn't already
+    if (target === 'block' && blockDatePicker.value) {
+        // Accessing internal state or forcing update if possible
+        // Ideally the v-model should update on interaction if we listen to events,
+        // but if auto-submit is false, we might need to force it.
+        // However, many vue libraries update v-model regardless.
+        // If not, we try to access the current selected date from the component.
+        // Let's assume v-model works BUT only on 'submit'.
+        // We can try to set auto-submit to true dynamically? No.
+        
+        // Try calling the submit method if it exists
+        if (typeof blockDatePicker.value.selectDate === 'function') {
+             blockDatePicker.value.selectDate();
+        }
+    } else if (target === 'limit' && limitDatePicker.value) {
+        if (typeof limitDatePicker.value.selectDate === 'function') {
+             limitDatePicker.value.selectDate();
+        }
     }
+    
+    // Small delay to allow v-model update? Or use nextTick?
+    // Using setTimeout to ensure event loop processes the update
+    setTimeout(() => {
+        const finalDate = tempDateRef.value;
+        if (target === 'block') {
+            customDate.value = finalDate;
+            showBlockDateModal.value = false;
+        } else {
+            customLimitDate.value = finalDate;
+            showLimitDateModal.value = false;
+        }
+    }, 50);
 }
 
 const roles = [
@@ -89,15 +115,16 @@ onUnmounted(() => {
 
 const isRestricted = computed(() => {
   if (!props.user.trading_restricted_until) return false;
-  // Backend returns naive UTC string (e.g., "2023-01-01T12:00:00").
-  // Append 'Z' to force browser to interpret it as UTC.
-  return new Date(props.user.trading_restricted_until + 'Z') > new Date();
+  // Use moment to handle both naive (which assumes local) and aware strings safely
+  // Since backend typically sends UTC ISO, we parse as UTC
+  const restrictionTime = moment.utc(props.user.trading_restricted_until);
+  return restrictionTime.isValid() && restrictionTime.isAfter(moment.utc());
 });
 
 const restrictionText = computed(() => {
   if (!isRestricted.value) return '✅ آزاد';
-  const date = new Date(props.user.trading_restricted_until + 'Z');
-  if (date.getFullYear() > 2100) return '⛔ مسدود دائم';
+  const restrictionTime = moment.utc(props.user.trading_restricted_until);
+  if (restrictionTime.year() > 2100) return '⛔ مسدود دائم';
   return `⛔ تا ${props.user.trading_restricted_until_jalali}`;
 });
 
@@ -183,6 +210,11 @@ async function blockUser(minutes: number) {
   }
 }
 
+const toEnglishDigits = (str: string) => {
+  if (!str) return str;
+  return str.replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString());
+};
+
 async function blockUserCustom() {
     if (!customDate.value) {
         alert('لطفاً یک تاریخ معتبر انتخاب کنید.');
@@ -190,15 +222,30 @@ async function blockUserCustom() {
     }
     isLoading.value = true;
     try {
+        // Normalize digits (Persian to English) before parsing
+        const normalizedDate = toEnglishDigits(customDate.value);
+        console.log('Raw Date:', customDate.value);
+        console.log('Normalized Date:', normalizedDate);
+
         // Parse Jalali date string to ISO
-        const date = moment(customDate.value, 'jYYYY/jMM/jDD HH:mm').utc();
+        // Using strict parsing mode (third argument true) if possible, or just standard
+        const date = moment(normalizedDate, 'jYYYY/jMM/jDD HH:mm');
+        
+        console.log('Parsed Year:', date.year()); // Should be 2024/2025 (Gregorian equivalent)
         
         if (!date.isValid()) {
+             console.error('Date Invalid:', normalizedDate);
              alert('تاریخ نامعتبر است.');
+             isLoading.value = false;
              return;
         }
-        await sendBlockRequest(date.toISOString());
+        
+        // Convert to standard Gregorian UTC ISO for backend
+        const isoDate = date.toDate().toISOString();
+        console.log('Sending ISO:', isoDate);
+        await sendBlockRequest(isoDate);
     } catch (e) {
+        console.error('Custom Block Error:', e);
         alert('خطا در انجام عملیات');
     } finally {
         isLoading.value = false;
@@ -206,21 +253,29 @@ async function blockUserCustom() {
 }
 
 async function sendBlockRequest(restrictedUntil: string) {
-    const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${props.jwtToken}`
-      },
-      body: JSON.stringify({ trading_restricted_until: restrictedUntil })
-    });
-    
-    if (!response.ok) throw new Error('خطا در مسدودسازی');
-    const updatedUser = await response.json();
-    Object.assign(props.user, updatedUser);
-    showBlockModal.value = false;
-    showCustomDateInput.value = false;
-    alert('کاربر مسدود شد.');
+    try {
+        const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${props.jwtToken}`
+          },
+          body: JSON.stringify({ trading_restricted_until: restrictedUntil })
+        });
+        
+        if (!response.ok) throw new Error('خطا در مسدودسازی');
+        const updatedUser = await response.json();
+        console.log('Block User Response:', updatedUser); 
+        Object.assign(props.user, updatedUser);
+        console.log('Props User Restricted Until:', props.user.trading_restricted_until);
+        
+        showBlockModal.value = false;
+        showCustomDateInput.value = false;
+        alert('کاربر مسدود شد.');
+    } catch (e) {
+        console.error('Block Error:', e);
+        alert('خطا در اعمال مسدودیت');
+    }
 }
 
 async function saveLimitations() {
@@ -522,6 +577,7 @@ async function deleteUser() {
                 
                 <div class="date-picker-wrapper">
                     <DatePicker 
+                        ref="blockDatePicker"
                         v-model="tempDateRef" 
                         type="datetime" 
                         format="jYYYY/jMM/jDD HH:mm"
@@ -547,6 +603,7 @@ async function deleteUser() {
                 
                 <div class="date-picker-wrapper">
                     <DatePicker 
+                        ref="limitDatePicker"
                         v-model="tempDateRef" 
                         type="datetime" 
                         format="jYYYY/jMM/jDD HH:mm"
