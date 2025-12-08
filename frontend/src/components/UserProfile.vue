@@ -46,39 +46,24 @@ function initDatePicker(currentValue: string) {
 }
 
 
-function saveDateSelection(target: 'block' | 'limit') {
-    // Manually trigger the picker's submit to update the model if it hasn't already
-    if (target === 'block' && blockDatePicker.value) {
-        // Accessing internal state or forcing update if possible
-        // Ideally the v-model should update on interaction if we listen to events,
-        // but if auto-submit is false, we might need to force it.
-        // However, many vue libraries update v-model regardless.
-        // If not, we try to access the current selected date from the component.
-        // Let's assume v-model works BUT only on 'submit'.
-        // We can try to set auto-submit to true dynamically? No.
-        
-        // Try calling the submit method if it exists
-        if (typeof blockDatePicker.value.selectDate === 'function') {
-             blockDatePicker.value.selectDate();
-        }
-    } else if (target === 'limit' && limitDatePicker.value) {
-        if (typeof limitDatePicker.value.selectDate === 'function') {
-             limitDatePicker.value.selectDate();
-        }
-    }
+
+// Rename handler for native submit
+function onDateSubmit(val: string) {
+    if (!val) return;
+    console.log('Native Date Picker Submit:', val);
+    tempDateRef.value = val;
     
-    // Small delay to allow v-model update? Or use nextTick?
-    // Using setTimeout to ensure event loop processes the update
-    setTimeout(() => {
-        const finalDate = tempDateRef.value;
-        if (target === 'block') {
-            customDate.value = finalDate;
-            showBlockDateModal.value = false;
-        } else {
-            customLimitDate.value = finalDate;
-            showLimitDateModal.value = false;
-        }
-    }, 50);
+    // Determine which modal is active to save to correct ref
+    // Since this handler is shared, we check the active modal state.
+    // Alternatively, we can pass argument in template @submit="onDateSubmit($event, 'block')"
+    // But the component emits just the value.
+    if (showBlockDateModal.value) {
+        customDate.value = val;
+        showBlockDateModal.value = false;
+    } else if (showLimitDateModal.value) {
+        customLimitDate.value = val;
+        showLimitDateModal.value = false;
+    }
 }
 
 const roles = [
@@ -584,13 +569,10 @@ async function deleteUser() {
                         inline 
                         :auto-submit="false" 
                         :editable="false" 
+                        @submit="onDateSubmit"
                     />
                 </div>
-                
-                <div class="action-buttons" style="margin-top: 10px;">
-                     <button @click="saveDateSelection('block')" class="save-btn">تایید نهایی</button>
-                     <button @click="showBlockDateModal = false" class="cancel-btn">انصراف</button>
-                </div>
+                <!-- Native buttons are used, external buttons removed -->
             </div>
         </div>
     </Teleport>
@@ -610,13 +592,10 @@ async function deleteUser() {
                         inline 
                         :auto-submit="false" 
                         :editable="false" 
+                        @submit="onDateSubmit"
                     />
                 </div>
-
-                <div class="action-buttons" style="margin-top: 10px;">
-                     <button @click="saveDateSelection('limit')" class="save-btn">تایید نهایی</button>
-                     <button @click="showLimitDateModal = false" class="cancel-btn">انصراف</button>
-                </div>
+                 <!-- Native buttons are used, external buttons removed -->
             </div>
         </div>
     </Teleport>
@@ -627,39 +606,42 @@ async function deleteUser() {
 .vpd-actions {
     display: flex !important;
     justify-content: space-between !important;
-    position: absolute !important;
-    bottom: 0 !important;
-    left: 0 !important;
+    position: relative !important; /* Changed from absolute */
     width: 100% !important;
     z-index: 1000 !important;
     background: #fff !important;
     border-top: 1px solid #eee !important;
-    padding: 0 10px !important;
+    padding: 10px !important;
     min-height: 40px !important;
+    margin-top: 10px !important;
 }
 
 .vpd-submit-btn {
     background: #007bff;
     color: white;
     border: none;
-    padding: 5px 15px;
-    border-radius: 4px;
+    padding: 8px 20px;
+    border-radius: 6px;
     cursor: pointer;
     font-size: 14px;
+    font-weight: bold;
 }
 .vpd-submit-btn:hover {
     background: #0056b3;
 }
 
 .vpd-content {
-    padding-bottom: 0 !important;
+    padding-bottom: 10px !important; /* Restore padding */
     height: auto !important;
     overflow: visible !important;
+    display: flex !important;
+    flex-direction: column !important;
 }
 
 .vpd-main {
     height: auto !important;
     overflow: visible !important;
+    flex: 1 !important;
 }
 
 .vpd-days {
