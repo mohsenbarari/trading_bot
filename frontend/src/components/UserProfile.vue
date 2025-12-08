@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watchEffect, onUnmounted } from 'vue';
 import moment from 'moment-jalaali';
+import DatePicker from 'vue3-persian-datetime-picker';
 
 const props = defineProps<{
   user: any;
@@ -28,52 +29,32 @@ const customLimitDate = ref('');
 const selectedRole = ref(props.user?.role || 'تماشا');
 const hasBotAccess = ref(props.user?.has_bot_access ?? true);
 
-// --- Native Date Picker Logic ---
-const jalaliMonths = [
-    'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
-    'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'
-];
-const years = computed(() => {
-    const currentYear = moment().jYear();
-    const list = [];
-    for (let i = currentYear; i <= currentYear + 10; i++) list.push(i);
-    return list;
-});
-const days = Array.from({ length: 31 }, (_, i) => i + 1);
-const hours = Array.from({ length: 24 }, (_, i) => i);
-const minutes = Array.from({ length: 60 }, (_, i) => i);
-
-const pYear = ref(1403);
-const pMonth = ref(1);
-const pDay = ref(1);
-const pHour = ref(12);
-const pMinute = ref(0);
+// --- Date Picker Logic ---
+const showCustomDateInput = ref(false);
+const showBlockDateModal = ref(false);
+const customDate = ref('');
+const tempDateRef = ref(''); // Intermediate ref (Gregorian ISO string)
 
 function initDatePicker(currentValue: string) {
-    const now = moment();
-    let m = now;
-    
     if (currentValue) {
-        m = moment(currentValue, 'jYYYY/jMM/jDD HH:mm');
-        if (!m.isValid()) m = now;
+        // incoming is Jalali "1403/09/17 14:30"
+        // convert to Gregorian "2024-12-08 14:30:00" for the picker model
+        const m = moment(currentValue, 'jYYYY/jMM/jDD HH:mm');
+        if (m.isValid()) {
+             tempDateRef.value = m.format('YYYY-MM-DD HH:mm:ss');
+        } else {
+             tempDateRef.value = moment().format('YYYY-MM-DD HH:mm:ss');
+        }
+    } else {
+        tempDateRef.value = moment().format('YYYY-MM-DD HH:mm:ss');
     }
-
-    pYear.value = m.jYear();
-    pMonth.value = m.jMonth() + 1; // 0-indexed
-    pDay.value = m.jDate();
-    pHour.value = m.hour();
-    pMinute.value = m.minute();
 }
 
 function saveDateSelection(target: 'block' | 'limit') {
-    // Format: 1403/05/21 15:30
-    const y = pYear.value;
-    const mo = String(pMonth.value).padStart(2, '0');
-    const d = String(pDay.value).padStart(2, '0');
-    const h = String(pHour.value).padStart(2, '0');
-    const mi = String(pMinute.value).padStart(2, '0');
-    
-    const finalDate = `${y}/${mo}/${d} ${h}:${mi}`;
+    // tempDateRef is Gregorian "2024-12-08 14:30:00"
+    // convert back to Jalali "1403/09/17 14:30" for display/saving
+    const m = moment(tempDateRef.value, 'YYYY-MM-DD HH:mm:ss');
+    const finalDate = m.format('jYYYY/jMM/jDD HH:mm');
     
     if (target === 'block') {
         customDate.value = finalDate;
@@ -103,9 +84,7 @@ const blockDurations = [
   { label: 'انتخاب زمان دلخواه', minutes: -1 } // -1 برای حالت کاستوم
 ];
 
-const showCustomDateInput = ref(false);
-const showBlockDateModal = ref(false);
-const customDate = ref('');
+
 
 // Lock body scroll when any modal is open
 watchEffect(() => {
@@ -551,40 +530,16 @@ async function deleteUser() {
             <div class="modal-content date-modal-content">
                 <h3>📅 انتخاب تاریخ</h3>
                 
-                <div class="date-columns">
-                    <div class="date-col">
-                        <label>سال</label>
-                        <select v-model="pYear" class="native-select">
-                            <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
-                        </select>
-                    </div>
-                    <div class="date-col">
-                        <label>ماه</label>
-                        <select v-model="pMonth" class="native-select">
-                            <option v-for="(m, i) in jalaliMonths" :key="i" :value="i+1">{{ m }}</option>
-                        </select>
-                    </div>
-                    <div class="date-col">
-                        <label>روز</label>
-                        <select v-model="pDay" class="native-select">
-                            <option v-for="d in days" :key="d" :value="d">{{ d }}</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="date-columns" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
-                    <div class="date-col">
-                        <label>ساعت</label>
-                        <select v-model="pHour" class="native-select">
-                            <option v-for="h in hours" :key="h" :value="h">{{ String(h).padStart(2, '0') }}</option>
-                        </select>
-                    </div>
-                    <div class="date-col">
-                        <label>دقیقه</label>
-                        <select v-model="pMinute" class="native-select">
-                            <option v-for="m in minutes" :key="m" :value="m">{{ String(m).padStart(2, '0') }}</option>
-                        </select>
-                    </div>
+                <div class="date-picker-wrapper">
+                    <DatePicker 
+                        v-model="tempDateRef" 
+                        type="datetime" 
+                        format="YYYY-MM-DD HH:mm:ss"
+                        display-format="jYYYY/jMM/jDD HH:mm"
+                        inline 
+                        :auto-submit="false" 
+                        :editable="false" 
+                    />
                 </div>
 
                 <div class="action-buttons" style="margin-top: 20px;">
@@ -601,40 +556,16 @@ async function deleteUser() {
             <div class="modal-content date-modal-content">
                 <h3>📅 انتخاب تاریخ</h3>
                 
-                <div class="date-columns">
-                    <div class="date-col">
-                        <label>سال</label>
-                        <select v-model="pYear" class="native-select">
-                            <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
-                        </select>
-                    </div>
-                    <div class="date-col">
-                        <label>ماه</label>
-                        <select v-model="pMonth" class="native-select">
-                            <option v-for="(m, i) in jalaliMonths" :key="i" :value="i+1">{{ m }}</option>
-                        </select>
-                    </div>
-                    <div class="date-col">
-                        <label>روز</label>
-                        <select v-model="pDay" class="native-select">
-                            <option v-for="d in days" :key="d" :value="d">{{ d }}</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="date-columns" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
-                    <div class="date-col">
-                        <label>ساعت</label>
-                        <select v-model="pHour" class="native-select">
-                            <option v-for="h in hours" :key="h" :value="h">{{ String(h).padStart(2, '0') }}</option>
-                        </select>
-                    </div>
-                    <div class="date-col">
-                        <label>دقیقه</label>
-                        <select v-model="pMinute" class="native-select">
-                            <option v-for="m in minutes" :key="m" :value="m">{{ String(m).padStart(2, '0') }}</option>
-                        </select>
-                    </div>
+                <div class="date-picker-wrapper">
+                    <DatePicker 
+                        v-model="tempDateRef" 
+                        type="datetime" 
+                        format="YYYY-MM-DD HH:mm:ss"
+                        display-format="jYYYY/jMM/jDD HH:mm"
+                        inline 
+                        :auto-submit="false" 
+                        :editable="false" 
+                    />
                 </div>
 
                 <div class="action-buttons" style="margin-top: 20px;">
@@ -711,37 +642,10 @@ async function deleteUser() {
     border-color: #86b7fe;
 }
 
-.date-columns {
+.date-picker-wrapper {
     display: flex;
-    gap: 8px;
     justify-content: center;
-}
-.date-col {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-}
-.date-col label {
-    font-size: 0.8rem;
-    color: #666;
-    margin-bottom: 2px;
-}
-.native-select {
-    width: 100%;
-    padding: 8px;
-    font-size: 1.1rem;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    background: #fff;
-    text-align: center;
-    direction: ltr; /* numbers ltr */
-}
-
-/* Ensure inline picker fits */
-.vpd-main {
-    box-shadow: none !important;
-    border: none !important;
+    margin-bottom: 20px;
 }
 </style>
 
