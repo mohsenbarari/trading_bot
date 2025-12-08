@@ -453,85 +453,87 @@ async function deleteUser() {
     </div>
 
     <!-- مودال انتخاب مدت زمان مسدودیت -->
-    <div v-if="showBlockModal" class="modal-overlay">
-        <div class="modal-content">
-            <h3>⏳ مدت زمان مسدودیت</h3>
-            
-            <div v-if="!showCustomDateInput">
-                <div class="duration-list">
-                    <button v-for="duration in blockDurations" :key="duration.minutes" 
-                            @click="blockUser(duration.minutes)" class="duration-btn">
-                        {{ duration.label }}
-                    </button>
-                </div>
-            </div>
-            
-            <div v-else class="custom-date-section">
-                <label>تاریخ و زمان پایان مسدودیت:</label>
-                <div 
-                    class="custom-date-trigger"
-                    @click="initDatePicker(customDate); showBlockDateModal = true"
-                >
-                    {{ customDate || 'انتخاب تاریخ...' }}
+    <Teleport to="body">
+        <div v-if="showBlockModal" class="modal-overlay">
+            <div class="modal-content">
+                <h3>⏳ مدت زمان مسدودیت</h3>
+                
+                <div v-if="!showCustomDateInput">
+                    <div class="duration-list">
+                        <button v-for="duration in blockDurations" :key="duration.minutes" 
+                                @click="blockUser(duration.minutes)" class="duration-btn">
+                            {{ duration.label }}
+                        </button>
+                    </div>
                 </div>
                 
+                <div v-else class="custom-date-section">
+                    <label>تاریخ و زمان پایان مسدودیت:</label>
+                    <div 
+                        class="custom-date-trigger"
+                        @click="initDatePicker(customDate); showBlockDateModal = true"
+                    >
+                        {{ customDate || 'انتخاب تاریخ...' }}
+                    </div>
+                    
 
 
-                <div class="action-buttons">
-                     <button @click="blockUserCustom" class="save-btn">تایید نهایی</button>
-                     <button @click="showCustomDateInput = false" class="cancel-btn">بازگشت</button>
+                    <div class="action-buttons">
+                         <button @click="blockUserCustom" class="save-btn">تایید نهایی</button>
+                         <button @click="showCustomDateInput = false" class="cancel-btn">بازگشت</button>
+                    </div>
                 </div>
-            </div>
 
-            <button v-if="!showCustomDateInput" @click="showBlockModal = false" class="cancel-btn full-width">انصراف</button>
+                <button v-if="!showCustomDateInput" @click="showBlockModal = false" class="cancel-btn full-width">انصراف</button>
+            </div>
         </div>
-    </div>
+    </Teleport>
 
     <!-- مودال اعمال محدودیت -->
-    <div v-if="showLimitationsModal" class="modal-overlay">
-        <div class="modal-content">
-            <h3>⚠️ اعمال محدودیت</h3>
-            
-            <div class="form-group">
-                <label>حداکثر تعداد معاملات روزانه:</label>
-                <input type="number" v-model="limitMaxTrades" class="form-select" placeholder="نامحدود (خالی)" />
-            </div>
-            <div class="form-group">
-                <label>حداکثر کالاهای فعال:</label>
-                <input type="number" v-model="limitMaxCommodities" class="form-select" placeholder="نامحدود (خالی)" />
-            </div>
-            <div class="form-group">
-                <label>حداکثر درخواست‌های روزانه:</label>
-                <input type="number" v-model="limitMaxRequests" class="form-select" placeholder="نامحدود (خالی)" />
-            </div>
-
-            <div class="form-group">
-                <label>مدت زمان محدودیت:</label>
-                <select v-model="limitDurationMinutes" class="form-select">
-                    <option v-for="duration in blockDurations" :key="duration.minutes" :value="duration.minutes">
-                        {{ duration.label }}
-                    </option>
-                </select>
-            </div>
-            
-            <div v-if="limitDurationMinutes === -1" class="custom-date-section">
-                <label>تاریخ پایان:</label>
-                <div 
-                    class="custom-date-trigger"
-                    @click="initDatePicker(customLimitDate); showLimitDateModal = true"
-                >
-                    {{ customLimitDate || 'انتخاب تاریخ...' }}
+    <Teleport to="body">
+        <div v-if="showLimitationsModal" class="modal-overlay">
+            <div class="modal-content">
+                <h3>⚠️ اعمال محدودیت</h3>
+                
+                <div class="form-group">
+                    <label>حداکثر تعداد معاملات روزانه:</label>
+                    <input type="number" v-model="limitMaxTrades" class="form-select" placeholder="نامحدود (خالی)" />
+                </div>
+                <div class="form-group">
+                    <label>حداکثر کالاهای فعال:</label>
+                    <input type="number" v-model="limitMaxCommodities" class="form-select" placeholder="نامحدود (خالی)" />
+                </div>
+                <div class="form-group">
+                    <label>حداکثر درخواست‌های روزانه:</label>
+                    <input type="number" v-model="limitMaxRequests" class="form-select" placeholder="نامحدود (خالی)" />
                 </div>
 
-
-            </div>
-            
-            <div class="action-buttons">
-                <button @click="saveLimitations" :disabled="isLoading" class="save-btn">ذخیره</button>
-                <button @click="showLimitationsModal = false" class="cancel-btn">انصراف</button>
+                <div class="form-group">
+                    <label>مدت زمان محدودیت:</label>
+                    <select v-model="limitDurationMinutes" class="form-select">
+                        <option v-for="duration in blockDurations" :key="duration.minutes" :value="duration.minutes">
+                            {{ duration.label }}
+                        </option>
+                    </select>
+                </div>
+                
+                <div v-if="limitDurationMinutes === -1" class="custom-date-section">
+                    <label>تاریخ پایان:</label>
+                    <div 
+                        class="custom-date-trigger"
+                        @click="initDatePicker(customLimitDate); showLimitDateModal = true"
+                    >
+                        {{ customLimitDate || 'انتخاب تاریخ...' }}
+                    </div>
+                </div>
+                
+                <div class="action-buttons">
+                    <button @click="saveLimitations" :disabled="isLoading" class="save-btn">ذخیره</button>
+                    <button @click="showLimitationsModal = false" class="cancel-btn">انصراف</button>
+                </div>
             </div>
         </div>
-    </div>
+    </Teleport>
 
     <template v-if="!isAdminView">
         <button class="menu-button notification-btn" @click="emit('navigate', 'notifications')">
@@ -544,100 +546,104 @@ async function deleteUser() {
   </div>
 
     <!-- Moved Block Date Modal -->
-    <div v-if="showBlockDateModal" class="modal-overlay" style="z-index: 2010;">
-        <div class="modal-content date-modal-content">
-            <h3>📅 انتخاب تاریخ</h3>
-            
-            <div class="date-columns">
-                <div class="date-col">
-                    <label>سال</label>
-                    <select v-model="pYear" class="native-select">
-                        <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
-                    </select>
+    <Teleport to="body">
+        <div v-if="showBlockDateModal" class="modal-overlay" style="z-index: 2010;">
+            <div class="modal-content date-modal-content">
+                <h3>📅 انتخاب تاریخ</h3>
+                
+                <div class="date-columns">
+                    <div class="date-col">
+                        <label>سال</label>
+                        <select v-model="pYear" class="native-select">
+                            <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
+                        </select>
+                    </div>
+                    <div class="date-col">
+                        <label>ماه</label>
+                        <select v-model="pMonth" class="native-select">
+                            <option v-for="(m, i) in jalaliMonths" :key="i" :value="i+1">{{ m }}</option>
+                        </select>
+                    </div>
+                    <div class="date-col">
+                        <label>روز</label>
+                        <select v-model="pDay" class="native-select">
+                            <option v-for="d in days" :key="d" :value="d">{{ d }}</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="date-col">
-                    <label>ماه</label>
-                    <select v-model="pMonth" class="native-select">
-                        <option v-for="(m, i) in jalaliMonths" :key="i" :value="i+1">{{ m }}</option>
-                    </select>
-                </div>
-                <div class="date-col">
-                    <label>روز</label>
-                    <select v-model="pDay" class="native-select">
-                        <option v-for="d in days" :key="d" :value="d">{{ d }}</option>
-                    </select>
-                </div>
-            </div>
 
-            <div class="date-columns" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
-                <div class="date-col">
-                    <label>ساعت</label>
-                    <select v-model="pHour" class="native-select">
-                        <option v-for="h in hours" :key="h" :value="h">{{ String(h).padStart(2, '0') }}</option>
-                    </select>
+                <div class="date-columns" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
+                    <div class="date-col">
+                        <label>ساعت</label>
+                        <select v-model="pHour" class="native-select">
+                            <option v-for="h in hours" :key="h" :value="h">{{ String(h).padStart(2, '0') }}</option>
+                        </select>
+                    </div>
+                    <div class="date-col">
+                        <label>دقیقه</label>
+                        <select v-model="pMinute" class="native-select">
+                            <option v-for="m in minutes" :key="m" :value="m">{{ String(m).padStart(2, '0') }}</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="date-col">
-                    <label>دقیقه</label>
-                    <select v-model="pMinute" class="native-select">
-                        <option v-for="m in minutes" :key="m" :value="m">{{ String(m).padStart(2, '0') }}</option>
-                    </select>
-                </div>
-            </div>
 
-            <div class="action-buttons" style="margin-top: 20px;">
-                 <button @click="saveDateSelection('block')" class="save-btn">تایید</button>
-                 <button @click="showBlockDateModal = false" class="cancel-btn">لغو</button>
+                <div class="action-buttons" style="margin-top: 20px;">
+                     <button @click="saveDateSelection('block')" class="save-btn">تایید</button>
+                     <button @click="showBlockDateModal = false" class="cancel-btn">لغو</button>
+                </div>
             </div>
         </div>
-    </div>
+    </Teleport>
 
     <!-- Moved Limit Date Modal -->
-    <div v-if="showLimitDateModal" class="modal-overlay" style="z-index: 2010;">
-        <div class="modal-content date-modal-content">
-            <h3>📅 انتخاب تاریخ</h3>
-            
-            <div class="date-columns">
-                <div class="date-col">
-                    <label>سال</label>
-                    <select v-model="pYear" class="native-select">
-                        <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
-                    </select>
+    <Teleport to="body">
+        <div v-if="showLimitDateModal" class="modal-overlay" style="z-index: 2010;">
+            <div class="modal-content date-modal-content">
+                <h3>📅 انتخاب تاریخ</h3>
+                
+                <div class="date-columns">
+                    <div class="date-col">
+                        <label>سال</label>
+                        <select v-model="pYear" class="native-select">
+                            <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
+                        </select>
+                    </div>
+                    <div class="date-col">
+                        <label>ماه</label>
+                        <select v-model="pMonth" class="native-select">
+                            <option v-for="(m, i) in jalaliMonths" :key="i" :value="i+1">{{ m }}</option>
+                        </select>
+                    </div>
+                    <div class="date-col">
+                        <label>روز</label>
+                        <select v-model="pDay" class="native-select">
+                            <option v-for="d in days" :key="d" :value="d">{{ d }}</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="date-col">
-                    <label>ماه</label>
-                    <select v-model="pMonth" class="native-select">
-                        <option v-for="(m, i) in jalaliMonths" :key="i" :value="i+1">{{ m }}</option>
-                    </select>
-                </div>
-                <div class="date-col">
-                    <label>روز</label>
-                    <select v-model="pDay" class="native-select">
-                        <option v-for="d in days" :key="d" :value="d">{{ d }}</option>
-                    </select>
-                </div>
-            </div>
 
-            <div class="date-columns" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
-                <div class="date-col">
-                    <label>ساعت</label>
-                    <select v-model="pHour" class="native-select">
-                        <option v-for="h in hours" :key="h" :value="h">{{ String(h).padStart(2, '0') }}</option>
-                    </select>
+                <div class="date-columns" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
+                    <div class="date-col">
+                        <label>ساعت</label>
+                        <select v-model="pHour" class="native-select">
+                            <option v-for="h in hours" :key="h" :value="h">{{ String(h).padStart(2, '0') }}</option>
+                        </select>
+                    </div>
+                    <div class="date-col">
+                        <label>دقیقه</label>
+                        <select v-model="pMinute" class="native-select">
+                            <option v-for="m in minutes" :key="m" :value="m">{{ String(m).padStart(2, '0') }}</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="date-col">
-                    <label>دقیقه</label>
-                    <select v-model="pMinute" class="native-select">
-                        <option v-for="m in minutes" :key="m" :value="m">{{ String(m).padStart(2, '0') }}</option>
-                    </select>
-                </div>
-            </div>
 
-            <div class="action-buttons" style="margin-top: 20px;">
-                 <button @click="saveDateSelection('limit')" class="save-btn">تایید</button>
-                 <button @click="showLimitDateModal = false" class="cancel-btn">لغو</button>
+                <div class="action-buttons" style="margin-top: 20px;">
+                     <button @click="saveDateSelection('limit')" class="save-btn">تایید</button>
+                     <button @click="showLimitDateModal = false" class="cancel-btn">لغو</button>
+                </div>
             </div>
         </div>
-    </div>
+    </Teleport>
 </template>
 
 <style>
@@ -918,6 +924,7 @@ h2 {
 }
 
 /* Modal Styles */
+/* Modal Styles */
 .modal-overlay {
     position: fixed;
     top: 0;
@@ -926,10 +933,9 @@ h2 {
     bottom: 0;
     background-color: rgba(0,0,0,0.5);
     display: flex;
-    align-items: center;
-    justify-content: center;
     z-index: 1000;
     padding: 20px;
+    overflow-y: auto; /* Allow scrolling if content is tall */
 }
 .modal-content {
     background-color: white;
@@ -940,6 +946,7 @@ h2 {
     min-height: 450px; /* Increased to Stabilize height during content switch */
     box-shadow: 0 10px 25px rgba(0,0,0,0.2);
     text-align: center;
+    margin: auto; /* Centers the modal vertically and horizontally in flex container */
 }
 .modal-content h3 {
     margin-top: 0;
