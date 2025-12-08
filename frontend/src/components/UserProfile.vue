@@ -530,10 +530,10 @@ async function deleteUser() {
                         :editable="false" 
                     />
                 </div>
-
-                <div class="action-buttons" style="margin-top: 20px;">
-                     <button @click="saveDateSelection('block')" class="save-btn">تایید</button>
-                     <button @click="showBlockDateModal = false" class="cancel-btn">لغو</button>
+                
+                <div class="action-buttons" style="margin-top: 10px;">
+                     <button @click="saveDateSelection('block')" class="save-btn">تایید نهایی</button>
+                     <button @click="showBlockDateModal = false" class="cancel-btn">انصراف</button>
                 </div>
             </div>
         </div>
@@ -556,9 +556,9 @@ async function deleteUser() {
                     />
                 </div>
 
-                <div class="action-buttons" style="margin-top: 20px;">
-                     <button @click="saveDateSelection('limit')" class="save-btn">تایید</button>
-                     <button @click="showLimitDateModal = false" class="cancel-btn">لغو</button>
+                <div class="action-buttons" style="margin-top: 10px;">
+                     <button @click="saveDateSelection('limit')" class="save-btn">تایید نهایی</button>
+                     <button @click="showLimitDateModal = false" class="cancel-btn">انصراف</button>
                 </div>
             </div>
         </div>
@@ -611,13 +611,9 @@ async function deleteUser() {
     padding-bottom: 10px !important;
 }
 
+/* Hide library footer to use custom buttons */
 .vpd-actions {
-    position: relative !important; /* Stop floating */
-    bottom: auto !important;
-    left: auto !important;
-    margin-top: 10px !important;
-    background: transparent !important;
-    border-top: none !important;
+    display: none !important;
 }
 
 .date-modal-content {
