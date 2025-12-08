@@ -33,28 +33,18 @@ const hasBotAccess = ref(props.user?.has_bot_access ?? true);
 const showCustomDateInput = ref(false);
 const showBlockDateModal = ref(false);
 const customDate = ref('');
-const tempDateRef = ref(''); // Intermediate ref (Gregorian ISO string)
+const tempDateRef = ref(''); // Intermediate ref
 
 function initDatePicker(currentValue: string) {
     if (currentValue) {
-        // incoming is Jalali "1403/09/17 14:30"
-        // convert to Gregorian "2024-12-08 14:30:00" for the picker model
-        const m = moment(currentValue, 'jYYYY/jMM/jDD HH:mm');
-        if (m.isValid()) {
-             tempDateRef.value = m.format('YYYY-MM-DD HH:mm:ss');
-        } else {
-             tempDateRef.value = moment().format('YYYY-MM-DD HH:mm:ss');
-        }
+        tempDateRef.value = currentValue;
     } else {
-        tempDateRef.value = moment().format('YYYY-MM-DD HH:mm:ss');
+        tempDateRef.value = moment().format('jYYYY/jMM/jDD HH:mm');
     }
 }
 
 function saveDateSelection(target: 'block' | 'limit') {
-    // tempDateRef is Gregorian "2024-12-08 14:30:00"
-    // convert back to Jalali "1403/09/17 14:30" for display/saving
-    const m = moment(tempDateRef.value, 'YYYY-MM-DD HH:mm:ss');
-    const finalDate = m.format('jYYYY/jMM/jDD HH:mm');
+    const finalDate = tempDateRef.value;
     
     if (target === 'block') {
         customDate.value = finalDate;
@@ -534,8 +524,7 @@ async function deleteUser() {
                     <DatePicker 
                         v-model="tempDateRef" 
                         type="datetime" 
-                        format="YYYY-MM-DD HH:mm:ss"
-                        display-format="jYYYY/jMM/jDD HH:mm"
+                        format="jYYYY/jMM/jDD HH:mm"
                         inline 
                         :auto-submit="false" 
                         :editable="false" 
@@ -560,8 +549,7 @@ async function deleteUser() {
                     <DatePicker 
                         v-model="tempDateRef" 
                         type="datetime" 
-                        format="YYYY-MM-DD HH:mm:ss"
-                        display-format="jYYYY/jMM/jDD HH:mm"
+                        format="jYYYY/jMM/jDD HH:mm"
                         inline 
                         :auto-submit="false" 
                         :editable="false" 
@@ -607,8 +595,29 @@ async function deleteUser() {
 }
 
 .vpd-content {
-    padding-bottom: 40px !important; /* Space for the footer */
-    position: relative !important;
+    padding-bottom: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+}
+
+.vpd-main {
+    height: auto !important;
+    overflow: visible !important;
+}
+
+.vpd-days {
+    height: auto !important;
+    overflow: visible !important;
+    padding-bottom: 10px !important;
+}
+
+.vpd-actions {
+    position: relative !important; /* Stop floating */
+    bottom: auto !important;
+    left: auto !important;
+    margin-top: 10px !important;
+    background: transparent !important;
+    border-top: none !important;
 }
 
 .date-modal-content {
