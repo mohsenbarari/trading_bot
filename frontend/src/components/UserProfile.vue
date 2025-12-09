@@ -45,24 +45,33 @@ function initDatePicker(currentValue: string) {
     }
 }
 
+// Update temp ref on any change (click day, time, etc)
+function onDateChange(val: any) {
+    console.log('Date Change:', val);
+    if (val) tempDateRef.value = val;
+}
 
-
-// Rename handler for native submit
-function onDateSubmit(val: string) {
+// Final submission handler
+function submitDate() {
+    const val = tempDateRef.value;
     if (!val) return;
-    console.log('Native Date Picker Submit:', val);
-    tempDateRef.value = val;
     
-    // Determine which modal is active to save to correct ref
-    // Since this handler is shared, we check the active modal state.
-    // Alternatively, we can pass argument in template @submit="onDateSubmit($event, 'block')"
-    // But the component emits just the value.
+    console.log('Manual Submit:', val);
+    
     if (showBlockDateModal.value) {
         customDate.value = val;
         showBlockDateModal.value = false;
     } else if (showLimitDateModal.value) {
         customLimitDate.value = val;
         showLimitDateModal.value = false;
+    }
+}
+
+// Legacy handler - can be removed or kept as alias
+function onDateSubmit(val: string) {
+    if (val) {
+        tempDateRef.value = val;
+        submitDate();
     }
 }
 
@@ -569,10 +578,12 @@ async function deleteUser() {
                         inline 
                         :auto-submit="false" 
                         :editable="false" 
-                        @submit="onDateSubmit"
+                        @change="onDateChange"
                     />
+                    <div class="integrated-footer">
+                         <button @click="submitDate" class="integrated-save-btn">تایید</button>
+                    </div>
                 </div>
-                <!-- Native buttons are used, external buttons removed -->
             </div>
         </div>
     </Teleport>
@@ -592,50 +603,41 @@ async function deleteUser() {
                         inline 
                         :auto-submit="false" 
                         :editable="false" 
-                        @submit="onDateSubmit"
+                        @change="onDateChange"
                     />
+                    <div class="integrated-footer">
+                         <button @click="submitDate" class="integrated-save-btn">تایید</button>
+                    </div>
                 </div>
-                 <!-- Native buttons are used, external buttons removed -->
             </div>
         </div>
     </Teleport>
 </template>
 
 <style>
-/* Global fix for datepicker buttons */
-.vpd-actions {
-    display: flex !important;
-    justify-content: space-between !important;
-    position: relative !important; /* Changed from absolute */
-    width: 100% !important;
-    z-index: 1000 !important;
-    background: #fff !important;
-    border-top: 1px solid #eee !important;
-    padding: 10px !important;
-    min-height: 40px !important;
-    margin-top: 10px !important;
+/* Integrated Footer Styles */
+.integrated-footer {
+    padding: 10px;
+    border-top: 1px solid #eee;
+    background: #fff;
+    text-align: center;
 }
 
-.vpd-submit-btn {
-    background: #007bff;
+.integrated-save-btn {
+    width: 100%;
+    background-color: #007aff;
     color: white;
     border: none;
-    padding: 8px 20px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 14px;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 16px;
     font-weight: bold;
-}
-.vpd-submit-btn:hover {
-    background: #0056b3;
+    cursor: pointer;
 }
 
-.vpd-content {
-    padding-bottom: 10px !important; /* Restore padding */
-    height: auto !important;
-    overflow: visible !important;
-    display: flex !important;
-    flex-direction: column !important;
+/* Hide original actions just in case they appear */
+.vpd-actions {
+    display: none !important;
 }
 
 .vpd-main {
