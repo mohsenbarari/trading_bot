@@ -87,11 +87,13 @@ function handleFinalSubmit() {
 }
 
 // Legacy handler - can be removed or kept as alias
-function onDateSubmit(val: string) {
-    if (val) {
-        tempDateRef.value = val;
-        submitDate();
-    }
+// Explicit update handlers to ensure v-model sync works for custom integration
+function updateDatePart(val: any) {
+    if (val) tempDatePart.value = val;
+}
+
+function updateTimePart(val: any) {
+    if (val) tempTimePart.value = val;
 }
 
 const roles = [
@@ -598,6 +600,7 @@ async function deleteUser() {
                         inline 
                         :auto-submit="false" 
                         :editable="false" 
+                        @change="updateDatePart"
                     />
                     <!-- Step 2: Time -->
                     <DatePicker 
@@ -608,6 +611,7 @@ async function deleteUser() {
                         inline 
                         :auto-submit="false" 
                         :editable="false" 
+                        @change="updateTimePart"
                     />
                 </div>
                 <!-- Footer moved outside wrapper to ensure visibility -->
@@ -637,6 +641,7 @@ async function deleteUser() {
                         inline 
                         :auto-submit="false" 
                         :editable="false" 
+                        @change="updateDatePart"
                     />
                     <!-- Step 2: Time -->
                     <DatePicker 
@@ -647,6 +652,7 @@ async function deleteUser() {
                         inline 
                         :auto-submit="false" 
                         :editable="false" 
+                        @change="updateTimePart"
                     />
                 </div>
                 <!-- Footer moved outside wrapper to ensure visibility -->
