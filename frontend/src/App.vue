@@ -60,6 +60,93 @@ const swipeThreshold = 100;
 const isPopoverOpen = ref(false);
 const popoverNotifications = ref<any[]>([]);
 
+// --- لاگین (OTP) ---
+const loginStep = ref<'none' | 'mobile' | 'otp'>('none');
+const loginMobile = ref('');
+const loginCode = ref('');
+const loginError = ref('');
+const isLoginLoading = ref(false);
+
+async function handleRequestOtp() {
+    if (!loginMobile.value) {
+        loginError.value = 'لطفاً شماره موبایل را وارد کنید.';
+        return;
+    }
+    // Normalize logic could be added here if needed, but backend handles it too
+    
+    isLoginLoading.value = true;
+    loginError.value = '';
+    
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/auth/request-otp`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ mobile_number: loginMobile.value })
+        });
+        
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'خطا در ارسال کد');
+        }
+        
+        // Success
+        loginStep.value = 'otp';
+        loadingMessage.value = 'کد ارسال شد. لطفاً آن را وارد کنید.'; // Not strictly used in UI but good for debugging
+    } catch (e: any) {
+        loginError.value = e.message;
+    } finally {
+        isLoginLoading.value = false;
+    }
+}
+
+async function handleVerifyOtp() {
+    if (!loginCode.value) {
+        loginError.value = 'لطفاً کد تایید را وارد کنید.';
+        return;
+    }
+    
+    isLoginLoading.value = true;
+    loginError.value = '';
+    
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ mobile_number: loginMobile.value, otp_code: loginCode.value })
+        });
+        
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'کد نادرست است');
+        }
+        
+        const data = await res.json();
+        jwtToken.value = data.access_token;
+        
+        // Proceed to load user
+        await loadUser();
+        
+        loginStep.value = 'none'; // Exit login mode
+    } catch (e: any) {
+        loginError.value = e.message;
+    } finally {
+        isLoginLoading.value = false;
+    }
+}
+
+async function loadUser() {
+    loadingMessage.value = 'در حال دریافت اطلاعات کاربر...';
+    const userResp = await fetch(`${API_BASE_URL}/api/auth/me`, { headers: { Authorization: `Bearer ${jwtToken.value}` }, });
+    if (!userResp.ok) throw new Error("دریافت اطلاعات کاربر ناموفق بود.");
+    user.value = await userResp.json();
+    loadingMessage.value = '';
+    
+    if (user.value?.role === 'WATCH') activeView.value = 'profile'; 
+    
+    await checkNotifications();
+    startSSE();
+}
+
 const computePageTitle = computed(() => {
   switch (activeView.value) {
     case 'trade': return 'معاملات';
@@ -379,36 +466,14 @@ onMounted(async () => {
         if (!loginResp.ok) throw new Error("احراز هویت اولیه ناموفق بود.");
         const loginJson = await loginResp.json();
         token = loginJson.access_token;
+        jwtToken.value = token;
+        await loadUser();
     } else {
-        // Fallback for browser debugging
-        console.warn("Running in browser mode (Dev Login)");
-        loadingMessage.value = 'ورود توسعه‌دهنده...';
-        // Using a hardcoded known admin mobile number for debugging
-        const devResp = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ mobile_number: '09370809280', otp_code: '0000' }) 
-        });
-        if (!devResp.ok) throw new Error("ورود توسعه‌دهنده ناموفق بود.");
-        const devJson = await devResp.json();
-        token = devJson.access_token;
+        // Browser Mode -> Show Login
+        console.warn("Running in browser mode. Waiting for OTP login.");
+        loadingMessage.value = ''; // Clear loading
+        loginStep.value = 'mobile';
     }
-
-    jwtToken.value = token;
-    
-    loadingMessage.value = 'در حال دریافت اطلاعات کاربر...';
-    const userResp = await fetch(`${API_BASE_URL}/api/auth/me`, { headers: { Authorization: `Bearer ${jwtToken.value}` }, });
-    if (!userResp.ok) throw new Error("دریافت اطلاعات کاربر ناموفق بود.");
-    user.value = await userResp.json();
-    loadingMessage.value = '';
-    
-    if (user.value?.role === 'WATCH') activeView.value = 'profile'; 
-    
-    // --- شروع سیستم نوتیفیکیشن ---
-    // 1. دریافت وضعیت فعلی
-    await checkNotifications();
-    // 2. اتصال دائمی برای دریافت پیام‌های جدید
-    startSSE();
     
   } catch (e: any) { loadingMessage.value = `⚠️ ${e.message}`; }
 });
@@ -585,6 +650,34 @@ onUnmounted(() => {
 
           </template>
         
+      </template>
+
+      <!-- Login UI -->
+      <template v-else-if="loginStep !== 'none'">
+        <div class="login-container">
+            <div class="login-card">
+                <h2>🔐 ورود به پنل</h2>
+                
+                <div v-if="loginStep === 'mobile'">
+                    <p>لطفاً شماره موبایل خود را وارد کنید.</p>
+                    <input v-model="loginMobile" placeholder="شماره موبایل (مثال: 09123456789)" dir="ltr" />
+                    <button @click="handleRequestOtp" :disabled="isLoginLoading">
+                        {{ isLoginLoading ? 'در حال ارسال...' : 'ارسال کد تایید' }}
+                    </button>
+                </div>
+                
+                <div v-else-if="loginStep === 'otp'">
+                    <p>کد ارسال شده به ربات تلگرام را وارد کنید:</p>
+                    <input v-model="loginCode" placeholder="کد تایید" dir="ltr" type="number" />
+                    <button @click="handleVerifyOtp" :disabled="isLoginLoading">
+                        {{ isLoginLoading ? 'در حال بررسی...' : 'تایید و ورود' }}
+                    </button>
+                    <button @click="loginStep = 'mobile'" class="secondary-btn">بازگشت</button>
+                </div>
+
+                <p v-if="loginError" class="error-text">{{ loginError }}</p>
+            </div>
+        </div>
       </template>
     </main>
 
@@ -937,4 +1030,69 @@ body {
   font-family: 'Vazirmatn', sans-serif; 
 }
 .popover-footer button:hover { background-color: #eef; }
+
+/* Login Styles */
+.login-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    padding: 20px;
+    background-color: var(--bg-color);
+}
+
+.login-card {
+    background: white;
+    padding: 30px;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+}
+
+.login-card h2 {
+    margin-bottom: 24px;
+    color: var(--text-color);
+}
+
+.login-card input {
+    width: 100%;
+    padding: 12px;
+    margin-bottom: 16px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 16px;
+    font-family: inherit;
+}
+
+.login-card button {
+    width: 100%;
+    padding: 12px;
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    font-weight: bold;
+    margin-bottom: 8px;
+}
+
+.login-card button:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.login-card .secondary-btn {
+    background-color: transparent;
+    color: var(--text-secondary);
+    border: 1px solid #ddd;
+}
+
+.error-text {
+    color: #ff3b30;
+    margin-top: 10px;
+    font-size: 14px;
+}
 </style>

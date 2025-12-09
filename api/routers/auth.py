@@ -14,6 +14,8 @@ from datetime import datetime, timedelta
 
 from core.config import settings, Settings
 from core.db import get_db
+from core.redis import get_redis
+from redis.asyncio import Redis
 from core.security import create_access_token
 from core.enums import UserRole
 from models.user import User
@@ -121,20 +123,74 @@ async def get_admin_user_dependency(
 
 # --- اندپوینت‌ها ---
 
-@router.post("/request-otp")
-async def request_otp(request: schemas.OTPRequest, db: AsyncSession = Depends(get_db)):
-    return {"message": "OTP sent (simulated)"}
+# --- اندپوینت‌ها ---
 
-@router.post("/verify-otp", response_model=schemas.Token)
-async def verify_otp(request: schemas.OTPVerify, db: AsyncSession = Depends(get_db)):
+@router.post("/request-otp")
+async def request_otp(
+    request: schemas.OTPRequest, 
+    db: AsyncSession = Depends(get_db),
+    redis_client: Redis = Depends(get_redis)
+):
+    # 1. Check if user exists
     stmt = select(User).where(User.mobile_number == request.mobile_number)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
     
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-        
-    access_token = create_access_token(data={"sub": str(user.telegram_id), "role": user.role.value})
+        # Security: Don't reveal if user exists? 
+        # For this specific app, returning 404 is fine as it's an invite-only internal app.
+        raise HTTPException(status_code=404, detail="شماره موبایل یافت نشد.")
+
+    # 2. Generate OTP
+    import secrets
+    otp_code = "".join([str(secrets.randbelow(10)) for _ in range(5)]) # 5 digit code
+    
+    # 3. Store in Redis (120 seconds expiry)
+    await redis_client.set(f"OTP:{request.mobile_number}", otp_code, ex=120)
+    print(f"DEBUG OTP for {request.mobile_number}: {otp_code}")
+    
+    # 4. Send via Telegram
+    from aiogram import Bot
+    try:
+        async with Bot(token=settings.bot_token) as bot:
+            message_text = f"🔐 کد ورود شما:\n\n`{otp_code}`\n\nاین کد تا ۲ دقیقه معتبر است."
+            await bot.send_message(chat_id=user.telegram_id, text=message_text, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Failed to send Telegram message: {e}")
+        raise HTTPException(status_code=500, detail="خطا در ارسال پیام تلگرام")
+
+    return {"message": "کد تایید به تلگرام شما ارسال شد."}
+
+@router.post("/verify-otp", response_model=schemas.Token)
+async def verify_otp(
+    request: schemas.OTPVerify, 
+    db: AsyncSession = Depends(get_db),
+    redis_client: Redis = Depends(get_redis)
+):
+    # 1. Dev Exception (keep for emergency/testing if needed, or remove)
+    # Removing hardcoded dev exception as user requested SECURITY.
+    
+    # 2. Verify OTP from Redis
+    stored_otp = await redis_client.get(f"OTP:{request.mobile_number}")
+    if not stored_otp or stored_otp != request.otp_code:
+        raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است.")
+    
+    # 3. Get User
+    stmt = select(User).where(User.mobile_number == request.mobile_number)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User found during OTP but not found now?")
+
+    # 4. Cleanup
+    await redis_client.delete(f"OTP:{request.mobile_number}")
+
+    # 5. Generate Token
+    access_token = create_access_token(
+        data={"sub": str(user.telegram_id), "role": user.role.value, "source": "web"},
+        expires_delta=timedelta(hours=12)
+    )
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.get("/me", response_model=schemas.UserRead)
