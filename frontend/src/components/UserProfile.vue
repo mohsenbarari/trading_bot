@@ -580,9 +580,10 @@ async function deleteUser() {
                         :editable="false" 
                         @change="onDateChange"
                     />
-                    <div class="integrated-footer">
-                         <button @click="submitDate" class="integrated-save-btn">تایید</button>
-                    </div>
+                </div>
+                <!-- Footer moved outside wrapper to ensure visibility -->
+                <div class="integrated-footer">
+                        <button @click="submitDate" class="integrated-save-btn">تایید</button>
                 </div>
             </div>
         </div>
@@ -605,9 +606,10 @@ async function deleteUser() {
                         :editable="false" 
                         @change="onDateChange"
                     />
-                    <div class="integrated-footer">
-                         <button @click="submitDate" class="integrated-save-btn">تایید</button>
-                    </div>
+                </div>
+                <!-- Footer moved outside wrapper to ensure visibility -->
+                <div class="integrated-footer">
+                        <button @click="submitDate" class="integrated-save-btn">تایید</button>
                 </div>
             </div>
         </div>
@@ -617,12 +619,16 @@ async function deleteUser() {
 <style>
 /* Integrated Footer Styles */
 .integrated-footer {
+    width: 100%;
+    max-width: 320px;
     padding: 10px;
     border-top: 1px solid #eee;
     background: #fff;
     text-align: center;
     border-bottom-left-radius: 8px;
     border-bottom-right-radius: 8px;
+    margin-top: -5px; /* Pull it up slightly to connect with picker */
+    z-index: 10;
 }
 
 .integrated-save-btn {
