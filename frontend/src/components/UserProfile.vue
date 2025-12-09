@@ -37,11 +37,25 @@ const tempDateRef = ref(''); // Intermediate ref
 const blockDatePicker = ref<any>(null); // Ref for block date picker
 const limitDatePicker = ref<any>(null); // Ref for limit date picker
 
+const pickerStep = ref(1);
+const tempDatePart = ref('');
+const tempTimePart = ref('');
+
 function initDatePicker(currentValue: string) {
+    pickerStep.value = 1;
     if (currentValue) {
-        tempDateRef.value = currentValue;
+        // Try to parse existing value
+        const m = moment(currentValue, 'jYYYY/jMM/jDD HH:mm');
+        if (m.isValid()) {
+            tempDatePart.value = m.format('jYYYY/jMM/jDD');
+            tempTimePart.value = m.format('HH:mm');
+        } else {
+            tempDatePart.value = moment().format('jYYYY/jMM/jDD');
+            tempTimePart.value = moment().format('HH:mm');
+        }
     } else {
-        tempDateRef.value = moment().format('jYYYY/jMM/jDD HH:mm');
+        tempDatePart.value = moment().format('jYYYY/jMM/jDD');
+        tempTimePart.value = moment().format('HH:mm');
     }
 }
 
@@ -52,17 +66,22 @@ function onDateChange(val: any) {
 }
 
 // Final submission handler
-function submitDate() {
-    const val = tempDateRef.value;
-    if (!val) return;
+function handleNextStep() {
+    if (!tempDatePart.value) return;
+    pickerStep.value = 2;
+}
+
+function handleFinalSubmit() {
+    if (!tempDatePart.value || !tempTimePart.value) return;
     
-    console.log('Manual Submit:', val);
+    const finalVal = `${tempDatePart.value} ${tempTimePart.value}`;
+    console.log('Final Submit:', finalVal);
     
     if (showBlockDateModal.value) {
-        customDate.value = val;
+        customDate.value = finalVal;
         showBlockDateModal.value = false;
     } else if (showLimitDateModal.value) {
-        customLimitDate.value = val;
+        customLimitDate.value = finalVal;
         showLimitDateModal.value = false;
     }
 }
@@ -567,23 +586,36 @@ async function deleteUser() {
     <Teleport to="body">
         <div v-if="showBlockDateModal" class="modal-overlay" style="z-index: 2010;">
             <div class="modal-content date-modal-content">
-                <h3>📅 انتخاب تاریخ</h3>
+                <h3>{{ pickerStep === 1 ? '📅 انتخاب تاریخ' : '⏰ انتخاب ساعت' }}</h3>
                 
                 <div class="date-picker-wrapper">
+                    <!-- Step 1: Date -->
                     <DatePicker 
-                        ref="blockDatePicker"
-                        v-model="tempDateRef" 
-                        type="datetime" 
-                        format="jYYYY/jMM/jDD HH:mm"
+                        v-if="pickerStep === 1"
+                        v-model="tempDatePart" 
+                        type="date" 
+                        format="jYYYY/jMM/jDD"
                         inline 
                         :auto-submit="false" 
                         :editable="false" 
-                        @change="onDateChange"
+                    />
+                    <!-- Step 2: Time -->
+                    <DatePicker 
+                        v-if="pickerStep === 2"
+                        v-model="tempTimePart" 
+                        type="time" 
+                        format="HH:mm"
+                        inline 
+                        :auto-submit="false" 
+                        :editable="false" 
                     />
                 </div>
                 <!-- Footer moved outside wrapper to ensure visibility -->
                 <div class="integrated-footer">
-                        <button @click="submitDate" class="integrated-save-btn">تایید</button>
+                        <button @click="showBlockDateModal = false" class="integrated-cancel-btn">انصراف</button>
+                        
+                        <button v-if="pickerStep === 1" @click="handleNextStep" class="integrated-save-btn">ادامه</button>
+                        <button v-if="pickerStep === 2" @click="handleFinalSubmit" class="integrated-save-btn">تایید نهایی</button>
                 </div>
             </div>
         </div>
@@ -593,23 +625,36 @@ async function deleteUser() {
     <Teleport to="body">
         <div v-if="showLimitDateModal" class="modal-overlay" style="z-index: 2010;">
             <div class="modal-content date-modal-content">
-                <h3>📅 انتخاب تاریخ</h3>
+                <h3>{{ pickerStep === 1 ? '📅 انتخاب تاریخ' : '⏰ انتخاب ساعت' }}</h3>
                 
                 <div class="date-picker-wrapper">
+                    <!-- Step 1: Date -->
                     <DatePicker 
-                        ref="limitDatePicker"
-                        v-model="tempDateRef" 
-                        type="datetime" 
-                        format="jYYYY/jMM/jDD HH:mm"
+                        v-if="pickerStep === 1"
+                        v-model="tempDatePart" 
+                        type="date" 
+                        format="jYYYY/jMM/jDD"
                         inline 
                         :auto-submit="false" 
                         :editable="false" 
-                        @change="onDateChange"
+                    />
+                    <!-- Step 2: Time -->
+                    <DatePicker 
+                        v-if="pickerStep === 2"
+                        v-model="tempTimePart" 
+                        type="time" 
+                        format="HH:mm"
+                        inline 
+                        :auto-submit="false" 
+                        :editable="false" 
                     />
                 </div>
                 <!-- Footer moved outside wrapper to ensure visibility -->
                 <div class="integrated-footer">
-                        <button @click="submitDate" class="integrated-save-btn">تایید</button>
+                        <button @click="showLimitDateModal = false" class="integrated-cancel-btn">انصراف</button>
+                        
+                        <button v-if="pickerStep === 1" @click="handleNextStep" class="integrated-save-btn">ادامه</button>
+                        <button v-if="pickerStep === 2" @click="handleFinalSubmit" class="integrated-save-btn">تایید نهایی</button>
                 </div>
             </div>
         </div>
@@ -629,10 +674,13 @@ async function deleteUser() {
     border-bottom-right-radius: 8px;
     margin-top: -5px; /* Pull it up slightly to connect with picker */
     z-index: 10;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
 }
 
 .integrated-save-btn {
-    width: 100%;
+    flex: 1;
     background-color: #007aff;
     color: white;
     border: none;
@@ -642,6 +690,19 @@ async function deleteUser() {
     font-weight: bold;
     cursor: pointer;
 }
+
+.integrated-cancel-btn {
+    flex: 1;
+    background-color: #f0f0f0;
+    color: #333;
+    border: 1px solid #ddd;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
 
 /* Hide original actions just in case they appear */
 .vpd-actions {
