@@ -122,6 +122,7 @@ async function handleVerifyOtp() {
         
         const data = await res.json();
         jwtToken.value = data.access_token;
+        localStorage.setItem('auth_token', data.access_token); // Persist token
         
         // Proceed to load user
         await loadUser();
@@ -136,15 +137,24 @@ async function handleVerifyOtp() {
 
 async function loadUser() {
     loadingMessage.value = 'در حال دریافت اطلاعات کاربر...';
-    const userResp = await fetch(`${API_BASE_URL}/api/auth/me`, { headers: { Authorization: `Bearer ${jwtToken.value}` }, });
-    if (!userResp.ok) throw new Error("دریافت اطلاعات کاربر ناموفق بود.");
-    user.value = await userResp.json();
-    loadingMessage.value = '';
-    
-    if (user.value?.role === 'WATCH') activeView.value = 'profile'; 
-    
-    await checkNotifications();
-    startSSE();
+    try {
+        const userResp = await fetch(`${API_BASE_URL}/api/auth/me`, { headers: { Authorization: `Bearer ${jwtToken.value}` }, });
+        if (!userResp.ok) throw new Error("Token expired or invalid");
+        user.value = await userResp.json();
+        loadingMessage.value = '';
+        
+        if (user.value?.role === 'WATCH') activeView.value = 'profile'; 
+        
+        await checkNotifications();
+        startSSE();
+    } catch (e: any) {
+        // If load user fails (e.g. 401), clear token
+        console.warn("Auth check failed:", e);
+        jwtToken.value = null;
+        user.value = null;
+        localStorage.removeItem('auth_token');
+        throw e;
+    }
 }
 
 const computePageTitle = computed(() => {
@@ -469,13 +479,32 @@ onMounted(async () => {
         jwtToken.value = token;
         await loadUser();
     } else {
-        // Browser Mode -> Show Login
-        console.warn("Running in browser mode. Waiting for OTP login.");
-        loadingMessage.value = ''; // Clear loading
-        loginStep.value = 'mobile';
+        // Browser Mode
+        const storedToken = localStorage.getItem('auth_token');
+        if (storedToken) {
+            console.log("Found stored token, attempting auto-login...");
+            jwtToken.value = storedToken;
+            try {
+                await loadUser();
+            } catch (e) {
+                console.warn("Stored token invalid, showing login.");
+                loginStep.value = 'mobile';
+                loadingMessage.value = '';
+            }
+        } else {
+             console.warn("No stored token. Waiting for OTP login.");
+             loadingMessage.value = ''; 
+             loginStep.value = 'mobile';
+        }
     }
     
-  } catch (e: any) { loadingMessage.value = `⚠️ ${e.message}`; }
+  } catch (e: any) { 
+      loadingMessage.value = ''; 
+      if (!user.value && loginStep.value === 'none') {
+        // Only show error if we are stuck
+         loadingMessage.value = `⚠️ ${e.message}`; 
+      }
+  }
 });
 
 onUnmounted(() => {
