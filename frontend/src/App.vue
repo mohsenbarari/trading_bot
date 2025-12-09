@@ -371,12 +371,30 @@ onMounted(async () => {
   setTimeout(() => { document.body.style.backgroundColor = '#f0f2f5'; }, 100);
   if (tg) { try { tg.setHeaderColor('#ffffff'); tg.setBackgroundColor('#f0f2f5'); } catch (e) { console.error("Telegram API error:", e); } }
   try {
-    if (!tg || !tg.initData) throw new Error("لطفاً این برنامه را از طریق تلگرام باز کنید.");
-    loadingMessage.value = 'در حال احراز هویت...';
-    const loginResp = await fetch(`${API_BASE_URL}/api/auth/webapp-login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: tg.initData }), });
-    if (!loginResp.ok) throw new Error("احراز هویت اولیه ناموفق بود.");
-    const loginJson = await loginResp.json();
-    jwtToken.value = loginJson.access_token;
+    let token = null;
+
+    if (tg && tg.initData) {
+        loadingMessage.value = 'در حال احراز هویت...';
+        const loginResp = await fetch(`${API_BASE_URL}/api/auth/webapp-login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: tg.initData }), });
+        if (!loginResp.ok) throw new Error("احراز هویت اولیه ناموفق بود.");
+        const loginJson = await loginResp.json();
+        token = loginJson.access_token;
+    } else {
+        // Fallback for browser debugging
+        console.warn("Running in browser mode (Dev Login)");
+        loadingMessage.value = 'ورود توسعه‌دهنده...';
+        // Using a hardcoded known admin mobile number for debugging
+        const devResp = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ mobile_number: '09370809280', otp_code: '0000' }) 
+        });
+        if (!devResp.ok) throw new Error("ورود توسعه‌دهنده ناموفق بود.");
+        const devJson = await devResp.json();
+        token = devJson.access_token;
+    }
+
+    jwtToken.value = token;
     
     loadingMessage.value = 'در حال دریافت اطلاعات کاربر...';
     const userResp = await fetch(`${API_BASE_URL}/api/auth/me`, { headers: { Authorization: `Bearer ${jwtToken.value}` }, });
