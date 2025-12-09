@@ -652,6 +652,24 @@ async function deleteUser() {
     padding-bottom: 10px !important;
 }
 
+/* Hide header submit/check buttons to prevent reset bug */
+.vpd-header .vpd-icon-btn svg {
+    /* We cannot verify the SVG path easily in CSS, but checking for specific classes usually helps */
+}
+
+/* Specific fix for the top-left button in Time View (which resets date) */
+/* In RTL, :last-child is usually the left-most element in a flex row */
+.vpd-content.vpd-is-time .vpd-header .vpd-icon-btn:last-child,
+.vpd-time .vpd-header .vpd-icon-btn:last-child {
+    display: none !important;
+}
+
+/* Hide any button explicitly named 'submit' or having check icon class in header */
+.vpd-header .vpd-icon-btn.vpd-check, 
+.vpd-header .vpd-icon-btn.vpd-tick {
+    display: none !important;
+}
+
 /* Hide library footer to use custom buttons */
 .vpd-actions {
     display: none !important;
