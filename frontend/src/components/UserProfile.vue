@@ -230,6 +230,18 @@ const toEnglishDigits = (str: string) => {
   return str.replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString());
 };
 
+// Helper to interpret Jalali input as Iran Standard Time (+03:30)
+const parseJalaliToIranISO = (jalaliStr: string) => {
+    const normalize = toEnglishDigits(jalaliStr);
+    // Parse as Jalaali, then FORCE the offset to +03:30 (Iran Standard Time)
+    // We use utcOffset(210, true) -> 210 mins = 3h 30m. 
+    // The 'true' flag keeps the local time (HH:mm) and adjusts the underlying UTC.
+    const m = moment(normalize, 'jYYYY/jMM/jDD HH:mm');
+    if (!m.isValid()) return null;
+    m.utcOffset(210, true);
+    return m.toISOString(); // Returns equivalent UTC time
+};
+
 async function blockUserCustom() {
     if (!customDate.value) {
         alert('لطفاً یک تاریخ معتبر انتخاب کنید.');
@@ -242,23 +254,19 @@ async function blockUserCustom() {
         console.log('Raw Date:', customDate.value);
         console.log('Normalized Date:', normalizedDate);
 
-        // Parse Jalali date string to ISO
-        // Using strict parsing mode (third argument true) if possible, or just standard
-        const date = moment(normalizedDate, 'jYYYY/jMM/jDD HH:mm');
+        // Parse Jalali date string strictly as Iran Time
+        const isoDate = parseJalaliToIranISO(normalizedDate);
         
-        console.log('Parsed Year:', date.year()); // Should be 2024/2025 (Gregorian equivalent)
-        
-        if (!date.isValid()) {
+        if (!isoDate) {
              console.error('Date Invalid:', normalizedDate);
              alert('تاریخ نامعتبر است.');
              isLoading.value = false;
              return;
         }
         
-        // Convert to standard Gregorian UTC ISO for backend
-        const isoDate = date.toDate().toISOString();
-        console.log('Sending ISO:', isoDate);
+        console.log('Sending ISO (Iran Time -> UTC):', isoDate);
         await sendBlockRequest(isoDate);
+
     } catch (e) {
         console.error('Custom Block Error:', e);
         alert('خطا در انجام عملیات');
@@ -304,7 +312,12 @@ async function saveLimitations() {
                  isLoading.value = false;
                  return;
              }
-             expireAt = moment(customLimitDate.value, 'jYYYY/jMM/jDD HH:mm').utc().toISOString();
+             expireAt = parseJalaliToIranISO(customLimitDate.value);
+             if (!expireAt) {
+                 alert('تاریخ نامعتبر است.');
+                 isLoading.value = false;
+                 return;
+             }
         } else if (limitDurationMinutes.value > 0) {
              const date = new Date();
              date.setMinutes(date.getMinutes() + limitDurationMinutes.value);
