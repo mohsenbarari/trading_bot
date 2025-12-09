@@ -621,6 +621,8 @@ async function deleteUser() {
     border-top: 1px solid #eee;
     background: #fff;
     text-align: center;
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
 }
 
 .integrated-save-btn {
@@ -675,9 +677,63 @@ async function deleteUser() {
     display: none !important;
 }
 
+/* More specific width control to prevent full-width ugly look */
+.date-picker-wrapper {
+    width: 100%;
+    max-width: 320px; /* Force standard calendar width */
+    margin: 0 auto; /* Center it */
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
 .date-modal-content {
-    max-width: 350px !important;
-    padding: 10px !important;
+    width: auto !important;
+    min-width: 300px;
+    max-width: 360px !important;
+    padding: 0 !important; /* Remove padding to let picker fill nicely */
+    background: transparent !important; /* Let picker bg show */
+    box-shadow: none !important; /* Remove double shadow */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* Hide redundant input field (white box with date) in inline mode */
+.date-picker-wrapper .vpd-input-group {
+    display: none !important;
+}
+
+.date-modal-content h3 {
+    margin-bottom: 15px;
+    color: white; /* Make title visible on overlay or add bg */
+    background: #fff;
+    width: 100%;
+    text-align: center;
+    padding: 10px;
+    border-radius: 8px;
+    color: #333;
+    max-width: 320px;
+}
+
+/* Stronger layout fix for width */
+.vpd-container, .vpd-wrapper {
+    width: 100% !important;
+    max-width: 320px !important;
+    margin: 0 auto !important;
+}
+
+/* Fix for top-left header button in Time View */
+/* Hide ALL icon buttons in header in time view to prevent accidental resets */
+.vpd-content.vpd-is-time .vpd-header .vpd-icon-btn,
+.vpd-time .vpd-header .vpd-icon-btn {
+    display: none !important;
+}
+
+/* Just in case, explicit hide for check/tick class if present */
+.vpd-header .vpd-icon-btn.vpd-check, 
+.vpd-header .vpd-icon-btn.vpd-tick {
+    display: none !important;
 }
 
 /* Neutral trigger that looks like an input but acts like a div */
