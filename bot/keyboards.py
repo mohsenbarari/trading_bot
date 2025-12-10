@@ -101,10 +101,14 @@ def get_user_profile_return_keyboard(user_id: int, back_to_page: int = 1) -> Inl
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def get_user_settings_keyboard(user_id: int, is_restricted: bool = False) -> InlineKeyboardMarkup:
+def get_user_settings_keyboard(user_id: int, is_restricted: bool = False, has_limitations: bool = False) -> InlineKeyboardMarkup:
     # تعیین متن و اکشن دکمه مسدودسازی
     block_text = "🔓 رفع مسدودیت" if is_restricted else "⛔ مسدود کردن"
     block_callback = f"user_unblock_{user_id}" if is_restricted else f"user_block_{user_id}"
+    
+    # تعیین متن و اکشن دکمه محدودیت
+    limit_text = "✅ رفع محدودیت" if has_limitations else "⚠️ اعمال محدودیت"
+    limit_callback = f"user_unlimit_{user_id}" if has_limitations else f"user_limit_{user_id}"
 
     keyboard = [
         [
@@ -117,12 +121,13 @@ def get_user_settings_keyboard(user_id: int, is_restricted: bool = False) -> Inl
             InlineKeyboardButton(text=block_text, callback_data=block_callback)
         ],
         [
-            InlineKeyboardButton(text="⚠️ اعمال محدودیت", callback_data=f"user_limit_{user_id}")
+            InlineKeyboardButton(text=limit_text, callback_data=limit_callback)
         ],
-        [
-            InlineKeyboardButton(text="🔙 بازگشت", callback_data=f"user_profile_{user_id}")
-        ]
     ]
+    
+    keyboard.append([
+        InlineKeyboardButton(text="🔙 بازگشت", callback_data=f"user_profile_{user_id}")
+    ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_block_duration_keyboard(user_id: int) -> InlineKeyboardMarkup:

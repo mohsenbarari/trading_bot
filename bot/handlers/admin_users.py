@@ -373,11 +373,18 @@ async def handle_user_settings(callback: types.CallbackQuery, user: Optional[Use
     # مقایسه با datetime.utcnow() (naive)
     if target_user.trading_restricted_until and target_user.trading_restricted_until > datetime.utcnow():
         is_restricted = True
+    
+    # بررسی وجود محدودیت
+    has_limitations = (
+        target_user.max_daily_trades is not None or
+        target_user.max_active_commodities is not None or
+        target_user.max_daily_requests is not None
+    )
 
     try:
         await callback.message.edit_text(
             profile_text,
-            reply_markup=get_user_settings_keyboard(target_user_id, is_restricted=is_restricted),
+            reply_markup=get_user_settings_keyboard(target_user_id, is_restricted=is_restricted, has_limitations=has_limitations),
             parse_mode="Markdown"
         )
     except TelegramBadRequest:
@@ -448,11 +455,18 @@ async def handle_user_block_actions(callback: types.CallbackQuery, user: Optiona
                 # Telegram notification
                 await send_telegram_notification(target_user.telegram_id, block_message)
                 
+                # بررسی وجود محدودیت
+                has_limitations = (
+                    target_user.max_daily_trades is not None or
+                    target_user.max_active_commodities is not None or
+                    target_user.max_daily_requests is not None
+                )
+                
                 # بازگشت به تنظیمات
                 profile_text = await get_user_profile_text(target_user)
                 await callback.message.edit_text(
                     profile_text,
-                    reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=True),
+                    reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=True, has_limitations=has_limitations),
                     parse_mode="Markdown"
                 )
                 await callback.answer(msg_text, show_alert=True)
@@ -475,14 +489,57 @@ async def handle_user_unblock(callback: types.CallbackQuery, user: Optional[User
             target_user.trading_restricted_until = None
             await session.commit()
             
+            # بررسی وجود محدودیت
+            has_limitations = (
+                target_user.max_daily_trades is not None or
+                target_user.max_active_commodities is not None or
+                target_user.max_daily_requests is not None
+            )
+            
             # بازگشت به تنظیمات
             profile_text = await get_user_profile_text(target_user)
             await callback.message.edit_text(
                 profile_text,
-                reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=False),
+                reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=False, has_limitations=has_limitations),
                 parse_mode="Markdown"
             )
             await callback.answer("✅ رفع مسدودیت انجام شد.", show_alert=True)
+        else:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("user_unlimit_"))
+async def handle_user_unlimit(callback: types.CallbackQuery, user: Optional[User]):
+    """رفع محدودیت‌های کاربر"""
+    if not user or user.role != UserRole.SUPER_ADMIN: return
+    
+    target_user_id = int(callback.data.split("_")[-1])
+    
+    async with AsyncSessionLocal() as session:
+        stmt = select(User).where(User.id == target_user_id)
+        target_user = (await session.execute(stmt)).scalar_one_or_none()
+        
+        if target_user:
+            # حذف تمام محدودیت‌ها
+            target_user.max_daily_trades = None
+            target_user.max_active_commodities = None
+            target_user.max_daily_requests = None
+            target_user.limitations_expire_at = None
+            await session.commit()
+            
+            # بررسی وضعیت مسدودی
+            is_restricted = False
+            if target_user.trading_restricted_until and target_user.trading_restricted_until > datetime.utcnow():
+                is_restricted = True
+            
+            # بازگشت به تنظیمات
+            profile_text = await get_user_profile_text(target_user)
+            await callback.message.edit_text(
+                profile_text,
+                reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=is_restricted, has_limitations=False),
+                parse_mode="Markdown"
+            )
+            await callback.answer("✅ محدودیت‌ها برداشته شد.", show_alert=True)
         else:
             await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
 
@@ -553,10 +610,17 @@ async def handle_user_toggle_bot(callback: types.CallbackQuery, user: Optional[U
             if target_user.trading_restricted_until and target_user.trading_restricted_until > datetime.utcnow():
                 is_restricted = True
             
+            # بررسی وجود محدودیت
+            has_limitations = (
+                target_user.max_daily_trades is not None or
+                target_user.max_active_commodities is not None or
+                target_user.max_daily_requests is not None
+            )
+            
             try:
                 await callback.message.edit_text(
                     profile_text,
-                    reply_markup=get_user_settings_keyboard(user_id=target_user.id, is_restricted=is_restricted),
+                    reply_markup=get_user_settings_keyboard(user_id=target_user.id, is_restricted=is_restricted, has_limitations=has_limitations),
                     parse_mode="Markdown"
                 )
             except TelegramBadRequest:

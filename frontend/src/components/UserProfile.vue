@@ -455,6 +455,43 @@ async function unblockUser() {
   }
 }
 
+// Check if user has active limitations
+const hasLimitations = computed(() => {
+    return props.user.max_daily_trades != null || 
+           props.user.max_active_commodities != null || 
+           props.user.max_daily_requests != null;
+});
+
+async function removeLimitations() {
+  if (!confirm('آیا از رفع محدودیت‌ها اطمینان دارید؟')) return;
+  if (!props.apiBaseUrl || !props.jwtToken) return;
+  isLoading.value = true;
+  try {
+    const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${props.jwtToken}`
+      },
+      body: JSON.stringify({ 
+        max_daily_trades: null,
+        max_active_commodities: null,
+        max_daily_requests: null,
+        limitations_expire_at: null
+      })
+    });
+    
+    if (!response.ok) throw new Error('خطا در رفع محدودیت‌ها');
+    const updatedUser = await response.json();
+    Object.assign(props.user, updatedUser);
+    alert('محدودیت‌ها برداشته شد.');
+  } catch (e) {
+    alert('خطا در انجام عملیات');
+  } finally {
+    isLoading.value = false;
+  }
+}
+
 async function deleteUser() {
   if (!confirm('آیا از حذف این کاربر اطمینان دارید؟')) return;
   if (!props.apiBaseUrl || !props.jwtToken) return;
@@ -551,7 +588,10 @@ async function deleteUser() {
             </button>
             <button @click="isEditingRole = true" class="menu-button">✏️ ویرایش نقش</button>
             
-            <button @click="openLimitationsModal" class="menu-button">⚠️ اعمال محدودیت</button>
+            <button v-if="!hasLimitations" @click="openLimitationsModal" class="menu-button">⚠️ اعمال محدودیت</button>
+            <button v-else @click="removeLimitations" class="menu-button unlimit-btn">
+                ✅ رفع محدودیت
+            </button>
             
             <button v-if="!isRestricted" @click="showBlockModal = true" class="menu-button block-btn">
                 ⛔ مسدود کردن
