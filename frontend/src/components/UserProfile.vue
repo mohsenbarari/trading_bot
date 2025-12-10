@@ -100,28 +100,8 @@ function handleFinalSubmit() {
 // Explicit update handlers to ensure v-model sync works for custom integration
 function updateDatePart(val: any) {
     console.log('updateDatePart received:', val, 'type:', typeof val);
-    if (!val) return;
-    
-    // Handle different formats the picker might return
-    if (typeof val === 'string') {
-        // Already a string, check if it's Jalali format
-        if (/^\d{4}\/\d{2}\/\d{2}$/.test(val)) {
-            tempDatePart.value = val;
-        } else {
-            // Try to parse with moment
-            const m = moment(val, ['jYYYY/jMM/jDD', 'YYYY-MM-DD']);
-            if (m.isValid()) {
-                tempDatePart.value = m.format('jYYYY/jMM/jDD');
-            } else {
-                tempDatePart.value = val;
-            }
-        }
-    } else if (val instanceof Date) {
-        tempDatePart.value = moment(val).format('jYYYY/jMM/jDD');
-    } else {
-        tempDatePart.value = String(val);
-    }
-    console.log('tempDatePart set to:', tempDatePart.value);
+    // Do NOT modify tempDatePart here - v-model handles it.
+    // This handler is only for logging/debugging.
 }
 
 function updateTimePart(val: any) {
