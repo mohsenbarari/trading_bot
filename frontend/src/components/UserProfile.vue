@@ -682,6 +682,8 @@ async function deleteUser() {
                         :auto-submit="false" 
                         :editable="false" 
                         @change="updateTimePart"
+                        @input="updateTimePart"
+                        @update:model-value="updateTimePart"
                     />
                 </div>
                 <!-- Footer moved outside wrapper to ensure visibility -->
@@ -724,6 +726,8 @@ async function deleteUser() {
                         :auto-submit="false" 
                         :editable="false" 
                         @change="updateTimePart"
+                        @input="updateTimePart"
+                        @update:model-value="updateTimePart"
                     />
                 </div>
                 <!-- Footer moved outside wrapper to ensure visibility -->
