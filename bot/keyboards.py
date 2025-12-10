@@ -272,6 +272,23 @@ def get_limit_duration_keyboard(user_id: int) -> InlineKeyboardMarkup:
     keyboard.append([InlineKeyboardButton(text="🔙 انصراف", callback_data=f"user_settings_{user_id}")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+def get_limit_settings_keyboard(user_id: int, max_trades=None, max_commodities=None, max_requests=None) -> InlineKeyboardMarkup:
+    """کیبورد تنظیم محدودیت‌ها با دکمه‌های جداگانه برای هر نوع"""
+    trades_text = f"📊 تعداد معاملات: {max_trades}" if max_trades else "📊 تعداد معاملات: ---"
+    commodities_text = f"📦 تعداد سکه: {max_commodities}" if max_commodities else "📦 تعداد سکه: ---"
+    requests_text = f"📨 تعداد درخواست: {max_requests}" if max_requests else "📨 تعداد درخواست: ---"
+    
+    keyboard = [
+        [InlineKeyboardButton(text=trades_text, callback_data=f"limit_set_trades_{user_id}")],
+        [InlineKeyboardButton(text=commodities_text, callback_data=f"limit_set_commodities_{user_id}")],
+        [InlineKeyboardButton(text=requests_text, callback_data=f"limit_set_requests_{user_id}")],
+        [
+            InlineKeyboardButton(text="✅ تایید", callback_data=f"limit_confirm_{user_id}"),
+            InlineKeyboardButton(text="❌ انصراف", callback_data=f"limit_cancel_{user_id}")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
 def get_skip_keyboard(callback_data: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⏭ رد کردن (بدون محدودیت)", callback_data=callback_data)]

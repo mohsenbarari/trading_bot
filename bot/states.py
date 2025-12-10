@@ -32,6 +32,4 @@ class UserManagement(StatesGroup):
     awaiting_search_query = State()
 
 class UserLimitations(StatesGroup):
-    awaiting_max_trades = State()
-    awaiting_max_commodities = State()
-    awaiting_max_requests = State()
+    awaiting_limit_value = State()  # منتظر وارد کردن عدد محدودیت

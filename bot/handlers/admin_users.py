@@ -667,7 +667,22 @@ async def handle_user_delete_confirm(callback: types.CallbackQuery, user: Option
             await callback.answer("❌ کاربر یافت نشد یا قبلاً حذف شده است.", show_alert=True)
             await show_users_list(callback.bot, callback.message.chat.id, state, page=1, message_id_to_edit=callback.message.message_id)
 
-# --- هندلرهای محدودسازی کاربر ---
+# --- هندلرهای محدودسازی کاربر (رویکرد جدید با دکمه‌ها) ---
+
+def get_limit_panel_text(max_trades, max_commodities, max_requests):
+    """ساخت متن پنل محدودیت‌ها"""
+    trades_str = str(max_trades) if max_trades else "---"
+    commodities_str = str(max_commodities) if max_commodities else "---"
+    requests_str = str(max_requests) if max_requests else "---"
+    
+    return (
+        "⚠️ **تنظیم محدودیت‌ها**\n\n"
+        f"📊 تعداد معاملات روزانه: **{trades_str}**\n"
+        f"📦 تعداد سکه فعال: **{commodities_str}**\n"
+        f"📨 تعداد درخواست روزانه: **{requests_str}**\n\n"
+        "برای تنظیم هر مورد روی دکمه مربوطه کلیک کنید.\n"
+        "پس از اتمام، دکمه **تایید** را بزنید."
+    )
 
 @router.callback_query(F.data.startswith("user_limit_"))
 async def handle_user_limit_start(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
@@ -679,9 +694,8 @@ async def handle_user_limit_start(callback: types.CallbackQuery, user: Optional[
         target_user_id = int(parts[3])
         minutes = int(parts[4])
         
-        # ذخیره مدت زمان و شروع FSM
+        # ذخیره مدت زمان
         if minutes == 0:
-            # نامحدود (100 سال)
             expire_at = datetime.utcnow() + timedelta(days=36500)
         else:
             expire_at = datetime.utcnow() + timedelta(minutes=minutes)
@@ -694,11 +708,11 @@ async def handle_user_limit_start(callback: types.CallbackQuery, user: Optional[
             limit_max_requests=None
         )
         
-        await state.set_state(UserLimitations.awaiting_max_trades)
+        # نمایش پنل محدودیت‌ها
+        from bot.keyboards import get_limit_settings_keyboard
         await callback.message.edit_text(
-            "📊 **حداکثر تعداد معاملات روزانه** را وارد کنید:\n\n"
-            "(عدد وارد کنید یا از دکمه زیر برای رد کردن استفاده کنید)",
-            reply_markup=get_skip_keyboard(f"user_limit_skip_trades_{target_user_id}"),
+            get_limit_panel_text(None, None, None),
+            reply_markup=get_limit_settings_keyboard(target_user_id),
             parse_mode="Markdown"
         )
         await callback.answer()
@@ -713,24 +727,53 @@ async def handle_user_limit_start(callback: types.CallbackQuery, user: Optional[
     )
     await callback.answer()
 
-@router.callback_query(F.data.startswith("user_limit_skip_trades_"))
-async def handle_skip_trades(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
+@router.callback_query(F.data.startswith("limit_set_trades_"))
+async def handle_set_trades(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
     if not user or user.role != UserRole.SUPER_ADMIN: return
     
     target_user_id = int(callback.data.split("_")[-1])
-    await state.update_data(limit_max_trades=None)
-    await state.set_state(UserLimitations.awaiting_max_commodities)
+    await state.update_data(limit_editing="trades")
+    await state.set_state(UserLimitations.awaiting_limit_value)
     
     await callback.message.edit_text(
-        "📦 **حداکثر تعداد کالاهای فعال** را وارد کنید:\n\n"
-        "(عدد وارد کنید یا از دکمه زیر برای رد کردن استفاده کنید)",
-        reply_markup=get_skip_keyboard(f"user_limit_skip_commodities_{target_user_id}"),
+        "📊 **حداکثر تعداد معاملات روزانه** را وارد کنید:\n\n"
+        "(یک عدد وارد کنید)",
         parse_mode="Markdown"
     )
     await callback.answer()
 
-@router.message(UserLimitations.awaiting_max_trades)
-async def process_max_trades(message: types.Message, state: FSMContext, user: Optional[User]):
+@router.callback_query(F.data.startswith("limit_set_commodities_"))
+async def handle_set_commodities(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
+    if not user or user.role != UserRole.SUPER_ADMIN: return
+    
+    target_user_id = int(callback.data.split("_")[-1])
+    await state.update_data(limit_editing="commodities")
+    await state.set_state(UserLimitations.awaiting_limit_value)
+    
+    await callback.message.edit_text(
+        "📦 **حداکثر تعداد سکه فعال** را وارد کنید:\n\n"
+        "(یک عدد وارد کنید)",
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("limit_set_requests_"))
+async def handle_set_requests(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
+    if not user or user.role != UserRole.SUPER_ADMIN: return
+    
+    target_user_id = int(callback.data.split("_")[-1])
+    await state.update_data(limit_editing="requests")
+    await state.set_state(UserLimitations.awaiting_limit_value)
+    
+    await callback.message.edit_text(
+        "📨 **حداکثر تعداد درخواست روزانه** را وارد کنید:\n\n"
+        "(یک عدد وارد کنید)",
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@router.message(UserLimitations.awaiting_limit_value)
+async def process_limit_value(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN:
         await state.clear()
         return
@@ -738,109 +781,58 @@ async def process_max_trades(message: types.Message, state: FSMContext, user: Op
     await delete_user_message(message)
     
     try:
-        max_trades = int(message.text.strip())
-        if max_trades < 0:
+        value = int(message.text.strip())
+        if value < 0:
             raise ValueError
-        await state.update_data(limit_max_trades=max_trades)
     except ValueError:
         temp_msg = await message.answer("❌ لطفاً یک عدد صحیح معتبر وارد کنید.")
         asyncio.create_task(safe_delete_message(message.bot, message.chat.id, temp_msg.message_id, delay=3))
         return
     
     data = await state.get_data()
+    editing = data.get("limit_editing")
     target_user_id = data.get("limit_target_user_id")
     
-    await state.set_state(UserLimitations.awaiting_max_commodities)
-    msg = await message.answer(
-        "📦 **حداکثر تعداد کالاهای فعال** را وارد کنید:\n\n"
-        "(عدد وارد کنید یا از دکمه زیر برای رد کردن استفاده کنید)",
-        reply_markup=get_skip_keyboard(f"user_limit_skip_commodities_{target_user_id}"),
-        parse_mode="Markdown"
-    )
-    await update_anchor(state, msg.message_id, message.bot, message.chat.id)
-
-@router.callback_query(F.data.startswith("user_limit_skip_commodities_"))
-async def handle_skip_commodities(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    # ذخیره مقدار در state
+    if editing == "trades":
+        await state.update_data(limit_max_trades=value)
+    elif editing == "commodities":
+        await state.update_data(limit_max_commodities=value)
+    elif editing == "requests":
+        await state.update_data(limit_max_requests=value)
     
-    target_user_id = int(callback.data.split("_")[-1])
-    await state.update_data(limit_max_commodities=None)
-    await state.set_state(UserLimitations.awaiting_max_requests)
+    await state.set_state(None)  # خروج از FSM
     
-    await callback.message.edit_text(
-        "📨 **حداکثر تعداد درخواست‌های روزانه** را وارد کنید:\n\n"
-        "(عدد وارد کنید یا از دکمه زیر برای رد کردن استفاده کنید)",
-        reply_markup=get_skip_keyboard(f"user_limit_skip_requests_{target_user_id}"),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@router.message(UserLimitations.awaiting_max_commodities)
-async def process_max_commodities(message: types.Message, state: FSMContext, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN:
-        await state.clear()
-        return
-    
-    await delete_user_message(message)
-    
-    try:
-        max_commodities = int(message.text.strip())
-        if max_commodities < 0:
-            raise ValueError
-        await state.update_data(limit_max_commodities=max_commodities)
-    except ValueError:
-        temp_msg = await message.answer("❌ لطفاً یک عدد صحیح معتبر وارد کنید.")
-        asyncio.create_task(safe_delete_message(message.bot, message.chat.id, temp_msg.message_id, delay=3))
-        return
-    
+    # بازگشت به پنل با مقادیر به‌روز شده
     data = await state.get_data()
-    target_user_id = data.get("limit_target_user_id")
+    max_trades = data.get("limit_max_trades")
+    max_commodities = data.get("limit_max_commodities")
+    max_requests = data.get("limit_max_requests")
     
-    await state.set_state(UserLimitations.awaiting_max_requests)
+    from bot.keyboards import get_limit_settings_keyboard
     msg = await message.answer(
-        "📨 **حداکثر تعداد درخواست‌های روزانه** را وارد کنید:\n\n"
-        "(عدد وارد کنید یا از دکمه زیر برای رد کردن استفاده کنید)",
-        reply_markup=get_skip_keyboard(f"user_limit_skip_requests_{target_user_id}"),
+        get_limit_panel_text(max_trades, max_commodities, max_requests),
+        reply_markup=get_limit_settings_keyboard(target_user_id, max_trades, max_commodities, max_requests),
         parse_mode="Markdown"
     )
     await update_anchor(state, msg.message_id, message.bot, message.chat.id)
 
-@router.callback_query(F.data.startswith("user_limit_skip_requests_"))
-async def handle_skip_requests(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
+@router.callback_query(F.data.startswith("limit_confirm_"))
+async def handle_limit_confirm(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
+    """تایید و اعمال محدودیت‌ها"""
     if not user or user.role != UserRole.SUPER_ADMIN: return
     
-    await state.update_data(limit_max_requests=None)
-    await finalize_limitations(callback, state)
-
-@router.message(UserLimitations.awaiting_max_requests)
-async def process_max_requests(message: types.Message, state: FSMContext, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN:
-        await state.clear()
-        return
-    
-    await delete_user_message(message)
-    
-    try:
-        max_requests = int(message.text.strip())
-        if max_requests < 0:
-            raise ValueError
-        await state.update_data(limit_max_requests=max_requests)
-    except ValueError:
-        temp_msg = await message.answer("❌ لطفاً یک عدد صحیح معتبر وارد کنید.")
-        asyncio.create_task(safe_delete_message(message.bot, message.chat.id, temp_msg.message_id, delay=3))
-        return
-    
-    # Finalize and save
-    await finalize_limitations_message(message, state)
-
-async def finalize_limitations(callback: types.CallbackQuery, state: FSMContext):
-    """ذخیره محدودیت‌ها و بازگشت به پروفایل - برای callback"""
     data = await state.get_data()
     target_user_id = data.get("limit_target_user_id")
     expire_at = data.get("limit_expire_at")
     max_trades = data.get("limit_max_trades")
     max_commodities = data.get("limit_max_commodities")
     max_requests = data.get("limit_max_requests")
+    
+    # اگر هیچ محدودیتی تنظیم نشده
+    if not max_trades and not max_commodities and not max_requests:
+        await callback.answer("⚠️ لطفاً حداقل یک محدودیت تنظیم کنید.", show_alert=True)
+        return
     
     async with AsyncSessionLocal() as session:
         stmt = select(User).where(User.id == target_user_id)
@@ -872,13 +864,11 @@ async def finalize_limitations(callback: types.CallbackQuery, state: FSMContext)
                     limitation_message += f"• {lim}\n"
                 limitation_message += f"\n📅 *اعتبار تا:* {expire_jalali}"
                 
-                # In-app notification
                 await create_user_notification(
                     session, target_user.id, limitation_message,
                     level=NotificationLevel.WARNING,
                     category=NotificationCategory.SYSTEM
                 )
-                # Telegram notification
                 await send_telegram_notification(target_user.telegram_id, limitation_message)
             
             await clear_state_retain_anchors(state)
@@ -893,63 +883,32 @@ async def finalize_limitations(callback: types.CallbackQuery, state: FSMContext)
         else:
             await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
 
-async def finalize_limitations_message(message: types.Message, state: FSMContext):
-    """ذخیره محدودیت‌ها و بازگشت به پروفایل - برای message"""
-    data = await state.get_data()
-    target_user_id = data.get("limit_target_user_id")
-    expire_at = data.get("limit_expire_at")
-    max_trades = data.get("limit_max_trades")
-    max_commodities = data.get("limit_max_commodities")
-    max_requests = data.get("limit_max_requests")
+@router.callback_query(F.data.startswith("limit_cancel_"))
+async def handle_limit_cancel(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
+    """انصراف از اعمال محدودیت"""
+    if not user or user.role != UserRole.SUPER_ADMIN: return
+    
+    target_user_id = int(callback.data.split("_")[-1])
+    
+    await clear_state_retain_anchors(state)
     
     async with AsyncSessionLocal() as session:
         stmt = select(User).where(User.id == target_user_id)
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
         if target_user:
-            target_user.max_daily_trades = max_trades
-            target_user.max_active_commodities = max_commodities
-            target_user.max_daily_requests = max_requests
-            target_user.limitations_expire_at = expire_at
-            await session.commit()
-            
-            # --- Send Notification to limited user ---
-            limitations_changed = []
-            if max_trades is not None:
-                limitations_changed.append(f"تعداد ترید روزانه: {max_trades}")
-            if max_commodities is not None:
-                limitations_changed.append(f"تعداد کالای فعال: {max_commodities}")
-            if max_requests is not None:
-                limitations_changed.append(f"تعداد درخواست روزانه: {max_requests}")
-            
-            if limitations_changed:
-                expire_jalali = to_jalali_str(expire_at) if expire_at else "نامحدود"
-                limitation_message = (
-                    f"⚠️ *اعمال محدودیت*\n\n"
-                    f"محدودیت‌های زیر برای حساب شما اعمال شده است:\n\n"
-                )
-                for lim in limitations_changed:
-                    limitation_message += f"• {lim}\n"
-                limitation_message += f"\n📅 *اعتبار تا:* {expire_jalali}"
-                
-                # In-app notification
-                await create_user_notification(
-                    session, target_user.id, limitation_message,
-                    level=NotificationLevel.WARNING,
-                    category=NotificationCategory.SYSTEM
-                )
-                # Telegram notification
-                await send_telegram_notification(target_user.telegram_id, limitation_message)
-            
-            await clear_state_retain_anchors(state)
+            is_restricted = target_user.trading_restricted_until and target_user.trading_restricted_until > datetime.utcnow()
+            has_limitations = (
+                target_user.max_daily_trades is not None or
+                target_user.max_active_commodities is not None or
+                target_user.max_daily_requests is not None
+            )
             
             profile_text = await get_user_profile_text(target_user)
-            msg = await message.answer(
+            await callback.message.edit_text(
                 profile_text,
-                reply_markup=get_user_profile_return_keyboard(user_id=target_user.id),
+                reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=is_restricted, has_limitations=has_limitations),
                 parse_mode="Markdown"
             )
-            await update_anchor(state, msg.message_id, message.bot, message.chat.id)
-        else:
-            msg = await message.answer("❌ کاربر یافت نشد.")
-            asyncio.create_task(safe_delete_message(message.bot, message.chat.id, msg.message_id, delay=5))
+    
+    await callback.answer("عملیات لغو شد.")
