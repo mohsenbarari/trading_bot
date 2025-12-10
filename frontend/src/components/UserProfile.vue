@@ -40,6 +40,8 @@ const limitDatePicker = ref<any>(null); // Ref for limit date picker
 const pickerStep = ref(1);
 const tempDatePart = ref('');
 const tempTimePart = ref('');
+const blockTimePickerRef = ref<any>(null);
+const limitTimePickerRef = ref<any>(null);
 
 function initDatePicker(currentValue: string) {
     pickerStep.value = 1;
@@ -81,8 +83,28 @@ function handleFinalSubmit() {
         return;
     }
     
-    // If time is empty, use current time as fallback
-    const timePart = tempTimePart.value || moment().format('HH:mm');
+    // Try to get time from picker ref if tempTimePart is empty
+    let timePart = tempTimePart.value;
+    
+    if (!timePart || timePart === '') {
+        // Try to read from picker component directly
+        const pickerRef = showBlockDateModal.value ? blockTimePickerRef.value : limitTimePickerRef.value;
+        if (pickerRef && pickerRef.modelValue) {
+            const pickerVal = pickerRef.modelValue;
+            console.log('Reading from picker ref:', pickerVal);
+            if (typeof pickerVal === 'string') {
+                timePart = pickerVal;
+            } else if (pickerVal instanceof Date) {
+                timePart = moment(pickerVal).format('HH:mm');
+            }
+        }
+    }
+    
+    // Final fallback to current time
+    if (!timePart || timePart === '') {
+        timePart = moment().format('HH:mm');
+        console.log('Using fallback current time:', timePart);
+    }
     
     const finalVal = `${tempDatePart.value} ${timePart}`;
     console.log('Final Submit (Jalali):', finalVal);
@@ -652,6 +674,7 @@ async function deleteUser() {
                     <!-- Step 2: Time -->
                     <DatePicker 
                         v-if="pickerStep === 2"
+                        ref="blockTimePickerRef"
                         v-model="tempTimePart" 
                         type="time" 
                         format="HH:mm"
@@ -693,6 +716,7 @@ async function deleteUser() {
                     <!-- Step 2: Time -->
                     <DatePicker 
                         v-if="pickerStep === 2"
+                        ref="limitTimePickerRef"
                         v-model="tempTimePart" 
                         type="time" 
                         format="HH:mm"
