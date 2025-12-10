@@ -72,10 +72,20 @@ function handleNextStep() {
 }
 
 function handleFinalSubmit() {
-    if (!tempDatePart.value || !tempTimePart.value) return;
+    // Log current state for debugging
+    console.log('tempDatePart before submit:', tempDatePart.value);
+    console.log('tempTimePart before submit:', tempTimePart.value);
     
-    const finalVal = `${tempDatePart.value} ${tempTimePart.value}`;
-    console.log('Final Submit:', finalVal);
+    if (!tempDatePart.value) {
+        alert('لطفاً تاریخ را انتخاب کنید.');
+        return;
+    }
+    
+    // If time is empty, use current time as fallback
+    const timePart = tempTimePart.value || moment().format('HH:mm');
+    
+    const finalVal = `${tempDatePart.value} ${timePart}`;
+    console.log('Final Submit (Jalali):', finalVal);
     
     if (showBlockDateModal.value) {
         customDate.value = finalVal;
@@ -89,11 +99,55 @@ function handleFinalSubmit() {
 // Legacy handler - can be removed or kept as alias
 // Explicit update handlers to ensure v-model sync works for custom integration
 function updateDatePart(val: any) {
-    if (val) tempDatePart.value = val;
+    console.log('updateDatePart received:', val, 'type:', typeof val);
+    if (!val) return;
+    
+    // Handle different formats the picker might return
+    if (typeof val === 'string') {
+        // Already a string, check if it's Jalali format
+        if (/^\d{4}\/\d{2}\/\d{2}$/.test(val)) {
+            tempDatePart.value = val;
+        } else {
+            // Try to parse with moment
+            const m = moment(val, ['jYYYY/jMM/jDD', 'YYYY-MM-DD']);
+            if (m.isValid()) {
+                tempDatePart.value = m.format('jYYYY/jMM/jDD');
+            } else {
+                tempDatePart.value = val;
+            }
+        }
+    } else if (val instanceof Date) {
+        tempDatePart.value = moment(val).format('jYYYY/jMM/jDD');
+    } else {
+        tempDatePart.value = String(val);
+    }
+    console.log('tempDatePart set to:', tempDatePart.value);
 }
 
 function updateTimePart(val: any) {
-    if (val) tempTimePart.value = val;
+    console.log('updateTimePart received:', val, 'type:', typeof val);
+    if (!val) return;
+    
+    // Handle different formats the picker might return
+    if (typeof val === 'string') {
+        // If it's already HH:mm format
+        if (/^\d{2}:\d{2}$/.test(val)) {
+            tempTimePart.value = val;
+        } else {
+            // Try to parse with moment
+            const m = moment(val, ['HH:mm', 'HH:mm:ss', 'h:mm A']);
+            if (m.isValid()) {
+                tempTimePart.value = m.format('HH:mm');
+            } else {
+                tempTimePart.value = val;
+            }
+        }
+    } else if (val instanceof Date) {
+        tempTimePart.value = moment(val).format('HH:mm');
+    } else {
+        tempTimePart.value = String(val);
+    }
+    console.log('tempTimePart set to:', tempTimePart.value);
 }
 
 const roles = [
