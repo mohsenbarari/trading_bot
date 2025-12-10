@@ -15,10 +15,78 @@ from models.invitation import Invitation
 from models.user import User
 from bot.middlewares.auth import AuthMiddleware
 from bot.handlers import start, panel, default, admin, admin_commodities, admin_users
-from core.utils import create_user_notification 
+from core.utils import create_user_notification, send_telegram_notification
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+async def monitor_expired_restrictions(bot: Bot):
+    """تسک پس‌زمینه برای بررسی انقضای مسدودیت‌ها و محدودیت‌ها."""
+    logger.info("--> Restriction/Limitation Expiry Monitor Started...")
+    while True:
+        try:
+            async with AsyncSessionLocal() as session:
+                now = datetime.utcnow()
+                
+                # چک مسدودیت‌های منقضی شده
+                stmt = select(User).where(
+                    User.trading_restricted_until != None,
+                    User.trading_restricted_until <= now,
+                    User.trading_restricted_until > now - timedelta(minutes=2)  # فقط تازه منقضی شده‌ها
+                )
+                result = await session.execute(stmt)
+                expired_blocks = result.scalars().all()
+                
+                for user in expired_blocks:
+                    msg = (
+                        "ℹ️ *منقضی شدن مسدودیت*\n\n"
+                        "مسدودیت حساب شما به پایان رسید."
+                    )
+                    await create_user_notification(
+                        session, user.id, msg,
+                        level=NotificationLevel.INFO,
+                        category=NotificationCategory.SYSTEM
+                    )
+                    await send_telegram_notification(user.telegram_id, msg)
+                    
+                    # پاک کردن مسدودیت
+                    user.trading_restricted_until = None
+                    await session.commit()
+                    logger.info(f"Block expired for user {user.id}")
+                
+                # چک محدودیت‌های منقضی شده
+                stmt2 = select(User).where(
+                    User.limitations_expire_at != None,
+                    User.limitations_expire_at <= now,
+                    User.limitations_expire_at > now - timedelta(minutes=2)
+                )
+                result2 = await session.execute(stmt2)
+                expired_limits = result2.scalars().all()
+                
+                for user in expired_limits:
+                    msg = (
+                        "ℹ️ *منقضی شدن محدودیت*\n\n"
+                        "محدودیت‌های حساب شما به پایان رسید."
+                    )
+                    await create_user_notification(
+                        session, user.id, msg,
+                        level=NotificationLevel.INFO,
+                        category=NotificationCategory.SYSTEM
+                    )
+                    await send_telegram_notification(user.telegram_id, msg)
+                    
+                    # پاک کردن محدودیت‌ها
+                    user.max_daily_trades = None
+                    user.max_active_commodities = None
+                    user.max_daily_requests = None
+                    user.limitations_expire_at = None
+                    await session.commit()
+                    logger.info(f"Limitations expired for user {user.id}")
+                    
+        except Exception as e:
+            logger.error(f"Error in restriction monitor: {e}")
+        
+        await asyncio.sleep(60)  # هر ۱ دقیقه چک کن
 
 async def monitor_expired_invitations(bot: Bot):
     """تسک پس‌زمینه برای بررسی لینک‌های منقضی شده."""
@@ -118,6 +186,7 @@ async def main():
     dp.include_router(default.router) 
 
     asyncio.create_task(monitor_expired_invitations(bot))
+    asyncio.create_task(monitor_expired_restrictions(bot))
     asyncio.create_task(cleanup_old_notifications())
 
     logger.info("--> Starting Bot polling...")

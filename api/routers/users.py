@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 from typing import List, Optional
+import asyncio
 
 from core.db import get_db
 from models.user import User
@@ -9,6 +10,30 @@ from .auth import verify_super_admin_or_dev_key
 from core.utils import create_user_notification, to_jalali_str, send_telegram_notification
 from core.enums import NotificationLevel, NotificationCategory
 import schemas
+
+async def send_delayed_removal_notification_api(db_session_factory, user_id: int, telegram_id: int, is_block: bool, delay_seconds: int = 120):
+    """ارسال نوتیفیکیشن رفع مسدودیت/محدودیت با تاخیر"""
+    await asyncio.sleep(delay_seconds)
+    
+    if is_block:
+        msg = (
+            "ℹ️ *رفع مسدودیت توسط مدیر*\n\n"
+            "مسدودیت حساب شما توسط مدیر رفع شد."
+        )
+    else:
+        msg = (
+            "ℹ️ *رفع محدودیت توسط مدیر*\n\n"
+            "محدودیت‌های حساب شما توسط مدیر رفع شد."
+        )
+    
+    async for session in db_session_factory():
+        await create_user_notification(
+            session, user_id, msg,
+            level=NotificationLevel.INFO,
+            category=NotificationCategory.SYSTEM
+        )
+        break
+    await send_telegram_notification(telegram_id, msg)
 
 router = APIRouter(
     prefix="/users",
@@ -77,39 +102,49 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
         user.role = update_data['role']
     if 'has_bot_access' in update_data:
         user.has_bot_access = update_data['has_bot_access']
+    
     # Track what changed for notifications
     block_notification_needed = False
     limitation_notification_needed = False
+    unblock_notification_needed = False  # رفع مسدودیت
+    unlimit_notification_needed = False  # رفع محدودیت
     
     if 'trading_restricted_until' in update_data:
+        old_restricted = user.trading_restricted_until
         restricted_until = update_data['trading_restricted_until']
         if restricted_until is not None:
             import pytz
             from datetime import timezone
             if restricted_until.tzinfo is None:
-                # اگر naive است، فرض می‌کنیم تایم ایران است -> تبدیل به UTC
                 iran_tz = pytz.timezone('Asia/Tehran')
                 restricted_until = iran_tz.localize(restricted_until).astimezone(timezone.utc).replace(tzinfo=None)
             else:
-                # اگر aware است -> تبدیل به UTC
                 restricted_until = restricted_until.astimezone(timezone.utc).replace(tzinfo=None)
             block_notification_needed = True
+        else:
+            # اگر قبلاً مسدود بوده و الان null شده = رفع مسدودیت
+            if old_restricted is not None:
+                unblock_notification_needed = True
         user.trading_restricted_until = restricted_until
     
     # Limitations
     limitations_changed = []
+    old_had_limits = (user.max_daily_trades is not None or 
+                      user.max_active_commodities is not None or 
+                      user.max_daily_requests is not None)
+    
     if 'max_daily_trades' in update_data:
         user.max_daily_trades = update_data['max_daily_trades']
         if update_data['max_daily_trades'] is not None:
-            limitations_changed.append(f"تعداد ترید روزانه: {update_data['max_daily_trades']}")
+            limitations_changed.append(f"مجموع تعداد معاملات: {update_data['max_daily_trades']}")
     if 'max_active_commodities' in update_data:
         user.max_active_commodities = update_data['max_active_commodities']
         if update_data['max_active_commodities'] is not None:
-            limitations_changed.append(f"تعداد کالای فعال: {update_data['max_active_commodities']}")
+            limitations_changed.append(f"مجموع تعداد کالای معامله شده: {update_data['max_active_commodities']}")
     if 'max_daily_requests' in update_data:
         user.max_daily_requests = update_data['max_daily_requests']
         if update_data['max_daily_requests'] is not None:
-            limitations_changed.append(f"تعداد درخواست روزانه: {update_data['max_daily_requests']}")
+            limitations_changed.append(f"مجموع ارسال لفظ در کانال: {update_data['max_daily_requests']}")
     if 'limitations_expire_at' in update_data:
         expire_at = update_data['limitations_expire_at']
         if expire_at is not None:
@@ -124,6 +159,13 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
     
     if limitations_changed:
         limitation_notification_needed = True
+    
+    # بررسی آیا همه محدودیت‌ها null شدند؟
+    new_has_limits = (user.max_daily_trades is not None or 
+                      user.max_active_commodities is not None or 
+                      user.max_daily_requests is not None)
+    if old_had_limits and not new_has_limits:
+        unlimit_notification_needed = True
         
     await db.commit()
     await db.refresh(user)
@@ -175,6 +217,14 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
         )
         # Telegram notification
         await send_telegram_notification(user.telegram_id, limitation_message)
+    
+    # 3. Unblock Notification (با تاخیر ۲ دقیقه)
+    if unblock_notification_needed:
+        asyncio.create_task(send_delayed_removal_notification_api(get_db, user.id, user.telegram_id, is_block=True))
+    
+    # 4. Unlimit Notification (با تاخیر ۲ دقیقه)
+    if unlimit_notification_needed:
+        asyncio.create_task(send_delayed_removal_notification_api(get_db, user.id, user.telegram_id, is_block=False))
     
     return user
 

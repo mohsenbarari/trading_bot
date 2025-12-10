@@ -83,6 +83,29 @@ async def delete_user_message(message: types.Message):
     except Exception:
         pass
 
+async def send_delayed_removal_notification(user_id: int, telegram_id: int, is_block: bool, delay_seconds: int = 120):
+    """ارسال نوتیفیکیشن رفع مسدودیت/محدودیت با تاخیر (پیش‌فرض ۲ دقیقه)"""
+    await asyncio.sleep(delay_seconds)
+    
+    if is_block:
+        msg = (
+            "ℹ️ *رفع مسدودیت توسط مدیر*\n\n"
+            "مسدودیت حساب شما توسط مدیر رفع شد."
+        )
+    else:
+        msg = (
+            "ℹ️ *رفع محدودیت توسط مدیر*\n\n"
+            "محدودیت‌های حساب شما توسط مدیر رفع شد."
+        )
+    
+    async with AsyncSessionLocal() as session:
+        await create_user_notification(
+            session, user_id, msg,
+            level=NotificationLevel.INFO,
+            category=NotificationCategory.SYSTEM
+        )
+    await send_telegram_notification(telegram_id, msg)
+
 # --- توابع نمایش (Views) ---
 
 async def show_users_list(bot: Bot, chat_id: int, state: FSMContext, page: int, message_id_to_edit: int = None):
@@ -486,8 +509,12 @@ async def handle_user_unblock(callback: types.CallbackQuery, user: Optional[User
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
         if target_user:
+            telegram_id = target_user.telegram_id  # ذخیره قبل از commit
             target_user.trading_restricted_until = None
             await session.commit()
+            
+            # ارسال نوتیفیکیشن با تاخیر ۲ دقیقه
+            asyncio.create_task(send_delayed_removal_notification(target_user.id, telegram_id, is_block=True))
             
             # بررسی وجود محدودیت
             has_limitations = (
@@ -520,12 +547,16 @@ async def handle_user_unlimit(callback: types.CallbackQuery, user: Optional[User
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
         if target_user:
+            telegram_id = target_user.telegram_id  # ذخیره قبل از commit
             # حذف تمام محدودیت‌ها
             target_user.max_daily_trades = None
             target_user.max_active_commodities = None
             target_user.max_daily_requests = None
             target_user.limitations_expire_at = None
             await session.commit()
+            
+            # ارسال نوتیفیکیشن با تاخیر ۲ دقیقه
+            asyncio.create_task(send_delayed_removal_notification(target_user.id, telegram_id, is_block=False))
             
             # بررسی وضعیت مسدودی
             is_restricted = False
@@ -677,9 +708,9 @@ def get_limit_panel_text(max_trades, max_commodities, max_requests):
     
     return (
         "⚠️ **تنظیم محدودیت‌ها**\n\n"
-        f"📊 تعداد معاملات روزانه: **{trades_str}**\n"
-        f"📦 تعداد سکه فعال: **{commodities_str}**\n"
-        f"📨 تعداد درخواست روزانه: **{requests_str}**\n\n"
+        f"📊 مجموع تعداد معاملات: **{trades_str}**\n"
+        f"📦 مجموع تعداد کالای معامله شده: **{commodities_str}**\n"
+        f"📨 مجموع ارسال لفظ در کانال: **{requests_str}**\n\n"
         "برای تنظیم هر مورد روی دکمه مربوطه کلیک کنید.\n"
         "پس از اتمام، دکمه **تایید** را بزنید."
     )
@@ -736,7 +767,7 @@ async def handle_set_trades(callback: types.CallbackQuery, user: Optional[User],
     await state.set_state(UserLimitations.awaiting_limit_value)
     
     await callback.message.edit_text(
-        "📊 **حداکثر تعداد معاملات روزانه** را وارد کنید:\n\n"
+        "📊 **مجموع تعداد معاملات** را وارد کنید:\n\n"
         "(یک عدد وارد کنید)",
         parse_mode="Markdown"
     )
@@ -751,7 +782,7 @@ async def handle_set_commodities(callback: types.CallbackQuery, user: Optional[U
     await state.set_state(UserLimitations.awaiting_limit_value)
     
     await callback.message.edit_text(
-        "📦 **حداکثر تعداد سکه فعال** را وارد کنید:\n\n"
+        "📦 **مجموع تعداد کالای معامله شده** را وارد کنید:\n\n"
         "(یک عدد وارد کنید)",
         parse_mode="Markdown"
     )
@@ -766,7 +797,7 @@ async def handle_set_requests(callback: types.CallbackQuery, user: Optional[User
     await state.set_state(UserLimitations.awaiting_limit_value)
     
     await callback.message.edit_text(
-        "📨 **حداکثر تعداد درخواست روزانه** را وارد کنید:\n\n"
+        "📨 **مجموع ارسال لفظ در کانال** را وارد کنید:\n\n"
         "(یک عدد وارد کنید)",
         parse_mode="Markdown"
     )
@@ -848,11 +879,11 @@ async def handle_limit_confirm(callback: types.CallbackQuery, user: Optional[Use
             # --- Send Notification to limited user ---
             limitations_changed = []
             if max_trades is not None:
-                limitations_changed.append(f"تعداد ترید روزانه: {max_trades}")
+                limitations_changed.append(f"مجموع تعداد معاملات: {max_trades}")
             if max_commodities is not None:
-                limitations_changed.append(f"تعداد کالای فعال: {max_commodities}")
+                limitations_changed.append(f"مجموع تعداد کالای معامله شده: {max_commodities}")
             if max_requests is not None:
-                limitations_changed.append(f"تعداد درخواست روزانه: {max_requests}")
+                limitations_changed.append(f"مجموع ارسال لفظ در کانال: {max_requests}")
             
             if limitations_changed:
                 expire_jalali = to_jalali_str(expire_at) if expire_at else "نامحدود"

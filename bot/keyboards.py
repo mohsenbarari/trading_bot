@@ -274,9 +274,9 @@ def get_limit_duration_keyboard(user_id: int) -> InlineKeyboardMarkup:
 
 def get_limit_settings_keyboard(user_id: int, max_trades=None, max_commodities=None, max_requests=None) -> InlineKeyboardMarkup:
     """کیبورد تنظیم محدودیت‌ها با دکمه‌های جداگانه برای هر نوع"""
-    trades_text = f"📊 تعداد معاملات: {max_trades}" if max_trades else "📊 تعداد معاملات: ---"
-    commodities_text = f"📦 تعداد سکه: {max_commodities}" if max_commodities else "📦 تعداد سکه: ---"
-    requests_text = f"📨 تعداد درخواست: {max_requests}" if max_requests else "📨 تعداد درخواست: ---"
+    trades_text = f"📊 مجموع معاملات: {max_trades}" if max_trades else "📊 مجموع معاملات: ---"
+    commodities_text = f"📦 مجموع کالا: {max_commodities}" if max_commodities else "📦 مجموع کالا: ---"
+    requests_text = f"📨 مجموع لفظ: {max_requests}" if max_requests else "📨 مجموع لفظ: ---"
     
     keyboard = [
         [InlineKeyboardButton(text=trades_text, callback_data=f"limit_set_trades_{user_id}")],

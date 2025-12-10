@@ -649,16 +649,16 @@ async function deleteUser() {
                 <h3>⚠️ اعمال محدودیت</h3>
                 
                 <div class="form-group">
-                    <label>حداکثر تعداد معاملات روزانه:</label>
-                    <input type="number" v-model="limitMaxTrades" class="form-select" placeholder="نامحدود (خالی)" />
+                    <label>مجموع تعداد معاملات:</label>
+                    <input type="number" v-model.number="limitMaxTrades" class="form-input" min="0" placeholder="نامحدود (خالی)" />
                 </div>
                 <div class="form-group">
-                    <label>حداکثر کالاهای فعال:</label>
-                    <input type="number" v-model="limitMaxCommodities" class="form-select" placeholder="نامحدود (خالی)" />
+                    <label>مجموع تعداد کالای معامله شده:</label>
+                    <input type="number" v-model.number="limitMaxCommodities" class="form-input" min="0" placeholder="نامحدود (خالی)" />
                 </div>
                 <div class="form-group">
-                    <label>حداکثر درخواست‌های روزانه:</label>
-                    <input type="number" v-model="limitMaxRequests" class="form-select" placeholder="نامحدود (خالی)" />
+                    <label>مجموع ارسال لفظ در کانال:</label>
+                    <input type="number" v-model.number="limitMaxRequests" class="form-input" min="0" placeholder="نامحدود (خالی)" />
                 </div>
 
                 <div class="form-group">
@@ -1074,6 +1074,44 @@ h2 {
   font-size: 14px;
   width: 100%; /* Ensure full width for inputs */
   box-sizing: border-box;
+}
+/* Ensure number inputs are editable */
+input[type="number"].form-select {
+  -moz-appearance: textfield;
+  appearance: textfield;
+  cursor: text;
+  user-select: text;
+  pointer-events: auto;
+}
+input[type="number"].form-select::-webkit-outer-spin-button,
+input[type="number"].form-select::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Number input styling */
+.form-input {
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  background-color: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  width: 100%;
+  box-sizing: border-box;
+  cursor: text;
+  user-select: text;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.form-input:focus {
+  outline: none;
+  border-color: var(--accent-gold);
+  box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.2);
+}
+.form-input::-webkit-outer-spin-button,
+.form-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .checkbox-group {
   flex-direction: row;
