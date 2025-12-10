@@ -12,6 +12,7 @@ services:
       - ./models:/app/models
       - ./main.py:/app/main.py
       - ./schemas.py:/app/schemas.py
+      - ./mini_app_dist:/app/mini_app_dist
     ports:
       - "8000:8000"
     env_file:

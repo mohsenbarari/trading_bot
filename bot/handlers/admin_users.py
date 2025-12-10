@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 
 from core.db import AsyncSessionLocal
 from models.user import User
-from core.enums import UserRole
-from core.utils import normalize_account_name, normalize_persian_numerals, to_jalali_str
+from core.enums import UserRole, NotificationLevel, NotificationCategory
+from core.utils import normalize_account_name, normalize_persian_numerals, to_jalali_str, create_user_notification, send_telegram_notification
 from bot.keyboards import (
     get_users_management_keyboard, 
     get_admin_panel_keyboard, 
@@ -412,15 +412,41 @@ async def handle_user_block_actions(callback: types.CallbackQuery, user: Optiona
             
             if target_user:
                 if minutes == 0:
-                    # نامحدود (مثلاً 100 سال) - استفاده از utcnow (naive)
+                    # نامحدود (100 سال) - استفاده از utcnow (naive)
                     target_user.trading_restricted_until = datetime.utcnow() + timedelta(days=36500)
                     msg_text = "⛔ کاربر به صورت **دائم** مسدود شد."
+                    is_permanent = True
                 else:
                     # استفاده از utcnow (naive)
                     target_user.trading_restricted_until = datetime.utcnow() + timedelta(minutes=minutes)
                     msg_text = f"⛔ کاربر به مدت **{minutes} دقیقه** مسدود شد."
+                    is_permanent = False
                 
                 await session.commit()
+                
+                # --- Send Notification to blocked user ---
+                jalali_date = to_jalali_str(target_user.trading_restricted_until)
+                if is_permanent:
+                    block_message = (
+                        f"⛔ *اخطار مسدودیت حساب*\n\n"
+                        f"حساب کاربری شما به صورت *دائمی* مسدود شده است.\n"
+                        f"برای اطلاعات بیشتر با پشتیبانی تماس بگیرید."
+                    )
+                else:
+                    block_message = (
+                        f"⛔ *اخطار مسدودیت حساب*\n\n"
+                        f"حساب کاربری شما موقتاً مسدود شده است.\n\n"
+                        f"📅 *پایان مسدودیت:* {jalali_date}\n\n"
+                        f"تا زمان رفع مسدودیت امکان انجام معاملات وجود ندارد."
+                    )
+                # In-app notification
+                await create_user_notification(
+                    session, target_user.id, block_message,
+                    level=NotificationLevel.WARNING,
+                    category=NotificationCategory.SYSTEM
+                )
+                # Telegram notification
+                await send_telegram_notification(target_user.telegram_id, block_message)
                 
                 # بازگشت به تنظیمات
                 profile_text = await get_user_profile_text(target_user)
@@ -763,6 +789,34 @@ async def finalize_limitations(callback: types.CallbackQuery, state: FSMContext)
             target_user.limitations_expire_at = expire_at
             await session.commit()
             
+            # --- Send Notification to limited user ---
+            limitations_changed = []
+            if max_trades is not None:
+                limitations_changed.append(f"تعداد ترید روزانه: {max_trades}")
+            if max_commodities is not None:
+                limitations_changed.append(f"تعداد کالای فعال: {max_commodities}")
+            if max_requests is not None:
+                limitations_changed.append(f"تعداد درخواست روزانه: {max_requests}")
+            
+            if limitations_changed:
+                expire_jalali = to_jalali_str(expire_at) if expire_at else "نامحدود"
+                limitation_message = (
+                    f"⚠️ *اعمال محدودیت*\n\n"
+                    f"محدودیت‌های زیر برای حساب شما اعمال شده است:\n\n"
+                )
+                for lim in limitations_changed:
+                    limitation_message += f"• {lim}\n"
+                limitation_message += f"\n📅 *اعتبار تا:* {expire_jalali}"
+                
+                # In-app notification
+                await create_user_notification(
+                    session, target_user.id, limitation_message,
+                    level=NotificationLevel.WARNING,
+                    category=NotificationCategory.SYSTEM
+                )
+                # Telegram notification
+                await send_telegram_notification(target_user.telegram_id, limitation_message)
+            
             await clear_state_retain_anchors(state)
             
             profile_text = await get_user_profile_text(target_user)
@@ -794,6 +848,34 @@ async def finalize_limitations_message(message: types.Message, state: FSMContext
             target_user.max_daily_requests = max_requests
             target_user.limitations_expire_at = expire_at
             await session.commit()
+            
+            # --- Send Notification to limited user ---
+            limitations_changed = []
+            if max_trades is not None:
+                limitations_changed.append(f"تعداد ترید روزانه: {max_trades}")
+            if max_commodities is not None:
+                limitations_changed.append(f"تعداد کالای فعال: {max_commodities}")
+            if max_requests is not None:
+                limitations_changed.append(f"تعداد درخواست روزانه: {max_requests}")
+            
+            if limitations_changed:
+                expire_jalali = to_jalali_str(expire_at) if expire_at else "نامحدود"
+                limitation_message = (
+                    f"⚠️ *اعمال محدودیت*\n\n"
+                    f"محدودیت‌های زیر برای حساب شما اعمال شده است:\n\n"
+                )
+                for lim in limitations_changed:
+                    limitation_message += f"• {lim}\n"
+                limitation_message += f"\n📅 *اعتبار تا:* {expire_jalali}"
+                
+                # In-app notification
+                await create_user_notification(
+                    session, target_user.id, limitation_message,
+                    level=NotificationLevel.WARNING,
+                    category=NotificationCategory.SYSTEM
+                )
+                # Telegram notification
+                await send_telegram_notification(target_user.telegram_id, limitation_message)
             
             await clear_state_retain_anchors(state)
             

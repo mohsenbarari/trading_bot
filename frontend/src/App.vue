@@ -499,10 +499,12 @@ onMounted(async () => {
     }
     
   } catch (e: any) { 
-      loadingMessage.value = ''; 
-      if (!user.value && loginStep.value === 'none') {
-        // Only show error if we are stuck
-         loadingMessage.value = `⚠️ ${e.message}`; 
+      // If we are in browser (no tg) and error occurred, show login
+      if (!tg && !tg?.initData) {
+          loadingMessage.value = '';
+          loginStep.value = 'mobile';
+      } else {
+          loadingMessage.value = `⚠️ ${e.message}`; 
       }
   }
 });

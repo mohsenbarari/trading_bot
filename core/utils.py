@@ -91,6 +91,40 @@ async def create_user_notification(
 
     return new_notif
 
+# --- تابع ارسال پیام مستقیم به تلگرام ---
+import httpx
+import os
+
+async def send_telegram_notification(telegram_id: int, message: str):
+    """
+    ارسال پیام مستقیم به تلگرام کاربر از طریق API تلگرام.
+    این تابع از API side فراخوانی می‌شود (نه Bot side).
+    """
+    bot_token = os.getenv("BOT_TOKEN")
+    if not bot_token:
+        print("⚠️ BOT_TOKEN not found in environment")
+        return False
+    
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": telegram_id,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload, timeout=10)
+            if response.status_code == 200:
+                print(f"✅ Telegram notification sent to {telegram_id}")
+                return True
+            else:
+                print(f"⚠️ Telegram API Error: {response.status_code} - {response.text}")
+                return False
+    except Exception as e:
+        print(f"⚠️ Error sending Telegram notification: {e}")
+        return False
+
 # --- توابع کمکی تاریخ و زمان (ایران/جلالی) ---
 import jdatetime
 import pytz
