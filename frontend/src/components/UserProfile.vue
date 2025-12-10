@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watchEffect, onUnmounted } from 'vue';
+import { ref, computed, watchEffect, onUnmounted, watch } from 'vue';
 import moment from 'moment-jalaali';
 import DatePicker from 'vue3-persian-datetime-picker';
 
@@ -42,6 +42,11 @@ const tempDatePart = ref('');
 const tempTimePart = ref('');
 const blockTimePickerRef = ref<any>(null);
 const limitTimePickerRef = ref<any>(null);
+
+// Watch tempTimePart for debugging
+watch(tempTimePart, (newVal, oldVal) => {
+    console.log('tempTimePart changed via watch:', oldVal, '->', newVal);
+});
 
 function initDatePicker(currentValue: string) {
     pickerStep.value = 1;
@@ -671,20 +676,15 @@ async function deleteUser() {
                         :editable="false" 
                         @change="updateDatePart"
                     />
-                    <!-- Step 2: Time -->
-                    <DatePicker 
-                        v-if="pickerStep === 2"
-                        ref="blockTimePickerRef"
-                        v-model="tempTimePart" 
-                        type="time" 
-                        format="HH:mm"
-                        inline 
-                        :auto-submit="false" 
-                        :editable="false" 
-                        @change="updateTimePart"
-                        @input="updateTimePart"
-                        @update:model-value="updateTimePart"
-                    />
+                    <!-- Step 2: Time - Using native HTML5 input for reliability -->
+                    <div v-if="pickerStep === 2" class="native-time-picker">
+                        <label>ساعت مورد نظر:</label>
+                        <input 
+                            type="time" 
+                            v-model="tempTimePart" 
+                            class="time-input"
+                        />
+                    </div>
                 </div>
                 <!-- Footer moved outside wrapper to ensure visibility -->
                 <div class="integrated-footer">
@@ -715,20 +715,15 @@ async function deleteUser() {
                         :editable="false" 
                         @change="updateDatePart"
                     />
-                    <!-- Step 2: Time -->
-                    <DatePicker 
-                        v-if="pickerStep === 2"
-                        ref="limitTimePickerRef"
-                        v-model="tempTimePart" 
-                        type="time" 
-                        format="HH:mm"
-                        inline 
-                        :auto-submit="false" 
-                        :editable="false" 
-                        @change="updateTimePart"
-                        @input="updateTimePart"
-                        @update:model-value="updateTimePart"
-                    />
+                    <!-- Step 2: Time - Using native HTML5 input for reliability -->
+                    <div v-if="pickerStep === 2" class="native-time-picker">
+                        <label>ساعت مورد نظر:</label>
+                        <input 
+                            type="time" 
+                            v-model="tempTimePart" 
+                            class="time-input"
+                        />
+                    </div>
                 </div>
                 <!-- Footer moved outside wrapper to ensure visibility -->
                 <div class="integrated-footer">
@@ -782,6 +777,42 @@ async function deleteUser() {
     font-size: 16px;
     font-weight: bold;
     cursor: pointer;
+}
+
+/* Native time picker styles */
+.native-time-picker {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 12px;
+    margin: 10px 0;
+}
+
+.native-time-picker label {
+    font-size: 18px;
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 15px;
+}
+
+.native-time-picker .time-input {
+    font-size: 32px;
+    padding: 15px 25px;
+    border: 2px solid #007aff;
+    border-radius: 12px;
+    text-align: center;
+    background: white;
+    color: #333;
+    width: auto;
+    min-width: 150px;
+}
+
+.native-time-picker .time-input:focus {
+    outline: none;
+    border-color: #0056b3;
+    box-shadow: 0 0 10px rgba(0, 122, 255, 0.3);
 }
 
 
