@@ -62,11 +62,16 @@ class UserRead(UserBase):
     created_at: datetime
     trading_restricted_until: datetime | None = None
     
-    # Limitations
+    # Limitations - حداکثر مجاز
     max_daily_trades: int | None = None
     max_active_commodities: int | None = None
     max_daily_requests: int | None = None
     limitations_expire_at: datetime | None = None
+    
+    # Counters - شمارنده‌های مصرف
+    trades_count: int = 0
+    commodities_traded_count: int = 0
+    channel_messages_count: int = 0
     
     @computed_field
     def created_at_jalali(self) -> str | None:

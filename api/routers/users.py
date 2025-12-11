@@ -159,6 +159,10 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
     
     if limitations_changed:
         limitation_notification_needed = True
+        # اگر محدودیت جدید اعمال شده، شمارنده‌ها ریست شوند
+        user.trades_count = 0
+        user.commodities_traded_count = 0
+        user.channel_messages_count = 0
     
     # بررسی آیا همه محدودیت‌ها null شدند؟
     new_has_limits = (user.max_daily_trades is not None or 
@@ -166,6 +170,10 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
                       user.max_daily_requests is not None)
     if old_had_limits and not new_has_limits:
         unlimit_notification_needed = True
+        # ریست شمارنده‌ها
+        user.trades_count = 0
+        user.commodities_traded_count = 0
+        user.channel_messages_count = 0
         
     await db.commit()
     await db.refresh(user)

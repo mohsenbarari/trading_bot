@@ -204,6 +204,83 @@ const restrictionText = computed(() => {
   return `⛔ تا ${props.user.trading_restricted_until_jalali}`;
 });
 
+// --- Countdown Timer Logic ---
+const countdownRestriction = ref('');
+const countdownLimitation = ref('');
+let countdownInterval: ReturnType<typeof setInterval> | null = null;
+
+function formatCountdown(seconds: number): string {
+  if (seconds <= 0) return 'منقضی شده';
+  
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  
+  if (days > 0) {
+    return `${days} روز ${hours} ساعت ${minutes} دقیقه`;
+  } else if (hours > 0) {
+    return `${hours} ساعت ${minutes} دقیقه ${secs} ثانیه`;
+  } else if (minutes > 0) {
+    return `${minutes} دقیقه ${secs} ثانیه`;
+  } else {
+    return `${secs} ثانیه`;
+  }
+}
+
+function updateCountdowns() {
+  const now = moment.utc();
+  
+  // Restriction countdown
+  if (props.user.trading_restricted_until) {
+    const restrictionTime = moment.utc(props.user.trading_restricted_until);
+    if (restrictionTime.isValid() && restrictionTime.year() <= 2100) {
+      const diffSeconds = restrictionTime.diff(now, 'seconds');
+      countdownRestriction.value = formatCountdown(diffSeconds);
+    } else if (restrictionTime.year() > 2100) {
+      countdownRestriction.value = 'دائمی';
+    } else {
+      countdownRestriction.value = '';
+    }
+  } else {
+    countdownRestriction.value = '';
+  }
+  
+  // Limitation countdown
+  if (props.user.limitations_expire_at) {
+    const limitTime = moment.utc(props.user.limitations_expire_at);
+    if (limitTime.isValid()) {
+      const diffSeconds = limitTime.diff(now, 'seconds');
+      countdownLimitation.value = formatCountdown(diffSeconds);
+    } else {
+      countdownLimitation.value = '';
+    }
+  } else {
+    countdownLimitation.value = '';
+  }
+}
+
+// Start countdown interval on component mount
+watchEffect(() => {
+  // Clear existing interval
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+    countdownInterval = null;
+  }
+  
+  // Only start if there's something to count
+  if (props.user.trading_restricted_until || props.user.limitations_expire_at) {
+    updateCountdowns();
+    countdownInterval = setInterval(updateCountdowns, 1000);
+  }
+});
+
+onUnmounted(() => {
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+  }
+});
+
 async function saveRole() {
   if (!props.apiBaseUrl || !props.jwtToken) return;
   isLoading.value = true;
@@ -543,20 +620,33 @@ async function deleteUser() {
           <span class="value" :class="{ 'text-red': isRestricted }">{{ restrictionText }}</span>
       </div>
       
+      <!-- تایمر شمارش معکوس مسدودیت -->
+      <div v-if="isRestricted && countdownRestriction" class="countdown-box restriction-countdown">
+          <span class="countdown-icon">⏱️</span>
+          <span class="countdown-label">زمان باقی‌مانده مسدودیت:</span>
+          <span class="countdown-value">{{ countdownRestriction }}</span>
+      </div>
+      
       <!-- نمایش محدودیت‌ها -->
       <div v-if="user.max_daily_trades || user.max_active_commodities || user.max_daily_requests" class="limitations-box">
           <h4>⚠️ محدودیت‌های فعال:</h4>
           <div v-if="user.max_daily_trades" class="limit-item">
-              <span>معاملات روزانه:</span> <span>{{ user.max_daily_trades }}</span>
+              <span>مجموع معاملات:</span> <span class="usage-ratio">{{ user.trades_count ?? 0 }} / {{ user.max_daily_trades }}</span>
           </div>
           <div v-if="user.max_active_commodities" class="limit-item">
-              <span>کالاهای فعال:</span> <span>{{ user.max_active_commodities }}</span>
+              <span>مجموع کالا:</span> <span class="usage-ratio">{{ user.commodities_traded_count ?? 0 }} / {{ user.max_active_commodities }}</span>
           </div>
           <div v-if="user.max_daily_requests" class="limit-item">
-              <span>درخواست‌های روزانه:</span> <span>{{ user.max_daily_requests }}</span>
+              <span>مجموع لفظ:</span> <span class="usage-ratio">{{ user.channel_messages_count ?? 0 }} / {{ user.max_daily_requests }}</span>
           </div>
           <div v-if="user.limitations_expire_at" class="limit-expiry">
               <span>انقضا:</span> <span>{{ user.limitations_expire_at_jalali }}</span>
+          </div>
+          <!-- تایمر شمارش معکوس محدودیت -->
+          <div v-if="countdownLimitation" class="countdown-inline">
+              <span class="countdown-icon">⏱️</span>
+              <span class="countdown-label">باقی‌مانده:</span>
+              <span class="countdown-value">{{ countdownLimitation }}</span>
           </div>
       </div>
 
@@ -1295,5 +1385,71 @@ input[type="number"].form-select::-webkit-inner-spin-button {
     color: #ea580c;
     display: flex;
     justify-content: space-between;
+}
+.usage-ratio {
+    font-family: 'Vazirmatn', tahoma, sans-serif;
+    font-weight: 600;
+    color: #c2410c;
+    direction: ltr;
+}
+
+/* Countdown Timer Styles */
+.countdown-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    margin: 12px 0;
+    animation: pulse 2s infinite;
+}
+.restriction-countdown {
+    background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+    border: 1px solid #fecaca;
+}
+.countdown-icon {
+    font-size: 18px;
+}
+.countdown-label {
+    font-size: 13px;
+    color: #7f1d1d;
+}
+.countdown-value {
+    font-family: 'Vazirmatn', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    color: #dc2626;
+    background: rgba(255, 255, 255, 0.7);
+    padding: 4px 10px;
+    border-radius: 8px;
+    margin-right: auto;
+    direction: ltr;
+}
+.countdown-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed #fbbf24;
+}
+.countdown-inline .countdown-icon {
+    font-size: 14px;
+}
+.countdown-inline .countdown-label {
+    font-size: 12px;
+    color: #92400e;
+}
+.countdown-inline .countdown-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: #d97706;
+    background: rgba(254, 243, 199, 0.8);
+    padding: 3px 8px;
+    border-radius: 6px;
+}
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.85; }
 }
 </style>

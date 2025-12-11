@@ -49,8 +49,6 @@ services:
       - .:/app
     env_file:
       - .env
-    environment:
-      - SYNC_DATABASE_URL=${SYNC_DATABASE_URL}
     depends_on:
       db:
         condition: service_healthy

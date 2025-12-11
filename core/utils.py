@@ -173,3 +173,68 @@ def parse_jalali_str(date_str: str) -> datetime | None:
         return g_dt.astimezone(pytz.utc)
     except Exception:
         return None
+
+
+# --- توابع کمکی برای شمارنده‌های محدودیت ---
+
+def check_user_limits(user, action_type: str, quantity: int = 1) -> tuple[bool, str | None]:
+    """
+    بررسی می‌کند که آیا کاربر مجاز به انجام عملیات است یا خیر.
+    
+    action_type: 'trade' یا 'channel_message'
+    quantity: تعداد کالا (برای trade)
+    
+    Returns: (allowed: bool, error_message: str | None)
+    """
+    from datetime import datetime
+    
+    # اگر محدودیت ندارد، همیشه مجاز است
+    if user.limitations_expire_at is None:
+        return (True, None)
+    
+    # اگر محدودیت منقضی شده، مجاز است
+    if user.limitations_expire_at <= datetime.utcnow():
+        return (True, None)
+    
+    if action_type == 'trade':
+        # بررسی تعداد معاملات
+        if user.max_daily_trades is not None:
+            if user.trades_count >= user.max_daily_trades:
+                return (False, f"شما به حداکثر تعداد معاملات مجاز ({user.max_daily_trades}) رسیده‌اید.")
+        
+        # بررسی تعداد کالا
+        if user.max_active_commodities is not None:
+            if user.commodities_traded_count + quantity > user.max_active_commodities:
+                remaining = user.max_active_commodities - user.commodities_traded_count
+                return (False, f"شما به حداکثر تعداد کالای مجاز رسیده‌اید. باقی‌مانده: {max(0, remaining)}")
+    
+    elif action_type == 'channel_message':
+        # بررسی تعداد ارسال لفظ
+        if user.max_daily_requests is not None:
+            if user.channel_messages_count >= user.max_daily_requests:
+                return (False, f"شما به حداکثر تعداد ارسال لفظ مجاز ({user.max_daily_requests}) رسیده‌اید.")
+    
+    return (True, None)
+
+
+async def increment_user_counter(session: AsyncSession, user, action_type: str, quantity: int = 1) -> None:
+    """
+    شمارنده مربوط به عملیات را افزایش می‌دهد.
+    
+    action_type: 'trade' یا 'channel_message'
+    quantity: تعداد کالا (برای trade)
+    """
+    if action_type == 'trade':
+        user.trades_count += 1
+        user.commodities_traded_count += quantity
+    elif action_type == 'channel_message':
+        user.channel_messages_count += 1
+    
+    await session.commit()
+
+
+def reset_user_counters(user) -> None:
+    """شمارنده‌های کاربر را صفر می‌کند."""
+    user.trades_count = 0
+    user.commodities_traded_count = 0
+    user.channel_messages_count = 0

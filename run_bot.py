@@ -75,11 +75,14 @@ async def monitor_expired_restrictions(bot: Bot):
                     )
                     await send_telegram_notification(user.telegram_id, msg)
                     
-                    # پاک کردن محدودیت‌ها
+                    # پاک کردن محدودیت‌ها و ریست شمارنده‌ها
                     user.max_daily_trades = None
                     user.max_active_commodities = None
                     user.max_daily_requests = None
                     user.limitations_expire_at = None
+                    user.trades_count = 0
+                    user.commodities_traded_count = 0
+                    user.channel_messages_count = 0
                     await session.commit()
                     logger.info(f"Limitations expired for user {user.id}")
                     

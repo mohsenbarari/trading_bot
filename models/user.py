@@ -16,10 +16,15 @@ class User(Base):
     has_bot_access = Column(Boolean, default=True, nullable=False)
     trading_restricted_until = Column(DateTime, nullable=True, default=None)
     
-    # Limitations
+    # Limitations - حداکثر مجاز
     max_daily_trades = Column(Integer, nullable=True, default=None)
     max_active_commodities = Column(Integer, nullable=True, default=None)
     max_daily_requests = Column(Integer, nullable=True, default=None)
     limitations_expire_at = Column(DateTime, nullable=True, default=None)
+    
+    # Counters - شمارنده‌های مصرف
+    trades_count = Column(Integer, nullable=False, default=0)
+    commodities_traded_count = Column(Integer, nullable=False, default=0)
+    channel_messages_count = Column(Integer, nullable=False, default=0)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
