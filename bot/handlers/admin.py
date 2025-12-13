@@ -1,11 +1,11 @@
-# trading_bot/bot/handlers/admin.py (کامل و اصلاح شده)
+# trading_bot/bot/handlers/admin.py
+"""هندلرهای مدیریت دعوت‌نامه‌ها"""
 
 from aiogram import Router, types, F, Bot
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from typing import Optional
 import re
-import asyncio
 from fastapi import HTTPException, BackgroundTasks
 from core.db import AsyncSessionLocal
 from models.user import User
@@ -18,18 +18,17 @@ from bot.keyboards import (
     get_commodity_fsm_cancel_keyboard,
     get_admin_panel_keyboard 
 )
+from bot.message_manager import (
+    set_anchor, 
+    schedule_message_delete, 
+    schedule_delete,
+    delete_previous_anchor,
+    DeleteDelay
+)
 from api.routers.invitations import create_invitation
 from schemas import InvitationCreate
 
 router = Router()
-
-async def delete_message_after_delay(message: types.Message, delay: int):
-    """پیام را پس از چند ثانیه حذف می‌کند."""
-    await asyncio.sleep(delay)
-    try:
-        await message.delete()
-    except Exception:
-        pass
 
 # --- ۱. تابع کمکی (اصلاح شد) ---
 async def _return_to_admin_panel(message: types.Message | types.CallbackQuery, state: FSMContext, bot: Bot):
@@ -71,7 +70,7 @@ async def start_invitation_creation(message: types.Message, state: FSMContext, u
     if not user or user.role != UserRole.SUPER_ADMIN:
         return
         
-    asyncio.create_task(delete_message_after_delay(message, 30))
+    schedule_message_delete(message)
     
     await state.set_state(InvitationCreation.awaiting_account_name)
     prompt_msg = await message.answer(
@@ -104,7 +103,7 @@ async def process_invitation_account_name(message: types.Message, state: FSMCont
     data = await state.get_data()
     last_prompt_id = data.get("last_prompt_message_id")
     
-    asyncio.create_task(delete_message_after_delay(message, 0)) # حذف فوری
+    schedule_message_delete(message) # حذف فوری
     if last_prompt_id:
         try:
             await message.bot.delete_message(message.chat.id, last_prompt_id)
@@ -141,7 +140,7 @@ async def process_invitation_mobile(message: types.Message, state: FSMContext):
     data = await state.get_data()
     last_prompt_id = data.get("last_prompt_message_id")
     
-    asyncio.create_task(delete_message_after_delay(message, 0)) # حذف فوری
+    schedule_message_delete(message) # حذف فوری
     if last_prompt_id:
         try:
             await message.bot.delete_message(message.chat.id, last_prompt_id)
@@ -203,7 +202,7 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
 
     if not account_name or not mobile_number:
         error_msg = await callback.message.answer("خطایی رخ داد، اطلاعات ناقص است. لطفاً دوباره تلاش کنید.")
-        asyncio.create_task(delete_message_after_delay(error_msg, 30))
+        schedule_message_delete(error_msg)
         await _return_to_admin_panel(callback, state, bot)
         return
 
@@ -226,7 +225,7 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
             bot_username = bot_user.username
             invite_link = f"https://t.me/{bot_username}?start={code.token}" 
 
-            await callback.message.answer(
+            invite_msg = await callback.message.answer(
                 f"✅ لینک دعوت با موفقیت برای نقش **{role.value}** ایجاد شد:\n\n"
                 f"**نام کاربری:** `{account_name}`\n"
                 f"**موبایل:** `{mobile_number}`\n\n"
@@ -234,6 +233,8 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
                 parse_mode="Markdown",
                 reply_markup=None 
             )
+            # لینک دعوت بعد از 3 روز حذف شود
+            schedule_message_delete(invite_msg, DeleteDelay.INVITATION)
 
         except HTTPException as e:
             if e.detail.startswith("EXISTING_ACTIVE_LINK::"):
@@ -252,21 +253,21 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
                     )
                 except Exception:
                     error_msg = await callback.message.answer(f"❌ خطای سیستمی: {str(e)}", parse_mode=None)
-                    asyncio.create_task(delete_message_after_delay(error_msg, 30))
+                    schedule_message_delete(error_msg)
             
             else:
                 error_msg = await callback.message.answer(
                     f"❌ **خطا در ایجاد دعوت‌نامه:**\n\n{e.detail.replace('**', '')}",
                     parse_mode="Markdown"
                 )
-                asyncio.create_task(delete_message_after_delay(error_msg, 30))
+                schedule_message_delete(error_msg)
             
         except Exception as e:
             error_msg = await callback.message.answer(
                 f"❌ خطای سیستمی: {str(e)}",
                 parse_mode=None
             )
-            asyncio.create_task(delete_message_after_delay(error_msg, 30))
+            schedule_message_delete(error_msg)
             
     await _return_to_admin_panel(callback, state, bot)
     await callback.answer()
@@ -286,7 +287,7 @@ async def cancel_invitation_creation(callback: types.CallbackQuery, state: FSMCo
             pass
 
     cancel_msg = await callback.message.answer("عملیات لغو شد.")
-    asyncio.create_task(delete_message_after_delay(cancel_msg, 30))
+    schedule_message_delete(cancel_msg)
     
     await _return_to_admin_panel(callback, state, bot)
     await callback.answer("لغو شد")

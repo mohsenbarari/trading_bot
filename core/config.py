@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     postgres_password: str
     frontend_url: str  
     redis_url: str
+    channel_id: int | None = None  # آیدی کانال برای ارسال پیام
 
     jwt_secret_key: str = "a_very_secret_key"
     jwt_algorithm: str = "HS256"

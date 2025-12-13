@@ -1,4 +1,4 @@
-# bot/handlers/default.py (فایل جدید)
+# bot/handlers/default.py
 from aiogram import Router, types
 from typing import Optional
 from models.user import User
