@@ -4,6 +4,7 @@
 from aiogram import Router, types, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import joinedload
 from typing import Optional
@@ -12,7 +13,8 @@ import os
 import tempfile
 
 from models.user import User
-from models.trade import Trade, TradeType
+from models.trade import Trade, TradeType, TradeStatus
+from models.offer import Offer, OfferType
 from models.commodity import Commodity
 from bot.message_manager import schedule_message_delete, set_anchor, delete_previous_anchor, DeleteDelay
 from core.db import AsyncSessionLocal
@@ -49,16 +51,20 @@ async def get_trade_history(current_user_id: int, target_user_id: int, months: i
         if not target_user:
             return None, []
         
-        # دریافت معاملات هر دو کاربر
+        # دریافت معاملات بین دو کاربر (یکی لفظ‌دهنده، دیگری پاسخ‌دهنده)
         stmt = (
             select(Trade)
-            .options(joinedload(Trade.commodity), joinedload(Trade.user))
+            .options(
+                joinedload(Trade.commodity), 
+                joinedload(Trade.offer_user),
+                joinedload(Trade.responder_user)
+            )
             .where(
                 and_(
                     Trade.created_at >= from_date,
                     or_(
-                        Trade.user_id == current_user_id,
-                        Trade.user_id == target_user_id
+                        and_(Trade.offer_user_id == current_user_id, Trade.responder_user_id == target_user_id),
+                        and_(Trade.offer_user_id == target_user_id, Trade.responder_user_id == current_user_id)
                     )
                 )
             )
@@ -70,7 +76,7 @@ async def get_trade_history(current_user_id: int, target_user_id: int, months: i
         return target_user, trades
 
 
-def format_trade_history(trades, target_user) -> str:
+def format_trade_history(trades, target_user, current_user_id: int) -> str:
     """فرمت‌بندی تاریخچه معاملات"""
     if not trades:
         return f"📊 تاریخچه معاملات با {target_user.account_name}\n\n⚠️ معامله‌ای یافت نشد."
@@ -81,14 +87,22 @@ def format_trade_history(trades, target_user) -> str:
         trade_emoji = "🟢" if trade.trade_type == TradeType.BUY else "🔴"
         trade_label = "خرید" if trade.trade_type == TradeType.BUY else "فروش"
         
+        # تشخیص نقش کاربر فعلی
+        if trade.offer_user_id == current_user_id:
+            role = "لفظ‌دهنده"
+            partner = trade.responder_user.account_name
+        else:
+            role = "پاسخ‌دهنده"
+            partner = trade.offer_user.account_name
+        
         # تبدیل به تاریخ شمسی
         jalali_date = jdatetime.datetime.fromgregorian(datetime=trade.created_at)
         date_str = jalali_date.strftime("%Y/%m/%d")
         
         text += (
             f"{trade_emoji} {trade_label} {trade.commodity.name} "
-            f"{trade.quantity} عدد {trade.price:,} - {date_str}\n"
-            f"   👤 {trade.user.account_name}\n\n"
+            f"{trade.quantity} عدد {trade.price:,}\n"
+            f"   � {date_str} | با {partner}\n\n"
         )
     
     if len(trades) > 20:
@@ -121,12 +135,18 @@ async def generate_excel(trades, target_user, current_user) -> str:
     for row, trade in enumerate(trades, 2):
         jalali_date = jdatetime.datetime.fromgregorian(datetime=trade.created_at)
         
+        # تشخیص طرف معامله
+        if trade.offer_user_id == current_user.id:
+            partner = trade.responder_user.account_name
+        else:
+            partner = trade.offer_user.account_name
+        
         ws.cell(row=row, column=1, value=jalali_date.strftime("%Y/%m/%d %H:%M"))
         ws.cell(row=row, column=2, value="خرید" if trade.trade_type == TradeType.BUY else "فروش")
         ws.cell(row=row, column=3, value=trade.commodity.name)
         ws.cell(row=row, column=4, value=trade.quantity)
         ws.cell(row=row, column=5, value=trade.price)
-        ws.cell(row=row, column=6, value=trade.user.account_name)
+        ws.cell(row=row, column=6, value=partner)
     
     # عرض ستون‌ها
     ws.column_dimensions['A'].width = 18
@@ -156,17 +176,24 @@ async def generate_pdf(trades, target_user, current_user) -> str:
     doc = SimpleDocTemplate(filename, pagesize=A4)
     
     # داده‌های جدول
-    data = [["Date", "Type", "Commodity", "Qty", "Price", "User"]]
+    data = [["Date", "Type", "Commodity", "Qty", "Price", "Partner"]]
     
     for trade in trades:
         jalali_date = jdatetime.datetime.fromgregorian(datetime=trade.created_at)
+        
+        # تشخیص طرف معامله
+        if trade.offer_user_id == current_user.id:
+            partner = trade.responder_user.account_name
+        else:
+            partner = trade.offer_user.account_name
+        
         data.append([
             jalali_date.strftime("%Y/%m/%d"),
             "Buy" if trade.trade_type == TradeType.BUY else "Sell",
             trade.commodity.name,
             str(trade.quantity),
             f"{trade.price:,}",
-            trade.user.account_name
+            partner
         ])
     
     # ایجاد جدول
@@ -203,7 +230,7 @@ async def show_trade_history(callback: types.CallbackQuery, state: FSMContext, u
     
     await state.update_data(history_months=3, history_target_id=target_user_id)
     
-    text = format_trade_history(trades, target_user)
+    text = format_trade_history(trades, target_user, user.id)
     
     await callback.message.edit_text(
         text,
@@ -230,12 +257,15 @@ async def filter_trade_history(callback: types.CallbackQuery, state: FSMContext,
     
     await state.update_data(history_months=months, history_target_id=target_user_id)
     
-    text = format_trade_history(trades, target_user)
+    text = format_trade_history(trades, target_user, user.id)
     
-    await callback.message.edit_text(
-        text,
-        reply_markup=get_trade_history_keyboard(target_user_id)
-    )
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_trade_history_keyboard(target_user_id)
+        )
+    except TelegramBadRequest:
+        pass  # پیام تغییر نکرده
     await callback.answer()
 
 

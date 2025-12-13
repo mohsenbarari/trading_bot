@@ -11,6 +11,7 @@ import models.user
 import models.invitation
 import models.session
 import models.commodity
+import models.offer  # مدل لفظ
 import models.trade  # مدل معاملات
 
 # --- خواندن تنظیمات Alembic ---

@@ -10,7 +10,7 @@ from typing import Optional
 
 from models.user import User
 from models.commodity import Commodity
-from models.trade import Trade as TradeModel, TradeType
+from models.offer import Offer, OfferType, OfferStatus
 from bot.states import Trade
 from bot.message_manager import schedule_message_delete, schedule_delete, DeleteDelay
 from core.config import settings
@@ -372,17 +372,18 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
                 parse_mode="Markdown"
             )
             
-            # ذخیره معامله در دیتابیس
+            # ذخیره لفظ در دیتابیس
             async with AsyncSessionLocal() as session:
-                new_trade = TradeModel(
+                new_offer = Offer(
                     user_id=user.id,
-                    trade_type=TradeType.BUY if trade_type == "buy" else TradeType.SELL,
+                    offer_type=OfferType.BUY if trade_type == "buy" else OfferType.SELL,
                     commodity_id=data.get("commodity_id"),
                     quantity=quantity,
                     price=price,
+                    status=OfferStatus.ACTIVE,
                     channel_message_id=sent_msg.message_id
                 )
-                session.add(new_trade)
+                session.add(new_offer)
                 await session.commit()
             
             await callback.message.edit_text(
