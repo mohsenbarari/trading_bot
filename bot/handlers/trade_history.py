@@ -102,7 +102,7 @@ def format_trade_history(trades, target_user, current_user_id: int) -> str:
         text += (
             f"{trade_emoji} {trade_label} {trade.commodity.name} "
             f"{trade.quantity} عدد {trade.price:,}\n"
-            f"   � {date_str} | با {partner}\n\n"
+            f"   {date_str}\n\n"
         )
     
     if len(trades) > 20:
@@ -112,17 +112,18 @@ def format_trade_history(trades, target_user, current_user_id: int) -> str:
 
 
 async def generate_excel(trades, target_user, current_user) -> str:
-    """ایجاد فایل Excel"""
+    """ایجاد فایل Excel با پشتیبانی RTL"""
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill
     
     wb = Workbook()
     ws = wb.active
     ws.title = "Trade History"
+    ws.sheet_view.rightToLeft = True  # راست به چپ
     
-    # هدر
-    headers = ["تاریخ", "نوع", "کالا", "تعداد", "قیمت", "معامله‌گر"]
-    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    # هدر - ترتیب RTL (از راست به چپ)
+    headers = ["قیمت", "تعداد", "کالا", "نوع", "ساعت", "تاریخ"]
+    header_fill = PatternFill(start_color="2C5282", end_color="2C5282", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF")
     
     for col, header in enumerate(headers, 1):
@@ -131,30 +132,33 @@ async def generate_excel(trades, target_user, current_user) -> str:
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center")
     
-    # داده‌ها
-    for row, trade in enumerate(trades, 2):
+    # داده‌ها - ترتیب RTL
+    for row_num, trade in enumerate(trades, 2):
         jalali_date = jdatetime.datetime.fromgregorian(datetime=trade.created_at)
         
-        # تشخیص طرف معامله
-        if trade.offer_user_id == current_user.id:
-            partner = trade.responder_user.account_name
-        else:
-            partner = trade.offer_user.account_name
+        ws.cell(row=row_num, column=1, value=trade.price)
+        ws.cell(row=row_num, column=2, value=trade.quantity)
+        ws.cell(row=row_num, column=3, value=trade.commodity.name)
+        ws.cell(row=row_num, column=4, value="خرید" if trade.trade_type == TradeType.BUY else "فروش")
+        ws.cell(row=row_num, column=5, value=jalali_date.strftime("%H:%M"))
+        ws.cell(row=row_num, column=6, value=jalali_date.strftime("%Y/%m/%d"))
         
-        ws.cell(row=row, column=1, value=jalali_date.strftime("%Y/%m/%d %H:%M"))
-        ws.cell(row=row, column=2, value="خرید" if trade.trade_type == TradeType.BUY else "فروش")
-        ws.cell(row=row, column=3, value=trade.commodity.name)
-        ws.cell(row=row, column=4, value=trade.quantity)
-        ws.cell(row=row, column=5, value=trade.price)
-        ws.cell(row=row, column=6, value=partner)
+        # سطرهای یکی در میان
+        if row_num % 2 == 0:
+            for col in range(1, 7):
+                ws.cell(row=row_num, column=col).fill = PatternFill(start_color="EDF2F7", end_color="EDF2F7", fill_type="solid")
+        
+        # تراز وسط
+        for col in range(1, 7):
+            ws.cell(row=row_num, column=col).alignment = Alignment(horizontal="center")
     
-    # عرض ستون‌ها
-    ws.column_dimensions['A'].width = 18
-    ws.column_dimensions['B'].width = 10
-    ws.column_dimensions['C'].width = 15
-    ws.column_dimensions['D'].width = 10
-    ws.column_dimensions['E'].width = 15
-    ws.column_dimensions['F'].width = 15
+    # عرض ستون‌ها - RTL
+    ws.column_dimensions['A'].width = 15  # قیمت
+    ws.column_dimensions['B'].width = 10  # تعداد
+    ws.column_dimensions['C'].width = 15  # کالا
+    ws.column_dimensions['D'].width = 10  # نوع
+    ws.column_dimensions['E'].width = 8   # ساعت
+    ws.column_dimensions['F'].width = 12  # تاریخ
     
     # ذخیره
     filename = tempfile.mktemp(suffix=".xlsx")
@@ -164,51 +168,106 @@ async def generate_excel(trades, target_user, current_user) -> str:
 
 
 async def generate_pdf(trades, target_user, current_user) -> str:
-    """ایجاد فایل PDF"""
+    """ایجاد فایل PDF با فونت فارسی و پشتیبانی RTL"""
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
-    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+    import arabic_reshaper
+    from bidi.algorithm import get_display
+    import os
+    
+    def reshape_persian(text):
+        """تبدیل متن فارسی برای نمایش صحیح RTL"""
+        if not text:
+            return text
+        reshaped = arabic_reshaper.reshape(str(text))
+        return get_display(reshaped)
+    
+    # ثبت فونت فارسی
+    font_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'fonts', 'Vazir.ttf')
+    if os.path.exists(font_path):
+        pdfmetrics.registerFont(TTFont('Vazir', font_path))
+        persian_font = 'Vazir'
+    else:
+        persian_font = 'Helvetica'
     
     filename = tempfile.mktemp(suffix=".pdf")
-    doc = SimpleDocTemplate(filename, pagesize=A4)
+    doc = SimpleDocTemplate(filename, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     
-    # داده‌های جدول
-    data = [["Date", "Type", "Commodity", "Qty", "Price", "Partner"]]
+    elements = []
+    
+    # عنوان
+    title_style = ParagraphStyle(
+        'Title',
+        fontName=persian_font,
+        fontSize=16,
+        alignment=TA_CENTER,
+        spaceAfter=20
+    )
+    title_text = reshape_persian(f"تاریخچه معاملات با {target_user.account_name}")
+    title = Paragraph(title_text, title_style)
+    elements.append(title)
+    elements.append(Spacer(1, 20))
+    
+    # داده‌های جدول - ترتیب RTL (از راست به چپ)
+    headers = [
+        reshape_persian("قیمت"),
+        reshape_persian("تعداد"),
+        reshape_persian("کالا"),
+        reshape_persian("نوع"),
+        reshape_persian("ساعت"),
+        reshape_persian("تاریخ")
+    ]
+    data = [headers]
     
     for trade in trades:
         jalali_date = jdatetime.datetime.fromgregorian(datetime=trade.created_at)
-        
-        # تشخیص طرف معامله
-        if trade.offer_user_id == current_user.id:
-            partner = trade.responder_user.account_name
-        else:
-            partner = trade.offer_user.account_name
+        trade_type = reshape_persian("خرید") if trade.trade_type == TradeType.BUY else reshape_persian("فروش")
         
         data.append([
-            jalali_date.strftime("%Y/%m/%d"),
-            "Buy" if trade.trade_type == TradeType.BUY else "Sell",
-            trade.commodity.name,
-            str(trade.quantity),
             f"{trade.price:,}",
-            partner
+            str(trade.quantity),
+            reshape_persian(trade.commodity.name),
+            trade_type,
+            jalali_date.strftime("%H:%M"),
+            jalali_date.strftime("%Y/%m/%d")
         ])
     
-    # ایجاد جدول
-    table = Table(data)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4F81BD')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-    ]))
+    # ایجاد جدول - RTL
+    col_widths = [80, 50, 100, 50, 50, 80]
+    table = Table(data, colWidths=col_widths)
     
-    doc.build([table])
+    # استایل جدول
+    style_commands = [
+        # هدر
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2C5282')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, -1), persian_font),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('TOPPADDING', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+        ('TOPPADDING', (0, 1), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E0')),
+    ]
+    
+    # سطرهای یکی در میان
+    for i in range(1, len(data)):
+        if i % 2 == 0:
+            style_commands.append(('BACKGROUND', (0, i), (-1, i), colors.HexColor('#EDF2F7')))
+        else:
+            style_commands.append(('BACKGROUND', (0, i), (-1, i), colors.white))
+    
+    table.setStyle(TableStyle(style_commands))
+    elements.append(table)
+    
+    doc.build(elements)
     
     return filename
 
