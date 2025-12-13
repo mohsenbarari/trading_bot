@@ -14,7 +14,7 @@ from core.enums import UserRole, NotificationLevel, NotificationCategory # <-- �
 from models.invitation import Invitation
 from models.user import User
 from bot.middlewares.auth import AuthMiddleware
-from bot.handlers import start, panel, default, admin, admin_commodities, admin_users, trade
+from bot.handlers import start, panel, default, admin, admin_commodities, admin_users, trade, trade_history
 from core.utils import create_user_notification, send_telegram_notification
 
 logging.basicConfig(level=logging.INFO)
@@ -183,6 +183,7 @@ async def main():
 
     dp.include_router(start.router)
     dp.include_router(trade.router)  # باید قبل از panel باشد تا دکمه معامله را بگیرد
+    dp.include_router(trade_history.router)  # تاریخچه معاملات
     dp.include_router(panel.router)
     dp.include_router(admin.router)
     dp.include_router(admin_commodities.router)

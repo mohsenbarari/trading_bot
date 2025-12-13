@@ -12,7 +12,7 @@ class User(Base):
     telegram_id = Column(BigInteger, unique=True, index=True, nullable=False)
     username = Column(String, nullable=True)
     full_name = Column(String, nullable=False)
-    address = Column(Text, nullable=True)  # آدرس کاربر
+    address = Column(Text, nullable=False)  # آدرس کاربر - اجباری
     role = Column(Enum(UserRole), nullable=False, default=UserRole.WATCH)
     has_bot_access = Column(Boolean, default=True, nullable=False)
     trading_restricted_until = Column(DateTime, nullable=True, default=None)

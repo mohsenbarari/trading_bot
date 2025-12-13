@@ -2,6 +2,7 @@
 """هندلرهای شروع و ثبت‌نام"""
 
 from aiogram import Router, types, F
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart
 from aiogram.filters.command import CommandObject
 from aiogram.fsm.context import FSMContext
@@ -54,9 +55,18 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                         f"📍 آدرس: {target_user.address or 'ثبت نشده'}"
                     )
                     await delete_previous_anchor(message.bot, message.chat.id, delay=0)
+                    
+                    # دکمه تاریخچه معاملات (فقط برای کاربران لاگین شده)
+                    if user:
+                        profile_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="📊 تاریخچه معاملات", callback_data=f"trade_history_{target_user_id}")]
+                        ])
+                    else:
+                        profile_keyboard = None
+                    
                     anchor_msg = await message.answer(
                         profile_text,
-                        reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url) if user else None
+                        reply_markup=profile_keyboard
                     )
                     if user:
                         set_anchor(message.chat.id, anchor_msg.message_id)
