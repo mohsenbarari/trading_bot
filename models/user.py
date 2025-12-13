@@ -1,5 +1,5 @@
 # models/user.py
-from sqlalchemy import Column, Integer, String, BigInteger, Enum, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, BigInteger, Enum, Boolean, DateTime, Text
 from .database import Base
 from core.enums import UserRole
 from sqlalchemy.sql import func
@@ -12,6 +12,7 @@ class User(Base):
     telegram_id = Column(BigInteger, unique=True, index=True, nullable=False)
     username = Column(String, nullable=True)
     full_name = Column(String, nullable=False)
+    address = Column(Text, nullable=True)  # آدرس کاربر
     role = Column(Enum(UserRole), nullable=False, default=UserRole.WATCH)
     has_bot_access = Column(Boolean, default=True, nullable=False)
     trading_restricted_until = Column(DateTime, nullable=True, default=None)

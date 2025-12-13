@@ -2,6 +2,7 @@ from aiogram.fsm.state import StatesGroup, State
 
 class Registration(StatesGroup):
     awaiting_contact = State()
+    awaiting_address = State()  # منتظر دریافت آدرس
 
 class InvitationCreation(StatesGroup):
     awaiting_account_name = State()

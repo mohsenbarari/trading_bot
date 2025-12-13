@@ -10,7 +10,8 @@ from models.database import Base
 import models.user
 import models.invitation
 import models.session
-import models.commodity # <-- مدل جدید کالا را هم اضافه کنید
+import models.commodity
+import models.trade  # مدل معاملات
 
 # --- خواندن تنظیمات Alembic ---
 config = context.config

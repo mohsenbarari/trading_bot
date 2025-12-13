@@ -10,6 +10,7 @@ from typing import Optional
 
 from models.user import User
 from models.commodity import Commodity
+from models.trade import Trade as TradeModel, TradeType
 from bot.states import Trade
 from bot.message_manager import schedule_message_delete, schedule_delete, DeleteDelay
 from core.config import settings
@@ -242,7 +243,7 @@ async def handle_quick_quantity(callback: types.CallbackQuery, state: FSMContext
         f"نوع معامله: {trade_type_fa}\n"
         f"کالا: {commodity_name}\n"
         f"تعداد: {quantity}\n\n"
-        f"💰 قیمت را وارد کنید (5 یا 6 رقم، مثال: 75800 یا 758000):",
+        f"💰 قیمت را وارد کنید (5 یا 6 رقم):",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❌ انصراف", callback_data="trade_cancel")]
@@ -279,7 +280,7 @@ async def handle_manual_quantity(message: types.Message, state: FSMContext, user
         f"نوع معامله: {trade_type_fa}\n"
         f"کالا: {commodity_name}\n"
         f"تعداد: {quantity}\n\n"
-        f"💰 قیمت را وارد کنید (5 یا 6 رقم، مثال: 75800 یا 758000):",
+        f"💰 قیمت را وارد کنید (5 یا 6 رقم):",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❌ انصراف", callback_data="trade_cancel")]
@@ -349,36 +350,45 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
     quantity = data.get("quantity", 1)
     price = data.get("price", 0)
     
-    # ساخت پیام کانال
+    # ساخت پیام کانال - فرمت مختصر
     trade_emoji = "🟢" if trade_type == "buy" else "🔴"
     trade_label = "خرید" if trade_type == "buy" else "فروش"
     
+    # لینک پروفایل کاربر در بات
+    profile_link = f"https://t.me/{settings.bot_username}?start=profile_{user.id}"
+    
     channel_message = (
-        f"{trade_emoji} **{trade_label}**\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"📦 کالا: {commodity_name}\n"
-        f"🔢 تعداد: {quantity}\n"
-        f"💰 قیمت: {price:,}\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 {user.account_name}"
+        f"{trade_emoji}{trade_label} {commodity_name} {quantity} عدد {price:,}\n"
+        f"\n"
+        f"[{user.account_name}]({profile_link})"
     )
     
     # ارسال به کانال
     if settings.channel_id:
         try:
-            await bot.send_message(
+            sent_msg = await bot.send_message(
                 chat_id=settings.channel_id,
                 text=channel_message,
                 parse_mode="Markdown"
             )
             
+            # ذخیره معامله در دیتابیس
+            async with AsyncSessionLocal() as session:
+                new_trade = TradeModel(
+                    user_id=user.id,
+                    trade_type=TradeType.BUY if trade_type == "buy" else TradeType.SELL,
+                    commodity_id=data.get("commodity_id"),
+                    quantity=quantity,
+                    price=price,
+                    channel_message_id=sent_msg.message_id
+                )
+                session.add(new_trade)
+                await session.commit()
+            
             await callback.message.edit_text(
-                "✅ **لفظ شما با موفقیت در کانال ارسال شد!**",
+                "✅ لفظ شما با موفقیت در کانال ارسال شد!",
                 parse_mode="Markdown"
             )
-            
-            # TODO: افزایش شمارنده‌های محدودیت
-            # await increment_user_counter(session, user, 'trade', quantity)
             
         except TelegramBadRequest as e:
             await callback.message.edit_text(

@@ -30,9 +30,47 @@ router = Router()
 @router.message(CommandStart(deep_link=True))
 async def handle_start_with_token(message: types.Message, command: CommandObject, state: FSMContext, user: Optional[User]):
     
+    token = command.args
+    
+    # --- بررسی لینک پروفایل عمومی ---
+    if token and token.startswith("profile_"):
+        # حذف فوری پیام /start
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        
+        try:
+            target_user_id = int(token.replace("profile_", ""))
+            async with AsyncSessionLocal() as session:
+                stmt = select(User).where(User.id == target_user_id)
+                target_user = (await session.execute(stmt)).scalar_one_or_none()
+                
+                if target_user:
+                    profile_text = (
+                        f"👤 پروفایل عمومی\n\n"
+                        f"🔸 نام کاربری: {target_user.account_name}\n"
+                        f"📞 شماره تماس: {target_user.mobile_number}\n"
+                        f"📍 آدرس: {target_user.address or 'ثبت نشده'}"
+                    )
+                    await delete_previous_anchor(message.bot, message.chat.id, delay=0)
+                    anchor_msg = await message.answer(
+                        profile_text,
+                        reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url) if user else None
+                    )
+                    if user:
+                        set_anchor(message.chat.id, anchor_msg.message_id)
+                else:
+                    await message.answer("❌ کاربر یافت نشد.")
+        except (ValueError, Exception):
+            await message.answer("❌ لینک نامعتبر است.")
+        return
+    
+    # --- حذف پیام و لنگر برای سایر حالات ---
     schedule_message_delete(message)
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     
+    # --- کاربر قبلاً ثبت‌نام کرده ---
     if user:
         anchor_msg = await message.answer(
             "شما قبلاً ثبت‌نام کرده‌اید. برای دسترسی به پنل از دکمه زیر استفاده کنید.",
@@ -41,7 +79,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         set_anchor(message.chat.id, anchor_msg.message_id)
         return
         
-    token = command.args
+    # --- لینک دعوت ---
     async with AsyncSessionLocal() as session:
         inv_stmt = select(Invitation).where(Invitation.token == token)
         invitation = (await session.execute(inv_stmt)).scalar_one_or_none()
@@ -93,15 +131,48 @@ async def handle_contact(message: types.Message, state: FSMContext):
     state_data = await state.get_data()
     expected_phone_number = state_data.get("mobile_number")
     token = state_data.get("token")
-    await state.clear() 
 
     if not user_phone_number.endswith(expected_phone_number[-10:]) or shared_contact.user_id != message.from_user.id:
+        await state.clear()
         bot_response = await message.answer(
             "❌ شماره تماس شما با شماره ثبت شده برای این لینک دعوت مطابقت ندارد. ثبت‌نام انجام نشد.",
             reply_markup=types.ReplyKeyboardRemove()
         )
         schedule_message_delete(bot_response)
         return
+
+    # ذخیره اطلاعات و رفتن به مرحله آدرس
+    await state.update_data(phone_verified=True)
+    await state.set_state(Registration.awaiting_address)
+    
+    anchor_msg = await message.answer(
+        "✅ شماره تماس تایید شد!\n\n"
+        "📍 لطفاً آدرس خود را وارد کنید:\n"
+        "(شهر، منطقه، خیابان اصلی)",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    set_anchor(message.chat.id, anchor_msg.message_id)
+
+
+@router.message(Registration.awaiting_address)
+async def handle_address(message: types.Message, state: FSMContext):
+    
+    schedule_message_delete(message)
+    await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
+    
+    address = message.text.strip()
+    
+    if len(address) < 10:
+        bot_response = await message.answer(
+            "❌ آدرس وارد شده کوتاه است. لطفاً آدرس کامل‌تری وارد کنید."
+        )
+        schedule_message_delete(bot_response)
+        return
+    
+    state_data = await state.get_data()
+    token = state_data.get("token")
+    
+    await state.clear()
 
     async with AsyncSessionLocal() as session:
         inv_stmt = select(Invitation).where(Invitation.token == token)
@@ -118,6 +189,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
             full_name=message.from_user.full_name,
             account_name=invitation.account_name,
             mobile_number=invitation.mobile_number,
+            address=address,
             role=invitation.role,
             has_bot_access=True
         )
