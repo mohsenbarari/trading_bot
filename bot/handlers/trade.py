@@ -345,6 +345,7 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
     commodity_name = data.get("commodity_name", "نامشخص")
     quantity = data.get("quantity", 1)
     price = data.get("price", 0)
+    commodity_id = data.get("commodity_id")
     
     # ساخت پیام کانال - فرمت مختصر
     trade_emoji = "🟢" if trade_type == "buy" else "🔴"
@@ -362,31 +363,48 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
     # ارسال به کانال
     if settings.channel_id:
         try:
-            sent_msg = await bot.send_message(
-                chat_id=settings.channel_id,
-                text=channel_message,
-                parse_mode="Markdown"
-            )
-            
-            # ذخیره لفظ در دیتابیس
+            # ذخیره لفظ در دیتابیس اول برای گرفتن offer_id
             async with AsyncSessionLocal() as session:
                 new_offer = Offer(
                     user_id=user.id,
                     offer_type=OfferType.BUY if trade_type == "buy" else OfferType.SELL,
-                    commodity_id=data.get("commodity_id"),
+                    commodity_id=commodity_id,
                     quantity=quantity,
                     price=price,
-                    status=OfferStatus.ACTIVE,
-                    channel_message_id=sent_msg.message_id
+                    status=OfferStatus.ACTIVE
                 )
                 session.add(new_offer)
                 await session.commit()
+                await session.refresh(new_offer)
+                offer_id = new_offer.id
+            
+            # دکمه معامله برای کانال
+            respond_label = "فروش" if trade_type == "buy" else "خرید"
+            trade_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text=f"📦 {respond_label} {quantity} عدد",
+                    url=f"https://t.me/{settings.bot_username}?start=respond_{offer_id}"
+                )]
+            ])
+            
+            sent_msg = await bot.send_message(
+                chat_id=settings.channel_id,
+                text=channel_message,
+                parse_mode="Markdown",
+                reply_markup=trade_keyboard
+            )
+            
+            # بروزرسانی channel_message_id
+            async with AsyncSessionLocal() as session:
+                offer = await session.get(Offer, offer_id)
+                if offer:
+                    offer.channel_message_id = sent_msg.message_id
+                    await session.commit()
             
             await callback.message.edit_text(
                 "✅ لفظ شما با موفقیت در کانال ارسال شد!",
                 parse_mode="Markdown"
             )
-            # این پیام باقی می‌ماند و حذف نمی‌شود
             
         except TelegramBadRequest as e:
             await callback.message.edit_text(
