@@ -20,8 +20,6 @@ from bot.keyboards import (
 )
 from bot.message_manager import (
     set_anchor, 
-    schedule_message_delete, 
-    schedule_delete,
     delete_previous_anchor,
     DeleteDelay
 )
@@ -70,7 +68,6 @@ async def start_invitation_creation(message: types.Message, state: FSMContext, u
     if not user or user.role != UserRole.SUPER_ADMIN:
         return
         
-    schedule_message_delete(message)
     
     await state.set_state(InvitationCreation.awaiting_account_name)
     prompt_msg = await message.answer(
@@ -103,7 +100,6 @@ async def process_invitation_account_name(message: types.Message, state: FSMCont
     data = await state.get_data()
     last_prompt_id = data.get("last_prompt_message_id")
     
-    schedule_message_delete(message) # حذف فوری
     if last_prompt_id:
         try:
             await message.bot.delete_message(message.chat.id, last_prompt_id)
@@ -140,7 +136,6 @@ async def process_invitation_mobile(message: types.Message, state: FSMContext):
     data = await state.get_data()
     last_prompt_id = data.get("last_prompt_message_id")
     
-    schedule_message_delete(message) # حذف فوری
     if last_prompt_id:
         try:
             await message.bot.delete_message(message.chat.id, last_prompt_id)
@@ -202,7 +197,6 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
 
     if not account_name or not mobile_number:
         error_msg = await callback.message.answer("خطایی رخ داد، اطلاعات ناقص است. لطفاً دوباره تلاش کنید.")
-        schedule_message_delete(error_msg)
         await _return_to_admin_panel(callback, state, bot)
         return
 
@@ -234,7 +228,6 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
                 reply_markup=None 
             )
             # لینک دعوت بعد از 3 روز حذف شود
-            schedule_message_delete(invite_msg, DeleteDelay.INVITATION)
 
         except HTTPException as e:
             if e.detail.startswith("EXISTING_ACTIVE_LINK::"):
@@ -253,21 +246,18 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
                     )
                 except Exception:
                     error_msg = await callback.message.answer(f"❌ خطای سیستمی: {str(e)}", parse_mode=None)
-                    schedule_message_delete(error_msg)
             
             else:
                 error_msg = await callback.message.answer(
                     f"❌ **خطا در ایجاد دعوت‌نامه:**\n\n{e.detail.replace('**', '')}",
                     parse_mode="Markdown"
                 )
-                schedule_message_delete(error_msg)
             
         except Exception as e:
             error_msg = await callback.message.answer(
                 f"❌ خطای سیستمی: {str(e)}",
                 parse_mode=None
             )
-            schedule_message_delete(error_msg)
             
     await _return_to_admin_panel(callback, state, bot)
     await callback.answer()
@@ -287,7 +277,6 @@ async def cancel_invitation_creation(callback: types.CallbackQuery, state: FSMCo
             pass
 
     cancel_msg = await callback.message.answer("عملیات لغو شد.")
-    schedule_message_delete(cancel_msg)
     
     await _return_to_admin_panel(callback, state, bot)
     await callback.answer("لغو شد")

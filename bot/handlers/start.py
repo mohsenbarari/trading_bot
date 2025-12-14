@@ -18,7 +18,6 @@ from bot.states import Registration
 from bot.keyboards import get_share_contact_keyboard, get_persistent_menu_keyboard
 from bot.message_manager import (
     set_anchor, 
-    schedule_message_delete,
     delete_previous_anchor,
     DeleteDelay
 )
@@ -35,7 +34,6 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
     
     # --- بررسی لینک پروفایل عمومی ---
     if token and token.startswith("profile_"):
-        # حذف فوری پیام /start
         try:
             await message.delete()
         except Exception:
@@ -77,7 +75,6 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         return
     
     # --- حذف پیام و لنگر برای سایر حالات ---
-    schedule_message_delete(message)
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     
     # --- کاربر قبلاً ثبت‌نام کرده ---
@@ -95,7 +92,6 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         invitation = (await session.execute(inv_stmt)).scalar_one_or_none()
         if not invitation or invitation.is_used:
             bot_response = await message.answer("لینک دعوت شما نامعتبر یا منقضی شده است.", reply_markup=types.ReplyKeyboardRemove())
-            schedule_message_delete(bot_response)
             return
             
         await state.update_data(token=token, mobile_number=invitation.mobile_number)
@@ -111,7 +107,6 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
 @router.message(CommandStart(deep_link=False))
 async def handle_start_without_token(message: types.Message, state: FSMContext, user: Optional[User]):
     
-    schedule_message_delete(message)
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     
     if user:
@@ -129,7 +124,6 @@ async def handle_start_without_token(message: types.Message, state: FSMContext, 
 @router.message(Registration.awaiting_contact, F.contact)
 async def handle_contact(message: types.Message, state: FSMContext):
     
-    schedule_message_delete(message)
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     
     shared_contact = message.contact
@@ -148,7 +142,6 @@ async def handle_contact(message: types.Message, state: FSMContext):
             "❌ شماره تماس شما با شماره ثبت شده برای این لینک دعوت مطابقت ندارد. ثبت‌نام انجام نشد.",
             reply_markup=types.ReplyKeyboardRemove()
         )
-        schedule_message_delete(bot_response)
         return
 
     # ذخیره اطلاعات و رفتن به مرحله آدرس
@@ -167,7 +160,6 @@ async def handle_contact(message: types.Message, state: FSMContext):
 @router.message(Registration.awaiting_address)
 async def handle_address(message: types.Message, state: FSMContext):
     
-    schedule_message_delete(message)
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     
     address = message.text.strip()
@@ -176,7 +168,6 @@ async def handle_address(message: types.Message, state: FSMContext):
         bot_response = await message.answer(
             "❌ آدرس وارد شده کوتاه است. لطفاً آدرس کامل‌تری وارد کنید."
         )
-        schedule_message_delete(bot_response)
         return
     
     state_data = await state.get_data()
@@ -190,7 +181,6 @@ async def handle_address(message: types.Message, state: FSMContext):
 
         if not invitation or invitation.is_used:
             bot_response = await message.answer("خطا! لینک دعوت شما دیگر معتبر نیست.", reply_markup=types.ReplyKeyboardRemove())
-            schedule_message_delete(bot_response)
             return
 
         new_user = User(

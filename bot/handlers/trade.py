@@ -12,7 +12,6 @@ from models.user import User
 from models.commodity import Commodity
 from models.offer import Offer, OfferType, OfferStatus
 from bot.states import Trade
-from bot.message_manager import schedule_message_delete
 from core.config import settings
 from core.enums import UserRole
 from core.db import AsyncSessionLocal
@@ -136,7 +135,6 @@ async def handle_trade_button(message: types.Message, state: FSMContext, user: O
         reply_markup=get_trade_type_keyboard()
     )
     
-    schedule_message_delete(message)
 
 
 # --- انتخاب نوع معامله ---
@@ -267,7 +265,6 @@ async def handle_manual_quantity(message: types.Message, state: FSMContext, user
             raise ValueError()
     except ValueError:
         await message.answer("❌ لطفاً یک عدد صحیح مثبت وارد کنید.")
-        schedule_message_delete(message)
         return
     
     data = await state.get_data()
@@ -290,7 +287,6 @@ async def handle_manual_quantity(message: types.Message, state: FSMContext, user
     
     
     await state.set_state(Trade.awaiting_price)
-    schedule_message_delete(message)
 
 
 # --- ورود قیمت ---
@@ -304,7 +300,6 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
     # اعتبارسنجی: فقط 5 یا 6 رقم
     if not price_text.isdigit() or len(price_text) not in [5, 6]:
         err_msg = await message.answer("❌ قیمت باید 5 یا 6 رقم باشد (مثال: 75800 یا 758000)")
-        schedule_message_delete(message)
         return
     
     price = int(price_text)

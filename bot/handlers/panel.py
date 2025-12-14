@@ -12,7 +12,6 @@ from bot.keyboards import (
 )
 from bot.message_manager import (
     set_anchor, 
-    schedule_message_delete, 
     delete_previous_anchor,
     DeleteDelay
 )
@@ -33,7 +32,6 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
         return
 
     # حذف پیام کاربر و لنگر قبلی
-    schedule_message_delete(message)
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     
     profile_text = (
@@ -58,7 +56,6 @@ async def show_admin_panel_and_change_keyboard(message: types.Message, state: FS
     if not user or user.role != UserRole.SUPER_ADMIN:
         return
     
-    schedule_message_delete(message)
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     
     anchor_msg = await message.answer(
@@ -74,8 +71,6 @@ async def handle_user_settings_button(message: types.Message, user: Optional[Use
     if not user: return
     
     bot_response = await message.answer("🚧 بخش تنظیمات کاربری (بات) در حال توسعه است.")
-    schedule_message_delete(message)
-    schedule_message_delete(bot_response)
 
 
 # --- هندلر دکمه تنظیمات مدیریت ---
@@ -85,8 +80,6 @@ async def handle_admin_settings_button(message: types.Message, user: Optional[Us
         return
 
     bot_response = await message.answer("🚧 بخش تنظیمات مدیریت (بات) در حال توسعه است.")
-    schedule_message_delete(message)
-    schedule_message_delete(bot_response)
 
 
 # --- هندلر دکمه بازگشت ---
@@ -94,7 +87,6 @@ async def handle_admin_settings_button(message: types.Message, user: Optional[Us
 async def handle_back_to_main_menu(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user: return
     
-    schedule_message_delete(message)
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     
     anchor_msg = await message.answer(
