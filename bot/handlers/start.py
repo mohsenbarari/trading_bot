@@ -18,7 +18,7 @@ from bot.states import Registration
 from bot.keyboards import get_share_contact_keyboard, get_persistent_menu_keyboard
 from bot.message_manager import (
     set_anchor, 
-    schedule_message_delete, 
+    schedule_message_delete,
     delete_previous_anchor,
     DeleteDelay
 )

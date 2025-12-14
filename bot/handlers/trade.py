@@ -12,7 +12,7 @@ from models.user import User
 from models.commodity import Commodity
 from models.offer import Offer, OfferType, OfferStatus
 from bot.states import Trade
-from bot.message_manager import schedule_message_delete, schedule_delete, DeleteDelay
+from bot.message_manager import schedule_message_delete
 from core.config import settings
 from core.enums import UserRole
 from core.db import AsyncSessionLocal
@@ -250,6 +250,7 @@ async def handle_quick_quantity(callback: types.CallbackQuery, state: FSMContext
         ])
     )
     
+    
     await state.set_state(Trade.awaiting_price)
     await callback.answer()
 
@@ -275,7 +276,7 @@ async def handle_manual_quantity(message: types.Message, state: FSMContext, user
     
     await state.update_data(quantity=quantity)
     
-    await message.answer(
+    msg = await message.answer(
         f"📈 **ثبت لفظ جدید**\n\n"
         f"نوع معامله: {trade_type_fa}\n"
         f"کالا: {commodity_name}\n"
@@ -286,6 +287,7 @@ async def handle_manual_quantity(message: types.Message, state: FSMContext, user
             [InlineKeyboardButton(text="❌ انصراف", callback_data="trade_cancel")]
         ])
     )
+    
     
     await state.set_state(Trade.awaiting_price)
     schedule_message_delete(message)
@@ -301,7 +303,7 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
     
     # اعتبارسنجی: فقط 5 یا 6 رقم
     if not price_text.isdigit() or len(price_text) not in [5, 6]:
-        await message.answer("❌ قیمت باید 5 یا 6 رقم باشد (مثال: 75800 یا 758000)")
+        err_msg = await message.answer("❌ قیمت باید 5 یا 6 رقم باشد (مثال: 75800 یا 758000)")
         schedule_message_delete(message)
         return
     
@@ -325,7 +327,7 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
         f"🔢 تعداد: {quantity}\n"
         f"💰 قیمت: {price:,}\n\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
-        f"آیا اطلاعات بالا صحیح است؟"
+        f"آیا اطلاعات بالا صحیح است?"
     )
     
     await message.answer(
@@ -333,8 +335,7 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
         parse_mode="Markdown",
         reply_markup=get_confirm_keyboard()
     )
-    
-    schedule_message_delete(message)
+
 
 
 # --- تایید و ارسال به کانال ---
@@ -390,6 +391,7 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
                 "✅ لفظ شما با موفقیت در کانال ارسال شد!",
                 parse_mode="Markdown"
             )
+            # این پیام باقی می‌ماند و حذف نمی‌شود
             
         except TelegramBadRequest as e:
             await callback.message.edit_text(

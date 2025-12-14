@@ -16,7 +16,6 @@ from models.user import User
 from models.trade import Trade, TradeType, TradeStatus
 from models.offer import Offer, OfferType
 from models.commodity import Commodity
-from bot.message_manager import schedule_message_delete, set_anchor, delete_previous_anchor, DeleteDelay
 from core.db import AsyncSessionLocal
 import jdatetime
 
@@ -343,14 +342,14 @@ async def export_excel(callback: types.CallbackQuery, state: FSMContext, user: O
     target_user, trades = await get_trade_history(user.id, target_user_id, months=months)
     
     if not trades:
-        await callback.message.answer("⚠️ معامله‌ای برای دانلود وجود ندارد.")
+        msg = await callback.message.answer("⚠️ معامله‌ای برای دانلود وجود ندارد.")
         return
     
     try:
         filename = await generate_excel(trades, target_user, user)
         
         # ارسال فایل
-        await bot.send_document(
+        doc_msg = await bot.send_document(
             chat_id=callback.message.chat.id,
             document=FSInputFile(filename, filename=f"trade_history_{target_user.account_name}.xlsx"),
             caption=f"📊 تاریخچه معاملات با {target_user.account_name}\n📅 {months} ماه اخیر"
@@ -360,7 +359,7 @@ async def export_excel(callback: types.CallbackQuery, state: FSMContext, user: O
         os.remove(filename)
         
     except Exception as e:
-        await callback.message.answer(f"❌ خطا در ایجاد فایل: {str(e)}")
+        msg = await callback.message.answer(f"❌ خطا در ایجاد فایل: {str(e)}")
 
 
 # --- دانلود PDF ---
@@ -378,14 +377,14 @@ async def export_pdf(callback: types.CallbackQuery, state: FSMContext, user: Opt
     target_user, trades = await get_trade_history(user.id, target_user_id, months=months)
     
     if not trades:
-        await callback.message.answer("⚠️ معامله‌ای برای دانلود وجود ندارد.")
+        msg = await callback.message.answer("⚠️ معامله‌ای برای دانلود وجود ندارد.")
         return
     
     try:
         filename = await generate_pdf(trades, target_user, user)
         
         # ارسال فایل
-        await bot.send_document(
+        doc_msg = await bot.send_document(
             chat_id=callback.message.chat.id,
             document=FSInputFile(filename, filename=f"trade_history_{target_user.account_name}.pdf"),
             caption=f"📊 تاریخچه معاملات با {target_user.account_name}\n📅 {months} ماه اخیر"
@@ -395,7 +394,7 @@ async def export_pdf(callback: types.CallbackQuery, state: FSMContext, user: Opt
         os.remove(filename)
         
     except Exception as e:
-        await callback.message.answer(f"❌ خطا در ایجاد فایل: {str(e)}")
+        msg = await callback.message.answer(f"❌ خطا در ایجاد فایل: {str(e)}")
 
 
 # --- بازگشت به پروفایل ---
