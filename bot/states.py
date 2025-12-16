@@ -38,4 +38,12 @@ class UserLimitations(StatesGroup):
 class Trade(StatesGroup):
     """FSM برای ثبت لفظ معاملاتی"""
     awaiting_quantity = State()  # منتظر تعداد کالا
+    awaiting_lot_type = State()  # منتظر انتخاب یکجا/خُرد
+    awaiting_lot_sizes = State() # منتظر ترکیب بخش‌ها
     awaiting_price = State()     # منتظر قیمت (5 یا 6 رقمی)
+
+
+class TradingSettingsEdit(StatesGroup):
+    """FSM برای ویرایش تنظیمات سیستم"""
+    awaiting_value = State()  # منتظر ورود مقدار جدید
+

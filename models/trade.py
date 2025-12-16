@@ -25,17 +25,22 @@ class Trade(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     
+    # شماره معامله (5 رقمی به بالا، شروع از 10000)
+    trade_number = Column(Integer, unique=True, nullable=False, index=True)
+    
     # لفظ مربوطه
-    offer_id = Column(Integer, ForeignKey("offers.id"), nullable=False)
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"), nullable=True)
     offer = relationship("Offer")
     
-    # کاربر لفظ‌دهنده (صاحب لفظ)
-    offer_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # کاربر لفظ‌دهنده (صاحب لفظ) - nullable برای حفظ تاریخچه پس از حذف کاربر
+    offer_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     offer_user = relationship("User", foreign_keys=[offer_user_id])
+    offer_user_mobile = Column(String(20), nullable=True)  # شماره موبایل برای حفظ تاریخچه
     
-    # کاربر پاسخ‌دهنده (کسی که با لفظ موافقت کرده)
-    responder_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # کاربر پاسخ‌دهنده (کسی که با لفظ موافقت کرده) - nullable برای حفظ تاریخچه
+    responder_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     responder_user = relationship("User", foreign_keys=[responder_user_id])
+    responder_user_mobile = Column(String(20), nullable=True)  # شماره موبایل برای حفظ تاریخچه
     
     # کالا
     commodity_id = Column(Integer, ForeignKey("commodities.id"), nullable=False)

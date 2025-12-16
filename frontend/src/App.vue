@@ -9,6 +9,7 @@ import UserManager from './components/UserManager.vue'
 import CreateInvitationView from './components/CreateInvitationView.vue'
 import PlaceholderView from './components/PlaceholderView.vue'
 import NotificationCenter from './components/NotificationCenter.vue'
+import TradingSettings from './components/TradingSettings.vue'
 
 interface Notification {
   id: number;
@@ -648,9 +649,10 @@ onUnmounted(() => {
             @navigate="handleNavigation"
           />
 
-          <PlaceholderView
-            v-else-if="activeView === 'settings'"
-            title="تنظیمات"
+          <TradingSettings
+            v-else-if="activeView === 'settings' && user.role === 'مدیر ارشد'"
+            :api-base-url="API_BASE_URL"
+            :jwt-token="jwtToken"
           />
 
           <AdminPanel

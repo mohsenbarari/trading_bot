@@ -13,6 +13,7 @@ from core.db import AsyncSessionLocal
 from core.enums import UserRole, NotificationLevel, NotificationCategory # <-- ایمپورت جدید
 from models.invitation import Invitation
 from models.user import User
+from models.offer import Offer, OfferStatus
 from bot.middlewares.auth import AuthMiddleware
 from bot.handlers import start, panel, default, admin, admin_commodities, admin_users, trade, trade_history
 from core.utils import create_user_notification, send_telegram_notification
@@ -173,6 +174,54 @@ async def cleanup_old_notifications(retention_days: int = 90):
         await asyncio.sleep(86400)
 
 
+async def monitor_expired_offers(bot: Bot):
+    """تسک پس‌زمینه برای منقضی کردن لفظ‌های قدیمی بر اساس تنظیمات."""
+    logger.info("--\> Offer Expiry Monitor Started...")
+    
+    while True:
+        try:
+            from core.trading_settings import get_trading_settings
+            ts = get_trading_settings()
+            
+            # زمان منقضی شدن (دقیقه)
+            expiry_minutes = ts.offer_expiry_minutes
+            cutoff_time = datetime.utcnow() - timedelta(minutes=expiry_minutes)
+            
+            async with AsyncSessionLocal() as session:
+                # پیدا کردن لفظ‌های منقضی شده
+                stmt = select(Offer).where(
+                    Offer.status == OfferStatus.ACTIVE,
+                    Offer.created_at < cutoff_time
+                )
+                result = await session.execute(stmt)
+                expired_offers = result.scalars().all()
+                
+                for offer in expired_offers:
+                    offer.status = OfferStatus.EXPIRED
+                    
+                    # حذف دکمه از پست کانال
+                    if offer.channel_message_id and settings.channel_id:
+                        try:
+                            await bot.edit_message_reply_markup(
+                                chat_id=settings.channel_id,
+                                message_id=offer.channel_message_id,
+                                reply_markup=None
+                            )
+                        except:
+                            pass
+                    
+                    logger.info(f"Offer {offer.id} expired automatically")
+                
+                if expired_offers:
+                    await session.commit()
+                    logger.info(f"Expired {len(expired_offers)} offers")
+                    
+        except Exception as e:
+            logger.error(f"Error in offer expiry monitor: {e}")
+        
+        # هر 30 ثانیه چک کن
+        await asyncio.sleep(30)
+
 async def main():
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode="Markdown"))
     dp = Dispatcher(storage=MemoryStorage())
@@ -192,6 +241,7 @@ async def main():
 
     asyncio.create_task(monitor_expired_invitations(bot))
     asyncio.create_task(monitor_expired_restrictions(bot))
+    asyncio.create_task(monitor_expired_offers(bot))
     asyncio.create_task(cleanup_old_notifications())
 
     logger.info("--> Starting Bot polling...")

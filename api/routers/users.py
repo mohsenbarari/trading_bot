@@ -239,10 +239,87 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
 @router.delete("/{user_id}")
 async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
     """حذف کاربر"""
+    from core.config import settings
+    from models.offer import Offer
+    from models.trade import Trade
+    import httpx
+    
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    
+    # ارسال نوتیفیکیشن به کاربر قبل از حذف
+    if user.telegram_id:
+        notification_text = (
+            "ℹ️ **اطلاعیه**\n\n"
+            "حساب کاربری شما توسط مدیر سیستم حذف شده است.\n\n"
+            "در صورت نیاز به اطلاعات بیشتر، با پشتیبانی تماس بگیرید."
+        )
+        await send_telegram_notification(user.telegram_id, notification_text)
         
+        # حذف کاربر از کانال (kick بدون ban دائمی)
+        if settings.channel_id:
+            try:
+                async with httpx.AsyncClient() as client:
+                    # اول ban می‌کنیم
+                    await client.post(
+                        f"https://api.telegram.org/bot{settings.bot_token}/banChatMember",
+                        json={
+                            "chat_id": settings.channel_id,
+                            "user_id": user.telegram_id,
+                            "revoke_messages": False
+                        }
+                    )
+                    # سپس unban می‌کنیم تا بتواند دوباره join کند
+                    await client.post(
+                        f"https://api.telegram.org/bot{settings.bot_token}/unbanChatMember",
+                        json={
+                            "chat_id": settings.channel_id,
+                            "user_id": user.telegram_id,
+                            "only_if_banned": True
+                        }
+                    )
+            except Exception:
+                pass  # خطا مهم نیست، ادامه بده
+    
+    # ذخیره شماره موبایل در معاملات قبل از حذف کاربر
+    from sqlalchemy import update
+    
+    # ذخیره شماره موبایل برای معاملات که کاربر لفظ‌دهنده بوده
+    await db.execute(
+        update(Trade)
+        .where(Trade.offer_user_id == user_id)
+        .values(offer_user_mobile=user.mobile_number)
+    )
+    
+    # ذخیره شماره موبایل برای معاملات که کاربر پاسخ‌دهنده بوده
+    await db.execute(
+        update(Trade)
+        .where(Trade.responder_user_id == user_id)
+        .values(responder_user_mobile=user.mobile_number)
+    )
+    
+    # منقضی کردن لفظ‌های فعال کاربر
+    from models.offer import OfferStatus
+    await db.execute(
+        update(Offer)
+        .where(Offer.user_id == user_id, Offer.status == OfferStatus.ACTIVE)
+        .values(status=OfferStatus.EXPIRED)
+    )
+    
+    # حذف دعوت‌نامه‌های مرتبط با این کاربر (شماره موبایل یا نام کاربری)
+    from models.invitation import Invitation
+    from sqlalchemy import delete
+    await db.execute(
+        delete(Invitation).where(
+            or_(
+                Invitation.mobile_number == user.mobile_number,
+                Invitation.account_name == user.account_name
+            )
+        )
+    )
+        
+    # حذف کاربر - FKها به صورت خودکار NULL می‌شوند
     await db.delete(user)
     await db.commit()
     return {"message": "User deleted successfully"}

@@ -84,9 +84,11 @@ async def create_invitation(
 
     # (ادامه کد برای ساخت لینک جدید)
     token = f"INV-{secrets.token_hex(16)}"
-    #expires_at = datetime.utcnow() + timedelta(days=settings.invitation_expiry_days)
     
-    expires_at = datetime.utcnow() + timedelta(minutes=3)
+    # استفاده از تنظیمات برای مدت انقضا
+    from core.trading_settings import get_trading_settings
+    ts = get_trading_settings()
+    expires_at = datetime.utcnow() + timedelta(minutes=ts.invitation_expiry_minutes)
 
     db_invitation = Invitation(
         account_name=account_name_normalized,

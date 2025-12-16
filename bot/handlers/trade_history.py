@@ -18,6 +18,10 @@ from models.offer import Offer, OfferType
 from models.commodity import Commodity
 from core.db import AsyncSessionLocal
 import jdatetime
+from datetime import timezone, timedelta
+
+# تایم‌زون ایران (UTC+3:30)
+IRAN_TZ = timezone(timedelta(hours=3, minutes=30))
 
 router = Router()
 
@@ -51,6 +55,7 @@ async def get_trade_history(current_user_id: int, target_user_id: int, months: i
             return None, []
         
         # دریافت معاملات بین دو کاربر (یکی لفظ‌دهنده، دیگری پاسخ‌دهنده)
+        # فقط با user_id جستجو می‌شود - کاربر جدید به معاملات قبلی دسترسی ندارد
         stmt = (
             select(Trade)
             .options(
@@ -67,7 +72,7 @@ async def get_trade_history(current_user_id: int, target_user_id: int, months: i
                     )
                 )
             )
-            .order_by(Trade.created_at.desc())
+            .order_by(Trade.created_at.asc())
         )
         result = await session.execute(stmt)
         trades = result.scalars().all()
@@ -83,19 +88,20 @@ def format_trade_history(trades, target_user, current_user_id: int) -> str:
     text = f"📊 تاریخچه معاملات با {target_user.account_name}\n\n"
     
     for trade in trades[:20]:  # حداکثر 20 معامله
-        trade_emoji = "🟢" if trade.trade_type == TradeType.BUY else "🔴"
-        trade_label = "خرید" if trade.trade_type == TradeType.BUY else "فروش"
-        
-        # تشخیص نقش کاربر فعلی
-        if trade.offer_user_id == current_user_id:
-            role = "لفظ‌دهنده"
-            partner = trade.responder_user.account_name
+        # تشخیص نوع معامله از دید کاربر فعلی
+        if trade.responder_user_id == current_user_id:
+            # کاربر فعلی پاسخ‌دهنده بود - trade_type همان نوع عمل اوست
+            is_buy = trade.trade_type == TradeType.BUY
         else:
-            role = "پاسخ‌دهنده"
-            partner = trade.offer_user.account_name
+            # کاربر فعلی لفظ‌دهنده بود - عکس trade_type
+            is_buy = trade.trade_type != TradeType.BUY
         
-        # تبدیل به تاریخ شمسی
-        jalali_date = jdatetime.datetime.fromgregorian(datetime=trade.created_at)
+        trade_emoji = "🟢" if is_buy else "🔴"
+        trade_label = "خرید" if is_buy else "فروش"
+        
+        # تبدیل به تاریخ شمسی با تایم‌زون ایران
+        created_at_iran = trade.created_at.astimezone(IRAN_TZ) if trade.created_at.tzinfo else trade.created_at
+        jalali_date = jdatetime.datetime.fromgregorian(datetime=created_at_iran)
         date_str = jalali_date.strftime("%Y/%m/%d")
         
         text += (
@@ -133,12 +139,20 @@ async def generate_excel(trades, target_user, current_user) -> str:
     
     # داده‌ها - ترتیب RTL
     for row_num, trade in enumerate(trades, 2):
-        jalali_date = jdatetime.datetime.fromgregorian(datetime=trade.created_at)
+        created_at_iran = trade.created_at.astimezone(IRAN_TZ) if trade.created_at.tzinfo else trade.created_at
+        jalali_date = jdatetime.datetime.fromgregorian(datetime=created_at_iran)
+        
+        # تشخیص نوع معامله از دید کاربر فعلی
+        if trade.responder_user_id == current_user.id:
+            is_buy = trade.trade_type == TradeType.BUY
+        else:
+            is_buy = trade.trade_type != TradeType.BUY
+        trade_label = "خرید" if is_buy else "فروش"
         
         ws.cell(row=row_num, column=1, value=trade.price)
         ws.cell(row=row_num, column=2, value=trade.quantity)
         ws.cell(row=row_num, column=3, value=trade.commodity.name)
-        ws.cell(row=row_num, column=4, value="خرید" if trade.trade_type == TradeType.BUY else "فروش")
+        ws.cell(row=row_num, column=4, value=trade_label)
         ws.cell(row=row_num, column=5, value=jalali_date.strftime("%H:%M"))
         ws.cell(row=row_num, column=6, value=jalali_date.strftime("%Y/%m/%d"))
         
@@ -224,14 +238,21 @@ async def generate_pdf(trades, target_user, current_user) -> str:
     data = [headers]
     
     for trade in trades:
-        jalali_date = jdatetime.datetime.fromgregorian(datetime=trade.created_at)
-        trade_type = reshape_persian("خرید") if trade.trade_type == TradeType.BUY else reshape_persian("فروش")
+        created_at_iran = trade.created_at.astimezone(IRAN_TZ) if trade.created_at.tzinfo else trade.created_at
+        jalali_date = jdatetime.datetime.fromgregorian(datetime=created_at_iran)
+        
+        # تشخیص نوع معامله از دید کاربر فعلی
+        if trade.responder_user_id == current_user.id:
+            is_buy = trade.trade_type == TradeType.BUY
+        else:
+            is_buy = trade.trade_type != TradeType.BUY
+        trade_label = reshape_persian("خرید") if is_buy else reshape_persian("فروش")
         
         data.append([
             f"{trade.price:,}",
             str(trade.quantity),
             reshape_persian(trade.commodity.name),
-            trade_type,
+            trade_label,
             jalali_date.strftime("%H:%M"),
             jalali_date.strftime("%Y/%m/%d")
         ])

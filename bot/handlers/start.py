@@ -219,8 +219,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
     
     anchor_msg = await message.answer(
         "✅ شماره تماس تایید شد!\n\n"
-        "📍 لطفاً آدرس خود را وارد کنید:\n"
-        "(شهر، منطقه، خیابان اصلی)",
+        "📍 آدرس خود را جهت جابجایی سکه وارد نمایید:",
         reply_markup=types.ReplyKeyboardRemove()
     )
     set_anchor(message.chat.id, anchor_msg.message_id)
@@ -267,9 +266,22 @@ async def handle_address(message: types.Message, state: FSMContext):
         session.add(new_user)
         await session.commit()
         
+        # ساخت پیام خوش‌آمدگویی با لینک کانال
+        welcome_text = (
+            f"✅ خوش آمدید، {message.from_user.full_name}!\n"
+            f"ثبت‌نام شما با موفقیت انجام شد.\n\n"
+            f"از لینک زیر جهت عضویت در کانال معاملات استفاده کنید:\n"
+            
+        )
+        
+        if settings.channel_invite_link:
+            welcome_text += f"🔗 [عضویت در کانال معاملات]({settings.channel_invite_link})\n\n"
+        
+        welcome_text += "برای دسترسی به امکانات، از دکمه‌های زیر استفاده کنید."
+        
         anchor_msg = await message.answer(
-            f"✅ خوش آمدید، {message.from_user.full_name}! ثبت‌نام شما با موفقیت انجام شد.\n"
-            "برای دسترسی به امکانات، از دکمه‌های زیر استفاده کنید.",
+            welcome_text,
+            parse_mode="Markdown",
             reply_markup=get_persistent_menu_keyboard(invitation.role, settings.frontend_url)
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
