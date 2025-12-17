@@ -1,6 +1,23 @@
 # bot/handlers/trade.py
-"""هندلرهای مربوط به ثبت لفظ معاملاتی"""
+"""
+هندلرهای مربوط به ثبت لفظ معاملاتی
 
+=== بخش‌بندی فایل ===
+خط 1-50:     Imports و Constants
+خط 50-150:   Utility Functions (کیبوردها، اعتبارسنجی)
+خط 150-400:  Button Flow Handlers (ثبت لفظ با دکمه)
+خط 400-700:  Preview & Confirm (پیش‌نمایش و تایید)
+خط 700-900:  Offer Management (منقضی کردن، مدیریت)
+خط 900-1150: Channel Trade Handlers (معاملات کانال)
+خط 1150-1400: Text Offer Handler (لفظ متنی)
+==============================
+
+برای refactoring آینده، هر بخش را می‌توان به فایل جداگانه منتقل کرد.
+"""
+
+# ============================================
+# IMPORTS
+# ============================================
 from aiogram import Router, types, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -16,7 +33,16 @@ from core.config import settings
 from core.enums import UserRole
 from core.db import AsyncSessionLocal
 
+# ============================================
+# ROUTER
+# ============================================
 router = Router()
+
+
+# ============================================
+# SECTION 1: UTILITY FUNCTIONS
+# کیبوردها، اعتبارسنجی، توابع کمکی
+# ============================================
 
 def get_trade_type_keyboard() -> InlineKeyboardMarkup:
     """کیبورد انتخاب نوع معامله (خرید/فروش)"""
@@ -185,7 +211,11 @@ def get_confirm_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-# --- هندلر دکمه معامله ---
+# ============================================
+# SECTION 2: BUTTON FLOW HANDLERS
+# ثبت لفظ با دکمه - فلوی اصلی
+# ============================================
+
 @router.message(F.text == "📈 معامله")
 async def handle_trade_button(message: types.Message, state: FSMContext, user: Optional[User]):
     """شروع فرآیند معامله"""
@@ -632,8 +662,10 @@ async def show_trade_preview(message_or_callback, state: FSMContext, edit: bool 
         )
 
 
-
-# --- تایید و ارسال به کانال ---
+# ============================================
+# SECTION 3: PREVIEW & CONFIRM
+# پیش‌نمایش و تایید لفظ - ارسال به کانال
+# ============================================
 @router.callback_query(F.data == "trade_confirm")
 async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
     if not user:
@@ -824,12 +856,16 @@ async def handle_noop(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# --- ذخیره آمار منقضی شدن لفظ ---
+# ============================================
+# SECTION 4: OFFER MANAGEMENT
+# مدیریت لفظ - منقضی کردن، آمار
+# ============================================
+
+# ذخیره آمار منقضی شدن لفظ
 _expire_rate_tracker: dict[int, list[float]] = {}  # user_id -> list of timestamps
 _daily_expire_tracker: dict[int, dict] = {}  # user_id -> {"date": date, "count": int, "total_offers": int}
 
 
-# --- منقضی کردن لفظ توسط کاربر ---
 @router.callback_query(F.data.startswith("expire_offer_"))
 async def handle_expire_offer(callback: types.CallbackQuery, user: Optional[User], bot: Bot):
     if not user:
@@ -952,7 +988,11 @@ def build_lot_buttons(offer_id: int, remaining: int, lot_sizes: list[int]) -> In
     return InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
 
 
-# --- هندلر معامله از کانال (دابل‌کلیک) ---
+# ============================================
+# SECTION 5: CHANNEL TRADE HANDLERS
+# معاملات کانال - پردازش کلیک روی پست‌ها
+# ============================================
+
 @router.callback_query(F.data.startswith("channel_trade_"))
 async def handle_channel_trade(callback: types.CallbackQuery, user: Optional[User], bot: Bot):
     """کلیک روی دکمه پست کانال - دابل‌کلیک برای تایید"""
@@ -1148,9 +1188,9 @@ async def handle_channel_trade(callback: types.CallbackQuery, user: Optional[Use
             _pending_confirmations[confirmation_key] = current_time
             await callback.answer()
 
-
 # ============================================
-# هندلر لفظ متنی
+# SECTION 6: TEXT OFFER HANDLER
+# لفظ متنی - ثبت لفظ با تایپ کردن
 # ============================================
 
 def _get_offer_suggestion(original_text: str, error_message: str) -> str:
