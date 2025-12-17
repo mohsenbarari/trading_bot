@@ -9,6 +9,7 @@ services:
       - ./api:/app/api
       - ./bot:/app/bot
       - ./core:/app/core
+      - ./src:/app/src
       - ./models:/app/models
       - ./migrations:/app/migrations
       - ./main.py:/app/main.py

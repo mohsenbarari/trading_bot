@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY api/ ./api/
 COPY bot/ ./bot/
 COPY core/ ./core/
+COPY src/ ./src/
 COPY migrations/ ./migrations/
 COPY models/ ./models/
 COPY templates/ ./templates/
