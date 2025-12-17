@@ -52,6 +52,9 @@ class Offer(Base):
     # وضعیت لفظ
     status = Column(Enum(OfferStatus), nullable=False, default=OfferStatus.ACTIVE)
     
+    # توضیحات یا شرایط کاربر (اختیاری)
+    notes = Column(String(200), nullable=True)
+    
     # آیدی پیام در کانال
     channel_message_id = Column(BigInteger, nullable=True)
     

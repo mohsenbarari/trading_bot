@@ -10,6 +10,7 @@ services:
       - ./bot:/app/bot
       - ./core:/app/core
       - ./models:/app/models
+      - ./migrations:/app/migrations
       - ./main.py:/app/main.py
       - ./schemas.py:/app/schemas.py
       - ./mini_app_dist:/app/mini_app_dist

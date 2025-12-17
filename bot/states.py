@@ -41,6 +41,8 @@ class Trade(StatesGroup):
     awaiting_lot_type = State()  # منتظر انتخاب یکجا/خُرد
     awaiting_lot_sizes = State() # منتظر ترکیب بخش‌ها
     awaiting_price = State()     # منتظر قیمت (5 یا 6 رقمی)
+    awaiting_notes = State()     # منتظر توضیحات (اختیاری)
+    awaiting_text_confirm = State()  # منتظر تایید لفظ متنی
 
 
 class TradingSettingsEdit(StatesGroup):
