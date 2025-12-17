@@ -178,42 +178,61 @@ async def find_commodity(text: str) -> Tuple[Optional[int], str]:
     پیدا کردن کالا از متن
     Returns: (commodity_id, commodity_name)
     """
-    async with AsyncSessionLocal() as session:
-        # گرفتن همه کالاها
-        result = await session.execute(select(Commodity))
-        commodities = result.scalars().all()
+    from bot.utils.redis_helpers import get_cached_commodities, set_cached_commodities
+    
+    # تلاش برای خواندن از cache
+    cached = await get_cached_commodities()
+    
+    if cached:
+        # استفاده از cache
+        name_to_commodity = {item["name"]: (item["id"], item["name"]) for item in cached}
+        for item in cached:
+            for alias in item.get("aliases", []):
+                name_to_commodity[alias] = (item["id"], item["name"])
         
-        # گرفتن مستعارها
-        result = await session.execute(select(CommodityAlias))
-        aliases = result.scalars().all()
-        
-        # ساخت دیکشنری نام‌ها
-        name_to_commodity = {}
-        
-        for c in commodities:
-            name_to_commodity[c.name] = (c.id, c.name)
-        
-        for a in aliases:
+        commodities_list = cached
+    else:
+        # خواندن از دیتابیس و cache کردن
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(Commodity))
+            commodities = result.scalars().all()
+            
+            result = await session.execute(select(CommodityAlias))
+            aliases = result.scalars().all()
+            
+            # ساخت لیست برای cache
+            commodities_list = []
             for c in commodities:
-                if c.id == a.commodity_id:
-                    name_to_commodity[a.alias] = (c.id, c.name)
-                    break
-        
-        # جستجو در متن (اولویت با نام‌های کوتاه‌تر/مستعار)
-        sorted_names = sorted(name_to_commodity.keys(), key=len, reverse=True)
-        for name in sorted_names:
-            if name in text:
-                return name_to_commodity[name]
-        
-        # پیش‌فرض: امام
-        for c in commodities:
-            if 'امام' in c.name:
-                return c.id, c.name
-        
-        if commodities:
-            return commodities[0].id, commodities[0].name
-        
-        return None, "نامشخص"
+                item = {"id": c.id, "name": c.name, "aliases": []}
+                for a in aliases:
+                    if a.commodity_id == c.id:
+                        item["aliases"].append(a.alias)
+                commodities_list.append(item)
+            
+            # ذخیره در cache (5 دقیقه)
+            await set_cached_commodities(commodities_list, ttl=300)
+            
+            # ساخت دیکشنری
+            name_to_commodity = {item["name"]: (item["id"], item["name"]) for item in commodities_list}
+            for item in commodities_list:
+                for alias in item.get("aliases", []):
+                    name_to_commodity[alias] = (item["id"], item["name"])
+    
+    # جستجو در متن (اولویت با نام‌های کوتاه‌تر/مستعار)
+    sorted_names = sorted(name_to_commodity.keys(), key=len, reverse=True)
+    for name in sorted_names:
+        if name in text:
+            return name_to_commodity[name]
+    
+    # پیش‌فرض: امام
+    for item in commodities_list:
+        if 'امام' in item["name"]:
+            return item["id"], item["name"]
+    
+    if commodities_list:
+        return commodities_list[0]["id"], commodities_list[0]["name"]
+    
+    return None, "نامشخص"
 
 
 async def parse_offer_text(text: str) -> Tuple[Optional[ParsedOffer], Optional[ParseError]]:
