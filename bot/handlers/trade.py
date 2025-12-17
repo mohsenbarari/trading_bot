@@ -861,9 +861,7 @@ async def handle_noop(callback: types.CallbackQuery):
 # مدیریت لفظ - منقضی کردن، آمار
 # ============================================
 
-# ذخیره آمار منقضی شدن لفظ
-_expire_rate_tracker: dict[int, list[float]] = {}  # user_id -> list of timestamps
-_daily_expire_tracker: dict[int, dict] = {}  # user_id -> {"date": date, "count": int, "total_offers": int}
+# NOTE: آمار و rate limiting حالا در Redis ذخیره می‌شود (bot/utils/redis_helpers.py)
 
 
 @router.callback_query(F.data.startswith("expire_offer_"))
@@ -872,35 +870,22 @@ async def handle_expire_offer(callback: types.CallbackQuery, user: Optional[User
         await callback.answer()
         return
     
-    import time
-    from datetime import date
+    from datetime import date, datetime, timedelta
     from core.trading_settings import get_trading_settings
+    from bot.utils.redis_helpers import track_expire_rate, track_daily_expire
     
     ts = get_trading_settings()
-    current_time = time.time()
     today = date.today()
     
-    # بررسی محدودیت در دقیقه
-    if user.id not in _expire_rate_tracker:
-        _expire_rate_tracker[user.id] = []
-    
-    # حذف timestampهای قدیمی‌تر از 1 دقیقه
-    _expire_rate_tracker[user.id] = [t for t in _expire_rate_tracker[user.id] if current_time - t < 60]
-    
-    if len(_expire_rate_tracker[user.id]) >= ts.offer_expire_rate_per_minute:
+    # بررسی محدودیت در دقیقه (با Redis)
+    rate_count = await track_expire_rate(user.id, window_seconds=60)
+    if rate_count > ts.offer_expire_rate_per_minute:
         await callback.answer(f"❌ حداکثر {ts.offer_expire_rate_per_minute} منقضی در دقیقه مجاز است")
         return
-    
-    # بررسی محدودیت روزانه (1/3 لفظ‌ها بعد از آستانه)
-    if user.id not in _daily_expire_tracker or _daily_expire_tracker[user.id]["date"] != today:
-        _daily_expire_tracker[user.id] = {"date": today, "count": 0, "total_offers": 0}
-    
-    daily_data = _daily_expire_tracker[user.id]
     
     # شمارش کل لفظ‌های امروز
     async with AsyncSessionLocal() as session:
         from sqlalchemy import func
-        from datetime import datetime, timedelta
         start_of_day = datetime.combine(today, datetime.min.time())
         
         total_offers_today = await session.scalar(
@@ -908,13 +893,15 @@ async def handle_expire_offer(callback: types.CallbackQuery, user: Optional[User
                 Offer.user_id == user.id,
                 Offer.created_at >= start_of_day
             )
-        )
-        daily_data["total_offers"] = total_offers_today or 0
+        ) or 0
+    
+    # دریافت آمار روزانه (با Redis)
+    daily_data = await track_daily_expire(user.id, total_offers_today)
     
     # اگر از آستانه رد شده و 1/3 را استفاده کرده
     threshold = ts.offer_expire_daily_limit_after_threshold
     if daily_data["count"] >= threshold:
-        max_allowed = daily_data["total_offers"] // 3
+        max_allowed = total_offers_today // 3
         if daily_data["count"] >= max_allowed:
             await callback.answer(
                 f"❌ شما امروز {daily_data['count']} لفظ منقضی کرده‌اید.\n"
@@ -943,10 +930,6 @@ async def handle_expire_offer(callback: types.CallbackQuery, user: Optional[User
         offer.status = OfferStatus.EXPIRED
         await session.commit()
         
-        # ثبت آمار
-        _expire_rate_tracker[user.id].append(current_time)
-        _daily_expire_tracker[user.id]["count"] += 1
-        
         # حذف دکمه از پست کانال
         if offer.channel_message_id and settings.channel_id:
             try:
@@ -962,9 +945,7 @@ async def handle_expire_offer(callback: types.CallbackQuery, user: Optional[User
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.answer("✅ لفظ شما منقضی شد")
 
-
-# --- ذخیره وضعیت تایید (کلیک اول) ---
-_pending_confirmations: dict[tuple[int, int, int], float] = {}  # (user_id, offer_id, amount) -> timestamp
+# NOTE: Double-click confirmation حالا در Redis ذخیره می‌شود (bot/utils/redis_helpers.py)
 
 
 def build_lot_buttons(offer_id: int, remaining: int, lot_sizes: list[int]) -> InlineKeyboardMarkup:
@@ -996,21 +977,18 @@ def build_lot_buttons(offer_id: int, remaining: int, lot_sizes: list[int]) -> In
 @router.callback_query(F.data.startswith("channel_trade_"))
 async def handle_channel_trade(callback: types.CallbackQuery, user: Optional[User], bot: Bot):
     """کلیک روی دکمه پست کانال - دابل‌کلیک برای تایید"""
-    import time
-    
     if not user:
         await callback.answer()
         return
     
     from models.trade import Trade, TradeType, TradeStatus
     from sqlalchemy.orm import joinedload
+    from bot.utils.redis_helpers import check_double_click
     
     # پارس callback_data: channel_trade_{offer_id}_{amount}
     parts = callback.data.split("_")
     offer_id = int(parts[2])
     trade_amount = int(parts[3]) if len(parts) > 3 else None
-    
-    confirmation_key = (user.id, offer_id, trade_amount or 0)
     
     async with AsyncSessionLocal() as session:
         # اول قفل را بگیر، سپس روابط را بارگذاری کن
@@ -1043,14 +1021,11 @@ async def handle_channel_trade(callback: types.CallbackQuery, user: Optional[Use
             await callback.answer("❌ این تعداد دیگر موجود نیست")
             return
         
-        # بررسی دابل‌کلیک (0.5 ثانیه)
-        current_time = time.time()
-        last_click = _pending_confirmations.get(confirmation_key, 0)
+        # بررسی دابل‌کلیک با Redis (0.5 ثانیه)
+        is_confirmed = await check_double_click(user.id, offer_id, actual_amount, timeout=0.5)
         
-        if current_time - last_click < 0.5:  # نیم ثانیه
+        if is_confirmed:
             # دابل‌کلیک - انجام معامله
-            if confirmation_key in _pending_confirmations:
-                del _pending_confirmations[confirmation_key]
             
             # نوع معامله از دید پاسخ‌دهنده
             trade_type = TradeType.SELL if offer.offer_type == OfferType.BUY else TradeType.BUY
@@ -1184,8 +1159,7 @@ async def handle_channel_trade(callback: types.CallbackQuery, user: Optional[Use
             
             await callback.answer()
         else:
-            # کلیک اول - ثبت زمان
-            _pending_confirmations[confirmation_key] = current_time
+            # کلیک اول - Redis ثبت کرده، فقط پاسخ بده
             await callback.answer()
 
 # ============================================
