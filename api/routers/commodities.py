@@ -96,6 +96,14 @@ async def create_commodity(
     db.add(db_commodity)
     await db.commit()
     await db.refresh(db_commodity, ['aliases'])
+    
+    # پاک کردن cache کالاها
+    try:
+        from bot.utils.redis_helpers import invalidate_commodity_cache
+        await invalidate_commodity_cache()
+    except:
+        pass
+    
     return db_commodity
 
 @router.put("/{commodity_id}", response_model=schemas.Commodity)
@@ -126,6 +134,14 @@ async def update_commodity_name(
     db_commodity.name = commodity_update.name
     await db.commit()
     await db.refresh(db_commodity)
+
+    # پاک کردن cache کالاها
+    try:
+        from bot.utils.redis_helpers import invalidate_commodity_cache
+        await invalidate_commodity_cache()
+    except:
+        pass
+
     return db_commodity
 
 @router.delete("/{commodity_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -147,6 +163,14 @@ async def delete_commodity(
     
     await db.delete(db_commodity)
     await db.commit()
+
+    # پاک کردن cache کالاها
+    try:
+        from bot.utils.redis_helpers import invalidate_commodity_cache
+        await invalidate_commodity_cache()
+    except:
+        pass
+
     return None
 
 # --- مدیریت نام‌های مستعار (Aliases) ---
@@ -174,6 +198,14 @@ async def add_alias_to_commodity(
     try:
         await db.commit()
         await db.refresh(db_alias)
+
+        # پاک کردن cache کالاها
+        try:
+            from bot.utils.redis_helpers import invalidate_commodity_cache
+            await invalidate_commodity_cache()
+        except:
+            pass
+
         return db_alias
     except Exception:
         await db.rollback()
@@ -207,6 +239,14 @@ async def update_alias(
     db_alias.alias = alias_update.alias
     await db.commit()
     await db.refresh(db_alias)
+
+    # پاک کردن cache کالاها
+    try:
+        from bot.utils.redis_helpers import invalidate_commodity_cache
+        await invalidate_commodity_cache()
+    except:
+        pass
+
     return db_alias
 
 @router.delete("/aliases/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -228,4 +268,12 @@ async def delete_alias(
         
     await db.delete(db_alias)
     await db.commit()
+
+    # پاک کردن cache کالاها
+    try:
+        from bot.utils.redis_helpers import invalidate_commodity_cache
+        await invalidate_commodity_cache()
+    except:
+        pass
+
     return None
