@@ -230,8 +230,31 @@ async def handle_trade_button(message: types.Message, state: FSMContext, user: O
     # بررسی مسدودیت
     if user.trading_restricted_until:
         from datetime import datetime
-        if user.trading_restricted_until > datetime.utcnow():
-            await message.answer("⛔️ حساب شما مسدود است و امکان معامله ندارید.")
+        from core.utils import to_jalali_str
+        
+        now = datetime.utcnow()
+        if user.trading_restricted_until > now:
+            # محاسبه زمان باقیمانده
+            remaining = user.trading_restricted_until - now
+            total_seconds = int(remaining.total_seconds())
+            
+            days = total_seconds // 86400
+            hours = (total_seconds % 86400) // 3600
+            minutes = (total_seconds % 3600) // 60
+            
+            # فرمت dd:hh:mm
+            countdown = f"{days:02d}:{hours:02d}:{minutes:02d}"
+            
+            # تاریخ انقضا به شمسی
+            expiry_jalali = to_jalali_str(user.trading_restricted_until, "%Y/%m/%d - %H:%M")
+            
+            await message.answer(
+                f"⛔️ **حساب شما مسدود است**\n\n"
+                f"📅 تاریخ رفع مسدودیت: {expiry_jalali}\n"
+                f"⏳ زمان باقی‌مانده: {countdown}\n\n"
+                f"تا رفع مسدودیت امکان انتشار لفظ در کانال را ندارید.",
+                parse_mode="Markdown"
+            )
             return
     
     # پاک کردن state قبلی
@@ -421,12 +444,7 @@ async def handle_lot_wholesale(callback: types.CallbackQuery, state: FSMContext,
     await state.update_data(is_wholesale=True, lot_sizes=None)
     
     await callback.message.edit_text(
-        f"📈 **ثبت لفظ جدید**\n\n"
-        f"نوع معامله: {trade_type_fa}\n"
-        f"کالا: {commodity_name}\n"
-        f"تعداد: {quantity} (یکجا)\n\n"
-        f"💰 قیمت را وارد کنید (5 یا 6 رقم):",
-        parse_mode="Markdown",
+        " قیمت را وارد کنید (5 یا 6 رقم):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❌ انصراف", callback_data="trade_cancel")]
         ])
@@ -511,12 +529,7 @@ async def handle_lot_sizes_input(message: types.Message, state: FSMContext, user
     
     lots_display = " + ".join(map(str, lot_sizes))
     await message.answer(
-        f"📈 **ثبت لفظ جدید**\n\n"
-        f"نوع معامله: {trade_type_fa}\n"
-        f"کالا: {commodity_name}\n"
-        f"تعداد: {quantity} (ترکیب: {lots_display})\n\n"
-        f"💰 قیمت را وارد کنید (5 یا 6 رقم):",
-        parse_mode="Markdown",
+        "💰 قیمت را وارد کنید (5 یا 6 رقم):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❌ انصراف", callback_data="trade_cancel")]
         ])
@@ -544,12 +557,7 @@ async def handle_accept_suggested_lots(callback: types.CallbackQuery, state: FSM
     
     lots_display = " + ".join(map(str, lot_sizes))
     await callback.message.edit_text(
-        f"📈 **ثبت لفظ جدید**\n\n"
-        f"نوع معامله: {trade_type_fa}\n"
-        f"کالا: {commodity_name}\n"
-        f"تعداد: {quantity} (ترکیب: {lots_display})\n\n"
-        f"💰 قیمت را وارد کنید (5 یا 6 رقم):",
-        parse_mode="Markdown",
+        " قیمت را وارد کنید (5 یا 6 رقم):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❌ انصراف", callback_data="trade_cancel")]
         ])
@@ -672,9 +680,53 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
         return
     
     from core.trading_settings import get_trading_settings
+    from core.utils import check_user_limits, to_jalali_str
+    from datetime import datetime
+    
     ts = get_trading_settings()
     
-    # بررسی تعداد لفظ‌های فعال
+    # بررسی محدودیت‌های کاربر (لفظ، کالا، معامله)
+    data = await state.get_data()
+    quantity = data.get("quantity", 1)
+    
+    # بررسی محدودیت ارسال لفظ
+    allowed, error_msg = check_user_limits(user, 'channel_message')
+    if not allowed:
+        # نمایش پیام با زمان باقی‌مانده
+        if user.limitations_expire_at:
+            remaining = user.limitations_expire_at - datetime.utcnow()
+            total_seconds = max(0, int(remaining.total_seconds()))
+            days = total_seconds // 86400
+            hours = (total_seconds % 86400) // 3600
+            minutes = (total_seconds % 3600) // 60
+            countdown = f"{days:02d}:{hours:02d}:{minutes:02d}"
+            expiry_jalali = to_jalali_str(user.limitations_expire_at, "%Y/%m/%d - %H:%M")
+            error_msg += f"\n\n📅 رفع محدودیت: {expiry_jalali}\n⏳ زمان باقی‌مانده: {countdown}"
+        
+        await callback.message.edit_text(f"⚠️ **محدودیت**\n\n{error_msg}", parse_mode="Markdown")
+        await state.clear()
+        await callback.answer()
+        return
+    
+    # بررسی محدودیت معاملات و کالا
+    allowed, error_msg = check_user_limits(user, 'trade', quantity)
+    if not allowed:
+        if user.limitations_expire_at:
+            remaining = user.limitations_expire_at - datetime.utcnow()
+            total_seconds = max(0, int(remaining.total_seconds()))
+            days = total_seconds // 86400
+            hours = (total_seconds % 86400) // 3600
+            minutes = (total_seconds % 3600) // 60
+            countdown = f"{days:02d}:{hours:02d}:{minutes:02d}"
+            expiry_jalali = to_jalali_str(user.limitations_expire_at, "%Y/%m/%d - %H:%M")
+            error_msg += f"\n\n📅 رفع محدودیت: {expiry_jalali}\n⏳ زمان باقی‌مانده: {countdown}"
+        
+        await callback.message.edit_text(f"⚠️ **محدودیت**\n\n{error_msg}", parse_mode="Markdown")
+        await state.clear()
+        await callback.answer()
+        return
+    
+    # بررسی تعداد لفظ‌های فعال (تنظیمات عمومی)
     async with AsyncSessionLocal() as session:
         from sqlalchemy import func
         active_count = await session.scalar(
@@ -776,12 +828,18 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
                 reply_markup=trade_keyboard
             )
             
-            # بروزرسانی channel_message_id
+            # بروزرسانی channel_message_id و افزایش شمارنده
             async with AsyncSessionLocal() as session:
                 offer = await session.get(Offer, offer_id)
                 if offer:
                     offer.channel_message_id = sent_msg.message_id
                     await session.commit()
+                
+                # افزایش شمارنده لفظ‌های ارسالی
+                from core.utils import increment_user_counter
+                db_user = await session.get(User, user.id)
+                if db_user:
+                    await increment_user_counter(session, db_user, 'channel_message')
             
             # پیام موفقیت
             await callback.message.edit_text(
@@ -1145,6 +1203,41 @@ async def handle_channel_trade(callback: types.CallbackQuery, user: Optional[Use
             except:
                 pass
             
+            # ارسال نوتیفیکیشن به اپ برای هر دو کاربر
+            from core.utils import create_user_notification
+            from core.enums import NotificationLevel, NotificationCategory
+            
+            # نوتیفیکیشن ساده‌تر برای اپ (بدون Markdown)
+            notif_msg_responder = (
+                f"{respond_emoji} {respond_type_fa}\n"
+                f"💰 فی: {offer.price:,} | 📦 تعداد: {actual_amount}\n"
+                f"🏷️ کالا: {offer.commodity.name}\n"
+                f"� طرف معامله: {offer.user.account_name}\n"
+                f"�🔢 شماره: {new_trade_number}"
+            )
+            
+            notif_msg_owner = (
+                f"{offer_emoji} {offer_type_fa}\n"
+                f"💰 فی: {offer.price:,} | 📦 تعداد: {actual_amount}\n"
+                f"🏷️ کالا: {offer.commodity.name}\n"
+                f"👤 طرف معامله: {user.account_name}\n"
+                f"🔢 شماره: {new_trade_number}"
+            )
+            
+            try:
+                await create_user_notification(
+                    session, user.id, notif_msg_responder,
+                    level=NotificationLevel.SUCCESS,
+                    category=NotificationCategory.TRADE
+                )
+                await create_user_notification(
+                    session, offer.user_id, notif_msg_owner,
+                    level=NotificationLevel.SUCCESS,
+                    category=NotificationCategory.TRADE
+                )
+            except:
+                pass
+            
             # بروزرسانی دکمه‌های پست کانال
             try:
                 if new_remaining <= 0:
@@ -1238,6 +1331,38 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
     if not user:
         return
     
+    # بررسی نقش کاربر
+    if user.role == UserRole.WATCH:
+        await message.answer("⛔️ شما دسترسی به بخش معاملات را ندارید.")
+        return
+    
+    # بررسی مسدودیت
+    if user.trading_restricted_until:
+        from datetime import datetime
+        from core.utils import to_jalali_str
+        
+        now = datetime.utcnow()
+        if user.trading_restricted_until > now:
+            # محاسبه زمان باقیمانده
+            remaining = user.trading_restricted_until - now
+            total_seconds = int(remaining.total_seconds())
+            
+            days = total_seconds // 86400
+            hours = (total_seconds % 86400) // 3600
+            minutes = (total_seconds % 3600) // 60
+            
+            countdown = f"{days:02d}:{hours:02d}:{minutes:02d}"
+            expiry_jalali = to_jalali_str(user.trading_restricted_until, "%Y/%m/%d - %H:%M")
+            
+            await message.answer(
+                f"⛔️ **حساب شما مسدود است**\n\n"
+                f"📅 تاریخ رفع مسدودیت: {expiry_jalali}\n"
+                f"⏳ زمان باقی‌مانده: {countdown}\n\n"
+                f"تا رفع مسدودیت امکان انتشار لفظ در کانال را ندارید.",
+                parse_mode="Markdown"
+            )
+            return
+    
     # اگر در state دیگری هستیم، پردازش نکن
     current_state = await state.get_state()
     if current_state is not None:
@@ -1327,11 +1452,73 @@ async def handle_text_offer_confirm(callback: types.CallbackQuery, state: FSMCon
         await callback.answer()
         return
     
+    from core.utils import check_user_limits, to_jalali_str
+    from core.trading_settings import get_trading_settings
+    from datetime import datetime
+    
+    ts = get_trading_settings()
+    
+    # بررسی محدودیت ارسال لفظ
+    allowed, error_msg = check_user_limits(user, 'channel_message')
+    if not allowed:
+        if user.limitations_expire_at:
+            remaining = user.limitations_expire_at - datetime.utcnow()
+            total_seconds = max(0, int(remaining.total_seconds()))
+            days = total_seconds // 86400
+            hours = (total_seconds % 86400) // 3600
+            minutes = (total_seconds % 3600) // 60
+            countdown = f"{days:02d}:{hours:02d}:{minutes:02d}"
+            expiry_jalali = to_jalali_str(user.limitations_expire_at, "%Y/%m/%d - %H:%M")
+            error_msg += f"\n\n📅 رفع محدودیت: {expiry_jalali}\n⏳ زمان باقی‌مانده: {countdown}"
+        
+        await callback.message.edit_text(f"⚠️ **محدودیت**\n\n{error_msg}", parse_mode="Markdown")
+        await state.clear()
+        await callback.answer()
+        return
+    
     data = await state.get_data()
+    quantity = data.get("quantity", 1)
+    
+    # بررسی محدودیت معاملات و کالا
+    allowed, error_msg = check_user_limits(user, 'trade', quantity)
+    if not allowed:
+        if user.limitations_expire_at:
+            remaining = user.limitations_expire_at - datetime.utcnow()
+            total_seconds = max(0, int(remaining.total_seconds()))
+            days = total_seconds // 86400
+            hours = (total_seconds % 86400) // 3600
+            minutes = (total_seconds % 3600) // 60
+            countdown = f"{days:02d}:{hours:02d}:{minutes:02d}"
+            expiry_jalali = to_jalali_str(user.limitations_expire_at, "%Y/%m/%d - %H:%M")
+            error_msg += f"\n\n📅 رفع محدودیت: {expiry_jalali}\n⏳ زمان باقی‌مانده: {countdown}"
+        
+        await callback.message.edit_text(f"⚠️ **محدودیت**\n\n{error_msg}", parse_mode="Markdown")
+        await state.clear()
+        await callback.answer()
+        return
+    
+    # بررسی تعداد لفظ‌های فعال
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy import func
+        active_count = await session.scalar(
+            select(func.count(Offer.id)).where(
+                Offer.user_id == user.id,
+                Offer.status == OfferStatus.ACTIVE
+            )
+        )
+        if active_count >= ts.max_active_offers:
+            await callback.message.edit_text(
+                f"❌ شما حداکثر {ts.max_active_offers} لفظ فعال دارید.\n"
+                f"لطفاً ابتدا یکی از لفظ‌های قبلی را منقضی کنید.",
+                parse_mode="Markdown"
+            )
+            await state.clear()
+            await callback.answer()
+            return
+    
     trade_type = data.get("trade_type")
     commodity_id = data.get("commodity_id")
     commodity_name = data.get("commodity_name")
-    quantity = data.get("quantity")
     price = data.get("price")
     is_wholesale = data.get("is_wholesale", True)
     lot_sizes = data.get("lot_sizes")
@@ -1404,6 +1591,12 @@ async def handle_text_offer_confirm(callback: types.CallbackQuery, state: FSMCon
                 if offer:
                     offer.channel_message_id = sent_msg.message_id
                     await session.commit()
+                
+                # افزایش شمارنده لفظ‌های ارسالی
+                from core.utils import increment_user_counter
+                db_user = await session.get(User, user.id)
+                if db_user:
+                    await increment_user_counter(session, db_user, 'channel_message')
             
             await callback.message.edit_text(
                 "✅ لفظ شما با موفقیت در کانال منتشر شد!",
