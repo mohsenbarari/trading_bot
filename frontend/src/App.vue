@@ -10,6 +10,7 @@ import CreateInvitationView from './components/CreateInvitationView.vue'
 import PlaceholderView from './components/PlaceholderView.vue'
 import NotificationCenter from './components/NotificationCenter.vue'
 import TradingSettings from './components/TradingSettings.vue'
+import TradingView from './components/TradingView.vue'
 
 interface Notification {
   id: number;
@@ -624,7 +625,13 @@ onUnmounted(() => {
       
       <template v-else-if="user">
         
-        <PlaceholderView v-if="showTradePage" title="معاملات" /> 
+        <TradingView 
+          v-if="showTradePage" 
+          :api-base-url="API_BASE_URL" 
+          :jwt-token="jwtToken"
+          :user="user"
+          @navigate="handleNavigation"
+        /> 
         
         <template v-else>
           <UserProfile
