@@ -1,15 +1,14 @@
 # api/routers/realtime.py
 """
-Real-time SSE (Server-Sent Events) for MiniApp
+Real-time WebSocket and SSE for MiniApp - Instant Updates
 """
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as redis
 import asyncio
 import json
+from typing import List, Dict, Set
 
-from core.db import get_db
 from core.redis import pool
 from models.user import User
 from .auth import get_current_user_optional
@@ -21,55 +20,143 @@ router = APIRouter(
 )
 
 
+# --- WebSocket Connection Manager ---
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+    
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+    
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+    
+    async def broadcast(self, message: dict):
+        """ارسال پیام به همه کانکشن‌های فعال"""
+        disconnected = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except:
+                disconnected.append(connection)
+        
+        # حذف کانکشن‌های بسته شده
+        for conn in disconnected:
+            self.disconnect(conn)
+
+
+manager = ConnectionManager()
+
+
+# --- WebSocket Endpoint ---
+@router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint برای real-time updates آنی
+    """
+    await manager.connect(websocket)
+    
+    try:
+        # شروع گوش دادن به Redis Pub/Sub در یک task جداگانه
+        redis_task = asyncio.create_task(listen_redis_events(websocket))
+        
+        # گوش دادن به پیام‌های کلاینت (برای keep-alive)
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30)
+                # پیام ping/pong برای keep alive
+                if data == "ping":
+                    await websocket.send_text("pong")
+            except asyncio.TimeoutError:
+                # ارسال heartbeat
+                try:
+                    await websocket.send_json({"type": "heartbeat"})
+                except:
+                    break
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        manager.disconnect(websocket)
+        redis_task.cancel()
+
+
+async def listen_redis_events(websocket: WebSocket):
+    """گوش دادن به رویدادهای Redis و ارسال به WebSocket"""
+    try:
+        async with redis.Redis(connection_pool=pool) as redis_client:
+            pubsub = redis_client.pubsub()
+            
+            await pubsub.subscribe(
+                "events:offer:created",
+                "events:offer:expired",
+                "events:offer:updated",
+                "events:trade:created"
+            )
+            
+            while True:
+                try:
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                    if message and message.get("type") == "message":
+                        channel = message.get("channel", b"").decode("utf-8")
+                        data = message.get("data", b"").decode("utf-8")
+                        event_type = channel.replace("events:", "")
+                        
+                        try:
+                            await websocket.send_json({
+                                "type": event_type,
+                                "data": json.loads(data)
+                            })
+                        except:
+                            break
+                except asyncio.TimeoutError:
+                    continue
+                except Exception:
+                    break
+                    
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        print(f"Redis listener error: {e}")
+
+
+# --- SSE Endpoint (Backup) ---
 async def event_generator(user_id: int):
-    """
-    Generator برای SSE events
-    گوش می‌دهد به رویدادهای Redis و آنها را به کلاینت ارسال می‌کند
-    """
+    """Generator برای SSE events"""
     async with redis.Redis(connection_pool=pool) as redis_client:
         pubsub = redis_client.pubsub()
         
-        # Subscribe به کانال‌های مورد نیاز
         await pubsub.subscribe(
             "events:offer:created",
             "events:offer:expired",
             "events:offer:updated",
-            "events:trade:created",
-            f"notifications:{user_id}"  # نوتیفیکیشن‌های شخصی کاربر
+            "events:trade:created"
         )
         
-        # ارسال heartbeat برای جلوگیری از timeout
-        heartbeat_interval = 30  # ثانیه
+        heartbeat_interval = 15
         last_heartbeat = asyncio.get_event_loop().time()
         
         try:
             while True:
-                # چک کردن پیام‌های جدید
-                message = await asyncio.wait_for(
-                    pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0),
-                    timeout=5.0
-                )
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 
                 if message and message.get("type") == "message":
                     channel = message.get("channel", b"").decode("utf-8")
                     data = message.get("data", b"").decode("utf-8")
-                    
-                    # تعیین نوع رویداد
-                    event_type = channel.replace("events:", "").replace(f"notifications:{user_id}", "notification")
-                    
+                    event_type = channel.replace("events:", "")
                     yield f"event: {event_type}\ndata: {data}\n\n"
                 
-                # ارسال heartbeat
                 current_time = asyncio.get_event_loop().time()
                 if current_time - last_heartbeat > heartbeat_interval:
-                    yield f"event: heartbeat\ndata: {json.dumps({'timestamp': current_time})}\n\n"
+                    yield f"event: heartbeat\ndata: {{}}\n\n"
                     last_heartbeat = current_time
                     
-        except asyncio.TimeoutError:
-            # ادامه حلقه در صورت timeout
-            pass
+                await asyncio.sleep(0.1)
+                    
         except asyncio.CancelledError:
-            # cleanup در صورت cancel شدن
             await pubsub.unsubscribe()
             raise
         finally:
@@ -78,17 +165,7 @@ async def event_generator(user_id: int):
 
 @router.get("/stream")
 async def sse_stream(request: Request, current_user: User = Depends(get_current_user_optional)):
-    """
-    SSE endpoint برای دریافت رویدادهای Real-time
-    
-    Events:
-    - offer:created - لفظ جدید ایجاد شد
-    - offer:expired - لفظ منقضی شد
-    - offer:updated - موجودی لفظ تغییر کرد
-    - trade:created - معامله جدید انجام شد
-    - notification - نوتیفیکیشن شخصی
-    - heartbeat - برای جلوگیری از timeout
-    """
+    """SSE endpoint (backup for browsers without WebSocket)"""
     user_id = current_user.id if current_user else 0
     
     return StreamingResponse(
@@ -97,23 +174,25 @@ async def sse_stream(request: Request, current_user: User = Depends(get_current_
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # برای nginx
+            "X-Accel-Buffering": "no"
         }
     )
 
 
-# --- Helper function برای publish رویدادها ---
-
+# --- Helper function برای broadcast رویدادها ---
 async def publish_event(event_type: str, data: dict):
-    """
-    Publish یک رویداد به Redis برای SSE
-    
-    event_type: مثل 'offer:created', 'trade:created'
-    data: دیتای JSON-serializable
-    """
+    """Publish یک رویداد به Redis برای real-time sync"""
     try:
         async with redis.Redis(connection_pool=pool) as redis_client:
             channel = f"events:{event_type}"
             await redis_client.publish(channel, json.dumps(data, ensure_ascii=False))
     except Exception as e:
         print(f"⚠️ Error publishing event {event_type}: {e}")
+
+
+async def broadcast_to_all(event_type: str, data: dict):
+    """Broadcast مستقیم به همه WebSocket کانکشن‌ها"""
+    await manager.broadcast({
+        "type": event_type,
+        "data": data
+    })
