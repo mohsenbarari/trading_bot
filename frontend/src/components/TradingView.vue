@@ -360,92 +360,46 @@ async function expireOffer(offerId: number) {
   }
 }
 
-// WebSocket for instant real-time updates
-let ws: WebSocket | null = null
-let reconnectTimer: number | null = null
+// Fast polling for near-instant updates (every 2 seconds)
+let pollingInterval: number | null = null
+let lastOffersHash = ''
 
-function connectWebSocket() {
-  // ساخت URL وب‌سوکت
-  const wsUrl = props.apiBaseUrl
-    .replace('https://', 'wss://')
-    .replace('http://', 'ws://') + '/api/realtime/ws'
-  
+async function checkForUpdates() {
   try {
-    ws = new WebSocket(wsUrl)
+    const newOffers = await apiFetch('/offers/')
+    const newHash = JSON.stringify(newOffers.map((o: Offer) => o.id + ':' + o.remaining_quantity + ':' + o.status))
     
-    ws.onopen = () => {
-      console.log('✅ WebSocket connected')
-      // ارسال ping هر ۲۵ ثانیه برای keep-alive
-      startPingInterval()
-    }
-    
-    ws.onmessage = async (event) => {
-      try {
-        const message = JSON.parse(event.data)
-        
-        // به‌روزرسانی فوری بر اساس نوع رویداد
-        if (message.type === 'offer:created' || message.type === 'offer:expired' || message.type === 'offer:updated') {
-          // آپدیت آنی لیست لفظ‌ها
-          await loadOffers()
-          if (activeTab.value === 'my_offers') {
-            await loadMyOffers()
-          }
-        } else if (message.type === 'trade:created') {
-          // آپدیت آنی لیست و معاملات
-          await loadOffers()
-          if (activeTab.value === 'my_trades') {
-            await loadMyTrades()
-          }
-        }
-      } catch (e) {
-        console.warn('WebSocket message parse error:', e)
-      }
-    }
-    
-    ws.onclose = () => {
-      console.log('❌ WebSocket closed, reconnecting in 3s...')
-      stopPingInterval()
-      // تلاش مجدد برای اتصال
-      reconnectTimer = setTimeout(connectWebSocket, 3000) as unknown as number
-    }
-    
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error)
+    // فقط اگر تغییری ایجاد شده باشد، آپدیت کن
+    if (newHash !== lastOffersHash) {
+      lastOffersHash = newHash
+      offers.value = newOffers
     }
   } catch (e) {
-    console.error('WebSocket connection error:', e)
-    // تلاش مجدد
-    reconnectTimer = setTimeout(connectWebSocket, 5000) as unknown as number
+    // ignore errors during polling
   }
 }
 
-let pingInterval: number | null = null
-
-function startPingInterval() {
-  stopPingInterval()
-  pingInterval = setInterval(() => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send('ping')
+function startFastPolling() {
+  if (pollingInterval) {
+    clearInterval(pollingInterval)
+  }
+  
+  // هر ۲ ثانیه چک کن
+  pollingInterval = setInterval(async () => {
+    if (activeTab.value === 'offers') {
+      await checkForUpdates()
+    } else if (activeTab.value === 'my_offers') {
+      await loadMyOffers()
+    } else if (activeTab.value === 'my_trades') {
+      await loadMyTrades()
     }
-  }, 25000) as unknown as number
+  }, 2000) as unknown as number
 }
 
-function stopPingInterval() {
-  if (pingInterval) {
-    clearInterval(pingInterval)
-    pingInterval = null
-  }
-}
-
-function disconnectWebSocket() {
-  stopPingInterval()
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = null
-  }
-  if (ws) {
-    ws.close()
-    ws = null
+function stopFastPolling() {
+  if (pollingInterval) {
+    clearInterval(pollingInterval)
+    pollingInterval = null
   }
 }
 
@@ -453,11 +407,13 @@ function disconnectWebSocket() {
 onMounted(async () => {
   await loadCommodities()
   await loadOffers()
-  connectWebSocket()
+  // ذخیره hash اولیه
+  lastOffersHash = JSON.stringify(offers.value.map((o: Offer) => o.id + ':' + o.remaining_quantity + ':' + o.status))
+  startFastPolling()
 })
 
 onUnmounted(() => {
-  disconnectWebSocket()
+  stopFastPolling()
 })
 
 // Watch tab changes
