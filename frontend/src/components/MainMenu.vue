@@ -36,12 +36,6 @@ const toggleButtonText = computed(() => {
           پنل مدیریت
         </button>
       </div>
-      <div class="bottom-row single-col">
-        <button @click="emit('navigate', 'create_invitation')">
-          <span>➕</span>
-          ارسال لینک دعوت 
-        </button>
-      </div>
     </div>
 
     <div v-else class="bottom-row standard-row">

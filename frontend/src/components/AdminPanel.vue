@@ -10,6 +10,10 @@ defineEmits(['navigate']);
       <p>لطفاً بخش مورد نظر خود را انتخاب کنید:</p>
       
       <div class="button-group">
+        <button class="management-button primary" @click="$emit('navigate', 'create_invitation')">
+          ➕ ارسال لینک دعوت
+        </button>
+        
         <button class="management-button" @click="$emit('navigate', 'manage_commodities')">
           📦 مدیریت کالاها
         </button>
@@ -80,5 +84,15 @@ p {
 .management-button:active {
   background-color: #e0f2fe;
   transform: translateY(1px);
+}
+.management-button.primary {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  border-color: #10b981;
+}
+.management-button.primary:hover {
+  background: linear-gradient(135deg, #059669, #047857);
+  border-color: #059669;
+  color: white;
 }
 </style>

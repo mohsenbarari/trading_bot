@@ -18,8 +18,6 @@ def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> Repl
     row_2_buttons.append(KeyboardButton(text="👤 پنل کاربر")) 
     row_2_buttons.append(KeyboardButton(text="📱 نسخه تحت وب", web_app=WebAppInfo(url=mini_app_url)))
     keyboard_layout.append(row_2_buttons)
-    if user_role == UserRole.SUPER_ADMIN:
-        keyboard_layout.append([KeyboardButton(text="➕ ارسال لینک دعوت")])
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
 def get_user_panel_keyboard() -> ReplyKeyboardMarkup:
@@ -28,8 +26,9 @@ def get_user_panel_keyboard() -> ReplyKeyboardMarkup:
 
 def get_admin_panel_keyboard() -> ReplyKeyboardMarkup:
     keyboard_layout = [
+        [KeyboardButton(text="➕ ارسال لینک دعوت")],
         [KeyboardButton(text="📦 مدیریت کالاها")],
-        [KeyboardButton(text="👥 مدیریت کاربران")], # <--- دکمه جدید اضافه شد
+        [KeyboardButton(text="👥 مدیریت کاربران")],
         [KeyboardButton(text="⚙️ تنظیمات مدیریت")],
         [KeyboardButton(text="🔙 بازگشت")]
     ]
