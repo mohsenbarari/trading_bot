@@ -792,17 +792,18 @@ watch(activeTab, async (tab) => {
 
 <style scoped>
 .trading-view {
-  padding: 10px;
+  padding: 12px;
   direction: rtl;
   font-family: 'Vazirmatn', sans-serif;
 }
 
 /* Messages */
 .message {
-  padding: 12px;
-  border-radius: 8px;
-  margin-bottom: 15px;
+  padding: 14px;
+  border-radius: 10px;
+  margin-bottom: 16px;
   text-align: center;
+  font-weight: 500;
 }
 
 .message.success {
@@ -818,51 +819,56 @@ watch(activeTab, async (tab) => {
 /* Tabs */
 .tabs {
   display: flex;
-  gap: 5px;
-  margin-bottom: 15px;
+  gap: 6px;
+  margin-bottom: 16px;
   overflow-x: auto;
-  padding-bottom: 5px;
+  padding-bottom: 6px;
 }
 
 .tabs button {
   flex: 1;
-  padding: 10px 12px;
-  border: none;
-  background: rgba(255, 255, 255, 0.1);
-  color: #e2e8f0;
-  border-radius: 8px;
-  font-size: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  color: var(--text-color);
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.3s;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
 }
 
 .tabs button.active {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  background: linear-gradient(135deg, #007AFF, #0056b3);
   color: white;
+  border-color: #007AFF;
 }
 
 /* Filter Bar */
 .filter-bar {
   display: flex;
   gap: 8px;
-  margin-bottom: 15px;
+  margin-bottom: 16px;
 }
 
 .filter-bar button {
-  padding: 8px 16px;
-  border: none;
-  background: rgba(255, 255, 255, 0.1);
-  color: #e2e8f0;
+  padding: 10px 18px;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  color: var(--text-color);
   border-radius: 20px;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.3s;
 }
 
 .filter-bar button.active {
-  background: #3b82f6;
+  background: #007AFF;
   color: white;
+  border-color: #007AFF;
 }
 
 /* Offers List */
@@ -873,10 +879,11 @@ watch(activeTab, async (tab) => {
 }
 
 .offer-card, .trade-card {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--card-bg);
   border-radius: 12px;
-  padding: 15px;
+  padding: 16px;
   border-right: 4px solid;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 
 .offer-card.buy, .trade-card.buy {
@@ -891,50 +898,57 @@ watch(activeTab, async (tab) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .offer-type, .trade-type {
-  font-weight: bold;
-  font-size: 14px;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text-color);
 }
 
 .offer-time, .trade-time, .trade-number {
-  color: #94a3b8;
+  color: var(--text-secondary);
   font-size: 12px;
 }
 
 .offer-body, .trade-body {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+}
+
+.trade-body p {
+  margin: 6px 0;
+  color: var(--text-color);
 }
 
 .offer-main {
   display: flex;
-  gap: 15px;
+  gap: 16px;
   align-items: center;
   flex-wrap: wrap;
 }
 
 .commodity {
-  font-weight: bold;
-  font-size: 16px;
-  color: #f8fafc;
+  font-weight: 700;
+  font-size: 17px;
+  color: var(--text-color);
 }
 
 .quantity {
-  color: #60a5fa;
-  font-size: 14px;
+  color: #007AFF;
+  font-size: 15px;
+  font-weight: 500;
 }
 
 .price {
-  color: #fbbf24;
-  font-size: 14px;
-  font-weight: bold;
+  color: #f59e0b;
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .offer-notes {
-  color: #94a3b8;
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
   margin-top: 8px;
 }
 
@@ -945,8 +959,8 @@ watch(activeTab, async (tab) => {
 }
 
 .offer-owner {
-  color: #94a3b8;
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 .trade-buttons {
@@ -955,14 +969,16 @@ watch(activeTab, async (tab) => {
 }
 
 .trade-btn {
-  padding: 8px 16px;
+  padding: 10px 18px;
   border: none;
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  background: linear-gradient(135deg, #007AFF, #0056b3);
   color: white;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
   transition: transform 0.2s;
+  box-shadow: 0 3px 10px rgba(0, 122, 255, 0.3);
 }
 
 .trade-btn:active {
@@ -970,17 +986,19 @@ watch(activeTab, async (tab) => {
 }
 
 .own-offer-badge {
-  background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
-  padding: 4px 12px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #d97706;
+  padding: 6px 14px;
   border-radius: 20px;
   font-size: 12px;
+  font-weight: 500;
 }
 
 .empty-state {
   text-align: center;
-  padding: 40px;
-  color: #94a3b8;
+  padding: 50px 20px;
+  color: var(--text-secondary);
+  font-size: 15px;
 }
 
 /* Create Offer Styles */
@@ -992,11 +1010,12 @@ watch(activeTab, async (tab) => {
 
 .mode-toggle button {
   flex: 1;
-  padding: 12px;
-  border: none;
-  background: rgba(255, 255, 255, 0.1);
-  color: #e2e8f0;
-  border-radius: 8px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  color: var(--text-color);
+  border-radius: 10px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.3s;
 }
@@ -1004,22 +1023,26 @@ watch(activeTab, async (tab) => {
 .mode-toggle button.active {
   background: linear-gradient(135deg, #8b5cf6, #7c3aed);
   color: white;
+  border-color: #8b5cf6;
 }
 
 .step {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--card-bg);
   border-radius: 12px;
   padding: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 
 .step h3 {
-  margin: 0 0 15px 0;
-  color: #f8fafc;
+  margin: 0 0 16px 0;
+  color: var(--text-color);
+  font-size: 18px;
 }
 
 .step p {
-  color: #94a3b8;
-  margin-bottom: 15px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  font-size: 14px;
 }
 
 .type-buttons, .lot-buttons {
@@ -1029,12 +1052,14 @@ watch(activeTab, async (tab) => {
 
 .type-btn, .lot-btn {
   flex: 1;
-  padding: 20px;
+  padding: 22px;
   border: none;
   border-radius: 12px;
   font-size: 18px;
+  font-weight: 600;
   cursor: pointer;
   transition: transform 0.2s;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 
 .type-btn.buy {
@@ -1060,72 +1085,79 @@ watch(activeTab, async (tab) => {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
-  margin-bottom: 15px;
+  margin-bottom: 16px;
 }
 
 .commodity-btn {
-  padding: 15px 10px;
-  border: none;
-  background: rgba(255, 255, 255, 0.1);
-  color: #e2e8f0;
-  border-radius: 8px;
+  padding: 16px 12px;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  color: var(--text-color);
+  border-radius: 10px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.3s;
 }
 
-.commodity-btn:hover {
-  background: #3b82f6;
+.commodity-btn:hover, .commodity-btn:active {
+  background: #007AFF;
+  color: white;
+  border-color: #007AFF;
 }
 
 .input-field {
   width: 100%;
-  padding: 15px;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #f8fafc;
+  padding: 16px;
+  border: 2px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--card-bg);
+  color: var(--text-color);
   font-size: 18px;
   text-align: center;
-  margin-bottom: 15px;
+  margin-bottom: 16px;
 }
 
 .input-field:focus {
   outline: none;
-  border-color: #3b82f6;
+  border-color: #007AFF;
 }
 
 .next-btn, .back-btn, .parse-btn {
-  padding: 12px 24px;
+  padding: 14px 26px;
   border: none;
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 500;
   cursor: pointer;
   margin-left: 10px;
 }
 
 .next-btn {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  background: linear-gradient(135deg, #007AFF, #0056b3);
   color: white;
 }
 
 .back-btn {
-  background: rgba(255, 255, 255, 0.1);
-  color: #94a3b8;
+  background: #f3f4f6;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
 }
 
 .parse-btn {
   background: linear-gradient(135deg, #8b5cf6, #7c3aed);
   color: white;
   width: 100%;
+  margin: 0;
 }
 
 /* Preview */
 .preview-card {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--card-bg);
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 20px;
   border-right: 4px solid;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 
 .preview-card.buy {
@@ -1138,22 +1170,28 @@ watch(activeTab, async (tab) => {
 
 .preview-header {
   font-size: 18px;
-  font-weight: bold;
-  margin-bottom: 10px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--text-color);
 }
 
 .preview-details {
-  color: #94a3b8;
+  color: var(--text-secondary);
+}
+
+.preview-details p {
+  margin: 6px 0;
 }
 
 .notes-input {
-  margin-bottom: 15px;
+  margin-bottom: 16px;
 }
 
 .notes-input label {
   display: block;
   margin-bottom: 8px;
-  color: #94a3b8;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 
 .preview-actions {
@@ -1163,46 +1201,57 @@ watch(activeTab, async (tab) => {
 
 .submit-btn, .confirm-btn {
   flex: 1;
-  padding: 15px;
+  padding: 16px;
   border: none;
   background: linear-gradient(135deg, #10b981, #059669);
   color: white;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 16px;
+  font-weight: 600;
   cursor: pointer;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
 }
 
 .cancel-btn, .expire-btn {
-  padding: 15px 20px;
-  border: none;
-  background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
-  border-radius: 8px;
+  padding: 16px 20px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #dc2626;
+  border-radius: 10px;
   font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
 }
 
 /* Text Mode */
 .text-input {
   width: 100%;
-  padding: 15px;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #f8fafc;
+  padding: 16px;
+  border: 2px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--card-bg);
+  color: var(--text-color);
   font-size: 16px;
   resize: none;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  font-family: inherit;
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: #007AFF;
 }
 
 .hint {
-  font-size: 12px;
-  color: #60a5fa;
+  font-size: 13px;
+  color: #007AFF;
+  margin-bottom: 12px;
 }
 
 .parse-error {
-  color: #ef4444;
-  margin-bottom: 10px;
+  color: #dc2626;
+  margin-bottom: 12px;
+  font-size: 14px;
 }
 
 /* Modal */
@@ -1212,7 +1261,7 @@ watch(activeTab, async (tab) => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1221,17 +1270,19 @@ watch(activeTab, async (tab) => {
 }
 
 .modal {
-  background: linear-gradient(135deg, #1e293b, #0f172a);
+  background: var(--card-bg);
   border-radius: 16px;
-  padding: 25px;
+  padding: 24px;
   width: 100%;
   max-width: 400px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
 }
 
 .modal h3 {
   margin: 0 0 20px 0;
   text-align: center;
-  color: #f8fafc;
+  color: var(--text-color);
+  font-size: 20px;
 }
 
 .modal-content {
@@ -1239,40 +1290,43 @@ watch(activeTab, async (tab) => {
 }
 
 .modal-content p {
-  margin: 8px 0;
-  color: #e2e8f0;
+  margin: 10px 0;
+  color: var(--text-color);
+  font-size: 15px;
 }
 
 .quantity-selector {
-  margin-top: 15px;
+  margin-top: 16px;
 }
 
 .quantity-selector label {
   display: block;
-  margin-bottom: 10px;
-  color: #94a3b8;
+  margin-bottom: 12px;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 
 .quantity-buttons {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
 }
 
 .quantity-buttons button {
-  padding: 10px 20px;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  background: transparent;
-  color: #e2e8f0;
-  border-radius: 8px;
+  padding: 12px 22px;
+  border: 2px solid var(--border-color);
+  background: var(--card-bg);
+  color: var(--text-color);
+  border-radius: 10px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.3s;
 }
 
 .quantity-buttons button.selected {
-  border-color: #3b82f6;
-  background: rgba(59, 130, 246, 0.2);
-  color: #3b82f6;
+  border-color: #007AFF;
+  background: rgba(0, 122, 255, 0.1);
+  color: #007AFF;
 }
 
 .modal-actions {
@@ -1283,6 +1337,12 @@ watch(activeTab, async (tab) => {
 /* My Offer specific */
 .my-offer .offer-status {
   color: #10b981;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Tab Content */
+.tab-content {
+  min-height: 200px;
 }
 </style>
