@@ -100,6 +100,18 @@ const filteredOffers = computed(() => {
   return offers.value.filter(o => o.offer_type === filterType.value)
 })
 
+// Available trade quantities for selected offer
+const availableTradeQuantities = computed(() => {
+  if (!selectedOffer.value) return []
+  const offer = selectedOffer.value
+  if (offer.is_wholesale || !offer.lot_sizes) {
+    return [offer.remaining_quantity]
+  }
+  const amounts = [offer.remaining_quantity, ...offer.lot_sizes]
+  const unique = [...new Set(amounts)].filter(a => a <= offer.remaining_quantity)
+  return unique.sort((a, b) => b - a)
+})
+
 // API Helper
 async function apiFetch(endpoint: string, options: RequestInit = {}) {
   const headers: HeadersInit = {
@@ -756,9 +768,7 @@ watch(activeTab, async (tab) => {
             <label>📦 تعداد:</label>
             <div class="quantity-buttons">
               <button 
-                v-for="amount in selectedOffer.is_wholesale 
-                  ? [selectedOffer.remaining_quantity] 
-                  : [selectedOffer.remaining_quantity, ...(selectedOffer.lot_sizes || [])].filter((v, i, a) => a.indexOf(v) === i && v <= selectedOffer.remaining_quantity).sort((a, b) => b - a)"
+                v-for="amount in availableTradeQuantities"
                 :key="amount"
                 :class="{ selected: tradeQuantity === amount }"
                 @click="tradeQuantity = amount"
