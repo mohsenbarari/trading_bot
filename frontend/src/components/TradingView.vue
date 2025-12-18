@@ -91,9 +91,6 @@ const selectedOffer = ref<Offer | null>(null)
 const tradeQuantity = ref(0)
 const isTrading = ref(false)
 
-// SSE
-let sseController: AbortController | null = null
-
 // Computed
 const filteredOffers = computed(() => {
   if (filterType.value === 'all') return offers.value
@@ -356,68 +353,50 @@ async function expireOffer(offerId: number) {
     await apiFetch(`/offers/${offerId}`, { method: 'DELETE' })
     successMessage.value = '✅ لفظ منقضی شد.'
     await loadMyOffers()
+    await loadOffers()  // هم لیست اصلی را آپدیت کن
     setTimeout(() => successMessage.value = '', 3000)
   } catch (e: any) {
     error.value = e.message
   }
 }
 
-// SSE for real-time updates
-function startSSE() {
-  if (!props.jwtToken) return
-  
-  sseController = new AbortController()
-  
-  const fetchSSE = async () => {
-    try {
-      const response = await fetch(`${props.apiBaseUrl}/api/realtime/stream`, {
-        headers: { 'Authorization': `Bearer ${props.jwtToken}` },
-        signal: sseController!.signal
-      })
-      
-      const reader = response.body?.getReader()
-      const decoder = new TextDecoder()
-      
-      while (reader) {
-        const { done, value } = await reader.read()
-        if (done) break
-        
-        const text = decoder.decode(value)
-        const lines = text.split('\n')
-        
-        for (const line of lines) {
-          if (line.startsWith('event:')) {
-            const eventType = line.replace('event:', '').trim()
-            // بر اساس نوع رویداد، لیست را آپدیت کن
-            if (eventType.startsWith('offer:') || eventType.startsWith('trade:')) {
-              await loadOffers()
-            }
-          }
-        }
-      }
-    } catch (e: any) {
-      if (e.name !== 'AbortError') {
-        console.error('SSE error:', e)
-        // تلاش مجدد بعد از ۵ ثانیه
-        setTimeout(fetchSSE, 5000)
-      }
-    }
+// Auto-refresh for real-time updates (polling every 5 seconds)
+let pollingInterval: number | null = null
+
+function startPolling() {
+  // توقف polling قبلی
+  if (pollingInterval) {
+    clearInterval(pollingInterval)
   }
   
-  fetchSSE()
+  // شروع polling جدید - هر ۵ ثانیه لیست را آپدیت کن
+  pollingInterval = setInterval(async () => {
+    if (activeTab.value === 'offers') {
+      await loadOffers()
+    } else if (activeTab.value === 'my_offers') {
+      await loadMyOffers()
+    } else if (activeTab.value === 'my_trades') {
+      await loadMyTrades()
+    }
+  }, 5000) as unknown as number
+}
+
+function stopPolling() {
+  if (pollingInterval) {
+    clearInterval(pollingInterval)
+    pollingInterval = null
+  }
 }
 
 // Lifecycle
 onMounted(async () => {
   await loadCommodities()
   await loadOffers()
-  startSSE()
+  startPolling()
 })
 
 onUnmounted(() => {
-  if (sseController) {
-    sseController.abort()
-  }
+  stopPolling()
 })
 
 // Watch tab changes
