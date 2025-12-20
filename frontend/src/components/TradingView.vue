@@ -434,7 +434,7 @@ function stopPingInterval() {
   }
 }
 
-// Polling fallback - هر ۳ ثانیه
+// Polling fallback - هر ۱.۵ ثانیه
 function startPolling() {
   if (pollingInterval) return // اگر قبلاً شروع شده، دوباره شروع نکن
   
@@ -447,7 +447,7 @@ function startPolling() {
     } else if (activeTab.value === 'my_trades') {
       await loadMyTrades()
     }
-  }, 3000) as unknown as number
+  }, 1500) as unknown as number
 }
 
 function stopPolling() {
