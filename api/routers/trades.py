@@ -327,22 +327,17 @@ async def create_trade(
     
     # ارسال رویداد SSE
     from .realtime import publish_event
-    event_time = datetime.utcnow().isoformat()
-    print(f"📤 [TRADE:CREATED] trade_number={new_trade_number} offer_id={offer.id} time={event_time}")
     await publish_event("trade:created", {
         "trade_number": new_trade_number,
         "offer_id": offer.id,
         "quantity": trade_data.quantity,
         "price": offer.price,
-        "commodity_name": offer.commodity.name,
-        "event_time": event_time
+        "commodity_name": offer.commodity.name
     })
-    print(f"📤 [OFFER:UPDATED] id={offer.id} remaining={offer.remaining_quantity} time={event_time}")
     await publish_event("offer:updated", {
         "id": offer.id,
         "remaining_quantity": offer.remaining_quantity,
-        "status": offer.status.value,
-        "event_time": event_time
+        "status": offer.status.value
     })
     
     return trade_to_response(new_trade)
