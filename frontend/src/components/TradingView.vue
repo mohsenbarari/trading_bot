@@ -336,7 +336,15 @@ async function executeTrade() {
     successMessage.value = '✅ معامله با موفقیت انجام شد!'
     showTradeModal.value = false
     selectedOffer.value = null
+    
+    // صبر کوتاه برای اطمینان از commit دیتابیس
+    await new Promise(resolve => setTimeout(resolve, 300))
+    
+    // بارگذاری مجدد لفظ‌ها
     await loadOffers()
+    
+    // بارگذاری دوم برای اطمینان
+    setTimeout(() => loadOffers(), 500)
     
     setTimeout(() => successMessage.value = '', 3000)
   } catch (e: any) {
