@@ -44,7 +44,9 @@ interface Trade {
   commodity_name: string
   quantity: number
   price: number
+  offer_user_id: number | null
   offer_user_name: string | null
+  responder_user_id: number | null
   responder_user_name: string | null
   created_at: string
 }
@@ -726,7 +728,7 @@ watch(activeTab, async (tab) => {
           <div class="trade-body">
             <p><strong>{{ trade.commodity_name }}</strong></p>
             <p>💰 فی: {{ trade.price.toLocaleString() }} | 📦 تعداد: {{ trade.quantity }}</p>
-            <p>👤 طرف معامله: {{ trade.responder_user_name || trade.offer_user_name }}</p>
+            <p>👤 طرف معامله: {{ trade.responder_user_id === user?.id ? trade.offer_user_name : trade.responder_user_name }}</p>
           </div>
           
           <div class="trade-footer">
