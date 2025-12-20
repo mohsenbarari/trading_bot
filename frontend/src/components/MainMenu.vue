@@ -22,11 +22,7 @@ const toggleButtonText = computed(() => {
     </button>
     
     <div v-if="userRole === 'مدیر ارشد'" class="admin-layout">
-      <div class="bottom-row three-cols">
-        <button @click="emit('toggle-trade-view')">
-          <span>{{ isTradePageVisible ? '❌' : '👀' }}</span>
-          {{ toggleButtonText }}
-        </button>
+      <div class="bottom-row two-cols">
         <button @click="emit('navigate', 'profile')">
           <span>👤</span>
           پنل کاربر
@@ -42,10 +38,6 @@ const toggleButtonText = computed(() => {
        <button @click="emit('navigate', 'profile')">
         <span>👤</span>
         پنل کاربر
-      </button>
-      <button @click="emit('toggle-trade-view')">
-        <span>{{ isTradePageVisible ? '❌' : '👀' }}</span>
-        {{ toggleButtonText }}
       </button>
     </div>
     

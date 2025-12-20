@@ -7,29 +7,7 @@ const emit = defineEmits(['navigate'])
 
 <template>
   <div class="home-page">
-    <div class="home-content">
-      <!-- دکمه های اصلی -->
-      <div class="main-buttons">
-        <button class="main-btn trade-btn" @click="emit('navigate', 'trade')">
-          <span class="btn-icon">📈</span>
-          <span class="btn-text">معامله</span>
-        </button>
-        
-        <button class="main-btn profile-btn" @click="emit('navigate', 'profile')">
-          <span class="btn-icon">👤</span>
-          <span class="btn-text">پنل کاربری</span>
-        </button>
-        
-        <button 
-          v-if="userRole === 'مدیر ارشد'" 
-          class="main-btn admin-btn" 
-          @click="emit('navigate', 'admin_panel')"
-        >
-          <span class="btn-icon">🔐</span>
-          <span class="btn-text">پنل مدیریت</span>
-        </button>
-      </div>
-    </div>
+    <!-- صفحه خالی - دکمه‌ها در منوی پایین هستند -->
   </div>
 </template>
 
