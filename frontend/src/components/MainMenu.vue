@@ -114,6 +114,11 @@ const toggleButtonText = computed(() => {
   grid-template-columns: repeat(3, 1fr);
 }
 
+/* استایل: دو ستون کنار هم */
+.two-cols {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 /* استایل جدید: یک ستون برای ردیف سوم ادمین */
 .single-col {
   grid-template-columns: 1fr;
