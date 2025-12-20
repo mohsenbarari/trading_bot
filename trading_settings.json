@@ -1,9 +1,9 @@
 {
-    "invitation_expiry_days": 3,
-    "offer_expiry_minutes": 2,
+    "invitation_expiry_days": 2,
+    "offer_expiry_minutes": 20,
     "offer_min_quantity": 5,
     "offer_max_quantity": 50,
-    "max_active_offers": 3,
+    "max_active_offers": 100,
     "offer_expire_rate_per_minute": 2,
     "offer_expire_daily_limit_after_threshold": 10
 }
