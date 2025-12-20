@@ -12,6 +12,7 @@ import PlaceholderView from './components/PlaceholderView.vue'
 import NotificationCenter from './components/NotificationCenter.vue'
 import TradingSettings from './components/TradingSettings.vue'
 import TradingView from './components/TradingView.vue'
+import UserSettings from './components/UserSettings.vue'
 
 interface Notification {
   id: number;
@@ -701,6 +702,11 @@ onUnmounted(() => {
             v-else-if="activeView === 'manage_users' && user.role === 'مدیر ارشد'"
             :api-base-url="API_BASE_URL"
             :jwt-token="jwtToken"
+            @navigate="handleNavigation"
+          />
+
+          <UserSettings
+            v-else-if="activeView === 'user_settings'"
             @navigate="handleNavigation"
           />
 

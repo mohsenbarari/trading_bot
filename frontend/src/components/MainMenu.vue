@@ -34,10 +34,14 @@ const toggleButtonText = computed(() => {
       </div>
     </div>
 
-    <div v-else class="bottom-row standard-row">
+    <div v-else class="bottom-row two-cols">
        <button @click="emit('navigate', 'profile')">
         <span>👤</span>
         پنل کاربر
+      </button>
+      <button @click="emit('navigate', 'user_settings')">
+        <span>⚙️</span>
+        تنظیمات
       </button>
     </div>
     
