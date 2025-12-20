@@ -673,7 +673,7 @@ onUnmounted(() => {
           />
 
           <TradingSettings
-            v-else-if="activeView === 'settings'"
+            v-else-if="activeView === 'settings' && user.role === 'مدیر ارشد'"
             :api-base-url="API_BASE_URL"
             :jwt-token="jwtToken"
           />
