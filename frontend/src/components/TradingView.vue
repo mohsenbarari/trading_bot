@@ -361,84 +361,12 @@ async function expireOffer(offerId: number) {
   }
 }
 
-// WebSocket for instant real-time updates
-let ws: WebSocket | null = null
-let reconnectTimer: number | null = null
-let pingInterval: number | null = null
+// Real-time updates با polling سریع (هر ۱.۵ ثانیه)
 let pollingInterval: number | null = null
 
-function connectWebSocket() {
-  const wsUrl = props.apiBaseUrl
-    .replace('https://', 'wss://')
-    .replace('http://', 'ws://') + '/api/realtime/ws'
-  
-  console.log('🔌 Connecting to WebSocket:', wsUrl)
-  
-  try {
-    ws = new WebSocket(wsUrl)
-    
-    ws.onopen = () => {
-      console.log('✅ WebSocket connected!')
-      startPingInterval()
-      // توقف polling وقتی WebSocket متصل است
-      stopPolling()
-    }
-    
-    ws.onmessage = async (event) => {
-      try {
-        const message = JSON.parse(event.data)
-        console.log('📩 WebSocket message:', message.type)
-        
-        if (message.type === 'offer:created' || message.type === 'offer:expired' || message.type === 'offer:updated') {
-          await loadOffers()
-          if (activeTab.value === 'my_offers') await loadMyOffers()
-        } else if (message.type === 'trade:created') {
-          await loadOffers()
-          if (activeTab.value === 'my_trades') await loadMyTrades()
-        }
-      } catch (e) {}
-    }
-    
-    ws.onclose = (event) => {
-      console.log('❌ WebSocket closed:', event.code)
-      stopPingInterval()
-      // شروع polling به عنوان fallback
-      startPolling()
-      // تلاش مجدد بعد از ۵ ثانیه
-      reconnectTimer = setTimeout(connectWebSocket, 5000) as unknown as number
-    }
-    
-    ws.onerror = () => {
-      console.warn('⚠️ WebSocket error, using polling fallback')
-    }
-  } catch (e) {
-    console.error('WebSocket connection error, using polling')
-    startPolling()
-    reconnectTimer = setTimeout(connectWebSocket, 10000) as unknown as number
-  }
-}
-
-function startPingInterval() {
-  stopPingInterval()
-  pingInterval = setInterval(() => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send('ping')
-    }
-  }, 25000) as unknown as number
-}
-
-function stopPingInterval() {
-  if (pingInterval) {
-    clearInterval(pingInterval)
-    pingInterval = null
-  }
-}
-
-// Polling fallback - هر ۱.۵ ثانیه
 function startPolling() {
-  if (pollingInterval) return // اگر قبلاً شروع شده، دوباره شروع نکن
+  if (pollingInterval) return
   
-  console.log('📡 Starting polling fallback')
   pollingInterval = setInterval(async () => {
     if (activeTab.value === 'offers') {
       await loadOffers()
@@ -452,22 +380,8 @@ function startPolling() {
 
 function stopPolling() {
   if (pollingInterval) {
-    console.log('📡 Stopping polling')
     clearInterval(pollingInterval)
     pollingInterval = null
-  }
-}
-
-function cleanup() {
-  stopPingInterval()
-  stopPolling()
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = null
-  }
-  if (ws) {
-    ws.close()
-    ws = null
   }
 }
 
@@ -475,13 +389,11 @@ function cleanup() {
 onMounted(async () => {
   await loadCommodities()
   await loadOffers()
-  connectWebSocket()
-  // شروع polling به عنوان backup اولیه
   startPolling()
 })
 
 onUnmounted(() => {
-  cleanup()
+  stopPolling()
 })
 
 // Watch tab changes
