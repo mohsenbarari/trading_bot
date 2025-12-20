@@ -261,13 +261,17 @@ async def create_offer(
     
     # ارسال رویداد SSE
     from .realtime import publish_event
+    from datetime import datetime
+    created_at = datetime.utcnow().isoformat()
+    print(f"📤 [OFFER:CREATED] id={new_offer.id} time={created_at}")
     await publish_event("offer:created", {
         "id": new_offer.id,
         "offer_type": new_offer.offer_type.value,
         "commodity_name": new_offer.commodity.name,
         "quantity": new_offer.quantity,
         "price": new_offer.price,
-        "user_account_name": current_user.account_name
+        "user_account_name": current_user.account_name,
+        "created_at": created_at
     })
     
     return offer_to_response(new_offer)
@@ -300,6 +304,11 @@ async def get_active_offers(
     
     result = await db.execute(query)
     offers = result.scalars().all()
+    
+    # لاگ زمان دریافت
+    from datetime import datetime
+    fetch_time = datetime.utcnow().isoformat()
+    print(f"📥 [OFFERS:FETCHED] count={len(offers)} time={fetch_time}")
     
     return [offer_to_response(o) for o in offers]
 
@@ -379,7 +388,10 @@ async def expire_offer(
     
     # ارسال رویداد SSE
     from .realtime import publish_event
-    await publish_event("offer:expired", {"id": offer_id})
+    from datetime import datetime
+    expired_at = datetime.utcnow().isoformat()
+    print(f"📤 [OFFER:EXPIRED] id={offer_id} time={expired_at}")
+    await publish_event("offer:expired", {"id": offer_id, "expired_at": expired_at})
     
     return None
 
