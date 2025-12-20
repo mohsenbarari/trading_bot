@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 
 import MainMenu from './components/MainMenu.vue'
+import HomePage from './components/HomePage.vue'
 import UserProfile from './components/UserProfile.vue'
 import AdminPanel from './components/AdminPanel.vue'
 import CommodityManager from './components/CommodityManager.vue'
@@ -23,7 +24,7 @@ interface Notification {
 
 const user = ref<any>(null)
 const loadingMessage = ref('در حال اتصال...')
-const activeView = ref('trade')
+const activeView = ref('home')
 const jwtToken = ref<string | null>(null)
 const API_BASE_URL = 'https://telegram.362514.ir'
 const tg = (window as any).Telegram?.WebApp
@@ -625,8 +626,15 @@ onUnmounted(() => {
       
       <template v-else-if="user">
         
+        <!-- صفحه اصلی -->
+        <HomePage 
+          v-if="activeView === 'home'"
+          :user-role="user.role"
+          @navigate="handleNavigation"
+        />
+        
         <TradingView 
-          v-if="showTradePage" 
+          v-else-if="showTradePage" 
           :api-base-url="API_BASE_URL" 
           :jwt-token="jwtToken"
           :user="user"
