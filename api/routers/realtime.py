@@ -86,6 +86,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def listen_redis_events(websocket: WebSocket):
     """گوش دادن به رویدادهای Redis و ارسال به WebSocket"""
+    print(f"🔴 Redis listener started for WebSocket")
     try:
         async with redis.Redis(connection_pool=pool) as redis_client:
             pubsub = redis_client.pubsub()
@@ -96,6 +97,7 @@ async def listen_redis_events(websocket: WebSocket):
                 "events:offer:updated",
                 "events:trade:created"
             )
+            print(f"✅ Subscribed to Redis channels")
             
             while True:
                 try:
@@ -105,22 +107,28 @@ async def listen_redis_events(websocket: WebSocket):
                         data = message.get("data", b"").decode("utf-8")
                         event_type = channel.replace("events:", "")
                         
+                        print(f"📩 Redis message received: {event_type}")
+                        
                         try:
                             await websocket.send_json({
                                 "type": event_type,
                                 "data": json.loads(data)
                             })
-                        except:
+                            print(f"✅ Sent to WebSocket: {event_type}")
+                        except Exception as send_err:
+                            print(f"❌ Error sending to WebSocket: {send_err}")
                             break
+                    await asyncio.sleep(0.1)  # کمی تاخیر برای جلوگیری از busy loop
                 except asyncio.TimeoutError:
                     continue
-                except Exception:
+                except Exception as e:
+                    print(f"❌ Redis listener loop error: {e}")
                     break
                     
     except asyncio.CancelledError:
-        pass
+        print("🔴 Redis listener cancelled")
     except Exception as e:
-        print(f"Redis listener error: {e}")
+        print(f"❌ Redis listener error: {e}")
 
 
 # --- SSE Endpoint (Backup) ---
