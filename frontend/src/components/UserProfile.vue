@@ -786,7 +786,7 @@ async function deleteUser() {
         <button 
           v-if="user.role !== 'عادی'" 
           class="menu-button settings-btn" 
-          @click="emit('navigate', 'settings')"
+          @click="emit('navigate', 'user_settings')"
         >
           ⚙️ تنظیمات
         </button>
