@@ -782,6 +782,14 @@ async function deleteUser() {
         <button class="menu-button notification-btn" @click="emit('navigate', 'notifications')">
           🔔 صندوق پیام‌ها
         </button>
+        <!-- دکمه تنظیمات فقط برای نقش‌های غیر عادی -->
+        <button 
+          v-if="user.role !== 'عادی'" 
+          class="menu-button settings-btn" 
+          @click="emit('navigate', 'settings')"
+        >
+          ⚙️ تنظیمات
+        </button>
     </template>
   </div>
 
