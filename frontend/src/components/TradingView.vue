@@ -481,7 +481,7 @@ watch(activeTab, async (tab) => {
                 <button 
                   v-for="amount in [...new Set([offer.remaining_quantity, ...(offer.lot_sizes || [])])]
                     .filter(a => a > 0 && a <= offer.remaining_quantity)
-                    .sort((a, b) => b - a)"
+                    .sort((a, b) => a - b)"
                   :key="offer.id + '-' + amount"
                   class="trade-btn"
                   @click="openTradeModal(offer, amount)"
