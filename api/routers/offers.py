@@ -261,7 +261,6 @@ async def create_offer(
     
     # ارسال رویداد SSE
     from .realtime import publish_event
-    from datetime import datetime
     created_at = datetime.utcnow().isoformat()
     print(f"📤 [OFFER:CREATED] id={new_offer.id} time={created_at}")
     await publish_event("offer:created", {
@@ -306,7 +305,7 @@ async def get_active_offers(
     offers = result.scalars().all()
     
     # لاگ زمان دریافت
-    from datetime import datetime
+
     fetch_time = datetime.utcnow().isoformat()
     print(f"📥 [OFFERS:FETCHED] count={len(offers)} time={fetch_time}")
     
@@ -388,7 +387,6 @@ async def expire_offer(
     
     # ارسال رویداد SSE
     from .realtime import publish_event
-    from datetime import datetime
     expired_at = datetime.utcnow().isoformat()
     print(f"📤 [OFFER:EXPIRED] id={offer_id} time={expired_at}")
     await publish_event("offer:expired", {"id": offer_id, "expired_at": expired_at})
