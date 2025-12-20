@@ -469,7 +469,6 @@ watch(activeTab, async (tab) => {
           </div>
           
           <div class="offer-footer">
-            <span class="offer-owner">👤 {{ offer.user_account_name }}</span>
             
             <!-- Trade buttons (like Telegram channel) -->
             <div class="trade-buttons" v-if="offer.user_id !== user?.id">
@@ -737,7 +736,6 @@ watch(activeTab, async (tab) => {
         <div class="modal-content">
           <p>
             <strong>{{ selectedOffer.offer_type === 'buy' ? '🔴 فروش' : '🟢 خرید' }}</strong>
-            به {{ selectedOffer.user_account_name }}
           </p>
           <p>🏷️ کالا: {{ selectedOffer.commodity_name }}</p>
           <p>💰 فی: {{ selectedOffer.price.toLocaleString() }}</p>

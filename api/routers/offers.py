@@ -79,15 +79,12 @@ class ParseOfferResponse(BaseModel):
 
 def offer_to_response(offer: Offer) -> OfferResponse:
     """تبدیل مدل Offer به پاسخ API"""
-    # اگر معامله‌ای انجام شده باشد (remaining_quantity < quantity)، نام نشان داده شود
     remaining = offer.remaining_quantity or offer.quantity
-    has_trade = remaining < offer.quantity
-    user_name = offer.user.account_name if (offer.user and has_trade) else "---"
     
     return OfferResponse(
         id=offer.id,
         user_id=offer.user_id,
-        user_account_name=user_name,
+        user_account_name="",  # نام ثبت‌کننده نمایش داده نشود - فقط در نوتیفیکیشن معامله
         offer_type=offer.offer_type.value,
         commodity_id=offer.commodity_id,
         commodity_name=offer.commodity.name if offer.commodity else "نامشخص",
