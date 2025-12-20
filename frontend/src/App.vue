@@ -578,7 +578,15 @@ onUnmounted(() => {
           </span>
         </button>
         
-        <span class="header-title">{{ computePageTitle }}</span>
+        <span 
+          v-if="activeView === 'home'" 
+          class="header-title"
+        >Trading Bot</span>
+        <span 
+          v-else 
+          class="header-title back-link" 
+          @click="activeView = 'home'"
+        >← بازگشت به صفحه اصلی</span>
       </div>
     </header>
 
@@ -1002,6 +1010,15 @@ body {
 
 .header-title {
   font-size: 18px; font-weight: 700; color: var(--text-color); text-align: right; 
+}
+
+.header-title.back-link {
+  color: #007aff;
+  cursor: pointer;
+  font-size: 14px;
+}
+.header-title.back-link:hover {
+  text-decoration: underline;
 }
 
 .notification-bell-btn {
