@@ -782,9 +782,6 @@ async function deleteUser() {
         <button class="menu-button notification-btn" @click="emit('navigate', 'notifications')">
           🔔 صندوق پیام‌ها
         </button>
-        <button class="menu-button settings-btn" @click="emit('navigate', 'settings')">
-          ⚙️ تنظیمات
-        </button>
     </template>
   </div>
 
