@@ -19,7 +19,6 @@ def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> Repl
     # دکمه تنظیمات فقط برای کاربران با نقش عادی در منوی اصلی
     if user_role == UserRole.STANDARD:
         row_2_buttons.append(KeyboardButton(text="⚙️ تنظیمات"))
-    row_2_buttons.append(KeyboardButton(text="📱 نسخه تحت وب", web_app=WebAppInfo(url=mini_app_url)))
     keyboard_layout.append(row_2_buttons)
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
