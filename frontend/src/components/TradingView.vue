@@ -306,14 +306,15 @@ function resetCreateForm() {
 }
 
 // Trade
-function openTradeModal(offer: Offer) {
+function openTradeModal(offer: Offer, quantity?: number) {
   if (offer.user_id === props.user?.id) {
     error.value = 'نمی‌توانید روی لفظ خودتان معامله کنید.'
     setTimeout(() => error.value = '', 3000)
     return
   }
   selectedOffer.value = offer
-  tradeQuantity.value = offer.remaining_quantity
+  // اگر quantity پاس داده شده باشد، از آن استفاده کن، در غیر اینصورت کل موجودی
+  tradeQuantity.value = quantity ?? offer.remaining_quantity
   showTradeModal.value = true
 }
 
@@ -545,7 +546,7 @@ watch(activeTab, async (tab) => {
                   v-for="amount in [offer.remaining_quantity, ...(offer.lot_sizes || [])].filter(a => a <= offer.remaining_quantity)"
                   :key="amount"
                   class="trade-btn"
-                  @click="tradeQuantity = amount; openTradeModal(offer)"
+                  @click="openTradeModal(offer, amount)"
                 >
                   {{ amount }} عدد
                 </button>
