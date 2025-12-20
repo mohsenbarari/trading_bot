@@ -15,13 +15,20 @@ def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> Repl
     row_2_buttons = []
     if user_role == UserRole.SUPER_ADMIN:
         row_2_buttons.append(KeyboardButton(text="🔐 پنل مدیریت")) 
-    row_2_buttons.append(KeyboardButton(text="👤 پنل کاربر")) 
+    row_2_buttons.append(KeyboardButton(text="👤 پنل کاربر"))
+    # دکمه تنظیمات فقط برای کاربران با نقش عادی در منوی اصلی
+    if user_role == UserRole.STANDARD:
+        row_2_buttons.append(KeyboardButton(text="⚙️ تنظیمات"))
     row_2_buttons.append(KeyboardButton(text="📱 نسخه تحت وب", web_app=WebAppInfo(url=mini_app_url)))
     keyboard_layout.append(row_2_buttons)
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
-def get_user_panel_keyboard() -> ReplyKeyboardMarkup:
-    keyboard_layout = [[KeyboardButton(text="⚙️ تنظیمات کاربری")], [KeyboardButton(text="🔙 بازگشت")]]
+def get_user_panel_keyboard(user_role: UserRole = None) -> ReplyKeyboardMarkup:
+    keyboard_layout = []
+    # دکمه تنظیمات فقط برای نقش‌های غیر عادی (مدیر ارشد، مدیر میانی، پلیس)
+    if user_role and user_role != UserRole.STANDARD:
+        keyboard_layout.append([KeyboardButton(text="⚙️ تنظیمات کاربری")])
+    keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
 def get_admin_panel_keyboard() -> ReplyKeyboardMarkup:

@@ -45,7 +45,7 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
     anchor_msg = await message.answer(
         profile_text, 
         parse_mode="Markdown",
-        reply_markup=get_user_panel_keyboard() 
+        reply_markup=get_user_panel_keyboard(user.role)
     )
     set_anchor(message.chat.id, anchor_msg.message_id)
 
@@ -71,6 +71,14 @@ async def handle_user_settings_button(message: types.Message, user: Optional[Use
     if not user: return
     
     bot_response = await message.answer("🚧 بخش تنظیمات کاربری (بات) در حال توسعه است.")
+
+
+# --- هندلر دکمه تنظیمات ساده (برای کاربران عادی) ---
+@router.message(F.text == "⚙️ تنظیمات")
+async def handle_simple_settings_button(message: types.Message, user: Optional[User]):
+    if not user: return
+    
+    await message.answer("🚧 بخش تنظیمات کاربری در حال توسعه است.")
 
 
 # --- تنظیمات: نام‌های فارسی و کلیدها ---
