@@ -365,9 +365,9 @@ async function expireOffer(offerId: number) {
 let ws: WebSocket | null = null
 let reconnectTimer: number | null = null
 let pingInterval: number | null = null
+let pollingInterval: number | null = null
 
 function connectWebSocket() {
-  // ساخت URL وب‌سوکت
   const wsUrl = props.apiBaseUrl
     .replace('https://', 'wss://')
     .replace('http://', 'ws://') + '/api/realtime/ws'
@@ -380,6 +380,8 @@ function connectWebSocket() {
     ws.onopen = () => {
       console.log('✅ WebSocket connected!')
       startPingInterval()
+      // توقف polling وقتی WebSocket متصل است
+      stopPolling()
     }
     
     ws.onmessage = async (event) => {
@@ -387,36 +389,32 @@ function connectWebSocket() {
         const message = JSON.parse(event.data)
         console.log('📩 WebSocket message:', message.type)
         
-        // به‌روزرسانی فوری بر اساس نوع رویداد
         if (message.type === 'offer:created' || message.type === 'offer:expired' || message.type === 'offer:updated') {
           await loadOffers()
-          if (activeTab.value === 'my_offers') {
-            await loadMyOffers()
-          }
+          if (activeTab.value === 'my_offers') await loadMyOffers()
         } else if (message.type === 'trade:created') {
           await loadOffers()
-          if (activeTab.value === 'my_trades') {
-            await loadMyTrades()
-          }
+          if (activeTab.value === 'my_trades') await loadMyTrades()
         }
-      } catch (e) {
-        // ignore parse errors
-      }
+      } catch (e) {}
     }
     
     ws.onclose = (event) => {
-      console.log('❌ WebSocket closed:', event.code, event.reason)
+      console.log('❌ WebSocket closed:', event.code)
       stopPingInterval()
-      // تلاش مجدد برای اتصال بعد از ۳ ثانیه
-      reconnectTimer = setTimeout(connectWebSocket, 3000) as unknown as number
+      // شروع polling به عنوان fallback
+      startPolling()
+      // تلاش مجدد بعد از ۵ ثانیه
+      reconnectTimer = setTimeout(connectWebSocket, 5000) as unknown as number
     }
     
-    ws.onerror = (error) => {
-      console.error('⚠️ WebSocket error:', error)
+    ws.onerror = () => {
+      console.warn('⚠️ WebSocket error, using polling fallback')
     }
   } catch (e) {
-    console.error('WebSocket connection error:', e)
-    reconnectTimer = setTimeout(connectWebSocket, 5000) as unknown as number
+    console.error('WebSocket connection error, using polling')
+    startPolling()
+    reconnectTimer = setTimeout(connectWebSocket, 10000) as unknown as number
   }
 }
 
@@ -436,8 +434,33 @@ function stopPingInterval() {
   }
 }
 
-function disconnectWebSocket() {
+// Polling fallback - هر ۳ ثانیه
+function startPolling() {
+  if (pollingInterval) return // اگر قبلاً شروع شده، دوباره شروع نکن
+  
+  console.log('📡 Starting polling fallback')
+  pollingInterval = setInterval(async () => {
+    if (activeTab.value === 'offers') {
+      await loadOffers()
+    } else if (activeTab.value === 'my_offers') {
+      await loadMyOffers()
+    } else if (activeTab.value === 'my_trades') {
+      await loadMyTrades()
+    }
+  }, 3000) as unknown as number
+}
+
+function stopPolling() {
+  if (pollingInterval) {
+    console.log('📡 Stopping polling')
+    clearInterval(pollingInterval)
+    pollingInterval = null
+  }
+}
+
+function cleanup() {
   stopPingInterval()
+  stopPolling()
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
     reconnectTimer = null
@@ -453,10 +476,12 @@ onMounted(async () => {
   await loadCommodities()
   await loadOffers()
   connectWebSocket()
+  // شروع polling به عنوان backup اولیه
+  startPolling()
 })
 
 onUnmounted(() => {
-  disconnectWebSocket()
+  cleanup()
 })
 
 // Watch tab changes
