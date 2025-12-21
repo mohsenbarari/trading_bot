@@ -51,8 +51,15 @@ interface Trade {
   created_at: string
 }
 
+interface TradingSettings {
+  offer_min_quantity: number
+  offer_max_quantity: number
+  lot_min_size: number
+  lot_max_count: number
+}
+
 // State
-const activeTab = ref<'offers' | 'create' | 'my_offers' | 'my_trades'>('offers')
+const activeTab = ref<'offers' | 'my_offers' | 'my_trades'>('offers')
 const isLoading = ref(false)
 const error = ref('')
 const successMessage = ref('')
@@ -62,15 +69,21 @@ const offers = ref<Offer[]>([])
 const myOffers = ref<Offer[]>([])
 const myTrades = ref<Trade[]>([])
 const commodities = ref<Commodity[]>([])
+const tradingSettings = ref<TradingSettings>({
+  offer_min_quantity: 1,
+  offer_max_quantity: 50,
+  lot_min_size: 5,
+  lot_max_count: 5
+})
 
 // Filter
 const filterType = ref<'all' | 'buy' | 'sell'>('all')
 
-// Create offer form
-const createMode = ref<'button' | 'text'>('button')
-const createStep = ref<'type' | 'commodity' | 'quantity' | 'lot' | 'price' | 'preview'>('type')
+// Create offer wizard
+const showCreateWizard = ref(false)
+const createStep = ref<'commodity' | 'quantity' | 'lot' | 'lotInput' | 'price' | 'notes' | 'preview'>('commodity')
 
-// Button mode data
+// Offer data
 const newOffer = ref({
   offer_type: '' as 'buy' | 'sell' | '',
   commodity_id: 0,
@@ -84,7 +97,6 @@ const newOffer = ref({
 
 // Text mode
 const offerText = ref('')
-const parsedOffer = ref<any>(null)
 const parseError = ref('')
 
 // Trade modal
@@ -93,22 +105,16 @@ const selectedOffer = ref<Offer | null>(null)
 const tradeQuantity = ref(0)
 const isTrading = ref(false)
 
+// Polling
+let pollingInterval: number | null = null
+
+// Quick quantity buttons
+const quickQuantities = [10, 15, 20, 25, 30, 35, 40, 45, 50]
+
 // Computed
 const filteredOffers = computed(() => {
   if (filterType.value === 'all') return offers.value
   return offers.value.filter(o => o.offer_type === filterType.value)
-})
-
-// Available trade quantities for selected offer
-const availableTradeQuantities = computed(() => {
-  if (!selectedOffer.value) return []
-  const offer = selectedOffer.value
-  if (offer.is_wholesale || !offer.lot_sizes) {
-    return [offer.remaining_quantity]
-  }
-  const amounts = [offer.remaining_quantity, ...offer.lot_sizes]
-  const unique = [...new Set(amounts)].filter(a => a <= offer.remaining_quantity)
-  return unique.sort((a, b) => b - a)
 })
 
 // API Helper
@@ -166,10 +172,31 @@ async function loadCommodities() {
   }
 }
 
-// Create Offer - Button Mode
-function selectOfferType(type: 'buy' | 'sell') {
-  newOffer.value.offer_type = type
+async function loadTradingSettings() {
+  try {
+    const data = await apiFetch('/trading-settings/')
+    tradingSettings.value = data
+  } catch (e: any) {
+    console.error('Error loading trading settings:', e)
+  }
+}
+
+// ===== CREATE OFFER WIZARD =====
+
+function startCreateOffer(type: 'buy' | 'sell') {
+  newOffer.value = {
+    offer_type: type,
+    commodity_id: 0,
+    commodity_name: '',
+    quantity: 0,
+    price: 0,
+    is_wholesale: true,
+    lot_sizes: null,
+    notes: ''
+  }
+  error.value = ''
   createStep.value = 'commodity'
+  showCreateWizard.value = true
 }
 
 function selectCommodity(commodity: Commodity) {
@@ -178,9 +205,20 @@ function selectCommodity(commodity: Commodity) {
   createStep.value = 'quantity'
 }
 
+function selectQuantity(qty: number) {
+  if (qty < tradingSettings.value.offer_min_quantity || qty > tradingSettings.value.offer_max_quantity) {
+    error.value = `تعداد باید بین ${tradingSettings.value.offer_min_quantity} تا ${tradingSettings.value.offer_max_quantity} باشد.`
+    return
+  }
+  newOffer.value.quantity = qty
+  error.value = ''
+  createStep.value = 'lot'
+}
+
 function confirmQuantity() {
-  if (newOffer.value.quantity < 1 || newOffer.value.quantity > 1000) {
-    error.value = 'تعداد باید بین ۱ تا ۱۰۰۰ باشد.'
+  const qty = newOffer.value.quantity
+  if (qty < tradingSettings.value.offer_min_quantity || qty > tradingSettings.value.offer_max_quantity) {
+    error.value = `تعداد باید بین ${tradingSettings.value.offer_min_quantity} تا ${tradingSettings.value.offer_max_quantity} باشد.`
     return
   }
   error.value = ''
@@ -193,7 +231,7 @@ function selectLotType(isWholesale: boolean) {
     newOffer.value.lot_sizes = null
     createStep.value = 'price'
   } else {
-    // برای خُرد، پیشنهاد می‌دهیم
+    // پیشنهاد ترکیب اولیه
     const qty = newOffer.value.quantity
     if (qty >= 30) {
       newOffer.value.lot_sizes = [Math.floor(qty / 3), Math.floor(qty / 3), qty - 2 * Math.floor(qty / 3)]
@@ -202,17 +240,96 @@ function selectLotType(isWholesale: boolean) {
     } else {
       newOffer.value.lot_sizes = [qty]
     }
+    createStep.value = 'lotInput'
+  }
+}
+
+// Lot sizes input (as text like "10 15 25")
+const lotSizesText = ref('')
+
+function validateLotSizes(): boolean {
+  const parts = lotSizesText.value.trim().split(/\s+/)
+  if (parts.length === 0 || (parts.length === 1 && parts[0] === '')) {
+    error.value = 'لطفاً ترکیب را وارد کنید.'
+    return false
+  }
+  
+  const lots: number[] = []
+  for (const p of parts) {
+    const n = parseInt(p)
+    if (isNaN(n) || n <= 0) {
+      error.value = `"${p}" یک عدد معتبر نیست.`
+      return false
+    }
+    if (n < tradingSettings.value.lot_min_size) {
+      error.value = `هر بخش باید حداقل ${tradingSettings.value.lot_min_size} عدد باشد.`
+      return false
+    }
+    lots.push(n)
+  }
+  
+  if (lots.length > tradingSettings.value.lot_max_count) {
+    error.value = `حداکثر ${tradingSettings.value.lot_max_count} بخش مجاز است.`
+    return false
+  }
+  
+  const sum = lots.reduce((a, b) => a + b, 0)
+  if (sum !== newOffer.value.quantity) {
+    error.value = `جمع ترکیب (${sum}) با کل (${newOffer.value.quantity}) برابر نیست.`
+    return false
+  }
+  
+  newOffer.value.lot_sizes = lots.sort((a, b) => b - a)
+  error.value = ''
+  return true
+}
+
+function confirmLotSizes() {
+  if (validateLotSizes()) {
     createStep.value = 'price'
   }
 }
 
 function confirmPrice() {
-  if (newOffer.value.price < 10000 || newOffer.value.price > 9999999) {
-    error.value = 'قیمت باید بین ۱۰,۰۰۰ تا ۹,۹۹۹,۹۹۹ باشد.'
+  if (newOffer.value.price <= 0) {
+    error.value = 'قیمت باید بزرگ‌تر از صفر باشد.'
     return
   }
   error.value = ''
+  createStep.value = 'notes'
+}
+
+function confirmNotes() {
   createStep.value = 'preview'
+}
+
+function goBack() {
+  switch (createStep.value) {
+    case 'commodity': closeWizard(); break
+    case 'quantity': createStep.value = 'commodity'; break
+    case 'lot': createStep.value = 'quantity'; break
+    case 'lotInput': createStep.value = 'lot'; break
+    case 'price': 
+      createStep.value = newOffer.value.is_wholesale ? 'lot' : 'lotInput'
+      break
+    case 'notes': createStep.value = 'price'; break
+    case 'preview': createStep.value = 'notes'; break
+  }
+}
+
+function closeWizard() {
+  showCreateWizard.value = false
+  newOffer.value = {
+    offer_type: '',
+    commodity_id: 0,
+    commodity_name: '',
+    quantity: 0,
+    price: 0,
+    is_wholesale: true,
+    lot_sizes: null,
+    notes: ''
+  }
+  error.value = ''
 }
 
 async function submitOffer() {
@@ -236,8 +353,7 @@ async function submitOffer() {
     })
     
     successMessage.value = '✅ لفظ شما با موفقیت در کانال ارسال شد!'
-    resetCreateForm()
-    activeTab.value = 'offers'
+    closeWizard()
     await loadOffers()
     
     setTimeout(() => successMessage.value = '', 3000)
@@ -248,10 +364,11 @@ async function submitOffer() {
   }
 }
 
-// Create Offer - Text Mode
-async function parseOfferText() {
+// ===== TEXT MODE OFFER =====
+
+async function parseAndSubmitTextOffer() {
   if (!offerText.value.trim()) {
-    parseError.value = 'متن لفظ را وارد کنید.'
+    parseError.value = 'لطفاً متن لفظ را وارد کنید.'
     return
   }
   
@@ -259,28 +376,16 @@ async function parseOfferText() {
   parseError.value = ''
   
   try {
-    const result = await apiFetch('/offers/parse', {
+    await apiFetch('/offers/parse', {
       method: 'POST',
       body: JSON.stringify({ text: offerText.value })
     })
     
-    if (result.success) {
-      parsedOffer.value = result.data
-      // پر کردن فرم از داده پارس شده
-      newOffer.value = {
-        offer_type: result.data.trade_type,
-        commodity_id: result.data.commodity_id,
-        commodity_name: result.data.commodity_name,
-        quantity: result.data.quantity,
-        price: result.data.price,
-        is_wholesale: result.data.is_wholesale,
-        lot_sizes: result.data.lot_sizes,
-        notes: result.data.notes || ''
-      }
-      createStep.value = 'preview'
-    } else {
-      parseError.value = result.error || 'خطا در پارس متن'
-    }
+    successMessage.value = '✅ لفظ شما با موفقیت در کانال ارسال شد!'
+    offerText.value = ''
+    await loadOffers()
+    
+    setTimeout(() => successMessage.value = '', 3000)
   } catch (e: any) {
     parseError.value = e.message
   } finally {
@@ -288,26 +393,8 @@ async function parseOfferText() {
   }
 }
 
-function resetCreateForm() {
-  createStep.value = 'type'
-  createMode.value = 'button'
-  newOffer.value = {
-    offer_type: '',
-    commodity_id: 0,
-    commodity_name: '',
-    quantity: 0,
-    price: 0,
-    is_wholesale: true,
-    lot_sizes: null,
-    notes: ''
-  }
-  offerText.value = ''
-  parsedOffer.value = null
-  parseError.value = ''
-  error.value = ''
-}
+// ===== TRADE MODAL =====
 
-// Trade
 function openTradeModal(offer: Offer, quantity?: number) {
   if (offer.user_id === props.user?.id) {
     error.value = 'نمی‌توانید روی لفظ خودتان معامله کنید.'
@@ -315,7 +402,6 @@ function openTradeModal(offer: Offer, quantity?: number) {
     return
   }
   selectedOffer.value = offer
-  // اگر quantity پاس داده شده باشد، از آن استفاده کن، در غیر اینصورت کل موجودی
   tradeQuantity.value = quantity ?? offer.remaining_quantity
   showTradeModal.value = true
 }
@@ -339,13 +425,8 @@ async function executeTrade() {
     showTradeModal.value = false
     selectedOffer.value = null
     
-    // صبر کوتاه برای اطمینان از commit دیتابیس
     await new Promise(resolve => setTimeout(resolve, 300))
-    
-    // بارگذاری مجدد لفظ‌ها
     await loadOffers()
-    
-    // بارگذاری دوم برای اطمینان
     setTimeout(() => loadOffers(), 500)
     
     setTimeout(() => successMessage.value = '', 3000)
@@ -356,7 +437,8 @@ async function executeTrade() {
   }
 }
 
-// Expire offer
+// ===== EXPIRE OFFER =====
+
 async function expireOffer(offerId: number) {
   if (!confirm('آیا از منقضی کردن این لفظ مطمئن هستید؟')) return
   
@@ -371,8 +453,7 @@ async function expireOffer(offerId: number) {
   }
 }
 
-// Real-time updates با polling سریع (هر ۱.۵ ثانیه)
-let pollingInterval: number | null = null
+// ===== POLLING =====
 
 function startPolling() {
   if (pollingInterval) return
@@ -395,9 +476,17 @@ function stopPolling() {
   }
 }
 
-// Lifecycle
+// ===== NAVIGATION =====
+
+function goHome() {
+  emit('navigate', 'profile')
+}
+
+// ===== LIFECYCLE =====
+
 onMounted(async () => {
   await loadCommodities()
+  await loadTradingSettings()
   await loadOffers()
   startPolling()
 })
@@ -406,20 +495,53 @@ onUnmounted(() => {
   stopPolling()
 })
 
-// Watch tab changes
 watch(activeTab, async (tab) => {
   if (tab === 'my_offers') await loadMyOffers()
   if (tab === 'my_trades') await loadMyTrades()
   if (tab === 'offers') await loadOffers()
-  if (tab === 'create') resetCreateForm()
+})
+
+// Set initial lot sizes text when entering lotInput step
+watch(createStep, (step) => {
+  if (step === 'lotInput' && newOffer.value.lot_sizes) {
+    lotSizesText.value = newOffer.value.lot_sizes.join(' ')
+  }
 })
 </script>
 
 <template>
   <div class="trading-view">
+    <!-- Header with back button -->
+    <div class="trade-header">
+      <button class="back-btn" @click="goHome">
+        <span>←</span>
+      </button>
+      <h1>معاملات</h1>
+      <div class="header-spacer"></div>
+    </div>
+    
     <!-- Success/Error Messages -->
     <div v-if="successMessage" class="message success">{{ successMessage }}</div>
     <div v-if="error" class="message error">{{ error }}</div>
+    
+    <!-- Text Input for Offer -->
+    <div class="text-offer-section">
+      <textarea 
+        v-model="offerText"
+        class="text-offer-input"
+        placeholder="لفظ متنی را اینجا بنویسید... مثال: خرید سکه 10 20 15 قیمت 1000000"
+        rows="2"
+      ></textarea>
+      <div v-if="parseError" class="parse-error">{{ parseError }}</div>
+      <button 
+        v-if="offerText.trim()" 
+        class="text-submit-btn"
+        @click="parseAndSubmitTextOffer"
+        :disabled="isLoading"
+      >
+        {{ isLoading ? '...' : '🚀 ارسال' }}
+      </button>
+    </div>
     
     <!-- Tabs -->
     <div class="tabs">
@@ -427,10 +549,6 @@ watch(activeTab, async (tab) => {
         :class="{ active: activeTab === 'offers' }"
         @click="activeTab = 'offers'"
       >📊 لفظ‌ها</button>
-      <button 
-        :class="{ active: activeTab === 'create' }"
-        @click="activeTab = 'create'"
-      >➕ ثبت لفظ</button>
       <button 
         :class="{ active: activeTab === 'my_offers' }"
         @click="activeTab = 'my_offers'"
@@ -441,7 +559,7 @@ watch(activeTab, async (tab) => {
       >📜 معاملات</button>
     </div>
     
-    <!-- Tab: Active Offers (like Telegram channel) -->
+    <!-- Tab: Active Offers -->
     <div v-if="activeTab === 'offers'" class="tab-content">
       <div class="filter-bar">
         <button :class="{ active: filterType === 'all' }" @click="filterType = 'all'">همه</button>
@@ -479,8 +597,6 @@ watch(activeTab, async (tab) => {
           </div>
           
           <div class="offer-footer">
-            
-            <!-- Trade buttons (like Telegram channel) -->
             <div class="trade-buttons" v-if="offer.user_id !== user?.id">
               <template v-if="offer.is_wholesale || !offer.lot_sizes">
                 <button class="trade-btn" @click="openTradeModal(offer)">
@@ -506,169 +622,6 @@ watch(activeTab, async (tab) => {
       </div>
     </div>
     
-    <!-- Tab: Create Offer -->
-    <div v-if="activeTab === 'create'" class="tab-content create-offer">
-      
-      <!-- Mode Toggle -->
-      <div class="mode-toggle">
-        <button :class="{ active: createMode === 'button' }" @click="createMode = 'button'; resetCreateForm()">
-          🔘 با دکمه
-        </button>
-        <button :class="{ active: createMode === 'text' }" @click="createMode = 'text'; resetCreateForm()">
-          ✏️ با متن
-        </button>
-      </div>
-      
-      <!-- Button Mode -->
-      <div v-if="createMode === 'button'" class="button-mode">
-        
-        <!-- Step 1: Type -->
-        <div v-if="createStep === 'type'" class="step">
-          <h3>📈 ثبت لفظ جدید</h3>
-          <p>نوع معامله را انتخاب کنید:</p>
-          <div class="type-buttons">
-            <button class="type-btn buy" @click="selectOfferType('buy')">🟢 خرید</button>
-            <button class="type-btn sell" @click="selectOfferType('sell')">🔴 فروش</button>
-          </div>
-        </div>
-        
-        <!-- Step 2: Commodity -->
-        <div v-if="createStep === 'commodity'" class="step">
-          <h3>{{ newOffer.offer_type === 'buy' ? '🟢 خرید' : '🔴 فروش' }}</h3>
-          <p>کالا را انتخاب کنید:</p>
-          <div class="commodity-grid">
-            <button 
-              v-for="commodity in commodities" 
-              :key="commodity.id"
-              class="commodity-btn"
-              @click="selectCommodity(commodity)"
-            >
-              {{ commodity.name }}
-            </button>
-          </div>
-          <button class="back-btn" @click="createStep = 'type'">⬅️ بازگشت</button>
-        </div>
-        
-        <!-- Step 3: Quantity -->
-        <div v-if="createStep === 'quantity'" class="step">
-          <h3>{{ newOffer.offer_type === 'buy' ? '🟢 خرید' : '🔴 فروش' }} {{ newOffer.commodity_name }}</h3>
-          <p>تعداد را وارد کنید (۱ تا ۱۰۰۰):</p>
-          <input 
-            type="number" 
-            v-model.number="newOffer.quantity" 
-            min="1" 
-            max="1000"
-            placeholder="تعداد"
-            class="input-field"
-          />
-          <button class="next-btn" @click="confirmQuantity" :disabled="!newOffer.quantity">ادامه ➡️</button>
-          <button class="back-btn" @click="createStep = 'commodity'">⬅️ بازگشت</button>
-        </div>
-        
-        <!-- Step 4: Lot Type -->
-        <div v-if="createStep === 'lot'" class="step">
-          <h3>{{ newOffer.offer_type === 'buy' ? '🟢 خرید' : '🔴 فروش' }} {{ newOffer.commodity_name }} - {{ newOffer.quantity }} عدد</h3>
-          <p>نوع فروش را انتخاب کنید:</p>
-          <div class="lot-buttons">
-            <button class="lot-btn" @click="selectLotType(true)">📦 یکجا</button>
-            <button class="lot-btn" @click="selectLotType(false)">📦📦 خُرد</button>
-          </div>
-          <button class="back-btn" @click="createStep = 'quantity'">⬅️ بازگشت</button>
-        </div>
-        
-        <!-- Step 5: Price -->
-        <div v-if="createStep === 'price'" class="step">
-          <h3>
-            {{ newOffer.offer_type === 'buy' ? '🟢 خرید' : '🔴 فروش' }} 
-            {{ newOffer.commodity_name }} - {{ newOffer.quantity }} عدد
-            ({{ newOffer.is_wholesale ? 'یکجا' : 'خُرد' }})
-          </h3>
-          <p>💰 قیمت را وارد کنید (5 یا 6 رقم):</p>
-          <input 
-            type="number" 
-            v-model.number="newOffer.price" 
-            min="10000" 
-            max="9999999"
-            placeholder="قیمت"
-            class="input-field"
-          />
-          <button class="next-btn" @click="confirmPrice" :disabled="!newOffer.price">ادامه ➡️</button>
-          <button class="back-btn" @click="createStep = 'lot'">⬅️ بازگشت</button>
-        </div>
-        
-        <!-- Step 6: Preview -->
-        <div v-if="createStep === 'preview'" class="step preview">
-          <h3>پیش‌نمایش لفظ</h3>
-          <div class="preview-card" :class="newOffer.offer_type">
-            <div class="preview-header">
-              {{ newOffer.offer_type === 'buy' ? '🟢 خرید' : '🔴 فروش' }}
-              {{ newOffer.commodity_name }}
-              {{ newOffer.quantity }} عدد
-              {{ newOffer.price.toLocaleString() }}
-            </div>
-            <div class="preview-details">
-              <p>📦 نوع: {{ newOffer.is_wholesale ? 'یکجا' : `خُرد ${newOffer.lot_sizes?.join(', ')}` }}</p>
-              <p v-if="newOffer.notes">توضیحات: {{ newOffer.notes }}</p>
-            </div>
-          </div>
-          
-          <div class="notes-input">
-            <label>توضیحات (اختیاری):</label>
-            <input type="text" v-model="newOffer.notes" maxlength="200" placeholder="توضیحات اضافی..." class="input-field" />
-          </div>
-          
-          <div class="preview-actions">
-            <button class="submit-btn" @click="submitOffer" :disabled="isLoading">
-              {{ isLoading ? 'در حال ارسال...' : '✅ تایید و ارسال' }}
-            </button>
-            <button class="cancel-btn" @click="resetCreateForm">❌ انصراف</button>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Text Mode -->
-      <div v-if="createMode === 'text'" class="text-mode">
-        <div v-if="createStep !== 'preview'" class="step">
-          <h3>✏️ ثبت لفظ با متن</h3>
-          <p>متن لفظ را مانند بات وارد کنید:</p>
-          <p class="hint">مثال: خ 30تا 75800 یا ف 20 تا 802000</p>
-          <textarea 
-            v-model="offerText" 
-            placeholder="خ 30تا 75800"
-            class="text-input"
-            rows="3"
-          ></textarea>
-          <div v-if="parseError" class="parse-error">{{ parseError }}</div>
-          <button class="parse-btn" @click="parseOfferText" :disabled="isLoading">
-            {{ isLoading ? 'در حال پردازش...' : '🔍 بررسی متن' }}
-          </button>
-        </div>
-        
-        <!-- Preview for text mode -->
-        <div v-if="createStep === 'preview' && parsedOffer" class="step preview">
-          <h3>پیش‌نمایش لفظ</h3>
-          <div class="preview-card" :class="newOffer.offer_type">
-            <div class="preview-header">
-              {{ newOffer.offer_type === 'buy' ? '🟢 خرید' : '🔴 فروش' }}
-              {{ newOffer.commodity_name }}
-              {{ newOffer.quantity }} عدد
-              {{ newOffer.price.toLocaleString() }}
-            </div>
-            <div class="preview-details">
-              <p>📦 نوع: {{ newOffer.is_wholesale ? 'یکجا' : `خُرد ${newOffer.lot_sizes?.join(', ')}` }}</p>
-            </div>
-          </div>
-          
-          <div class="preview-actions">
-            <button class="submit-btn" @click="submitOffer" :disabled="isLoading">
-              {{ isLoading ? 'در حال ارسال...' : '✅ تایید و ارسال' }}
-            </button>
-            <button class="cancel-btn" @click="resetCreateForm">❌ انصراف</button>
-          </div>
-        </div>
-      </div>
-    </div>
-    
     <!-- Tab: My Offers -->
     <div v-if="activeTab === 'my_offers'" class="tab-content">
       <div v-if="myOffers.length === 0" class="empty-state">
@@ -686,7 +639,7 @@ watch(activeTab, async (tab) => {
             <span class="offer-type">
               {{ offer.offer_type === 'buy' ? '🟢 خرید' : '🔴 فروش' }}
             </span>
-            <span class="offer-status">{{ offer.status === 'active' ? '✅ فعال' : offer.status }}</span>
+            <span class="remaining">{{ offer.remaining_quantity }}/{{ offer.quantity }}</span>
           </div>
           
           <div class="offer-body">
@@ -738,38 +691,173 @@ watch(activeTab, async (tab) => {
       </div>
     </div>
     
-    <!-- Trade Modal -->
-    <div v-if="showTradeModal && selectedOffer" class="modal-overlay" @click.self="showTradeModal = false">
-      <div class="modal">
-        <h3>تایید معامله</h3>
+    <!-- Bottom Fixed Buttons (Buy / Sell) -->
+    <div class="bottom-actions" v-if="!showCreateWizard && !showTradeModal">
+      <button class="action-btn buy" @click="startCreateOffer('buy')">
+        🟢 خرید
+      </button>
+      <button class="action-btn sell" @click="startCreateOffer('sell')">
+        🔴 فروش
+      </button>
+    </div>
+    
+    <!-- Create Offer Wizard Modal -->
+    <div v-if="showCreateWizard" class="wizard-overlay">
+      <div class="wizard-modal">
+        <div class="wizard-header">
+          <button class="wizard-back" @click="goBack">←</button>
+          <h2>
+            {{ newOffer.offer_type === 'buy' ? '🟢 ثبت لفظ خرید' : '🔴 ثبت لفظ فروش' }}
+          </h2>
+          <button class="wizard-close" @click="closeWizard">✕</button>
+        </div>
         
-        <div class="modal-content">
-          <p>
-            <strong>{{ selectedOffer.offer_type === 'buy' ? '🔴 فروش' : '🟢 خرید' }}</strong>
-          </p>
-          <p>🏷️ کالا: {{ selectedOffer.commodity_name }}</p>
-          <p>💰 فی: {{ selectedOffer.price.toLocaleString() }}</p>
-          
-          <div class="quantity-selector">
-            <label>📦 تعداد:</label>
-            <div class="quantity-buttons">
-              <button 
-                v-for="amount in availableTradeQuantities"
-                :key="amount"
-                :class="{ selected: tradeQuantity === amount }"
-                @click="tradeQuantity = amount"
-              >
-                {{ amount }} عدد
-              </button>
-            </div>
+        <div v-if="error" class="wizard-error">{{ error }}</div>
+        
+        <!-- Step: Commodity -->
+        <div v-if="createStep === 'commodity'" class="wizard-step">
+          <h3>کالا را انتخاب کنید:</h3>
+          <div class="commodity-grid">
+            <button 
+              v-for="commodity in commodities" 
+              :key="commodity.id"
+              class="commodity-btn"
+              @click="selectCommodity(commodity)"
+            >
+              {{ commodity.name }}
+            </button>
           </div>
         </div>
         
-        <div class="modal-actions">
-          <button class="confirm-btn" @click="executeTrade" :disabled="isTrading">
-            {{ isTrading ? 'در حال انجام...' : '✅ تایید معامله' }}
+        <!-- Step: Quantity -->
+        <div v-if="createStep === 'quantity'" class="wizard-step">
+          <h3>تعداد را انتخاب کنید:</h3>
+          <div class="quantity-grid">
+            <button 
+              v-for="qty in quickQuantities.filter(q => q >= tradingSettings.offer_min_quantity && q <= tradingSettings.offer_max_quantity)" 
+              :key="qty"
+              class="qty-btn"
+              @click="selectQuantity(qty)"
+            >
+              {{ qty }}
+            </button>
+          </div>
+          <div class="custom-qty">
+            <input 
+              type="number" 
+              v-model.number="newOffer.quantity"
+              :min="tradingSettings.offer_min_quantity"
+              :max="tradingSettings.offer_max_quantity"
+              placeholder="یا تعداد دلخواه..."
+              class="qty-input"
+            >
+            <button class="confirm-btn" @click="confirmQuantity" :disabled="!newOffer.quantity">
+              تأیید
+            </button>
+          </div>
+        </div>
+        
+        <!-- Step: Lot Type -->
+        <div v-if="createStep === 'lot'" class="wizard-step">
+          <h3>نوع فروش:</h3>
+          <div class="lot-type-buttons">
+            <button class="lot-btn wholesale" @click="selectLotType(true)">
+              📦 یکجا
+            </button>
+            <button class="lot-btn retail" @click="selectLotType(false)">
+              🔢 خُرد
+            </button>
+          </div>
+        </div>
+        
+        <!-- Step: Lot Sizes Input -->
+        <div v-if="createStep === 'lotInput'" class="wizard-step">
+          <h3>ترکیب را وارد کنید:</h3>
+          <p class="hint">مجموع باید {{ newOffer.quantity }} باشد (با فاصله جدا کنید)</p>
+          <input 
+            type="text"
+            v-model="lotSizesText"
+            placeholder="مثال: 10 15 25"
+            class="lot-input"
+          >
+          <button class="confirm-btn" @click="confirmLotSizes">
+            تأیید ترکیب
           </button>
-          <button class="cancel-btn" @click="showTradeModal = false">❌ انصراف</button>
+        </div>
+        
+        <!-- Step: Price -->
+        <div v-if="createStep === 'price'" class="wizard-step">
+          <h3>قیمت را وارد کنید:</h3>
+          <input 
+            type="number"
+            v-model.number="newOffer.price"
+            placeholder="قیمت (تومان)"
+            class="price-input"
+          >
+          <button class="confirm-btn" @click="confirmPrice" :disabled="!newOffer.price">
+            تأیید
+          </button>
+        </div>
+        
+        <!-- Step: Notes -->
+        <div v-if="createStep === 'notes'" class="wizard-step">
+          <h3>توضیحات (اختیاری):</h3>
+          <textarea 
+            v-model="newOffer.notes"
+            placeholder="توضیحات اضافی..."
+            class="notes-input"
+            rows="3"
+          ></textarea>
+          <button class="confirm-btn" @click="confirmNotes">
+            بعدی
+          </button>
+        </div>
+        
+        <!-- Step: Preview -->
+        <div v-if="createStep === 'preview'" class="wizard-step">
+          <h3>پیش‌نمایش لفظ:</h3>
+          <div class="preview-card">
+            <p><strong>نوع:</strong> {{ newOffer.offer_type === 'buy' ? '🟢 خرید' : '🔴 فروش' }}</p>
+            <p><strong>کالا:</strong> {{ newOffer.commodity_name }}</p>
+            <p><strong>تعداد:</strong> {{ newOffer.quantity }}</p>
+            <p><strong>قیمت:</strong> {{ newOffer.price.toLocaleString() }} تومان</p>
+            <p><strong>نوع فروش:</strong> {{ newOffer.is_wholesale ? 'یکجا' : 'خُرد' }}</p>
+            <p v-if="!newOffer.is_wholesale && newOffer.lot_sizes">
+              <strong>ترکیب:</strong> {{ newOffer.lot_sizes.join(' + ') }}
+            </p>
+            <p v-if="newOffer.notes"><strong>توضیحات:</strong> {{ newOffer.notes }}</p>
+          </div>
+          <button class="submit-btn" @click="submitOffer" :disabled="isLoading">
+            {{ isLoading ? 'در حال ارسال...' : '✅ تأیید و ارسال' }}
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Trade Modal -->
+    <div v-if="showTradeModal && selectedOffer" class="modal-overlay" @click.self="showTradeModal = false">
+      <div class="modal">
+        <div class="modal-header">
+          <h2>{{ selectedOffer.offer_type === 'buy' ? '🔴 فروش' : '🟢 خرید' }}</h2>
+          <button class="close-btn" @click="showTradeModal = false">✕</button>
+        </div>
+        
+        <div class="modal-body">
+          <p><strong>کالا:</strong> {{ selectedOffer.commodity_name }}</p>
+          <p><strong>قیمت:</strong> {{ selectedOffer.price.toLocaleString() }}</p>
+          <p><strong>تعداد:</strong> {{ tradeQuantity }}</p>
+          <p><strong>مجموع:</strong> {{ (selectedOffer.price * tradeQuantity).toLocaleString() }} تومان</p>
+        </div>
+        
+        <div class="modal-footer">
+          <button class="cancel-btn" @click="showTradeModal = false">انصراف</button>
+          <button 
+            class="confirm-trade-btn"
+            @click="executeTrade"
+            :disabled="isTrading"
+          >
+            {{ isTrading ? 'در حال پردازش...' : '✅ تأیید معامله' }}
+          </button>
         </div>
       </div>
     </div>
@@ -779,8 +867,39 @@ watch(activeTab, async (tab) => {
 <style scoped>
 .trading-view {
   padding: 12px;
+  padding-bottom: 100px;
   direction: rtl;
   font-family: 'Vazirmatn', sans-serif;
+  min-height: 100vh;
+  background: var(--bg-color);
+}
+
+/* Header */
+.trade-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 8px 0;
+}
+
+.back-btn {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.trade-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.header-spacer {
+  width: 44px;
 }
 
 /* Messages */
@@ -802,28 +921,62 @@ watch(activeTab, async (tab) => {
   color: white;
 }
 
+/* Text Offer Section */
+.text-offer-section {
+  background: var(--card-bg);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border-color);
+}
+
+.text-offer-input {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 14px;
+  resize: none;
+  font-family: inherit;
+}
+
+.parse-error {
+  color: #ef4444;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.text-submit-btn {
+  margin-top: 8px;
+  width: 100%;
+  padding: 10px;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 /* Tabs */
 .tabs {
   display: flex;
   gap: 6px;
   margin-bottom: 16px;
   overflow-x: auto;
-  padding-bottom: 6px;
 }
 
 .tabs button {
   flex: 1;
-  padding: 12px 14px;
+  padding: 10px 8px;
   border: 1px solid var(--border-color);
   background: var(--card-bg);
   color: var(--text-color);
   border-radius: 10px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.3s;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
 }
 
 .tabs button.active {
@@ -840,15 +993,13 @@ watch(activeTab, async (tab) => {
 }
 
 .filter-bar button {
-  padding: 10px 18px;
+  padding: 8px 16px;
   border: 1px solid var(--border-color);
   background: var(--card-bg);
   color: var(--text-color);
   border-radius: 20px;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12px;
   cursor: pointer;
-  transition: all 0.3s;
 }
 
 .filter-bar button.active {
@@ -867,75 +1018,63 @@ watch(activeTab, async (tab) => {
 .offer-card, .trade-card {
   background: var(--card-bg);
   border-radius: 12px;
-  padding: 16px;
-  border-right: 4px solid;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  padding: 14px;
+  border: 1px solid var(--border-color);
 }
 
-.offer-card.buy, .trade-card.buy {
-  border-color: #10b981;
+.offer-card.buy {
+  border-right: 4px solid #10b981;
 }
 
-.offer-card.sell, .trade-card.sell {
-  border-color: #ef4444;
+.offer-card.sell {
+  border-right: 4px solid #ef4444;
 }
 
 .offer-header, .trade-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .offer-type, .trade-type {
-  font-weight: 700;
-  font-size: 15px;
-  color: var(--text-color);
+  font-weight: 600;
 }
 
-.offer-time, .trade-time, .trade-number {
+.offer-time, .trade-time {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .offer-body, .trade-body {
-  margin-bottom: 12px;
-}
-
-.trade-body p {
-  margin: 6px 0;
-  color: var(--text-color);
+  margin-bottom: 10px;
 }
 
 .offer-main {
   display: flex;
-  gap: 16px;
+  justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
 }
 
 .commodity {
-  font-weight: 700;
-  font-size: 17px;
-  color: var(--text-color);
+  font-weight: 600;
 }
 
 .quantity {
-  color: #007AFF;
-  font-size: 15px;
-  font-weight: 500;
+  background: #f0f0f0;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
 }
 
 .price {
-  color: #f59e0b;
-  font-size: 15px;
   font-weight: 700;
+  color: var(--primary-color);
 }
 
 .offer-notes {
-  color: var(--text-secondary);
-  font-size: 13px;
   margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .offer-footer, .trade-footer {
@@ -944,391 +1083,367 @@ watch(activeTab, async (tab) => {
   align-items: center;
 }
 
-.offer-owner {
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
 .trade-buttons {
   display: flex;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .trade-btn {
-  padding: 10px 18px;
-  border: none;
-  background: linear-gradient(135deg, #007AFF, #0056b3);
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
   color: white;
+  border: none;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: transform 0.2s;
-  box-shadow: 0 3px 10px rgba(0, 122, 255, 0.3);
-}
-
-.trade-btn:active {
-  transform: scale(0.95);
 }
 
 .own-offer-badge {
-  background: rgba(245, 158, 11, 0.15);
-  color: #d97706;
-  padding: 6px 14px;
-  border-radius: 20px;
+  background: #f0f0f0;
+  padding: 6px 12px;
+  border-radius: 6px;
   font-size: 12px;
-  font-weight: 500;
+  color: var(--text-secondary);
 }
 
+.expire-btn {
+  background: #fee2e2;
+  color: #dc2626;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Empty State */
 .empty-state {
   text-align: center;
-  padding: 50px 20px;
+  padding: 40px 20px;
   color: var(--text-secondary);
-  font-size: 15px;
 }
 
-/* Create Offer Styles */
-.mode-toggle {
+/* Bottom Fixed Buttons */
+.bottom-actions {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
   display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg-color);
+  border-top: 1px solid var(--border-color);
+  z-index: 100;
 }
 
-.mode-toggle button {
+.action-btn {
   flex: 1;
-  padding: 14px;
-  border: 1px solid var(--border-color);
-  background: var(--card-bg);
-  color: var(--text-color);
-  border-radius: 10px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.mode-toggle button.active {
-  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
-  color: white;
-  border-color: #8b5cf6;
-}
-
-.step {
-  background: var(--card-bg);
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-}
-
-.step h3 {
-  margin: 0 0 16px 0;
-  color: var(--text-color);
-  font-size: 18px;
-}
-
-.step p {
-  color: var(--text-secondary);
-  margin-bottom: 16px;
-  font-size: 14px;
-}
-
-.type-buttons, .lot-buttons {
-  display: flex;
-  gap: 15px;
-}
-
-.type-btn, .lot-btn {
-  flex: 1;
-  padding: 22px;
+  padding: 16px;
   border: none;
-  border-radius: 12px;
+  border-radius: 14px;
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  transition: transform 0.2s;
   box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 
-.type-btn.buy {
+.action-btn.buy {
   background: linear-gradient(135deg, #10b981, #059669);
   color: white;
 }
 
-.type-btn.sell {
+.action-btn.sell {
   background: linear-gradient(135deg, #ef4444, #dc2626);
   color: white;
 }
 
-.lot-btn {
-  background: linear-gradient(135deg, #6366f1, #4f46e5);
-  color: white;
+/* Wizard Modal */
+.wizard-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: flex-end;
+  z-index: 200;
 }
 
-.type-btn:active, .lot-btn:active {
-  transform: scale(0.95);
+.wizard-modal {
+  background: var(--card-bg);
+  width: 100%;
+  max-height: 85vh;
+  border-radius: 20px 20px 0 0;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.wizard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.wizard-back, .wizard-close {
+  background: #f0f0f0;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.wizard-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.wizard-error {
+  background: #fee2e2;
+  color: #dc2626;
+  padding: 10px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.wizard-step h3 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
 }
 
 .commodity-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
-  margin-bottom: 16px;
 }
 
 .commodity-btn {
-  padding: 16px 12px;
-  border: 1px solid var(--border-color);
+  padding: 14px 8px;
   background: var(--card-bg);
-  color: var(--text-color);
+  border: 1px solid var(--border-color);
   border-radius: 10px;
-  font-weight: 500;
+  font-size: 13px;
   cursor: pointer;
-  transition: all 0.3s;
 }
 
-.commodity-btn:hover, .commodity-btn:active {
+.commodity-btn:hover {
   background: #007AFF;
   color: white;
   border-color: #007AFF;
 }
 
-.input-field {
-  width: 100%;
-  padding: 16px;
-  border: 2px solid var(--border-color);
-  border-radius: 10px;
-  background: var(--card-bg);
-  color: var(--text-color);
-  font-size: 18px;
-  text-align: center;
+.quantity-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
   margin-bottom: 16px;
 }
 
-.input-field:focus {
-  outline: none;
-  border-color: #007AFF;
-}
-
-.next-btn, .back-btn, .parse-btn {
-  padding: 14px 26px;
+.qty-btn {
+  padding: 16px;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white;
   border: none;
   border-radius: 10px;
-  font-size: 15px;
-  font-weight: 500;
-  cursor: pointer;
-  margin-left: 10px;
-}
-
-.next-btn {
-  background: linear-gradient(135deg, #007AFF, #0056b3);
-  color: white;
-}
-
-.back-btn {
-  background: #f3f4f6;
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
-}
-
-.parse-btn {
-  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
-  color: white;
-  width: 100%;
-  margin: 0;
-}
-
-/* Preview */
-.preview-card {
-  background: var(--card-bg);
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 20px;
-  border-right: 4px solid;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-}
-
-.preview-card.buy {
-  border-color: #10b981;
-}
-
-.preview-card.sell {
-  border-color: #ef4444;
-}
-
-.preview-header {
   font-size: 18px;
-  font-weight: 700;
-  margin-bottom: 12px;
-  color: var(--text-color);
+  font-weight: 600;
+  cursor: pointer;
 }
 
-.preview-details {
-  color: var(--text-secondary);
-}
-
-.preview-details p {
-  margin: 6px 0;
-}
-
-.notes-input {
-  margin-bottom: 16px;
-}
-
-.notes-input label {
-  display: block;
-  margin-bottom: 8px;
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
-.preview-actions {
+.custom-qty {
   display: flex;
   gap: 10px;
 }
 
-.submit-btn, .confirm-btn {
+.qty-input, .price-input, .lot-input {
   flex: 1;
-  padding: 16px;
-  border: none;
-  background: linear-gradient(135deg, #10b981, #059669);
-  color: white;
+  padding: 14px;
+  border: 1px solid var(--border-color);
   border-radius: 10px;
   font-size: 16px;
+  text-align: center;
+}
+
+.confirm-btn {
+  padding: 14px 24px;
+  background: linear-gradient(135deg, #007AFF, #0056b3);
+  color: white;
+  border: none;
+  border-radius: 10px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
 }
 
-.cancel-btn, .expire-btn {
-  padding: 16px 20px;
-  border: 1px solid #fecaca;
-  background: #fef2f2;
-  color: #dc2626;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 500;
+.confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.lot-type-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.lot-btn {
+  flex: 1;
+  padding: 24px;
+  border: none;
+  border-radius: 14px;
+  font-size: 18px;
+  font-weight: 600;
   cursor: pointer;
+  color: white;
 }
 
-/* Text Mode */
-.text-input {
-  width: 100%;
-  padding: 16px;
-  border: 2px solid var(--border-color);
-  border-radius: 10px;
-  background: var(--card-bg);
-  color: var(--text-color);
-  font-size: 16px;
-  resize: none;
-  margin-bottom: 12px;
-  font-family: inherit;
+.lot-btn.wholesale {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
 }
 
-.text-input:focus {
-  outline: none;
-  border-color: #007AFF;
+.lot-btn.retail {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
 }
 
 .hint {
-  font-size: 13px;
-  color: #007AFF;
+  color: var(--text-secondary);
+  font-size: 12px;
   margin-bottom: 12px;
 }
 
-.parse-error {
-  color: #dc2626;
-  margin-bottom: 12px;
+.notes-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
   font-size: 14px;
+  resize: none;
+  font-family: inherit;
+  margin-bottom: 12px;
 }
 
-/* Modal */
+.preview-card {
+  background: #f9fafb;
+  padding: 16px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+
+.preview-card p {
+  margin: 6px 0;
+}
+
+.submit-btn {
+  width: 100%;
+  padding: 16px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Trade Modal */
 .modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0,0,0,0.5);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  padding: 20px;
+  z-index: 200;
 }
 
 .modal {
   background: var(--card-bg);
   border-radius: 16px;
-  padding: 24px;
-  width: 100%;
+  width: 90%;
   max-width: 400px;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  padding: 20px;
 }
 
-.modal h3 {
-  margin: 0 0 20px 0;
-  text-align: center;
-  color: var(--text-color);
-  font-size: 20px;
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
 }
 
-.modal-content {
+.modal-header h2 {
+  margin: 0;
+}
+
+.close-btn {
+  background: #f0f0f0;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.modal-body {
   margin-bottom: 20px;
 }
 
-.modal-content p {
-  margin: 10px 0;
-  color: var(--text-color);
-  font-size: 15px;
+.modal-body p {
+  margin: 8px 0;
 }
 
-.quantity-selector {
-  margin-top: 16px;
-}
-
-.quantity-selector label {
-  display: block;
-  margin-bottom: 12px;
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
-.quantity-buttons {
+.modal-footer {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
 }
 
-.quantity-buttons button {
-  padding: 12px 22px;
-  border: 2px solid var(--border-color);
-  background: var(--card-bg);
-  color: var(--text-color);
+.cancel-btn {
+  flex: 1;
+  padding: 14px;
+  background: #f0f0f0;
+  border: none;
   border-radius: 10px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s;
 }
 
-.quantity-buttons button.selected {
-  border-color: #007AFF;
-  background: rgba(0, 122, 255, 0.1);
-  color: #007AFF;
+.confirm-trade-btn {
+  flex: 1;
+  padding: 14px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
-.modal-actions {
-  display: flex;
-  gap: 10px;
+.confirm-trade-btn:disabled {
+  opacity: 0.6;
 }
 
-/* My Offer specific */
-.my-offer .offer-status {
-  color: #10b981;
-  font-size: 13px;
-  font-weight: 500;
+/* Trade card styles */
+.trade-card.buy {
+  border-right: 4px solid #10b981;
 }
 
-/* Tab Content */
-.tab-content {
-  min-height: 200px;
+.trade-card.sell {
+  border-right: 4px solid #ef4444;
+}
+
+.trade-number {
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 </style>

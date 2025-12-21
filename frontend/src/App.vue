@@ -744,7 +744,7 @@ onUnmounted(() => {
     </main>
 
     <MainMenu 
-      v-if="user && user.role !== 'WATCH'" 
+      v-if="user && user.role !== 'WATCH' && activeView !== 'trade'" 
       :user-role="user.role"
       :is-trade-page-visible="showTradePage" 
       @navigate="handleNavigation" 
