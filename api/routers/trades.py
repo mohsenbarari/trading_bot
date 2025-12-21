@@ -322,11 +322,19 @@ async def create_trade(
     except:
         pass
     
-    # افزایش شمارنده معامله - باید کاربر را از session جاری بگیریم
+    # افزایش شمارنده معامله برای هر دو طرف (پاسخ‌دهنده و صاحب لفظ)
     from sqlalchemy import select
+    
+    # 1. شمارنده برای پاسخ‌دهنده (current_user)
     user_for_counter = await db.get(User, current_user.id)
     if user_for_counter:
         await increment_user_counter(db, user_for_counter, 'trade', trade_data.quantity)
+    
+    # 2. شمارنده برای صاحب لفظ (offer.user_id) - اگر متفاوت از پاسخ‌دهنده باشد
+    if offer.user_id and offer.user_id != current_user.id:
+        offer_owner = await db.get(User, offer.user_id)
+        if offer_owner:
+            await increment_user_counter(db, offer_owner, 'trade', trade_data.quantity)
     
     # ارسال رویداد SSE
     from .realtime import publish_event

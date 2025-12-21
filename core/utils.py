@@ -224,13 +224,28 @@ async def increment_user_counter(session: AsyncSession, user, action_type: str, 
     action_type: 'trade' یا 'channel_message'
     quantity: تعداد کالا (برای trade)
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"increment_user_counter called: action_type={action_type}, quantity={quantity}, user_id={user.id if user else 'None'}")
+    
     if action_type == 'trade':
+        old_trades = user.trades_count
+        old_commodities = user.commodities_traded_count
         user.trades_count += 1
         user.commodities_traded_count += quantity
+        logger.info(f"Updated trades_count: {old_trades} -> {user.trades_count}, commodities_traded_count: {old_commodities} -> {user.commodities_traded_count}")
     elif action_type == 'channel_message':
+        old_messages = user.channel_messages_count
         user.channel_messages_count += 1
+        logger.info(f"Updated channel_messages_count: {old_messages} -> {user.channel_messages_count}")
     
-    await session.commit()
+    try:
+        await session.commit()
+        logger.info("Session committed successfully")
+    except Exception as e:
+        logger.error(f"Error committing session: {e}")
+        raise
 
 
 def reset_user_counters(user) -> None:
