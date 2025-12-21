@@ -1144,6 +1144,20 @@ async def handle_channel_trade(callback: types.CallbackQuery, user: Optional[Use
                     else:
                         raise
             
+            # افزایش شمارنده معاملات برای هر دو طرف
+            from core.utils import increment_user_counter
+            
+            # 1. شمارنده برای پاسخ‌دهنده (user)
+            db_responder = await session.get(User, user.id)
+            if db_responder:
+                await increment_user_counter(session, db_responder, 'trade', actual_amount)
+            
+            # 2. شمارنده برای صاحب لفظ (offer.user_id)
+            if offer.user_id and offer.user_id != user.id:
+                db_offer_owner = await session.get(User, offer.user_id)
+                if db_offer_owner:
+                    await increment_user_counter(session, db_offer_owner, 'trade', actual_amount)
+            
             # اطلاعات معامله
             offer_type_fa = "خرید" if offer.offer_type == OfferType.BUY else "فروش"
             respond_type_fa = "فروش" if offer.offer_type == OfferType.BUY else "خرید"
