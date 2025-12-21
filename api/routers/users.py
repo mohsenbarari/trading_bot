@@ -83,8 +83,6 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
     
     if user_update.role is not None:
         user.role = user_update.role
-    if user_update.has_bot_access is not None:
-        user.has_bot_access = user_update.has_bot_access
     if user_update.trading_restricted_until is not None:
         # اگر مقدار ارسال شده باشد (حتی اگر None باشد برای رفع مسدودیت، البته در Pydantic اگر فیلد Optional باشد و ارسال نشود None است)
         # اما اینجا چون Optional[datetime] = None است، اگر در درخواست نباشد None است.
