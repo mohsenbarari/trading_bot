@@ -323,7 +323,6 @@ async def create_trade(
         pass
     
     # افزایش شمارنده معامله برای هر دو طرف (پاسخ‌دهنده و صاحب لفظ)
-    from sqlalchemy import select
     
     # 1. شمارنده برای پاسخ‌دهنده (current_user)
     user_for_counter = await db.get(User, current_user.id)
