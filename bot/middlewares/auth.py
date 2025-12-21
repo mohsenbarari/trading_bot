@@ -37,4 +37,18 @@ class AuthMiddleware(BaseMiddleware):
             # تا در تمام handler ها در دسترس باشد.
             data["user"] = user
             
+            # بررسی دسترسی بات
+            if user and not user.has_bot_access:
+                # کاربر دسترسی به بات ندارد - پیام مناسب نمایش بده
+                restricted_message = (
+                    "⚠️ دسترسی شما به ربات محدود شده است.\n\n"
+                    "لطفاً از طریق MiniApp به سیستم دسترسی پیدا کنید.\n"
+                    "برای اطلاعات بیشتر با پشتیبانی تماس بگیرید."
+                )
+                if isinstance(event, Message):
+                    await event.answer(restricted_message)
+                elif isinstance(event, CallbackQuery):
+                    await event.answer(restricted_message, show_alert=True)
+                return  # جلوی ادامه پردازش را بگیر
+            
             return await handler(event, data)

@@ -637,6 +637,35 @@ async def handle_user_toggle_bot(callback: types.CallbackQuery, user: Optional[U
             target_user.has_bot_access = not target_user.has_bot_access
             await session.commit()
             
+            # ارسال نوتیفیکیشن به کاربر
+            if not target_user.has_bot_access:
+                # دسترسی بات محدود شد
+                bot_access_message = (
+                    "ℹ️ *اطلاعیه*\n\n"
+                    "دسترسی شما به ربات تلگرام محدود شده است.\n\n"
+                    "شما همچنان می‌توانید از طریق *MiniApp* به سیستم دسترسی داشته باشید.\n\n"
+                    "برای اطلاعات بیشتر با پشتیبانی تماس بگیرید."
+                )
+                await create_user_notification(
+                    session, target_user.id, bot_access_message,
+                    level=NotificationLevel.INFO,
+                    category=NotificationCategory.SYSTEM
+                )
+                await send_telegram_notification(target_user.telegram_id, bot_access_message)
+            else:
+                # دسترسی بات فعال شد
+                bot_access_message = (
+                    "✅ *اطلاعیه*\n\n"
+                    "دسترسی شما به ربات تلگرام مجدداً فعال شد.\n\n"
+                    "اکنون می‌توانید از تمام امکانات بات استفاده کنید."
+                )
+                await create_user_notification(
+                    session, target_user.id, bot_access_message,
+                    level=NotificationLevel.SUCCESS,
+                    category=NotificationCategory.SYSTEM
+                )
+                await send_telegram_notification(target_user.telegram_id, bot_access_message)
+            
             # بازگشت به منوی تنظیمات (چون از آنجا آمده‌ایم)
             profile_text = await get_user_profile_text(target_user)
             
