@@ -229,10 +229,12 @@ async def create_trade(
     
     # بروزرسانی لات‌ها - حذف مقدار معامله شده از لیست
     if offer.lot_sizes:
+        from sqlalchemy.orm.attributes import flag_modified
         new_lot_sizes = list(offer.lot_sizes)
         if trade_data.quantity in new_lot_sizes:
             new_lot_sizes.remove(trade_data.quantity)
         offer.lot_sizes = new_lot_sizes if new_lot_sizes else None
+        flag_modified(offer, "lot_sizes")  # اجبار SQLAlchemy برای تشخیص تغییر
     
     if offer.remaining_quantity <= 0:
         offer.status = OfferStatus.COMPLETED
