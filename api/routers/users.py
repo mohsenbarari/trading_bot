@@ -96,12 +96,17 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
         # راه حل بهتر: استفاده از exclude_unset در روتر.
         pass
 
-    # استفاده از exclude_unset برای اعمال تغییرات
     update_data = user_update.model_dump(exclude_unset=True)
     if 'role' in update_data:
         user.role = update_data['role']
+    
+    # Track has_bot_access change
+    bot_access_changed = False
+    old_bot_access = user.has_bot_access
     if 'has_bot_access' in update_data:
         user.has_bot_access = update_data['has_bot_access']
+        if old_bot_access != update_data['has_bot_access']:
+            bot_access_changed = True
     
     # Track what changed for notifications
     block_notification_needed = False
@@ -233,6 +238,36 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
     # 4. Unlimit Notification (با تاخیر ۲ دقیقه)
     if unlimit_notification_needed:
         asyncio.create_task(send_delayed_removal_notification_api(get_db, user.id, user.telegram_id, is_block=False))
+    
+    # 5. Bot Access Notification
+    if bot_access_changed:
+        if not user.has_bot_access:
+            # دسترسی بات محدود شد
+            bot_access_message = (
+                "ℹ️ *اطلاعیه*\n\n"
+                "دسترسی شما به ربات تلگرام محدود شده است.\n\n"
+                "شما همچنان می‌توانید از طریق *MiniApp* به سیستم دسترسی داشته باشید.\n\n"
+                "برای اطلاعات بیشتر با پشتیبانی تماس بگیرید."
+            )
+            await create_user_notification(
+                db, user.id, bot_access_message,
+                level=NotificationLevel.INFO,
+                category=NotificationCategory.SYSTEM
+            )
+            await send_telegram_notification(user.telegram_id, bot_access_message)
+        else:
+            # دسترسی بات فعال شد
+            bot_access_message = (
+                "✅ *اطلاعیه*\n\n"
+                "دسترسی شما به ربات تلگرام مجدداً فعال شد.\n\n"
+                "اکنون می‌توانید از تمام امکانات بات استفاده کنید."
+            )
+            await create_user_notification(
+                db, user.id, bot_access_message,
+                level=NotificationLevel.SUCCESS,
+                category=NotificationCategory.SYSTEM
+            )
+            await send_telegram_notification(user.telegram_id, bot_access_message)
     
     return user
 
