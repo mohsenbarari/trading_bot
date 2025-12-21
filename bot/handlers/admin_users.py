@@ -84,21 +84,43 @@ async def delete_user_message(message: types.Message):
         pass
 
 async def send_delayed_removal_notification(user_id: int, telegram_id: int, is_block: bool, delay_seconds: int = 120):
-    """ارسال نوتیفیکیشن رفع مسدودیت/محدودیت با تاخیر (پیش‌فرض ۲ دقیقه)"""
+    """ارسال نوتیفیکیشن رفع مسدودیت/محدودیت با تاخیر (پیش‌فرض ۲ دقیقه)
+    
+    قبل از ارسال بررسی می‌کند که آیا کاربر هنوز رفع محدودیت/مسدودیت است یا خیر.
+    اگر مجدداً محدود شده باشد، نوتیفیکیشن ارسال نمی‌شود.
+    """
     await asyncio.sleep(delay_seconds)
     
-    if is_block:
-        msg = (
-            "ℹ️ *رفع مسدودیت توسط مدیر*\n\n"
-            "مسدودیت حساب شما توسط مدیر رفع شد."
-        )
-    else:
-        msg = (
-            "ℹ️ *رفع محدودیت توسط مدیر*\n\n"
-            "محدودیت‌های حساب شما توسط مدیر رفع شد."
-        )
-    
+    # بررسی وضعیت فعلی کاربر قبل از ارسال نوتیفیکیشن
     async with AsyncSessionLocal() as session:
+        user = await session.get(User, user_id)
+        if not user:
+            return  # کاربر حذف شده
+        
+        if is_block:
+            # بررسی مسدودیت: اگر مجدداً مسدود شده، نوتیفیکیشن ارسال نشود
+            if user.trading_restricted_until and user.trading_restricted_until > datetime.utcnow():
+                return  # هنوز مسدود است، نوتیفیکیشن رفع مسدودیت ارسال نشود
+            
+            msg = (
+                "ℹ️ *رفع مسدودیت توسط مدیر*\n\n"
+                "مسدودیت حساب شما توسط مدیر رفع شد."
+            )
+        else:
+            # بررسی محدودیت: اگر مجدداً محدود شده، نوتیفیکیشن ارسال نشود
+            has_limitations = (
+                user.max_daily_trades is not None or
+                user.max_active_commodities is not None or
+                user.max_daily_requests is not None
+            )
+            if has_limitations:
+                return  # هنوز محدود است، نوتیفیکیشن رفع محدودیت ارسال نشود
+            
+            msg = (
+                "ℹ️ *رفع محدودیت توسط مدیر*\n\n"
+                "محدودیت‌های حساب شما توسط مدیر رفع شد."
+            )
+        
         await create_user_notification(
             session, user_id, msg,
             level=NotificationLevel.INFO,
