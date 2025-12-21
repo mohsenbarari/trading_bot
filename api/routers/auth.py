@@ -236,8 +236,8 @@ async def webapp_login(init_data_obj: schemas.WebAppInitData, db: AsyncSession =
     if not user:
         raise HTTPException(status_code=403, detail="User not registered. Please register via bot invitation link first.")
 
-    if not user.has_bot_access:
-        raise HTTPException(status_code=403, detail="Access denied")
+    # توجه: has_bot_access فقط دسترسی بات را محدود می‌کند، نه MiniApp
+    # پس اینجا بررسی نمی‌کنیم
 
     # تبدیل telegram_id به رشته برای ذخیره در توکن
     access_token = create_access_token(
