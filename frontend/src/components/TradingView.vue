@@ -511,36 +511,15 @@ watch(createStep, (step) => {
 
 <template>
   <div class="trading-view">
-    <!-- Header with back button -->
-    <div class="trade-header">
-      <button class="back-btn" @click="goHome">
-        <span>←</span>
-      </button>
-      <h1>معاملات</h1>
-      <div class="header-spacer"></div>
-    </div>
-    
     <!-- Success/Error Messages -->
     <div v-if="successMessage" class="message success">{{ successMessage }}</div>
     <div v-if="error" class="message error">{{ error }}</div>
     
-    <!-- Text Input for Offer -->
-    <div class="text-offer-section">
-      <textarea 
-        v-model="offerText"
-        class="text-offer-input"
-        placeholder="لفظ متنی را اینجا بنویسید... مثال: خرید سکه 10 20 15 قیمت 1000000"
-        rows="2"
-      ></textarea>
-      <div v-if="parseError" class="parse-error">{{ parseError }}</div>
-      <button 
-        v-if="offerText.trim()" 
-        class="text-submit-btn"
-        @click="parseAndSubmitTextOffer"
-        :disabled="isLoading"
-      >
-        {{ isLoading ? '...' : '🚀 ارسال' }}
-      </button>
+    <!-- Filter Bar at Top -->
+    <div class="filter-bar">
+      <button :class="{ active: filterType === 'all' }" @click="filterType = 'all'">همه</button>
+      <button :class="{ active: filterType === 'buy' }" @click="filterType = 'buy'">🟢 خرید</button>
+      <button :class="{ active: filterType === 'sell' }" @click="filterType = 'sell'">� فروش</button>
     </div>
     
     <!-- Tabs -->
@@ -561,12 +540,6 @@ watch(createStep, (step) => {
     
     <!-- Tab: Active Offers -->
     <div v-if="activeTab === 'offers'" class="tab-content">
-      <div class="filter-bar">
-        <button :class="{ active: filterType === 'all' }" @click="filterType = 'all'">همه</button>
-        <button :class="{ active: filterType === 'buy' }" @click="filterType = 'buy'">🟢 خرید</button>
-        <button :class="{ active: filterType === 'sell' }" @click="filterType = 'sell'">🔴 فروش</button>
-      </div>
-      
       <div v-if="filteredOffers.length === 0" class="empty-state">
         <p>هیچ لفظ فعالی وجود ندارد.</p>
       </div>
@@ -691,14 +664,36 @@ watch(createStep, (step) => {
       </div>
     </div>
     
-    <!-- Bottom Fixed Buttons (Buy / Sell) -->
-    <div class="bottom-actions" v-if="!showCreateWizard && !showTradeModal">
-      <button class="action-btn buy" @click="startCreateOffer('buy')">
-        🟢 خرید
-      </button>
-      <button class="action-btn sell" @click="startCreateOffer('sell')">
-        🔴 فروش
-      </button>
+    <!-- Bottom Fixed Section (Text Input + Buy/Sell Buttons) -->
+    <div class="bottom-fixed" v-if="!showCreateWizard && !showTradeModal">
+      <!-- Text Input for Offer -->
+      <div class="text-offer-section">
+        <textarea 
+          v-model="offerText"
+          class="text-offer-input"
+          placeholder="لفظ متنی... مثال: خرید سکه 10 20 15 قیمت 1000000"
+          rows="1"
+        ></textarea>
+        <button 
+          v-if="offerText.trim()" 
+          class="text-submit-btn"
+          @click="parseAndSubmitTextOffer"
+          :disabled="isLoading"
+        >
+          🚀
+        </button>
+      </div>
+      <div v-if="parseError" class="parse-error">{{ parseError }}</div>
+      
+      <!-- Buy/Sell Buttons -->
+      <div class="bottom-actions">
+        <button class="action-btn buy" @click="startCreateOffer('buy')">
+          🟢 خرید
+        </button>
+        <button class="action-btn sell" @click="startCreateOffer('sell')">
+          🔴 فروش
+        </button>
+      </div>
     </div>
     
     <!-- Create Offer Wizard Modal -->
@@ -1125,18 +1120,54 @@ watch(createStep, (step) => {
   color: var(--text-secondary);
 }
 
-/* Bottom Fixed Buttons */
-.bottom-actions {
+/* Bottom Fixed Section */
+.bottom-fixed {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  display: flex;
-  gap: 12px;
-  padding: 16px;
   background: var(--bg-color);
   border-top: 1px solid var(--border-color);
+  padding: 12px 16px;
   z-index: 100;
+}
+
+.bottom-fixed .text-offer-section {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.bottom-fixed .text-offer-input {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  font-size: 13px;
+  resize: none;
+  min-height: 40px;
+}
+
+.bottom-fixed .text-submit-btn {
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.bottom-fixed .parse-error {
+  margin-bottom: 8px;
+}
+
+.bottom-actions {
+  display: flex;
+  gap: 12px;
 }
 
 .action-btn {
