@@ -1144,19 +1144,30 @@ async def handle_channel_trade(callback: types.CallbackQuery, user: Optional[Use
                     else:
                         raise
             
-            # افزایش شمارنده معاملات برای هر دو طرف
+            # افزایش شمارنده معاملات
             from core.utils import increment_user_counter
+            from sqlalchemy import func as sql_func
             
-            # 1. شمارنده برای پاسخ‌دهنده (user)
+            # 1. شمارنده برای پاسخ‌دهنده (user) - هر تراکنش یک معامله حساب می‌شود
             db_responder = await session.get(User, user.id)
             if db_responder:
                 await increment_user_counter(session, db_responder, 'trade', actual_amount)
             
             # 2. شمارنده برای صاحب لفظ (offer.user_id)
+            # فقط اولین معامله روی هر لفظ برای صاحب لفظ شمرده می‌شود
             if offer.user_id and offer.user_id != user.id:
-                db_offer_owner = await session.get(User, offer.user_id)
-                if db_offer_owner:
-                    await increment_user_counter(session, db_offer_owner, 'trade', actual_amount)
+                existing_trades_on_offer = await session.scalar(
+                    select(sql_func.count(Trade.id)).where(
+                        Trade.offer_id == offer.id,
+                        Trade.id != new_trade.id  # به جز معامله فعلی
+                    )
+                )
+                # اگر این اولین معامله روی این لفظ است، شمارنده صاحب لفظ افزایش یابد
+                if existing_trades_on_offer == 0:
+                    db_offer_owner = await session.get(User, offer.user_id)
+                    if db_offer_owner:
+                        # برای صاحب لفظ: trades_count +1، commodities: کل تعداد اولیه لفظ
+                        await increment_user_counter(session, db_offer_owner, 'trade', offer.initial_quantity)
             
             # اطلاعات معامله
             offer_type_fa = "خرید" if offer.offer_type == OfferType.BUY else "فروش"

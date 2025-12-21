@@ -322,18 +322,29 @@ async def create_trade(
     except:
         pass
     
-    # افزایش شمارنده معامله برای هر دو طرف (پاسخ‌دهنده و صاحب لفظ)
+    # افزایش شمارنده معامله
     
-    # 1. شمارنده برای پاسخ‌دهنده (current_user)
+    # 1. شمارنده برای پاسخ‌دهنده (current_user) - هر تراکنش یک معامله حساب می‌شود
     user_for_counter = await db.get(User, current_user.id)
     if user_for_counter:
         await increment_user_counter(db, user_for_counter, 'trade', trade_data.quantity)
     
-    # 2. شمارنده برای صاحب لفظ (offer.user_id) - اگر متفاوت از پاسخ‌دهنده باشد
+    # 2. شمارنده برای صاحب لفظ (offer.user_id)
+    # فقط اولین معامله روی هر لفظ برای صاحب لفظ شمرده می‌شود
+    # بررسی تعداد معاملات قبلی روی این لفظ (به جز معامله فعلی)
     if offer.user_id and offer.user_id != current_user.id:
-        offer_owner = await db.get(User, offer.user_id)
-        if offer_owner:
-            await increment_user_counter(db, offer_owner, 'trade', trade_data.quantity)
+        existing_trades_on_offer = await db.scalar(
+            select(func.count(Trade.id)).where(
+                Trade.offer_id == offer.id,
+                Trade.id != new_trade.id  # به جز معامله فعلی
+            )
+        )
+        # اگر این اولین معامله روی این لفظ است، شمارنده صاحب لفظ افزایش یابد
+        if existing_trades_on_offer == 0:
+            offer_owner = await db.get(User, offer.user_id)
+            if offer_owner:
+                # برای صاحب لفظ: trades_count +1، commodities: کل تعداد اولیه لفظ
+                await increment_user_counter(db, offer_owner, 'trade', offer.initial_quantity)
     
     # ارسال رویداد SSE
     from .realtime import publish_event
