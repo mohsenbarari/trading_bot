@@ -231,7 +231,12 @@ async def main():
     dp.callback_query.middleware(auth_middleware)
 
     dp.include_router(start.router)
-    dp.include_router(trade.router)  # باید قبل از panel باشد تا دکمه معامله را بگیرد
+    # trade.router replaced by split handlers
+    from bot.handlers import trade_create, trade_execute, trade_manage
+    dp.include_router(trade_create.router)   # Creation & Text logic
+    dp.include_router(trade_execute.router) # Channel execution
+    dp.include_router(trade_manage.router)  # Management (Expire)
+    
     dp.include_router(trade_history.router)  # تاریخچه معاملات
     dp.include_router(panel.router)
     dp.include_router(admin.router)

@@ -21,6 +21,12 @@ import jdatetime
 from datetime import timezone, timedelta
 
 # تایم‌زون ایران (UTC+3:30)
+from bot.callbacks import (
+    TradeHistoryCallback, HistoryPageCallback, 
+    ExportHistoryCallback, ProfileCallback
+)
+
+# تایم‌زون ایران (UTC+3:30)
 IRAN_TZ = timezone(timedelta(hours=3, minutes=30))
 
 router = Router()
@@ -30,15 +36,15 @@ def get_trade_history_keyboard(target_user_id: int) -> InlineKeyboardMarkup:
     """کیبورد تاریخچه معاملات"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📥 دانلود Excel", callback_data=f"export_excel_{target_user_id}"),
-            InlineKeyboardButton(text="📄 دانلود PDF", callback_data=f"export_pdf_{target_user_id}")
+            InlineKeyboardButton(text="📥 دانلود Excel", callback_data=ExportHistoryCallback(format="excel", target_user_id=target_user_id).pack()),
+            InlineKeyboardButton(text="📄 دانلود PDF", callback_data=ExportHistoryCallback(format="pdf", target_user_id=target_user_id).pack())
         ],
         [
-            InlineKeyboardButton(text="📅 ۱ ماه", callback_data=f"history_1m_{target_user_id}"),
-            InlineKeyboardButton(text="📅 ۳ ماه", callback_data=f"history_3m_{target_user_id}"),
-            InlineKeyboardButton(text="📅 ۶ ماه", callback_data=f"history_6m_{target_user_id}"),
+            InlineKeyboardButton(text="📅 ۱ ماه", callback_data=HistoryPageCallback(months=1, target_user_id=target_user_id).pack()),
+            InlineKeyboardButton(text="📅 ۳ ماه", callback_data=HistoryPageCallback(months=3, target_user_id=target_user_id).pack()),
+            InlineKeyboardButton(text="📅 ۶ ماه", callback_data=HistoryPageCallback(months=6, target_user_id=target_user_id).pack()),
         ],
-        [InlineKeyboardButton(text="🔙 بازگشت", callback_data=f"back_to_profile_{target_user_id}")]
+        [InlineKeyboardButton(text="🔙 بازگشت", callback_data=ProfileCallback(target_user_id=target_user_id).pack())]
     ])
 
 
@@ -293,13 +299,13 @@ async def generate_pdf(trades, target_user, current_user) -> str:
 
 
 # --- دکمه تاریخچه در پروفایل ---
-@router.callback_query(F.data.startswith("trade_history_"))
-async def show_trade_history(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+@router.callback_query(TradeHistoryCallback.filter())
+async def show_trade_history(callback: types.CallbackQuery, callback_data: TradeHistoryCallback, state: FSMContext, user: Optional[User]):
     if not user:
         await callback.answer("لطفاً ابتدا ثبت‌نام کنید.", show_alert=True)
         return
     
-    target_user_id = int(callback.data.split("_")[-1])
+    target_user_id = callback_data.target_user_id
     
     target_user, trades = await get_trade_history(user.id, target_user_id, months=3)
     
@@ -319,14 +325,13 @@ async def show_trade_history(callback: types.CallbackQuery, state: FSMContext, u
 
 
 # --- فیلتر تاریخ ---
-@router.callback_query(F.data.regexp(r"history_\d+m_\d+"))
-async def filter_trade_history(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+@router.callback_query(HistoryPageCallback.filter())
+async def filter_trade_history(callback: types.CallbackQuery, callback_data: HistoryPageCallback, state: FSMContext, user: Optional[User]):
     if not user:
         return
     
-    parts = callback.data.split("_")
-    months = int(parts[1].replace("m", ""))
-    target_user_id = int(parts[2])
+    months = callback_data.months
+    target_user_id = callback_data.target_user_id
     
     target_user, trades = await get_trade_history(user.id, target_user_id, months=months)
     
@@ -349,8 +354,8 @@ async def filter_trade_history(callback: types.CallbackQuery, state: FSMContext,
 
 
 # --- دانلود Excel ---
-@router.callback_query(F.data.startswith("export_excel_"))
-async def export_excel(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
+@router.callback_query(ExportHistoryCallback.filter(F.format == "excel"))
+async def export_excel(callback: types.CallbackQuery, callback_data: ExportHistoryCallback, state: FSMContext, user: Optional[User], bot: Bot):
     if not user:
         return
     
@@ -358,7 +363,7 @@ async def export_excel(callback: types.CallbackQuery, state: FSMContext, user: O
     
     data = await state.get_data()
     months = data.get("history_months", 3)
-    target_user_id = int(callback.data.split("_")[-1])
+    target_user_id = callback_data.target_user_id
     
     target_user, trades = await get_trade_history(user.id, target_user_id, months=months)
     
@@ -384,8 +389,8 @@ async def export_excel(callback: types.CallbackQuery, state: FSMContext, user: O
 
 
 # --- دانلود PDF ---
-@router.callback_query(F.data.startswith("export_pdf_"))
-async def export_pdf(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
+@router.callback_query(ExportHistoryCallback.filter(F.format == "pdf"))
+async def export_pdf(callback: types.CallbackQuery, callback_data: ExportHistoryCallback, state: FSMContext, user: Optional[User], bot: Bot):
     if not user:
         return
     
@@ -393,7 +398,7 @@ async def export_pdf(callback: types.CallbackQuery, state: FSMContext, user: Opt
     
     data = await state.get_data()
     months = data.get("history_months", 3)
-    target_user_id = int(callback.data.split("_")[-1])
+    target_user_id = callback_data.target_user_id
     
     target_user, trades = await get_trade_history(user.id, target_user_id, months=months)
     
@@ -419,12 +424,12 @@ async def export_pdf(callback: types.CallbackQuery, state: FSMContext, user: Opt
 
 
 # --- بازگشت به پروفایل ---
-@router.callback_query(F.data.startswith("back_to_profile_"))
-async def back_to_profile(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
+@router.callback_query(ProfileCallback.filter())
+async def back_to_profile(callback: types.CallbackQuery, callback_data: ProfileCallback, state: FSMContext, user: Optional[User]):
     if not user:
         return
     
-    target_user_id = int(callback.data.split("_")[-1])
+    target_user_id = callback_data.target_user_id
     
     async with AsyncSessionLocal() as session:
         stmt = select(User).where(User.id == target_user_id)
@@ -441,7 +446,7 @@ async def back_to_profile(callback: types.CallbackQuery, state: FSMContext, user
         await callback.message.edit_text(
             profile_text,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📊 تاریخچه معاملات", callback_data=f"trade_history_{target_user_id}")]
+                [InlineKeyboardButton(text="📊 تاریخچه معاملات", callback_data=TradeHistoryCallback(target_user_id=target_user_id).pack())]
             ])
         )
     
