@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime, timezone, timedelta
 from aiogram import Bot
 from aiogram.types import Message
 from aiogram.exceptions import TelegramBadRequest
@@ -10,6 +11,67 @@ from core.enums import NotificationLevel, NotificationCategory
 
 import redis.asyncio as redis
 from core.redis import pool 
+
+# ===== TIMEZONE UTILITIES =====
+# اصل معماری: "Store UTC, Display Local"
+# همه datetime ها در دیتابیس UTC ذخیره می‌شوند
+# تبدیل به ساعت ایران فقط در لحظه نمایش انجام می‌شود
+
+# Timezone ایران (UTC+3:30)
+IRAN_OFFSET = timedelta(hours=3, minutes=30)
+IRAN_TZ = timezone(IRAN_OFFSET)
+
+
+def utc_now() -> datetime:
+    """
+    تاریخ و زمان فعلی به UTC.
+    این تابع جایگزین datetime.utcnow() است که در Python 3.12 deprecated شده.
+    
+    Returns:
+        datetime: زمان فعلی به UTC (timezone-aware)
+    """
+    return datetime.now(timezone.utc)
+
+
+def to_iran_time(dt: datetime) -> datetime:
+    """
+    تبدیل datetime از UTC به ساعت ایران.
+    فقط برای نمایش به کاربر استفاده شود.
+    
+    Args:
+        dt: datetime به UTC (naive یا aware)
+        
+    Returns:
+        datetime: زمان به ساعت ایران
+    """
+    if dt is None:
+        return None
+    # اگر naive است، فرض می‌کنیم UTC است
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IRAN_TZ)
+
+
+def format_iran_datetime(dt: datetime, include_time: bool = True) -> str:
+    """
+    فرمت کردن datetime به صورت خوانا برای کاربران ایرانی.
+    
+    Args:
+        dt: datetime به UTC
+        include_time: آیا ساعت هم نمایش داده شود
+        
+    Returns:
+        str: تاریخ و ساعت به فرمت ایرانی
+    """
+    if dt is None:
+        return "---"
+    
+    iran_dt = to_iran_time(dt)
+    
+    if include_time:
+        return iran_dt.strftime("%Y-%m-%d %H:%M")
+    else:
+        return iran_dt.strftime("%Y-%m-%d")
 
 # نگاشت اعداد فارسی
 PERSIAN_NUM_MAP = {
