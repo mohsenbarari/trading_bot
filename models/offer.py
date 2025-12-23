@@ -1,6 +1,6 @@
 # models/offer.py
 """مدل لفظ (درخواست خرید/فروش در کانال)"""
-from sqlalchemy import Column, Integer, String, BigInteger, Enum, DateTime, ForeignKey, Boolean, JSON
+from sqlalchemy import Column, Integer, String, BigInteger, Enum, DateTime, ForeignKey, Boolean, JSON, CheckConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -22,6 +22,13 @@ class OfferStatus(str, enum.Enum):
 class Offer(Base):
     """لفظ - درخواست خرید/فروش در کانال"""
     __tablename__ = "offers"
+    
+    # ===== Database Constraints =====
+    __table_args__ = (
+        CheckConstraint('quantity > 0', name='ck_offers_quantity_positive'),
+        CheckConstraint('price > 0', name='ck_offers_price_positive'),
+        CheckConstraint('remaining_quantity >= 0', name='ck_offers_remaining_nonnegative'),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
     

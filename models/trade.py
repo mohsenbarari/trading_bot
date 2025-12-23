@@ -1,6 +1,6 @@
 # models/trade.py
 """مدل معامله (تراکنش واقعی بین دو کاربر)"""
-from sqlalchemy import Column, Integer, String, BigInteger, Enum, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, BigInteger, Enum, DateTime, ForeignKey, Text, CheckConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -22,6 +22,12 @@ class TradeStatus(str, enum.Enum):
 class Trade(Base):
     """معامله - تراکنش واقعی بین دو کاربر"""
     __tablename__ = "trades"
+    
+    # ===== Database Constraints =====
+    __table_args__ = (
+        CheckConstraint('quantity > 0', name='ck_trades_quantity_positive'),
+        CheckConstraint('price > 0', name='ck_trades_price_positive'),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
     
@@ -63,3 +69,4 @@ class Trade(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     confirmed_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
+
