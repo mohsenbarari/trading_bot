@@ -4,136 +4,112 @@ from aiogram.filters.callback_data import CallbackData
 # Trade Creation Callbacks
 # ==========================================
 
-class TradeTypeCallback(CallbackData, prefix="trade_type", sep="_"):
+class TradeTypeCallback(CallbackData, prefix="trade_type"):
     """
-    Format: trade_type_{type}
-    Example: trade_type_buy, trade_type_sell
+    Format: trade_type:{type}
+    Example: trade_type:buy
     """
     type: str
 
-class CommodityCallback(CallbackData, prefix="trade_commodity", sep="_"):
+class CommodityCallback(CallbackData, prefix="trade_commodity"):
     """
-    Format: trade_commodity_{id}
-    Example: trade_commodity_12
+    Format: trade_commodity:{id}
+    Example: trade_commodity:12
     """
     id: int
 
-class PageCallback(CallbackData, prefix="trade_page", sep="_"):
+class PageCallback(CallbackData, prefix="trade_page"):
     """
-    Format: trade_page_{trade_type}_{page}
-    Example: trade_page_buy_2
+    Format: trade_page:{trade_type}:{page}
+    Example: trade_page:buy:2
     """
     trade_type: str
     page: int
 
-class QuantityCallback(CallbackData, prefix="quantity", sep="_"):
+class QuantityCallback(CallbackData, prefix="quantity"):
     """
-    Format: quantity_{value}
-    Example: quantity_10, quantity_manual
+    Format: quantity:{value}
+    Example: quantity:10
     """
     value: str
 
-class LotTypeCallback(CallbackData, prefix="lot_type", sep="_"):
+class LotTypeCallback(CallbackData, prefix="lot_type"):
     """
-    Format: lot_type_{type}
-    Example: lot_type_wholesale, lot_type_retail
+    Format: lot_type:{type}
+    Example: lot_type:wholesale
     """
     type: str
 
-class AcceptLotsCallback(CallbackData, prefix="accept_lots", sep="_"):
+class AcceptLotsCallback(CallbackData, prefix="accept_lots"):
     """
-    Format: accept_lots_{lots_str}
-    Example: accept_lots_10_15
+    Format: accept_lots:{lots_str}
+    Example: accept_lots:10_15
     """
     lots: str
 
-class TradeActionCallback(CallbackData, prefix="trade", sep="_"):
+class TradeActionCallback(CallbackData, prefix="trade"):
     """
-    Format: trade_{action}
-    Example: trade_cancel, trade_confirm, trade_back_to_type
+    Format: trade:{action}
+    Example: trade:cancel
     """
     action: str
 
-class SkipNotesCallback(CallbackData, prefix="skip", sep="_"):
+class SkipNotesCallback(CallbackData, prefix="skip"):
     """
-    Format: skip_{target}
-    Example: skip_notes
+    Format: skip:{target}
+    Example: skip:notes
     """
     target: str
 
-# ==========================================
-# Text Offer Callbacks
-# ==========================================
-
-class TextOfferActionCallback(CallbackData, prefix="text_offer", sep="_"):
+class TextOfferActionCallback(CallbackData, prefix="text_offer"):
     """
-    Format: text_offer_{action}
-    Example: text_offer_confirm, text_offer_cancel
+    Format: text_offer:{action}
+    Example: text_offer:confirm
     """
     action: str
 
-# ==========================================
-# Channel Execution Callbacks
-# ==========================================
-
-class ChannelTradeCallback(CallbackData, prefix="channel_trade", sep="_"):
+class ChannelTradeCallback(CallbackData, prefix="channel_trade"):
     """
-    Format: channel_trade_{offer_id}_{amount}
-    Example: channel_trade_123_50
+    Format: channel_trade:{offer_id}:{amount}
+    Example: channel_trade:123:50
     """
     offer_id: int
     amount: int
 
-# ==========================================
-# Management Callbacks
-# ==========================================
-
-class ExpireOfferCallback(CallbackData, prefix="expire_offer", sep="_"):
+class ExpireOfferCallback(CallbackData, prefix="expire_offer"):
     """
-    Format: expire_offer_{offer_id}
-    Example: expire_offer_123
+    Format: expire_offer:{offer_id}
+    Example: expire_offer:123
     """
     offer_id: int
 
-# ==========================================
-# Trade History Callbacks
-# ==========================================
-
-class TradeHistoryCallback(CallbackData, prefix="trade_history", sep="_"):
+class TradeHistoryCallback(CallbackData, prefix="trade_history"):
     """
-    Format: trade_history_{target_user_id}
-    Example: trade_history_12345
+    Format: trade_history:{target_user_id}
+    Example: trade_history:12345
     """
     target_user_id: int
 
-class HistoryPageCallback(CallbackData, prefix="history", sep="_"):
+class HistoryPageCallback(CallbackData, prefix="history"):
     """
-    Format: history_{months}m_{target_user_id}
-    Example: history_3m_12345
-    NOTE: In handler regex was history_\\d+m_\\d+, so prefix="history" is correct.
-    But manual construction was `history_{months}m_{id}`.
-    Standard CallbackData uses `sep` between fields.
-    So `history_3_12345` would be standard.
-    But to match existing regex or migration, I can use standard pack() which will produce `history_3_12345`.
-    The regex handler in trade_history.py expects `history_3m_12345`.
-    I will change the handler to use HistoryPageCallback.filter() which expects `history:3:12345` (if using default colon) or `history_3_12345`.
-    I will stick to standard CallbackData packing.
+    Format: history:{months}:{target_user_id}
+    Example: history:3:12345
     """
     months: int
     target_user_id: int
 
-class ExportHistoryCallback(CallbackData, prefix="export", sep="_"):
+class ExportHistoryCallback(CallbackData, prefix="export"):
     """
-    Format: export_{format}_{target_user_id}
-    Example: export_excel_12345
+    Format: export:{format}:{target_user_id}
+    Example: export:excel:12345
     """
     format: str
     target_user_id: int
 
-class ProfileCallback(CallbackData, prefix="back_to_profile", sep="_"):
+class ProfileCallback(CallbackData, prefix="back_to_profile"):
     """
-    Format: back_to_profile_{target_user_id}
-    Example: back_to_profile_12345
+    Format: back_to_profile:{target_user_id}
+    Example: back_to_profile:12345
     """
     target_user_id: int
 
