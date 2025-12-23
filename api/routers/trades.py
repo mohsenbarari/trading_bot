@@ -167,7 +167,7 @@ async def create_trade(
             detail="شما دسترسی به بخش معاملات را ندارید."
         )
     
-    # بررسی مسدودیت
+    # بررسی مسدودیت (قبل از قفل)
     if current_user.trading_restricted_until:
         if current_user.trading_restricted_until > datetime.utcnow():
             raise HTTPException(
@@ -175,7 +175,14 @@ async def create_trade(
                 detail="حساب شما مسدود است."
             )
     
-    # بررسی محدودیت معامله
+    # ===== قفل کاربر برای جلوگیری از Race Condition در محدودیت‌ها =====
+    # اگر دو درخواست همزمان بیاید، اولی قفل می‌کند و دومی منتظر می‌ماند
+    locked_user = await db.execute(
+        select(User).where(User.id == current_user.id).with_for_update()
+    )
+    current_user = locked_user.scalar_one()
+    
+    # بررسی محدودیت معامله (حالا با قفل)
     allowed, error_msg = check_user_limits(current_user, 'trade', trade_data.quantity)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
