@@ -804,8 +804,29 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
             )
             
         except TelegramBadRequest as e:
+            # ===== Rollback: منقضی کردن لفظ اگر ارسال به کانال شکست خورد =====
+            async with AsyncSessionLocal() as session:
+                offer = await session.get(Offer, offer_id)
+                if offer:
+                    offer.status = OfferStatus.EXPIRED
+                    await session.commit()
+            
             await callback.message.edit_text(
-                f"❌ خطا در ارسال به کانال: {e.message}",
+                f"❌ خطا در ارسال به کانال: {e.message}\n\n"
+                f"لفظ ثبت نشد. لطفاً دوباره تلاش کنید.",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            # ===== Rollback برای خطاهای غیر منتظره =====
+            async with AsyncSessionLocal() as session:
+                offer = await session.get(Offer, offer_id)
+                if offer:
+                    offer.status = OfferStatus.EXPIRED
+                    await session.commit()
+            
+            await callback.message.edit_text(
+                f"❌ خطا در ارسال به کانال\n\n"
+                f"لفظ ثبت نشد. لطفاً دوباره تلاش کنید.",
                 parse_mode="Markdown"
             )
     else:
