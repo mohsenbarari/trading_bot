@@ -6,7 +6,7 @@ from sqlalchemy import select
 from typing import Optional
 
 from models.user import User
-from models.customer import Customer
+
 from models.offer import Offer, OfferType, OfferStatus
 from models.commodity import Commodity
 from bot.states import Trade
