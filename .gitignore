@@ -7,3 +7,8 @@ __pycache__/
 .idea/
 *.swp
 check-dns
+
+# Build artifacts
+mini_app_dist/
+node_modules/
+frontend/node_modules/
