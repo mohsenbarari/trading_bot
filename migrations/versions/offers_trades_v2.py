@@ -19,6 +19,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # ===== GUARD CHECK: جلوگیری از اجرای تصادفی مجدد =====
+    # اگر جدول offers وجود دارد، یعنی migration قبلاً اجرا شده
+    # و نباید دوباره اجرا شود (جلوگیری از پاک شدن داده‌ها)
+    from sqlalchemy import text
+    conn = op.get_bind()
+    result = conn.execute(text(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='offers')"
+    ))
+    if result.scalar():
+        print("⚠️ WARNING: Migration 'offers_trades_v2' already applied. Skipping to prevent data loss.")
+        return
+    
+    # ===== حذف جدول trades قدیمی =====
+    # ⚠️ این دستور فقط یکبار اجرا می‌شود (اولین بار)
     # 1. Drop old trades table (if exists with old schema)
     op.drop_index('ix_trades_created_at', table_name='trades', if_exists=True)
     op.drop_index('ix_trades_user_id', table_name='trades', if_exists=True)
