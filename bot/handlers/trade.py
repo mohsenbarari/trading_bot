@@ -66,74 +66,15 @@ def get_lot_type_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def suggest_lot_combination(total: int, user_lots: list[int]) -> list[int]:
-    """پیشنهاد ترکیب بهینه اگر ترکیب کاربر درست نباشد"""
-    from core.trading_settings import get_trading_settings
-    settings = get_trading_settings()
-    MIN_LOT = settings.lot_min_size
-    MAX_LOTS = settings.lot_max_count
-    
-    # اگر جمع کمتر است، بزرگترین عدد را افزایش بده
-    user_sum = sum(user_lots)
-    diff = total - user_sum
-    
-    if diff == 0:
-        return user_lots
-    
-    suggested = sorted(user_lots, reverse=True)
-    
-    if diff > 0:
-        # کمبود - به بزرگترین اضافه کن
-        suggested[0] += diff
-    else:
-        # اضافه - از بزرگترین کم کن
-        for i in range(len(suggested)):
-            reduction = min(suggested[i] - MIN_LOT, -diff)
-            if reduction > 0:
-                suggested[i] -= reduction
-                diff += reduction
-            if diff == 0:
-                break
-    
-    # فیلتر کردن موارد کوچکتر از MIN_LOT
-    suggested = [x for x in suggested if x >= MIN_LOT]
-    
-    # اگر هنوز جمع نمی‌شود، None بده
-    if sum(suggested) != total:
-        return None
-    
-    return sorted(suggested, reverse=True)
-
-
-def validate_lot_sizes(total: int, lot_sizes: list[int]) -> tuple[bool, str, list[int]]:
-    """اعتبارسنجی ترکیب لات‌ها
-    Returns: (is_valid, error_message, suggested_lots)
-    """
-    from core.trading_settings import get_trading_settings
-    settings = get_trading_settings()
-    MIN_LOT = settings.lot_min_size
-    MAX_LOTS = settings.lot_max_count
-    
-    if len(lot_sizes) > MAX_LOTS:
-        return False, f"❌ حداکثر {MAX_LOTS} بخش مجاز است.", None
-    
-    for lot in lot_sizes:
-        if lot < MIN_LOT:
-            return False, f"❌ هر بخش باید حداقل {MIN_LOT} عدد باشد.", None
-    
-    lot_sum = sum(lot_sizes)
-    
-    if lot_sum != total:
-        suggested = suggest_lot_combination(total, lot_sizes)
-        if suggested:
-            return False, f"❌ جمع ترکیب ({lot_sum}) با کل ({total}) برابر نیست.\n\n💡 پیشنهاد: {' '.join(map(str, suggested))}", suggested
-        else:
-            return False, f"❌ جمع ترکیب ({lot_sum}) با کل ({total}) برابر نیست.", None
-    
-    return True, "", lot_sizes
-
-
-
+# Import shared trade service functions
+from core.services.trade_service import (
+    suggest_lot_combination,
+    validate_lot_sizes,
+    validate_quantity,
+    validate_price,
+    generate_default_lots,
+    parse_lot_sizes_text
+)
 async def get_commodities_keyboard(trade_type: str, page: int = 1, limit: int = 9) -> InlineKeyboardMarkup:
     """کیبورد لیست کالاها با pagination"""
     async with AsyncSessionLocal() as session:
