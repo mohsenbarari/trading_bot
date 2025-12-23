@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     channel_id: int | None = None  # آیدی کانال برای ارسال پیام
     channel_invite_link: str | None = None  # لینک دعوت کانال
 
-    jwt_secret_key: str = "a_very_secret_key"
+    jwt_secret_key: str  # ❗ اجباری - باید در .env تعریف شود (JWT_SECRET_KEY)
     jwt_algorithm: str = "HS256"
     dev_api_key: str | None = None
     invitation_expiry_days: int = 1
