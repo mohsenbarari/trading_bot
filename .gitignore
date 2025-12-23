@@ -12,3 +12,4 @@ check-dns
 mini_app_dist/
 node_modules/
 frontend/node_modules/
+deploy.sh
