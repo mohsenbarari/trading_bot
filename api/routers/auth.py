@@ -131,6 +131,18 @@ async def request_otp(
     db: AsyncSession = Depends(get_db),
     redis_client: Redis = Depends(get_redis)
 ):
+    # ===== Rate Limiting: 1 request per 2 minutes per mobile =====
+    rate_limit_key = f"OTP_RATE_LIMIT:{request.mobile_number}"
+    existing_limit = await redis_client.get(rate_limit_key)
+    
+    if existing_limit:
+        # محاسبه زمان باقیمانده
+        ttl = await redis_client.ttl(rate_limit_key)
+        raise HTTPException(
+            status_code=429,  # Too Many Requests
+            detail=f"لطفاً {ttl} ثانیه دیگر تلاش کنید."
+        )
+    
     # 1. Check if user exists
     stmt = select(User).where(User.mobile_number == request.mobile_number, User.is_deleted == False)
     result = await db.execute(stmt)
@@ -147,6 +159,10 @@ async def request_otp(
     
     # 3. Store in Redis (120 seconds expiry)
     await redis_client.set(f"OTP:{request.mobile_number}", otp_code, ex=120)
+    
+    # ===== ست کردن Rate Limit (120 ثانیه = 2 دقیقه) =====
+    await redis_client.set(rate_limit_key, "1", ex=120)
+    
     print(f"DEBUG OTP for {request.mobile_number}: {otp_code}")
     
     # 4. Send via Telegram
