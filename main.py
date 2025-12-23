@@ -1,11 +1,13 @@
 import logging
 from pathlib import Path
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from api.routers import auth, invitations, commodities, users, notifications, trading_settings, offers, trades, realtime
 from core.config import settings
+from core.redis import init_redis, close_redis
 import schemas
 
 # -------------------------------------------------------
@@ -18,7 +20,25 @@ API_PREFIX = "/api"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("trading_bot.main")
 
-app = FastAPI(title="Trading Bot Backend + Vue Frontend")
+
+# -------------------------------------------------------
+# 🔄 Lifespan - مدیریت Lifecycle (Startup/Shutdown)
+# -------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """مدیریت startup و shutdown اپلیکیشن."""
+    # Startup
+    logger.info("🚀 Application startup...")
+    await init_redis()
+    
+    yield  # اجرای اپلیکیشن
+    
+    # Shutdown
+    logger.info("🛑 Application shutdown...")
+    await close_redis()
+
+
+app = FastAPI(title="Trading Bot Backend + Vue Frontend", lifespan=lifespan)
 
 # -------------------------------------------------------
 # 🧩 تنظیم CORS
