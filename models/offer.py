@@ -1,6 +1,6 @@
 # models/offer.py
 """مدل لفظ (درخواست خرید/فروش در کانال)"""
-from sqlalchemy import Column, Integer, String, BigInteger, Enum, DateTime, ForeignKey, Boolean, JSON, CheckConstraint
+from sqlalchemy import Column, Integer, String, BigInteger, Enum, DateTime, ForeignKey, Boolean, JSON, CheckConstraint, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -23,11 +23,13 @@ class Offer(Base):
     """لفظ - درخواست خرید/فروش در کانال"""
     __tablename__ = "offers"
     
-    # ===== Database Constraints =====
+    # ===== Database Constraints & Indexes =====
     __table_args__ = (
         CheckConstraint('quantity > 0', name='ck_offers_quantity_positive'),
         CheckConstraint('price > 0', name='ck_offers_price_positive'),
         CheckConstraint('remaining_quantity >= 0', name='ck_offers_remaining_nonnegative'),
+        # ایندکس ترکیبی برای کوئری‌های رایج: WHERE status='active' AND commodity_id=X
+        Index('ix_offers_status_commodity', 'status', 'commodity_id'),
     )
     
     id = Column(Integer, primary_key=True, index=True)
