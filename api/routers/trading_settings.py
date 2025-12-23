@@ -8,8 +8,8 @@ from typing import Optional
 from .auth import verify_super_admin_or_dev_key
 from core.trading_settings import (
     TradingSettings, 
-    load_trading_settings, 
-    save_trading_settings,
+    load_trading_settings,
+    save_trading_settings_async,
     refresh_settings_cache
 )
 
@@ -17,7 +17,6 @@ from core.trading_settings import (
 router = APIRouter(
     prefix="/trading-settings",
     tags=["Trading Settings"],
-    dependencies=[Depends(verify_super_admin_or_dev_key)]
 )
 
 
@@ -32,49 +31,92 @@ class TradingSettingsUpdate(BaseModel):
     offer_expire_daily_limit_after_threshold: Optional[int] = None
 
 
-@router.get("/", response_model=TradingSettings)
+class TradingSettingsResponse(BaseModel):
+    """مدل پاسخ تنظیمات (بدون property ها)"""
+    invitation_expiry_days: int
+    offer_expiry_minutes: int
+    offer_min_quantity: int
+    offer_max_quantity: int
+    max_active_offers: int
+    offer_expire_rate_per_minute: int
+    offer_expire_daily_limit_after_threshold: int
+    
+    # مقادیر محاسباتی
+    invitation_expiry_minutes: int
+    lot_min_size: int
+    lot_max_count: int
+
+
+@router.get("/", response_model=TradingSettingsResponse)
 async def get_settings():
-    """دریافت تنظیمات فعلی"""
-    return load_trading_settings()
+    """دریافت تنظیمات فعلی - برای همه کاربران قابل دسترس"""
+    settings = load_trading_settings()
+    return TradingSettingsResponse(
+        invitation_expiry_days=settings.invitation_expiry_days,
+        offer_expiry_minutes=settings.offer_expiry_minutes,
+        offer_min_quantity=settings.offer_min_quantity,
+        offer_max_quantity=settings.offer_max_quantity,
+        max_active_offers=settings.max_active_offers,
+        offer_expire_rate_per_minute=settings.offer_expire_rate_per_minute,
+        offer_expire_daily_limit_after_threshold=settings.offer_expire_daily_limit_after_threshold,
+        invitation_expiry_minutes=settings.invitation_expiry_minutes,
+        lot_min_size=settings.lot_min_size,
+        lot_max_count=settings.lot_max_count,
+    )
 
 
-@router.put("/", response_model=TradingSettings)
+@router.put("/", response_model=TradingSettingsResponse, dependencies=[Depends(verify_super_admin_or_dev_key)])
 async def update_settings(updates: TradingSettingsUpdate):
-    """بروزرسانی تنظیمات"""
+    """بروزرسانی تنظیمات - فقط ادمین ارشد"""
     current = load_trading_settings()
     
     # بروزرسانی فقط مقادیر ارسال شده
     update_data = updates.model_dump(exclude_unset=True)
+    current_dict = current.model_dump()
+    
     for key, value in update_data.items():
         if value is not None:
-            setattr(current, key, value)
+            current_dict[key] = value
     
     # اعتبارسنجی
-    if current.offer_min_quantity > current.offer_max_quantity:
+    if current_dict['offer_min_quantity'] > current_dict['offer_max_quantity']:
         raise HTTPException(
             status_code=400, 
             detail="حداقل تعداد نمی‌تواند بیشتر از حداکثر باشد"
         )
     
-    # ذخیره
-    if not save_trading_settings(current):
+    # ذخیره در دیتابیس
+    success = await save_trading_settings_async(current_dict)
+    if not success:
         raise HTTPException(
             status_code=500,
             detail="خطا در ذخیره تنظیمات"
         )
     
-    # بروزرسانی کش
-    refresh_settings_cache()
+    # بارگذاری مجدد برای گرفتن مقادیر بروز
+    updated = load_trading_settings()
     
-    return current
+    return TradingSettingsResponse(
+        invitation_expiry_days=updated.invitation_expiry_days,
+        offer_expiry_minutes=updated.offer_expiry_minutes,
+        offer_min_quantity=updated.offer_min_quantity,
+        offer_max_quantity=updated.offer_max_quantity,
+        max_active_offers=updated.max_active_offers,
+        offer_expire_rate_per_minute=updated.offer_expire_rate_per_minute,
+        offer_expire_daily_limit_after_threshold=updated.offer_expire_daily_limit_after_threshold,
+        invitation_expiry_minutes=updated.invitation_expiry_minutes,
+        lot_min_size=updated.lot_min_size,
+        lot_max_count=updated.lot_max_count,
+    )
 
 
-@router.post("/reset", response_model=TradingSettings)
+@router.post("/reset", response_model=TradingSettingsResponse, dependencies=[Depends(verify_super_admin_or_dev_key)])
 async def reset_settings():
-    """بازنشانی تنظیمات به مقادیر پیش‌فرض"""
+    """بازنشانی تنظیمات به مقادیر پیش‌فرض - فقط ادمین ارشد"""
     default_settings = TradingSettings()
     
-    if not save_trading_settings(default_settings):
+    success = await save_trading_settings_async(default_settings.model_dump())
+    if not success:
         raise HTTPException(
             status_code=500,
             detail="خطا در بازنشانی تنظیمات"
@@ -82,4 +124,15 @@ async def reset_settings():
     
     refresh_settings_cache()
     
-    return default_settings
+    return TradingSettingsResponse(
+        invitation_expiry_days=default_settings.invitation_expiry_days,
+        offer_expiry_minutes=default_settings.offer_expiry_minutes,
+        offer_min_quantity=default_settings.offer_min_quantity,
+        offer_max_quantity=default_settings.offer_max_quantity,
+        max_active_offers=default_settings.max_active_offers,
+        offer_expire_rate_per_minute=default_settings.offer_expire_rate_per_minute,
+        offer_expire_daily_limit_after_threshold=default_settings.offer_expire_daily_limit_after_threshold,
+        invitation_expiry_minutes=default_settings.invitation_expiry_minutes,
+        lot_min_size=default_settings.lot_min_size,
+        lot_max_count=default_settings.lot_max_count,
+    )
