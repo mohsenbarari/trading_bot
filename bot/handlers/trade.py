@@ -983,11 +983,25 @@ async def handle_channel_trade(callback: types.CallbackQuery, user: Optional[Use
     from models.trade import Trade, TradeType, TradeStatus
     from sqlalchemy.orm import joinedload
     from bot.utils.redis_helpers import check_double_click
+    from core.utils import check_user_limits
+    from datetime import datetime
+    
+    # ===== بررسی مسدودیت کاربر =====
+    if user.trading_restricted_until and user.trading_restricted_until > datetime.utcnow():
+        await callback.answer("⛔ حساب شما مسدود است", show_alert=True)
+        return
     
     # پارس callback_data: channel_trade_{offer_id}_{amount}
     parts = callback.data.split("_")
     offer_id = int(parts[2])
     trade_amount = int(parts[3]) if len(parts) > 3 else None
+    
+    # ===== بررسی محدودیت کاربر =====
+    # باید قبل از قفل offer انجام شود
+    allowed, error_msg = check_user_limits(user, 'trade', trade_amount or 1)
+    if not allowed:
+        await callback.answer(f"⚠️ {error_msg}", show_alert=True)
+        return
     
     async with AsyncSessionLocal() as session:
         # اول قفل را بگیر، سپس روابط را بارگذاری کن
