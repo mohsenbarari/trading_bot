@@ -218,14 +218,31 @@ async def create_offer(
     commodity = await db.get(Commodity, offer_data.commodity_id)
     if not commodity:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کالا یافت نشد.")
+
+    # ===== اعتبارسنجی‌های مشترک (Shared Service) =====
+    from core.services.trade_service import validate_quantity, validate_price, validate_lot_sizes
     
-    # اعتبارسنجی lot_sizes
+    # 1. اعتبارسنجی تعداد
+    is_valid_qty, err_qty = validate_quantity(offer_data.quantity)
+    if not is_valid_qty:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_qty)
+
+    # 2. اعتبارسنجی قیمت
+    is_valid_price, err_price = validate_price(offer_data.price)
+    if not is_valid_price:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_price)
+    
+    # 3. اعتبارسنجی لات‌ها
     if not offer_data.is_wholesale and offer_data.lot_sizes:
-        if sum(offer_data.lot_sizes) != offer_data.quantity:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="مجموع بخش‌ها باید برابر با تعداد کل باشد."
-            )
+        is_valid_lots, err_lots, suggested_lots = validate_lot_sizes(offer_data.quantity, offer_data.lot_sizes)
+        if not is_valid_lots:
+            detail_msg = err_lots
+            # اگر پیشنهاد اصلاح دارد، آن را به کاربر نشان می‌دهیم
+            if suggested_lots:
+                # اینجا می‌توانیم پیشنهاد را در قالب خاصی بفرستیم، اما فعلاً در متن خطا می‌گذاریم
+                pass 
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail_msg)
+
     
     # ایجاد لفظ
     new_offer = Offer(
