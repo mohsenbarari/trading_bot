@@ -219,37 +219,74 @@ def check_user_limits(user, action_type: str, quantity: int = 1) -> tuple[bool, 
 
 async def increment_user_counter(session: AsyncSession, user, action_type: str, quantity: int = 1) -> None:
     """
-    شمارنده مربوط به عملیات را افزایش می‌دهد.
+    شمارنده مربوط به عملیات را به صورت اتمیک افزایش می‌دهد.
+    
+    این تابع از UPDATE اتمیک در سطح دیتابیس استفاده می‌کند
+    تا از Race Condition در محیط‌های با همزمانی بالا جلوگیری شود.
     
     action_type: 'trade' یا 'channel_message'
     quantity: تعداد کالا (برای trade)
     """
     import logging
+    from sqlalchemy import update
+    from models.user import User
+    
     logger = logging.getLogger(__name__)
     
     logger.info(f"increment_user_counter called: action_type={action_type}, quantity={quantity}, user_id={user.id if user else 'None'}")
     
-    if action_type == 'trade':
-        old_trades = user.trades_count
-        old_commodities = user.commodities_traded_count
-        user.trades_count += 1
-        user.commodities_traded_count += quantity
-        logger.info(f"Updated trades_count: {old_trades} -> {user.trades_count}, commodities_traded_count: {old_commodities} -> {user.commodities_traded_count}")
-    elif action_type == 'channel_message':
-        old_messages = user.channel_messages_count
-        user.channel_messages_count += 1
-        logger.info(f"Updated channel_messages_count: {old_messages} -> {user.channel_messages_count}")
-    
     try:
+        if action_type == 'trade':
+            # آپدیت اتمیک در سطح دیتابیس - جلوگیری از Race Condition
+            stmt = (
+                update(User)
+                .where(User.id == user.id)
+                .values(
+                    trades_count=User.trades_count + 1,
+                    commodities_traded_count=User.commodities_traded_count + quantity
+                )
+            )
+            await session.execute(stmt)
+            logger.info(f"Atomic update: trades_count += 1, commodities_traded_count += {quantity}")
+            
+        elif action_type == 'channel_message':
+            # آپدیت اتمیک برای شمارنده پیام‌ها
+            stmt = (
+                update(User)
+                .where(User.id == user.id)
+                .values(channel_messages_count=User.channel_messages_count + 1)
+            )
+            await session.execute(stmt)
+            logger.info(f"Atomic update: channel_messages_count += 1")
+        
         await session.commit()
+        
+        # بروزرسانی مقادیر در آبجکت فعلی (برای استفاده در کد بعدی)
+        await session.refresh(user)
+        
         logger.info("Session committed successfully")
     except Exception as e:
-        logger.error(f"Error committing session: {e}")
+        logger.error(f"Error in atomic update: {e}")
+        await session.rollback()
         raise
 
 
-def reset_user_counters(user) -> None:
-    """شمارنده‌های کاربر را صفر می‌کند."""
-    user.trades_count = 0
-    user.commodities_traded_count = 0
-    user.channel_messages_count = 0
+async def reset_user_counters(session: AsyncSession, user) -> None:
+    """
+    شمارنده‌های کاربر را به صورت اتمیک صفر می‌کند.
+    """
+    from sqlalchemy import update
+    from models.user import User
+    
+    stmt = (
+        update(User)
+        .where(User.id == user.id)
+        .values(
+            trades_count=0,
+            commodities_traded_count=0,
+            channel_messages_count=0
+        )
+    )
+    await session.execute(stmt)
+    await session.commit()
+    await session.refresh(user)
