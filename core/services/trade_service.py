@@ -13,6 +13,12 @@ def suggest_lot_combination(total: int, user_lots: List[int]) -> Optional[List[i
     """
     پیشنهاد ترکیب بهینه لات‌ها اگر ترکیب کاربر درست نباشد.
     
+    الگوریتم:
+    1. اگر جمع درست است، همان را برگردان
+    2. اگر کمبود داریم، به بزرگترین لات اضافه کن
+    3. اگر اضافه داریم، از بزرگترین‌ها کم کن (با رعایت MIN_LOT)
+    4. لات‌های کوچکتر از MIN_LOT را حذف کن
+    
     Args:
         total: تعداد کل کالا
         user_lots: لیست لات‌های وارد شده توسط کاربر
@@ -20,34 +26,44 @@ def suggest_lot_combination(total: int, user_lots: List[int]) -> Optional[List[i
     Returns:
         لیست پیشنهادی یا None اگر امکان اصلاح نباشد
     """
+    if not user_lots:
+        return None
+    
     settings = get_trading_settings()
     MIN_LOT = settings.lot_min_size
     
-    user_sum = sum(user_lots)
-    diff = total - user_sum
+    current_sum = sum(user_lots)
     
-    if diff == 0:
-        return user_lots
+    # اگر جمع درست است، همان را برگردان
+    if current_sum == total:
+        return sorted(user_lots, reverse=True)
     
+    # مرتب‌سازی نزولی برای کار با بزرگترین‌ها اول
     suggested = sorted(user_lots, reverse=True)
+    diff = total - current_sum
     
     if diff > 0:
-        # کمبود - به بزرگترین اضافه کن
+        # کمبود داریم - به بزرگترین اضافه کن
         suggested[0] += diff
     else:
-        # اضافه - از بزرگترین کم کن
+        # اضافه داریم - از بزرگترین‌ها کم کن
+        remaining_excess = -diff
+        
         for i in range(len(suggested)):
-            reduction = min(suggested[i] - MIN_LOT, -diff)
-            if reduction > 0:
-                suggested[i] -= reduction
-                diff += reduction
-            if diff == 0:
+            # حداکثر مقداری که می‌توانیم کم کنیم (با حفظ MIN_LOT)
+            max_reduction = max(0, suggested[i] - MIN_LOT)
+            reduction = min(max_reduction, remaining_excess)
+            
+            suggested[i] -= reduction
+            remaining_excess -= reduction
+            
+            if remaining_excess == 0:
                 break
     
-    # فیلتر کردن موارد کوچکتر از MIN_LOT
-    suggested = [x for x in suggested if x >= MIN_LOT]
+    # حذف لات‌های کوچکتر از حداقل
+    suggested = [lot for lot in suggested if lot >= MIN_LOT]
     
-    # اگر هنوز جمع نمی‌شود، None بده
+    # بررسی نهایی: آیا جمع درست شد؟
     if sum(suggested) != total:
         return None
     
