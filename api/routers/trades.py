@@ -2,7 +2,7 @@
 """
 API Router for Trade Management - MiniApp Integration
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -146,11 +146,86 @@ async def update_channel_buttons(offer: Offer) -> bool:
         return False
 
 
+# ===== Sync Wrappers for BackgroundTasks =====
+# FastAPI BackgroundTasks نیاز به توابع sync دارد (async پشتیبانی نمی‌شود)
+
+def send_telegram_message_sync(chat_id: int, text: str) -> bool:
+    """نسخه sync برای استفاده در BackgroundTasks"""
+    import asyncio
+    try:
+        return asyncio.run(_send_telegram_message_async(chat_id, text))
+    except Exception as e:
+        print(f"[Background] Error sending telegram message: {e}")
+        return False
+
+
+async def _send_telegram_message_async(chat_id: int, text: str) -> bool:
+    """Helper async function"""
+    bot_token = os.getenv("BOT_TOKEN")
+    if not bot_token:
+        return False
+    
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, timeout=10)
+        return response.status_code == 200
+
+
+def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, lot_sizes) -> bool:
+    """نسخه sync برای استفاده در BackgroundTasks"""
+    import asyncio
+    try:
+        return asyncio.run(_update_channel_buttons_async(offer_id, remaining_quantity, status, lot_sizes))
+    except Exception as e:
+        print(f"[Background] Error updating channel buttons: {e}")
+        return False
+
+
+async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, offer_status, lot_sizes) -> bool:
+    """Helper async function - باید offer را از دیتابیس بخواند"""
+    from core.db import AsyncSessionLocal
+    
+    bot_token = os.getenv("BOT_TOKEN")
+    channel_id = settings.channel_id
+    
+    if not bot_token or not channel_id:
+        return False
+    
+    # گرفتن اطلاعات offer از دیتابیس
+    async with AsyncSessionLocal() as session:
+        offer = await session.get(Offer, offer_id)
+        if not offer or not offer.channel_message_id:
+            return False
+        
+        url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
+        
+        if remaining_quantity <= 0 or offer_status != OfferStatus.ACTIVE:
+            payload = {"chat_id": channel_id, "message_id": offer.channel_message_id}
+        else:
+            if offer.is_wholesale or not lot_sizes:
+                buttons = [[{"text": f"{remaining_quantity} عدد", "callback_data": f"channel_trade_{offer_id}_{remaining_quantity}"}]]
+            else:
+                valid_lots = [l for l in lot_sizes if l <= remaining_quantity]
+                if remaining_quantity not in valid_lots:
+                    valid_lots = [remaining_quantity] + valid_lots
+                valid_lots = sorted(set(valid_lots), reverse=True)
+                buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade_{offer_id}_{a}"} for a in valid_lots]]
+            
+            payload = {"chat_id": channel_id, "message_id": offer.channel_message_id, "reply_markup": {"inline_keyboard": buttons}}
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, timeout=10)
+        return response.status_code == 200
+
+
 # --- Endpoints ---
 
 @router.post("/", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)
 async def create_trade(
     trade_data: TradeCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -271,8 +346,11 @@ async def create_trade(
     )
     new_trade = result.scalar_one()
     
-    # آپدیت دکمه‌های کانال
-    await update_channel_buttons(offer)
+    # ===== ارسال پیام‌های تلگرام در Background (غیر-بلاکینگ) =====
+    # این کار باعث می‌شود پاسخ API سریعتر برگردد
+    
+    # آپدیت دکمه‌های کانال (در background)
+    background_tasks.add_task(update_channel_buttons_sync, offer.id, offer.remaining_quantity, offer.status, offer.lot_sizes)
     
     # ارسال نوتیفیکیشن‌ها
     now = datetime.utcnow()
@@ -313,10 +391,10 @@ async def create_trade(
         f"🕐 زمان معامله: {trade_datetime}"
     )
     
-    # ارسال پیام تلگرام
-    await send_telegram_message(current_user.telegram_id, responder_msg)
+    # ارسال پیام‌های تلگرام (در background)
+    background_tasks.add_task(send_telegram_message_sync, current_user.telegram_id, responder_msg)
     if offer.user:
-        await send_telegram_message(offer.user.telegram_id, offer_owner_msg)
+        background_tasks.add_task(send_telegram_message_sync, offer.user.telegram_id, offer_owner_msg)
     
     # ارسال نوتیفیکیشن اپ
     notif_msg_responder = (
