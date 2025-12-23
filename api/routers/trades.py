@@ -239,7 +239,18 @@ async def create_trade(
     if offer.remaining_quantity <= 0:
         offer.status = OfferStatus.COMPLETED
     
-    await db.commit()
+    # Commit با محافظت Optimistic Locking
+    try:
+        await db.commit()
+    except Exception as e:
+        # بررسی StaleDataError (تغییر همزمان توسط کاربر دیگر)
+        if "StaleDataError" in str(type(e).__name__) or "could not update" in str(e).lower():
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="این لفظ توسط کاربر دیگری در حال معامله است. لطفاً دوباره تلاش کنید."
+            )
+        raise
     
     # بارگذاری روابط معامله
     result = await db.execute(

@@ -25,6 +25,10 @@ class Offer(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     
+    # ===== Optimistic Locking =====
+    # این ستون برای جلوگیری از Lost Update در درخواست‌های همزمان استفاده می‌شود
+    version_id = Column(Integer, nullable=False, default=1)
+    
     # کاربر لفظ‌دهنده - nullable برای حفظ رکورد پس از حذف کاربر
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     user = relationship("User", foreign_keys=[user_id])
@@ -61,3 +65,9 @@ class Offer(Base):
     # زمان ایجاد
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    
+    # ===== فعال‌سازی Optimistic Locking =====
+    __mapper_args__ = {
+        "version_id_col": version_id
+    }
+
