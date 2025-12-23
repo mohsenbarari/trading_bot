@@ -73,7 +73,8 @@ async def read_all_users(
     db: AsyncSession = Depends(get_db)
 ):
     """دریافت لیست کاربران با قابلیت جستجو (فقط برای مدیر ارشد)"""
-    query = select(User).order_by(User.id.desc())
+    # فیلتر کردن کاربران حذف شده
+    query = select(User).where(User.is_deleted == False).order_by(User.id.desc())
     
     if search:
         search_pattern = f"%{search}%"

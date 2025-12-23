@@ -58,7 +58,7 @@ async def get_current_user_from_token(token: str, db: AsyncSession = Depends(get
     except (JWTError, ValueError): # ValueError برای حالتی که تبدیل به عدد شکست بخورد
         raise credentials_exception
     
-    stmt = select(User).where(User.telegram_id == telegram_id)
+    stmt = select(User).where(User.telegram_id == telegram_id, User.is_deleted == False)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
     if user is None:
@@ -111,7 +111,7 @@ async def get_admin_user_dependency(
             raise credentials_exception
 
     if api_key_header == settings.dev_api_key and settings.dev_api_key:
-        stmt = select(User).where(User.role == UserRole.SUPER_ADMIN).limit(1)
+        stmt = select(User).where(User.role == UserRole.SUPER_ADMIN, User.is_deleted == False).limit(1)
         result = await db.execute(stmt)
         admin_user = result.scalar_one_or_none()
         if admin_user:
@@ -132,7 +132,7 @@ async def request_otp(
     redis_client: Redis = Depends(get_redis)
 ):
     # 1. Check if user exists
-    stmt = select(User).where(User.mobile_number == request.mobile_number)
+    stmt = select(User).where(User.mobile_number == request.mobile_number, User.is_deleted == False)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
     
@@ -176,7 +176,7 @@ async def verify_otp(
         raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است.")
     
     # 3. Get User
-    stmt = select(User).where(User.mobile_number == request.mobile_number)
+    stmt = select(User).where(User.mobile_number == request.mobile_number, User.is_deleted == False)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
     
@@ -229,7 +229,7 @@ async def webapp_login(init_data_obj: schemas.WebAppInitData, db: AsyncSession =
     user_data = json.loads(user_data_str)
     telegram_id = user_data.get('id') # این عدد صحیح است
 
-    stmt = select(User).where(User.telegram_id == telegram_id)
+    stmt = select(User).where(User.telegram_id == telegram_id, User.is_deleted == False)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
 

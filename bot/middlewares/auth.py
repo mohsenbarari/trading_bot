@@ -28,9 +28,9 @@ class AuthMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         async with self.session_pool() as session:
-            # کاربر را از دیتابیس خودمان پیدا می‌کنیم
+            # کاربر را از دیتابیس خودمان پیدا می‌کنیم (فقط کاربران فعال)
             user = (await session.execute(
-                select(User).where(User.telegram_id == user_telegram_obj.id)
+                select(User).where(User.telegram_id == user_telegram_obj.id, User.is_deleted == False)
             )).scalar_one_or_none()
             
             # آبجکت کاربر دیتابیس (که ممکن است None باشد) را به data اضافه می‌کنیم
