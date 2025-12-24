@@ -1,8 +1,8 @@
 # models/trading_setting.py
 """مدل تنظیمات معاملاتی در دیتابیس"""
 
-from datetime import datetime
 from sqlalchemy import Column, String, Text, DateTime
+from sqlalchemy.sql import func
 from models.database import Base
 
 
@@ -22,7 +22,7 @@ class TradingSetting(Base):
     value = Column(Text, nullable=False)
     
     # زمان آخرین بروزرسانی
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     def __repr__(self):
         return f"<TradingSetting {self.key}={self.value}>"

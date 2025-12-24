@@ -39,6 +39,7 @@ class User(Base):
     channel_messages_count = Column(Integer, nullable=False, default=0)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
     
     @property
     def is_active(self) -> bool:

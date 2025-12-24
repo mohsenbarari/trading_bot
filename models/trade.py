@@ -1,6 +1,6 @@
 # models/trade.py
 """مدل معامله (تراکنش واقعی بین دو کاربر)"""
-from sqlalchemy import Column, Integer, String, BigInteger, Enum, DateTime, ForeignKey, Text, CheckConstraint
+from sqlalchemy import Column, Integer, String, BigInteger, Enum, DateTime, ForeignKey, Text, CheckConstraint, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -23,13 +23,21 @@ class Trade(Base):
     """معامله - تراکنش واقعی بین دو کاربر"""
     __tablename__ = "trades"
     
-    # ===== Database Constraints =====
+    # ===== Database Constraints & Indexes =====
     __table_args__ = (
         CheckConstraint('quantity > 0', name='ck_trades_quantity_positive'),
         CheckConstraint('price > 0', name='ck_trades_price_positive'),
+        # ایندکس ترکیبی برای کوئری‌های رایج: معاملات یک کاربر با وضعیت خاص
+        Index('ix_trades_status_offer_user', 'status', 'offer_user_id'),
+        Index('ix_trades_status_responder', 'status', 'responder_user_id'),
+        Index('ix_trades_created_at', 'created_at'),
     )
     
     id = Column(Integer, primary_key=True, index=True)
+    
+    # ===== Optimistic Locking =====
+    # این ستون برای جلوگیری از Lost Update در درخواست‌های همزمان استفاده می‌شود
+    version_id = Column(Integer, nullable=False, default=1)
     
     # شماره معامله (5 رقمی به بالا، شروع از 10000)
     trade_number = Column(Integer, unique=True, nullable=False, index=True)
@@ -67,6 +75,11 @@ class Trade(Base):
     
     # زمان‌ها
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
     confirmed_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
-
+    
+    # ===== فعال‌سازی Optimistic Locking =====
+    __mapper_args__ = {
+        "version_id_col": version_id
+    }
