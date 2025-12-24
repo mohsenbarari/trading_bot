@@ -1,15 +1,79 @@
+# core/services/trade_service.py
 """
 Trade Service - منطق مشترک معاملات
+
 این ماژول شامل توابع محاسبه لات، اعتبارسنجی و پیشنهاد قیمت است
 که هم توسط بات و هم توسط API استفاده می‌شود.
 """
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Union
+
 from core.trading_settings import get_trading_settings
+
+__all__ = [
+    "suggest_lot_combination",
+    "generate_default_lots",
+    "validate_lot_sizes",
+    "validate_quantity",
+    "validate_price",
+    "parse_lot_sizes_text",
+]
+
+
+# ===== INPUT VALIDATION HELPERS =====
+
+def _ensure_int(value: Union[int, float, str], name: str) -> int:
+    """
+    اطمینان از اینکه مقدار ورودی یک عدد صحیح است.
+    
+    Args:
+        value: مقدار ورودی
+        name: نام پارامتر (برای پیام خطا)
+        
+    Returns:
+        int: مقدار تبدیل شده
+        
+    Raises:
+        TypeError: اگر تبدیل ممکن نباشد
+    """
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if value != int(value):
+            raise TypeError(f"{name} باید یک عدد صحیح باشد، نه اعشاری")
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            raise TypeError(f"{name} باید یک عدد صحیح باشد")
+    raise TypeError(f"{name} باید یک عدد صحیح باشد")
+
+
+def _ensure_int_list(values: List[Union[int, float, str]], name: str) -> List[int]:
+    """
+    اطمینان از اینکه لیست ورودی شامل اعداد صحیح است.
+    
+    Args:
+        values: لیست مقادیر ورودی
+        name: نام پارامتر (برای پیام خطا)
+        
+    Returns:
+        List[int]: لیست تبدیل شده
+        
+    Raises:
+        TypeError: اگر تبدیل ممکن نباشد
+    """
+    if not isinstance(values, (list, tuple)):
+        raise TypeError(f"{name} باید یک لیست باشد")
+    return [_ensure_int(v, f"{name}[{i}]") for i, v in enumerate(values)]
 
 
 # ===== LOT CALCULATION =====
 
-def suggest_lot_combination(total: int, user_lots: List[int]) -> Optional[List[int]]:
+def suggest_lot_combination(
+    total: Union[int, float, str],
+    user_lots: List[Union[int, float, str]]
+) -> Optional[List[int]]:
     """
     پیشنهاد ترکیب بهینه لات‌ها اگر ترکیب کاربر درست نباشد.
     
@@ -26,6 +90,13 @@ def suggest_lot_combination(total: int, user_lots: List[int]) -> Optional[List[i
     Returns:
         لیست پیشنهادی یا None اگر امکان اصلاح نباشد
     """
+    # اعتبارسنجی ورودی
+    try:
+        total = _ensure_int(total, "total")
+        user_lots = _ensure_int_list(user_lots, "user_lots")
+    except TypeError:
+        return None
+    
     if not user_lots:
         return None
     
@@ -70,7 +141,7 @@ def suggest_lot_combination(total: int, user_lots: List[int]) -> Optional[List[i
     return sorted(suggested, reverse=True)
 
 
-def generate_default_lots(quantity: int) -> Optional[List[int]]:
+def generate_default_lots(quantity: Union[int, float, str]) -> Optional[List[int]]:
     """
     تولید ترکیب پیش‌فرض لات‌ها بر اساس تعداد.
     
@@ -80,10 +151,19 @@ def generate_default_lots(quantity: int) -> Optional[List[int]]:
     Returns:
         لیست لات‌های پیشنهادی
     """
+    # اعتبارسنجی ورودی
+    try:
+        quantity = _ensure_int(quantity, "quantity")
+    except TypeError:
+        return None
+    
     settings = get_trading_settings()
     MIN_LOT = settings.lot_min_size
     
-    if quantity >= 30:
+    # استفاده از تنظیمات به جای hardcoded مقدار 30
+    THRESHOLD_3_LOTS = settings.offer_min_quantity * 6  # حدود 30 اگر min=5
+    
+    if quantity >= THRESHOLD_3_LOTS:
         lot1 = quantity // 3
         lot2 = quantity // 3
         lot3 = quantity - lot1 - lot2
@@ -98,7 +178,10 @@ def generate_default_lots(quantity: int) -> Optional[List[int]]:
 
 # ===== VALIDATION =====
 
-def validate_lot_sizes(total: int, lot_sizes: List[int]) -> Tuple[bool, str, Optional[List[int]]]:
+def validate_lot_sizes(
+    total: Union[int, float, str],
+    lot_sizes: List[Union[int, float, str]]
+) -> Tuple[bool, str, Optional[List[int]]]:
     """
     اعتبارسنجی ترکیب لات‌ها.
     
@@ -109,6 +192,13 @@ def validate_lot_sizes(total: int, lot_sizes: List[int]) -> Tuple[bool, str, Opt
     Returns:
         (is_valid, error_message, suggested_lots)
     """
+    # اعتبارسنجی ورودی
+    try:
+        total = _ensure_int(total, "total")
+        lot_sizes = _ensure_int_list(lot_sizes, "lot_sizes")
+    except TypeError as e:
+        return False, f"❌ {str(e)}", None
+    
     settings = get_trading_settings()
     MIN_LOT = settings.lot_min_size
     MAX_LOTS = settings.lot_max_count
@@ -132,7 +222,7 @@ def validate_lot_sizes(total: int, lot_sizes: List[int]) -> Tuple[bool, str, Opt
     return True, "", lot_sizes
 
 
-def validate_quantity(quantity: int) -> Tuple[bool, str]:
+def validate_quantity(quantity: Union[int, float, str]) -> Tuple[bool, str]:
     """
     اعتبارسنجی تعداد کالا.
     
@@ -142,6 +232,12 @@ def validate_quantity(quantity: int) -> Tuple[bool, str]:
     Returns:
         (is_valid, error_message)
     """
+    # اعتبارسنجی ورودی
+    try:
+        quantity = _ensure_int(quantity, "quantity")
+    except TypeError as e:
+        return False, f"❌ {str(e)}"
+    
     settings = get_trading_settings()
     MIN_QTY = settings.offer_min_quantity
     MAX_QTY = settings.offer_max_quantity
@@ -155,7 +251,7 @@ def validate_quantity(quantity: int) -> Tuple[bool, str]:
     return True, ""
 
 
-def validate_price(price: int) -> Tuple[bool, str]:
+def validate_price(price: Union[int, float, str]) -> Tuple[bool, str]:
     """
     اعتبارسنجی قیمت.
     
@@ -165,6 +261,12 @@ def validate_price(price: int) -> Tuple[bool, str]:
     Returns:
         (is_valid, error_message)
     """
+    # اعتبارسنجی ورودی
+    try:
+        price = _ensure_int(price, "price")
+    except TypeError as e:
+        return False, f"❌ {str(e)}"
+    
     if price <= 0:
         return False, "❌ قیمت باید بزرگ‌تر از صفر باشد."
     
@@ -185,6 +287,9 @@ def parse_lot_sizes_text(text: str) -> Tuple[bool, str, Optional[List[int]]]:
     """
     settings = get_trading_settings()
     MIN_LOT = settings.lot_min_size
+    
+    if not isinstance(text, str):
+        return False, "❌ ورودی باید متن باشد.", None
     
     text = text.strip()
     if not text:

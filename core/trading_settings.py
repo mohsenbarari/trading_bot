@@ -2,19 +2,38 @@
 """
 مدیریت تنظیمات قابل تغییر سیستم معاملاتی
 
-این ماژول تنظیمات را از دیتابیس می‌خواند و در حافظه کش می‌کند.
+این ماژول تنظیمات را از دیتابیس می‌خواند و در Redis کش می‌کند.
+استفاده از Redis به جای متغیر global باعث می‌شود همه workerها کش یکسان داشته باشند.
+
 برای سازگاری با کد قدیمی، اگر تنظیمات در دیتابیس نباشد، از JSON فایل می‌خواند.
 """
-
 import json
-import os
+import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
+
 from pydantic import BaseModel
+
+__all__ = [
+    "TradingSettings",
+    "get_trading_settings",
+    "load_trading_settings",
+    "refresh_settings_cache",
+    "save_trading_settings_async",
+    "get_setting",
+    "update_setting_async",
+]
+
+logger = logging.getLogger(__name__)
 
 # مسیر فایل تنظیمات (fallback)
 SETTINGS_FILE = Path(__file__).parent.parent / "trading_settings.json"
+
+# کلید کش در Redis
+REDIS_CACHE_KEY = "trading_settings:cache"
+CACHE_TTL_SECONDS = 60  # کش هر 60 ثانیه منقضی می‌شود
 
 
 class TradingSettings(BaseModel):
@@ -58,10 +77,10 @@ class TradingSettings(BaseModel):
         return 3
 
 
-# ===== CACHE =====
-_cached_settings: Optional[TradingSettings] = None
-_cache_timestamp: float = 0
-CACHE_TTL_SECONDS = 60  # کش هر 60 ثانیه منقضی می‌شود
+# ===== IN-MEMORY FALLBACK CACHE =====
+# این کش فقط زمانی استفاده می‌شود که Redis در دسترس نباشد
+_fallback_cache: Optional[TradingSettings] = None
+_fallback_timestamp: float = 0
 
 
 def _load_from_json() -> dict:
@@ -70,26 +89,24 @@ def _load_from_json() -> dict:
         try:
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to load settings from JSON: {e}")
     return {}
 
 
-def _load_from_db_sync() -> dict:
+async def _load_from_db_async() -> dict:
     """
-    خواندن تنظیمات از دیتابیس (sync برای استفاده در context های غیر async).
-    اگر دیتابیس در دسترس نباشد، دیکشنری خالی برمی‌گرداند.
+    خواندن تنظیمات از دیتابیس (async).
+    این روش best practice است و از blocking جلوگیری می‌کند.
     """
     try:
-        from sqlalchemy import create_engine, select
-        from core.config import settings as app_settings
-        from models.trading_setting import TradingSetting
+        from sqlalchemy import text
+        from core.db import AsyncSessionLocal
         
-        # استفاده از sync database URL
-        engine = create_engine(app_settings.sync_database_url)
-        with engine.connect() as conn:
-            from sqlalchemy import text
-            result = conn.execute(text("SELECT key, value FROM trading_settings"))
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                text("SELECT key, value FROM trading_settings")
+            )
             rows = result.fetchall()
             
             data = {}
@@ -99,15 +116,51 @@ def _load_from_db_sync() -> dict:
                 except (json.JSONDecodeError, TypeError):
                     data[row[0]] = row[1]
             return data
+            
     except Exception as e:
-        # اگر دیتابیس در دسترس نیست، از fallback استفاده کن
+        logger.warning(f"Failed to load settings from DB: {e}")
         return {}
 
 
-def load_trading_settings() -> TradingSettings:
-    """خواندن تنظیمات (اول از DB، بعد از JSON)"""
+async def _get_from_redis_cache() -> Optional[TradingSettings]:
+    """خواندن تنظیمات از کش Redis"""
+    try:
+        from core.redis import get_redis_client
+        
+        redis_client = get_redis_client()
+        cached_data = await redis_client.get(REDIS_CACHE_KEY)
+        
+        if cached_data:
+            data = json.loads(cached_data)
+            return TradingSettings(**data)
+            
+    except Exception as e:
+        logger.debug(f"Redis cache miss or error: {e}")
+    
+    return None
+
+
+async def _set_redis_cache(settings: TradingSettings) -> None:
+    """ذخیره تنظیمات در کش Redis"""
+    try:
+        from core.redis import get_redis_client
+        
+        redis_client = get_redis_client()
+        data = settings.model_dump()
+        await redis_client.setex(
+            REDIS_CACHE_KEY,
+            CACHE_TTL_SECONDS,
+            json.dumps(data)
+        )
+        
+    except Exception as e:
+        logger.debug(f"Failed to set Redis cache: {e}")
+
+
+async def load_trading_settings_async() -> TradingSettings:
+    """خواندن تنظیمات (async) - اول از DB، بعد از JSON"""
     # اول از دیتابیس
-    db_data = _load_from_db_sync()
+    db_data = await _load_from_db_async()
     
     if db_data:
         return TradingSettings(**db_data)
@@ -121,34 +174,88 @@ def load_trading_settings() -> TradingSettings:
     return TradingSettings()
 
 
-def get_trading_settings() -> TradingSettings:
-    """گرفتن تنظیمات با کش (بررسی TTL)"""
-    global _cached_settings, _cache_timestamp
+def load_trading_settings() -> TradingSettings:
+    """
+    خواندن تنظیمات (sync fallback).
     
-    import time
+    توجه: این تابع برای سازگاری با کد قدیمی است.
+    در کد جدید از get_trading_settings_async() استفاده کنید.
+    """
+    # اول از JSON (غیر blocking)
+    json_data = _load_from_json()
+    if json_data:
+        return TradingSettings(**json_data)
+    
+    # مقادیر پیش‌فرض
+    return TradingSettings()
+
+
+async def get_trading_settings_async() -> TradingSettings:
+    """
+    گرفتن تنظیمات با کش Redis (async - توصیه شده).
+    
+    این تابع برای استفاده در context های async است.
+    """
+    # اول از کش Redis
+    cached = await _get_from_redis_cache()
+    if cached is not None:
+        return cached
+    
+    # بارگذاری از DB
+    settings = await load_trading_settings_async()
+    
+    # ذخیره در کش Redis
+    await _set_redis_cache(settings)
+    
+    return settings
+
+
+def get_trading_settings() -> TradingSettings:
+    """
+    گرفتن تنظیمات با کش (sync - برای سازگاری).
+    
+    این تابع از fallback cache استفاده می‌کند.
+    برای بهترین عملکرد، از get_trading_settings_async() استفاده کنید.
+    """
+    global _fallback_cache, _fallback_timestamp
+    
     current_time = time.time()
     
     # اگر کش معتبر است، از آن استفاده کن
-    if _cached_settings is not None and (current_time - _cache_timestamp) < CACHE_TTL_SECONDS:
-        return _cached_settings
+    if _fallback_cache is not None and (current_time - _fallback_timestamp) < CACHE_TTL_SECONDS:
+        return _fallback_cache
     
-    # بارگذاری مجدد
+    # بارگذاری مجدد (sync fallback)
     try:
-        _cached_settings = load_trading_settings()
-        _cache_timestamp = current_time
+        _fallback_cache = load_trading_settings()
+        _fallback_timestamp = current_time
     except Exception:
-        if _cached_settings is None:
-            _cached_settings = TradingSettings()
+        if _fallback_cache is None:
+            _fallback_cache = TradingSettings()
     
-    return _cached_settings
+    return _fallback_cache
 
 
-def refresh_settings_cache():
-    """بروزرسانی فوری کش تنظیمات"""
-    global _cached_settings, _cache_timestamp
-    import time
-    _cached_settings = load_trading_settings()
-    _cache_timestamp = time.time()
+async def refresh_settings_cache_async() -> None:
+    """بروزرسانی فوری کش تنظیمات (async)"""
+    global _fallback_cache, _fallback_timestamp
+    
+    settings = await load_trading_settings_async()
+    
+    # بروزرسانی Redis cache
+    await _set_redis_cache(settings)
+    
+    # بروزرسانی fallback cache
+    _fallback_cache = settings
+    _fallback_timestamp = time.time()
+
+
+def refresh_settings_cache() -> None:
+    """بروزرسانی فوری کش تنظیمات (sync fallback)"""
+    global _fallback_cache, _fallback_timestamp
+    
+    _fallback_cache = load_trading_settings()
+    _fallback_timestamp = time.time()
 
 
 async def save_trading_settings_async(settings_dict: dict) -> bool:
@@ -164,7 +271,6 @@ async def save_trading_settings_async(settings_dict: dict) -> bool:
     try:
         from sqlalchemy import text
         from core.db import AsyncSessionLocal
-        from models.trading_setting import TradingSetting
         
         async with AsyncSessionLocal() as session:
             for key, value in settings_dict.items():
@@ -191,11 +297,11 @@ async def save_trading_settings_async(settings_dict: dict) -> bool:
             await session.commit()
         
         # بروزرسانی کش
-        refresh_settings_cache()
+        await refresh_settings_cache_async()
         return True
         
     except Exception as e:
-        print(f"Error saving trading settings: {e}")
+        logger.error(f"Error saving trading settings: {e}")
         return False
 
 
@@ -205,16 +311,15 @@ def get_setting(key: str) -> Any:
     return getattr(settings, key, None)
 
 
-def update_setting(key: str, value: Any) -> bool:
-    """بروزرسانی یک تنظیم خاص (sync - برای سازگاری)"""
-    import asyncio
-    settings = get_trading_settings()
+async def update_setting_async(key: str, value: Any) -> bool:
+    """
+    بروزرسانی یک تنظیم خاص (async).
+    
+    این تابع جایگزین update_setting() قدیمی است که از deprecated API استفاده می‌کرد.
+    """
+    settings = await get_trading_settings_async()
     if hasattr(settings, key):
         data = settings.model_dump()
         data[key] = value
-        try:
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(save_trading_settings_async(data))
-        except Exception:
-            return False
+        return await save_trading_settings_async(data)
     return False

@@ -5,12 +5,24 @@ Redis Client Manager - مدیریت بهینه اتصال Redis
 این ماژول از یک کلاینت global استفاده می‌کند که در startup ایجاد
 و در shutdown بسته می‌شود. این رویکرد بهینه‌تر از ساخت کلاینت در هر درخواست است.
 """
+import logging
 import redis.asyncio as redis
 from redis.asyncio import Redis
 from redis.asyncio.connection import ConnectionPool
 from typing import AsyncGenerator, Optional
 
 from core.config import settings
+
+__all__ = [
+    "pool",
+    "init_redis",
+    "close_redis",
+    "get_redis_client",
+    "get_redis",
+    "check_redis_connection",
+]
+
+logger = logging.getLogger(__name__)
 
 # ایجاد Pool اتصال
 pool = ConnectionPool.from_url(
@@ -31,7 +43,7 @@ async def init_redis() -> Redis:
     if _redis_client is None:
         _redis_client = redis.Redis(connection_pool=pool)
         await _redis_client.ping()  # تست اتصال
-        print("✅ Redis client initialized successfully.")
+        logger.info("Redis client initialized successfully.")
     return _redis_client
 
 
@@ -44,7 +56,7 @@ async def close_redis() -> None:
     if _redis_client is not None:
         await _redis_client.close()
         _redis_client = None
-        print("✅ Redis client closed.")
+        logger.info("Redis client closed.")
 
 
 def get_redis_client() -> Redis:
@@ -87,8 +99,8 @@ async def check_redis_connection() -> bool:
     try:
         client = get_redis_client()
         await client.ping()
-        print("✅ Redis connection OK.")
+        logger.info("Redis connection OK.")
         return True
     except Exception as e:
-        print(f"❌ Redis connection failed: {e}")
+        logger.error(f"Redis connection failed: {e}")
         return False

@@ -1,4 +1,10 @@
+# core/enums.py
+"""
+Enum تعریف‌های مشترک اپلیکیشن
+"""
 import enum
+
+__all__ = ["UserRole", "NotificationLevel", "NotificationCategory"]
 
 class UserRole(str, enum.Enum):
     WATCH = "تماشا"

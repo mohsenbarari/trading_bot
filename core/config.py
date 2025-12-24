@@ -1,4 +1,13 @@
+# core/config.py
+"""
+تنظیمات اپلیکیشن از متغیرهای محیطی
+
+این ماژول از pydantic-settings برای مدیریت تنظیمات استفاده می‌کند.
+تمام مقادیر از فایل .env خوانده می‌شوند.
+"""
 from pydantic_settings import BaseSettings
+
+__all__ = ["Settings", "settings"]
 
 class Settings(BaseSettings):
     bot_token: str
