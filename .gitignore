@@ -13,3 +13,7 @@ mini_app_dist/
 node_modules/
 frontend/node_modules/
 deploy.sh
+# Temporary Test Files
+tests/debug_trade.py
+tests/live_simulation.py
+app_logs.txt

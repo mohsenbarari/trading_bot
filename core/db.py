@@ -22,10 +22,10 @@ engine = create_async_engine(
     settings.database_url,
     
     # تعداد اتصالات دائمی در pool
-    pool_size=10,
+    pool_size=100,
     
     # تعداد اتصالات اضافی در صورت نیاز (بالاتر از pool_size)
-    max_overflow=20,
+    max_overflow=50,
     
     # بررسی سلامت اتصال قبل از استفاده
     # اگر اتصال stale باشد، یک اتصال جدید می‌سازد
