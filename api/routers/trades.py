@@ -2,28 +2,32 @@
 """
 API Router for Trade Management - MiniApp Integration
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
-from typing import List, Optional
-from datetime import datetime
-from pydantic import BaseModel, Field
-import httpx
+import logging
 import os
+from datetime import datetime
+from typing import List, Optional
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
+from pydantic import BaseModel, Field
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from core.db import get_db
 from core.config import settings
+from core.enums import NotificationLevel, NotificationCategory
+from core.utils import (
+    check_user_limits, increment_user_counter, to_jalali_str,
+    create_user_notification, send_telegram_notification
+)
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
 from models.trade import Trade, TradeType, TradeStatus
 from models.commodity import Commodity
 from .auth import get_current_user
-from core.utils import (
-    check_user_limits, increment_user_counter, to_jalali_str,
-    create_user_notification
-)
-from core.enums import NotificationLevel, NotificationCategory
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(
@@ -100,7 +104,8 @@ async def send_telegram_message(chat_id: int, text: str) -> bool:
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload, timeout=10)
             return response.status_code == 200
-    except:
+    except Exception as e:
+        logger.error(f"Error sending telegram message: {e}")
         return False
 
 
@@ -142,25 +147,16 @@ async def update_channel_buttons(offer: Offer) -> bool:
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload, timeout=10)
             return response.status_code == 200
-    except:
+    except Exception as e:
+        logger.error(f"Error updating channel buttons: {e}")
         return False
 
 
 # ===== Sync Wrappers for BackgroundTasks =====
-# FastAPI BackgroundTasks نیاز به توابع sync دارد (async پشتیبانی نمی‌شود)
+# استفاده از httpx sync client به جای asyncio.run برای جلوگیری از مشکلات event loop
 
 def send_telegram_message_sync(chat_id: int, text: str) -> bool:
     """نسخه sync برای استفاده در BackgroundTasks"""
-    import asyncio
-    try:
-        return asyncio.run(_send_telegram_message_async(chat_id, text))
-    except Exception as e:
-        print(f"[Background] Error sending telegram message: {e}")
-        return False
-
-
-async def _send_telegram_message_async(chat_id: int, text: str) -> bool:
-    """Helper async function"""
     bot_token = os.getenv("BOT_TOKEN")
     if not bot_token:
         return False
@@ -168,18 +164,39 @@ async def _send_telegram_message_async(chat_id: int, text: str) -> bool:
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
     
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=payload, timeout=10)
+    try:
+        # استفاده از httpx sync client به جای asyncio.run
+        response = httpx.post(url, json=payload, timeout=10)
         return response.status_code == 200
+    except Exception as e:
+        logger.error(f"[Background] Error sending telegram message: {e}")
+        return False
 
 
 def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, lot_sizes) -> bool:
     """نسخه sync برای استفاده در BackgroundTasks"""
+    from core.db import AsyncSessionLocal
     import asyncio
+    
+    bot_token = os.getenv("BOT_TOKEN")
+    channel_id = settings.channel_id
+    
+    if not bot_token or not channel_id:
+        return False
+    
+    # برای گرفتن channel_message_id باید از DB بخوانیم
+    # این کار در یک thread جداگانه انجام می‌شود
     try:
-        return asyncio.run(_update_channel_buttons_async(offer_id, remaining_quantity, status, lot_sizes))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(
+                _update_channel_buttons_async(offer_id, remaining_quantity, status, lot_sizes)
+            )
+        finally:
+            loop.close()
     except Exception as e:
-        print(f"[Background] Error updating channel buttons: {e}")
+        logger.error(f"[Background] Error updating channel buttons: {e}")
         return False
 
 

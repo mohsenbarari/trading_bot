@@ -11,6 +11,20 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
+
+class TokenPair(BaseModel):
+    """جفت توکن - Access Token + Refresh Token"""
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int = 1800  # 30 دقیقه به ثانیه
+
+
+class RefreshRequest(BaseModel):
+    """درخواست تمدید توکن"""
+    refresh_token: str
+
+
 class TokenData(BaseModel):
     telegram_id: int | None = None
     session_key: str | None = None

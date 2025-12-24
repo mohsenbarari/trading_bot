@@ -1,26 +1,40 @@
-# trading_bot/api/routers/auth.py (کامل و اصلاح شده - رفع باگ تایپ تلگرام آیدی)
+# trading_bot/api/routers/auth.py
+"""
+API Router for Authentication - JWT Access Token + Refresh Token
+"""
+import hashlib
+import hmac
+import json
+import logging
+import secrets
+import urllib.parse
+from datetime import datetime, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Security
 from fastapi.security import OAuth2PasswordBearer, APIKeyHeader
 from jose import JWTError, jwt
-from sqlalchemy.ext.asyncio import AsyncSession
+from redis.asyncio import Redis
 from sqlalchemy import select
-from typing import Optional
-import hmac
-import hashlib
-import urllib.parse
-import json
-from datetime import datetime, timedelta
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings, Settings
 from core.db import get_db
-from core.redis import get_redis
-from redis.asyncio import Redis
-from core.security import create_access_token
 from core.enums import UserRole
+from core.redis import get_redis
+from core.security import (
+    create_access_token,
+    create_refresh_token,
+    verify_token,
+    verify_refresh_token,
+    create_token_pair,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+)
 from models.user import User
 from models.session import UserSession
 import schemas
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/auth",
@@ -154,8 +168,7 @@ async def request_otp(
         raise HTTPException(status_code=404, detail="شماره موبایل یافت نشد.")
 
     # 2. Generate OTP
-    import secrets
-    otp_code = "".join([str(secrets.randbelow(10)) for _ in range(5)]) # 5 digit code
+    otp_code = "".join([str(secrets.randbelow(10)) for _ in range(5)])  # 5 digit code
     
     # 3. Store in Redis (120 seconds expiry)
     await redis_client.set(f"OTP:{request.mobile_number}", otp_code, ex=120)
@@ -163,7 +176,7 @@ async def request_otp(
     # ===== ست کردن Rate Limit (120 ثانیه = 2 دقیقه) =====
     await redis_client.set(rate_limit_key, "1", ex=120)
     
-    print(f"DEBUG OTP for {request.mobile_number}: {otp_code}")
+    logger.debug(f"OTP generated for {request.mobile_number}")
     
     # 4. Send via Telegram
     from aiogram import Bot
@@ -172,42 +185,46 @@ async def request_otp(
             message_text = f"🔐 کد ورود شما:\n\n`{otp_code}`\n\nاین کد تا ۲ دقیقه معتبر است."
             await bot.send_message(chat_id=user.telegram_id, text=message_text, parse_mode="Markdown")
     except Exception as e:
-        print(f"Failed to send Telegram message: {e}")
+        logger.error(f"Failed to send Telegram OTP message: {e}")
         raise HTTPException(status_code=500, detail="خطا در ارسال پیام تلگرام")
 
     return {"message": "کد تایید به تلگرام شما ارسال شد."}
 
-@router.post("/verify-otp", response_model=schemas.Token)
+@router.post("/verify-otp", response_model=schemas.TokenPair)
 async def verify_otp(
     request: schemas.OTPVerify, 
     db: AsyncSession = Depends(get_db),
     redis_client: Redis = Depends(get_redis)
 ):
-    # 1. Dev Exception (keep for emergency/testing if needed, or remove)
-    # Removing hardcoded dev exception as user requested SECURITY.
-    
-    # 2. Verify OTP from Redis
+    """
+    تایید OTP و دریافت جفت توکن (Access + Refresh)
+    """
+    # 1. Verify OTP from Redis
     stored_otp = await redis_client.get(f"OTP:{request.mobile_number}")
     if not stored_otp or stored_otp != request.otp_code:
         raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است.")
     
-    # 3. Get User
+    # 2. Get User
     stmt = select(User).where(User.mobile_number == request.mobile_number, User.is_deleted == False)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
     
     if not user:
-        raise HTTPException(status_code=404, detail="User found during OTP but not found now?")
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد.")
 
-    # 4. Cleanup
+    # 3. Cleanup
     await redis_client.delete(f"OTP:{request.mobile_number}")
 
-    # 5. Generate Token
-    access_token = create_access_token(
-        data={"sub": str(user.telegram_id), "role": user.role.value, "source": "web"},
-        expires_delta=timedelta(hours=12)
+    # 4. Generate Token Pair
+    access_token, refresh_token = create_token_pair(user.id, user.telegram_id)
+    
+    logger.info(f"User {user.id} logged in via OTP")
+    
+    return schemas.TokenPair(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60
     )
-    return {"access_token": access_token, "token_type": "bearer"}
 
 @router.get("/me", response_model=schemas.UserRead)
 async def read_users_me(current_user: User = Depends(get_current_user)):
@@ -252,18 +269,60 @@ async def webapp_login(init_data_obj: schemas.WebAppInitData, db: AsyncSession =
     if not user:
         raise HTTPException(status_code=403, detail="User not registered. Please register via bot invitation link first.")
 
-    # توجه: has_bot_access فقط دسترسی بات را محدود می‌کند، نه MiniApp
-    # پس اینجا بررسی نمی‌کنیم
-
-    # تبدیل telegram_id به رشته برای ذخیره در توکن
-    access_token = create_access_token(
-        data={
-            "sub": str(user.telegram_id), 
-            "role": user.role.value,
-            "source": "miniapp"
-        }
+    # Generate Token Pair
+    access_token, refresh_token = create_token_pair(user.id, user.telegram_id)
+    
+    logger.info(f"User {user.id} logged in via WebApp")
+    
+    return schemas.TokenPair(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/refresh", response_model=schemas.TokenPair)
+async def refresh_access_token(
+    refresh_data: schemas.RefreshRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    تمدید Access Token با استفاده از Refresh Token
+    
+    - Refresh Token اعتبار 30 روزه دارد
+    - هر بار یک جفت توکن جدید صادر می‌شود
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Refresh token نامعتبر یا منقضی شده است.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    # Verify Refresh Token
+    payload = verify_refresh_token(refresh_data.refresh_token, credentials_exception)
+    
+    user_id = int(payload.get("sub"))
+    telegram_id = payload.get("telegram_id")
+    
+    # Verify user still exists and is active
+    stmt = select(User).where(User.id == user_id, User.is_deleted == False)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise credentials_exception
+    
+    # Generate new Token Pair
+    access_token, refresh_token = create_token_pair(user.id, user.telegram_id)
+    
+    logger.info(f"User {user.id} refreshed tokens")
+    
+    return schemas.TokenPair(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    )
+
 
 async def get_request_source(token: str = Depends(oauth2_scheme)) -> str:
     """

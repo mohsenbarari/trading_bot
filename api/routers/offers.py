@@ -2,24 +2,28 @@
 """
 API Router for Offer Management - MiniApp Integration
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
-from sqlalchemy.orm import selectinload
-from typing import List, Optional
-from datetime import datetime
-from pydantic import BaseModel, Field
-import httpx
+import logging
 import os
+from datetime import datetime
+from typing import List, Optional
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import select, func, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from core.db import get_db
 from core.config import settings
+from core.trading_settings import get_trading_settings
+from core.utils import check_user_limits, increment_user_counter, to_jalali_str
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
 from models.commodity import Commodity
 from .auth import get_current_user
-from core.utils import check_user_limits, increment_user_counter, to_jalali_str
-from core.trading_settings import get_trading_settings
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(
@@ -147,7 +151,7 @@ async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
                 result = response.json()
                 return result.get("result", {}).get("message_id")
     except Exception as e:
-        print(f"⚠️ Error sending to channel: {e}")
+        logger.error(f"Error sending to channel: {e}")
     
     return None
 
@@ -392,8 +396,8 @@ async def expire_offer(
             try:
                 async with httpx.AsyncClient() as client:
                     await client.post(url, json=payload, timeout=10)
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Error removing channel buttons: {e}")
     
     # ارسال رویداد SSE
     from .realtime import publish_event
