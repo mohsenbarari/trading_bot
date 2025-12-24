@@ -1,3 +1,4 @@
+import logging
 from aiogram import Router, F, types, Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import Optional, List
@@ -13,6 +14,8 @@ from bot.utils.redis_helpers import check_double_click
 from core.utils import check_user_limits, increment_user_counter
 from core.enums import NotificationLevel, NotificationCategory, UserRole
 from bot.callbacks import ChannelTradeCallback
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -209,8 +212,8 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
                     text=responder_msg,
                     parse_mode="Markdown"
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to send message to responder: {e}")
             
             try:
                 await bot.send_message(
@@ -218,8 +221,8 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
                     text=offer_owner_msg,
                     parse_mode="Markdown"
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to send message to offer owner: {e}")
             
             # ارسال نوتیفیکیشن به اپ برای هر دو کاربر
             # نوتیفیکیشن ساده‌تر برای اپ (بدون Markdown)
@@ -248,13 +251,13 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
                             level=NotificationLevel.SUCCESS,
                             category=NotificationCategory.TRADE
                         )
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Failed to create notification: {e}")
 
                 await safe_create_notif(user.id, notif_msg_responder)
                 await safe_create_notif(offer.user_id, notif_msg_owner)
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to create notifications: {e}")
             
             # بروزرسانی دکمه‌های پست کانال
             try:
@@ -265,8 +268,8 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
                     # ساخت دکمه‌های جدید
                     new_keyboard = build_lot_buttons(offer_id, new_remaining, new_lot_sizes)
                     await callback.message.edit_reply_markup(reply_markup=new_keyboard)
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to update channel buttons: {e}")
             
             await callback.answer()
         else:

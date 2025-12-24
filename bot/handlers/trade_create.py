@@ -1,18 +1,25 @@
+import logging
 from aiogram import Router, F, types, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy import select
 from typing import Optional
+from datetime import datetime
 
 from models.user import User
-
 from models.offer import Offer, OfferType, OfferStatus
 from models.commodity import Commodity
 from bot.states import Trade
 from core.config import settings
 from core.enums import UserRole
 from core.db import AsyncSessionLocal
+from core.services.trade_service import (
+    validate_lot_sizes,
+    validate_quantity,
+    validate_price
+)
+from core.utils import to_jalali_str, check_user_limits, increment_user_counter
 from bot.handlers.trade_utils import (
     get_trade_type_keyboard,
     get_lot_type_keyboard,
@@ -33,14 +40,7 @@ from bot.callbacks import (
     ACTION_NOOP
 )
 
-# Import shared validation functions
-from core.services.trade_service import (
-    validate_lot_sizes,
-    validate_quantity,
-    validate_price
-)
-from datetime import datetime
-from core.utils import to_jalali_str, check_user_limits, increment_user_counter
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -1112,8 +1112,8 @@ async def handle_text_offer_confirm(callback: types.CallbackQuery, state: FSMCon
                         if offer:
                             offer.status = OfferStatus.EXPIRED
                             await session.commit()
-            except:
-                pass
+            except Exception as rollback_error:
+                logger.debug(f"Rollback failed: {rollback_error}")
             
             await callback.message.edit_text(f"❌ خطا در ارسال به کانال: {str(e)}")
     else:

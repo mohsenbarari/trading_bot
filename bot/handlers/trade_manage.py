@@ -1,3 +1,4 @@
+import logging
 from aiogram import Router, F, types, Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import Optional
@@ -11,6 +12,8 @@ from core.db import AsyncSessionLocal
 from core.trading_settings import get_trading_settings
 from bot.utils.redis_helpers import track_expire_rate, track_daily_expire
 from bot.callbacks import ExpireOfferCallback
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -84,8 +87,8 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
                     message_id=offer.channel_message_id,
                     reply_markup=None
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to remove channel buttons: {e}")
         
         # حذف دکمه از پیام کاربر
         await callback.message.edit_reply_markup(reply_markup=None)

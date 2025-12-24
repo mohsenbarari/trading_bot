@@ -255,8 +255,8 @@ async def invalidate_commodity_cache():
         try:
             await redis_client.delete(key)
             await redis_client.aclose()
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to invalidate commodity cache: {e}")
     
     # Fallback
     if key in _memory_fallback["cache"]:
