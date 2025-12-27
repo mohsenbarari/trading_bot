@@ -147,7 +147,7 @@ async def handle_admin_settings_button(message: types.Message, state: FSMContext
     
     await state.clear()
     await message.answer(
-        get_settings_text(), 
+        await get_settings_text(), 
         parse_mode="Markdown", 
         reply_markup=get_settings_keyboard()
     )
@@ -161,10 +161,10 @@ async def handle_settings_edit_click(callback: types.CallbackQuery, state: FSMCo
         return
     
     from bot.states import TradingSettingsEdit
-    from core.trading_settings import get_trading_settings
+    from core.trading_settings import get_trading_settings_async
     
     setting_key = callback.data.replace("settings_edit_", "")
-    ts = get_trading_settings()
+    ts = await get_trading_settings_async()
     current_value = getattr(ts, setting_key, None)
     label = SETTINGS_LABELS.get(setting_key, setting_key)
     
@@ -195,7 +195,7 @@ async def handle_settings_new_value(message: types.Message, state: FSMContext, u
     if not user or user.role != UserRole.SUPER_ADMIN:
         return
     
-    from core.trading_settings import load_trading_settings, save_trading_settings, refresh_settings_cache
+    from core.trading_settings import load_trading_settings_async, save_trading_settings_async, refresh_settings_cache_async
     
     data = await state.get_data()
     setting_key = data.get("editing_setting")
@@ -214,11 +214,12 @@ async def handle_settings_new_value(message: types.Message, state: FSMContext, u
         return
     
     # ذخیره
-    ts = load_trading_settings()
-    setattr(ts, setting_key, new_value)
+    ts = await load_trading_settings_async()
+    settings_dict = ts.model_dump()
+    settings_dict[setting_key] = new_value
     
-    if save_trading_settings(ts):
-        refresh_settings_cache()
+    if await save_trading_settings_async(settings_dict):
+        await refresh_settings_cache_async()
         label = SETTINGS_LABELS.get(setting_key, setting_key)
         await message.answer(
             f"✅ **{label}** به `{new_value}` تغییر کرد.",
@@ -231,7 +232,7 @@ async def handle_settings_new_value(message: types.Message, state: FSMContext, u
     
     # نمایش مجدد تنظیمات
     await message.answer(
-        get_settings_text(),
+        await get_settings_text(),
         parse_mode="Markdown",
         reply_markup=get_settings_keyboard()
     )
@@ -246,7 +247,7 @@ async def handle_settings_cancel(callback: types.CallbackQuery, state: FSMContex
     
     await state.clear()
     await callback.message.edit_text(
-        get_settings_text(),
+        await get_settings_text(),
         parse_mode="Markdown",
         reply_markup=get_settings_keyboard()
     )
@@ -283,17 +284,17 @@ async def handle_settings_reset_confirm(callback: types.CallbackQuery, user: Opt
         await callback.answer()
         return
     
-    from core.trading_settings import TradingSettings, save_trading_settings, refresh_settings_cache
+    from core.trading_settings import TradingSettings, save_trading_settings_async, refresh_settings_cache_async
     
     default_settings = TradingSettings()
-    if save_trading_settings(default_settings):
-        refresh_settings_cache()
+    if await save_trading_settings_async(default_settings.model_dump()):
+        await refresh_settings_cache_async()
         await callback.answer("✅ تنظیمات بازنشانی شد")
     else:
         await callback.answer("❌ خطا در بازنشانی")
     
     await callback.message.edit_text(
-        get_settings_text(),
+        await get_settings_text(),
         parse_mode="Markdown",
         reply_markup=get_settings_keyboard()
     )
@@ -306,7 +307,7 @@ async def handle_settings_reset_cancel(callback: types.CallbackQuery, user: Opti
         return
     
     await callback.message.edit_text(
-        get_settings_text(),
+        await get_settings_text(),
         parse_mode="Markdown",
         reply_markup=get_settings_keyboard()
     )
