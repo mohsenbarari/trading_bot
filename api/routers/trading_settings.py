@@ -8,9 +8,9 @@ from typing import Optional
 from .auth import verify_super_admin_or_dev_key
 from core.trading_settings import (
     TradingSettings, 
-    load_trading_settings,
+    load_trading_settings_async,
     save_trading_settings_async,
-    refresh_settings_cache
+    refresh_settings_cache_async
 )
 
 
@@ -50,7 +50,7 @@ class TradingSettingsResponse(BaseModel):
 @router.get("/", response_model=TradingSettingsResponse)
 async def get_settings():
     """دریافت تنظیمات فعلی - برای همه کاربران قابل دسترس"""
-    settings = load_trading_settings()
+    settings = await load_trading_settings_async()
     return TradingSettingsResponse(
         invitation_expiry_days=settings.invitation_expiry_days,
         offer_expiry_minutes=settings.offer_expiry_minutes,
@@ -68,7 +68,7 @@ async def get_settings():
 @router.put("/", response_model=TradingSettingsResponse, dependencies=[Depends(verify_super_admin_or_dev_key)])
 async def update_settings(updates: TradingSettingsUpdate):
     """بروزرسانی تنظیمات - فقط ادمین ارشد"""
-    current = load_trading_settings()
+    current = await load_trading_settings_async()
     
     # بروزرسانی فقط مقادیر ارسال شده
     update_data = updates.model_dump(exclude_unset=True)
@@ -94,7 +94,7 @@ async def update_settings(updates: TradingSettingsUpdate):
         )
     
     # بارگذاری مجدد برای گرفتن مقادیر بروز
-    updated = load_trading_settings()
+    updated = await load_trading_settings_async()
     
     return TradingSettingsResponse(
         invitation_expiry_days=updated.invitation_expiry_days,
@@ -122,7 +122,7 @@ async def reset_settings():
             detail="خطا در بازنشانی تنظیمات"
         )
     
-    refresh_settings_cache()
+    await refresh_settings_cache_async()
     
     return TradingSettingsResponse(
         invitation_expiry_days=default_settings.invitation_expiry_days,
