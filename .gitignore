@@ -17,3 +17,6 @@ deploy.sh
 tests/debug_trade.py
 tests/live_simulation.py
 app_logs.txt
+tests/load_test.py
+tests/__init__.py
+docs/*

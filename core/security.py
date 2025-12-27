@@ -155,7 +155,8 @@ def create_token_pair(user_id: int, telegram_id: int) -> Tuple[str, str]:
     Returns:
         (access_token, refresh_token)
     """
-    data = {"sub": str(user_id), "telegram_id": telegram_id}
+    # Use telegram_id as sub since get_current_user_from_token extracts telegram_id from sub
+    data = {"sub": str(telegram_id), "user_id": user_id, "telegram_id": telegram_id}
     
     access_token = create_access_token(data)
     refresh_token = create_refresh_token(data)

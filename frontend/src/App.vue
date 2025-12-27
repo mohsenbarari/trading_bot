@@ -27,7 +27,8 @@ const user = ref<any>(null)
 const loadingMessage = ref('در حال اتصال...')
 const activeView = ref('home')
 const jwtToken = ref<string | null>(null)
-const API_BASE_URL = 'https://telegram.362514.ir'
+// Use relative path for API calls since frontend is served by the same backend
+const API_BASE_URL = '';
 const tg = (window as any).Telegram?.WebApp
 
 const showTradePage = computed(() => activeView.value === 'trade');
@@ -95,11 +96,38 @@ async function handleRequestOtp() {
         
         // Success
         loginStep.value = 'otp';
-        loadingMessage.value = 'کد ارسال شد. لطفاً آن را وارد کنید.'; // Not strictly used in UI but good for debugging
+        loadingMessage.value = ''; // Clear loading message to show the UI
     } catch (e: any) {
         loginError.value = e.message;
     } finally {
         isLoginLoading.value = false;
+    }
+}
+
+async function tryRefreshToken(): Promise<boolean> {
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) return false;
+    
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ refresh_token: refreshToken })
+        });
+        
+        if (!res.ok) return false;
+        
+        const data = await res.json();
+        jwtToken.value = data.access_token;
+        localStorage.setItem('auth_token', data.access_token);
+        localStorage.setItem('refresh_token', data.refresh_token);
+        
+        // Retry loading user with new token
+        await loadUser();
+        return true;
+    } catch (e) {
+        console.warn("Refresh token failed:", e);
+        return false;
     }
 }
 
@@ -116,7 +144,7 @@ async function handleVerifyOtp() {
         const res = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ mobile_number: loginMobile.value, otp_code: loginCode.value })
+            body: JSON.stringify({ mobile_number: loginMobile.value, otp_code: String(loginCode.value) }) // Corrected field name + Ensure string type
         });
         
         if (!res.ok) {
@@ -126,7 +154,8 @@ async function handleVerifyOtp() {
         
         const data = await res.json();
         jwtToken.value = data.access_token;
-        localStorage.setItem('auth_token', data.access_token); // Persist token
+        localStorage.setItem('auth_token', data.access_token);
+        localStorage.setItem('refresh_token', data.refresh_token); // Store refresh token for 30-day persistence
         
         // Proceed to load user
         await loadUser();
@@ -152,12 +181,20 @@ async function loadUser() {
         await checkNotifications();
         startSSE();
     } catch (e: any) {
-        // If load user fails (e.g. 401), clear token
+        // If load user fails, try to refresh token first
         console.warn("Auth check failed:", e);
-        jwtToken.value = null;
-        user.value = null;
-        localStorage.removeItem('auth_token');
-        throw e;
+        const refreshed = await tryRefreshToken();
+        if (!refreshed) {
+            // Clear everything and show login
+            jwtToken.value = null;
+            user.value = null;
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('refresh_token');
+            loadingMessage.value = '';
+            if (!tg?.initData) {
+                 loginStep.value = 'mobile';
+            }
+        }
     }
 }
 

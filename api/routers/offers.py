@@ -144,12 +144,17 @@ async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
         "reply_markup": reply_markup
     }
     
+    logger.info(f"DEBUG CHANNEL: Sending offer {offer.id} to channel {channel_id}")
+    
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload, timeout=10)
+            logger.info(f"DEBUG CHANNEL: Response status={response.status_code}, body={response.text[:500]}")
             if response.status_code == 200:
                 result = response.json()
                 return result.get("result", {}).get("message_id")
+            else:
+                logger.error(f"Channel send failed: {response.status_code} - {response.text}")
     except Exception as e:
         logger.error(f"Error sending to channel: {e}")
     

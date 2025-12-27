@@ -201,7 +201,8 @@ async def verify_otp(
     """
     # 1. Verify OTP from Redis
     stored_otp = await redis_client.get(f"OTP:{request.mobile_number}")
-    if not stored_otp or stored_otp != request.otp_code:
+    
+    if not stored_otp or str(stored_otp) != str(request.otp_code):
         raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است.")
     
     # 2. Get User
