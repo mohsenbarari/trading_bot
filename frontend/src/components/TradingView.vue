@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
+import CircleTimer from './CircleTimer.vue'
 
 // Props
 const props = defineProps<{
@@ -35,6 +36,7 @@ interface Offer {
   status: string
   channel_message_id: number | null
   created_at: string
+  expires_at_ts?: number
 }
 
 interface Trade {
@@ -56,6 +58,7 @@ interface TradingSettings {
   offer_max_quantity: number
   lot_min_size: number
   lot_max_count: number
+  offer_expiry_minutes: number
 }
 
 // State
@@ -73,7 +76,8 @@ const tradingSettings = ref<TradingSettings>({
   offer_min_quantity: 1,
   offer_max_quantity: 50,
   lot_min_size: 5,
-  lot_max_count: 5
+  lot_max_count: 5,
+  offer_expiry_minutes: 10
 })
 
 // Filter
@@ -92,7 +96,8 @@ const newOffer = ref({
   price: null as number | null,
   is_wholesale: true,
   lot_sizes: null as number[] | null,
-  notes: ''
+  notes: '',
+  republished_from_id: null as number | null
 })
 
 // Text mode
@@ -193,7 +198,8 @@ async function loadOffers() {
 
 async function loadMyOffers() {
   try {
-    myOffers.value = await apiFetch('/offers/my?status_filter=active')
+    // دریافت لفظ‌های ۲ ساعت اخیر (همه وضعیت‌ها)
+    myOffers.value = await apiFetch('/offers/my?since_hours=2')
   } catch (e: any) {
     console.error('Error loading my offers:', e)
   }
@@ -236,7 +242,8 @@ function startCreateOffer(type: 'buy' | 'sell') {
     price: null,
     is_wholesale: true,
     lot_sizes: null,
-    notes: ''
+    notes: '',
+    republished_from_id: null
   }
   error.value = ''
   createStep.value = 'commodity'
@@ -374,7 +381,8 @@ function closeWizard() {
     price: null,
     is_wholesale: true,
     lot_sizes: null,
-    notes: ''
+    notes: '',
+    republished_from_id: null
   }
   error.value = ''
 }
@@ -391,7 +399,8 @@ async function submitOffer() {
       price: newOffer.value.price,
       is_wholesale: newOffer.value.is_wholesale,
       lot_sizes: newOffer.value.lot_sizes,
-      notes: newOffer.value.notes || null
+      notes: newOffer.value.notes || null,
+      republished_from_id: newOffer.value.republished_from_id || null
     }
     
     await apiFetch('/offers/', {
@@ -521,6 +530,35 @@ async function expireOffer(offerId: number) {
   }
 }
 
+function repeatOffer(offer: any) {
+  // تنظیم مقادیر فرم از روی لفظ قبلی
+  newOffer.value = {
+    offer_type: offer.offer_type,
+    commodity_id: offer.commodity_id,
+    commodity_name: offer.commodity_name,
+    quantity: offer.quantity,
+    price: offer.price,
+    is_wholesale: offer.is_wholesale,
+    lot_sizes: offer.original_lot_sizes || offer.lot_sizes,
+    notes: offer.notes,
+    republished_from_id: offer.id
+  }
+  
+  // باز کردن ویزارد
+  showCreateWizard.value = true
+  createStep.value = 'preview'
+}
+
+function getStatusLabel(status: string) {
+  switch (status) {
+    case 'active': return 'فعال';
+    case 'completed': return 'تکمیل شده';
+    case 'expired': return 'منقضی شده';
+    case 'cancelled': return 'لغو شده';
+    default: return status;
+  }
+}
+
 // ===== POLLING =====
 
 function startPolling() {
@@ -621,10 +659,24 @@ watch(createStep, (step) => {
           :class="offer.offer_type"
         >
           <div class="offer-header">
-            <span class="offer-type">
-              {{ offer.offer_type === 'buy' ? '🟢 خرید' : '🔴 فروش' }}
-            </span>
-            <span class="offer-time">{{ offer.created_at }}</span>
+            <div class="offer-role">
+              <span 
+                class="role-badge" 
+                :class="offer.offer_type === 'buy' ? 'buy' : 'sell'"
+              >
+                {{ offer.offer_type === 'buy' ? 'خرید' : 'فروش' }}
+              </span>
+            </div>
+            <div class="offer-time">{{ offer.created_at }}</div>
+          </div>
+
+          <!-- Expiration Timer (Absolute Positioned) -->
+          <div class="offer-timer-badge" v-if="offer.expires_at_ts">
+            <CircleTimer 
+              :expires-at="offer.expires_at_ts"
+              :total-duration="tradingSettings.offer_expiry_minutes * 60"
+              :size="24"
+            />
           </div>
           
           <div class="offer-body">
@@ -641,7 +693,7 @@ watch(createStep, (step) => {
           <div class="offer-footer">
             <div class="trade-buttons" v-if="offer.user_id !== user?.id">
               <template v-if="offer.is_wholesale || !offer.lot_sizes">
-                <button class="trade-btn" @click="openTradeModal(offer)">
+                <button class="trade-btn full-width" @click="openTradeModal(offer)">
                   {{ offer.remaining_quantity }} عدد
                 </button>
               </template>
@@ -654,7 +706,7 @@ watch(createStep, (step) => {
                   class="trade-btn"
                   @click="openTradeModal(offer, amount)"
                 >
-                  {{ amount }} عدد
+                  {{ amount }}
                 </button>
               </template>
             </div>
@@ -670,7 +722,7 @@ watch(createStep, (step) => {
     <!-- Tab: My Offers -->
     <div v-if="activeTab === 'my_offers'" class="tab-content">
       <div v-if="myOffers.length === 0" class="empty-state">
-        <p>شما هیچ لفظ فعالی ندارید.</p>
+        <p>شما هیچ لفظی در ۲ ساعت اخیر نداشته‌اید.</p>
       </div>
       
       <div v-else class="offers-list">
@@ -678,26 +730,43 @@ watch(createStep, (step) => {
           v-for="offer in myOffers" 
           :key="offer.id" 
           class="offer-card my-offer"
-          :class="offer.offer_type"
+          :class="[offer.offer_type, { 'expired-offer': offer.status !== 'active' }]"
         >
           <div class="offer-header">
             <span class="offer-type">
               {{ offer.offer_type === 'buy' ? '🟢 خرید' : '🔴 فروش' }}
+              <span v-if="offer.status !== 'active'" class="status-badge">{{ getStatusLabel(offer.status) }}</span>
             </span>
-            <span class="remaining">{{ offer.remaining_quantity }}/{{ offer.quantity }}</span>
+            <span class="remaining" v-if="offer.status === 'active'">{{ offer.remaining_quantity }}/{{ offer.quantity }}</span>
+            <span class="remaining" v-else>{{ offer.quantity }} عدد</span>
           </div>
           
           <div class="offer-body">
             <div class="offer-main">
               <span class="commodity">{{ offer.commodity_name }}</span>
-              <span class="quantity">{{ offer.remaining_quantity }}/{{ offer.quantity }} عدد</span>
+              <span class="quantity">{{ offer.remaining_quantity }} عدد</span>
               <span class="price">{{ offer.price.toLocaleString() }}</span>
+            </div>
+            <div v-if="offer.notes" class="offer-notes">
+              توضیحات: {{ offer.notes }}
             </div>
           </div>
           
           <div class="offer-footer">
             <span class="offer-time">{{ offer.created_at }}</span>
-            <button class="expire-btn" @click="expireOffer(offer.id)">❌ منقضی کردن</button>
+            <div class="owner-actions">
+              <button 
+                v-if="offer.status === 'active'" 
+                class="expire-btn" 
+                @click="expireOffer(offer.id)"
+              >❌ منقضی کردن</button>
+              
+              <button 
+                v-else 
+                class="repeat-btn" 
+                @click="repeatOffer(offer)"
+              >🔄 تکرار</button>
+            </div>
           </div>
         </div>
       </div>
@@ -903,7 +972,6 @@ watch(createStep, (step) => {
       <div class="modal">
         <div class="modal-header">
           <h2>{{ selectedOffer.offer_type === 'buy' ? '🔴 فروش' : '🟢 خرید' }}</h2>
-          <button class="close-btn" @click="showTradeModal = false">✕</button>
         </div>
         
         <div class="modal-body">
@@ -1104,8 +1172,9 @@ watch(createStep, (step) => {
 /* Filter Bar */
 .filter-bar {
   display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 2px;
+  margin-top: -25px;
+  margin-bottom: 8px;
 }
 
 .filter-bar button {
@@ -1136,6 +1205,17 @@ watch(createStep, (step) => {
   border-radius: 12px;
   padding: 14px;
   border: 1px solid var(--border-color);
+  position: relative; /* Context for absolute timer */
+}
+
+.offer-timer-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+  background: var(--card-bg);
+  border-radius: 50%;
+  padding: 1px;
 }
 
 .offer-card.buy {
@@ -1159,6 +1239,7 @@ watch(createStep, (step) => {
 .offer-time, .trade-time {
   color: var(--text-secondary);
   font-size: 11px;
+  padding-left: 30px; /* Space for absolute timer */
 }
 
 .offer-body, .trade-body {
@@ -1200,13 +1281,20 @@ watch(createStep, (step) => {
 }
 
 .trade-buttons {
-  display: flex;
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important; /* Force single row */
+  overflow-x: auto; /* Allow scrolling if too many buttons */
+  scrollbar-width: none; /* Hide scrollbar for cleaner look */
   gap: 6px;
-  flex-wrap: wrap;
+  width: 100%;
+}
+.trade-buttons::-webkit-scrollbar {
+  display: none;
 }
 
 .trade-btn {
-  padding: 8px 16px;
+  padding: 8px 12px;
   background: linear-gradient(135deg, #6366f1, #4f46e5);
   color: white;
   border: none;
@@ -1214,6 +1302,35 @@ watch(createStep, (step) => {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+  flex: 1 1 auto; /* Grow and shrink */
+  min-width: 45px; /* Smaller min-width to fit more */
+  max-width: 100px; /* Prevent them from becoming too wide individually unless full-width */
+  text-align: center;
+}
+
+.trade-btn.full-width {
+  width: 100%;
+  max-width: none;
+}
+
+/* Force Cancel Button Style with High Specificity */
+.modal-footer .cancel-btn {
+  background: #dc2626 !important;
+  color: white !important;
+  border: none !important;
+  padding: 12px 24px !important;
+  border-radius: 12px !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3) !important;
+}
+
+.modal-footer .cancel-btn:hover {
+  background: #b91c1c !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 15px rgba(220, 38, 38, 0.4) !important;
 }
 
 .own-offer-badge {
@@ -1317,10 +1434,10 @@ watch(createStep, (step) => {
 
 .action-btn {
   flex: 1;
-  padding: 16px;
+  padding: 10px;
   border: none;
-  border-radius: 14px;
-  font-size: 18px;
+  border-radius: 12px;
+  font-size: 16px;
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(0,0,0,0.15);
@@ -1682,5 +1799,56 @@ watch(createStep, (step) => {
 .trade-number {
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+/* Expired Offer Styles */
+.expired-offer {
+  opacity: 0.8;
+  background: #f5f5f5; /* Light gray for expired */
+  border-color: #ddd;
+}
+
+[data-theme='dark'] .expired-offer {
+  background: #2a2a2a;
+  border-color: #444;
+}
+
+.status-badge {
+  font-size: 12px;
+  background: #eee;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-right: 8px;
+  color: #666;
+}
+
+[data-theme='dark'] .status-badge {
+  background: #444;
+  color: #aaa;
+}
+
+/* Repeat Button */
+.repeat-btn {
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.repeat-btn-small {
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
 }
 </style>

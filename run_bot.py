@@ -180,8 +180,8 @@ async def monitor_expired_offers(bot: Bot):
     
     while True:
         try:
-            from core.trading_settings import get_trading_settings
-            ts = get_trading_settings()
+            from core.trading_settings import get_trading_settings_async
+            ts = await get_trading_settings_async()
             
             # زمان منقضی شدن (دقیقه)
             expiry_minutes = ts.offer_expiry_minutes

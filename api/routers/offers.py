@@ -43,6 +43,7 @@ class OfferCreate(BaseModel):
     is_wholesale: bool = Field(default=True, description="یکجا یا خُرد")
     lot_sizes: Optional[List[int]] = Field(default=None, description="بخش‌ها برای فروش خُرد")
     notes: Optional[str] = Field(default=None, max_length=200)
+    republished_from_id: Optional[int] = Field(default=None, description="شناسه لفظ قدیمی برای تکرار")
 
 
 class OfferResponse(BaseModel):
@@ -58,10 +59,12 @@ class OfferResponse(BaseModel):
     price: int
     is_wholesale: bool
     lot_sizes: Optional[List[int]]
+    original_lot_sizes: Optional[List[int]]
     notes: Optional[str]
     status: str
     channel_message_id: Optional[int]
     created_at: str
+    expires_at_ts: Optional[int] = None
     
     class Config:
         from_attributes = True
@@ -81,10 +84,27 @@ class ParseOfferResponse(BaseModel):
 
 # --- Helper Functions ---
 
-def offer_to_response(offer: Offer) -> OfferResponse:
+# --- Helper Functions ---
+
+def offer_to_response(offer: Offer, start_settings: Optional['TradingSettings'] = None) -> OfferResponse:
     """تبدیل مدل Offer به پاسخ API"""
     remaining = offer.remaining_quantity or offer.quantity
     
+    # محاسبه زمان انقضا
+    expires_at_ts = None
+    logger.info(f"TRACE EXPIRY: offer.id={offer.id} offer.status={offer.status} offer.status.type={type(offer.status)}")
+    if offer.status == OfferStatus.ACTIVE:
+        try:
+            ts = start_settings or get_trading_settings()
+            logger.info(f"TRACE SETTINGS: offer_expiry_minutes={ts.offer_expiry_minutes}")
+            # تبدیل created_at به timestamp
+            created_ts = offer.created_at.timestamp()
+            expiry_seconds = ts.offer_expiry_minutes * 60
+            expires_at_ts = int(created_ts + expiry_seconds)
+            logger.info(f"TRACE EXPIRY RESULT: ID={offer.id} ExpiresTS={expires_at_ts}")
+        except Exception as e:
+            logger.error(f"Error calculating expiry for offer {offer.id}: {e}")
+
     return OfferResponse(
         id=offer.id,
         user_id=offer.user_id,
@@ -97,10 +117,12 @@ def offer_to_response(offer: Offer) -> OfferResponse:
         price=offer.price,
         is_wholesale=offer.is_wholesale,
         lot_sizes=offer.lot_sizes,
+        original_lot_sizes=offer.original_lot_sizes,
         notes=offer.notes,
         status=offer.status.value,
         channel_message_id=offer.channel_message_id,
-        created_at=to_jalali_str(offer.created_at) or ""
+        created_at=to_jalali_str(offer.created_at) or "",
+        expires_at_ts=expires_at_ts
     )
 
 
@@ -253,6 +275,15 @@ async def create_offer(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail_msg)
 
     
+
+    # مدیریت تکرار لفظ قدیمی
+    if offer_data.republished_from_id:
+        old_offer = await db.get(Offer, offer_data.republished_from_id)
+        if old_offer and old_offer.user_id == current_user.id:
+            # اگر لفظ قبلی هنوز فعال باشد، آن را منقضی می‌کنیم
+            if old_offer.status == OfferStatus.ACTIVE:
+                 old_offer.status = OfferStatus.EXPIRED
+
     # ایجاد لفظ
     new_offer = Offer(
         user_id=current_user.id,
@@ -263,12 +294,21 @@ async def create_offer(
         price=offer_data.price,
         is_wholesale=offer_data.is_wholesale,
         lot_sizes=offer_data.lot_sizes,
+        original_lot_sizes=offer_data.lot_sizes,  # ذخیره ترکیب اولیه برای تکرار
         notes=offer_data.notes,
         status=OfferStatus.ACTIVE
     )
     db.add(new_offer)
     await db.commit()
     await db.refresh(new_offer)
+    
+    # لینک کردن لفظ قدیمی به جدید
+    if offer_data.republished_from_id:
+        # دوباره لود می‌کنیم چون ممکن است سشن بسته شده باشد یا نیاز به اتچ مجدد باشد، اما اینجا سشن باز است
+        # فقط باید مطمئن شویم old_offer در سشن است
+        if old_offer: 
+            old_offer.republished_offer_id = new_offer.id
+            await db.commit()
     
     # بارگذاری روابط
     result = await db.execute(
@@ -298,7 +338,11 @@ async def create_offer(
         "user_account_name": current_user.account_name
     })
     
-    return offer_to_response(new_offer)
+    # دریافت تنظیمات برای محاسبه انقضا
+    from core.trading_settings import get_trading_settings_async
+    ts = await get_trading_settings_async()
+    
+    return offer_to_response(new_offer, ts)
 
 
 @router.get("/", response_model=List[OfferResponse])
@@ -328,12 +372,18 @@ async def get_active_offers(
     
     result = await db.execute(query)
     offers = result.scalars().all()
-    return [offer_to_response(o) for o in offers]
+    
+    # دریافت تنظیمات برای محاسبه دقیق انقضا
+    from core.trading_settings import get_trading_settings_async
+    ts = await get_trading_settings_async()
+    
+    return [offer_to_response(o, ts) for o in offers]
 
 
 @router.get("/my", response_model=List[OfferResponse])
 async def get_my_offers(
     status_filter: Optional[str] = Query(None, pattern="^(active|completed|cancelled|expired)$"),
+    since_hours: Optional[int] = Query(None, gt=0),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -347,7 +397,24 @@ async def get_my_offers(
         selectinload(Offer.commodity)
     ).where(Offer.user_id == current_user.id)
     
-    if status_filter:
+    # فیلتر کردن لفظ‌هایی که دوباره منتشر شده‌اند
+    query = query.where(Offer.republished_offer_id.is_(None))
+    
+    if since_hours:
+        from datetime import timedelta
+        cutoff_time = datetime.utcnow() - timedelta(hours=since_hours)
+        query = query.where(Offer.created_at >= cutoff_time)
+        
+        if status_filter:
+             status_enum = {
+                "active": OfferStatus.ACTIVE,
+                "completed": OfferStatus.COMPLETED,
+                "cancelled": OfferStatus.CANCELLED,
+                "expired": OfferStatus.EXPIRED
+            }.get(status_filter)
+             if status_enum:
+                query = query.where(Offer.status == status_enum)
+    elif status_filter:
         status_enum = {
             "active": OfferStatus.ACTIVE,
             "completed": OfferStatus.COMPLETED,
@@ -357,12 +424,17 @@ async def get_my_offers(
         if status_enum:
             query = query.where(Offer.status == status_enum)
     
-    query = query.order_by(Offer.created_at.asc()).offset(skip).limit(limit)
+    # مرتب‌سازی: جدیدترین‌ها اول
+    query = query.order_by(Offer.created_at.desc()).offset(skip).limit(limit)
     
     result = await db.execute(query)
     offers = result.scalars().all()
     
-    return [offer_to_response(o) for o in offers]
+    # دریافت تنظیمات برای محاسبه انقضا
+    from core.trading_settings import get_trading_settings_async
+    ts = await get_trading_settings_async()
+    
+    return [offer_to_response(o, ts) for o in offers]
 
 
 @router.delete("/{offer_id}", status_code=status.HTTP_204_NO_CONTENT)
