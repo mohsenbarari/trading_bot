@@ -767,7 +767,7 @@ onUnmounted(() => {
                 
                 <div v-else-if="loginStep === 'otp'">
                     <p>کد ارسال شده به ربات تلگرام را وارد کنید:</p>
-                    <input v-model="loginCode" placeholder="کد تایید" dir="ltr" type="number" />
+                    <input v-model="loginCode" placeholder="کد تایید" dir="ltr" type="text" inputmode="numeric" />
                     <button @click="handleVerifyOtp" :disabled="isLoginLoading">
                         {{ isLoginLoading ? 'در حال بررسی...' : 'تایید و ورود' }}
                     </button>
