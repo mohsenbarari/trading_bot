@@ -114,10 +114,10 @@ def get_settings_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_settings_text():
+async def get_settings_text():
     """متن نمایش تنظیمات"""
-    from core.trading_settings import get_trading_settings
-    ts = get_trading_settings()
+    from core.trading_settings import get_trading_settings_async
+    ts = await get_trading_settings_async()
     
     return (
         "⚙️ **تنظیمات سیستم**\n"
@@ -139,8 +139,8 @@ def get_settings_text():
     )
 
 
-# --- هندلر دکمه تنظیمات مدیریت ---
-@router.message(F.text == "⚙️ تنظیمات مدیریت")
+# --- هندلر دکمه تنظیمات سیستم ---
+@router.message(F.text == "⚙️ تنظیمات سیستم")
 async def handle_admin_settings_button(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN:
         return

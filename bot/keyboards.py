@@ -35,7 +35,7 @@ def get_admin_panel_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="➕ ارسال لینک دعوت")],
         [KeyboardButton(text="📦 مدیریت کالاها")],
         [KeyboardButton(text="👥 مدیریت کاربران")],
-        [KeyboardButton(text="⚙️ تنظیمات مدیریت")],
+        [KeyboardButton(text="⚙️ تنظیمات سیستم")],
         [KeyboardButton(text="🔙 بازگشت")]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)

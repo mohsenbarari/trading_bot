@@ -23,7 +23,7 @@ defineEmits(['navigate']);
         </button>
         
         <button class="management-button" @click="$emit('navigate', 'settings')">
-          ⚙️ تنظیمات مدیریت
+          ⚙️ تنظیمات سیستم
         </button>
       </div>
     </div>
