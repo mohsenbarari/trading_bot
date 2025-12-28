@@ -62,6 +62,9 @@ class Offer(Base):
     # لیست بخش‌ها برای فروش خُرد (JSON array مثل [10, 15, 25])
     lot_sizes = Column(JSON, nullable=True)
     
+    # لیست اولیه بخش‌ها (برای تکرار لفظ - چون lot_sizes با معامله تغییر می‌کند)
+    original_lot_sizes = Column(JSON, nullable=True)
+    
     # وضعیت لفظ
     status = Column(Enum(OfferStatus), nullable=False, default=OfferStatus.ACTIVE)
     
@@ -70,6 +73,9 @@ class Offer(Base):
     
     # آیدی پیام در کانال
     channel_message_id = Column(BigInteger, nullable=True)
+    
+    # آیدی لفظ جدید (اگر این لفظ تکرار شده باشد)
+    republished_offer_id = Column(Integer, nullable=True)
     
     # زمان ایجاد
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
