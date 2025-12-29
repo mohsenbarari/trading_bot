@@ -791,6 +791,7 @@ onUnmounted(() => {
           :api-base-url="API_BASE_URL" 
           :jwt-token="jwtToken"
           :user="user"
+          :initial-tab="navigationPayload?.tab"
           @navigate="handleNavigation"
         /> 
         

@@ -107,6 +107,8 @@ class UserPublicRead(BaseModel):
     id: int
     account_name: str
     role: UserRole
+    mobile_number: str
+    address: str
     created_at: datetime
     trades_count: int = 0
     

@@ -533,3 +533,37 @@ async def get_trade(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما به این معامله دسترسی ندارید.")
     
     return trade_to_response(trade)
+
+
+@router.get("/with/{other_user_id}", response_model=List[TradeResponse])
+async def get_trades_with_user(
+    other_user_id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    دریافت تاریخچه معاملات با یک کاربر خاص
+    """
+    from sqlalchemy import and_, or_
+    
+    # کاربر نمی‌تواند معاملات خودش با خودش را بگیرد (که منطقاً وجود ندارد)
+    if other_user_id == current_user.id:
+        return []
+
+    query = select(Trade).options(
+        selectinload(Trade.offer_user),
+        selectinload(Trade.responder_user),
+        selectinload(Trade.commodity)
+    ).where(
+        or_(
+            and_(Trade.offer_user_id == current_user.id, Trade.responder_user_id == other_user_id),
+            and_(Trade.offer_user_id == other_user_id, Trade.responder_user_id == current_user.id)
+        )
+    ).order_by(Trade.created_at.desc()).offset(skip).limit(limit)
+    
+    result = await db.execute(query)
+    trades = result.scalars().all()
+    
+    return [trade_to_response(t) for t in trades]

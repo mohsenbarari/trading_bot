@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import CircleTimer from './CircleTimer.vue'
+import LoadingSkeleton from './LoadingSkeleton.vue'
 
 // Props
 const props = defineProps<{
   apiBaseUrl: string
   jwtToken: string | null
   user: any
+  initialTab?: 'offers' | 'my_offers' | 'my_trades'
 }>()
 
 // Emits
@@ -14,7 +16,7 @@ const emit = defineEmits<{
   (e: 'navigate', view: string, payload?: any): void
 }>()
 
-// Types
+// Interfaces
 interface Commodity {
   id: number
   name: string
@@ -62,32 +64,30 @@ interface TradingSettings {
 }
 
 // State
-const activeTab = ref<'offers' | 'my_offers' | 'my_trades'>('offers')
-const isLoading = ref(false)
+const activeTab = ref<'offers' | 'my_offers' | 'my_trades'>(props.initialTab || 'offers')
+const isLoading = ref(true)
 const error = ref('')
 const successMessage = ref('')
 
-// Offers list
+// Data Lists
 const offers = ref<Offer[]>([])
 const myOffers = ref<Offer[]>([])
 const myTrades = ref<Trade[]>([])
 const commodities = ref<Commodity[]>([])
 const tradingSettings = ref<TradingSettings>({
   offer_min_quantity: 1,
-  offer_max_quantity: 50,
+  offer_max_quantity: 1000,
   lot_min_size: 5,
   lot_max_count: 5,
-  offer_expiry_minutes: 10
+  offer_expiry_minutes: 60
 })
 
 // Filter
 const filterType = ref<'all' | 'buy' | 'sell'>('all')
 
-// Create offer wizard
+// Create Wizard State
 const showCreateWizard = ref(false)
 const createStep = ref<'commodity' | 'quantity' | 'lot' | 'lotInput' | 'price' | 'notes' | 'preview'>('commodity')
-
-// Offer data
 const newOffer = ref({
   offer_type: '' as 'buy' | 'sell' | '',
   commodity_id: 0,
@@ -99,12 +99,16 @@ const newOffer = ref({
   notes: '',
   republished_from_id: null as number | null
 })
+// Lot input
+const lotSizesText = ref('')
+const suggestedLotText = ref('')
+const quickQuantities = [10, 20, 30, 40, 50, 100]
 
-// Text mode
+// Text Offer Mode
 const offerText = ref('')
 const parseError = ref('')
 
-// Trade modal
+// Trade Modal State
 const showTradeModal = ref(false)
 const selectedOffer = ref<Offer | null>(null)
 const tradeQuantity = ref(0)
@@ -113,61 +117,23 @@ const isTrading = ref(false)
 // Polling
 let pollingInterval: number | null = null
 
-// Quick quantity buttons
-const quickQuantities = [10, 20, 30, 40, 50]
-
 // Computed
 const filteredOffers = computed(() => {
   if (filterType.value === 'all') return offers.value
   return offers.value.filter(o => o.offer_type === filterType.value)
 })
 
-// Dynamic placeholder generator based on actual commodities
 const randomPlaceholder = computed(() => {
-  // Default if no commodities loaded yet
   if (!commodities.value || commodities.value.length === 0) {
-    return 'لفظ متنی... مثال: خ سکه 30تا 125000'
+    return 'مثال: خرید سکه 30 عدد 125000'
   }
-  
-  // Pick a random commodity (with fallback)
-  const commodityIndex = Math.floor(Math.random() * commodities.value.length)
-  const commodity = commodities.value[commodityIndex]
-  if (!commodity) {
-    return 'لفظ متنی... مثال: خ سکه 30تا 125000'
-  }
-  const commodityName = commodity.name
-  
-  // Random parameters
-  const tradeTypes = ['خ', 'ف', 'خرید', 'فروش']
-  const tradeType = tradeTypes[Math.floor(Math.random() * tradeTypes.length)] || 'خ'
-  
-  const quantities = [20, 25, 30, 35, 40, 45, 50]
-  const quantity = quantities[Math.floor(Math.random() * quantities.length)] || 30
-  
-  const prices = [123000, 124000, 125000, 126000, 127000, 128000]
-  const price = prices[Math.floor(Math.random() * prices.length)] || 125000
-  
-  const quantitySuffix = Math.random() > 0.5 ? 'تا' : ' عدد'
-  
-  // 50% chance for retail (lot sizes)
-  const isRetail = Math.random() > 0.5
-  
-  if (isRetail && quantity >= 20) {
-    // Generate lot sizes that sum to quantity
-    const lot1 = Math.floor(quantity / 3)
-    const lot2 = Math.floor(quantity / 3)
-    const lot3 = quantity - lot1 - lot2
-    return `${tradeType} ${commodityName} ${quantity}${quantitySuffix} ${lot1} ${lot2} ${lot3} ${price}`
-  } else {
-    return `${tradeType} ${commodityName} ${quantity}${quantitySuffix} ${price}`
-  }
+  const comm = commodities.value[Math.floor(Math.random() * commodities.value.length)]
+  return `خرید ${comm?.name || 'کالا'} 50 عدد 125000`
 })
 
 // API Helper
 async function apiFetch(endpoint: string, options: RequestInit = {}) {
-  // Get the freshest token (localStorage may have been refreshed by parent)
-  const token = localStorage.getItem('auth_token') || props.jwtToken;
-  
+  const token = localStorage.getItem('auth_token') || props.jwtToken
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...(token ? { 'Authorization': `Bearer ${token}` } : {})
@@ -187,52 +153,70 @@ async function apiFetch(endpoint: string, options: RequestInit = {}) {
   return response.json()
 }
 
-// Load Data
-async function loadOffers() {
+
+// Load Functions
+async function loadOffers(silent = false) {
+  if (!silent) {
+      isLoading.value = true
+      error.value = ''
+  }
   try {
     offers.value = await apiFetch('/offers/')
   } catch (e: any) {
-    console.error('Error loading offers:', e)
+    console.error(e)
+    if (!silent) error.value = 'خطا در دریافت لیست لفظ‌ها'
+  } finally {
+    if (!silent) isLoading.value = false
   }
 }
 
-async function loadMyOffers() {
+async function loadMyOffers(silent = false) {
+  if (!silent) {
+      isLoading.value = true
+      error.value = ''
+  }
   try {
-    // دریافت لفظ‌های ۲ ساعت اخیر (همه وضعیت‌ها)
     myOffers.value = await apiFetch('/offers/my?since_hours=2')
   } catch (e: any) {
-    console.error('Error loading my offers:', e)
+    console.error(e)
+    if (!silent) error.value = 'خطا در دریافت لفظ‌های من'
+  } finally {
+    if (!silent) isLoading.value = false
   }
 }
 
-async function loadMyTrades() {
+async function loadMyTrades(silent = false) {
+  if (!silent) {
+      isLoading.value = true
+      error.value = ''
+  }
   try {
     myTrades.value = await apiFetch('/trades/my')
   } catch (e: any) {
-    console.error('Error loading my trades:', e)
+    console.error(e)
+    if (!silent) error.value = 'خطا در دریافت صورت معاملات'
+  } finally {
+    if (!silent) isLoading.value = false
   }
 }
 
 async function loadCommodities() {
   try {
-    const data = await apiFetch('/commodities/')
-    commodities.value = data
-  } catch (e: any) {
-    console.error('Error loading commodities:', e)
+    commodities.value = await apiFetch('/commodities/')
+  } catch (e) {
+      console.error('Failed to load commodities', e)
   }
 }
 
 async function loadTradingSettings() {
   try {
-    const data = await apiFetch('/trading-settings/')
-    tradingSettings.value = data
-  } catch (e: any) {
-    console.error('Error loading trading settings:', e)
+    tradingSettings.value = await apiFetch('/trading-settings/')
+  } catch (e) {
+      console.error('Failed to load settings', e)
   }
 }
 
-// ===== CREATE OFFER WIZARD =====
-
+// Wizard Functions
 function startCreateOffer(type: 'buy' | 'sell') {
   newOffer.value = {
     offer_type: type,
@@ -245,108 +229,69 @@ function startCreateOffer(type: 'buy' | 'sell') {
     notes: '',
     republished_from_id: null
   }
-  error.value = ''
   createStep.value = 'commodity'
   showCreateWizard.value = true
+  error.value = ''
 }
 
-function selectCommodity(commodity: Commodity) {
-  newOffer.value.commodity_id = commodity.id
-  newOffer.value.commodity_name = commodity.name
+function selectCommodity(c: Commodity) {
+  newOffer.value.commodity_id = c.id
+  newOffer.value.commodity_name = c.name
   createStep.value = 'quantity'
 }
 
-function selectQuantity(qty: number) {
-  if (qty < tradingSettings.value.offer_min_quantity || qty > tradingSettings.value.offer_max_quantity) {
-    error.value = `تعداد باید بین ${tradingSettings.value.offer_min_quantity} تا ${tradingSettings.value.offer_max_quantity} باشد.`
-    return
-  }
-  newOffer.value.quantity = qty
-  error.value = ''
+function selectQuantity(q: number) {
+  newOffer.value.quantity = q
   createStep.value = 'lot'
 }
 
 function confirmQuantity() {
-  const qty = newOffer.value.quantity
-  if (!qty || qty < tradingSettings.value.offer_min_quantity || qty > tradingSettings.value.offer_max_quantity) {
-    error.value = `تعداد باید بین ${tradingSettings.value.offer_min_quantity} تا ${tradingSettings.value.offer_max_quantity} باشد.`
+  if (!newOffer.value.quantity) {
+    error.value = 'تعداد الزامی است'
     return
   }
   error.value = ''
   createStep.value = 'lot'
 }
 
-function selectLotType(isWholesale: boolean) {
-  newOffer.value.is_wholesale = isWholesale
-  if (isWholesale) {
+function selectLotType(wholesale: boolean) {
+  newOffer.value.is_wholesale = wholesale
+  if (wholesale) {
     newOffer.value.lot_sizes = null
     createStep.value = 'price'
   } else {
-    // پیشنهاد ترکیب اولیه
-    const qty = newOffer.value.quantity || 0
-    if (qty >= 30) {
-      newOffer.value.lot_sizes = [Math.floor(qty / 3), Math.floor(qty / 3), qty - 2 * Math.floor(qty / 3)]
-    } else if (qty >= 10) {
-      newOffer.value.lot_sizes = [Math.floor(qty / 2), qty - Math.floor(qty / 2)]
-    } else {
-      newOffer.value.lot_sizes = [qty]
-    }
     createStep.value = 'lotInput'
+    // pre-fill suggested logic if needed
+    const q = newOffer.value.quantity || 0
+    if (q > 0) suggestedLotText.value = `${Math.floor(q/2)} ${q - Math.floor(q/2)}`
   }
-}
-
-// Lot sizes input (as text like "10 15 25")
-const lotSizesText = ref('')
-const suggestedLotText = ref('')  // Placeholder for suggested combination
-
-function validateLotSizes(): boolean {
-  // If user didn't enter anything, use the suggested combination
-  const textToValidate = lotSizesText.value.trim() || suggestedLotText.value.trim()
-  const parts = textToValidate.split(/\s+/)
-  if (parts.length === 0 || (parts.length === 1 && parts[0] === '')) {
-    error.value = 'لطفاً ترکیب را وارد کنید.'
-    return false
-  }
-  
-  const lots: number[] = []
-  for (const p of parts) {
-    const n = parseInt(p)
-    if (isNaN(n) || n <= 0) {
-      error.value = `"${p}" یک عدد معتبر نیست.`
-      return false
-    }
-    if (n < tradingSettings.value.lot_min_size) {
-      error.value = `هر بخش باید حداقل ${tradingSettings.value.lot_min_size} عدد باشد.`
-      return false
-    }
-    lots.push(n)
-  }
-  
-  if (lots.length > tradingSettings.value.lot_max_count) {
-    error.value = `حداکثر ${tradingSettings.value.lot_max_count} بخش مجاز است.`
-    return false
-  }
-  
-  const sum = lots.reduce((a, b) => a + b, 0)
-  if (sum !== newOffer.value.quantity) {
-    error.value = `جمع ترکیب (${sum}) با کل (${newOffer.value.quantity}) برابر نیست.`
-    return false
-  }
-  
-  newOffer.value.lot_sizes = lots.sort((a, b) => b - a)
-  error.value = ''
-  return true
 }
 
 function confirmLotSizes() {
-  if (validateLotSizes()) {
-    createStep.value = 'price'
+  if (!lotSizesText.value && !suggestedLotText.value) {
+    error.value = 'لطفا ترکیب را وارد کنید'
+    return
   }
+  const txt = lotSizesText.value || suggestedLotText.value
+  // basic validation
+  const parts = txt.trim().split(/\s+/).map(Number)
+  if (parts.some(isNaN)) {
+    error.value = 'اعداد نامعتبر'
+    return
+  }
+  const sum = parts.reduce((a,b) => a+b, 0)
+  if (sum !== newOffer.value.quantity) {
+    error.value = `مجموع (${sum}) با تعداد (${newOffer.value.quantity}) برابر نیست`
+    return
+  }
+  newOffer.value.lot_sizes = parts
+  error.value = ''
+  createStep.value = 'price'
 }
 
 function confirmPrice() {
-  if (!newOffer.value.price || newOffer.value.price <= 0) {
-    error.value = 'قیمت باید بزرگ‌تر از صفر باشد.'
+  if (!newOffer.value.price) {
+    error.value = 'قیمت الزامی است'
     return
   }
   error.value = ''
@@ -357,62 +302,21 @@ function confirmNotes() {
   createStep.value = 'preview'
 }
 
-function goBack() {
-  switch (createStep.value) {
-    case 'commodity': closeWizard(); break
-    case 'quantity': createStep.value = 'commodity'; break
-    case 'lot': createStep.value = 'quantity'; break
-    case 'lotInput': createStep.value = 'lot'; break
-    case 'price': 
-      createStep.value = newOffer.value.is_wholesale ? 'lot' : 'lotInput'
-      break
-    case 'notes': createStep.value = 'price'; break
-    case 'preview': createStep.value = 'notes'; break
-  }
-}
-
 function closeWizard() {
   showCreateWizard.value = false
-  newOffer.value = {
-    offer_type: '',
-    commodity_id: 0,
-    commodity_name: '',
-    quantity: null,
-    price: null,
-    is_wholesale: true,
-    lot_sizes: null,
-    notes: '',
-    republished_from_id: null
-  }
-  error.value = ''
 }
 
 async function submitOffer() {
   isLoading.value = true
-  error.value = ''
-  
   try {
-    const payload = {
-      offer_type: newOffer.value.offer_type,
-      commodity_id: newOffer.value.commodity_id,
-      quantity: newOffer.value.quantity,
-      price: newOffer.value.price,
-      is_wholesale: newOffer.value.is_wholesale,
-      lot_sizes: newOffer.value.lot_sizes,
-      notes: newOffer.value.notes || null,
-      republished_from_id: newOffer.value.republished_from_id || null
-    }
-    
     await apiFetch('/offers/', {
       method: 'POST',
-      body: JSON.stringify(payload)
+      body: JSON.stringify(newOffer.value)
     })
-    
-    successMessage.value = '✅ لفظ شما با موفقیت در کانال ارسال شد!'
+    successMessage.value = 'لفظ ثبت شد'
+    setTimeout(() => successMessage.value = '', 3000)
     closeWizard()
     await loadOffers()
-    
-    setTimeout(() => successMessage.value = '', 3000)
   } catch (e: any) {
     error.value = e.message
   } finally {
@@ -420,49 +324,35 @@ async function submitOffer() {
   }
 }
 
-// ===== TEXT MODE OFFER =====
-
 async function parseAndSubmitTextOffer() {
-  if (!offerText.value.trim()) {
-    parseError.value = 'لطفاً متن لفظ را وارد کنید.'
-    return
-  }
-  
+  if (!offerText.value.trim()) return
   isLoading.value = true
   parseError.value = ''
-  
   try {
-    // Step 1: Parse the text
-    const parseResult = await apiFetch('/offers/parse', {
+    const res = await apiFetch('/offers/parse', {
       method: 'POST',
       body: JSON.stringify({ text: offerText.value })
     })
-    
-    if (!parseResult.success || !parseResult.data) {
-      parseError.value = parseResult.error || 'خطا در پارس متن'
-      return
+    if (res.success && res.data) {
+       // Submit the parsed offer directly
+       await apiFetch('/offers/', {
+         method: 'POST',
+         body: JSON.stringify({
+            offer_type: res.data.trade_type,
+            commodity_id: res.data.commodity_id,
+            quantity: res.data.quantity,
+            price: res.data.price,
+            is_wholesale: res.data.is_wholesale,
+            lot_sizes: res.data.lot_sizes,
+            notes: res.data.notes
+         })
+       })
+       successMessage.value = 'لفظ متنی ثبت شد'
+       offerText.value = ''
+       await loadOffers()
+    } else {
+      parseError.value = res.error || 'خطا در پردازش متن'
     }
-    
-    // Step 2: Create the offer using parsed data
-    const offerData = parseResult.data
-    await apiFetch('/offers/', {
-      method: 'POST',
-      body: JSON.stringify({
-        offer_type: offerData.trade_type,
-        commodity_id: offerData.commodity_id,
-        quantity: offerData.quantity,
-        price: offerData.price,
-        is_wholesale: offerData.is_wholesale,
-        lot_sizes: offerData.lot_sizes,
-        notes: offerData.notes
-      })
-    })
-    
-    successMessage.value = '✅ لفظ شما با موفقیت در کانال ارسال شد!'
-    offerText.value = ''
-    await loadOffers()
-    
-    setTimeout(() => successMessage.value = '', 3000)
   } catch (e: any) {
     parseError.value = e.message
   } finally {
@@ -470,25 +360,17 @@ async function parseAndSubmitTextOffer() {
   }
 }
 
-// ===== TRADE MODAL =====
-
-function openTradeModal(offer: Offer, quantity?: number) {
-  if (offer.user_id === props.user?.id) {
-    error.value = 'نمی‌توانید روی لفظ خودتان معامله کنید.'
-    setTimeout(() => error.value = '', 3000)
-    return
-  }
+// Trade Logic
+function openTradeModal(offer: Offer, qty?: number) {
+  if (offer.user_id === props.user?.id) return
   selectedOffer.value = offer
-  tradeQuantity.value = quantity ?? offer.remaining_quantity
+  tradeQuantity.value = qty || offer.remaining_quantity
   showTradeModal.value = true
 }
 
 async function executeTrade() {
   if (!selectedOffer.value) return
-  
   isTrading.value = true
-  error.value = ''
-  
   try {
     await apiFetch('/trades/', {
       method: 'POST',
@@ -497,16 +379,9 @@ async function executeTrade() {
         quantity: tradeQuantity.value
       })
     })
-    
-    successMessage.value = '✅ معامله با موفقیت انجام شد!'
+    successMessage.value = 'معامله انجام شد'
     showTradeModal.value = false
-    selectedOffer.value = null
-    
-    await new Promise(resolve => setTimeout(resolve, 300))
     await loadOffers()
-    setTimeout(() => loadOffers(), 500)
-    
-    setTimeout(() => successMessage.value = '', 3000)
   } catch (e: any) {
     error.value = e.message
   } finally {
@@ -514,114 +389,66 @@ async function executeTrade() {
   }
 }
 
-// ===== EXPIRE OFFER =====
-
-async function expireOffer(offerId: number) {
-  if (!confirm('آیا از منقضی کردن این لفظ مطمئن هستید؟')) return
-  
+async function expireOffer(id: number) {
+  if (!confirm('آیا مطمئن هستید؟')) return
   try {
-    await apiFetch(`/offers/${offerId}`, { method: 'DELETE' })
-    successMessage.value = '✅ لفظ منقضی شد.'
+    await apiFetch(`/offers/${id}`, { method: 'DELETE' })
     await loadMyOffers()
-    await loadOffers()
-    setTimeout(() => successMessage.value = '', 3000)
-  } catch (e: any) {
-    error.value = e.message
-  }
+    if (activeTab.value === 'offers') await loadOffers()
+  } catch (e: any) { error.value = e.message }
 }
 
-function repeatOffer(offer: any) {
-  // تنظیم مقادیر فرم از روی لفظ قبلی
-  newOffer.value = {
-    offer_type: offer.offer_type,
-    commodity_id: offer.commodity_id,
-    commodity_name: offer.commodity_name,
-    quantity: offer.quantity,
-    price: offer.price,
-    is_wholesale: offer.is_wholesale,
-    lot_sizes: offer.original_lot_sizes || offer.lot_sizes,
-    notes: offer.notes,
-    republished_from_id: offer.id
-  }
-  
-  // باز کردن ویزارد
-  showCreateWizard.value = true
+function repeatOffer(offer: Offer) {
+  newOffer.value = { ...offer, republished_from_id: offer.id } as any
   createStep.value = 'preview'
+  showCreateWizard.value = true
 }
 
-function getStatusLabel(status: string) {
-  switch (status) {
-    case 'active': return 'فعال';
-    case 'completed': return 'تکمیل شده';
-    case 'expired': return 'منقضی شده';
-    case 'cancelled': return 'لغو شده';
-    default: return status;
-  }
+function getStatusLabel(s: string) {
+  const map: Record<string, string> = { active: 'فعال', completed: 'تکمیل', expired: 'منقضی', cancelled: 'لغو' }
+  return map[s] || s
 }
 
-// ===== POLLING =====
+function getUserTradeType(t: Trade) {
+  if (t.responder_user_id === props.user?.id) return t.trade_type
+  return t.trade_type === 'active' ? 'active' : (t.trade_type === 'buy' ? 'sell' : 'buy')
+}
 
-function startPolling() {
-  if (pollingInterval) return
+onMounted(() => {
+  // Parallelize loading: Fire non-criticals in background
+  loadCommodities()
+  loadTradingSettings()
   
-  pollingInterval = setInterval(async () => {
-    if (activeTab.value === 'offers') {
-      await loadOffers()
-    } else if (activeTab.value === 'my_offers') {
-      await loadMyOffers()
-    } else if (activeTab.value === 'my_trades') {
-      await loadMyTrades()
-    }
-  }, 1500) as unknown as number
-}
-
-function stopPolling() {
-  if (pollingInterval) {
-    clearInterval(pollingInterval)
-    pollingInterval = null
-  }
-}
-
-// ===== NAVIGATION =====
-
-function goHome() {
-  emit('navigate', 'profile')
-}
-
-// ===== LIFECYCLE =====
-
-onMounted(async () => {
-  await loadCommodities()
-  await loadTradingSettings()
-  await loadOffers()
+  // Load initial data based on active tab immediately
+  // We do NOT await here to let Vue mount the component and show the skeleton immediately
+  if (activeTab.value === 'offers') loadOffers()
+  else if (activeTab.value === 'my_offers') loadMyOffers()
+  else if (activeTab.value === 'my_trades') loadMyTrades()
+  
   startPolling()
 })
-
-// ===== HELPERS =====
-
-function getUserTradeType(trade: any) {
-  if (!trade || !props.user) return trade?.trade_type || 'buy';
-  return trade.responder_user_id === props.user.id 
-    ? trade.trade_type 
-    : (trade.trade_type === 'buy' ? 'sell' : 'buy');
-}
 
 onUnmounted(() => {
   stopPolling()
 })
 
-watch(activeTab, async (tab) => {
-  if (tab === 'my_offers') await loadMyOffers()
-  if (tab === 'my_trades') await loadMyTrades()
-  if (tab === 'offers') await loadOffers()
-})
+function startPolling() {
+  if (pollingInterval) return
+  pollingInterval = setInterval(() => {
+    if (activeTab.value === 'offers') loadOffers(true)
+    else if (activeTab.value === 'my_offers') loadMyOffers(true)
+    else if (activeTab.value === 'my_trades') loadMyTrades(true)
+  }, 3000) as any
+}
 
-// Set suggested lot sizes as placeholder when entering lotInput step
-watch(createStep, (step) => {
-  if (step === 'lotInput' && newOffer.value.lot_sizes) {
-    suggestedLotText.value = newOffer.value.lot_sizes.join(' ')
-    lotSizesText.value = ''  // Keep input empty so placeholder shows
-  }
+function stopPolling() {
+  if (pollingInterval) clearInterval(pollingInterval)
+}
+
+watch(activeTab, (val) => {
+   if (val === 'offers') loadOffers()
+   else if (val === 'my_offers') loadMyOffers()
+   else if (val === 'my_trades') loadMyTrades()
 })
 </script>
 
@@ -656,7 +483,10 @@ watch(createStep, (step) => {
     
     <!-- Tab: Active Offers -->
     <div v-if="activeTab === 'offers'" class="tab-content">
-      <div v-if="filteredOffers.length === 0" class="empty-state">
+      <div v-if="isLoading && offers.length === 0">
+         <LoadingSkeleton :count="5" :height="100" />
+      </div>
+      <div v-else-if="filteredOffers.length === 0" class="empty-state">
         <p>هیچ لفظ فعالی وجود ندارد.</p>
       </div>
       
@@ -730,7 +560,10 @@ watch(createStep, (step) => {
     
     <!-- Tab: My Offers -->
     <div v-if="activeTab === 'my_offers'" class="tab-content">
-      <div v-if="myOffers.length === 0" class="empty-state">
+      <div v-if="isLoading && myOffers.length === 0">
+         <LoadingSkeleton :count="3" :height="100" />
+      </div>
+      <div v-else-if="myOffers.length === 0" class="empty-state">
         <p>شما هیچ لفظی در ۲ ساعت اخیر نداشته‌اید.</p>
       </div>
       
@@ -783,7 +616,10 @@ watch(createStep, (step) => {
     
     <!-- Tab: My Trades -->
     <div v-if="activeTab === 'my_trades'" class="tab-content">
-      <div v-if="myTrades.length === 0" class="empty-state">
+      <div v-if="isLoading && myTrades.length === 0">
+         <LoadingSkeleton :count="4" :height="80" />
+      </div>
+      <div v-else-if="myTrades.length === 0" class="empty-state">
         <p>هنوز هیچ معامله‌ای انجام نداده‌اید.</p>
       </div>
       
@@ -1898,7 +1734,7 @@ watch(createStep, (step) => {
 } 
 
 .info-value.price { 
-  color: var(--primary-color); 
+  color: var(--text-color); 
   font-weight: 700; 
 } 
 
