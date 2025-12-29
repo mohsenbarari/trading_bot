@@ -597,6 +597,15 @@ onMounted(async () => {
   startPolling()
 })
 
+// ===== HELPERS =====
+
+function getUserTradeType(trade: any) {
+  if (!trade || !props.user) return trade?.trade_type || 'buy';
+  return trade.responder_user_id === props.user.id 
+    ? trade.trade_type 
+    : (trade.trade_type === 'buy' ? 'sell' : 'buy');
+}
+
 onUnmounted(() => {
   stopPolling()
 })
@@ -783,23 +792,49 @@ watch(createStep, (step) => {
           v-for="trade in myTrades" 
           :key="trade.id" 
           class="trade-card"
-          :class="trade.trade_type"
+          :class="getUserTradeType(trade)"
         >
           <div class="trade-header">
             <span class="trade-type">
-              {{ trade.trade_type === 'buy' ? '🟢 خرید' : '🔴 فروش' }}
+              {{ getUserTradeType(trade) === 'buy' ? '🟢 خرید' : '🔴 فروش' }}
             </span>
-            <span class="trade-number">#{{ trade.trade_number }}</span>
+            <!-- شماره معامله به بدنه منتقل شد -->
           </div>
           
           <div class="trade-body">
-            <p><strong>{{ trade.commodity_name }}</strong></p>
-            <p>💰 فی: {{ trade.price.toLocaleString() }} | 📦 تعداد: {{ trade.quantity }}</p>
-            <p>👤 طرف معامله: {{ trade.responder_user_id === user?.id ? trade.offer_user_name : trade.responder_user_name }}</p>
+            <div class="trade-info-row">
+              <span class="info-label">💰 فی:</span>
+              <span class="info-value price">{{ trade.price.toLocaleString() }}</span>
+            </div>
+            <div class="trade-info-row">
+              <span class="info-label">📦 تعداد:</span>
+              <span class="info-value">{{ trade.quantity }}</span>
+            </div>
+            <div class="trade-info-row">
+              <span class="info-label">🏷️ کالا:</span>
+              <span class="info-value">{{ trade.commodity_name }}</span>
+            </div>
+            <div class="trade-info-row">
+              <span class="info-label">👤 طرف معامله:</span>
+              <span 
+                class="info-value profile-link" 
+                @click.stop="$emit('navigate', 'public_profile', { id: trade.responder_user_id === user?.id ? trade.offer_user_id : trade.responder_user_id, account_name: trade.responder_user_id === user?.id ? trade.offer_user_name : trade.responder_user_name })"
+              >
+                {{ trade.responder_user_id === user?.id ? trade.offer_user_name : trade.responder_user_name }}
+              </span>
+            </div>
+            <div class="trade-info-row">
+              <span class="info-label">🔢 شماره معامله:</span>
+              <span class="info-value">{{ trade.trade_number }}</span>
+            </div>
+            <div class="trade-info-row">
+               <span class="info-label">🕐 زمان معامله:</span>
+               <span class="info-value dir-ltr">{{ trade.created_at }}</span>
+            </div>
           </div>
           
           <div class="trade-footer">
-            <span class="trade-time">{{ trade.created_at }}</span>
+             <!-- زمان به بدنه منتقل شد -->
           </div>
         </div>
       </div>
@@ -1851,4 +1886,38 @@ watch(createStep, (step) => {
   font-size: 12px;
   cursor: pointer;
 }
+.trade-info-row { 
+  display: flex; 
+  justify-content: space-between; 
+  margin-bottom: 6px; 
+  font-size: 13px; 
+} 
+
+.info-label { 
+  color: var(--text-secondary); 
+} 
+
+.info-value.price { 
+  color: var(--primary-color); 
+  font-weight: 700; 
+} 
+
+/* Profile Link Style - High Specificity */
+.info-value.profile-link { 
+  color: #3b82f6 !important; /* Blue-500 */
+  cursor: pointer; 
+  text-decoration: underline; 
+  font-weight: 600; 
+} 
+
+[data-theme='dark'] .info-value.profile-link {
+  color: #60a5fa !important; /* Blue-400 for dark mode */
+}
+
+.dir-ltr { 
+  direction: ltr; 
+  display: inline-block; 
+}
+
 </style>
+

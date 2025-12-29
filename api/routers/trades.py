@@ -462,7 +462,12 @@ async def create_trade(
         "offer_id": offer.id,
         "quantity": trade_data.quantity,
         "price": offer.price,
-        "commodity_name": offer.commodity.name
+        "commodity_name": offer.commodity.name,
+        "trade_type": responder_trade_type.value,
+        "offer_user_id": offer.user_id,
+        "offer_user_name": offer.user.account_name if offer.user else "ناشناس",
+        "responder_user_id": current_user.id,
+        "responder_user_name": current_user.account_name
     })
     await publish_event("offer:updated", {
         "id": offer.id,

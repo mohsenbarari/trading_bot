@@ -102,6 +102,21 @@ class UserRead(UserBase):
     class Config:
         from_attributes = True
 
+class UserPublicRead(BaseModel):
+    """شمای عمومی کاربر برای نمایش به دیگران"""
+    id: int
+    account_name: str
+    role: UserRole
+    created_at: datetime
+    trades_count: int = 0
+    
+    @computed_field
+    def created_at_jalali(self) -> str | None:
+        return to_jalali_str(self.created_at)
+
+    class Config:
+        from_attributes = True
+
 class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
     has_bot_access: Optional[bool] = None

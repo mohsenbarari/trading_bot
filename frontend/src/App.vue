@@ -13,6 +13,7 @@ import NotificationCenter from './components/NotificationCenter.vue'
 import TradingSettings from './components/TradingSettings.vue'
 import TradingView from './components/TradingView.vue'
 import UserSettings from './components/UserSettings.vue'
+import PublicProfile from './components/PublicProfile.vue'
 
 interface Notification {
   id: number;
@@ -397,10 +398,14 @@ async function checkNotifications() {
 }
 
 // 2. اتصال زنده و امن به SSE (بدون نیاز به کتابخانه اضافی)
+// 2. اتصال زنده و امن به SSE (بدون نیاز به کتابخانه اضافی)
+
+const isTradeBannerActive = ref(false);
+const tradeBannerData = ref<any>(null);
+
 async function startSSE() {
   if (!jwtToken.value) return;
   
-  // اگر اتصال قبلی باز است، ببندیم
   if (sseController) sseController.abort();
   sseController = new AbortController();
   
@@ -426,50 +431,63 @@ async function startSSE() {
       const { value, done } = await reader.read();
       if (done) break;
       
-      // دیکود کردن چانک دریافتی
       buffer += decoder.decode(value, { stream: true });
       
-      // پردازش خط به خط (ممکن است چند پیام همزمان بیاید)
       const parts = buffer.split('\n\n');
-      buffer = parts.pop() || ''; // بخش ناقص آخر را نگه دار
+      buffer = parts.pop() || '';
 
       for (const part of parts) {
-        if (part.startsWith('data: ')) {
-          try {
-             const jsonStr = part.substring(6).trim(); // حذف "data: "
-             if (!jsonStr) continue;
-             
-             const newNotif: Notification = JSON.parse(jsonStr);
-             
-             // اقداماتی که پس از دریافت پیام جدید انجام می‌شود:
-             
-             // 1. اضافه کردن به لیست
-             popoverNotifications.value.unshift(newNotif);
-             
-             // 2. افزایش عدد بج
-             unreadCount.value++;
-             
-             // 3. نمایش بنر (اگر قبلا نمایش داده نشده)
-             if (!shownBannerIds.value.has(newNotif.id)) {
-                enqueueBanners([newNotif]);
-             }
-             
-          } catch (err) {
-            console.error("SSE Parse Error:", err, part);
+        // Simple parser for event and data
+        let eventType = 'message';
+        let dataStr = '';
+
+        const lines = part.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            eventType = line.substring(7).trim();
+          } else if (line.startsWith('data: ')) {
+            dataStr = line.substring(6).trim();
           }
+        }
+
+        if (dataStr) {
+           try {
+             const data = JSON.parse(dataStr);
+             
+             if (eventType === 'trade:created') {
+                handleTradeEvent(data);
+             } else if (eventType === 'message' || !eventType) {
+                // Standard notification
+                const newNotif: Notification = data;
+                popoverNotifications.value.unshift(newNotif);
+                unreadCount.value++;
+                // Do NOT show banner for standard notifications if trade banner is high priority? 
+                // Or just standard enqueue.
+                // NOTE: Trade notifications also come as "message" from backend (via create_user_notification)
+                // We should prevent double banners if possible.
+                // Ideally, 'trade:created' event is for the special UI, 'message' is for history/badge.
+                
+                // If the message category is 'trade', maybe skip banner if we have the special banner?
+                // Let's rely on eventType 'trade:created' for the special banner.
+                // Standard notifications still go to the queue (top banner).
+                if (!shownBannerIds.value.has(newNotif.id)) {
+                    enqueueBanners([newNotif]);
+                }
+             }
+           } catch (err) {
+             console.error("SSE Parse Error:", err);
+           }
         }
       }
     }
   } catch (error: any) {
-    if (error.name === 'AbortError') return; // لغو دستی
+    if (error.name === 'AbortError') return;
     console.error("SSE Connection lost. Retrying in 5s...", error);
-    // تلاش مجدد بعد از 5 ثانیه
     setTimeout(() => {
        if (user.value) startSSE(); 
     }, 5000);
   }
 }
-// -------------------------------------------------------------
 
 const navigationPayload = ref<any>(null);
 
@@ -498,6 +516,67 @@ function togglePopover() {
   isPopoverOpen.value = !isPopoverOpen.value;
   // وقتی پاپ‌اور باز می‌شود، لیست را رفرش نمی‌کنیم چون SSE آن را آپدیت نگه داشته
 }
+
+// ===== TRADE BANNER LOGIC =====
+function handleTradeEvent(data: any) {
+    if (!data || !user.value) return;
+    
+    // Check if we are involved in this trade
+    if (data.offer_user_id !== user.value.id && data.responder_user_id !== user.value.id) {
+        return; // Irrelevant trade
+    }
+
+    tradeBannerData.value = data;
+    isTradeBannerActive.value = true;
+    
+    // Play sound if possible? (Browser policy might block)
+    
+    setTimeout(() => {
+        closeTradeBanner();
+    }, 6000);
+}
+
+function closeTradeBanner() {
+    isTradeBannerActive.value = false;
+    setTimeout(() => tradeBannerData.value = null, 300);
+}
+
+function getTradeSide(data: any) {
+    if (!user.value) return 'unknown';
+    // Responder action determines trade_type.
+    // If trade_type is 'buy': Responder BOUGHT.
+    // If I am Responder -> I Bought (Buy side).
+    // If I am Offer Owner -> I Sold (Sell side).
+    
+    const isResponder = data.responder_user_id === user.value.id;
+    const actionIsBuy = data.trade_type === 'buy';
+    
+    if (isResponder) {
+        return actionIsBuy ? 'buy' : 'sell';
+    } else {
+        return actionIsBuy ? 'sell' : 'buy';
+    }
+}
+
+function getTradeBannerClass(data: any) {
+    return getTradeSide(data) === 'buy' ? 'banner-buy' : 'banner-sell';
+}
+
+function getTradeBannerIcon(data: any) {
+    return getTradeSide(data) === 'buy' ? '🎉' : '💰';
+}
+
+function getTradeBannerTitle(data: any) {
+    return getTradeSide(data) === 'buy' ? 'خرید موفق!' : 'فروش موفق!';
+}
+
+function getTradeCounterparty(data: any) {
+    if (!user.value) return '...';
+    return data.offer_user_id === user.value.id 
+        ? data.responder_user_name 
+        : data.offer_user_name;
+}
+// ==============================
 
 function truncateMessage(message: string, length = 50) {
   const cleanMessage = message.replace(/\*\*(.*?)\*\*/g, '$1').replace(/`/g, '').replace(/\n/g, ' ');
@@ -587,6 +666,34 @@ onUnmounted(() => {
              <div class="notif-content">
                {{ bannerBody }}
              </div>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="slide-down">
+      <div 
+        v-if="isTradeBannerActive && tradeBannerData" 
+        class="trade-banner"
+        :class="getTradeBannerClass(tradeBannerData)"
+        @click="closeTradeBanner"
+      >
+        <div class="trade-banner-content">
+          <div class="trade-banner-icon">
+            {{ getTradeBannerIcon(tradeBannerData) }}
+          </div>
+          <div class="trade-banner-text">
+            <div class="trade-banner-title">
+              {{ getTradeBannerTitle(tradeBannerData) }}
+            </div>
+            <div class="trade-banner-details">
+              <span>{{ tradeBannerData.quantity }} {{ tradeBannerData.commodity_name }}</span>
+              <span class="separator">•</span>
+              <span>{{ tradeBannerData.price.toLocaleString() }} تومان</span>
+            </div>
+            <div class="trade-banner-user">
+              طرف حساب: {{ getTradeCounterparty(tradeBannerData) }}
+            </div>
           </div>
         </div>
       </div>
@@ -744,6 +851,14 @@ onUnmounted(() => {
 
           <UserSettings
             v-else-if="activeView === 'user_settings'"
+            @navigate="handleNavigation"
+          />
+
+          <PublicProfile
+            v-else-if="activeView === 'public_profile'"
+            :user="navigationPayload"
+            :api-base-url="API_BASE_URL"
+            :jwt-token="jwtToken"
             @navigate="handleNavigation"
           />
 
@@ -1202,5 +1317,86 @@ body {
     color: #ff3b30;
     margin-top: 10px;
     font-size: 14px;
+}
+/* Trade Banner Styles */
+.trade-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 9999;
+  padding: 16px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  cursor: pointer;
+  direction: rtl;
+  color: white;
+}
+
+.banner-buy {
+  background: linear-gradient(135deg, #059669, #10b981);
+}
+
+.banner-sell {
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+}
+
+.trade-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.trade-banner-icon {
+  font-size: 32px;
+  background: rgba(255,255,255,0.2);
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.trade-banner-text {
+  flex: 1;
+}
+
+.trade-banner-title {
+  font-weight: 800;
+  font-size: 18px;
+  margin-bottom: 4px;
+}
+
+.trade-banner-details {
+  font-size: 15px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.separator {
+  opacity: 0.6;
+}
+
+.trade-banner-user {
+  font-size: 13px;
+  opacity: 0.9;
+  margin-top: 4px;
+}
+
+/* Animations */
+.slide-down-enter-active,
+.slide-down-leave-active {
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.slide-down-enter-from,
+.slide-down-leave-to {
+  transform: translateY(-100%);
+  opacity: 0;
 }
 </style>

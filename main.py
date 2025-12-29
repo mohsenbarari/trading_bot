@@ -66,7 +66,10 @@ api_router.include_router(notifications.router)
 api_router.include_router(trading_settings.router)
 api_router.include_router(offers.router)
 api_router.include_router(trades.router)
+api_router.include_router(trades.router)
 api_router.include_router(realtime.router)
+from api.routers import users_public
+api_router.include_router(users_public.router)
 
 # 3. اندپوینت config را به همین روتر اصلی اضافه می‌کنیم
 @api_router.get("/config", response_model=schemas.AppConfig)
