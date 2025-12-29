@@ -207,8 +207,9 @@ async def monitor_expired_offers(bot: Bot):
                                 message_id=offer.channel_message_id,
                                 reply_markup=None
                             )
-                        except:
-                            pass
+                            logger.info(f"Removed buttons from channel message {offer.channel_message_id}")
+                        except Exception as e:
+                            logger.warning(f"Failed to remove buttons from channel message {offer.channel_message_id}: {e}")
                     
                     logger.info(f"Offer {offer.id} expired automatically")
                 
