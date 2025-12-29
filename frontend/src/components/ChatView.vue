@@ -7,6 +7,8 @@ const props = defineProps<{
   apiBaseUrl: string
   jwtToken: string | null
   currentUserId: number
+  targetUserId?: number
+  targetUserName?: string
 }>()
 
 // Emits
@@ -278,6 +280,13 @@ onMounted(async () => {
   await loadConversations()
   await loadStickers()
   isLoading.value = false
+  
+  // Auto-select target user if provided (e.g., from public profile)
+  if (props.targetUserId && props.targetUserName) {
+    selectedUserId.value = props.targetUserId
+    selectedUserName.value = props.targetUserName
+    loadMessages(props.targetUserId)
+  }
 })
 
 onUnmounted(() => {

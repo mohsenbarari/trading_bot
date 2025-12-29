@@ -123,11 +123,10 @@ async function loadMutualTrades() {
             <span class="stat-label">عضویت</span>
             <span class="stat-value">{{ profileData.created_at_jalali }}</span>
         </div>
-        <div class="stat-card">
-            <span class="stat-icon">🤝</span>
-            <span class="stat-label">معاملات</span>
-            <span class="stat-value">{{ profileData.trades_count }}</span>
-        </div>
+        <button class="message-btn" @click="$emit('navigate', 'chat', { userId: profileData.id, userName: profileData.account_name })">
+            <span class="stat-icon">💬</span>
+            <span class="stat-label">ارسال پیام</span>
+        </button>
       </div>
 
       <div class="history-section">
@@ -228,6 +227,35 @@ async function loadMutualTrades() {
   gap: 6px;
   border: 1px solid var(--border-color);
   box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.message-btn {
+  background: linear-gradient(135deg, #007aff, #0056b3);
+  color: white;
+  padding: 12px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
+  transition: all 0.2s;
+}
+
+.message-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.4);
+}
+
+.message-btn .stat-icon {
+  font-size: 20px;
+}
+
+.message-btn .stat-label {
+  font-weight: 600;
+  font-size: 13px;
 }
 
 .stat-icon {
