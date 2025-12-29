@@ -128,14 +128,14 @@ async def update_channel_buttons(offer: Offer) -> bool:
     else:
         # ساخت دکمه‌های جدید
         if offer.is_wholesale or not offer.lot_sizes:
-            buttons = [[{"text": f"{offer.remaining_quantity} عدد", "callback_data": f"channel_trade_{offer.id}_{offer.remaining_quantity}"}]]
+            buttons = [[{"text": f"{offer.remaining_quantity} عدد", "callback_data": f"channel_trade:{offer.id}:{offer.remaining_quantity}"}]]
         else:
             # فیلتر lot_sizes که بیشتر از remaining نباشند
             valid_lots = [l for l in offer.lot_sizes if l <= offer.remaining_quantity]
             if offer.remaining_quantity not in valid_lots:
                 valid_lots = [offer.remaining_quantity] + valid_lots
             valid_lots = sorted(set(valid_lots), reverse=True)
-            buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade_{offer.id}_{a}"} for a in valid_lots]]
+            buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer.id}:{a}"} for a in valid_lots]]
         
         payload = {
             "chat_id": channel_id,
@@ -222,13 +222,13 @@ async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, 
             payload = {"chat_id": channel_id, "message_id": offer.channel_message_id}
         else:
             if offer.is_wholesale or not lot_sizes:
-                buttons = [[{"text": f"{remaining_quantity} عدد", "callback_data": f"channel_trade_{offer_id}_{remaining_quantity}"}]]
+                buttons = [[{"text": f"{remaining_quantity} عدد", "callback_data": f"channel_trade:{offer_id}:{remaining_quantity}"}]]
             else:
                 valid_lots = [l for l in lot_sizes if l <= remaining_quantity]
                 if remaining_quantity not in valid_lots:
                     valid_lots = [remaining_quantity] + valid_lots
                 valid_lots = sorted(set(valid_lots), reverse=True)
-                buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade_{offer_id}_{a}"} for a in valid_lots]]
+                buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer_id}:{a}"} for a in valid_lots]]
             
             payload = {"chat_id": channel_id, "message_id": offer.channel_message_id, "reply_markup": {"inline_keyboard": buttons}}
     
@@ -366,8 +366,11 @@ async def create_trade(
     # ===== ارسال پیام‌های تلگرام در Background (غیر-بلاکینگ) =====
     # این کار باعث می‌شود پاسخ API سریعتر برگردد
     
-    # آپدیت دکمه‌های کانال (در background)
-    background_tasks.add_task(update_channel_buttons_sync, offer.id, offer.remaining_quantity, offer.status, offer.lot_sizes)
+    # آپدیت دکمه‌های کانال (مستقیم - نه در background)
+    try:
+        await update_channel_buttons(offer)
+    except Exception as e:
+        logger.error(f"Failed to update channel buttons: {e}")
     
     # ارسال نوتیفیکیشن‌ها
     now = datetime.utcnow()

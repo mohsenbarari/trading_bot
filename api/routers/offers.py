@@ -146,7 +146,7 @@ async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
     
     # ساخت دکمه‌ها
     if offer.is_wholesale or not offer.lot_sizes:
-        buttons = [[{"text": f"{offer.quantity} عدد", "callback_data": f"channel_trade_{offer.id}_{offer.quantity}"}]]
+        buttons = [[{"text": f"{offer.quantity} عدد", "callback_data": f"channel_trade:{offer.id}:{offer.quantity}"}]]
     else:
         all_amounts = [offer.quantity] + sorted(offer.lot_sizes, reverse=True)
         seen = set()
@@ -155,7 +155,7 @@ async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
             if a not in seen:
                 seen.add(a)
                 unique_amounts.append(a)
-        buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade_{offer.id}_{a}"} for a in unique_amounts]]
+        buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer.id}:{a}"} for a in unique_amounts]]
     
     reply_markup = {"inline_keyboard": buttons}
     
