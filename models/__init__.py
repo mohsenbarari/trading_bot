@@ -10,6 +10,8 @@ from .notification import Notification
 from .trading_setting import TradingSetting
 from .offer import Offer, OfferType, OfferStatus
 from .trade import Trade, TradeType, TradeStatus
+from .message import Message
+from .conversation import Conversation
 
 __all__ = [
     # User & Auth
@@ -28,6 +30,9 @@ __all__ = [
     "Trade",
     "TradeType",
     "TradeStatus",
+    # Chat
+    "Message",
+    "Conversation",
     # Other
     "Notification",
     "TradingSetting",

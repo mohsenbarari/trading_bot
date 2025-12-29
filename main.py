@@ -70,6 +70,8 @@ api_router.include_router(trades.router)
 api_router.include_router(realtime.router)
 from api.routers import users_public
 api_router.include_router(users_public.router)
+from api.routers import chat
+api_router.include_router(chat.router)
 
 # 3. اندپوینت config را به همین روتر اصلی اضافه می‌کنیم
 @api_router.get("/config", response_model=schemas.AppConfig)
@@ -80,6 +82,15 @@ async def get_app_config():
 # 4. در نهایت، روتر اصلی و کامل شده را به اپلیکیشن FastAPI اضافه می‌کنیم
 app.include_router(api_router)
 logger.info("All API routers are included under /api prefix.")
+
+# -------------------------------------------------------
+# 📁 سرو فایل‌های آپلود شده (مثل تصاویر چت)
+# -------------------------------------------------------
+UPLOADS_DIR = BASE_DIR / "uploads"
+if not UPLOADS_DIR.exists():
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+logger.info(f"Mounted uploads directory at /uploads")
 
 
 # -------------------------------------------------------

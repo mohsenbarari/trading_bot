@@ -13,6 +13,8 @@ import models.session
 import models.commodity
 import models.offer  # مدل لفظ
 import models.trade  # مدل معاملات
+import models.message  # مدل پیام چت
+import models.conversation  # مدل مکالمات چت
 
 # --- خواندن تنظیمات Alembic ---
 config = context.config

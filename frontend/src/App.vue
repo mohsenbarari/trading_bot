@@ -14,6 +14,7 @@ import TradingSettings from './components/TradingSettings.vue'
 import TradingView from './components/TradingView.vue'
 import UserSettings from './components/UserSettings.vue'
 import PublicProfile from './components/PublicProfile.vue'
+import ChatView from './components/ChatView.vue'
 
 interface Notification {
   id: number;
@@ -861,6 +862,15 @@ onUnmounted(() => {
             :api-base-url="API_BASE_URL"
             :jwt-token="jwtToken"
             @navigate="handleNavigation"
+          />
+
+          <ChatView
+            v-else-if="activeView === 'chat'"
+            :api-base-url="API_BASE_URL"
+            :jwt-token="jwtToken"
+            :current-user-id="user?.id"
+            @navigate="handleNavigation"
+            @back="handleNavigation('home')"
           />
 
           </template>

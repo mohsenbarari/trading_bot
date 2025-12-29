@@ -4,7 +4,7 @@ Enum تعریف‌های مشترک اپلیکیشن
 """
 import enum
 
-__all__ = ["UserRole", "NotificationLevel", "NotificationCategory"]
+__all__ = ["UserRole", "NotificationLevel", "NotificationCategory", "MessageType"]
 
 class UserRole(str, enum.Enum):
     WATCH = "تماشا"
@@ -24,3 +24,10 @@ class NotificationCategory(str, enum.Enum):
     SYSTEM = "SYSTEM"
     USER = "USER"
     TRADE = "TRADE"
+
+
+class MessageType(str, enum.Enum):
+    """نوع محتوای پیام چت"""
+    TEXT = "text"
+    IMAGE = "image"
+    STICKER = "sticker"

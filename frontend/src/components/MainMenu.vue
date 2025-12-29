@@ -22,10 +22,14 @@ const toggleButtonText = computed(() => {
     </button>
     
     <div v-if="userRole === 'مدیر ارشد'" class="admin-layout">
-      <div class="bottom-row two-cols">
+      <div class="bottom-row three-cols">
         <button @click="emit('navigate', 'profile')">
           <span>👤</span>
           پنل کاربر
+        </button>
+        <button @click="emit('navigate', 'chat')">
+          <span>💬</span>
+          پیام‌ها
         </button>
         <button @click="emit('navigate', 'admin_panel')">
           <span>🔐</span>
@@ -34,10 +38,14 @@ const toggleButtonText = computed(() => {
       </div>
     </div>
 
-    <div v-else class="bottom-row two-cols">
+    <div v-else class="bottom-row three-cols">
        <button @click="emit('navigate', 'profile')">
         <span>👤</span>
         پنل کاربر
+      </button>
+      <button @click="emit('navigate', 'chat')">
+        <span>💬</span>
+        پیام‌ها
       </button>
       <button @click="emit('navigate', 'user_settings')">
         <span>⚙️</span>
