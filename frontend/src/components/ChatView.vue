@@ -166,6 +166,8 @@ async function handleImageUpload(event: Event) {
   if (!input.files?.length) return
   
   const file = input.files[0]
+  if (!file) return
+  
   const formData = new FormData()
   formData.append('file', file)
   
@@ -364,7 +366,7 @@ defineExpose({ startNewChat })
           v-for="msg in messages" 
           :key="msg.id"
           class="message-bubble"
-          :class="{ 'sent': msg.sender_id === currentUserId, 'received': msg.sender_id !== currentUserId }"
+          :class="{ 'sent': msg.sender_id === props.currentUserId, 'received': msg.sender_id !== props.currentUserId }"
         >
           <!-- Text -->
           <template v-if="msg.message_type === 'text'">
