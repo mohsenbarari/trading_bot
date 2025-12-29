@@ -315,7 +315,10 @@ async def show_trade_history(callback: types.CallbackQuery, callback_data: Trade
     
     await state.update_data(history_months=3, history_target_id=target_user_id)
     
-    text = format_trade_history(trades, target_user, user.id)
+    # معکوس کردن لیست برای نمایش در بات (نزولی - جدیدترین اول)
+    # اما get_trade_history همچنان صعودی برمی‌گرداند (برای اکسل و PDF)
+    trades_desc = list(reversed(trades))
+    text = format_trade_history(trades_desc, target_user, user.id)
     
     await callback.message.edit_text(
         text,
@@ -341,7 +344,9 @@ async def filter_trade_history(callback: types.CallbackQuery, callback_data: His
     
     await state.update_data(history_months=months, history_target_id=target_user_id)
     
-    text = format_trade_history(trades, target_user, user.id)
+    # معکوس کردن لیست برای نمایش در بات (نزولی - جدیدترین اول)
+    trades_desc = list(reversed(trades))
+    text = format_trade_history(trades_desc, target_user, user.id)
     
     try:
         await callback.message.edit_text(

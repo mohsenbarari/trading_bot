@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
+import LoadingSkeleton from './LoadingSkeleton.vue';
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -18,7 +19,7 @@ interface User {
 }
 
 const users = ref<User[]>([]);
-const isLoading = ref(false);
+const isLoading = ref(true);
 const errorMessage = ref('');
 const searchQuery = ref('');
 const showSearch = ref(false);
@@ -87,7 +88,9 @@ onMounted(fetchUsers);
         <button @click="fetchUsers" class="do-search-btn">جستجو</button>
       </div>
 
-      <div v-if="isLoading" class="loading">در حال بارگیری...</div>
+      <div v-if="isLoading" class="loading-skeleton">
+         <LoadingSkeleton :count="6" :height="70" />
+      </div>
       <div v-else-if="errorMessage" class="error">{{ errorMessage }}</div>
       
       <div v-else class="users-list">

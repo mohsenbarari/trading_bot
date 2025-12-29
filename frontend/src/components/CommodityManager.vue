@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed } from 'vue';
+import LoadingSkeleton from './LoadingSkeleton.vue';
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -26,7 +27,7 @@ interface FormState {
 // --- متغیرهای State ---
 type ViewMode = 'list' | 'aliases' | 'add_commodity' | 'edit_commodity_name' | 'add_alias' | 'edit_alias' | 'delete_commodity' | 'delete_alias';
 const viewMode = ref<ViewMode>('list');
-const isLoading = ref(false);
+const isLoading = ref(true);
 const errorMessage = ref('');
 const successMessage = ref('');
 const commodities = ref<Commodity[]>([]);
@@ -324,54 +325,64 @@ onMounted(fetchCommodities);
     <div v-if="errorMessage" class="message error">
        <pre style="white-space: pre-wrap; margin: 0;">{{ errorMessage }}</pre>
     </div>
-    <div v-if="isLoading" class="loading-container"><div class="spinner"></div></div>
+    <!-- Removed generic spinner container -->
 
-    <div v-if="viewMode === 'list' && !isLoading" class="card">
+    <div v-if="viewMode === 'list'" class="card">
       <div class="header-row">
         <h2 class="page-title">مدیریت کالاها</h2>
         <button class="back-button" @click="$emit('navigate', 'admin_panel')">🔙</button>
       </div>
 
-      <div v-if="commodities.length === 0" class="no-data">هیچ کالایی ثبت نشده است.</div>
-      <div class="button-list">
-        <button v-for="comm in commodities" :key="comm.id" @click="onManageAliases(comm)" class="list-button">
-          <span>📦 {{ comm.name }}</span>
-          <span>&rsaquo;</span>
-        </button>
+      <div v-if="isLoading">
+          <LoadingSkeleton :count="5" :height="60" />
       </div>
-      <hr class="divider" />
-      <button class="list-button add-button" @click="onAddCommodityStart">
-        <span>➕ افزودن کالای جدید</span>
-      </button>
+      <div v-else>
+          <div v-if="commodities.length === 0" class="no-data">هیچ کالایی ثبت نشده است.</div>
+          <div class="button-list">
+            <button v-for="comm in commodities" :key="comm.id" @click="onManageAliases(comm)" class="list-button">
+              <span>📦 {{ comm.name }}</span>
+              <span>&rsaquo;</span>
+            </button>
+          </div>
+          <hr class="divider" />
+          <button class="list-button add-button" @click="onAddCommodityStart">
+            <span>➕ افزودن کالای جدید</span>
+          </button>
+      </div>
     </div>
 
-    <div v-if="viewMode === 'aliases' && selectedCommodity && !isLoading" class="card">
+    <div v-if="viewMode === 'aliases' && selectedCommodity" class="card">
       <div class="header-row">
         <h2 class="page-title">مدیریت: {{ selectedCommodity.name }}</h2>
         <button @click="fetchCommodities" class="back-button">🔙</button>
       </div>
 
-      <div v-if="selectedCommodity.aliases.length === 0" class="no-data">هیچ نام مستعاری ثبت نشده است.</div>
-      <div class="alias-list">
-        <div v-for="alias in selectedCommodity.aliases" :key="alias.id" class="alias-item">
-          <span>{{ alias.alias }}</span>
-          <div class="alias-actions">
-            <button @click="onEditAliasStart(alias)" class="action-btn edit">✏️</button>
-            <button @click="onDeleteAliasStart(alias)" class="action-btn delete">❌</button>
-          </div>
-        </div>
+      <div v-if="isLoading">
+          <LoadingSkeleton :count="3" :height="50" />
       </div>
-      <hr class="divider" />
-      <div class="button-list stacked">
-        <button class="list-button add-button" @click="onAddAliasStart">
-          <span>➕ افزودن نام مستعار جدید</span>
-        </button>
-        <button class="list-button edit-button" @click="onEditCommodityNameStart">
-          <span>✏️ ویرایش نام اصلی کالا</span>
-        </button>
-        <button class="list-button delete-button" @click="onDeleteCommodityStart">
-          <span>❌ حذف کامل این کالا</span>
-        </button>
+      <div v-else>
+          <div v-if="selectedCommodity.aliases.length === 0" class="no-data">هیچ نام مستعاری ثبت نشده است.</div>
+          <div class="alias-list">
+            <div v-for="alias in selectedCommodity.aliases" :key="alias.id" class="alias-item">
+              <span>{{ alias.alias }}</span>
+              <div class="alias-actions">
+                <button @click="onEditAliasStart(alias)" class="action-btn edit">✏️</button>
+                <button @click="onDeleteAliasStart(alias)" class="action-btn delete">❌</button>
+              </div>
+            </div>
+          </div>
+          <hr class="divider" />
+          <div class="button-list stacked">
+            <button class="list-button add-button" @click="onAddAliasStart">
+              <span>➕ افزودن نام مستعار جدید</span>
+            </button>
+            <button class="list-button edit-button" @click="onEditCommodityNameStart">
+              <span>✏️ ویرایش نام اصلی کالا</span>
+            </button>
+            <button class="list-button delete-button" @click="onDeleteCommodityStart">
+              <span>❌ حذف کامل این کالا</span>
+            </button>
+          </div>
       </div>
     </div>
     

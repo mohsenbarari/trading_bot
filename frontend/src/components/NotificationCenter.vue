@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
+import LoadingSkeleton from './LoadingSkeleton.vue';
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -18,7 +19,7 @@ interface Notification {
 }
 
 const notifications = ref<Notification[]>([]);
-const isLoading = ref(false);
+const isLoading = ref(true);
 
 const API_HEADERS = computed(() => ({
   'Content-Type': 'application/json',
@@ -97,7 +98,9 @@ function getIcon(level: string, category: string) {
          </button>
        </div>
        
-       <div v-if="isLoading" class="loading">در حال دریافت...</div>
+       <div v-if="isLoading">
+          <LoadingSkeleton :count="5" :height="100" />
+       </div>
        <div v-else-if="notifications.length === 0" class="no-data">پیامی ندارید.</div>
        
        <div v-else class="notif-list">

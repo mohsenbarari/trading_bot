@@ -56,8 +56,9 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                     
                     # دکمه تاریخچه معاملات (فقط برای کاربران لاگین شده)
                     if user:
+                        from bot.callbacks import TradeHistoryCallback
                         profile_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                            [InlineKeyboardButton(text="📊 تاریخچه معاملات", callback_data=f"trade_history_{target_user_id}")]
+                            [InlineKeyboardButton(text="📊 تاریخچه معاملات", callback_data=TradeHistoryCallback(target_user_id=target_user_id).pack())]
                         ])
                     else:
                         profile_keyboard = None

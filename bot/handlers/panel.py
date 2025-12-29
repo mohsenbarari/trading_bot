@@ -34,12 +34,16 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
     # حذف پیام کاربر و لنگر قبلی
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     
+    profile_link = f"https://t.me/{settings.bot_username}?start=profile_{user.id}"
+
     profile_text = (
         f"👤 **پروفایل شما**\n\n"
         f"🔸 **نام کاربری:** `{user.account_name}`\n"
         f"🔹 **نام تلگرام:** {user.full_name}\n"
         f"🔹 **آیدی تلگرام:** `{user.telegram_id}`\n"
-        f"🔹 **سطح دسترسی:** {user.role.value}"
+        f"🔹 **سطح دسترسی:** {user.role.value}\n\n"
+        f"🔗 **لینک پروفایل عمومی:**\n"
+        f"`{profile_link}`"
     )
     
     anchor_msg = await message.answer(
