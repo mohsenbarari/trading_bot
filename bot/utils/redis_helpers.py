@@ -156,8 +156,9 @@ async def check_double_click(user_id: int, offer_id: int, amount: int, timeout: 
                 await redis_client.aclose()
                 return True
             else:
-                # کلیک اول - ثبت با TTL
-                await redis_client.setex(key, int(timeout), "pending")
+                # کلیک اول - ثبت با TTL (حداقل 1 ثانیه)
+                ttl = max(1, int(timeout)) if timeout >= 1 else 1
+                await redis_client.setex(key, ttl, "pending")
                 await redis_client.aclose()
                 return False
                 

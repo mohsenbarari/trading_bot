@@ -409,15 +409,11 @@ async def increment_user_counter(
             logger.info("Atomic update: channel_messages_count += 1")
         
         await session.commit()
-        
-        # بروزرسانی مقادیر در آبجکت فعلی (برای استفاده در کد بعدی)
-        await session.refresh(user)
-        
         logger.info("Session committed successfully")
     except Exception as e:
         logger.error(f"Error in atomic update: {e}")
         await session.rollback()
-        raise
+        # Don't raise - counter update failure should not break the main flow
 
 
 async def reset_user_counters(session: AsyncSession, user: "User") -> None:
