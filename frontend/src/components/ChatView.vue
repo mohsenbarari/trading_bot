@@ -1078,4 +1078,45 @@ defineExpose({ startNewChat })
 .sticker-item:hover {
   transform: scale(1.1);
 }
+
+/* Scroll Bottom Button */
+.scroll-bottom-btn {
+  position: absolute;
+  bottom: 80px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(40, 40, 40, 0.7); /* Dark semi-transparent */
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: white;
+  z-index: 999;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.scroll-bottom-btn:hover {
+  transform: translateY(-2px);
+  background: rgba(40, 40, 40, 0.9);
+}
+
+.scroll-badge {
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  background: #ff3b30;
+  color: white;
+  border-radius: 10px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: bold;
+  min-width: 18px;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
 </style>
