@@ -491,19 +491,18 @@ defineExpose({ startNewChat })
 
 <style scoped>
 .chat-view {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   flex-direction: column;
-  height: 100%;
   background: var(--bg-color);
-  width: 100%;
-  max-width: 100%;
-  padding: 0;
-  margin: 0;
-  position: relative;
-  overflow: hidden;
+  z-index: 100;
 }
 
-/* Header */
+/* Header - Fixed at top */
 .chat-header {
   display: flex;
   align-items: center;
@@ -511,9 +510,6 @@ defineExpose({ startNewChat })
   background: var(--card-bg);
   border-bottom: 1px solid var(--border-color);
   gap: 12px;
-  position: sticky;
-  top: 0;
-  z-index: 10;
   flex-shrink: 0;
 }
 
