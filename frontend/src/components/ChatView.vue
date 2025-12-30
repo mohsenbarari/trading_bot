@@ -110,30 +110,34 @@ async function loadConversations() {
 async function loadMessages(userId: number, silent = false) {
   if (!silent) isLoadingMessages.value = true
   try {
-    const loadedMessages = await apiFetch(`/chat/messages/${userId}`)
+    // Add timestamp to prevent caching
+    const loadedMessages = await apiFetch(`/chat/messages/${userId}?_t=${Date.now()}`)
     
-    // If silent update (polling)
     if (silent) {
-      if (loadedMessages.length > messages.value.length) {
-        const lastOldMsg = messages.value[messages.value.length - 1]
-        const lastNewMsg = loadedMessages[loadedMessages.length - 1]
-        
-        const hasNewMsg = lastNewMsg && (!lastOldMsg || lastNewMsg.id !== lastOldMsg.id)
-        
-        messages.value = loadedMessages
-        
-        if (hasNewMsg && lastNewMsg.sender_id !== props.currentUserId) {
+      // Check for strictly new message (by ID)
+      const lastOldMsg = messages.value[messages.value.length - 1]
+      const lastNewMsg = loadedMessages[loadedMessages.length - 1]
+      const isNewMessage = lastNewMsg && (!lastOldMsg || lastNewMsg.id !== lastOldMsg.id)
+      const oldLength = messages.value.length
+
+      // Always update list to ensure consistency
+      messages.value = loadedMessages
+      
+      if (isNewMessage) {
+        if (lastNewMsg.sender_id !== props.currentUserId) {
+          // Message from other user
           if (isUserAtBottom.value) {
-            // User at bottom, auto scroll and mark read
+            // If at bottom, auto-scroll and mark read
             await nextTick()
             scrollToBottom()
             markAsRead()
           } else {
-            // User not at bottom, increment badge
-            unreadNewMessagesCount.value += (loadedMessages.length - messages.value.length)
+            // If scrolled up, increment badge (safely handle length changes)
+             const diff = loadedMessages.length - oldLength
+             unreadNewMessagesCount.value += (diff > 0 ? diff : 1)
           }
-        } else if (hasNewMsg && lastNewMsg.sender_id === props.currentUserId) {
-          // Own message sent/synced, scroll if at bottom
+        } else if (lastNewMsg.sender_id === props.currentUserId) {
+          // Own message (synced), keep bottom if there
           if (isUserAtBottom.value) {
             await nextTick()
             scrollToBottom()
@@ -147,7 +151,6 @@ async function loadMessages(userId: number, silent = false) {
       isLoadingMessages.value = false
       await nextTick()
       scrollToUnreadOrBottom()
-      // Note: markAsRead will be triggered by handleScroll if we land at bottom
     }
   } catch (e: any) {
     if (!silent) error.value = e.message
