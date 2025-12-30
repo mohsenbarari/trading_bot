@@ -703,31 +703,33 @@ defineExpose({ startNewChat })
 .input-area {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
+  padding: 6px 10px;
   background: var(--card-bg);
   border-top: 1px solid var(--border-color);
-  gap: 10px;
+  gap: 8px;
 }
 
 .input-container {
   flex: 1;
   display: flex;
   align-items: center;
-  background: #f0f2f5;
-  border-radius: 22px;
-  padding: 4px 8px;
-  gap: 4px;
+  background: #3a3a3c;
+  border-radius: 20px;
+  padding: 6px 12px;
+  min-height: 36px;
 }
 
 .input-container input[type="text"] {
   flex: 1;
-  padding: 8px 4px;
+  padding: 0 8px;
   border: none;
   background: transparent;
-  font-size: 15px;
+  font-size: 16px;
   outline: none;
   text-align: right;
   direction: rtl;
+  color: #fff;
+  min-width: 0;
 }
 
 .input-container input::placeholder {
@@ -737,22 +739,33 @@ defineExpose({ startNewChat })
 .emoji-btn, .attach-btn, .voice-btn {
   background: none;
   border: none;
-  padding: 6px;
+  padding: 0;
+  margin: 0;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  transition: background 0.2s;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
 }
 
-.emoji-btn:hover, .attach-btn:hover, .voice-btn:hover {
-  background: rgba(0, 0, 0, 0.05);
+.emoji-btn svg, .attach-btn svg, .voice-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+.emoji-btn {
+  margin-left: 4px;
+}
+
+.attach-btn, .voice-btn {
+  margin-right: 4px;
 }
 
 .send-btn {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   background: #007aff;
   color: white;
@@ -763,13 +776,11 @@ defineExpose({ startNewChat })
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: all 0.2s;
-  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
 }
 
-.send-btn:hover:not(:disabled) {
-  background: #0056b3;
-  transform: scale(1.05);
+.send-btn svg {
+  width: 20px;
+  height: 20px;
 }
 
 .send-btn:disabled {
