@@ -273,7 +273,7 @@ function adjustTextareaHeight() {
   const el = messageInputRef.value
   if (!el) return
   el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 120) + 'px' // Max 120px height
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px' // Max 200px height
 }
 
 // Scroll to bottom
@@ -853,7 +853,7 @@ defineExpose({ startNewChat })
   overflow-y: auto;
   min-height: 24px;
   line-height: 24px;
-  max-height: 120px;
+  max-height: 200px;
   font-family: inherit;
   direction: rtl;
   text-align: right;
