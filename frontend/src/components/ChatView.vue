@@ -135,11 +135,17 @@ async function loadMessages(userId: number, silent = false) {
 }
 
 // Send message
+// Send message
 async function sendMessage(type: 'text' | 'image' | 'sticker' = 'text', content?: string) {
   if (!selectedUserId.value) return
   
   const msgContent = content || messageInput.value.trim()
   if (!msgContent) return
+  
+  // Optimistically clear input to prevent double send and keep focus
+  if (type === 'text') {
+    messageInput.value = ''
+  }
   
   isSending.value = true
   try {
@@ -152,11 +158,15 @@ async function sendMessage(type: 'text' | 'image' | 'sticker' = 'text', content?
       })
     })
     messages.value.push(newMsg)
-    messageInput.value = ''
+    // Input already cleared
     showStickerPicker.value = false
     scrollToBottom()
   } catch (e: any) {
     error.value = e.message
+    // Restore input on failure
+    if (type === 'text') {
+      messageInput.value = msgContent
+    }
   } finally {
     isSending.value = false
   }
@@ -514,7 +524,6 @@ defineExpose({ startNewChat })
             type="text"
             placeholder="پیام..."
             @keyup.enter="sendMessage()"
-            :disabled="isSending"
           />
           
           <!-- Emoji/Sticker Toggle - Right side inside textbox -->
