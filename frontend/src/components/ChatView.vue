@@ -372,40 +372,42 @@ defineExpose({ startNewChat })
 
     <!-- Messages View -->
     <template v-else>
-      <div v-if="isLoadingMessages" class="loading-state">
-        <LoadingSkeleton :count="8" :height="50" />
-      </div>
-      
-      <div v-else class="messages-container">
-        <div v-if="messages.length === 0" class="empty-state">
-          <span>💬</span>
-          <p>شروع گفتگو...</p>
+      <div class="chat-content">
+        <div v-if="isLoadingMessages" class="loading-state">
+          <LoadingSkeleton :count="8" :height="50" />
         </div>
         
-        <div 
-          v-for="msg in messages" 
-          :key="msg.id"
-          class="message-bubble"
-          :class="{ 'sent': msg.sender_id === props.currentUserId, 'received': msg.sender_id !== props.currentUserId }"
-        >
-          <!-- Text -->
-          <template v-if="msg.message_type === 'text'">
-            <p>{{ msg.content }}</p>
-          </template>
+        <div v-else class="messages-container" ref="messagesContainer">
+          <div v-if="messages.length === 0" class="empty-state">
+            <span>💬</span>
+            <p>شروع گفتگو...</p>
+          </div>
           
-          <!-- Image -->
-          <template v-else-if="msg.message_type === 'image'">
-            <a :href="getImageUrl(msg.content)" target="_blank" class="msg-image-link">
-              <img :src="getImageUrl(msg.content)" alt="تصویر" class="msg-image" />
-            </a>
-          </template>
-          
-          <!-- Sticker -->
-          <template v-else-if="msg.message_type === 'sticker'">
-            <div class="msg-sticker">{{ msg.content }}</div>
-          </template>
-          
-          <span class="msg-time">{{ formatTime(msg.created_at) }}</span>
+          <div 
+            v-for="msg in messages" 
+            :key="msg.id"
+            class="message-bubble"
+            :class="{ 'sent': msg.sender_id === props.currentUserId, 'received': msg.sender_id !== props.currentUserId }"
+          >
+            <!-- Text -->
+            <template v-if="msg.message_type === 'text'">
+              <p>{{ msg.content }}</p>
+            </template>
+            
+            <!-- Image -->
+            <template v-else-if="msg.message_type === 'image'">
+              <a :href="getImageUrl(msg.content)" target="_blank" class="msg-image-link">
+                <img :src="getImageUrl(msg.content)" alt="تصویر" class="msg-image" />
+              </a>
+            </template>
+            
+            <!-- Sticker -->
+            <template v-else-if="msg.message_type === 'sticker'">
+              <div class="msg-sticker">{{ msg.content }}</div>
+            </template>
+            
+            <span class="msg-time">{{ formatTime(msg.created_at) }}</span>
+          </div>
         </div>
       </div>
 
@@ -644,7 +646,15 @@ defineExpose({ startNewChat })
   padding: 0 6px;
 }
 
-/* Messages Container */
+/* Chat Content - Main scrollable area */
+.chat-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
 .messages-container {
   flex: 1;
   overflow-y: auto;
@@ -652,7 +662,6 @@ defineExpose({ startNewChat })
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 0;
 }
 
 .message-bubble {
@@ -715,29 +724,20 @@ defineExpose({ startNewChat })
   display: flex;
   align-items: center;
   padding: 10px 8px;
-  background: var(--card-bg);
+  background: var(--bg-color);
   gap: 6px;
   width: 100%;
-  position: sticky;
-  bottom: 0;
-  z-index: 10;
   flex-shrink: 0;
-  border-top: 1px solid var(--border-color);
 }
 
 .input-container {
   flex: 1;
   display: flex;
   align-items: center;
-  background: linear-gradient(145deg, #f8f9fa, #e9ecef);
+  background: rgba(0, 0, 0, 0.05);
   border-radius: 24px;
   padding: 10px 16px;
   min-height: 48px;
-  box-shadow: 
-    inset 2px 2px 4px rgba(0, 0, 0, 0.06),
-    inset -2px -2px 4px rgba(255, 255, 255, 0.8),
-    0 1px 3px rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(0, 0, 0, 0.04);
 }
 
 .input-container input[type="text"] {
