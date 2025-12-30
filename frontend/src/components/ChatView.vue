@@ -411,31 +411,8 @@ defineExpose({ startNewChat })
 
       <!-- Input Area - Telegram Style -->
       <div class="input-area">
-        <!-- Send Button (Circle) - Left side in RTL -->
-        <button class="send-btn" @click="sendMessage()" :disabled="isSending || !messageInput.trim()">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="white">
-            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-          </svg>
-        </button>
-
         <!-- Input Container with Emoji inside -->
         <div class="input-container">
-          <!-- Emoji/Sticker Toggle - Inside textbox on right -->
-          <button class="emoji-btn" @click="showStickerPicker = !showStickerPicker">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="#8e8e93">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-6c.78 2.34 2.72 4 5 4s4.22-1.66 5-4H7zm1-4c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1zm8 0c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1z"/>
-            </svg>
-          </button>
-          
-          <!-- Text Input -->
-          <input 
-            v-model="messageInput"
-            type="text"
-            placeholder="پیام..."
-            @keyup.enter="sendMessage()"
-            :disabled="isSending"
-          />
-          
           <!-- Attachment Button -->
           <input 
             type="file" 
@@ -449,7 +426,30 @@ defineExpose({ startNewChat })
               <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/>
             </svg>
           </button>
+
+          <!-- Text Input -->
+          <input 
+            v-model="messageInput"
+            type="text"
+            placeholder="پیام..."
+            @keyup.enter="sendMessage()"
+            :disabled="isSending"
+          />
+          
+          <!-- Emoji/Sticker Toggle - Inside textbox on left -->
+          <button class="emoji-btn" @click="showStickerPicker = !showStickerPicker">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="#8e8e93">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-6c.78 2.34 2.72 4 5 4s4.22-1.66 5-4H7zm1-4c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1zm8 0c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1z"/>
+            </svg>
+          </button>
         </div>
+
+        <!-- Send Button (Circle) - Right side -->
+        <button class="send-btn" @click="sendMessage()" :disabled="isSending || !messageInput.trim()">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="white">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
       </div>
 
       <!-- Sticker Picker -->
@@ -692,7 +692,6 @@ defineExpose({ startNewChat })
   background: var(--card-bg);
   border-top: 1px solid var(--border-color);
   gap: 10px;
-  flex-direction: row-reverse; /* RTL: send on left */
 }
 
 .input-container {
@@ -763,9 +762,7 @@ defineExpose({ startNewChat })
   cursor: not-allowed;
 }
 
-.send-btn svg {
-  transform: rotate(180deg); /* Point arrow left for RTL */
-}
+
 
 /* Sticker Picker */
 .sticker-picker {
