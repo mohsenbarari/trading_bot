@@ -493,6 +493,10 @@ defineExpose({ startNewChat })
   flex-direction: column;
   height: 100%;
   background: var(--bg-color);
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+  margin: 0;
 }
 
 /* Header */
@@ -703,9 +707,10 @@ defineExpose({ startNewChat })
 .input-area {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
+  padding: 10px 8px;
   background: transparent;
-  gap: 8px;
+  gap: 6px;
+  width: 100%;
 }
 
 .input-container {
@@ -713,9 +718,9 @@ defineExpose({ startNewChat })
   display: flex;
   align-items: center;
   background: linear-gradient(145deg, #f8f9fa, #e9ecef);
-  border-radius: 20px;
-  padding: 8px 14px;
-  min-height: 40px;
+  border-radius: 24px;
+  padding: 10px 16px;
+  min-height: 48px;
   box-shadow: 
     inset 2px 2px 4px rgba(0, 0, 0, 0.06),
     inset -2px -2px 4px rgba(255, 255, 255, 0.8),
@@ -750,13 +755,13 @@ defineExpose({ startNewChat })
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
 }
 
 .emoji-btn svg, .attach-btn svg, .voice-btn svg {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
 }
 
 .emoji-btn {
@@ -777,14 +782,14 @@ defineExpose({ startNewChat })
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
   margin-right: 4px;
 }
 
 .send-btn-inline svg {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
 }
 
 .send-btn-inline:disabled {
