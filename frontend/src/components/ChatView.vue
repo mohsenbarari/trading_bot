@@ -267,6 +267,24 @@ function stopPolling() {
 const messagesContainer = ref<HTMLElement | null>(null)
 // Message input ref
 const messageInputRef = ref<HTMLTextAreaElement | null>(null)
+// Mobile detection
+const isMobile = ref(false)
+
+function updateIsMobile() {
+  isMobile.value = window.innerWidth < 768
+}
+
+// Handle Enter key
+function handleEnter(e: KeyboardEvent) {
+  // On mobile, Enter adds new line (default behavior)
+  if (isMobile.value) return 
+  
+  // On desktop, Enter sends (unless Shift is pressed)
+  if (!e.shiftKey) {
+    e.preventDefault()
+    sendMessage()
+  }
+}
 
 // Auto resize textarea
 function adjustTextareaHeight() {
@@ -370,11 +388,17 @@ onMounted(async () => {
     loadMessages(props.targetUserId)
   }
   
+  
   // Start polling for updates (conversations list + messages)
   startPolling()
+  
+  // Mobile check
+  updateIsMobile()
+  window.addEventListener('resize', updateIsMobile)
 })
 
 onUnmounted(() => {
+  window.removeEventListener('resize', updateIsMobile)
   stopPolling()
 })
 
@@ -544,7 +568,7 @@ defineExpose({ startNewChat })
             rows="1"
             placeholder="پیام..."
             @input="adjustTextareaHeight"
-            @keydown.enter.exact.prevent="sendMessage()"
+            @keydown.enter="handleEnter"
           ></textarea>
           
           <!-- Emoji/Sticker Toggle - Right side inside textbox -->
