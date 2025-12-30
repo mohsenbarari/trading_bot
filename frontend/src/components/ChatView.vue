@@ -693,25 +693,32 @@ defineExpose({ startNewChat })
   bottom: 0;
   display: flex;
   flex-direction: column;
-  flex-direction: column;
-  background-color: var(--bg-color);
-  background-image: radial-gradient(rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+  background-color: var(--tg-theme-bg-color, #ffffff);
+  /* Use a safe gray for pattern that works on both light/dark (e.g. middle gray with low opacity) */
+  background-image: radial-gradient(rgba(127, 127, 127, 0.15) 1px, transparent 1px);
   background-size: 20px 20px;
   z-index: 100;
 }
 
-/* Header - Fixed at top */
+/* Header - Absolute for glass effect */
 .chat-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  z-index: 1000;
   display: flex;
   align-items: center;
-  padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.85); /* Semi-transparent for glass effect */
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--border-color);
+  padding: 0 16px;
+  /* Use color-mix for transparent theme color */
+  background: color-mix(in srgb, var(--tg-theme-bg-color, #ffffff) 85%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(127, 127, 127, 0.1);
   gap: 12px;
-  flex-shrink: 0;
 }
+
 
 .back-btn {
   background: none;
@@ -847,18 +854,22 @@ defineExpose({ startNewChat })
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: hidden; /* Scroll handles in messages-container */
   min-height: 0;
-  position: relative; /* For absolute positioning of scroll button */
+  position: relative;
+  padding-top: 60px; /* Space for absolute header */
 }
 
 .messages-container {
   flex: 1;
   overflow-y: auto;
   padding: 12px 16px;
+  padding-bottom: 20px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* Scroll behavior */
+  scroll-behavior: smooth;
 }
 
 .message-bubble {
