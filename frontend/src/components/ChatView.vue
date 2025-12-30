@@ -106,31 +106,67 @@ async function loadConversations() {
 
 
 // Load messages
+// Load messages
 async function loadMessages(userId: number, silent = false) {
   if (!silent) isLoadingMessages.value = true
   try {
     const loadedMessages = await apiFetch(`/chat/messages/${userId}`)
-    messages.value = loadedMessages
     
-    // Scroll after DOM update
-    if (!silent) {
-      // Must set loading to false first so the container renders
+    // If silent update (polling)
+    if (silent) {
+      if (loadedMessages.length > messages.value.length) {
+        const lastOldMsg = messages.value[messages.value.length - 1]
+        const lastNewMsg = loadedMessages[loadedMessages.length - 1]
+        
+        const hasNewMsg = lastNewMsg && (!lastOldMsg || lastNewMsg.id !== lastOldMsg.id)
+        
+        messages.value = loadedMessages
+        
+        if (hasNewMsg && lastNewMsg.sender_id !== props.currentUserId) {
+          if (isUserAtBottom.value) {
+            // User at bottom, auto scroll and mark read
+            await nextTick()
+            scrollToBottom()
+            markAsRead()
+          } else {
+            // User not at bottom, increment badge
+            unreadNewMessagesCount.value += (loadedMessages.length - messages.value.length)
+          }
+        } else if (hasNewMsg && lastNewMsg.sender_id === props.currentUserId) {
+          // Own message sent/synced, scroll if at bottom
+          if (isUserAtBottom.value) {
+            await nextTick()
+            scrollToBottom()
+          }
+        }
+      }
+    } else {
+      // Initial load
+      messages.value = loadedMessages
+      unreadNewMessagesCount.value = 0
       isLoadingMessages.value = false
       await nextTick()
       scrollToUnreadOrBottom()
+      // Note: markAsRead will be triggered by handleScroll if we land at bottom
     }
-    
-    // Mark as read
-    await apiFetch(`/chat/read/${userId}`, { method: 'POST' })
-    // Update unread count in conversation list
-    const conv = conversations.value.find(c => c.other_user_id === userId)
-    if (conv) conv.unread_count = 0
   } catch (e: any) {
     if (!silent) error.value = e.message
-    if (!silent) isLoadingMessages.value = false // Ensure false in error
+    if (!silent) isLoadingMessages.value = false 
   } finally {
-    // Already handled in try, but safe to repeat or remove
     if (!silent && isLoadingMessages.value) isLoadingMessages.value = false
+  }
+}
+
+// Mark current chat as read
+async function markAsRead() {
+  if (!selectedUserId.value) return
+  try {
+    await apiFetch(`/chat/read/${selectedUserId.value}`, { method: 'POST' })
+    // Update local unread count immediately
+    const conv = conversations.value.find(c => c.other_user_id === selectedUserId.value)
+    if (conv) conv.unread_count = 0
+  } catch (e) {
+    console.error('Failed to mark as read', e)
   }
 }
 
@@ -269,6 +305,10 @@ const messagesContainer = ref<HTMLElement | null>(null)
 const messageInputRef = ref<HTMLTextAreaElement | null>(null)
 // Mobile detection
 const isMobile = ref(false)
+// Scroll state
+const isUserAtBottom = ref(true)
+const unreadNewMessagesCount = ref(0)
+const showScrollButton = ref(false)
 
 function updateIsMobile() {
   isMobile.value = window.innerWidth < 768
@@ -295,12 +335,41 @@ function adjustTextareaHeight() {
 }
 
 // Scroll to bottom
+// Scroll to bottom
 function scrollToBottom() {
+  // Reset unread count when manually scrolling to bottom
+  if (unreadNewMessagesCount.value > 0) {
+    markAsRead()
+    unreadNewMessagesCount.value = 0
+  }
+  
   setTimeout(() => {
     if (messagesContainer.value) {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+      messagesContainer.value.scrollTo({
+        top: messagesContainer.value.scrollHeight,
+        behavior: 'smooth'
+      })
     }
   }, 50)
+}
+
+// Handle Scroll
+function handleScroll() {
+  const el = messagesContainer.value
+  if (!el) return
+  
+  const threshold = 100 // px from bottom
+  const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+  const atBottom = distance < threshold
+  
+  isUserAtBottom.value = atBottom
+  showScrollButton.value = !atBottom
+  
+  // If arrived at bottom, mark as read
+  if (atBottom && unreadNewMessagesCount.value > 0) {
+    markAsRead()
+    unreadNewMessagesCount.value = 0
+  }
 }
 
 // Smart scroll - to first unread message or to bottom
@@ -475,7 +544,7 @@ defineExpose({ startNewChat })
           <LoadingSkeleton :count="8" :height="50" />
         </div>
         
-        <div v-else class="messages-container" ref="messagesContainer">
+        <div v-else class="messages-container" ref="messagesContainer" @scroll="handleScroll">
           <div v-if="messages.length === 0" class="empty-state">
             <span>💬</span>
             <p>شروع گفتگو...</p>
@@ -518,6 +587,17 @@ defineExpose({ startNewChat })
               </span>
             </div>
           </div>
+          <!-- Scroll to Bottom Button -->
+          <button 
+            v-if="showScrollButton" 
+            class="scroll-bottom-btn" 
+            @click="scrollToBottom"
+          >
+            <span v-if="unreadNewMessagesCount > 0" class="scroll-badge">{{ unreadNewMessagesCount }}</span>
+            <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+              <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -760,6 +840,7 @@ defineExpose({ startNewChat })
   flex-direction: column;
   overflow: hidden;
   min-height: 0;
+  position: relative; /* For absolute positioning of scroll button */
 }
 
 .messages-container {
