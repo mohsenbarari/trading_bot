@@ -544,7 +544,7 @@ defineExpose({ startNewChat })
             rows="1"
             placeholder="پیام..."
             @input="adjustTextareaHeight"
-            @keydown.ctrl.enter.prevent="sendMessage()"
+            @keydown.enter.exact.prevent="sendMessage()"
           ></textarea>
           
           <!-- Emoji/Sticker Toggle - Right side inside textbox -->
@@ -749,10 +749,19 @@ defineExpose({ startNewChat })
 
 .message-bubble {
   max-width: 75%;
-  padding: 10px 14px;
-  border-radius: 16px;
+  padding: 8px 12px;
+  border-radius: 12px;
   position: relative;
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre-wrap; /* Preserve line breaks */
+  word-wrap: break-word;
 }
+
+.message-bubble p {
+  margin: 0;
+}
+
 
 .message-bubble.sent {
   align-self: flex-start;
@@ -768,10 +777,7 @@ defineExpose({ startNewChat })
   border-bottom-right-radius: 4px;
 }
 
-.message-bubble p {
-  margin: 0;
-  word-break: break-word;
-}
+
 
 .msg-time {
   font-size: 10px;
