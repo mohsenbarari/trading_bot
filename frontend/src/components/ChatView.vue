@@ -446,7 +446,19 @@ defineExpose({ startNewChat })
               <div class="msg-sticker">{{ msg.content }}</div>
             </template>
             
-            <span class="msg-time">{{ formatTime(msg.created_at) }}</span>
+            <div class="msg-meta">
+              <span class="msg-time">{{ formatTime(msg.created_at) }}</span>
+              <span v-if="msg.sender_id === props.currentUserId" class="msg-status">
+                <!-- Read (Double Tick) -->
+                <svg v-if="msg.is_read" viewBox="0 0 24 24" class="icon-read" width="16" height="16">
+                  <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"/>
+                </svg>
+                <!-- Unread (Single Tick) -->
+                <svg v-else viewBox="0 0 24 24" class="icon-unread" width="16" height="16">
+                  <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                </svg>
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -729,9 +741,27 @@ defineExpose({ startNewChat })
 .msg-time {
   font-size: 10px;
   opacity: 0.7;
-  display: block;
+}
+
+.msg-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
   margin-top: 4px;
-  text-align: left;
+}
+
+.msg-status {
+  display: flex;
+  align-items: center;
+}
+
+.icon-read {
+  fill: #4caf50; /* Green for read */
+}
+
+.icon-unread {
+  fill: #8e8e93; /* Gray for unread */
 }
 
 .msg-image-link {
