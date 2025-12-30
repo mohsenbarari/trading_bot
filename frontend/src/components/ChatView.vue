@@ -1148,4 +1148,19 @@ defineExpose({ startNewChat })
   text-align: center;
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
+
+/* Fix layout for absolute header */
+.conversations-list, .loading-state, .error-state {
+  flex: 1;
+  padding-top: 60px; /* Space for absolute header */
+  width: 100%;
+  overflow-y: auto;
+}
+
+.loading-state, .error-state {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
 </style>
