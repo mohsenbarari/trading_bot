@@ -145,6 +145,9 @@ async function sendMessage(type: 'text' | 'image' | 'sticker' = 'text', content?
   // Optimistically clear input to prevent double send and keep focus
   if (type === 'text') {
     messageInput.value = ''
+    // Refocus input immediately to prevent keyboard hiding when send button disappears
+    await nextTick()
+    messageInputRef.value?.focus()
   }
   
   isSending.value = true
@@ -256,6 +259,8 @@ function stopPolling() {
 
 // Messages container ref
 const messagesContainer = ref<HTMLElement | null>(null)
+// Message input ref
+const messageInputRef = ref<HTMLInputElement | null>(null)
 
 // Scroll to bottom
 function scrollToBottom() {
@@ -520,6 +525,7 @@ defineExpose({ startNewChat })
 
           <!-- Text Input -->
           <input 
+            ref="messageInputRef"
             v-model="messageInput"
             type="text"
             placeholder="پیام..."
