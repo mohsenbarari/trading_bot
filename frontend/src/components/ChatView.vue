@@ -865,10 +865,18 @@ defineExpose({ startNewChat })
   flex: 1;
   display: flex;
   align-items: flex-end; /* Align bottom for multi-line support */
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--bg-color); /* Match background */
+  border: 1px solid var(--border-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); /* Soft 3D depth */
   border-radius: 24px;
   padding: 10px 16px;
   min-height: 52px;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.input-container:focus-within {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  border-color: var(--primary-color);
 }
 
 .input-container textarea {
