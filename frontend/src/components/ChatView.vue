@@ -114,6 +114,8 @@ async function loadMessages(userId: number, silent = false) {
     
     // Scroll after DOM update
     if (!silent) {
+      // Must set loading to false first so the container renders
+      isLoadingMessages.value = false
       await nextTick()
       scrollToUnreadOrBottom()
     }
@@ -125,8 +127,10 @@ async function loadMessages(userId: number, silent = false) {
     if (conv) conv.unread_count = 0
   } catch (e: any) {
     if (!silent) error.value = e.message
+    if (!silent) isLoadingMessages.value = false // Ensure false in error
   } finally {
-    if (!silent) isLoadingMessages.value = false
+    // Already handled in try, but safe to repeat or remove
+    if (!silent && isLoadingMessages.value) isLoadingMessages.value = false
   }
 }
 
