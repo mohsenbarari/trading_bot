@@ -239,6 +239,17 @@ function formatTime(dateStr: string) {
   return date.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
 }
 
+// Get full image URL
+function getImageUrl(path: string) {
+  if (!path) return ''
+  // If already full URL, return as is
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path
+  }
+  // Prepend apiBaseUrl for relative paths
+  return `${props.apiBaseUrl}${path}`
+}
+
 // Go back
 function goBack() {
   if (selectedUserId.value) {
@@ -384,7 +395,9 @@ defineExpose({ startNewChat })
           
           <!-- Image -->
           <template v-else-if="msg.message_type === 'image'">
-            <img :src="msg.content" alt="تصویر" class="msg-image" />
+            <a :href="getImageUrl(msg.content)" target="_blank" class="msg-image-link">
+              <img :src="getImageUrl(msg.content)" alt="تصویر" class="msg-image" />
+            </a>
           </template>
           
           <!-- Sticker -->
@@ -396,38 +409,47 @@ defineExpose({ startNewChat })
         </div>
       </div>
 
-      <!-- Input Area -->
+      <!-- Input Area - Telegram Style -->
       <div class="input-area">
-        <!-- Sticker Picker Toggle -->
-        <button class="sticker-toggle" @click="showStickerPicker = !showStickerPicker">
-          😊
-        </button>
-        
-        <!-- Image Upload -->
-        <input 
-          type="file" 
-          ref="imageInput" 
-          accept="image/*" 
-          style="display: none" 
-          @change="handleImageUpload"
-        />
-        <button class="image-btn" @click="imageInput?.click()" :disabled="isUploading">
-          🖼️
+        <!-- Send Button (Circle) - Left side in RTL -->
+        <button class="send-btn" @click="sendMessage()" :disabled="isSending || !messageInput.trim()">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="white">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
         </button>
 
-        <!-- Text Input -->
-        <input 
-          v-model="messageInput"
-          type="text"
-          placeholder="پیام خود را بنویسید..."
-          @keyup.enter="sendMessage()"
-          :disabled="isSending"
-        />
-        
-        <!-- Send Button -->
-        <button class="send-btn" @click="sendMessage()" :disabled="isSending || !messageInput.trim()">
-          ارسال
-        </button>
+        <!-- Input Container with Emoji inside -->
+        <div class="input-container">
+          <!-- Emoji/Sticker Toggle - Inside textbox on right -->
+          <button class="emoji-btn" @click="showStickerPicker = !showStickerPicker">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="#8e8e93">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-6c.78 2.34 2.72 4 5 4s4.22-1.66 5-4H7zm1-4c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1zm8 0c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1z"/>
+            </svg>
+          </button>
+          
+          <!-- Text Input -->
+          <input 
+            v-model="messageInput"
+            type="text"
+            placeholder="پیام..."
+            @keyup.enter="sendMessage()"
+            :disabled="isSending"
+          />
+          
+          <!-- Attachment Button -->
+          <input 
+            type="file" 
+            ref="imageInput" 
+            accept="image/*" 
+            style="display: none" 
+            @change="handleImageUpload"
+          />
+          <button class="attach-btn" @click="imageInput?.click()" :disabled="isUploading">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="#8e8e93">
+              <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/>
+            </svg>
+          </button>
+        </div>
       </div>
 
       <!-- Sticker Picker -->
@@ -641,61 +663,108 @@ defineExpose({ startNewChat })
   text-align: left;
 }
 
+.msg-image-link {
+  display: block;
+  text-decoration: none;
+}
+
 .msg-image {
   max-width: 200px;
   max-height: 200px;
   border-radius: 8px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.msg-image:hover {
+  opacity: 0.9;
 }
 
 .msg-sticker {
   font-size: 48px;
 }
 
-/* Input Area */
+/* Input Area - Telegram Style */
 .input-area {
   display: flex;
   align-items: center;
   padding: 8px 12px;
   background: var(--card-bg);
   border-top: 1px solid var(--border-color);
-  gap: 8px;
+  gap: 10px;
+  flex-direction: row-reverse; /* RTL: send on left */
 }
 
-.input-area input[type="text"] {
+.input-container {
   flex: 1;
-  padding: 10px 14px;
-  border: 1px solid var(--border-color);
-  border-radius: 20px;
-  font-size: 14px;
+  display: flex;
+  align-items: center;
+  background: #f0f2f5;
+  border-radius: 22px;
+  padding: 4px 8px;
+  gap: 4px;
+}
+
+.input-container input[type="text"] {
+  flex: 1;
+  padding: 8px 4px;
+  border: none;
+  background: transparent;
+  font-size: 15px;
   outline: none;
+  text-align: right;
+  direction: rtl;
 }
 
-.input-area input:focus {
-  border-color: var(--primary-color);
+.input-container input::placeholder {
+  color: #8e8e93;
 }
 
-.sticker-toggle, .image-btn {
+.emoji-btn, .attach-btn {
   background: none;
   border: none;
-  font-size: 22px;
+  padding: 6px;
   cursor: pointer;
-  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background 0.2s;
+}
+
+.emoji-btn:hover, .attach-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
 }
 
 .send-btn {
-  padding: 10px 16px;
-  background: linear-gradient(135deg, #007aff, #0056b3);
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  background: #007aff;
   color: white;
   border: none;
-  border-radius: 20px;
-  font-size: 14px;
-  font-weight: 500;
+  border-radius: 50%;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
+}
+
+.send-btn:hover:not(:disabled) {
+  background: #0056b3;
+  transform: scale(1.05);
 }
 
 .send-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.send-btn svg {
+  transform: rotate(180deg); /* Point arrow left for RTL */
 }
 
 /* Sticker Picker */
