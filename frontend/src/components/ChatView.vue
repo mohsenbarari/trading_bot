@@ -301,7 +301,7 @@ function goBack() {
     selectedUserId.value = null
     selectedUserName.value = ''
     messages.value = []
-    stopPolling()
+    // Don't stop polling, we need it for conversation list updates
   } else {
     emit('back')
   }
@@ -323,10 +323,7 @@ const totalUnread = computed(() => {
 // Watchers
 watch(selectedUserId, (newVal) => {
   if (newVal) {
-    startPolling()
     scrollToBottom()
-  } else {
-    stopPolling()
   }
 })
 
@@ -343,6 +340,9 @@ onMounted(async () => {
     selectedUserName.value = props.targetUserName
     loadMessages(props.targetUserId)
   }
+  
+  // Start polling for updates (conversations list + messages)
+  startPolling()
 })
 
 onUnmounted(() => {
