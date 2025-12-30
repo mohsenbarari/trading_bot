@@ -222,9 +222,14 @@ function sendSticker(stickerId: string) {
 }
 
 // Poll for new messages
+// Poll for new messages
 async function poll() {
-  if (!selectedUserId.value) return
-  await loadMessages(selectedUserId.value, true)
+  // Always update conversation list to show new unread counts/chats
+  await loadConversations()
+  
+  if (selectedUserId.value) {
+    await loadMessages(selectedUserId.value, true)
+  }
 }
 
 function startPolling() {
