@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
+import { ref, onMounted, computed, watch, onUnmounted, nextTick } from 'vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 
 // Props
@@ -103,11 +103,21 @@ async function loadConversations() {
   }
 }
 
+
+
 // Load messages
 async function loadMessages(userId: number, silent = false) {
   if (!silent) isLoadingMessages.value = true
   try {
-    messages.value = await apiFetch(`/chat/messages/${userId}`)
+    const loadedMessages = await apiFetch(`/chat/messages/${userId}`)
+    messages.value = loadedMessages
+    
+    // Scroll after DOM update
+    if (!silent) {
+      await nextTick()
+      scrollToUnreadOrBottom()
+    }
+    
     // Mark as read
     await apiFetch(`/chat/read/${userId}`, { method: 'POST' })
     // Update unread count in conversation list
@@ -225,12 +235,38 @@ function stopPolling() {
   }
 }
 
+// Messages container ref
+const messagesContainer = ref<HTMLElement | null>(null)
+
 // Scroll to bottom
 function scrollToBottom() {
   setTimeout(() => {
-    const container = document.querySelector('.messages-container')
-    if (container) container.scrollTop = container.scrollHeight
+    if (messagesContainer.value) {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+    }
   }, 50)
+}
+
+// Smart scroll - to first unread message or to bottom
+function scrollToUnreadOrBottom() {
+  if (!messagesContainer.value) return
+  
+  // Find first unread message (received and not read)
+  const firstUnreadIndex = messages.value.findIndex(
+    msg => msg.receiver_id === props.currentUserId && !msg.is_read
+  )
+  
+  if (firstUnreadIndex >= 0) {
+    // Scroll to first unread message
+    const messageElements = messagesContainer.value.querySelectorAll('.message-bubble')
+    if (messageElements[firstUnreadIndex]) {
+      // Use 'auto' behavior for instant jump on load
+      messageElements[firstUnreadIndex].scrollIntoView({ behavior: 'auto', block: 'start' })
+    }
+  } else {
+    // All read - scroll to bottom
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  }
 }
 
 // Format time
@@ -733,7 +769,7 @@ defineExpose({ startNewChat })
   background: rgba(0, 0, 0, 0.05);
   border-radius: 24px;
   padding: 10px 16px;
-  min-height: 48px;
+  min-height: 52px;
 }
 
 .input-container input[type="text"] {
