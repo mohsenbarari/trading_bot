@@ -497,6 +497,8 @@ defineExpose({ startNewChat })
   max-width: 100%;
   padding: 0;
   margin: 0;
+  position: relative;
+  overflow: hidden;
 }
 
 /* Header */
@@ -507,6 +509,10 @@ defineExpose({ startNewChat })
   background: var(--card-bg);
   border-bottom: 1px solid var(--border-color);
   gap: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex-shrink: 0;
 }
 
 .back-btn {
@@ -646,6 +652,7 @@ defineExpose({ startNewChat })
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
 }
 
 .message-bubble {
@@ -708,9 +715,14 @@ defineExpose({ startNewChat })
   display: flex;
   align-items: center;
   padding: 10px 8px;
-  background: transparent;
+  background: var(--card-bg);
   gap: 6px;
   width: 100%;
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-color);
 }
 
 .input-container {
