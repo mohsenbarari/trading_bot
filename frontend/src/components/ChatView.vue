@@ -145,6 +145,12 @@ async function sendMessage(type: 'text' | 'image' | 'sticker' = 'text', content?
   // Optimistically clear input to prevent double send and keep focus
   if (type === 'text') {
     messageInput.value = ''
+    
+    // Resize textarea back to base height
+    if (messageInputRef.value) {
+      messageInputRef.value.style.height = 'auto'
+    }
+    
     // Refocus input immediately to prevent keyboard hiding when send button disappears
     await nextTick()
     messageInputRef.value?.focus()
@@ -260,7 +266,15 @@ function stopPolling() {
 // Messages container ref
 const messagesContainer = ref<HTMLElement | null>(null)
 // Message input ref
-const messageInputRef = ref<HTMLInputElement | null>(null)
+const messageInputRef = ref<HTMLTextAreaElement | null>(null)
+
+// Auto resize textarea
+function adjustTextareaHeight() {
+  const el = messageInputRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px' // Max 120px height
+}
 
 // Scroll to bottom
 function scrollToBottom() {
@@ -524,13 +538,14 @@ defineExpose({ startNewChat })
           </button>
 
           <!-- Text Input -->
-          <input 
+          <textarea
             ref="messageInputRef"
             v-model="messageInput"
-            type="text"
+            rows="1"
             placeholder="پیام..."
-            @keyup.enter="sendMessage()"
-          />
+            @input="adjustTextareaHeight"
+            @keydown.enter.exact.prevent="sendMessage()"
+          ></textarea>
           
           <!-- Emoji/Sticker Toggle - Right side inside textbox -->
           <button class="emoji-btn" @click="showStickerPicker = !showStickerPicker">
@@ -819,28 +834,33 @@ defineExpose({ startNewChat })
 .input-container {
   flex: 1;
   display: flex;
-  align-items: center;
+  align-items: flex-end; /* Align bottom for multi-line support */
   background: rgba(0, 0, 0, 0.05);
   border-radius: 24px;
   padding: 10px 16px;
   min-height: 52px;
 }
 
-.input-container input[type="text"] {
+.input-container textarea {
   flex: 1;
-  padding: 0 8px;
+  padding: 4px 8px; /* Adjust padding for textarea */
   border: none;
   background: transparent;
-  font-size: 16px;
   outline: none;
-  text-align: right;
+  font-size: 16px;
+  color: var(--text-color);
+  resize: none;
+  overflow-y: auto;
+  min-height: 24px;
+  line-height: 24px;
+  max-height: 120px;
+  font-family: inherit;
   direction: rtl;
-  color: #333;
-  min-width: 0;
+  text-align: right;
 }
 
-.input-container input::placeholder {
-  color: #9ca3af;
+.input-container textarea::placeholder {
+  color: #8e8e93;
 }
 
 .emoji-btn, .attach-btn, .voice-btn {
