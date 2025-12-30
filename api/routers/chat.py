@@ -9,7 +9,7 @@ from sqlalchemy import select, and_, or_, update, func
 from sqlalchemy.orm import joinedload
 from typing import List, Optional
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import os
 import uuid
 
@@ -36,6 +36,11 @@ class MessageSend(BaseModel):
     message_type: MessageType = MessageType.TEXT
 
 
+class MessageUpdate(BaseModel):
+    """ویرایش پیام"""
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
 class MessageRead(BaseModel):
     """خواندن پیام"""
     id: int
@@ -44,6 +49,8 @@ class MessageRead(BaseModel):
     content: str
     message_type: MessageType
     is_read: bool
+    is_deleted: bool = False
+    updated_at: Optional[datetime] = None
     created_at: datetime
 
     class Config:
@@ -170,7 +177,7 @@ async def get_messages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """تاریخچه پیام‌ها با یک کاربر خاص"""
+    """تاریخچه پیام‌ها با یک کاربر خاص (پیام‌های حذف شده نمایش داده نمی‌شوند)"""
     # بررسی وجود کاربر
     target = await db.get(User, user_id)
     if not target:
@@ -183,6 +190,9 @@ async def get_messages(
             and_(Message.sender_id == user_id, Message.receiver_id == current_user.id)
         )
     ]
+    
+    # Filter deleted messages
+    conditions.append(Message.is_deleted == False)
     
     if before_id:
         conditions.append(Message.id < before_id)
@@ -243,7 +253,75 @@ async def send_message(
     await db.refresh(message)
     
     return message
+    return message
 
+
+@router.put("/messages/{message_id}", response_model=MessageRead)
+async def update_message(
+    message_id: int,
+    data: MessageUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """ویرایش پیام (محدودیت ۴۸ ساعت)"""
+    msg = await db.get(Message, message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+        
+    if msg.sender_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only edit your own messages")
+        
+    if msg.message_type != MessageType.TEXT:
+        raise HTTPException(status_code=400, detail="Only text messages can be edited")
+
+    # بررسی زمان (۴۸ ساعت)
+    now = datetime.now(timezone.utc)
+    if msg.created_at < now - timedelta(hours=48):
+        raise HTTPException(status_code=400, detail="Message is too old to edit")
+
+    # ذخیره تاریخچه
+    history = list(msg.edit_history) if msg.edit_history else []
+    history.append({
+        "content": msg.content,
+        "updated_at": str(now)
+    })
+    # نگه داشتن ۳ نسخه آخر
+    if len(history) > 3:
+        history.pop(0)
+    
+    msg.edit_history = history
+    msg.content = data.content
+    msg.updated_at = now
+    
+    await db.commit()
+    await db.refresh(msg)
+    return msg
+
+
+@router.delete("/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_message(
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """حذف message (Soft Delete - محدودیت ۴۸ ساعت)"""
+    msg = await db.get(Message, message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+        
+    if msg.sender_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only delete your own messages")
+
+    # بررسی زمان (۴۸ ساعت)
+    now = datetime.now(timezone.utc)
+    if msg.created_at < now - timedelta(hours=48):
+        raise HTTPException(status_code=400, detail="Message is too old to delete")
+
+    msg.is_deleted = True
+    msg.updated_at = now
+    
+    await db.commit()
+    return None
 
 @router.post("/read/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def mark_messages_read(

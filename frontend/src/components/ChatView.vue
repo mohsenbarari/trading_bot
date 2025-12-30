@@ -35,6 +35,8 @@ interface Message {
   content: string
   message_type: 'text' | 'image' | 'sticker'
   is_read: boolean
+  is_deleted?: boolean
+  updated_at?: string
   created_at: string
 }
 
@@ -56,10 +58,16 @@ const selectedUserName = ref('')
 // Messages
 const messages = ref<Message[]>([])
 const isLoadingMessages = ref(false)
+const messagesContainer = ref<HTMLElement | null>(null)
+const isUserAtBottom = ref(true)
+const unreadNewMessagesCount = ref(0)
+const showScrollButton = ref(false)
 
 // Input
 const messageInput = ref('')
 const isSending = ref(false)
+const messageInputRef = ref<HTMLTextAreaElement | null>(null)
+const editingMessage = ref<Message | null>(null)
 
 // Stickers
 const stickerPacks = ref<StickerPack[]>([])
@@ -68,6 +76,11 @@ const showStickerPicker = ref(false)
 // Image upload
 const imageInput = ref<HTMLInputElement | null>(null)
 const isUploading = ref(false)
+
+// UI State
+const isMobile = ref(false)
+const contextMenu = ref<{ visible: boolean; x: number; y: number; message: Message | null }>({ visible: false, x: 0, y: 0, message: null })
+const longPressTimer = ref<number | null>(null)
 
 // Poll timer
 let pollTimer: number | null = null
@@ -175,25 +188,8 @@ async function markAsRead() {
 
 // Send message
 // Send message
-async function sendMessage(type: 'text' | 'image' | 'sticker' = 'text', content?: string) {
+async function sendMediaMessage(type: 'image' | 'sticker', content: string) {
   if (!selectedUserId.value) return
-  
-  const msgContent = content || messageInput.value.trim()
-  if (!msgContent) return
-  
-  // Optimistically clear input to prevent double send and keep focus
-  if (type === 'text') {
-    messageInput.value = ''
-    
-    // Resize textarea back to base height
-    if (messageInputRef.value) {
-      messageInputRef.value.style.height = 'auto'
-    }
-    
-    // Refocus input immediately to prevent keyboard hiding when send button disappears
-    await nextTick()
-    messageInputRef.value?.focus()
-  }
   
   isSending.value = true
   try {
@@ -201,20 +197,15 @@ async function sendMessage(type: 'text' | 'image' | 'sticker' = 'text', content?
       method: 'POST',
       body: JSON.stringify({
         receiver_id: selectedUserId.value,
-        content: msgContent,
+        content: content,
         message_type: type
       })
     })
     messages.value.push(newMsg)
-    // Input already cleared
     showStickerPicker.value = false
     scrollToBottom()
   } catch (e: any) {
     error.value = e.message
-    // Restore input on failure
-    if (type === 'text') {
-      messageInput.value = msgContent
-    }
   } finally {
     isSending.value = false
   }
@@ -225,6 +216,10 @@ function selectConversation(conv: Conversation) {
   selectedUserId.value = conv.other_user_id
   selectedUserName.value = conv.other_user_name
   loadMessages(conv.other_user_id)
+  // Clear edit/context state
+  contextMenu.value.visible = false;
+  editingMessage.value = null;
+  messageInput.value = '';
 }
 
 // Start new chat (from search or profile)
@@ -256,7 +251,7 @@ async function handleImageUpload(event: Event) {
     })
     if (!res.ok) throw new Error('خطا در آپلود تصویر')
     const data = await res.json()
-    await sendMessage('image', data.url)
+    await sendMediaMessage('image', data.url)
   } catch (e: any) {
     error.value = e.message
   } finally {
@@ -276,7 +271,7 @@ async function loadStickers() {
 
 // Send sticker
 function sendSticker(stickerId: string) {
-  sendMessage('sticker', stickerId)
+  sendMediaMessage('sticker', stickerId)
 }
 
 // Poll for new messages
@@ -302,16 +297,151 @@ function stopPolling() {
   }
 }
 
-// Messages container ref
-const messagesContainer = ref<HTMLElement | null>(null)
-// Message input ref
-const messageInputRef = ref<HTMLTextAreaElement | null>(null)
-// Mobile detection
-const isMobile = ref(false)
-// Scroll state
-const isUserAtBottom = ref(true)
-const unreadNewMessagesCount = ref(0)
-const showScrollButton = ref(false)
+
+
+// Context Menu Logic
+const showContextMenu = (event: MouseEvent | TouchEvent, msg: Message) => {
+  if (msg.sender_id !== props.currentUserId) return; // Only own messages
+  // Check 48h limit
+  const msgTime = new Date(msg.created_at).getTime();
+  const now = Date.now();
+  if (now - msgTime > 48 * 60 * 60 * 1000) return;
+
+  if (event instanceof MouseEvent) {
+    event.preventDefault(); // Prevent default browser menu
+    contextMenu.value = {
+      visible: true,
+      x: event.clientX,
+      y: event.clientY,
+      message: msg
+    };
+  } else if (event instanceof TouchEvent && event.touches.length > 0) {
+    // For touch events, use the first touch point
+    const touch = event.touches[0]
+    if (touch) {
+      contextMenu.value = {
+        visible: true,
+        x: touch.clientX,
+        y: touch.clientY,
+        message: msg
+      };
+    }
+  }
+};
+
+const closeContextMenu = () => {
+  contextMenu.value.visible = false;
+};
+
+const handleLongPressStart = (event: TouchEvent, msg: Message) => {
+  longPressTimer.value = window.setTimeout(() => {
+    showContextMenu(event, msg);
+  }, 500);
+};
+
+const handleLongPressEnd = () => {
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value);
+    longPressTimer.value = null;
+  }
+};
+
+const handleEditMessage = () => {
+  const msg = contextMenu.value.message;
+  if (!msg) return;
+  
+  editingMessage.value = msg;
+  messageInput.value = msg.content;
+  closeContextMenu();
+  // Focus input
+  nextTick(() => {
+    messageInputRef.value?.focus();
+    adjustTextareaHeight();
+  });
+};
+
+const handleDeleteMessage = async () => {
+  const msg = contextMenu.value.message;
+  if (!msg) return;
+  
+  if (!confirm('آیا از حذف این پیام اطمینان دارید؟')) {
+    closeContextMenu();
+    return;
+  }
+
+  try {
+    await apiFetch(`/chat/messages/${msg.id}`, { method: 'DELETE' });
+    // Remove from local list
+    const index = messages.value.findIndex(m => m.id === msg.id);
+    if (index !== -1) {
+      messages.value.splice(index, 1); // Remove locally
+    }
+    closeContextMenu();
+  } catch (err) {
+    console.error('Failed to delete message:', err);
+    alert('خطا در حذف پیام');
+  }
+};
+
+const cancelEdit = () => {
+  editingMessage.value = null;
+  messageInput.value = '';
+  adjustTextareaHeight(); // Reset height
+};
+
+const sendMessage = async () => {
+  if (!messageInput.value.trim() && !editingMessage.value) return;
+
+  if (editingMessage.value) {
+    const msgToEdit = editingMessage.value
+    // Update Mode
+    try {
+      const updatedMsg = await apiFetch(`/chat/messages/${msgToEdit.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ content: messageInput.value })
+      });
+      // Update local message
+      const index = messages.value.findIndex(m => m.id === msgToEdit.id);
+      if (index !== -1) {
+        messages.value[index] = updatedMsg;
+      }
+      cancelEdit();
+    } catch (err) {
+      console.error('Failed to edit message:', err);
+      alert('خطا در ویرایش پیام');
+    }
+    return;
+  }
+
+  // Normal Send Mode
+  isSending.value = true;
+  const content = messageInput.value;
+  // Optimistic clear
+  messageInput.value = '';
+  adjustTextareaHeight();
+  
+  try {
+    const newMessage = await apiFetch('/chat/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        receiver_id: selectedUserId.value,
+        content: content,
+        message_type: 'text'
+      })
+    });
+    
+    messages.value.push(newMessage);
+    scrollToBottom();
+    // Keep focus
+    nextTick(() => messageInputRef.value?.focus());
+  } catch (err) {
+    console.error('Failed to send message:', err);
+    messageInput.value = content; // Restore on error
+  } finally {
+    isSending.value = false;
+  }
+};
+
 
 function updateIsMobile() {
   isMobile.value = window.innerWidth < 768
@@ -558,6 +688,9 @@ defineExpose({ startNewChat })
             :key="msg.id"
             class="message-bubble"
             :class="{ 'sent': msg.sender_id === props.currentUserId, 'received': msg.sender_id !== props.currentUserId }"
+            @contextmenu="showContextMenu($event, msg)"
+            @touchstart="handleLongPressStart($event, msg)"
+            @touchend="handleLongPressEnd"
           >
             <!-- Text -->
             <template v-if="msg.message_type === 'text'">
@@ -577,7 +710,10 @@ defineExpose({ startNewChat })
             </template>
             
             <div class="msg-meta">
-              <span class="msg-time">{{ formatTime(msg.created_at) }}</span>
+              <span class="msg-time">
+                {{ formatTime(msg.created_at) }}
+                <span v-if="msg.updated_at" class="edited-label">(ویرایش شده)</span>
+              </span>
               <span v-if="msg.sender_id === props.currentUserId" class="msg-status">
                 <!-- Read (Double Tick) -->
                 <svg v-if="msg.is_read" viewBox="0 0 24 24" class="icon-read" width="16" height="16">
@@ -680,6 +816,28 @@ defineExpose({ startNewChat })
           </div>
         </div>
       </div>
+
+    <!-- Context Menu -->
+    <div 
+      v-if="contextMenu.visible" 
+      class="context-menu"
+      :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
+    >
+      <div class="menu-item" @click="handleEditMessage">
+        <span>✏️</span> ویرایش
+      </div>
+      <div class="menu-item delete" @click="handleDeleteMessage">
+        <span>🗑️</span> حذف
+      </div>
+    </div>
+    
+    <!-- Click outside to close (Overlay) -->
+    <div 
+      v-if="contextMenu.visible" 
+      class="context-overlay"
+      @click="closeContextMenu"
+    ></div>
+
     </template>
   </div>
 </template>
@@ -1162,5 +1320,59 @@ defineExpose({ startNewChat })
   flex-direction: column;
   justify-content: center;
   align-items: center;
+}
+/* Context Menu */
+.context-menu {
+  position: fixed;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  min-width: 150px;
+  z-index: 2000;
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+}
+
+.menu-item {
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.2s;
+  font-size: 14px;
+  color: var(--text-color);
+}
+
+.menu-item:hover {
+  background: rgba(0,0,0,0.05);
+}
+
+.menu-item.delete {
+  color: #ef4444;
+}
+
+.menu-item.delete:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.context-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1999; /* Below context menu */
+}
+
+.edited-label {
+  font-size: 10px;
+  font-style: italic;
+  opacity: 0.7;
+  margin-right: 4px;
 }
 </style>
