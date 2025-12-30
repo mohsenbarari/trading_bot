@@ -873,8 +873,8 @@ defineExpose({ startNewChat })
 }
 
 .message-bubble {
-  max-width: 75%;
-  padding: 8px 12px;
+  max-width: 85%;
+  padding: 6px 14px;
   border-radius: 12px;
   position: relative;
   font-size: 14px;
