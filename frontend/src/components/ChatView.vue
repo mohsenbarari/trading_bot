@@ -413,11 +413,11 @@ defineExpose({ startNewChat })
       <div class="input-area">
         <!-- Input Container -->
         <div class="input-container">
-          <!-- Left side buttons - Only show when textbox is empty -->
+          <!-- Left side buttons - Show voice+attachment when empty, send when has text -->
           <template v-if="!messageInput.trim()">
             <!-- Voice Button -->
             <button class="voice-btn">
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="#8e8e93">
+              <svg viewBox="0 0 24 24" fill="#8e8e93">
                 <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
               </svg>
             </button>
@@ -431,11 +431,23 @@ defineExpose({ startNewChat })
               @change="handleImageUpload"
             />
             <button class="attach-btn" @click="imageInput?.click()" :disabled="isUploading">
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="#8e8e93">
+              <svg viewBox="0 0 24 24" fill="#8e8e93">
                 <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/>
               </svg>
             </button>
           </template>
+          
+          <!-- Send Button - Show when has text (same position as voice+attachment) -->
+          <button 
+            v-else
+            class="send-btn-inline" 
+            @click="sendMessage()" 
+            :disabled="isSending"
+          >
+            <svg viewBox="0 0 24 24" fill="#007aff">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            </svg>
+          </button>
 
           <!-- Text Input -->
           <input 
@@ -448,23 +460,11 @@ defineExpose({ startNewChat })
           
           <!-- Emoji/Sticker Toggle - Right side inside textbox -->
           <button class="emoji-btn" @click="showStickerPicker = !showStickerPicker">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="#8e8e93">
+            <svg viewBox="0 0 24 24" fill="#8e8e93">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-6c.78 2.34 2.72 4 5 4s4.22-1.66 5-4H7zm1-4c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1zm8 0c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1z"/>
             </svg>
           </button>
         </div>
-
-        <!-- Send Button (Circle) - Only show when has text -->
-        <button 
-          v-if="messageInput.trim()" 
-          class="send-btn" 
-          @click="sendMessage()" 
-          :disabled="isSending"
-        >
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="white">
-            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-          </svg>
-        </button>
       </div>
 
       <!-- Sticker Picker -->
@@ -767,27 +767,27 @@ defineExpose({ startNewChat })
   margin-right: 4px;
 }
 
-.send-btn {
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  background: #007aff;
-  color: white;
+.send-btn-inline {
+  background: none;
   border: none;
-  border-radius: 50%;
+  padding: 0;
+  margin: 0;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
 }
 
-.send-btn svg {
-  width: 20px;
-  height: 20px;
+.send-btn-inline svg {
+  width: 22px;
+  height: 22px;
 }
 
-.send-btn:disabled {
+.send-btn-inline:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
