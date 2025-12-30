@@ -544,7 +544,7 @@ defineExpose({ startNewChat })
             rows="1"
             placeholder="پیام..."
             @input="adjustTextareaHeight"
-            @keydown.enter.exact.prevent="sendMessage()"
+            @keydown.ctrl.enter.prevent="sendMessage()"
           ></textarea>
           
           <!-- Emoji/Sticker Toggle - Right side inside textbox -->
