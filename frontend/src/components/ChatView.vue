@@ -703,9 +703,8 @@ defineExpose({ startNewChat })
 .input-area {
   display: flex;
   align-items: center;
-  padding: 6px 10px;
-  background: var(--card-bg);
-  border-top: 1px solid var(--border-color);
+  padding: 8px 12px;
+  background: transparent;
   gap: 8px;
 }
 
@@ -713,10 +712,15 @@ defineExpose({ startNewChat })
   flex: 1;
   display: flex;
   align-items: center;
-  background: #3a3a3c;
+  background: linear-gradient(145deg, #f8f9fa, #e9ecef);
   border-radius: 20px;
-  padding: 6px 12px;
-  min-height: 36px;
+  padding: 8px 14px;
+  min-height: 40px;
+  box-shadow: 
+    inset 2px 2px 4px rgba(0, 0, 0, 0.06),
+    inset -2px -2px 4px rgba(255, 255, 255, 0.8),
+    0 1px 3px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.04);
 }
 
 .input-container input[type="text"] {
@@ -728,12 +732,12 @@ defineExpose({ startNewChat })
   outline: none;
   text-align: right;
   direction: rtl;
-  color: #fff;
+  color: #333;
   min-width: 0;
 }
 
 .input-container input::placeholder {
-  color: #8e8e93;
+  color: #9ca3af;
 }
 
 .emoji-btn, .attach-btn, .voice-btn {
