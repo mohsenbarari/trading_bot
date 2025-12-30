@@ -693,7 +693,10 @@ defineExpose({ startNewChat })
   bottom: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-color);
+  flex-direction: column;
+  background-color: var(--bg-color);
+  background-image: radial-gradient(rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+  background-size: 20px 20px;
   z-index: 100;
 }
 
@@ -702,7 +705,9 @@ defineExpose({ startNewChat })
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  background: var(--card-bg);
+  background: rgba(255, 255, 255, 0.85); /* Semi-transparent for glass effect */
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border-color);
   gap: 12px;
   flex-shrink: 0;
@@ -865,6 +870,19 @@ defineExpose({ startNewChat })
   line-height: 1.4;
   white-space: pre-wrap; /* Preserve line breaks */
   word-wrap: break-word;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  animation: slideIn 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .message-bubble p {
@@ -1088,7 +1106,7 @@ defineExpose({ startNewChat })
   height: 40px;
   border-radius: 50%;
   background: rgba(40, 40, 40, 0.7); /* Dark semi-transparent */
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(2px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;
   align-items: center;
