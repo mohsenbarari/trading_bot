@@ -590,18 +590,19 @@ defineExpose({ startNewChat })
               </span>
             </div>
           </div>
-          <!-- Scroll to Bottom Button -->
-          <button 
-            v-if="showScrollButton" 
-            class="scroll-bottom-btn" 
-            @click="scrollToBottom"
-          >
-            <span v-if="unreadNewMessagesCount > 0" class="scroll-badge">{{ unreadNewMessagesCount }}</span>
-            <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-              <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
-            </svg>
-          </button>
         </div>
+        
+        <!-- Scroll to Bottom Button -->
+        <button 
+          v-if="showScrollButton" 
+          class="scroll-bottom-btn" 
+          @click="scrollToBottom"
+        >
+          <span v-if="unreadNewMessagesCount > 0" class="scroll-badge">{{ unreadNewMessagesCount }}</span>
+          <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+            <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
+          </svg>
+        </button>
       </div>
 
       <!-- Input Area - Telegram Style -->
