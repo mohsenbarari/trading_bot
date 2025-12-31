@@ -307,26 +307,41 @@ const showContextMenu = (event: MouseEvent | TouchEvent, msg: Message) => {
   const now = Date.now();
   if (now - msgTime > 48 * 60 * 60 * 1000) return;
 
+  let clientX = 0;
+  let clientY = 0;
+
   if (event instanceof MouseEvent) {
-    event.preventDefault(); // Prevent default browser menu
-    contextMenu.value = {
-      visible: true,
-      x: event.clientX,
-      y: event.clientY,
-      message: msg
-    };
+    event.preventDefault();
+    clientX = event.clientX;
+    clientY = event.clientY;
   } else if (event instanceof TouchEvent && event.touches.length > 0) {
-    // For touch events, use the first touch point
-    const touch = event.touches[0]
+    const touch = event.touches[0];
     if (touch) {
-      contextMenu.value = {
-        visible: true,
-        x: touch.clientX,
-        y: touch.clientY,
-        message: msg
-      };
+      clientX = touch.clientX;
+      clientY = touch.clientY;
     }
   }
+
+  // Initial position (will be adjusted)
+  const menuWidth = 160;
+  const menuHeight = 100;
+  const padding = 10;
+
+  // Prevent overflow right
+  if (clientX + menuWidth > window.innerWidth) {
+    clientX = window.innerWidth - menuWidth - padding;
+  }
+  // Prevent overflow bottom
+  if (clientY + menuHeight > window.innerHeight) {
+    clientY = window.innerHeight - menuHeight - padding;
+  }
+
+  contextMenu.value = {
+    visible: true,
+    x: clientX,
+    y: clientY,
+    message: msg
+  };
 };
 
 const closeContextMenu = () => {
@@ -817,26 +832,28 @@ defineExpose({ startNewChat })
         </div>
       </div>
 
-    <!-- Context Menu -->
-    <div 
-      v-if="contextMenu.visible" 
-      class="context-menu"
-      :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
-    >
-      <div class="menu-item" @click="handleEditMessage">
-        <span>✏️</span> ویرایش
+    <!-- Context Menu (Teleport to body to avoid clipping/position issues) -->
+    <Teleport to="body">
+      <div 
+        v-if="contextMenu.visible" 
+        class="context-menu"
+        :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
+      >
+        <div class="menu-item" @click="handleEditMessage">
+          <span>✏️</span> ویرایش
+        </div>
+        <div class="menu-item delete" @click="handleDeleteMessage">
+          <span>🗑️</span> حذف
+        </div>
       </div>
-      <div class="menu-item delete" @click="handleDeleteMessage">
-        <span>🗑️</span> حذف
-      </div>
-    </div>
-    
-    <!-- Click outside to close (Overlay) -->
-    <div 
-      v-if="contextMenu.visible" 
-      class="context-overlay"
-      @click="closeContextMenu"
-    ></div>
+      
+      <!-- Click outside to close (Overlay) -->
+      <div 
+        v-if="contextMenu.visible" 
+        class="context-overlay"
+        @click="closeContextMenu"
+      ></div>
+    </Teleport>
 
     </template>
   </div>
