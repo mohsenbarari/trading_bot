@@ -164,6 +164,7 @@ async function loadMessages(userId: number, silent = false) {
       isLoadingMessages.value = false
       await nextTick()
       scrollToUnreadOrBottom()
+      markAsRead()
     }
   } catch (e: any) {
     if (!silent) error.value = e.message
@@ -789,6 +790,8 @@ defineExpose({ startNewChat })
             v-else
             class="send-btn-inline" 
             @click="sendMessage()" 
+            @mousedown.prevent
+            @touchstart.prevent="sendMessage()"
             :disabled="isSending"
           >
             <svg viewBox="0 0 24 24" fill="#007aff">
@@ -1043,8 +1046,6 @@ defineExpose({ startNewChat })
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* Scroll behavior */
-  scroll-behavior: smooth;
 }
 
 .message-bubble {
