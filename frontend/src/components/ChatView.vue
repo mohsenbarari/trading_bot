@@ -38,6 +38,12 @@ interface Message {
   is_deleted?: boolean
   updated_at?: string
   created_at: string
+  reply_to_message?: {
+    id: number
+    sender_id: number
+    content: string
+    message_type: string
+  }
 }
 
 interface StickerPack {
@@ -73,9 +79,14 @@ const editingMessage = ref<Message | null>(null)
 const stickerPacks = ref<StickerPack[]>([])
 const showStickerPicker = ref(false)
 
-// Image upload
 const imageInput = ref<HTMLInputElement | null>(null)
 const isUploading = ref(false)
+
+// Reply State
+const replyingToMessage = ref<Message | null>(null)
+const touchStartX = ref(0)
+const touchCurrentX = ref(0)
+const swipedMessageId = ref<number | null>(null)
 
 // UI State
 const isMobile = ref(false)
@@ -124,7 +135,7 @@ async function loadMessages(userId: number, silent = false) {
   if (!silent) isLoadingMessages.value = true
   try {
     // Add timestamp to prevent caching
-    const loadedMessages = await apiFetch(`/chat/messages/${userId}?_t=${Date.now()}`)
+    const loadedMessages = await apiFetch(`/chat/messages/${userId}?limit=200&_t=${Date.now()}`)
     
     if (silent) {
       // Check for strictly new message (by ID)
@@ -432,31 +443,187 @@ const sendMessage = async () => {
   // Normal Send Mode
   isSending.value = true;
   const content = messageInput.value;
+  const replyTo = replyingToMessage.value; // Store for logic
+
   // Optimistic clear
   messageInput.value = '';
+  replyingToMessage.value = null; // Clear reply state
+  if (isMobile.value) swipedMessageId.value = null; // Clear swipe
   adjustTextareaHeight();
   
   try {
-    const newMessage = await apiFetch('/chat/send', {
-      method: 'POST',
-      body: JSON.stringify({
+    const body: Record<string, any> = {
         receiver_id: selectedUserId.value,
         content: content,
         message_type: 'text'
-      })
+    };
+    if (replyTo) {
+        body.reply_to_message_id = replyTo.id;
+    }
+
+    const newMessage = await apiFetch('/chat/send', {
+      method: 'POST',
+      body: JSON.stringify(body)
     });
     
-    messages.value.push(newMessage);
-    scrollToBottom();
+    // Safety check: only push if we have a valid message
+    if (newMessage && newMessage.id) {
+        messages.value.push(newMessage);
+        await nextTick(); // Ensure DOM is updated
+        
+        // Use force scroll for replies (smooth scroll fails over long distances)
+        if (replyTo) {
+            forceScrollToBottom();
+        } else {
+            scrollToBottom();
+        }
+    }
     // Keep focus
     nextTick(() => messageInputRef.value?.focus());
   } catch (err) {
     console.error('Failed to send message:', err);
-    messageInput.value = content; // Restore on error
+    // Do NOT restore input to avoid ghost text
   } finally {
     isSending.value = false;
   }
 };
+
+const handleReply = (msg: Message) => {
+    replyingToMessage.value = msg
+    nextTick(() => {
+        messageInputRef.value?.focus()
+    })
+}
+
+const cancelReply = () => {
+  replyingToMessage.value = null
+  if (isMobile.value) {
+    swipedMessageId.value = null
+  }
+}
+
+// Swipe Logic
+const SWIPE_THRESHOLD = 50
+const handleTouchStart = (e: TouchEvent, msg: Message) => {
+  if (e.touches.length > 0) {
+    const touch = e.touches[0]
+    if (touch) {
+      touchStartX.value = touch.clientX
+      touchCurrentX.value = touch.clientX
+      swipedMessageId.value = msg.id
+    }
+  }
+}
+
+const handleTouchMove = (e: TouchEvent, msg: Message) => {
+  if (swipedMessageId.value !== msg.id) return
+  if (e.touches.length > 0) {
+    const touch = e.touches[0]
+    if (touch) {
+      touchCurrentX.value = touch.clientX
+      
+      // Cancel long press if moved significantly
+      if (Math.abs(touchCurrentX.value - touchStartX.value) > 10) {
+        if (longPressTimer.value) {
+          clearTimeout(longPressTimer.value)
+          longPressTimer.value = null
+        }
+      }
+    }
+  }
+}
+
+const handleTouchEnd = (e: TouchEvent, msg: Message) => {
+  if (swipedMessageId.value !== msg.id) return
+  
+  const diff = touchStartX.value - touchCurrentX.value
+  const isSent = msg.sender_id === props.currentUserId
+  
+  // Sent (Right side): Swipe Left (diff > 0)
+  // Received (Left side): Swipe Right (diff < 0)
+  const isValidSwipe = isSent ? (diff > SWIPE_THRESHOLD) : (diff < -SWIPE_THRESHOLD)
+
+  if (isValidSwipe) {
+    handleReply(msg)
+  }
+  
+  // Reset
+  swipedMessageId.value = null
+  touchStartX.value = 0
+  touchCurrentX.value = 0
+}
+
+const getSwipeStyle = (msg: Message) => {
+  if (swipedMessageId.value !== msg.id) return {}
+  const diff = touchStartX.value - touchCurrentX.value
+  const isSent = msg.sender_id === props.currentUserId
+
+  // Logic:
+  // Sent (Right): Allow negative translate (Left) -> diff > 0
+  // Received (Left): Allow positive translate (Right) -> diff < 0
+  
+  if (isSent) {
+    if (diff <= 0) return {}
+    const translateX = Math.min(diff, 100)
+    return { transform: `translateX(-${translateX}px)`, transition: 'none' }
+  } else {
+    // Received
+    if (diff >= 0) return {}
+    const translateX = Math.min(Math.abs(diff), 100)
+    return { transform: `translateX(${translateX}px)`, transition: 'none' }
+  }
+}
+
+// Scroll to message with custom slow animation
+const scrollToMessage = (msgId: number) => {
+    const el = document.getElementById(`msg-${msgId}`)
+    const container = messagesContainer.value
+    
+    if (el && container) {
+        // Capture non-null references for closure
+        const safeContainer = container
+        const safeEl = el
+        
+        // Calculate target position (center of container)
+        const elTop = safeEl.offsetTop
+        const elHeight = safeEl.offsetHeight
+        const containerHeight = safeContainer.clientHeight
+        const targetScrollTop = elTop - (containerHeight / 2) + (elHeight / 2)
+        
+        // Use custom animation for slower scroll
+        const startScrollTop = safeContainer.scrollTop
+        const distance = targetScrollTop - startScrollTop
+        const duration = 1000 // 1 second (slower than default)
+        const startTime = performance.now()
+        
+        function step(currentTime: number) {
+            const elapsed = currentTime - startTime
+            const progress = Math.min(elapsed / duration, 1)
+            
+            // Ease out cubic
+            const ease = 1 - Math.pow(1 - progress, 3)
+            
+            safeContainer.scrollTop = startScrollTop + (distance * ease)
+            
+            if (progress < 1) {
+                requestAnimationFrame(step)
+            } else {
+                 // Trigger highlight after scroll matches
+                 safeEl.classList.add('highlight-message')
+                 setTimeout(() => safeEl.classList.remove('highlight-message'), 2500)
+            }
+        }
+        
+        requestAnimationFrame(step)
+    }
+}
+
+const handleReplyMessage = () => {
+  const msg = contextMenu.value.message
+  if (!msg) return
+  handleReply(msg)
+  closeContextMenu()
+}
 
 
 function updateIsMobile() {
@@ -483,8 +650,7 @@ function adjustTextareaHeight() {
   el.style.height = Math.min(el.scrollHeight, 200) + 'px' // Max 200px height
 }
 
-// Scroll to bottom
-// Scroll to bottom
+// Scroll to bottom (smooth)
 function scrollToBottom() {
   // Reset unread count when manually scrolling to bottom
   if (unreadNewMessagesCount.value > 0) {
@@ -499,7 +665,27 @@ function scrollToBottom() {
         behavior: 'smooth'
       })
     }
-  }, 50)
+  }, 100)
+}
+
+// Force scroll to bottom (instant - for reply cases where smooth fails)
+function forceScrollToBottom() {
+  if (unreadNewMessagesCount.value > 0) {
+    markAsRead()
+    unreadNewMessagesCount.value = 0
+  }
+  
+  // Multiple attempts to ensure scroll works after layout changes
+  const doScroll = () => {
+    if (messagesContainer.value) {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight + 1000
+    }
+  }
+  
+  nextTick(doScroll)
+  setTimeout(doScroll, 50)
+  setTimeout(doScroll, 150)
+  setTimeout(doScroll, 300)
 }
 
 // Handle Scroll
@@ -702,12 +888,31 @@ defineExpose({ startNewChat })
           <div 
             v-for="msg in messages" 
             :key="msg.id"
+            :id="'msg-' + msg.id"
             class="message-bubble"
             :class="{ 'sent': msg.sender_id === props.currentUserId, 'received': msg.sender_id !== props.currentUserId }"
             @contextmenu="showContextMenu($event, msg)"
-            @touchstart="handleLongPressStart($event, msg)"
-            @touchend="handleLongPressEnd"
+            @touchstart="handleLongPressStart($event, msg); handleTouchStart($event, msg)"
+            @touchmove="handleTouchMove($event, msg)"
+            @touchend="handleLongPressEnd(); handleTouchEnd($event, msg)"
+            :style="getSwipeStyle(msg)"
           >
+            <!-- Reply Context -->
+            <div 
+              v-if="msg.reply_to_message" 
+              class="reply-context"
+              @click.stop="scrollToMessage(msg.reply_to_message.id)"
+            >
+              <div class="reply-line"></div>
+              <div class="reply-content">
+                <span class="reply-text">
+                  <template v-if="msg.reply_to_message.message_type === 'image'">🖼️ تصویر</template>
+                  <template v-else-if="msg.reply_to_message.message_type === 'sticker'">😊 استیکر</template>
+                  <template v-else>{{ msg.reply_to_message.content }}</template>
+                </span>
+              </div>
+            </div>
+            
             <!-- Text -->
             <template v-if="msg.message_type === 'text'">
               <p>{{ msg.content }}</p>
@@ -759,6 +964,17 @@ defineExpose({ startNewChat })
 
       <!-- Input Area - Telegram Style -->
       <div class="input-area">
+        <!-- Reply Banner -->
+        <div v-if="replyingToMessage" class="reply-banner">
+            <div class="reply-info">
+                <span class="reply-icon">↩️ در پاسخ به:</span>
+                <span class="reply-preview">
+                    {{ replyingToMessage.message_type === 'text' ? replyingToMessage.content : (replyingToMessage.message_type === 'image' ? '🖼️ تصویر' : '😊 استیکر') }}
+                </span>
+            </div>
+            <button class="close-reply" @click="cancelReply">✕</button>
+        </div>
+
         <!-- Input Container -->
         <div class="input-container">
           <!-- Left side buttons - Show voice+attachment when empty, send when has text -->
@@ -842,12 +1058,17 @@ defineExpose({ startNewChat })
         class="context-menu"
         :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
       >
-        <div class="menu-item" @click="handleEditMessage">
-          <span>✏️</span> ویرایش
+        <div class="menu-item" @click="handleReplyMessage">
+          <span>↩️</span> پاسخ
         </div>
-        <div class="menu-item delete" @click="handleDeleteMessage">
-          <span>🗑️</span> حذف
-        </div>
+        <template v-if="contextMenu.message && contextMenu.message.sender_id === props.currentUserId">
+            <div class="menu-item" @click="handleEditMessage">
+              <span>✏️</span> ویرایش
+            </div>
+            <div class="menu-item delete" @click="handleDeleteMessage">
+              <span>🗑️</span> حذف
+            </div>
+        </template>
       </div>
       
       <!-- Click outside to close (Overlay) -->
@@ -1041,6 +1262,7 @@ defineExpose({ startNewChat })
 .messages-container {
   flex: 1;
   overflow-y: auto;
+  overflow-anchor: none; /* Disable browser scroll anchoring */
   padding: 12px 16px;
   padding-bottom: 20px;
   display: flex;
@@ -1143,15 +1365,17 @@ defineExpose({ startNewChat })
 /* Input Area - Telegram Style */
 .input-area {
   display: flex;
-  align-items: center;
-  padding: 10px 8px;
+  flex-direction: column; /* Stack banner and input */
+  align-items: stretch;
+  padding: 0; /* Remove padding to let banner reach edges, add padding to children if needed */
   background: var(--bg-color);
-  gap: 6px;
-  width: 100%;
-  flex-shrink: 0;
+  gap: 0;
+  border-top: 1px solid var(--border-color);
 }
 
 .input-container {
+  width: 100%;
+  gap: 8px;
   flex: 1;
   display: flex;
   align-items: flex-end; /* Align bottom for multi-line support */
@@ -1392,5 +1616,113 @@ defineExpose({ startNewChat })
   font-style: italic;
   opacity: 0.7;
   margin-right: 4px;
+}
+
+/* Reply Styles */
+.reply-context {
+  border-left: 2px solid var(--primary-color);
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* Ensure content stays inside */
+  max-width: 100%; /* Don't exceed parent bubble */
+}
+
+.reply-line {
+  display: none; /* Handled by border-left */
+}
+
+.reply-name {
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--primary-color);
+}
+
+.reply-text {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+  display: block;
+  max-width: 100%; /* Force truncation */
+}
+
+/* Reply Banner (Input Area) */
+/* Reply Banner (Input Area) */
+.reply-banner {
+  position: relative; /* Context for absolute X */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: var(--bg-color);
+  padding: 8px 12px;
+  /* Add padding-left to avoid overlap with X */
+  padding-left: 32px; 
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  animation: slideUp 0.2s ease-out;
+  min-height: 40px; /* Ensure height */
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.reply-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: 100%;
+}
+
+.reply-icon {
+  font-size: 11px;
+  color: var(--primary-color);
+  margin-bottom: 2px;
+}
+
+.reply-preview {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-color);
+  display: block;
+  max-width: 100%;
+}
+
+.close-reply {
+  position: absolute;
+  top: 8px; /* Stick to top */
+  left: 8px; /* Stick to left */
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+/* Highlight Animation */
+.highlight-message {
+  animation: highlight 2.5s ease-out;
+}
+
+@keyframes highlight {
+  0% { background-color: rgba(0, 122, 255, 0.3); } /* Telegram Blue with opacity */
+  100% { background-color: transparent; }
 }
 </style>

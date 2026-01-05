@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, update, func
 from sqlalchemy.orm import joinedload
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, timedelta, timezone
 import os
 import uuid
@@ -29,16 +29,17 @@ router = APIRouter(
 
 # ===== Pydantic Schemas =====
 
-class MessageSend(BaseModel):
-    """ارسال پیام جدید"""
-    receiver_id: int
-    content: str = Field(..., min_length=1, max_length=4000)
-    message_type: MessageType = MessageType.TEXT
 
+class MessageReplyRead(BaseModel):
+    """خلاصه پیام برای نمایش در ریپلای"""
+    id: int
+    sender_id: int
+    content: str
+    message_type: MessageType
+    is_deleted: bool = False
 
-class MessageUpdate(BaseModel):
-    """ویرایش پیام"""
-    content: str = Field(..., min_length=1, max_length=4000)
+    class Config:
+        from_attributes = True
 
 
 class MessageRead(BaseModel):
@@ -52,9 +53,33 @@ class MessageRead(BaseModel):
     is_deleted: bool = False
     updated_at: Optional[datetime] = None
     created_at: datetime
+    
+    # Reply support
+    reply_to_message: Optional[MessageReplyRead] = None
 
     class Config:
         from_attributes = True
+
+    @field_validator('reply_to_message')
+    @classmethod
+    def filter_deleted_reply(cls, v):
+        # If the replied-to message is deleted, hide the reply context completely
+        if v and v.is_deleted:
+            return None
+        return v
+
+
+class MessageSend(BaseModel):
+    """ارسال پیام جدید"""
+    receiver_id: int
+    content: str = Field(..., min_length=1, max_length=4000)
+    message_type: MessageType = MessageType.TEXT
+    reply_to_message_id: Optional[int] = None
+
+
+class MessageUpdate(BaseModel):
+    """ویرایش پیام"""
+    content: str = Field(..., min_length=1, max_length=4000)
 
 
 class ConversationRead(BaseModel):
@@ -199,6 +224,7 @@ async def get_messages(
     
     stmt = (
         select(Message)
+        .options(joinedload(Message.reply_to_message))
         .where(*conditions)
         .order_by(Message.created_at.desc())
         .limit(limit)
@@ -232,10 +258,19 @@ async def send_message(
         receiver_id=data.receiver_id,
         content=data.content,
         message_type=data.message_type,
+        reply_to_message_id=data.reply_to_message_id,
         is_read=False
     )
     db.add(message)
-    await db.flush()
+    await db.commit()
+    await db.refresh(message)
+
+    # Eager load reply if exists (for response)
+    if message.reply_to_message_id:
+        result = await db.execute(
+            select(Message).options(joinedload(Message.reply_to_message)).where(Message.id == message.id)
+        )
+        message = result.scalars().first()
     
     # بروزرسانی مکالمه
     conversation = await get_or_create_conversation(db, current_user.id, data.receiver_id)
@@ -250,9 +285,7 @@ async def send_message(
         conversation.unread_count_user2 += 1
     
     await db.commit()
-    await db.refresh(message)
     
-    return message
     return message
 
 
