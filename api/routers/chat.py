@@ -327,7 +327,12 @@ async def update_message(
     msg.updated_at = now
     
     await db.commit()
-    await db.refresh(msg)
+    
+    # Eager load reply_to_message to avoid lazy loading in async context
+    result = await db.execute(
+        select(Message).options(joinedload(Message.reply_to_message)).where(Message.id == message_id)
+    )
+    msg = result.scalars().first()
     return msg
 
 
