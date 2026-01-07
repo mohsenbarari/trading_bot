@@ -87,6 +87,7 @@ const replyingToMessage = ref<Message | null>(null)
 const touchStartX = ref(0)
 const touchCurrentX = ref(0)
 const swipedMessageId = ref<number | null>(null)
+const isViewingReply = ref(false) // Flag to temporarily disable auto-scroll during reply viewing
 
 // UI State
 const isMobile = ref(false)
@@ -150,8 +151,8 @@ async function loadMessages(userId: number, silent = false) {
       if (isNewMessage) {
         if (lastNewMsg.sender_id !== props.currentUserId) {
           // Message from other user
-          if (isUserAtBottom.value) {
-            // If at bottom, auto-scroll and mark read
+          if (isUserAtBottom.value && !isViewingReply.value) {
+            // If at bottom, auto-scroll and mark read (unless viewing reply)
             await nextTick()
             scrollToBottom()
             markAsRead()
@@ -162,7 +163,7 @@ async function loadMessages(userId: number, silent = false) {
           }
         } else if (lastNewMsg.sender_id === props.currentUserId) {
           // Own message (synced), keep bottom if there
-          if (isUserAtBottom.value) {
+          if (isUserAtBottom.value && !isViewingReply.value) {
             await nextTick()
             scrollToBottom()
           }
@@ -313,11 +314,7 @@ function stopPolling() {
 
 // Context Menu Logic
 const showContextMenu = (event: MouseEvent | TouchEvent, msg: Message) => {
-  if (msg.sender_id !== props.currentUserId) return; // Only own messages
-  // Check 48h limit
-  const msgTime = new Date(msg.created_at).getTime();
-  const now = Date.now();
-  if (now - msgTime > 48 * 60 * 60 * 1000) return;
+  // Context menu is available for ALL messages (Reply), but Edit/Delete only for own messages + 48h limit
 
   let clientX = 0;
   let clientY = 0;
@@ -336,16 +333,26 @@ const showContextMenu = (event: MouseEvent | TouchEvent, msg: Message) => {
 
   // Initial position (will be adjusted)
   const menuWidth = 160;
-  const menuHeight = 100;
+  const menuHeight = 150; // Estimate for 3 items
   const padding = 10;
 
   // Prevent overflow right
   if (clientX + menuWidth > window.innerWidth) {
     clientX = window.innerWidth - menuWidth - padding;
   }
-  // Prevent overflow bottom
-  if (clientY + menuHeight > window.innerHeight) {
-    clientY = window.innerHeight - menuHeight - padding;
+  // Prevent overflow left
+  if (clientX < padding) {
+    clientX = padding;
+  }
+  
+  // Smart vertical positioning: if not enough space below, open ABOVE the touch point
+  if (clientY + menuHeight > window.innerHeight - padding) {
+    // Not enough space below, position above
+    clientY = clientY - menuHeight - padding;
+    // Ensure we don't go above the screen
+    if (clientY < padding) {
+      clientY = padding;
+    }
   }
 
   contextMenu.value = {
@@ -503,7 +510,7 @@ const cancelReply = () => {
 }
 
 // Swipe Logic
-const SWIPE_THRESHOLD = 50
+const SWIPE_THRESHOLD = 100 // Increased to reduce accidental swipes during scroll
 const handleTouchStart = (e: TouchEvent, msg: Message) => {
   if (e.touches.length > 0) {
     const touch = e.touches[0]
@@ -584,16 +591,27 @@ const scrollToMessage = (msgId: number) => {
         const safeContainer = container
         const safeEl = el
         
+        // Temporarily disable auto-scroll during viewing
+        isViewingReply.value = true
+        
+        // Start highlight immediately (runs alongside scroll)
+        safeEl.classList.add('highlight-message')
+        
+        // Re-enable auto-scroll after highlight completes (but don't remove class - let animation end naturally)
+        setTimeout(() => {
+            isViewingReply.value = false
+        }, 3500)
+        
         // Calculate target position (center of container)
         const elTop = safeEl.offsetTop
         const elHeight = safeEl.offsetHeight
         const containerHeight = safeContainer.clientHeight
         const targetScrollTop = elTop - (containerHeight / 2) + (elHeight / 2)
         
-        // Use custom animation for slower scroll
+        // Use custom animation for scroll
         const startScrollTop = safeContainer.scrollTop
         const distance = targetScrollTop - startScrollTop
-        const duration = 1000 // 1 second (slower than default)
+        const duration = 1000 // 1 second (same as highlight peak at 15% = 0.45s)
         const startTime = performance.now()
         
         function step(currentTime: number) {
@@ -607,10 +625,6 @@ const scrollToMessage = (msgId: number) => {
             
             if (progress < 1) {
                 requestAnimationFrame(step)
-            } else {
-                 // Trigger highlight after scroll matches
-                 safeEl.classList.add('highlight-message')
-                 setTimeout(() => safeEl.classList.remove('highlight-message'), 2500)
             }
         }
         
@@ -769,6 +783,16 @@ const sortedConversations = computed(() => {
 
 const totalUnread = computed(() => {
   return conversations.value.reduce((sum, c) => sum + c.unread_count, 0)
+})
+
+// Check if current context menu message can be edited/deleted (own message + within 48h)
+const canEditDelete = computed(() => {
+  const msg = contextMenu.value.message
+  if (!msg) return false
+  if (msg.sender_id !== props.currentUserId) return false
+  const msgTime = new Date(msg.created_at).getTime()
+  const now = Date.now()
+  return now - msgTime <= 48 * 60 * 60 * 1000
 })
 
 // Watchers
@@ -1061,7 +1085,7 @@ defineExpose({ startNewChat })
         <div class="menu-item" @click="handleReplyMessage">
           <span>↩️</span> پاسخ
         </div>
-        <template v-if="contextMenu.message && contextMenu.message.sender_id === props.currentUserId">
+        <template v-if="canEditDelete">
             <div class="menu-item" @click="handleEditMessage">
               <span>✏️</span> ویرایش
             </div>
@@ -1718,11 +1742,21 @@ defineExpose({ startNewChat })
 
 /* Highlight Animation */
 .highlight-message {
-  animation: highlight 2.5s ease-out;
+  animation: highlight 3s ease-in-out forwards;
 }
 
 @keyframes highlight {
-  0% { background-color: rgba(0, 122, 255, 0.3); } /* Telegram Blue with opacity */
-  100% { background-color: transparent; }
+  0% { 
+    background-color: transparent; 
+    box-shadow: none;
+  }
+  15% { 
+    background-color: rgba(255, 200, 0, 0.35);
+    box-shadow: 0 0 20px 10px rgba(255, 200, 0, 0.4);
+  }
+  100% { 
+    background-color: transparent; 
+    box-shadow: none;
+  }
 }
 </style>
