@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from fastapi.responses import StreamingResponse
 import asyncio
+import json
 from core.db import get_db
 from models.notification import Notification
 from models.user import User
@@ -171,9 +172,17 @@ async def stream_notifications(
             # گوش دادن به کانال
             async for message in pubsub.listen():
                 if message["type"] == "message":
-                    # فرمت استاندارد SSE: "data: ... \n\n"
-                    data = message["data"]
-                    yield f"data: {data}\n\n"
+                    raw_data = message["data"]
+                    try:
+                        payload = json.loads(raw_data)
+                        # Check for new event format
+                        if isinstance(payload, dict) and "event" in payload:
+                            yield f"event: {payload['event']}\n"
+                            yield f"data: {json.dumps(payload['data'])}\n\n"
+                        else:
+                            yield f"data: {raw_data}\n\n"
+                    except:
+                        yield f"data: {raw_data}\n\n"
                     
                 # هرت‌بیت (Heartbeat) برای زنده نگه داشتن اتصال (اختیاری)
                 # await asyncio.sleep(0.1) 

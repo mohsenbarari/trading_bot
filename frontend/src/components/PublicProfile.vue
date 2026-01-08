@@ -84,7 +84,7 @@ async function loadMutualTrades() {
          </h2>
          <h2 v-else>👤 پروفایل</h2>
       </div>
-      <button class="back-button" @click="$emit('navigate', 'trade', { tab: 'my_trades' })">🔙 بازگشت</button>
+      <button class="back-button" @click="$emit('navigate', 'home')">🔙 بازگشت</button>
     </div>
 
     <div v-if="isLoading" class="loading-state-skeleton">

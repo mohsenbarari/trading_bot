@@ -26,6 +26,7 @@ interface Conversation {
   last_message_type: string | null
   last_message_at: string | null
   unread_count: number
+  other_user_last_seen_at?: string | null
 }
 
 interface Message {
@@ -35,6 +36,8 @@ interface Message {
   content: string
   message_type: 'text' | 'image' | 'sticker'
   is_read: boolean
+  is_sending?: boolean
+  is_error?: boolean
   is_deleted?: boolean
   updated_at?: string
   created_at: string
@@ -63,6 +66,13 @@ const selectedUserName = ref('')
 
 // Messages
 const messages = ref<Message[]>([])
+// Search State
+const isSearchActive = ref(false)
+const isHeaderMenuOpen = ref(false)
+const searchQuery = ref('')
+const searchResults = ref<any[]>([])
+const isSearching = ref(false)
+const searchDebounceTimeout = ref<any>(null)
 const isLoadingMessages = ref(false)
 const messagesContainer = ref<HTMLElement | null>(null)
 const isUserAtBottom = ref(true)
@@ -96,7 +106,85 @@ const longPressTimer = ref<number | null>(null)
 
 // Poll timer
 let pollTimer: number | null = null
-const POLL_INTERVAL = 2000
+const POLL_INTERVAL = 30000
+
+// Status
+const targetUserStatus = ref('آخرین بازدید اخیراً')
+let statusPollTimer: number | null = null
+const typingUsers = ref<Record<number, boolean>>({})
+const typingTimeouts = ref<Record<number, number>>({})
+const isTyping = computed(() => selectedUserId.value ? !!typingUsers.value[selectedUserId.value] : false)
+let lastTypingTime = 0
+const TYPING_THROTTLE = 2000
+
+function formatLastSeen(date: Date): string {
+  const now = new Date()
+  const diffSeconds = Math.floor((now.getTime() - date.getTime()) / 1000)
+  
+  // Online threshold: 3 minutes (180 seconds)
+  if (diffSeconds < 180) {
+    return 'آنلاین'
+  }
+  
+  if (diffSeconds < 3600) {
+    const mins = Math.floor(diffSeconds / 60)
+    return `آخرین بازدید ${mins} دقیقه پیش`
+  }
+  
+  const isToday = now.getDate() === date.getDate() && 
+                  now.getMonth() === date.getMonth() && 
+                  now.getFullYear() === date.getFullYear()
+                  
+  const hours = date.getHours().toString().padStart(2, '0')
+  const mins = date.getMinutes().toString().padStart(2, '0')
+  
+  if (isToday) {
+    return `آخرین بازدید امروز ${hours}:${mins}`
+  }
+  
+  // Check yesterday
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const isYesterday = yesterday.getDate() === date.getDate() &&
+                      yesterday.getMonth() === date.getMonth() &&
+                      yesterday.getFullYear() === date.getFullYear()
+                      
+  if (isYesterday) {
+     return `آخرین بازدید دیروز ${hours}:${mins}`
+  }
+  
+  return `آخرین بازدید ${date.toLocaleDateString('fa-IR')}`
+}
+
+function isUserOnline(lastSeen: string | null | undefined): boolean {
+  if (!lastSeen) return false
+  const date = new Date(lastSeen)
+  // 3 minutes threshold (180 seconds)
+  return (new Date().getTime() - date.getTime()) < 180000
+}
+
+async function fetchTargetUserStatus(userId: number) {
+  console.log('Fetching status for user:', userId)
+  try {
+    const userData = await apiFetch(`/users-public/${userId}`)
+    
+    if (!userData) {
+        console.warn('No user data returned')
+        return
+    }
+
+    console.log('User Data:', userData)
+    
+    if (userData.last_seen_at) {
+      const serverDate = new Date(userData.last_seen_at)
+      targetUserStatus.value = formatLastSeen(serverDate)
+    } else {
+      targetUserStatus.value = 'آخرین بازدید خیلی وقت پیش'
+    }
+  } catch (e) {
+    console.error("Error fetching status", e)
+  }
+}
 
 // API Helper
 async function apiFetch(endpoint: string, options: RequestInit = {}) {
@@ -132,11 +220,26 @@ async function loadConversations() {
 
 // Load messages
 // Load messages
-async function loadMessages(userId: number, silent = false) {
+async function loadMessages(userId: number, silent = false, aroundId?: number) {
   if (!silent) isLoadingMessages.value = true
   try {
     // Add timestamp to prevent caching
-    const loadedMessages = await apiFetch(`/chat/messages/${userId}?limit=200&_t=${Date.now()}`)
+    let url = `/chat/messages/${userId}?limit=200&_t=${Date.now()}`
+    
+    // Deep Jump Support
+    if (aroundId) {
+        url = `/chat/messages/${userId}?limit=50&around_id=${aroundId}&_t=${Date.now()}`
+        // Clear list to force refresh and correct positioning
+        if (!silent) messages.value = [] 
+    }
+
+    const loadedMessages = await apiFetch(url)
+    
+    if (aroundId) {
+         messages.value = loadedMessages
+         isLoadingMessages.value = false
+         return // Skip normal scroll logic
+    }
     
     if (silent) {
       // Check for strictly new message (by ID)
@@ -146,7 +249,9 @@ async function loadMessages(userId: number, silent = false) {
       const oldLength = messages.value.length
 
       // Always update list to ensure consistency
-      messages.value = loadedMessages
+      // Preserve optimistic messages
+      const tempParams = messages.value.filter(m => m.id < 0)
+      messages.value = [...loadedMessages, ...tempParams]
       
       if (isNewMessage) {
         if (lastNewMsg.sender_id !== props.currentUserId) {
@@ -310,7 +415,110 @@ function stopPolling() {
   }
 }
 
+function startStatusPolling(userId: number) {
+  stopStatusPolling()
+  fetchTargetUserStatus(userId) // Immediate fetch
+  statusPollTimer = window.setInterval(() => fetchTargetUserStatus(userId), 30000) // Every 30 seconds
+}
 
+function stopStatusPolling() {
+  if (statusPollTimer) {
+    clearInterval(statusPollTimer)
+    statusPollTimer = null
+  }
+}
+
+// Header Actions (placeholders for future implementation)
+const handleCall = () => {
+  // TODO: Implement call functionality
+  alert('قابلیت تماس به زودی اضافه می‌شود')
+}
+
+const handleHeaderMenu = () => {
+  isHeaderMenuOpen.value = !isHeaderMenuOpen.value
+}
+
+const closeHeaderMenu = () => {
+  isHeaderMenuOpen.value = false
+}
+
+const handleMenuSearch = () => {
+   closeHeaderMenu()
+   toggleSearch()
+}
+
+const toggleSearch = () => {
+    isSearchActive.value = !isSearchActive.value
+    if (isSearchActive.value) {
+        nextTick(() => {
+            const input = document.getElementById('search-input')
+            if (input) input.focus()
+        })
+    } else {
+        searchQuery.value = ''
+        searchResults.value = []
+    }
+}
+
+const performSearch = () => {
+    if (!searchQuery.value.trim()) {
+        searchResults.value = []
+        return
+    }
+    
+    if (searchDebounceTimeout.value) clearTimeout(searchDebounceTimeout.value)
+    
+    searchDebounceTimeout.value = setTimeout(async () => {
+        isSearching.value = true
+        try {
+            const params = new URLSearchParams()
+            params.append('q', searchQuery.value)
+            if (selectedUserId.value) {
+                params.append('chat_id', selectedUserId.value.toString())
+            }
+            
+            const response = await apiFetch(`/chat/search?${params.toString()}`)
+            searchResults.value = response
+        } finally {
+            isSearching.value = false
+        }
+    }, 500)
+}
+
+const handleSearchResultClick = async (msg: any) => {
+    if (!selectedUserId.value) {
+        // Global Search result click logic
+        const otherId = msg.sender_id === props.currentUserId ? msg.receiver_id : msg.sender_id;
+        
+        // Enter chat mode
+        selectedUserId.value = otherId;
+        // Ideally we fetch user name here, for now use placeholder or try to find in conversations list
+        const conv = sortedConversations.value.find(c => c.other_user_id === otherId)
+        selectedUserName.value = conv ? conv.other_user_name : 'User'
+        
+        await loadMessages(otherId, false, msg.id)
+        nextTick(() => {
+             scrollToMessage(msg.id)
+        })
+    } else {
+    
+    // In Chat Jump
+    // Check if in list
+    const exists = messages.value.find(m => m.id === msg.id)
+    if (exists) {
+        scrollToMessage(msg.id)
+    } else {
+        await loadMessages(selectedUserId.value!, false, msg.id)
+        nextTick(() => {
+            scrollToMessage(msg.id)
+        })
+    }
+    }
+    // Close search ? Or keep it open? Telegram keeps it open? 
+    // Usually jumps and highlighting remains.
+    // We will keep search active but maybe minimize results?
+    // Let's close results dropdown but keep header.
+}
 
 // Context Menu Logic
 const showContextMenu = (event: MouseEvent | TouchEvent, msg: Message) => {
@@ -448,50 +656,68 @@ const sendMessage = async () => {
   }
 
   // Normal Send Mode
-  isSending.value = true;
+  if (!selectedUserId.value) return;
   const content = messageInput.value;
-  const replyTo = replyingToMessage.value; // Store for logic
+  const replyTo = replyingToMessage.value;
 
-  // Optimistic clear
+  // Optimistic UI
+  const tempId = -Date.now();
+  const tempMsg: Message = {
+    id: tempId,
+    sender_id: props.currentUserId,
+    receiver_id: selectedUserId.value,
+    content: content,
+    message_type: 'text',
+    is_read: false,
+    created_at: new Date().toISOString(),
+    is_sending: true,
+    reply_to_message: replyTo ? {
+        id: replyTo.id,
+        sender_id: replyTo.sender_id,
+        content: replyTo.content,
+        message_type: replyTo.message_type
+    } : undefined
+  };
+
+  messages.value.push(tempMsg);
+  
+  // Clear UI
   messageInput.value = '';
-  replyingToMessage.value = null; // Clear reply state
-  if (isMobile.value) swipedMessageId.value = null; // Clear swipe
+  replyingToMessage.value = null;
+  if (isMobile.value) swipedMessageId.value = null;
   adjustTextareaHeight();
   
+  nextTick(() => {
+     if (replyTo) forceScrollToBottom();
+     else scrollToBottom();
+  });
+
   try {
     const body: Record<string, any> = {
         receiver_id: selectedUserId.value,
         content: content,
         message_type: 'text'
     };
-    if (replyTo) {
-        body.reply_to_message_id = replyTo.id;
-    }
+    if (replyTo) body.reply_to_message_id = replyTo.id;
 
-    const newMessage = await apiFetch('/chat/send', {
+    const serverMsg = await apiFetch('/chat/send', {
       method: 'POST',
       body: JSON.stringify(body)
     });
     
-    // Safety check: only push if we have a valid message
-    if (newMessage && newMessage.id) {
-        messages.value.push(newMessage);
-        await nextTick(); // Ensure DOM is updated
-        
-        // Use force scroll for replies (smooth scroll fails over long distances)
-        if (replyTo) {
-            forceScrollToBottom();
-        } else {
-            scrollToBottom();
-        }
+    const idx = messages.value.findIndex(m => m.id === tempId);
+    if (idx !== -1) {
+        messages.value[idx] = serverMsg;
     }
-    // Keep focus
+    
     nextTick(() => messageInputRef.value?.focus());
   } catch (err) {
     console.error('Failed to send message:', err);
-    // Do NOT restore input to avoid ghost text
-  } finally {
-    isSending.value = false;
+    const idx = messages.value.findIndex(m => m.id === tempId);
+    if (idx !== -1 && messages.value[idx]) {
+        messages.value[idx].is_sending = false;
+        messages.value[idx].is_error = true;
+    }
   }
 };
 
@@ -749,6 +975,63 @@ function formatTime(dateStr: string) {
   return date.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
 }
 
+function shouldShowDateSeparator(index: number): boolean {
+    if (index === 0) return true;
+    const msgs = messages.value;
+    const currentMsg = msgs[index];
+    const prevMsg = msgs[index - 1];
+    
+    if (!currentMsg?.created_at || !prevMsg?.created_at) return false;
+
+    const current = new Date(currentMsg.created_at);
+    const prev = new Date(prevMsg.created_at);
+    return current.toDateString() !== prev.toDateString();
+}
+
+const groupedMessages = computed(() => {
+  const groups: { label: string, messages: any[] }[] = []
+  
+  if (messages.value.length === 0) return groups;
+  const firstMsg = messages.value[0];
+  if (!firstMsg) return groups;
+  
+  // Ensure we sort or assume sorted? Assuming sorted by date ascending.
+  let currentLabel = formatDateForSeparator(firstMsg.created_at)
+  let currentGroup: any[] = [firstMsg]
+  
+  for (let i = 1; i < messages.value.length; i++) {
+      const msg = messages.value[i]
+      if (!msg) continue;
+      const label = formatDateForSeparator(msg.created_at)
+      
+      if (label !== currentLabel) {
+          groups.push({ label: currentLabel, messages: currentGroup })
+          currentLabel = label
+          currentGroup = [msg]
+      } else {
+          currentGroup.push(msg)
+      }
+  }
+  groups.push({ label: currentLabel, messages: currentGroup })
+  
+  return groups
+})
+
+function formatDateForSeparator(dateStr: string): string {
+    const date = new Date(dateStr);
+    const now = new Date();
+    
+    // Check Today
+    if (date.toDateString() === now.toDateString()) return 'امروز';
+    
+    // Check Yesterday
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (date.toDateString() === yesterday.toDateString()) return 'دیروز';
+    
+    return date.toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
 // Get full image URL
 function getImageUrl(path: string) {
   if (!path) return ''
@@ -769,6 +1052,15 @@ function goBack() {
     // Don't stop polling, we need it for conversation list updates
   } else {
     emit('back')
+  }
+}
+
+function viewProfile() {
+  if (selectedUserId.value) {
+    emit('navigate', 'public_profile', { 
+        id: selectedUserId.value, 
+        account_name: selectedUserName.value 
+    })
   }
 }
 
@@ -797,13 +1089,84 @@ const canEditDelete = computed(() => {
 
 // Watchers
 watch(selectedUserId, (newVal) => {
+  console.log('WATCH selectedUserId:', newVal)
   if (newVal) {
+    startStatusPolling(newVal)
     scrollToBottom()
+  } else {
+    stopStatusPolling()
   }
 })
 
+// Typing Logic
+async function sendTypingSignal() {
+    if (!messageInput.value) return; 
+    const now = Date.now();
+    if (now - lastTypingTime < TYPING_THROTTLE) return;
+    lastTypingTime = now;
+    
+    if (!selectedUserId.value) return;
+    
+    try {
+        await apiFetch('/chat/typing', {
+            method: 'POST',
+            body: JSON.stringify({ receiver_id: selectedUserId.value })
+        });
+    } catch (e) { console.error('Typing signal failed', e); }
+}
+
+watch(messageInput, () => {
+    sendTypingSignal();
+});
+
+function handleTypingEvent(e: Event) {
+   const data = (e as CustomEvent).detail;
+   const senderId = data.sender_id;
+   if (senderId) {
+       typingUsers.value[senderId] = true;
+       
+       if (typingTimeouts.value[senderId]) clearTimeout(typingTimeouts.value[senderId]);
+       
+       // Use window.setTimeout to ensure number return type
+       typingTimeouts.value[senderId] = window.setTimeout(() => {
+           typingUsers.value[senderId] = false;
+       }, 5000);
+   }
+}
+
+function handleNewMessageEvent(e: Event) {
+  const notif = (e as CustomEvent).detail
+  const senderId = notif.sender_id
+  
+  // Clear typing on message
+  if (senderId) {
+      typingUsers.value[senderId] = false;
+  }
+  
+  // Always update conversations list (to show new message/count)
+  loadConversations();
+  
+  // Refresh if chat with sender
+  if (selectedUserId.value && (senderId === selectedUserId.value)) {
+      loadMessages(selectedUserId.value, true)
+      markAsRead()
+  }
+}
+
+function handleReadEvent(e: Event) {
+  const data = (e as CustomEvent).detail
+  // If the current chat user read our messages, refresh
+  if (selectedUserId.value && (data.reader_id === selectedUserId.value)) {
+       loadMessages(selectedUserId.value, true)
+  }
+}
+
 // Lifecycle
 onMounted(async () => {
+  window.addEventListener('chat-notification', handleNewMessageEvent)
+  window.addEventListener('chat-message', handleNewMessageEvent)
+  window.addEventListener('chat-typing', handleTypingEvent)
+  window.addEventListener('chat-read', handleReadEvent)
   isLoading.value = true
   await loadConversations()
   await loadStickers()
@@ -826,8 +1189,13 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('chat-message', handleNewMessageEvent)
+  window.removeEventListener('chat-notification', handleNewMessageEvent)
+  window.removeEventListener('chat-typing', handleTypingEvent)
+  window.removeEventListener('chat-read', handleReadEvent)
   window.removeEventListener('resize', updateIsMobile)
   stopPolling()
+  stopStatusPolling()
 })
 
 // Expose for parent to start new chat
@@ -836,20 +1204,102 @@ defineExpose({ startNewChat })
 
 <template>
   <div class="chat-view">
-    <!-- Header -->
+    <!-- Header - Telegram Style -->
     <div class="chat-header">
-      <button class="back-btn" @click="goBack">
-        <span>→</span>
+      <!-- Back Button -->
+      <button class="header-btn back-btn" @click="goBack">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
+        </svg>
       </button>
-      <div class="header-title">
-        <template v-if="selectedUserId">
-          {{ selectedUserName }}
-        </template>
-        <template v-else>
+      
+      <!-- Avatar + User Info (when in chat) -->
+      <template v-if="selectedUserId">
+        <div class="header-avatar" @click="viewProfile">{{ selectedUserName.charAt(0) }}</div>
+        <div class="header-user-info" @click="viewProfile">
+          <span class="header-name">{{ selectedUserName }}</span>
+          <span class="header-status" :class="{ 'online': targetUserStatus.includes('آنلاین') || isTyping }">
+            {{ isTyping ? 'در حال نوشتن...' : targetUserStatus }}
+          </span>
+        </div>
+      </template>
+      
+      <!-- Title (for conversation list) -->
+      <!-- Title (for conversation list) -->
+      <template v-else>
+        <div v-if="!isSearchActive" class="header-title">
           پیام‌ها
           <span v-if="totalUnread > 0" class="badge">{{ totalUnread }}</span>
-        </template>
+        </div>
+      </template>
+      
+      <!-- Search Bar Overlay -->
+      <div v-if="isSearchActive" class="search-bar-container">
+         <input 
+            id="search-input"
+            v-model="searchQuery" 
+            @input="performSearch" 
+            placeholder="جستجو..." 
+            class="header-search-input"
+         />
+         <button class="header-btn" @click="toggleSearch">✕</button>
+         
+         <!-- Search Results Dropdown -->
+         <div v-if="searchResults.length > 0" class="search-results-dropdown">
+            <div 
+               v-for="res in searchResults" 
+               :key="res.id" 
+               class="search-result-item"
+               @click="handleSearchResultClick(res)"
+            >
+               <span class="search-res-text">{{ res.content.substring(0, 30) }}...</span>
+               <span class="search-res-date">{{ formatDateForSeparator(res.created_at) }}</span>
+            </div>
+         </div>
       </div>
+      
+      <!-- Spacer -->
+      <div class="header-spacer"></div>
+      
+      <!-- Action Buttons (only in chat view) -->
+      <!-- Action Buttons -->
+      <template v-if="selectedUserId && !isSearchActive">
+        <button class="header-btn" @click="handleCall">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+             <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 00-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/>
+          </svg>
+        </button>
+        <!-- Three-dot Menu -->
+        <div class="header-menu-container" style="position: relative;">
+            <button class="header-btn" @click.stop="handleHeaderMenu">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+              </svg>
+            </button>
+            <div v-if="isHeaderMenuOpen" class="header-dropdown-menu" v-click-outside="closeHeaderMenu">
+               <div class="header-menu-item" @click="handleMenuSearch">
+                  <span>جستجو</span>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                    <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                  </svg>
+               </div>
+               <!-- Other placeholder items -->
+               <div class="header-menu-item" @click="closeHeaderMenu">
+                  <span>اطلاعات فرد</span>
+               </div>
+            </div>
+            <!-- Overlay to close menu (simple fallback if click-outside directive missing) -->
+            <div v-if="isHeaderMenuOpen" class="menu-overlay" @click="closeHeaderMenu"></div>
+        </div>
+      </template>
+      <!-- Conversation List Actions -->
+      <template v-else-if="!selectedUserId && !isSearchActive">
+         <button class="header-btn" @click="toggleSearch">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+          </svg>
+        </button>
+      </template>
     </div>
 
     <!-- Loading -->
@@ -876,7 +1326,10 @@ defineExpose({ startNewChat })
         :class="{ 'has-unread': conv.unread_count > 0 }"
         @click="selectConversation(conv)"
       >
-        <div class="conv-avatar">{{ conv.other_user_name.charAt(0) }}</div>
+        <div class="conv-avatar">
+          {{ conv.other_user_name.charAt(0) }}
+          <div v-if="isUserOnline(conv.other_user_last_seen_at)" class="online-indicator-dot"></div>
+        </div>
         <div class="conv-content">
           <div class="conv-header">
             <span class="conv-name">{{ conv.other_user_name }}</span>
@@ -885,9 +1338,14 @@ defineExpose({ startNewChat })
             </span>
           </div>
           <div class="conv-preview">
-            <template v-if="conv.last_message_type === 'image'">🖼️ تصویر</template>
-            <template v-else-if="conv.last_message_type === 'sticker'">😊 استیکر</template>
-            <template v-else>{{ conv.last_message_content?.substring(0, 30) || '...' }}</template>
+            <span v-if="typingUsers[conv.other_user_id]" class="typing-text">
+               🖊️ در حال نوشتن...
+            </span>
+            <template v-else>
+                <template v-if="conv.last_message_type === 'image'">🖼️ تصویر</template>
+                <template v-else-if="conv.last_message_type === 'sticker'">😊 استیکر</template>
+                <template v-else>{{ conv.last_message_content?.substring(0, 30) || '...' }}</template>
+            </template>
           </div>
         </div>
         <div v-if="conv.unread_count > 0" class="unread-badge">
@@ -898,6 +1356,9 @@ defineExpose({ startNewChat })
 
     <!-- Messages View -->
     <template v-else>
+      <div v-if="!selectedUserId" class="no-selection-placeholder">
+        <p>لطفاً یک گفتگو را انتخاب کنید</p>
+      </div>
       <div class="chat-content">
         <div v-if="isLoadingMessages" class="loading-state">
           <LoadingSkeleton :count="8" :height="50" />
@@ -909,18 +1370,28 @@ defineExpose({ startNewChat })
             <p>شروع گفتگو...</p>
           </div>
           
-          <div 
-            v-for="msg in messages" 
-            :key="msg.id"
-            :id="'msg-' + msg.id"
-            class="message-bubble"
-            :class="{ 'sent': msg.sender_id === props.currentUserId, 'received': msg.sender_id !== props.currentUserId }"
-            @contextmenu="showContextMenu($event, msg)"
-            @touchstart="handleLongPressStart($event, msg); handleTouchStart($event, msg)"
-            @touchmove="handleTouchMove($event, msg)"
-            @touchend="handleLongPressEnd(); handleTouchEnd($event, msg)"
-            :style="getSwipeStyle(msg)"
-          >
+          <div v-for="group in groupedMessages" :key="group.label" class="message-group">
+            <div class="date-separator sticky-date">
+              <span @click="scrollToMessage(group.messages[0].id)">{{ group.label }}</span>
+            </div>
+
+            <div 
+              v-for="(msg, index) in group.messages"
+              :key="msg.id"
+              :id="'msg-' + msg.id"
+              class="message-bubble"
+              :class="{ 
+                'sent': msg.sender_id === props.currentUserId, 
+                'received': msg.sender_id !== props.currentUserId,
+                'sending': msg.id < 0 || msg.is_sending,
+                'error': msg.is_error
+              }"
+              @contextmenu="showContextMenu($event, msg)"
+              @touchstart="handleLongPressStart($event, msg); handleTouchStart($event, msg)"
+              @touchmove="handleTouchMove($event, msg)"
+              @touchend="handleLongPressEnd(); handleTouchEnd($event, msg)"
+              :style="getSwipeStyle(msg)"
+            >
             <!-- Reply Context -->
             <div 
               v-if="msg.reply_to_message" 
@@ -960,16 +1431,21 @@ defineExpose({ startNewChat })
                 <span v-if="msg.updated_at" class="edited-label">(ویرایش شده)</span>
               </span>
               <span v-if="msg.sender_id === props.currentUserId" class="msg-status">
-                <!-- Read (Double Tick) -->
-                <svg v-if="msg.is_read" viewBox="0 0 24 24" class="icon-read" width="16" height="16">
+                <!-- Sending -->
+                <svg v-if="msg.id < 0 || msg.is_sending" viewBox="0 0 24 24" class="icon-clock" width="16" height="16" style="color: #aaa;">
+                    <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm4.2 14.2L11 13V7h1.5v5.2l4.5 2.7-.8 1.3z" fill="currentColor"/>
+                </svg>
+                <!-- Read -->
+                <svg v-else-if="msg.is_read" viewBox="0 0 24 24" class="icon-read" width="16" height="16">
                   <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"/>
                 </svg>
-                <!-- Unread (Single Tick) -->
+                <!-- Unread -->
                 <svg v-else viewBox="0 0 24 24" class="icon-unread" width="16" height="16">
                   <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
                 </svg>
               </span>
             </div>
+          </div>
           </div>
         </div>
         
@@ -1116,47 +1592,134 @@ defineExpose({ startNewChat })
   bottom: 0;
   display: flex;
   flex-direction: column;
-  background-color: var(--tg-theme-bg-color, #ffffff);
-  /* Use a safe gray for pattern that works on both light/dark (e.g. middle gray with low opacity) */
-  background-image: radial-gradient(rgba(127, 127, 127, 0.15) 1px, transparent 1px);
-  background-size: 20px 20px;
+  /* Light theme background */
+  background-color: #E8E5E0;
+  /* Telegram-style subtle pattern */
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d5d2cd' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
   z-index: 100;
 }
 
-/* Header - Absolute for glass effect */
+/* Header - Telegram Style Glass */
 .chat-header {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  height: 60px;
+  height: 56px;
   z-index: 1000;
   display: flex;
   align-items: center;
-  padding: 0 16px;
-  /* Use color-mix for transparent theme color */
-  background: color-mix(in srgb, var(--tg-theme-bg-color, #ffffff) 85%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(127, 127, 127, 0.1);
-  gap: 12px;
+  padding: 0 8px;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  gap: 8px;
+  direction: ltr; /* Force LTR layout as requested */
 }
 
-
-.back-btn {
+/* Header Buttons */
+.header-btn {
   background: none;
   border: none;
-  font-size: 20px;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 0; /* Minimal padding */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background 0.2s;
+  color: #000000;
+  width: 40px; /* Exact touch target size */
+  height: 40px;
+  flex-shrink: 0;
 }
 
-.header-title {
+.header-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+.header-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.header-btn:active {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+/* Header Avatar */
+.header-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #54A3FF, #0088CC);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 16px;
   font-weight: 600;
+  flex-shrink: 0;
+  margin: 0; /* Remove margins, rely on gap */
+  cursor: pointer;
+}
+
+/* Header User Info */
+.header-user-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  margin: 0;
+  min-width: 0;
+  flex: 1;
+  align-items: flex-start; /* Align Left */
+  padding-left: 4px; /* Padding on left for LTR */
+  cursor: pointer;
+}
+
+.header-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #000000;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  text-align: left; /* Align Left */
+}
+
+.header-status {
+  font-size: 13px;
+  color: #8E8E93;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  text-align: left; /* Align Left */
+}
+
+.header-status.online {
+  color: #0088CC; /* Telegram blue for online status */
+}
+
+/* Header Spacer */
+.header-spacer {
+  display: none; /* We use flex-grow on user-info instead, or keep it if needed for spacing logic */
+}
+
+/* Header Title (for conversation list) */
+.header-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #000000;
   display: flex;
   align-items: center;
   gap: 8px;
+  margin: 0;
+  flex: 1;
 }
 
 .badge {
@@ -1203,13 +1766,14 @@ defineExpose({ startNewChat })
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   cursor: pointer;
+  background: #FFFFFF;
   transition: background 0.2s;
 }
 
 .conversation-item:hover {
-  background: rgba(0,0,0,0.02);
+  background: #F5F5F5;
 }
 
 .conversation-item.has-unread {
@@ -1220,7 +1784,7 @@ defineExpose({ startNewChat })
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #007aff, #0056b3);
+  background: linear-gradient(135deg, #54A3FF, #0088CC);
   color: white;
   display: flex;
   align-items: center;
@@ -1228,6 +1792,18 @@ defineExpose({ startNewChat })
   font-size: 18px;
   font-weight: 600;
   margin-left: 12px;
+  position: relative;
+}
+
+.online-indicator-dot {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 13px;
+  height: 13px;
+  background-color: #4cd964; /* Telegram Green */
+  border: 2px solid #fff;
+  border-radius: 50%;
 }
 
 .conv-content {
@@ -1248,15 +1824,67 @@ defineExpose({ startNewChat })
 
 .conv-time {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: #8E8E93;
 }
 
 .conv-preview {
   font-size: 13px;
-  color: var(--text-secondary);
+  color: #8E8E93;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.typing-text {
+  color: #2ea043;
+  font-weight: 600;
+  font-style: italic;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.no-selection-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #8E8E93;
+  font-size: 1.1em;
+  background-color: #f5f5f7;
+}
+
+.date-separator {
+  display: flex;
+  justify-content: center;
+  margin: 16px 0;
+  z-index: 5;
+}
+
+.sticky-date {
+   position: sticky;
+   top: 10px;
+}
+
+.date-separator span {
+  background-color: rgba(0, 0, 0, 0.15);
+  color: #fff;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  backdrop-filter: blur(4px);
+  cursor: pointer;
+  user-select: none;
+}
+@media (prefers-color-scheme: light) {
+    .date-separator span {
+        background-color: rgba(0, 0, 0, 0.06); 
+        color: #555;
+        text-shadow: none;
+        font-weight: 500;
+        border: 1px solid rgba(0,0,0,0.05);
+    }
 }
 
 .unread-badge {
@@ -1277,21 +1905,28 @@ defineExpose({ startNewChat })
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden; /* Scroll handles in messages-container */
+  overflow: hidden;
   min-height: 0;
   position: relative;
-  padding-top: 60px; /* Space for absolute header */
+  /* No padding-top - messages will scroll UNDER the glass header */
 }
 
 .messages-container {
   flex: 1;
   overflow-y: auto;
-  overflow-anchor: none; /* Disable browser scroll anchoring */
-  padding: 12px 16px;
-  padding-bottom: 20px;
+  overflow-anchor: none;
+  /* Extra padding at top/bottom so messages start visible, but scroll under header/input */
+  padding: 70px 16px 20px 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.message-group {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 6px;
 }
 
 .message-bubble {
@@ -1325,23 +1960,25 @@ defineExpose({ startNewChat })
 
 .message-bubble.sent {
   align-self: flex-start;
-  background: linear-gradient(135deg, #007aff, #0056b3);
-  color: white;
-  border-bottom-left-radius: 4px;
+  background: #E1FFC7; /* Telegram green bubble */
+  color: #000000;
+  border-radius: 18px 18px 4px 18px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .message-bubble.received {
   align-self: flex-end;
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-bottom-right-radius: 4px;
+  background: #FFFFFF; /* White bubble */
+  color: #000000;
+  border-radius: 18px 18px 18px 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 
 
 .msg-time {
-  font-size: 10px;
-  opacity: 0.7;
+  font-size: 11px;
+  color: #8E8E93;
 }
 
 .msg-meta {
@@ -1386,15 +2023,17 @@ defineExpose({ startNewChat })
   font-size: 48px;
 }
 
-/* Input Area - Telegram Style */
+/* Input Area - Glass effect */
 .input-area {
   display: flex;
-  flex-direction: column; /* Stack banner and input */
+  flex-direction: column;
   align-items: stretch;
-  padding: 0; /* Remove padding to let banner reach edges, add padding to children if needed */
-  background: var(--bg-color);
+  padding: 8px 8px 12px 8px;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   gap: 0;
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .input-container {
@@ -1402,29 +2041,30 @@ defineExpose({ startNewChat })
   gap: 8px;
   flex: 1;
   display: flex;
-  align-items: flex-end; /* Align bottom for multi-line support */
-  background: var(--bg-color); /* Match background */
-  border: 1px solid var(--border-color);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); /* Soft 3D depth */
-  border-radius: 24px;
-  padding: 10px 16px;
-  min-height: 52px;
-  transition: box-shadow 0.2s, border-color 0.2s;
+  align-items: flex-end;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: none;
+  box-shadow: none;
+  border-radius: 20px;
+  padding: 8px 14px;
+  min-height: 44px;
+  transition: background 0.2s;
 }
 
 .input-container:focus-within {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-  border-color: var(--primary-color);
+  background: rgba(255, 255, 255, 0.8);
 }
 
 .input-container textarea {
   flex: 1;
-  padding: 4px 8px; /* Adjust padding for textarea */
+  padding: 4px 8px;
   border: none;
   background: transparent;
   outline: none;
   font-size: 16px;
-  color: var(--text-color);
+  color: #000000;
   resize: none;
   overflow-y: auto;
   min-height: 24px;
@@ -1436,7 +2076,7 @@ defineExpose({ startNewChat })
 }
 
 .input-container textarea::placeholder {
-  color: #8e8e93;
+  color: #8E8E93;
 }
 
 .emoji-btn, .attach-btn, .voice-btn {
@@ -1540,22 +2180,21 @@ defineExpose({ startNewChat })
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: rgba(40, 40, 40, 0.7); /* Dark semi-transparent */
-  backdrop-filter: blur(2px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #FFFFFF;
+  border: none;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: white;
+  color: #8E8E93;
   z-index: 999;
   transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
 .scroll-bottom-btn:hover {
   transform: translateY(-2px);
-  background: rgba(40, 40, 40, 0.9);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
 }
 
 .scroll-badge {
@@ -1644,16 +2283,16 @@ defineExpose({ startNewChat })
 
 /* Reply Styles */
 .reply-context {
-  border-left: 2px solid var(--primary-color);
-  background: rgba(0, 0, 0, 0.05);
+  border-left: 2px solid #0088CC;
+  background: rgba(0, 136, 204, 0.08);
   border-radius: 4px;
   padding: 4px 8px;
   margin-bottom: 6px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  overflow: hidden; /* Ensure content stays inside */
-  max-width: 100%; /* Don't exceed parent bubble */
+  overflow: hidden;
+  max-width: 100%;
 }
 
 .reply-line {
@@ -1663,7 +2302,7 @@ defineExpose({ startNewChat })
 .reply-name {
   font-size: 11px;
   font-weight: bold;
-  color: var(--primary-color);
+  color: #0088CC;
 }
 
 .reply-text {
@@ -1677,20 +2316,17 @@ defineExpose({ startNewChat })
 }
 
 /* Reply Banner (Input Area) */
-/* Reply Banner (Input Area) */
 .reply-banner {
-  position: relative; /* Context for absolute X */
+  position: relative;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  background: var(--bg-color);
+  background: #FFFFFF;
   padding: 8px 12px;
-  /* Add padding-left to avoid overlap with X */
-  padding-left: 32px; 
-  border-top: 1px solid var(--border-color);
-  border-bottom: 1px solid var(--border-color);
+  padding-left: 32px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
   animation: slideUp 0.2s ease-out;
-  min-height: 40px; /* Ensure height */
+  min-height: 40px;
 }
 
 @keyframes slideUp {
@@ -1707,7 +2343,7 @@ defineExpose({ startNewChat })
 
 .reply-icon {
   font-size: 11px;
-  color: var(--primary-color);
+  color: #0088CC;
   margin-bottom: 2px;
 }
 
@@ -1716,18 +2352,18 @@ defineExpose({ startNewChat })
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text-color);
+  color: #000000;
   display: block;
   max-width: 100%;
 }
 
 .close-reply {
   position: absolute;
-  top: 8px; /* Stick to top */
-  left: 8px; /* Stick to left */
+  top: 8px;
+  left: 8px;
   background: none;
   border: none;
-  color: var(--text-secondary);
+  color: #8E8E93;
   font-size: 18px;
   width: 20px;
   height: 20px;
@@ -1737,26 +2373,182 @@ defineExpose({ startNewChat })
   justify-content: center;
   cursor: pointer;
   line-height: 1;
-  opacity: 0.6;
+}
+
+.close-reply:hover {
+  color: #000000;
 }
 
 /* Highlight Animation */
 .highlight-message {
-  animation: highlight 3s ease-in-out forwards;
+  animation: highlight 3s ease-in-out;
 }
 
 @keyframes highlight {
   0% { 
-    background-color: transparent; 
     box-shadow: none;
   }
   15% { 
-    background-color: rgba(255, 200, 0, 0.35);
-    box-shadow: 0 0 20px 10px rgba(255, 200, 0, 0.4);
+    box-shadow: 0 0 0 4px rgba(255, 200, 0, 0.5), 0 0 20px 10px rgba(255, 200, 0, 0.3);
   }
   100% { 
-    background-color: transparent; 
     box-shadow: none;
+  }
+}
+/* Search Styles */
+.search-bar-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  position: relative;
+  height: 100%;
+  margin-right: 8px;
+}
+
+.header-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  color: inherit;
+  outline: none;
+  padding: 0 8px;
+  height: 100%;
+}
+
+.search-results-dropdown {
+  position: absolute;
+  top: 100%; /* Below header */
+  left: 0;
+  right: 0;
+  
+  /* Glassmorphism */
+  background: rgba(255, 255, 255, 0.85); /* Translucent White */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-top: none;
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 1000;
+  
+  /* 3D Shadow */
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0,0,0,0.05);
+  
+  border-radius: 0 0 12px 12px;
+}
+
+.search-result-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: background 0.2s;
+}
+
+.search-result-item:hover {
+  background: #f5f5f5;
+}
+
+.search-result-item:last-child {
+  border-bottom: none;
+}
+
+.search-res-text {
+  font-size: 14px;
+  color: #000;
+}
+
+.search-res-date {
+  font-size: 11px;
+  color: #8e8e93;
+  align-self: flex-end;
+}
+
+@media (prefers-color-scheme: dark) {
+  .search-results-dropdown {
+    background: rgba(30, 30, 32, 0.85); /* Translucent Dark */
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  }
+  
+  .search-result-item {
+    border-bottom-color: rgba(255, 255, 255, 0.05);
+  }
+  
+  .search-result-item:hover {
+    background: #2c2c2e;
+  }
+  
+  .search-res-text {
+    color: #fff;
+  }
+}
+
+/* Header Menu */
+.header-menu-container {
+  display: flex;
+  align-items: center;
+}
+
+.header-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0; 
+  left: auto;
+  margin-top: 8px;
+  
+  /* Glassmorphism */
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  
+  border-radius: 12px; /* Nicer rounded corners */
+  
+  /* 3D Shadow */
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0,0,0,0.05);
+  
+  min-width: 160px;
+  z-index: 2000;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.header-menu-item {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-size: 14px;
+  color: inherit;
+}
+
+.header-menu-item:hover {
+  background: #f5f5f5;
+}
+
+.menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1500;
+  background: transparent;
+}
+
+@media (prefers-color-scheme: dark) {
+  .header-dropdown-menu {
+    background: rgba(30, 30, 32, 0.85);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  }
+  .header-menu-item:hover {
+    background: #3a3a3c;
   }
 }
 </style>

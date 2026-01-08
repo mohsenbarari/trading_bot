@@ -4,6 +4,7 @@ API endpoints for in-app messaging system
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, update, func
 from sqlalchemy.orm import joinedload
@@ -19,6 +20,10 @@ from models.message import Message
 from models.conversation import Conversation
 from models.user import User
 from .auth import get_current_user
+from core.utils import publish_user_event
+
+class TypingSignal(BaseModel):
+    receiver_id: int
 
 router = APIRouter(
     prefix="/chat",
@@ -91,6 +96,7 @@ class ConversationRead(BaseModel):
     last_message_type: Optional[MessageType] = None
     last_message_at: Optional[datetime] = None
     unread_count: int = 0
+    other_user_last_seen_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -188,10 +194,47 @@ async def get_conversations(
             last_message_content=conv.last_message.content if conv.last_message else None,
             last_message_type=conv.last_message.message_type if conv.last_message else None,
             last_message_at=conv.last_message_at,
-            unread_count=unread
+            unread_count=unread,
+            other_user_last_seen_at=other_user.last_seen_at
         ))
     
     return response
+
+
+@router.get("/search", response_model=List[MessageRead])
+async def search_messages(
+    q: str,
+    chat_id: Optional[int] = None,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Search messages.
+    """
+    query = select(Message).where(
+        or_(
+            Message.sender_id == current_user.id,
+            Message.receiver_id == current_user.id
+        ),
+        Message.content.ilike(f"%{q}%"),
+        Message.is_deleted == False
+    ).order_by(Message.created_at.desc())
+    
+    if chat_id:
+        query = query.where(
+            or_(
+                and_(Message.sender_id == current_user.id, Message.receiver_id == chat_id),
+                and_(Message.sender_id == chat_id, Message.receiver_id == current_user.id)
+            )
+        )
+        
+    query = query.limit(limit)
+    
+    result = await db.execute(query)
+    messages = result.scalars().all()
+    # Return directly (will be serialized)
+    return messages
 
 
 @router.get("/messages/{user_id}", response_model=List[MessageRead])
@@ -199,26 +242,58 @@ async def get_messages(
     user_id: int,
     limit: int = 50,
     before_id: Optional[int] = None,
+    around_id: Optional[int] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """تاریخچه پیام‌ها با یک کاربر خاص (پیام‌های حذف شده نمایش داده نمی‌شوند)"""
+    """تاریخچه پیام‌ها. پشتیبانی از before_id (اسکرول به بالا) و around_id (پرش به پیام)."""
     # بررسی وجود کاربر
     target = await db.get(User, user_id)
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # کوئری پیام‌ها
-    conditions = [
+    # شرط مکالمه
+    base_conditions = [
         or_(
             and_(Message.sender_id == current_user.id, Message.receiver_id == user_id),
             and_(Message.sender_id == user_id, Message.receiver_id == current_user.id)
-        )
+        ),
+        Message.is_deleted == False
     ]
     
-    # Filter deleted messages
-    conditions.append(Message.is_deleted == False)
-    
+    if around_id:
+        # Load context: 1/2 older, 1/2 newer + target
+        # Older
+        stmt_older = (
+            select(Message)
+            .where(*base_conditions, Message.id < around_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit // 2)
+        )
+        
+        # Newer (inclusive of around_id? No, treat around_id as center. Fetch it explicitly or in newer?)
+        # Let's include around_id in newer set logic or explicit fetch.
+        # Simpler: Older < ID, Newer >= ID
+        stmt_newer = (
+            select(Message)
+            .where(*base_conditions, Message.id >= around_id)
+            .order_by(Message.created_at.asc())
+            .limit(limit // 2 + 1) # +1 to ensure center is included if limit is odd
+        )
+        
+        # Execute
+        res_older = await db.execute(stmt_older.options(joinedload(Message.reply_to_message)))
+        res_newer = await db.execute(stmt_newer.options(joinedload(Message.reply_to_message)))
+        
+        older_msgs = res_older.scalars().all() # Descending [M-1, M-2...]
+        newer_msgs = res_newer.scalars().all() # Ascending [M, M+1...]
+        
+        # Combine: older reversed (to be asc) + newer
+        messages = list(reversed(older_msgs)) + list(newer_msgs)
+        return messages
+
+    # Default / Pagination (before_id)
+    conditions = base_conditions.copy()
     if before_id:
         conditions.append(Message.id < before_id)
     
@@ -235,6 +310,21 @@ async def get_messages(
     
     # معکوس کردن برای نمایش صعودی
     return list(reversed(messages))
+
+
+@router.post("/typing", status_code=status.HTTP_204_NO_CONTENT)
+async def send_typing_signal(
+    data: TypingSignal,
+    current_user: User = Depends(get_current_user)
+):
+    """ارسال سیگنال تایپ کردن به گیرنده"""
+    if data.receiver_id != current_user.id:
+        await publish_user_event(
+            user_id=data.receiver_id,
+            event="chat:typing",
+            data={"sender_id": current_user.id}
+        )
+    return None
 
 
 @router.post("/send", response_model=MessageRead)
@@ -285,6 +375,11 @@ async def send_message(
         conversation.unread_count_user2 += 1
     
     await db.commit()
+    
+    # انتشار پیام برای گیرنده (Real-time update)
+    # استفاده از MessageRead برای سریالایز کردن مناسب
+    msg_data = jsonable_encoder(MessageRead.from_orm(message))
+    await publish_user_event(data.receiver_id, "chat:message", msg_data)
     
     return message
 
@@ -396,6 +491,14 @@ async def mark_messages_read(
             conversation.unread_count_user2 = 0
     
     await db.commit()
+    
+    # Notify sender that messages are read
+    await publish_user_event(
+        user_id=user_id,
+        event="chat:read",
+        data={"reader_id": current_user.id}
+    )
+    
     return None
 
 

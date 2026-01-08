@@ -8,7 +8,7 @@ import json
 import logging
 import secrets
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Security
@@ -77,6 +77,15 @@ async def get_current_user_from_token(token: str, db: AsyncSession = Depends(get
     user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception
+        
+    # --- Update Last Seen ---
+    now = datetime.now(timezone.utc)
+    if user.last_seen_at is None or (now - user.last_seen_at).total_seconds() > 60:
+        logger.info(f"DEBUG: Updating last_seen for user {user.id} to {now}")
+        user.last_seen_at = now
+        await db.commit()
+    # ------------------------
+    
     return user
 
 async def get_current_user_optional(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> Optional[User]:

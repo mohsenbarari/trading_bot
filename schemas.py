@@ -86,6 +86,8 @@ class UserRead(UserBase):
     trades_count: int = 0
     commodities_traded_count: int = 0
     channel_messages_count: int = 0
+
+    last_seen_at: datetime | None = None
     
     @computed_field
     def created_at_jalali(self) -> str | None:
@@ -111,6 +113,7 @@ class UserPublicRead(BaseModel):
     address: str
     created_at: datetime
     trades_count: int = 0
+    last_seen_at: datetime | None = None
     
     @computed_field
     def created_at_jalali(self) -> str | None:

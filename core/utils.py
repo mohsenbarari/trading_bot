@@ -275,7 +275,6 @@ async def create_user_notification(
     Returns:
         Notification: شیء نوتیفیکیشن ایجاد شده
     """
-    # 1. ذخیره در دیتابیس
     new_notif = Notification(
         user_id=user_id,
         message=message,
@@ -287,32 +286,53 @@ async def create_user_notification(
     await db.commit()
     await db.refresh(new_notif)
     
+    # داده‌ای که به فرانت می‌فرستیم
+    payload = {
+        "id": new_notif.id,
+        "message": new_notif.message,
+        "is_read": False,
+        "created_at": new_notif.created_at.isoformat(),
+        "level": new_notif.level.value,
+        "category": new_notif.category.value
+    }
+    
     try:
         async with redis.Redis(connection_pool=pool) as redis_client:
             # الف: افزایش شمارنده
             count_key = f"user:{user_id}:unread_count"
             await redis_client.incr(count_key)
-            
-            # ب: انتشار پیام در کانال اختصاصی کاربر (Pub/Sub)
-            channel_key = f"notifications:{user_id}"
-            
-            # داده‌ای که به فرانت می‌فرستیم
-            payload = {
-                "id": new_notif.id,
-                "message": new_notif.message,
-                "is_read": False,
-                "created_at": new_notif.created_at.isoformat(),
-                "level": new_notif.level.value,
-                "category": new_notif.category.value
-            }
-            
-            # انتشار در کانال
-            await redis_client.publish(channel_key, json.dumps(payload))
-            
     except Exception as e:
-        logger.warning(f"Redis Error: {e}")
+        logger.warning(f"Redis Increment Error: {e}")
+    
+    # انتشار در کانال (با فرمت جدید)
+    await publish_user_event(user_id, "message", payload)
 
     return new_notif
+
+
+async def publish_user_event(user_id: int, event: str, data: dict) -> None:
+    """
+    انتشار یک رویداد SSE برای کاربر خاص.
+    
+    Args:
+        user_id: آیدی کاربر
+        event: نام رویداد (مثلاً 'message', 'chat:typing')
+        data: داده‌های رویداد (dict)
+    """
+    try:
+        async with redis.Redis(connection_pool=pool) as redis_client:
+            channel_key = f"notifications:{user_id}"
+            
+            # لفاف‌پیچی استاندارد برای پردازش در stream_notifications
+            sse_payload = {
+                "event": event,
+                "data": data
+            }
+            
+            await redis_client.publish(channel_key, json.dumps(sse_payload))
+            
+    except Exception as e:
+        logger.warning(f"Redis Publish Error: {e}")
 
 
 # ===== USER LIMITS UTILITIES =====

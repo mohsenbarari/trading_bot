@@ -457,9 +457,21 @@ async function startSSE() {
              
              if (eventType === 'trade:created') {
                 handleTradeEvent(data);
+             } else if (eventType === 'chat:typing') {
+                window.dispatchEvent(new CustomEvent('chat-typing', { detail: data }));
+             } else if (eventType === 'chat:message') {
+                window.dispatchEvent(new CustomEvent('chat-message', { detail: data }));
+             } else if (eventType === 'chat:read') {
+                window.dispatchEvent(new CustomEvent('chat-read', { detail: data }));
              } else if (eventType === 'message' || !eventType) {
                 // Standard notification
                 const newNotif: Notification = data;
+
+                // Dispatch event for ChatView
+                if (newNotif.category && newNotif.category.toLowerCase() === 'chat') {
+                   window.dispatchEvent(new CustomEvent('chat-notification', { detail: newNotif }));
+                }
+
                 popoverNotifications.value.unshift(newNotif);
                 unreadCount.value++;
                 // Do NOT show banner for standard notifications if trade banner is high priority? 
