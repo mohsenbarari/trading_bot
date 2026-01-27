@@ -52,9 +52,31 @@ async def read_all_commodities(db: AsyncSession = Depends(get_db)):
     """
     دریافت لیست تمام کالاها به همراه نام‌های مستعار آن‌ها.
     """
+    # ===== Redis Cache Check =====
+    from core.cache import get_cached_commodities, set_cached_commodities
+    
+    cached = await get_cached_commodities()
+    if cached:
+        return cached
+    # =============================
+    
     stmt = select(Commodity).options(selectinload(Commodity.aliases)).order_by(Commodity.id)
     result = await db.execute(stmt)
     commodities = result.scalars().unique().all()
+    
+    # ===== Cache Result =====
+    # تبدیل به dict برای کش
+    commodities_data = [
+        {
+            "id": c.id,
+            "name": c.name,
+            "aliases": [{"id": a.id, "alias": a.alias, "commodity_id": a.commodity_id} for a in c.aliases]
+        }
+        for c in commodities
+    ]
+    await set_cached_commodities(commodities_data)
+    # ========================
+    
     return commodities
 
 @router.get("/{commodity_id}", response_model=schemas.Commodity)

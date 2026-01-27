@@ -260,6 +260,11 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
     await db.commit()
     await db.refresh(user)
     
+    # ===== Invalidate User Cache =====
+    from core.cache import invalidate_user_cache
+    await invalidate_user_cache(user.telegram_id)
+    # =================================
+    
     # --- 6. Send Notifications ---
     
     # مسدودیت

@@ -72,11 +72,40 @@ async def get_current_user_from_token(token: str, db: AsyncSession = Depends(get
     except (JWTError, ValueError): # ValueError برای حالتی که تبدیل به عدد شکست بخورد
         raise credentials_exception
     
+    # ===== Redis Cache Check =====
+    from core.cache import get_cached_user_by_telegram_id, set_cached_user
+    
+    cached_user_data = await get_cached_user_by_telegram_id(telegram_id)
+    if cached_user_data:
+        # بازسازی User از کش - فقط برای چک اولیه
+        # برای last_seen باید از DB بخوانیم
+        user_id = cached_user_data.get("id")
+        stmt = select(User).where(User.id == user_id, User.is_deleted == False)
+        result = await db.execute(stmt)
+        user = result.scalar_one_or_none()
+        if user:
+            # Update Last Seen (هر 60 ثانیه)
+            now = datetime.now(timezone.utc)
+            if user.last_seen_at is None or (now - user.last_seen_at).total_seconds() > 60:
+                user.last_seen_at = now
+                await db.commit()
+            return user
+    # =============================
+    
+    # Fallback به DB Query
     stmt = select(User).where(User.telegram_id == telegram_id, User.is_deleted == False)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception
+    
+    # ===== Cache User =====
+    await set_cached_user(telegram_id, {
+        "id": user.id,
+        "telegram_id": user.telegram_id,
+        "role": user.role.value if hasattr(user.role, 'value') else str(user.role),
+    })
+    # ======================
         
     # --- Update Last Seen ---
     now = datetime.now(timezone.utc)

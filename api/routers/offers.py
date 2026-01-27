@@ -231,14 +231,25 @@ async def create_offer(
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
     
-    # بررسی تعداد لفظ‌های فعال
+    # بررسی تعداد لفظ‌های فعال (با کش Redis)
     ts = get_trading_settings()
-    active_count = await db.scalar(
-        select(func.count(Offer.id)).where(
-            Offer.user_id == current_user.id,
-            Offer.status == OfferStatus.ACTIVE
+    
+    # ===== Redis Cache Check =====
+    from core.cache import get_active_offer_count, set_active_offer_count
+    
+    active_count = await get_active_offer_count(current_user.id)
+    if active_count is None:
+        # Cache miss - query DB
+        active_count = await db.scalar(
+            select(func.count(Offer.id)).where(
+                Offer.user_id == current_user.id,
+                Offer.status == OfferStatus.ACTIVE
+            )
         )
-    )
+        # Cache the result
+        await set_active_offer_count(current_user.id, active_count)
+    # =============================
+    
     if active_count >= ts.max_active_offers:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -323,6 +334,11 @@ async def create_offer(
     if message_id:
         new_offer.channel_message_id = message_id
         await db.commit()
+    
+    # ===== Increment Offer Count Cache =====
+    from core.cache import incr_active_offer_count
+    await incr_active_offer_count(current_user.id)
+    # =======================================
     
     # افزایش شمارنده
     await increment_user_counter(db, current_user, 'channel_message')
@@ -479,6 +495,11 @@ async def expire_offer(
     # ارسال رویداد SSE
     from .realtime import publish_event
     await publish_event("offer:expired", {"id": offer_id})
+    
+    # ===== Decrement Offer Count Cache =====
+    from core.cache import decr_active_offer_count
+    await decr_active_offer_count(offer.user_id)
+    # =======================================
     
     return None
 
