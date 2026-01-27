@@ -243,6 +243,8 @@ async def main():
     dp.include_router(admin.router)
     dp.include_router(admin_commodities.router)
     dp.include_router(admin_users.router)
+    from bot.handlers import block_manage
+    dp.include_router(block_manage.router)
     dp.include_router(default.router) 
 
     asyncio.create_task(monitor_expired_invitations(bot))

@@ -71,10 +71,33 @@ async def show_admin_panel_and_change_keyboard(message: types.Message, state: FS
 
 # --- هندلر دکمه تنظیمات کاربری ---
 @router.message(F.text == "⚙️ تنظیمات کاربری")
-async def handle_user_settings_button(message: types.Message, user: Optional[User]):
+async def handle_user_settings_button(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user: return
     
-    bot_response = await message.answer("🚧 بخش تنظیمات کاربری (بات) در حال توسعه است.")
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from core.db import AsyncSessionLocal
+    from core.services.block_service import get_block_status
+    
+    async with AsyncSessionLocal() as session:
+        block_status = await get_block_status(session, user.id)
+    
+    settings_text = (
+        f"⚙️ **تنظیمات کاربری**\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🚫 **مدیریت بلاک:**\n"
+        f"   • وضعیت: {'✅ فعال' if block_status.get('can_block') else '❌ غیرفعال'}\n"
+        f"   • مسدود شده: {block_status.get('current_blocked', 0)} از {block_status.get('max_blocked', 10)}\n"
+    )
+    
+    from bot.handlers.block_manage import BlockMenuCallback
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🚫 مدیریت کاربران مسدود",
+            callback_data=BlockMenuCallback(action="main").pack()
+        )]
+    ])
+    
+    await message.answer(settings_text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 # --- هندلر دکمه تنظیمات ساده (برای کاربران عادی) ---
