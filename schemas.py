@@ -89,6 +89,10 @@ class UserRead(UserBase):
 
     last_seen_at: datetime | None = None
     
+    # Block Settings
+    can_block_users: bool = True
+    max_blocked_users: int = 10
+    
     @computed_field
     def created_at_jalali(self) -> str | None:
         return to_jalali_str(self.created_at)
@@ -132,6 +136,10 @@ class UserUpdate(BaseModel):
     max_active_commodities: Optional[int] = None
     max_daily_requests: Optional[int] = None
     limitations_expire_at: Optional[datetime] = None
+    
+    # Block Settings
+    can_block_users: Optional[bool] = None
+    max_blocked_users: Optional[int] = None
 
 
 # --- ۳. اعتبارسنج (validator) اضافه شد ---
