@@ -72,6 +72,8 @@ from api.routers import users_public
 api_router.include_router(users_public.router)
 from api.routers import chat
 api_router.include_router(chat.router)
+from api.routers import blocks
+api_router.include_router(blocks.router)
 
 # 3. اندپوینت config را به همین روتر اصلی اضافه می‌کنیم
 @api_router.get("/config", response_model=schemas.AppConfig)

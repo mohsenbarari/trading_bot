@@ -41,6 +41,12 @@ class User(Base):
     # Activity
     last_seen_at = Column(DateTime(timezone=True), nullable=True, default=None)
 
+    # ===== Block Settings =====
+    # قابلیت مسدود کردن کاربران دیگر
+    can_block_users = Column(Boolean, nullable=False, default=True)
+    # حداکثر تعداد کاربران قابل مسدود
+    max_blocked_users = Column(Integer, nullable=False, default=10)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
     

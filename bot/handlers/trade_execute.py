@@ -85,6 +85,19 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
             await callback.answer()
             return
         
+        # ===== بررسی بلاک =====
+        from core.services.block_service import is_blocked
+        is_blocked_check, blocker_id = await is_blocked(session, offer.user_id, user.id)
+        if is_blocked_check:
+            if blocker_id == user.id:
+                # کاربر فعلی این لفظ‌دهنده را بلاک کرده
+                await callback.answer("⚠️ شما این کاربر را مسدود کرده‌اید!", show_alert=True)
+            else:
+                # لفظ‌دهنده کاربر فعلی را بلاک کرده
+                await callback.answer("❌ این لفظ در دسترس نیست.", show_alert=True)
+            return
+        # =======================
+        
         # تعداد واقعی معامله
         actual_amount = trade_amount or offer.remaining_quantity or offer.quantity
         

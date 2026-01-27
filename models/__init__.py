@@ -12,6 +12,7 @@ from .offer import Offer, OfferType, OfferStatus
 from .trade import Trade, TradeType, TradeStatus
 from .message import Message
 from .conversation import Conversation
+from .user_block import UserBlock
 
 __all__ = [
     # User & Auth
@@ -19,6 +20,7 @@ __all__ = [
     "Invitation",
     "UserSession",
     "Platform",
+    "UserBlock",
     # Commodity
     "Commodity",
     "CommodityAlias",
