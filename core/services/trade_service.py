@@ -16,6 +16,8 @@ __all__ = [
     "validate_quantity",
     "validate_price",
     "parse_lot_sizes_text",
+    "validate_competitive_price",
+    "get_quantity_range",
 ]
 
 
@@ -308,3 +310,115 @@ def parse_lot_sizes_text(text: str) -> Tuple[bool, str, Optional[List[int]]]:
             return False, f'❌ "{part}" یک عدد معتبر نیست.', None
     
     return True, "", sorted(lots, reverse=True)
+
+
+# ===== COMPETITIVE PRICE VALIDATION =====
+
+# رنج‌بندی تعداد کالا
+QUANTITY_RANGES = {
+    "A": (5, 20),    # 5 تا 20 عدد
+    "B": (21, 40),   # 21 تا 40 عدد
+    "C": (41, 50),   # 41 تا 50 عدد
+}
+
+# حداقل تعداد لفظ مشابه برای اعتبارسنجی
+MIN_SIMILAR_OFFERS = 3
+
+# تحمل قیمت (0.3%)
+PRICE_TOLERANCE = 0.003
+
+
+def get_quantity_range(quantity: int) -> Optional[str]:
+    """
+    تعیین رنج تعداد کالا.
+    
+    Args:
+        quantity: تعداد کالا
+        
+    Returns:
+        کد رنج (A, B, C) یا None اگر خارج از محدوده باشد
+    """
+    for range_code, (min_qty, max_qty) in QUANTITY_RANGES.items():
+        if min_qty <= quantity <= max_qty:
+            return range_code
+    return None
+
+
+async def validate_competitive_price(
+    db,  # AsyncSession
+    offer_type: str,
+    commodity_id: int,
+    quantity: int,
+    proposed_price: int,
+    user_id: int
+) -> Tuple[bool, str]:
+    """
+    اعتبارسنجی قیمت رقابتی.
+    
+    قیمت پیشنهادی را با میانگین قیمت لفظ‌های مشابه فعال مقایسه می‌کند.
+    
+    قوانین:
+    - اگر کمتر از 3 لفظ مشابه وجود داشته باشد: تایید می‌شود
+    - فروش: قیمت نباید بیش از 0.3% بالاتر از میانگین باشد
+    - خرید: قیمت نباید بیش از 0.3% پایین‌تر از میانگین باشد
+    
+    Args:
+        db: AsyncSession دیتابیس
+        offer_type: "buy" یا "sell"
+        commodity_id: شناسه کالا
+        quantity: تعداد کالا
+        proposed_price: قیمت پیشنهادی
+        user_id: شناسه کاربر (برای حذف از مقایسه)
+        
+    Returns:
+        (True, "") اگر معتبر باشد
+        (False, "پیام خطا") اگر نامعتبر باشد
+    """
+    from sqlalchemy import select, func
+    from models.offer import Offer, OfferStatus, OfferType
+    
+    # تعیین رنج تعداد
+    qty_range = get_quantity_range(quantity)
+    if qty_range is None:
+        # اگر خارج از رنج‌های تعریف شده باشد، بدون اعتبارسنجی تایید می‌شود
+        return True, ""
+    
+    # محدوده رنج
+    min_qty, max_qty = QUANTITY_RANGES[qty_range]
+    
+    # تبدیل نوع به enum
+    offer_type_enum = OfferType.SELL if offer_type == "sell" else OfferType.BUY
+    
+    # کوئری لفظ‌های مشابه فعال
+    stmt = select(Offer.price).where(
+        Offer.commodity_id == commodity_id,
+        Offer.offer_type == offer_type_enum,
+        Offer.status == OfferStatus.ACTIVE,
+        Offer.quantity >= min_qty,
+        Offer.quantity <= max_qty,
+        Offer.user_id != user_id  # لفظ‌های خود کاربر حذف
+    )
+    
+    result = await db.execute(stmt)
+    prices = [row[0] for row in result.fetchall()]
+    
+    # اگر کمتر از 3 لفظ مشابه وجود داشته باشد، بدون اعتبارسنجی تایید می‌شود
+    if len(prices) < MIN_SIMILAR_OFFERS:
+        return True, ""
+    
+    # محاسبه میانگین قیمت
+    avg_price = sum(prices) / len(prices)
+    
+    # اعتبارسنجی بر اساس نوع لفظ
+    if offer_type == "sell":
+        # فروش: قیمت نباید بیش از 0.3% بالاتر از میانگین باشد
+        max_allowed = avg_price * (1 + PRICE_TOLERANCE)
+        if proposed_price > max_allowed:
+            return False, "❌ لفظ شما تایید نشد.\nفروشنده‌ای با قیمت پایین‌تر وجود دارد."
+    else:
+        # خرید: قیمت نباید بیش از 0.3% پایین‌تر از میانگین باشد
+        min_allowed = avg_price * (1 - PRICE_TOLERANCE)
+        if proposed_price < min_allowed:
+            return False, "❌ لفظ شما تایید نشد.\nخریداری با قیمت بالاتر وجود دارد."
+    
+    return True, ""

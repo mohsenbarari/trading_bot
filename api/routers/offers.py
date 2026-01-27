@@ -284,8 +284,19 @@ async def create_offer(
                 # اینجا می‌توانیم پیشنهاد را در قالب خاصی بفرستیم، اما فعلاً در متن خطا می‌گذاریم
                 pass 
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail_msg)
-
     
+    # 4. اعتبارسنجی قیمت رقابتی
+    from core.services.trade_service import validate_competitive_price
+    is_valid_comp, err_comp = await validate_competitive_price(
+        db=db,
+        offer_type=offer_data.offer_type,
+        commodity_id=offer_data.commodity_id,
+        quantity=offer_data.quantity,
+        proposed_price=offer_data.price,
+        user_id=current_user.id
+    )
+    if not is_valid_comp:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_comp)
 
     # مدیریت تکرار لفظ قدیمی
     if offer_data.republished_from_id:

@@ -558,6 +558,24 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
     lot_sizes = data.get("lot_sizes", None)
     notes = data.get("notes", None)
     
+    # ===== اعتبارسنجی قیمت رقابتی =====
+    from core.services.trade_service import validate_competitive_price
+    async with AsyncSessionLocal() as session:
+        is_valid_comp, err_comp = await validate_competitive_price(
+            db=session,
+            offer_type=trade_type,
+            commodity_id=commodity_id,
+            quantity=quantity,
+            proposed_price=price,
+            user_id=user.id
+        )
+        if not is_valid_comp:
+            await callback.message.edit_text(err_comp, parse_mode="Markdown")
+            await state.clear()
+            await callback.answer()
+            return
+    # =====================================
+    
     # ساخت پیام کانال - فرمت مختصر (بدون نام کاربر)
     trade_emoji = "🟢" if trade_type == "buy" else "🔴"
     trade_label = "خرید" if trade_type == "buy" else "فروش"
@@ -1005,6 +1023,24 @@ async def handle_text_offer_confirm(callback: types.CallbackQuery, state: FSMCon
     is_wholesale = data.get("is_wholesale", True)
     lot_sizes = data.get("lot_sizes")
     notes = data.get("notes")
+    
+    # ===== اعتبارسنجی قیمت رقابتی =====
+    from core.services.trade_service import validate_competitive_price
+    async with AsyncSessionLocal() as session:
+        is_valid_comp, err_comp = await validate_competitive_price(
+            db=session,
+            offer_type=trade_type,
+            commodity_id=commodity_id,
+            quantity=quantity,
+            proposed_price=price,
+            user_id=user.id
+        )
+        if not is_valid_comp:
+            await callback.message.edit_text(err_comp, parse_mode="Markdown")
+            await state.clear()
+            await callback.answer()
+            return
+    # =====================================
     
     # ساخت پیام کانال
     trade_emoji = "🟢" if trade_type == "buy" else "🔴"
