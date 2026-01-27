@@ -66,6 +66,10 @@ const selectedUserName = ref('')
 
 // Messages
 const messages = ref<Message[]>([])
+// Selection State
+const selectedMessages = ref<number[]>([])
+const isSelectionMode = computed(() => selectedMessages.value.length > 0)
+const longPressTimer = ref<any>(null)
 // Search State
 const isSearchActive = ref(false)
 const isHeaderMenuOpen = ref(false)
@@ -102,7 +106,6 @@ const isViewingReply = ref(false) // Flag to temporarily disable auto-scroll dur
 // UI State
 const isMobile = ref(false)
 const contextMenu = ref<{ visible: boolean; x: number; y: number; message: Message | null }>({ visible: false, x: 0, y: 0, message: null })
-const longPressTimer = ref<number | null>(null)
 
 // Poll timer
 let pollTimer: number | null = null
@@ -786,6 +789,54 @@ const handleTouchEnd = (e: TouchEvent, msg: Message) => {
   touchCurrentX.value = 0
 }
 
+// Selection Logic
+const toggleSelection = (msgId: number) => {
+    const index = selectedMessages.value.indexOf(msgId)
+    if (index === -1) {
+        selectedMessages.value.push(msgId)
+    } else {
+        selectedMessages.value.splice(index, 1)
+    }
+}
+
+const clearSelection = () => {
+    selectedMessages.value = []
+}
+
+// Handle Message Click (Delegated)
+const handleMessageClick = (event: MouseEvent | TouchEvent, msg: Message) => {
+    if (isSelectionMode.value) {
+      event.preventDefault()
+      toggleSelection(msg.id)
+    } else {
+      showContextMenu(event, msg)
+    }
+}
+
+// Long Press Handlers
+const startLongPress = (event: TouchEvent, msg: Message) => {
+    longPressTimer.value = setTimeout(() => {
+        if (navigator.vibrate) navigator.vibrate(50)
+        toggleSelection(msg.id)
+        longPressTimer.value = null
+    }, 500)
+    
+    // Pass event to swipe handler too
+    handleTouchStart(event, msg)
+}
+
+const cancelLongPress = () => {
+    if (longPressTimer.value) {
+        clearTimeout(longPressTimer.value)
+        longPressTimer.value = null
+    }
+}
+
+const endLongPress = (event: TouchEvent, msg: Message) => {
+    cancelLongPress()
+    handleTouchEnd(event, msg)
+}
+
 const getSwipeStyle = (msg: Message) => {
   if (swipedMessageId.value !== msg.id) return {}
   const diff = touchStartX.value - touchCurrentX.value
@@ -1384,12 +1435,13 @@ defineExpose({ startNewChat })
                 'sent': msg.sender_id === props.currentUserId, 
                 'received': msg.sender_id !== props.currentUserId,
                 'sending': msg.id < 0 || msg.is_sending,
-                'error': msg.is_error
+                'error': msg.is_error,
+                'selected-message': selectedMessages.includes(msg.id)
               }"
-              @contextmenu="showContextMenu($event, msg)"
-              @touchstart="handleLongPressStart($event, msg); handleTouchStart($event, msg)"
-              @touchmove="handleTouchMove($event, msg)"
-              @touchend="handleLongPressEnd(); handleTouchEnd($event, msg)"
+              @click="handleMessageClick($event, msg)"
+              @touchstart="startLongPress($event, msg)"
+              @touchmove="cancelLongPress(); handleTouchMove($event, msg)"
+              @touchend="endLongPress($event, msg)"
               :style="getSwipeStyle(msg)"
             >
             <!-- Reply Context -->
@@ -2550,5 +2602,11 @@ defineExpose({ startNewChat })
   .header-menu-item:hover {
     background: #3a3a3c;
   }
+}
+
+.selected-message {
+  background-color: rgba(0, 122, 255, 0.2) !important;
+  position: relative;
+  border: 1px solid #007aff;
 }
 </style>
