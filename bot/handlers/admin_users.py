@@ -274,9 +274,22 @@ async def handle_view_user_profile(callback: types.CallbackQuery, user: Optional
     except Exception:
         pass 
     
+    # بررسی وضعیت مسدودی و محدودیت
+    is_restricted = target_user.trading_restricted_until and target_user.trading_restricted_until > datetime.utcnow()
+    has_limitations = (
+        target_user.max_daily_trades is not None or
+        target_user.max_active_commodities is not None or
+        target_user.max_daily_requests is not None
+    )
+    
     await callback.message.edit_text(
         profile_text,
-        reply_markup=get_user_profile_return_keyboard(user_id=target_user.id, back_to_page=current_page),
+        reply_markup=get_user_profile_return_keyboard(
+            user_id=target_user.id, 
+            back_to_page=current_page,
+            is_restricted=is_restricted,
+            has_limitations=has_limitations
+        ),
         parse_mode="Markdown"
     )
     await callback.answer()
@@ -387,9 +400,20 @@ async def process_search_query(message: types.Message, state: FSMContext, user: 
         await update_anchor(state, msg.message_id, message.bot, message.chat.id)
     else:
         profile_text = await get_user_profile_text(user_found)
+        is_restricted = user_found.trading_restricted_until and user_found.trading_restricted_until > datetime.utcnow()
+        has_limitations = (
+            user_found.max_daily_trades is not None or
+            user_found.max_active_commodities is not None or
+            user_found.max_daily_requests is not None
+        )
         msg = await message.answer(
             profile_text,
-            reply_markup=get_user_profile_return_keyboard(user_id=user_found.id, back_to_page=1),
+            reply_markup=get_user_profile_return_keyboard(
+                user_id=user_found.id, 
+                back_to_page=1,
+                is_restricted=is_restricted,
+                has_limitations=has_limitations
+            ),
             parse_mode="Markdown"
         )
         await update_anchor(state, msg.message_id, message.bot, message.chat.id)
@@ -642,10 +666,20 @@ async def handle_set_user_role(callback: types.CallbackQuery, user: Optional[Use
             # بازگشت به پروفایل (یا تنظیمات؟ معمولاً بعد از تغییر نقش به پروفایل برمی‌گردیم تا نتیجه را ببینیم)
             # اما چون دکمه بازگشت در کیبورد نقش‌ها به پروفایل برمی‌گردد، اینجا هم به پروفایل برمی‌گردیم.
             profile_text = await get_user_profile_text(target_user)
+            is_restricted = target_user.trading_restricted_until and target_user.trading_restricted_until > datetime.utcnow()
+            has_limitations = (
+                target_user.max_daily_trades is not None or
+                target_user.max_active_commodities is not None or
+                target_user.max_daily_requests is not None
+            )
             try:
                 await callback.message.edit_text(
                     profile_text,
-                    reply_markup=get_user_profile_return_keyboard(user_id=target_user.id),
+                    reply_markup=get_user_profile_return_keyboard(
+                        user_id=target_user.id,
+                        is_restricted=is_restricted,
+                        has_limitations=has_limitations
+                    ),
                     parse_mode="Markdown"
                 )
             except TelegramBadRequest:
@@ -973,9 +1007,15 @@ async def handle_limit_confirm(callback: types.CallbackQuery, user: Optional[Use
             await clear_state_retain_anchors(state)
             
             profile_text = await get_user_profile_text(target_user)
+            is_restricted = target_user.trading_restricted_until and target_user.trading_restricted_until > datetime.utcnow()
+            has_limitations = True  # Just set limitations, so always True
             await callback.message.edit_text(
                 profile_text,
-                reply_markup=get_user_profile_return_keyboard(user_id=target_user.id),
+                reply_markup=get_user_profile_return_keyboard(
+                    user_id=target_user.id,
+                    is_restricted=is_restricted,
+                    has_limitations=has_limitations
+                ),
                 parse_mode="Markdown"
             )
             await callback.answer("✅ محدودیت‌ها اعمال شد.", show_alert=True)

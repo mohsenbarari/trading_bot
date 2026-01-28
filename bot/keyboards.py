@@ -92,8 +92,20 @@ def get_users_list_inline_keyboard(users: list, page: int, total_count: int, lim
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
-def get_user_profile_return_keyboard(user_id: int, back_to_page: int = 1) -> InlineKeyboardMarkup:
+def get_user_profile_return_keyboard(user_id: int, back_to_page: int = 1, is_restricted: bool = False, has_limitations: bool = False) -> InlineKeyboardMarkup:
+    # تعیین متن و اکشن دکمه مسدودسازی
+    block_text = "🔓 رفع مسدودیت" if is_restricted else "⛔ مسدود کردن"
+    block_callback = f"user_unblock_{user_id}" if is_restricted else f"user_block_{user_id}"
+    
+    # تعیین متن و اکشن دکمه محدودیت
+    limit_text = "✅ رفع محدودیت" if has_limitations else "⚠️ اعمال محدودیت"
+    limit_callback = f"user_unlimit_{user_id}" if has_limitations else f"user_limit_{user_id}"
+    
     keyboard = [
+        [
+            InlineKeyboardButton(text=block_text, callback_data=block_callback),
+            InlineKeyboardButton(text=limit_text, callback_data=limit_callback)
+        ],
         [
             InlineKeyboardButton(text="⚙️ تنظیمات کاربر", callback_data=f"user_settings_{user_id}")
         ],
@@ -107,14 +119,6 @@ def get_user_profile_return_keyboard(user_id: int, back_to_page: int = 1) -> Inl
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_user_settings_keyboard(user_id: int, is_restricted: bool = False, has_limitations: bool = False, can_block: bool = True, max_blocked: int = 10) -> InlineKeyboardMarkup:
-    # تعیین متن و اکشن دکمه مسدودسازی
-    block_text = "🔓 رفع مسدودیت" if is_restricted else "⛔ مسدود کردن"
-    block_callback = f"user_unblock_{user_id}" if is_restricted else f"user_block_{user_id}"
-    
-    # تعیین متن و اکشن دکمه محدودیت
-    limit_text = "✅ رفع محدودیت" if has_limitations else "⚠️ اعمال محدودیت"
-    limit_callback = f"user_unlimit_{user_id}" if has_limitations else f"user_limit_{user_id}"
-    
     # تعیین متن دکمه تنظیمات بلاک
     block_status = "فعال" if can_block else "غیرفعال"
     block_settings_text = f"🚫 تنظیمات بلاک ({block_status} - {max_blocked})"
@@ -125,12 +129,6 @@ def get_user_settings_keyboard(user_id: int, is_restricted: bool = False, has_li
         ],
         [
             InlineKeyboardButton(text="✏️ ویرایش نقش", callback_data=f"user_edit_role_{user_id}")
-        ],
-        [
-            InlineKeyboardButton(text=block_text, callback_data=block_callback)
-        ],
-        [
-            InlineKeyboardButton(text=limit_text, callback_data=limit_callback)
         ],
         [
             InlineKeyboardButton(text=block_settings_text, callback_data=f"user_block_settings_{user_id}")
