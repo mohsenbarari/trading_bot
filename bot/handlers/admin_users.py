@@ -470,7 +470,7 @@ async def handle_user_settings(callback: types.CallbackQuery, user: Optional[Use
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("user_block_"))
+@router.callback_query(F.data.startswith("user_block_") & ~F.data.startswith("user_block_settings_"))
 async def handle_user_block_actions(callback: types.CallbackQuery, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN: return
     
