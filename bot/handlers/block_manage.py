@@ -7,6 +7,7 @@ from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.exceptions import TelegramBadRequest
 from typing import Optional
 from sqlalchemy import select
 
@@ -23,6 +24,15 @@ from core.services.block_service import (
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+
+async def safe_edit_text(message: types.Message, text: str, **kwargs):
+    """ویرایش پیام با مدیریت خطای 'message is not modified'"""
+    try:
+        await message.edit_text(text, **kwargs)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            raise
 
 
 # ===== States =====
@@ -139,7 +149,7 @@ async def show_block_menu(callback: types.CallbackQuery, user: Optional[User]):
     else:
         status_text += "❌ قابلیت مسدود کردن برای شما غیرفعال است.\n"
     
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         status_text,
         parse_mode="Markdown",
         reply_markup=get_block_menu_keyboard(status)
@@ -167,7 +177,7 @@ async def show_blocked_list(callback: types.CallbackQuery, user: Optional[User])
         f"برای رفع مسدودیت روی نام کلیک کنید:\n"
     )
     
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         text,
         parse_mode="Markdown",
         reply_markup=get_blocked_list_keyboard(blocked)
@@ -191,7 +201,7 @@ async def start_search(callback: types.CallbackQuery, state: FSMContext, user: O
         )]
     ])
     
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         "🔍 **جستجوی کاربر**\n\n"
         "شماره موبایل یا نام کاربری را وارد کنید:\n"
         "(حداقل 2 کاراکتر)",
@@ -271,7 +281,7 @@ async def handle_block_user(callback: types.CallbackQuery, callback_data: BlockU
             f"💡 باقی‌مانده: {status['remaining']}\n"
         )
         
-        await callback.message.edit_text(
+        await safe_edit_text(callback.message, 
             status_text,
             parse_mode="Markdown",
             reply_markup=get_block_menu_keyboard(status)
@@ -303,7 +313,7 @@ async def handle_unblock_user(callback: types.CallbackQuery, callback_data: Bloc
                 f"━━━━━━━━━━━━━━━━━━━\n\n"
                 f"برای رفع مسدودیت روی نام کلیک کنید:\n"
             )
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 text,
                 parse_mode="Markdown",
                 reply_markup=get_blocked_list_keyboard(blocked)
@@ -313,7 +323,7 @@ async def handle_unblock_user(callback: types.CallbackQuery, callback_data: Bloc
             async with AsyncSessionLocal() as session:
                 status = await get_block_status(session, user.id)
             
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 f"🚫 **مدیریت کاربران مسدود**\n"
                 f"━━━━━━━━━━━━━━━━━━━\n\n"
                 f"✅ لیست خالی است.\n"
@@ -349,7 +359,7 @@ async def handle_back(callback: types.CallbackQuery, state: FSMContext, user: Op
     else:
         status_text += "❌ قابلیت مسدود کردن برای شما غیرفعال است.\n"
     
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         status_text,
         parse_mode="Markdown",
         reply_markup=get_block_menu_keyboard(status)
