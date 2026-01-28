@@ -25,7 +25,9 @@ from bot.keyboards import (
     get_user_settings_keyboard,
     get_block_duration_keyboard,
     get_limit_duration_keyboard,
-    get_skip_keyboard
+    get_skip_keyboard,
+    get_block_settings_keyboard,
+    get_max_block_options_keyboard
 )
 from bot.states import UserManagement, UserLimitations
 
@@ -430,7 +432,13 @@ async def handle_user_settings(callback: types.CallbackQuery, user: Optional[Use
     try:
         await callback.message.edit_text(
             profile_text,
-            reply_markup=get_user_settings_keyboard(target_user_id, is_restricted=is_restricted, has_limitations=has_limitations),
+            reply_markup=get_user_settings_keyboard(
+                target_user_id, 
+                is_restricted=is_restricted, 
+                has_limitations=has_limitations,
+                can_block=target_user.can_block_users,
+                max_blocked=target_user.max_blocked_users
+            ),
             parse_mode="Markdown"
         )
     except TelegramBadRequest:
@@ -998,8 +1006,154 @@ async def handle_limit_cancel(callback: types.CallbackQuery, user: Optional[User
             profile_text = await get_user_profile_text(target_user)
             await callback.message.edit_text(
                 profile_text,
-                reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=is_restricted, has_limitations=has_limitations),
+                reply_markup=get_user_settings_keyboard(
+                    target_user.id, 
+                    is_restricted=is_restricted, 
+                    has_limitations=has_limitations,
+                    can_block=target_user.can_block_users,
+                    max_blocked=target_user.max_blocked_users
+                ),
                 parse_mode="Markdown"
             )
     
     await callback.answer("عملیات لغو شد.")
+
+
+# --- هندلرهای تنظیمات بلاک ادمین ---
+
+@router.callback_query(F.data.startswith("user_block_settings_"))
+async def handle_user_block_settings(callback: types.CallbackQuery, user: Optional[User]):
+    """نمایش منوی تنظیمات قابلیت بلاک برای کاربر"""
+    if not user or user.role != UserRole.SUPER_ADMIN: return
+    
+    target_user_id = int(callback.data.split("_")[-1])
+    
+    async with AsyncSessionLocal() as session:
+        stmt = select(User).where(User.id == target_user_id)
+        target_user = (await session.execute(stmt)).scalar_one_or_none()
+        
+    if not target_user:
+        await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+        return
+    
+    text = (
+        f"🚫 **تنظیمات قابلیت بلاک**\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👤 کاربر: `{target_user.account_name}`\n\n"
+        f"📊 قابلیت بلاک: {'✅ فعال' if target_user.can_block_users else '❌ غیرفعال'}\n"
+        f"🔢 سقف بلاک: {target_user.max_blocked_users} نفر\n"
+    )
+    
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_block_settings_keyboard(
+                target_user_id, 
+                target_user.can_block_users, 
+                target_user.max_blocked_users
+            ),
+            parse_mode="Markdown"
+        )
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_toggle_block_"))
+async def handle_admin_toggle_block(callback: types.CallbackQuery, user: Optional[User]):
+    """تغییر وضعیت قابلیت بلاک کاربر"""
+    if not user or user.role != UserRole.SUPER_ADMIN: return
+    
+    target_user_id = int(callback.data.split("_")[-1])
+    
+    async with AsyncSessionLocal() as session:
+        stmt = select(User).where(User.id == target_user_id)
+        target_user = (await session.execute(stmt)).scalar_one_or_none()
+        
+        if target_user:
+            target_user.can_block_users = not target_user.can_block_users
+            await session.commit()
+            
+            status = "فعال" if target_user.can_block_users else "غیرفعال"
+            
+            text = (
+                f"🚫 **تنظیمات قابلیت بلاک**\n"
+                f"━━━━━━━━━━━━━━━━━━━\n\n"
+                f"👤 کاربر: `{target_user.account_name}`\n\n"
+                f"📊 قابلیت بلاک: {'✅ فعال' if target_user.can_block_users else '❌ غیرفعال'}\n"
+                f"🔢 سقف بلاک: {target_user.max_blocked_users} نفر\n"
+            )
+            
+            try:
+                await callback.message.edit_text(
+                    text,
+                    reply_markup=get_block_settings_keyboard(
+                        target_user_id, 
+                        target_user.can_block_users, 
+                        target_user.max_blocked_users
+                    ),
+                    parse_mode="Markdown"
+                )
+            except TelegramBadRequest:
+                pass
+            await callback.answer(f"✅ قابلیت بلاک {status} شد.", show_alert=True)
+        else:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("admin_set_max_block_"))
+async def handle_admin_set_max_block(callback: types.CallbackQuery, user: Optional[User]):
+    """نمایش گزینه‌های سقف بلاک"""
+    if not user or user.role != UserRole.SUPER_ADMIN: return
+    
+    target_user_id = int(callback.data.split("_")[-1])
+    
+    await callback.message.edit_text(
+        "🔢 **سقف بلاک را انتخاب کنید:**\n\n"
+        "این عدد حداکثر تعداد کاربرانی است که این کاربر می‌تواند مسدود کند.",
+        reply_markup=get_max_block_options_keyboard(target_user_id),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_max_block_set_"))
+async def handle_admin_max_block_set(callback: types.CallbackQuery, user: Optional[User]):
+    """اعمال سقف بلاک جدید"""
+    if not user or user.role != UserRole.SUPER_ADMIN: return
+    
+    parts = callback.data.split("_")
+    target_user_id = int(parts[4])
+    new_max = int(parts[5])
+    
+    async with AsyncSessionLocal() as session:
+        stmt = select(User).where(User.id == target_user_id)
+        target_user = (await session.execute(stmt)).scalar_one_or_none()
+        
+        if target_user:
+            target_user.max_blocked_users = new_max
+            await session.commit()
+            
+            text = (
+                f"🚫 **تنظیمات قابلیت بلاک**\n"
+                f"━━━━━━━━━━━━━━━━━━━\n\n"
+                f"👤 کاربر: `{target_user.account_name}`\n\n"
+                f"📊 قابلیت بلاک: {'✅ فعال' if target_user.can_block_users else '❌ غیرفعال'}\n"
+                f"🔢 سقف بلاک: {target_user.max_blocked_users} نفر\n"
+            )
+            
+            try:
+                await callback.message.edit_text(
+                    text,
+                    reply_markup=get_block_settings_keyboard(
+                        target_user_id, 
+                        target_user.can_block_users, 
+                        target_user.max_blocked_users
+                    ),
+                    parse_mode="Markdown"
+                )
+            except TelegramBadRequest:
+                pass
+            await callback.answer(f"✅ سقف بلاک به {new_max} تغییر کرد.", show_alert=True)
+        else:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)

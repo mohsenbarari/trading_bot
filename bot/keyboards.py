@@ -106,7 +106,7 @@ def get_user_profile_return_keyboard(user_id: int, back_to_page: int = 1) -> Inl
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def get_user_settings_keyboard(user_id: int, is_restricted: bool = False, has_limitations: bool = False) -> InlineKeyboardMarkup:
+def get_user_settings_keyboard(user_id: int, is_restricted: bool = False, has_limitations: bool = False, can_block: bool = True, max_blocked: int = 10) -> InlineKeyboardMarkup:
     # تعیین متن و اکشن دکمه مسدودسازی
     block_text = "🔓 رفع مسدودیت" if is_restricted else "⛔ مسدود کردن"
     block_callback = f"user_unblock_{user_id}" if is_restricted else f"user_block_{user_id}"
@@ -114,6 +114,10 @@ def get_user_settings_keyboard(user_id: int, is_restricted: bool = False, has_li
     # تعیین متن و اکشن دکمه محدودیت
     limit_text = "✅ رفع محدودیت" if has_limitations else "⚠️ اعمال محدودیت"
     limit_callback = f"user_unlimit_{user_id}" if has_limitations else f"user_limit_{user_id}"
+    
+    # تعیین متن دکمه تنظیمات بلاک
+    block_status = "فعال" if can_block else "غیرفعال"
+    block_settings_text = f"🚫 تنظیمات بلاک ({block_status} - {max_blocked})"
 
     keyboard = [
         [
@@ -127,6 +131,9 @@ def get_user_settings_keyboard(user_id: int, is_restricted: bool = False, has_li
         ],
         [
             InlineKeyboardButton(text=limit_text, callback_data=limit_callback)
+        ],
+        [
+            InlineKeyboardButton(text=block_settings_text, callback_data=f"user_block_settings_{user_id}")
         ],
     ]
     
@@ -298,3 +305,30 @@ def get_skip_keyboard(callback_data: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⏭ رد کردن (بدون محدودیت)", callback_data=callback_data)]
     ])
+
+def get_block_settings_keyboard(user_id: int, can_block: bool, max_blocked: int) -> InlineKeyboardMarkup:
+    """کیبورد تنظیمات قابلیت بلاک برای ادمین"""
+    toggle_text = "❌ غیرفعال کردن قابلیت بلاک" if can_block else "✅ فعال کردن قابلیت بلاک"
+    toggle_callback = f"admin_toggle_block_{user_id}"
+    
+    keyboard = [
+        [InlineKeyboardButton(text=toggle_text, callback_data=toggle_callback)],
+        [InlineKeyboardButton(text=f"🔢 تغییر سقف ({max_blocked})", callback_data=f"admin_set_max_block_{user_id}")],
+        [InlineKeyboardButton(text="🔙 بازگشت", callback_data=f"user_settings_{user_id}")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_max_block_options_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """کیبورد انتخاب سقف بلاک"""
+    options = [5, 10, 15, 20, 30, 50]
+    keyboard = []
+    row = []
+    for num in options:
+        row.append(InlineKeyboardButton(text=str(num), callback_data=f"admin_max_block_set_{user_id}_{num}"))
+        if len(row) == 3:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data=f"user_block_settings_{user_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
