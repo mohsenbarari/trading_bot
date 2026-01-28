@@ -1197,3 +1197,77 @@ async def handle_admin_max_block_set(callback: types.CallbackQuery, user: Option
             await callback.answer(f"✅ سقف بلاک به {new_max} تغییر کرد.", show_alert=True)
         else:
             await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("admin_max_block_custom_"))
+async def handle_admin_max_block_custom(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
+    """درخواست ورود عدد دلخواه برای سقف بلاک"""
+    if not user or user.role != UserRole.SUPER_ADMIN: return
+    
+    target_user_id = int(callback.data.split("_")[-1])
+    
+    await state.update_data(custom_max_block_user_id=target_user_id)
+    await state.set_state(UserManagement.awaiting_custom_max_block)
+    
+    await callback.message.edit_text(
+        "🔢 **عدد دلخواه سقف بلاک را وارد کنید:**\n\n"
+        "لطفاً یک عدد بین 1 تا 100 وارد کنید.",
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@router.message(UserManagement.awaiting_custom_max_block)
+async def process_custom_max_block(message: types.Message, user: Optional[User], state: FSMContext):
+    """پردازش عدد دلخواه سقف بلاک"""
+    if not user or user.role != UserRole.SUPER_ADMIN: return
+    
+    await delete_user_message(message)
+    
+    data = await state.get_data()
+    target_user_id = data.get("custom_max_block_user_id")
+    anchor_id = data.get("anchor_id")
+    
+    try:
+        new_max = int(message.text.strip())
+        if new_max < 1 or new_max > 100:
+            raise ValueError("Out of range")
+    except (ValueError, AttributeError):
+        msg = await message.answer(
+            "❌ لطفاً یک عدد معتبر بین 1 تا 100 وارد کنید.",
+            parse_mode="Markdown"
+        )
+        await update_anchor(state, msg.message_id, message.bot, message.chat.id)
+        return
+    
+    await clear_state_retain_anchors(state)
+    
+    async with AsyncSessionLocal() as session:
+        stmt = select(User).where(User.id == target_user_id)
+        target_user = (await session.execute(stmt)).scalar_one_or_none()
+        
+        if target_user:
+            target_user.max_blocked_users = new_max
+            await session.commit()
+            
+            text = (
+                f"🚫 **تنظیمات قابلیت بلاک**\n"
+                f"━━━━━━━━━━━━━━━━━━━\n\n"
+                f"👤 کاربر: `{target_user.account_name}`\n\n"
+                f"📊 قابلیت بلاک: {'✅ فعال' if target_user.can_block_users else '❌ غیرفعال'}\n"
+                f"🔢 سقف بلاک: {target_user.max_blocked_users} نفر\n"
+            )
+            
+            msg = await message.answer(
+                text,
+                reply_markup=get_block_settings_keyboard(
+                    target_user_id, 
+                    target_user.can_block_users, 
+                    target_user.max_blocked_users
+                ),
+                parse_mode="Markdown"
+            )
+            await update_anchor(state, msg.message_id, message.bot, message.chat.id)
+        else:
+            msg = await message.answer("❌ کاربر یافت نشد.")
+            await update_anchor(state, msg.message_id, message.bot, message.chat.id)

@@ -31,6 +31,7 @@ class CommodityManagement(StatesGroup):
 
 class UserManagement(StatesGroup):
     awaiting_search_query = State()
+    awaiting_custom_max_block = State()  # منتظر ورود عدد دلخواه سقف بلاک
 
 class UserLimitations(StatesGroup):
     awaiting_limit_value = State()  # منتظر وارد کردن عدد محدودیت

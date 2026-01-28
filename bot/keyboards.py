@@ -328,5 +328,6 @@ def get_max_block_options_keyboard(user_id: int) -> InlineKeyboardMarkup:
             row = []
     if row:
         keyboard.append(row)
+    keyboard.append([InlineKeyboardButton(text="✏️ عدد دلخواه", callback_data=f"admin_max_block_custom_{user_id}")])
     keyboard.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data=f"user_block_settings_{user_id}")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
