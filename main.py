@@ -110,12 +110,18 @@ else:
 @app.get("/{full_path:path}")
 async def serve_vue_app(full_path: str):
     """
-    این مسیر به عنوان آخرین مسیر عمل می‌کند و هر درخواستی که با API ها
-    یا فایل‌های استاتیک مطابقت نداشته باشد را به index.html هدایت می‌کند.
+    سرو فایل‌های فرانت‌اند (SPA).
+    ابتدا بررسی می‌کند فایل درخواست شده (مثلاً sw.js یا manifest.webmanifest) وجود دارد یا خیر.
+    اگر نبود، index.html را برمی‌گرداند تا Vue Router در سمت کلاینت هندل کند.
     """
+    # 1. Try to find the file directly in DIST_DIR (e.g., manifest.webmanifest, sw.js)
+    requested_file = DIST_DIR / full_path
+    if full_path and requested_file.is_file():
+        return FileResponse(requested_file)
+
+    # 2. Fallback to index.html for SPA routing
     index_file = DIST_DIR / "index.html"
     if index_file.exists():
-        logger.info(f"Request to '{full_path}' → serving index.html")
         return FileResponse(index_file)
     
     logger.error("index.html not found in Vue build output.")

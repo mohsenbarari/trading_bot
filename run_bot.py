@@ -15,7 +15,7 @@ from models.invitation import Invitation
 from models.user import User
 from models.offer import Offer, OfferStatus
 from bot.middlewares.auth import AuthMiddleware
-from bot.handlers import start, panel, default, admin, admin_commodities, admin_users, trade, trade_history
+from bot.handlers import start, panel, default, admin, admin_commodities, admin_users, trade_history
 from core.utils import create_user_notification, send_telegram_notification
 
 logging.basicConfig(level=logging.INFO)

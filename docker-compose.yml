@@ -3,9 +3,10 @@ services:
     build: .
     container_name: trading_bot_app
     restart: always
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --ssl-keyfile /app/certs/privkey.pem --ssl-certfile /app/certs/fullchain.pem
 
     volumes:
+      - /root/cert/ip:/app/certs  # Mount Host Certs
       - ./api:/app/api
       - ./bot:/app/bot
       - ./core:/app/core

@@ -1,30 +1,47 @@
-// frontend/src/main.ts (نسخه صحیح)
 import { createApp } from 'vue'
+import { createPinia } from 'pinia'
 import App from './App.vue'
+import router from './router'
 import './assets/main.css'
 
-// --- Force light theme for Telegram WebApp ---
+const app = createApp(App)
+
+app.use(createPinia())
+app.use(router)
+
+// --- PWA Service Worker Registration ---
+import { registerSW } from 'virtual:pwa-register'
+
+const updateSW = registerSW({
+  onNeedRefresh() {
+    // Show a prompt to user to refresh, or auto-refresh
+    console.log('New content available, refreshing...')
+  },
+  onOfflineReady() {
+    console.log('App ready to work offline')
+  }
+})
+
+// --- Telegram WebApp Theme Handling ---
 const tg = (window as any).Telegram?.WebApp
 if (tg) {
   try {
     tg.ready()
-    // --- این خط باید اینجا باشد و از کامنت خارج شود ---
-    tg.expand() 
-    
-    // اعمال تم روشن به‌صورت اجباری
+    tg.expand()
+
+    // Force light theme or adapt to user pref (here forcing light/gold based on design)
     const root = document.documentElement
-    const applyLightTheme = () => {
-      root.style.setProperty('--tg-theme-bg-color', '#ffffff', 'important')
-      root.style.setProperty('--tg-theme-text-color', '#111827', 'important')
-      document.body.style.backgroundColor = '#ffffff'
+    const applyTheme = () => {
+      // We can use tg.colorScheme to detect dark mode if we want to support it later
+      // For now, consistent style:
+      document.body.style.backgroundColor = '#f9fafb' // gray-50
       document.body.style.color = '#111827'
     }
-    applyLightTheme()
-    tg.onEvent('themeChanged', applyLightTheme)
+    applyTheme()
+    tg.onEvent('themeChanged', applyTheme)
   } catch (e) {
     console.warn('Telegram WebApp not initialized', e)
   }
 }
 
-// Mount app
-createApp(App).mount('#app')
+app.mount('#app')
