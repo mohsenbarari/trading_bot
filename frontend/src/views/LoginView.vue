@@ -12,7 +12,7 @@ const showInstallBtn = ref(false)
 const deferredPrompt = ref<any>(null)
 const isIOS = ref(false)
 const showHelp = ref(false)
-const showManualInstructions = ref(false)
+const isInstalled = ref(false)
 
 const form = reactive({
   mobile: '',
@@ -89,13 +89,14 @@ function installPWA() {
     prompt.userChoice.then((choiceResult: any) => {
       if (choiceResult.outcome === 'accepted') {
         showInstallBtn.value = false
+        isInstalled.value = true
       }
       deferredPrompt.value = null;
       (window as any).deferredPrompt = null;
     })
   } else {
-    // Fallback: Show manual instructions
-    showManualInstructions.value = !showManualInstructions.value
+    // Fallback: Show simple alert instead of UI guide
+    alert('برای نصب اپلیکیشن، لطفاً از منوی مرورگر (سه نقطه) گزینه Install App یا Add to Home Screen را انتخاب کنید.')
   }
 }
 
@@ -116,7 +117,21 @@ onMounted(() => {
     showInstallBtn.value = true
   })
   
-  // Check if we already have it from App.vue
+  // Listen for custom event from App.vue (Fix for Race Condition)
+  window.addEventListener('pwa-install-ready', () => {
+    if ((window as any).deferredPrompt) {
+       deferredPrompt.value = (window as any).deferredPrompt
+       showInstallBtn.value = true
+    }
+  })
+  
+  // Listen for successful install
+  window.addEventListener('appinstalled', () => {
+    isInstalled.value = true
+    console.log('PWA Installed')
+  })
+  
+  // Check if we already have it from App.vue (Initial Load)
   if ((window as any).deferredPrompt) {
      deferredPrompt.value = (window as any).deferredPrompt
      showInstallBtn.value = true
@@ -169,49 +184,13 @@ onMounted(() => {
             </button>
 
             <!-- PWA PROMOTION SECTION (Only if NOT installed) -->
-            <div v-if="!isStandalone" class="pt-4 border-t border-gray-100 space-y-4">
+            <div v-if="!isStandalone && !isInstalled" class="pt-4 border-t border-gray-100 space-y-4">
                 
                 <!-- Install Button (Always Visible) -->
                 <button @click="installPWA" class="w-full py-3 px-4 bg-yellow-50 text-yellow-700 font-bold rounded-xl border border-yellow-200 hover:bg-yellow-100 transition-all flex items-center justify-center gap-2">
                    <Download class="w-5 h-5"/>
                    <span>نصب اپلیکیشن Gold</span>
                 </button>
-
-                <!-- Android/Chrome Manual Instructions (Hidden by default, shown on click if native prompt fails) -->
-                <transition name="fade">
-                  <div v-if="showManualInstructions && !isIOS" class="text-sm text-gray-600 bg-gray-50 p-4 rounded-xl border border-gray-100 animate-pulse-once">
-                     <p class="mb-1 font-bold text-amber-600 text-center">نصب خودکار انجام نشد ⚠️</p>
-                     <p class="mb-4 text-xs text-gray-500 text-center">لطفاً طبق راهنمای زیر نصب کنید:</p>
-                     
-                     <div class="flex flex-col gap-2 items-center mb-4">
-                       <div class="flex items-center gap-1">
-                          <span>۱. منوی مرورگر</span>
-                          <span class="font-bold text-lg leading-none">⋮</span>
-                          <span>را بزنید</span>
-                       </div>
-                       <div class="flex items-center gap-1">
-                          <span>۲. گزینه</span>
-                          <span class="font-bold">Install App</span>
-                          <span>یا</span>
-                          <span class="font-bold">Add to Home Screen</span>
-                       </div>
-                     </div>
-                     
-                     <div class="border-t border-gray-200 pt-3">
-                       <button @click="showHelp = !showHelp" class="text-primary-600 font-bold hover:underline flex items-center justify-center gap-1 w-full">
-                          <span>مشکل در نصب؟</span>
-                          <span class="text-xs bg-primary-100 px-2 py-0.5 rounded-full">راهنما</span>
-                       </button>
-                       
-                       <div v-if="showHelp" class="mt-3 text-right text-xs text-gray-500 space-y-2 bg-white p-3 rounded-lg border border-gray-100">
-                          <p>۱. مطمئن شوید که از مرورگر <b>Chrome</b> استفاده می‌کنید.</p>
-                          <p>۲. اگر دکمه نصب را نمی‌بینید، کش مرورگر را پاک کنید.</p>
-                          <p>۳. فیلترشکن خود را بررسی کنید.</p>
-                          <p>۴. مطمئن شوید گزینه "Desktop Site" خاموش است.</p>
-                       </div>
-                     </div>
-                  </div>
-                </transition>
 
                 <!-- iOS Instructions (Always visible on iOS) -->
                 <div v-if="isIOS" class="text-sm text-gray-600 bg-gray-50 p-4 rounded-xl border border-gray-100">
