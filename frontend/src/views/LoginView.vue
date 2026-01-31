@@ -137,6 +137,21 @@ onMounted(() => {
      showInstallBtn.value = true
   }
 })
+
+// Auto-submit OTP when 5 digits are entered
+import { watch } from 'vue'
+watch(() => form.code, (newVal) => {
+  if (newVal && newVal.length === 5) {
+    verifyOtp()
+  }
+})
+
+// Auto-submit Mobile Number when valid (11 digits, starts with 09)
+watch(() => form.mobile, (newVal) => {
+  if (newVal && newVal.length === 11 && /^09\d{9}$/.test(newVal) && !loading.value) {
+    requestOtp()
+  }
+})
 </script>
 
 <template>
@@ -170,7 +185,8 @@ onMounted(() => {
                 <input 
                   v-model="form.mobile"
                   type="tel" 
-                  class="input-premium pl-12"
+                  class="input-premium"
+                  style="direction: ltr; text-align: left !important; padding-left: 4rem !important;"
                   placeholder="0912..."
                   dir="ltr"
                 />
@@ -223,8 +239,9 @@ onMounted(() => {
                 <input 
                   v-model="form.code"
                   type="text" 
-                  class="input-premium pl-12 text-center tracking-[1em] font-mono text-lg"
-                  placeholder="____"
+                  class="input-premium !pl-20 !text-left tracking-[1em] font-mono text-lg"
+                  style="direction: ltr;"
+                  placeholder="_____"
                   maxlength="5"
                   dir="ltr"
                 />
