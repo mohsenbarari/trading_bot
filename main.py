@@ -31,6 +31,10 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Application startup...")
     await init_redis()
     
+    # Setup SQLAlchemy event listeners for real-time sync
+    from core.events import setup_all_events
+    setup_all_events()
+    
     yield  # اجرای اپلیکیشن
     
     # Shutdown

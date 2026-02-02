@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     postgres_password: str
     frontend_url: str  
     redis_url: str
+    redis_host: str = "redis"  # Default Docker service name
+    redis_port: int = 6379
     channel_id: int | None = None  # آیدی کانال برای ارسال پیام
     channel_invite_link: str | None = None  # لینک دعوت کانال
 
