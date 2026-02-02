@@ -183,6 +183,7 @@ async def request_otp(
     db: AsyncSession = Depends(get_db),
     redis_client: Redis = Depends(get_redis)
 ):
+    print(f"DEBUG: request_otp called for {request.mobile_number}", flush=True)
     # ===== Rate Limiting: 1 request per 2 minutes per mobile =====
     rate_limit_key = f"OTP_RATE_LIMIT:{request.mobile_number}"
     existing_limit = await redis_client.get(rate_limit_key)

@@ -359,10 +359,16 @@ async def create_offer(
     await publish_event("offer:created", {
         "id": new_offer.id,
         "offer_type": new_offer.offer_type.value,
+        "commodity_id": new_offer.commodity_id,
         "commodity_name": new_offer.commodity.name,
         "quantity": new_offer.quantity,
         "price": new_offer.price,
-        "user_account_name": current_user.account_name
+        "status": new_offer.status.value,
+        "created_at": to_jalali_str(new_offer.created_at) or "",
+        "user_account_name": current_user.account_name,
+        "notes": new_offer.notes,
+        "is_wholesale": new_offer.is_wholesale,
+        "lot_sizes": new_offer.lot_sizes,
     })
     
     # دریافت تنظیمات برای محاسبه انقضا

@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 import redis.asyncio as redis
 import asyncio
 import json
+import logging
 from typing import List, Dict, Set
 
 from core.redis import pool
@@ -86,7 +87,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def listen_redis_events(websocket: WebSocket):
     """گوش دادن به رویدادهای Redis و ارسال به WebSocket"""
-    print(f"🔴 Redis listener started for WebSocket")
+    logging.info(f"🔴 Redis listener started for WebSocket")
     try:
         async with redis.Redis(connection_pool=pool) as redis_client:
             pubsub = redis_client.pubsub()
@@ -97,38 +98,45 @@ async def listen_redis_events(websocket: WebSocket):
                 "events:offer:updated",
                 "events:trade:created"
             )
-            print(f"✅ Subscribed to Redis channels")
+            logging.info(f"✅ Subscribed to Redis channels")
             
             while True:
                 try:
                     message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                    if message:
+                        print(f"🔍 DEBUG APP: RAW REDIS MSG: {message}", flush=True)
+                    
                     if message and message.get("type") == "message":
                         channel = message.get("channel", b"").decode("utf-8")
-                        data = message.get("data", b"").decode("utf-8")
+                        data_str = message.get("data", b"").decode("utf-8")
                         event_type = channel.replace("events:", "")
                         
-                        print(f"📩 Redis message received: {event_type}")
+                        logging.info(f"📩 Redis message received: {event_type}")
                         
                         try:
+                            # Send plain JSON, client parses it
                             await websocket.send_json({
                                 "type": event_type,
-                                "data": json.loads(data)
+                                "data": json.loads(data_str)
                             })
-                            print(f"✅ Sent to WebSocket: {event_type}")
+                            logging.info(f"✅ Sent to WebSocket: {event_type}")
                         except Exception as send_err:
-                            print(f"❌ Error sending to WebSocket: {send_err}")
+                            logging.error(f"❌ Error sending to WebSocket: {send_err}")
                             break
-                    await asyncio.sleep(0.1)  # کمی تاخیر برای جلوگیری از busy loop
+                    
+                    await asyncio.sleep(0.1) 
                 except asyncio.TimeoutError:
                     continue
                 except Exception as e:
-                    print(f"❌ Redis listener loop error: {e}")
-                    break
+                    logging.error(f"❌ Redis listener loop error: {e}")
+                    # Don't break immediately on minor errors, but break on critical ones?
+                    # For now, sleep and retry to be robust
+                    await asyncio.sleep(1)
                     
     except asyncio.CancelledError:
-        print("🔴 Redis listener cancelled")
+        logging.info("🔴 Redis listener cancelled")
     except Exception as e:
-        print(f"❌ Redis listener error: {e}")
+        logging.error(f"❌ Redis listener critical error: {e}")
 
 
 # --- SSE Endpoint (Backup) ---
@@ -198,8 +206,6 @@ async def publish_event(event_type: str, data: dict):
         print(f"⚠️ Error publishing event {event_type}: {e}")
 
 
-async def broadcast_to_all(event_type: str, data: dict):
-    """Broadcast مستقیم به همه WebSocket کانکشن‌ها"""
     await manager.broadcast({
         "type": event_type,
         "data": data
