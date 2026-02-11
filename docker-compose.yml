@@ -3,7 +3,7 @@ services:
     build: .
     container_name: trading_bot_app
     restart: always
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --ssl-keyfile /app/certs/privkey.pem --ssl-certfile /app/certs/fullchain.pem
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
 
     volumes:
       - /root/cert/ip:/app/certs  # Mount Host Certs
@@ -41,6 +41,29 @@ services:
     depends_on:
       migration:
         condition: service_completed_successfully
+    networks:
+      - trading_net
+
+  sync_worker:
+    build: .
+    container_name: trading_bot_sync_worker
+    restart: always
+    command: python -m core.sync_worker
+    volumes:
+      - ./api:/app/api
+      - ./bot:/app/bot
+      - ./core:/app/core
+      - ./src:/app/src
+      - ./models:/app/models
+      - ./migrations:/app/migrations
+      - ./main.py:/app/main.py
+      - ./schemas.py:/app/schemas.py
+      - ./trading_settings.json:/app/trading_settings.json
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_started
     networks:
       - trading_net
 
