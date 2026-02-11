@@ -224,6 +224,10 @@ async def monitor_expired_offers(bot: Bot):
         await asyncio.sleep(30)
 
 async def main():
+    # Enable sync event listeners for bot process
+    from core.events import setup_all_events
+    setup_all_events()
+    
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode="Markdown"))
     dp = Dispatcher(storage=MemoryStorage())
 
