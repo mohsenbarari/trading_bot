@@ -9,7 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'offers_trades_v2'
@@ -41,17 +41,27 @@ def upgrade() -> None:
     
     # Drop old tradetype enum if exists
     op.execute("DROP TYPE IF EXISTS tradetype CASCADE")
+    op.execute("DROP TYPE IF EXISTS offertype CASCADE")
+    op.execute("DROP TYPE IF EXISTS offerstatus CASCADE")
+    op.execute("DROP TYPE IF EXISTS tradestatus CASCADE")
+
+    # Explicitly create Enums safely
+    op.execute("DO $$ BEGIN CREATE TYPE offertype AS ENUM ('BUY', 'SELL'); EXCEPTION WHEN duplicate_object THEN null; END $$;")
+    op.execute("DO $$ BEGIN CREATE TYPE offerstatus AS ENUM ('ACTIVE', 'COMPLETED', 'CANCELLED', 'EXPIRED'); EXCEPTION WHEN duplicate_object THEN null; END $$;")
+    op.execute("DO $$ BEGIN CREATE TYPE tradetype AS ENUM ('BUY', 'SELL'); EXCEPTION WHEN duplicate_object THEN null; END $$;")
+    op.execute("DO $$ BEGIN CREATE TYPE tradestatus AS ENUM ('PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED'); EXCEPTION WHEN duplicate_object THEN null; END $$;")
+
     
     # 2. Create offers table (لفظ)
     op.create_table(
         'offers',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('user_id', sa.Integer(), nullable=False),
-        sa.Column('offer_type', sa.Enum('BUY', 'SELL', name='offertype', create_type=True), nullable=False),
+        sa.Column('offer_type', postgresql.ENUM('BUY', 'SELL', name='offertype', create_type=False), nullable=False),
         sa.Column('commodity_id', sa.Integer(), nullable=False),
         sa.Column('quantity', sa.Integer(), nullable=False),
         sa.Column('price', sa.BigInteger(), nullable=False),
-        sa.Column('status', sa.Enum('ACTIVE', 'COMPLETED', 'CANCELLED', 'EXPIRED', name='offerstatus', create_type=True), nullable=False, server_default='ACTIVE'),
+        sa.Column('status', postgresql.ENUM('ACTIVE', 'COMPLETED', 'CANCELLED', 'EXPIRED', name='offerstatus', create_type=False), nullable=False, server_default='ACTIVE'),
         sa.Column('channel_message_id', sa.BigInteger(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
@@ -72,10 +82,10 @@ def upgrade() -> None:
         sa.Column('offer_user_id', sa.Integer(), nullable=False),
         sa.Column('responder_user_id', sa.Integer(), nullable=False),
         sa.Column('commodity_id', sa.Integer(), nullable=False),
-        sa.Column('trade_type', sa.Enum('BUY', 'SELL', name='tradetype', create_type=True), nullable=False),
+        sa.Column('trade_type', postgresql.ENUM('BUY', 'SELL', name='tradetype', create_type=False), nullable=False),
         sa.Column('quantity', sa.Integer(), nullable=False),
         sa.Column('price', sa.BigInteger(), nullable=False),
-        sa.Column('status', sa.Enum('PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED', name='tradestatus', create_type=True), nullable=False, server_default='PENDING'),
+        sa.Column('status', postgresql.ENUM('PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED', name='tradestatus', create_type=False), nullable=False, server_default='PENDING'),
         sa.Column('note', sa.Text(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('confirmed_at', sa.DateTime(timezone=True), nullable=True),

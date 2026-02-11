@@ -1,28 +1,22 @@
 #!/bin/bash
 
 # ==========================================
-# Nginx Server Settings (Destination)
-# ==========================================
-NGINX_SERVER_IP="YOUR_NGINX_SERVER_IP"
-NGINX_USER="root"
-REMOTE_DIR="/var/www/telegram_bot/dist/"
-
-# ==========================================
-# Project Settings (Source - App Server)
+# تنظیمات پروژه
 # ==========================================
 PROJECT_DIR="/root/trading-bot/trading_bot"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 DIST_DIR="$PROJECT_DIR/mini_app_dist"
 
-echo "🚀 Starting Deployment Process..."
+echo "� Starting automated deployment..."
+echo "�🚀 Starting Deployment Process..."
 
-# 1. Build Frontend
+# 1. رفتن به پوشه فرانت‌‌اند و بیلد گرفتن
 echo "📦 Building Frontend..."
 cd $FRONTEND_DIR
 npm install
 npm run build
 
-# Check build status
+# بررسی موفقیت بیلد
 if [ $? -ne 0 ]; then
     echo "❌ Build failed! Aborting deployment."
     exit 1
@@ -30,23 +24,30 @@ fi
 
 echo "✅ Build successful!"
 
-# 2. Check build directory
+# 2. بررسی وجود دایرکتوری بیلد
 if [ ! -d "$DIST_DIR" ]; then
     echo "❌ Build directory ($DIST_DIR) not found!"
     exit 1
 fi
 
-# 3. Sync files to Nginx Server
-echo "📡 Syncing files to Nginx Server ($NGINX_SERVER_IP)..."
+# 3. تنظیم مجوزها برای Nginx
+echo "� Setting permissions for Nginx..."
+chmod -R 755 "$DIST_DIR"
 
-# Using rsync for smart copy
-rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no" "$DIST_DIR/" "$NGINX_USER@$NGINX_SERVER_IP:$REMOTE_DIR"
+# 4. ریبیلد و ریستارت Docker containers
+echo "🐳 Rebuilding Docker containers..."
+cd $PROJECT_DIR
+docker compose down
+docker compose up -d --build
 
+# بررسی موفقیت
 if [ $? -eq 0 ]; then
     echo "✅ Deployment completed successfully!"
-    echo "🌐 Static files are now live on Nginx Server."
+    echo "🌐 Application is now live!"
+    echo ""
+    echo "📊 Container status:"
+    docker compose ps
 else
-    echo "❌ Deployment failed! Please check SSH connection."
-    echo "💡 Hint: Make sure you have added your SSH public key to the Nginx Server:"
-    echo "   ssh-copy-id $NGINX_USER@$NGINX_SERVER_IP"
+    echo "❌ Docker deployment failed!"
+    exit 1
 fi
