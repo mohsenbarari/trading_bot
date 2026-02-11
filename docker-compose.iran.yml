@@ -1,0 +1,125 @@
+# ==========================================
+# Docker Compose - Iran Server
+# بدون Telegram Bot
+# ==========================================
+
+services:
+  app:
+    build: .
+    container_name: trading_bot_app
+    restart: always
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - ./api:/app/api
+      - ./bot:/app/bot
+      - ./core:/app/core
+      - ./src:/app/src
+      - ./models:/app/models
+      - ./migrations:/app/migrations
+      - ./main.py:/app/main.py
+      - ./schemas.py:/app/schemas.py
+      - ./mini_app_dist:/app/mini_app_dist
+      - ./trading_settings.json:/app/trading_settings.json
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    networks:
+      - trading_net
+
+  # ❌ Bot Service - غیرفعال در سرور ایران
+  # bot:
+  #   build: .
+  #   container_name: trading_bot_bot
+  #   restart: always
+  #   command: python run_bot.py
+  #   ...
+
+  sync_worker:
+    build: .
+    container_name: trading_bot_sync_worker
+    restart: always
+    command: python -m core.sync_worker
+    volumes:
+      - ./api:/app/api
+      - ./bot:/app/bot
+      - ./core:/app/core
+      - ./src:/app/src
+      - ./models:/app/models
+      - ./migrations:/app/migrations
+      - ./main.py:/app/main.py
+      - ./schemas.py:/app/schemas.py
+      - ./trading_settings.json:/app/trading_settings.json
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_started
+    networks:
+      - trading_net
+
+  migration:
+    build: .
+    container_name: trading_bot_migration
+    command: [ "python", "manage.py" ]
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - trading_net
+
+  db:
+    image: postgres:15-alpine
+    container_name: trading_bot_db
+    restart: always
+    command: postgres -c max_connections=500
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    networks:
+      - trading_net
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  adminer:
+    image: adminer
+    container_name: trading_bot_adminer
+    restart: always
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - trading_net
+    depends_on:
+      - db
+
+  redis:
+    image: redis:7-alpine
+    container_name: trading_bot_redis
+    volumes:
+      - redis_data:/data
+    restart: always
+    networks:
+      - trading_net
+
+networks:
+  trading_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

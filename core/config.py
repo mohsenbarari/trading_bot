@@ -10,8 +10,14 @@ from pydantic_settings import BaseSettings
 __all__ = ["Settings", "settings"]
 
 class Settings(BaseSettings):
-    bot_token: str
-    bot_username: str
+    bot_token: str | None = None
+    bot_username: str | None = None
+    
+    # Server Mode (iran vs foreign)
+    server_mode: str = "foreign"
+    foreign_server_url: str | None = None
+    sync_api_key: str | None = None
+
     database_url: str
     sync_database_url: str
     postgres_db: str

@@ -1,22 +1,23 @@
-# Environments
-.env
-.venv
-__pycache__/
 
-# IDE specific files
-.idea/
-*.swp
-check-dns
-
+app_logs.txt
 # Build artifacts
+check-dns
+deploy.sh
+docs/*
+.env
+.env.iran
+# Environments
+frontend/node_modules/
+.idea/
+# IDE specific files
 mini_app_dist/
 node_modules/
-frontend/node_modules/
-deploy.sh
+__pycache__
+__pycache__/
+*.swp
 # Temporary Test Files
 tests/debug_trade.py
-tests/live_simulation.py
-app_logs.txt
-tests/load_test.py
 tests/__init__.py
-docs/*
+tests/live_simulation.py
+tests/load_test.py
+.venv
