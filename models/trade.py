@@ -1,6 +1,6 @@
 # models/trade.py
 """مدل معامله (تراکنش واقعی بین دو کاربر)"""
-from sqlalchemy import Column, Integer, String, BigInteger, Enum, DateTime, ForeignKey, Text, CheckConstraint, Index
+from sqlalchemy import Column, Integer, String, BigInteger, Enum, DateTime, ForeignKey, Text, CheckConstraint, Index, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -78,6 +78,10 @@ class Trade(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
     confirmed_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # ===== Sync Fields =====
+    idempotency_key = Column(String(64), unique=True, nullable=True)
+    archived = Column(Boolean, default=False)
     
     # ===== فعال‌سازی Optimistic Locking =====
     __mapper_args__ = {

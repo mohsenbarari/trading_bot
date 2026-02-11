@@ -80,6 +80,11 @@ class Offer(Base):
     # زمان ایجاد
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+    # ===== Sync Fields =====
+    idempotency_key = Column(String(64), unique=True, nullable=True)
+    archived = Column(Boolean, default=False)
+
     
     # ===== فعال‌سازی Optimistic Locking =====
     __mapper_args__ = {

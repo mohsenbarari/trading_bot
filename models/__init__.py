@@ -12,7 +12,10 @@ from .offer import Offer, OfferType, OfferStatus
 from .trade import Trade, TradeType, TradeStatus
 from .message import Message
 from .conversation import Conversation
+from .conversation import Conversation
 from .user_block import UserBlock
+from .change_log import ChangeLog
+from .sync_block import SyncBlock
 
 __all__ = [
     # User & Auth
@@ -38,4 +41,7 @@ __all__ = [
     # Other
     "Notification",
     "TradingSetting",
+    # Sync
+    "ChangeLog",
+    "SyncBlock",
 ]
