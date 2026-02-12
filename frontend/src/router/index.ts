@@ -37,12 +37,14 @@ const router = createRouter({
     ]
 })
 
-// Navigation Guard Stub (will implement real auth check later)
-router.beforeEach((to, from, next) => {
-    // const isAuthenticated = checkAuth() 
-    // if (to.meta.requiresAuth && !isAuthenticated) next({ name: 'login' })
-    // else next()
-    next()
+// Navigation Guard — redirect to login if not authenticated
+router.beforeEach((to, _from, next) => {
+    const token = localStorage.getItem('auth_token')
+    if (to.meta.requiresAuth && !token) {
+        next({ name: 'login' })
+    } else {
+        next()
+    }
 })
 
 export default router
