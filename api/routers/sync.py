@@ -85,7 +85,10 @@ async def receive_sync_data(
     sorted_items = sorted(items, key=lambda x: TABLE_ORDER.get(x.get('table', ''), 99))
     
     processed_count = 0
+
     errors = []
+    new_offers = [] # Track inserted offers for publishing
+
     
     try:
         for item in sorted_items:
@@ -138,6 +141,9 @@ async def receive_sync_data(
                 if operation in ("INSERT", "UPDATE"):
                     data['id'] = record_id
                     
+                    if table == "offers" and operation == "INSERT" and settings.server_mode != "iran":
+                        new_offers.append(record_id)
+                        
                     from sqlalchemy.dialects.postgresql import insert as pg_insert
                     stmt = pg_insert(model).values(**data)
                     stmt = stmt.on_conflict_do_update(
@@ -160,6 +166,47 @@ async def receive_sync_data(
         
         await db.commit()
         
+        # --- Handle Offer Publishing on Foreign Server ---
+        if settings.server_mode != "iran" and new_offers:
+             try:
+                 from sqlalchemy import select
+                 from sqlalchemy.orm import selectinload
+                 from models.offer import Offer, OfferStatus
+                 from api.routers.offers import send_offer_to_channel
+
+                 # Fetch newly inserted offers that are ACTIVE
+                 # We assume newly inserted offers are active if data['status'] == 'active'
+                 # But safer to query DB
+                 stmt = select(Offer).options(
+                     selectinload(Offer.user), 
+                     selectinload(Offer.commodity)
+                 ).where(
+                     Offer.id.in_(new_offers), 
+                     Offer.status == OfferStatus.ACTIVE,
+                     Offer.channel_message_id.is_(None)
+                 )
+                 result = await db.execute(stmt)
+                 offers_to_send = result.scalars().all()
+                 
+                 for offer in offers_to_send:
+                     try:
+                         msg_id = await send_offer_to_channel(offer, offer.user)
+                         if msg_id:
+                             offer.channel_message_id = msg_id
+                             # We do NOT use is_sync=True here, because this update MUST be synced back to Iran
+                             db.add(offer) 
+                             logger.info(f"📣 Published synced offer {offer.id} to Telegram. MsgID: {msg_id}")
+                     except Exception as e:
+                         logger.error(f"Failed to publish synced offer {offer.id}: {e}")
+                 
+                 if offers_to_send:
+                     await db.commit()
+                     
+             except ImportError:
+                 logger.error("Could not import send_offer_to_channel")
+             except Exception as e:
+                 logger.error(f"Error publishing synced offers: {e}")
+        
         if errors:
             return {"status": "partial", "processed": processed_count, "errors": len(errors)}
         return {"status": "success", "processed": processed_count}
@@ -168,3 +215,4 @@ async def receive_sync_data(
         await db.rollback()
         logger.error(f"Error processing sync batch: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
