@@ -50,7 +50,12 @@ async function requestOtp() {
     return
   }
   
-  if (countdown.value > 0) return
+  if (countdown.value > 0) {
+    // Timer active — don't re-request, but move to OTP step
+    // so user can enter a delayed code
+    step.value = 'otp'
+    return
+  }
 
   loading.value = true
   error.value = ''
@@ -233,15 +238,15 @@ watch(() => form.mobile, (newVal) => {
 
             <button 
               @click="requestOtp" 
-              :disabled="loading || countdown > 0" 
+              :disabled="loading" 
               class="btn-primary group relative overflow-hidden disabled:opacity-75 disabled:cursor-not-allowed"
             >
               <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
               
               <Loader2 v-if="loading" class="animate-spin" />
-              <div v-else-if="countdown > 0" class="flex items-center gap-2 font-mono dir-ltr">
-                <Clock :size="18" />
-                <span>{{ formattedTimer }}</span>
+              <div v-else-if="countdown > 0" class="flex items-center gap-2">
+                <span>وارد کردن کد</span>
+                <span class="font-mono text-xs opacity-75 dir-ltr">({{ formattedTimer }})</span>
               </div>
               <span v-else>دریافت کد تایید</span>
             </button>
