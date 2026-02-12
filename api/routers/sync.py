@@ -167,6 +167,7 @@ async def receive_sync_data(
         await db.commit()
         
         # --- Handle Offer Publishing on Foreign Server ---
+        logger.info(f"DEBUG SYNC: server_mode={settings.server_mode}, new_offers_count={len(new_offers)}")
         if settings.server_mode != "iran" and new_offers:
              try:
                  from sqlalchemy import select
