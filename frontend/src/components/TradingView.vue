@@ -82,8 +82,11 @@ const tradingSettings = ref<TradingSettings>({
   offer_expiry_minutes: 60
 })
 
-// Filter
+// Filter & Sort
 const filterType = ref<'all' | 'buy' | 'sell'>('all')
+const sortCommodity = ref('')
+const sortDirection = ref<'none' | 'asc' | 'desc'>('none')
+const showSortPanel = ref(false)
 
 // Create Wizard State
 const showCreateWizard = ref(false)
@@ -119,9 +122,49 @@ let pollingInterval: number | null = null
 
 // Computed
 const filteredOffers = computed(() => {
-  if (filterType.value === 'all') return offers.value
-  return offers.value.filter(o => o.offer_type === filterType.value)
+  let result = offers.value
+  
+  // Filter by type
+  if (filterType.value !== 'all') {
+    result = result.filter(o => o.offer_type === filterType.value)
+  }
+  
+  // Sort by price for selected commodity
+  if (sortCommodity.value && sortDirection.value !== 'none') {
+    const commodity = sortCommodity.value
+    const dir = sortDirection.value
+    result = [...result].sort((a, b) => {
+      const aMatch = a.commodity_name === commodity
+      const bMatch = b.commodity_name === commodity
+      // Non-matching commodities go to end
+      if (aMatch && !bMatch) return -1
+      if (!aMatch && bMatch) return 1
+      if (!aMatch && !bMatch) return 0
+      // Both match: sort by price
+      return dir === 'asc' ? a.price - b.price : b.price - a.price
+    })
+  }
+  
+  return result
 })
+
+function toggleSort(commodity: string) {
+  if (sortCommodity.value === commodity) {
+    // Cycle: none -> asc -> desc -> none
+    if (sortDirection.value === 'none') sortDirection.value = 'asc'
+    else if (sortDirection.value === 'asc') sortDirection.value = 'desc'
+    else { sortDirection.value = 'none'; sortCommodity.value = '' }
+  } else {
+    sortCommodity.value = commodity
+    sortDirection.value = 'asc'
+  }
+}
+
+function clearSort() {
+  sortCommodity.value = ''
+  sortDirection.value = 'none'
+  showSortPanel.value = false
+}
 
 const randomPlaceholder = computed(() => {
   if (!commodities.value || commodities.value.length === 0) {
@@ -459,10 +502,43 @@ watch(activeTab, (val) => {
     <div v-if="error" class="message error">{{ error }}</div>
     
     <!-- Filter Bar at Top -->
-    <div class="filter-bar">
-      <button :class="{ active: filterType === 'all' }" @click="filterType = 'all'">همه</button>
-      <button :class="{ active: filterType === 'buy' }" @click="filterType = 'buy'">🟢 خرید</button>
-      <button :class="{ active: filterType === 'sell' }" @click="filterType = 'sell'">🔴 فروش</button>
+    <div class="filter-sort-row">
+      <div class="filter-bar">
+        <button :class="{ active: filterType === 'all' }" @click="filterType = 'all'">همه</button>
+        <button :class="{ active: filterType === 'buy' }" @click="filterType = 'buy'">🟢 خرید</button>
+        <button :class="{ active: filterType === 'sell' }" @click="filterType = 'sell'">🔴 فروش</button>
+      </div>
+      <button class="sort-toggle-btn" :class="{ active: showSortPanel || sortDirection !== 'none' }" @click="showSortPanel = !showSortPanel">
+        <span v-if="sortDirection === 'asc'">↑</span>
+        <span v-else-if="sortDirection === 'desc'">↓</span>
+        <span v-else>⇅</span>
+        مرتب‌سازی
+      </button>
+    </div>
+
+    <!-- Sort Panel -->
+    <div v-if="showSortPanel" class="sort-panel">
+      <div class="sort-panel-header">
+        <span class="sort-panel-title">مرتب‌سازی بر اساس قیمت:</span>
+        <button v-if="sortDirection !== 'none'" class="sort-clear-btn" @click="clearSort">✕ حذف</button>
+      </div>
+      <div class="sort-chips">
+        <button
+          v-for="c in commodities"
+          :key="c.id"
+          class="sort-chip"
+          :class="{ active: sortCommodity === c.name }"
+          @click="toggleSort(c.name)"
+        >
+          {{ c.name }}
+          <span v-if="sortCommodity === c.name && sortDirection === 'asc'" class="sort-arrow">↑</span>
+          <span v-if="sortCommodity === c.name && sortDirection === 'desc'" class="sort-arrow">↓</span>
+        </button>
+      </div>
+      <div v-if="sortCommodity && sortDirection !== 'none'" class="sort-hint">
+        {{ sortCommodity }} — {{ sortDirection === 'asc' ? 'ارزان‌ترین اول' : 'گران‌ترین اول' }}
+        <span class="sort-hint-tip">(دوباره بزنید برای تغییر جهت)</span>
+      </div>
     </div>
     
     <!-- Tabs -->
@@ -1040,12 +1116,19 @@ watch(activeTab, (val) => {
   border-color: #007AFF;
 }
 
-/* Filter Bar */
+/* Filter & Sort Row */
+.filter-sort-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: -25px;
+  margin-bottom: 8px;
+}
+
 .filter-bar {
   display: flex;
   gap: 2px;
-  margin-top: -25px;
-  margin-bottom: 8px;
 }
 
 .filter-bar button {
@@ -1062,6 +1145,107 @@ watch(activeTab, (val) => {
   background: #007AFF;
   color: white;
   border-color: #007AFF;
+}
+
+.sort-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.sort-toggle-btn.active {
+  background: #f59e0b;
+  color: white;
+  border-color: #f59e0b;
+}
+
+/* Sort Panel */
+.sort-panel {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  animation: slideDown 0.2s ease-out;
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.sort-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.sort-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-color);
+}
+.sort-clear-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: none;
+  background: #fee2e2;
+  color: #dc2626;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.sort-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sort-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  color: var(--text-color);
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.sort-chip:active {
+  transform: scale(0.95);
+}
+.sort-chip.active {
+  background: #fffbeb;
+  border-color: #f59e0b;
+  color: #b45309;
+  font-weight: 700;
+}
+.sort-arrow {
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.sort-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #d97706;
+  font-weight: 600;
+}
+.sort-hint-tip {
+  color: var(--text-secondary);
+  font-weight: 400;
 }
 
 /* Offers List */
