@@ -2,7 +2,6 @@
 app_logs.txt
 # Build artifacts
 check-dns
-deploy.sh
 docs/*
 .env
 .env.iran
