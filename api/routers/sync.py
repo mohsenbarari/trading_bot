@@ -115,6 +115,7 @@ async def receive_sync_data(
 
             table = item.get('table')
             operation = item.get('operation')
+            logger.info(f"DEBUG ITEM: table={table} operation={operation} server_mode={settings.server_mode}")
             data = item.get('data')
             record_id = item.get('id')
             
