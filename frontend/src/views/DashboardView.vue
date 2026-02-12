@@ -1,15 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, Shield, MessageCircle, Bell, Store, LogOut, AlertTriangle, Ban } from 'lucide-vue-next'
+import { Bell, Store, LogOut, AlertTriangle, Ban } from 'lucide-vue-next'
 
 const router = useRouter()
 const user = ref<any>(null)
 const loading = ref(true)
-
-const isAdmin = computed(() => {
-  return user.value && ['مدیر ارشد', 'مدیر میانی'].includes(user.value.role)
-})
 
 const isRestricted = computed(() => {
   if (!user.value?.trading_restricted_until) return false
@@ -94,7 +90,6 @@ onMounted(fetchUser)
         <div class="top-actions">
           <button class="icon-btn" aria-label="اعلان‌ها">
             <Bell :size="22" />
-            <!-- <span class="badge">3</span> -->
           </button>
           <button class="icon-btn" @click="logout" aria-label="خروج">
             <LogOut :size="20" />
@@ -142,36 +137,6 @@ onMounted(fetchUser)
           <div class="hero-arrow">←</div>
         </button>
 
-        <!-- Quick Access Grid -->
-        <div class="quick-grid">
-
-          <!-- Messenger -->
-          <button class="quick-card" @click="router.push('/messenger')">
-            <div class="quick-icon messenger-icon">
-              <MessageCircle :size="24" />
-            </div>
-            <span class="quick-label">پیام‌رسان</span>
-            <span class="quick-badge coming-soon">بزودی</span>
-          </button>
-
-          <!-- Profile -->
-          <button class="quick-card" @click="router.push('/profile')">
-            <div class="quick-icon profile-icon">
-              <User :size="24" />
-            </div>
-            <span class="quick-label">پنل کاربری</span>
-          </button>
-
-          <!-- Admin Panel (role-based) -->
-          <button v-if="isAdmin" class="quick-card" @click="router.push('/admin')">
-            <div class="quick-icon admin-icon">
-              <Shield :size="24" />
-            </div>
-            <span class="quick-label">پنل مدیریت</span>
-          </button>
-
-        </div>
-
       </main>
 
       <!-- Footer -->
@@ -184,10 +149,6 @@ onMounted(fetchUser)
 </template>
 
 <style scoped>
-/* ═══════════════════════════════════
-   Dashboard — Clean & Premium
-   ═══════════════════════════════════ */
-
 .dashboard-page {
   min-height: 100dvh;
   background: linear-gradient(160deg, #fefce8 0%, #ffffff 40%, #fffbeb 100%);
@@ -217,6 +178,7 @@ onMounted(fetchUser)
 /* Content */
 .dashboard-content {
   padding: 1.25rem;
+  padding-bottom: 6rem;
   max-width: 480px;
   margin: 0 auto;
   display: flex;
@@ -298,21 +260,6 @@ onMounted(fetchUser)
   transform: scale(0.92);
   background: #f9fafb;
 }
-.badge {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  width: 16px;
-  height: 16px;
-  background: #ef4444;
-  color: white;
-  font-size: 0.6rem;
-  font-weight: 700;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 
 /* ═══ Alert Cards ═══ */
 .alert-card {
@@ -377,6 +324,7 @@ onMounted(fetchUser)
   flex: 1;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 1.25rem;
 }
 
@@ -402,13 +350,12 @@ onMounted(fetchUser)
   position: absolute;
   inset: 0;
   background: linear-gradient(135deg, #f59e0b, #d97706, #b45309);
-  transition: opacity 0.3s;
 }
 .hero-btn-bg::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%);
+  background: linear-gradient(135deg, transparent 30%, rgba(255,255,255,0.15) 50%, transparent 70%);
   animation: shimmer 3s ease-in-out infinite;
 }
 @keyframes shimmer {
@@ -464,81 +411,6 @@ onMounted(fetchUser)
 @keyframes arrowBounce {
   0%, 100% { transform: translateX(0); }
   50% { transform: translateX(-6px); }
-}
-
-/* ═══ Quick Grid ═══ */
-.quick-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.875rem;
-}
-
-.quick-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  padding: 1.5rem 1rem;
-  border-radius: 1.25rem;
-  border: 1px solid rgba(0,0,0,0.04);
-  background: white;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  -webkit-tap-highlight-color: transparent;
-}
-.quick-card:active {
-  transform: scale(0.96);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-}
-
-.quick-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.2s;
-}
-.quick-card:active .quick-icon {
-  transform: scale(0.9);
-}
-
-.messenger-icon {
-  background: linear-gradient(135deg, #dbeafe, #bfdbfe);
-  color: #2563eb;
-}
-.profile-icon {
-  background: linear-gradient(135deg, #f3e8ff, #e9d5ff);
-  color: #7c3aed;
-}
-.admin-icon {
-  background: linear-gradient(135deg, #dcfce7, #bbf7d0);
-  color: #16a34a;
-}
-
-.quick-label {
-  font-size: 0.85rem;
-  font-weight: 700;
-  color: #374151;
-}
-
-.quick-badge {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  font-size: 0.6rem;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 20px;
-}
-.coming-soon {
-  background: #f0f9ff;
-  color: #0284c7;
-  border: 1px solid #bae6fd;
 }
 
 /* ═══ Footer ═══ */
