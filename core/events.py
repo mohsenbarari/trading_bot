@@ -197,6 +197,10 @@ def setup_trade_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
+            # Handle Enum or String
+            trade_type_val = target.trade_type.value if hasattr(target.trade_type, 'value') else target.trade_type
+            status_val = target.status.value if hasattr(target.status, 'value') else target.status
+
             data = {
                 "id": target.id,
                 "trade_number": target.trade_number,
@@ -204,10 +208,10 @@ def setup_trade_events():
                 "offer_user_id": target.offer_user_id,
                 "responder_user_id": target.responder_user_id,
                 "commodity_id": target.commodity_id,
-                "trade_type": target.trade_type.value if target.trade_type else None,
+                "trade_type": trade_type_val,
                 "quantity": target.quantity,
                 "price": target.price,
-                "status": target.status.value if target.status else None,
+                "status": status_val,
                 "created_at": target.created_at.isoformat() if target.created_at else None,
                 "idempotency_key": target.idempotency_key,
                 "archived": target.archived
@@ -221,9 +225,11 @@ def setup_trade_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
+            status_val = target.status.value if hasattr(target.status, 'value') else target.status
+            
             data = {
                 "id": target.id,
-                "status": target.status.value if target.status else None,
+                "status": status_val,
                 "confirmed_at": target.confirmed_at.isoformat() if target.confirmed_at else None,
                 "completed_at": target.completed_at.isoformat() if target.completed_at else None,
                 "updated_at": target.updated_at.isoformat() if target.updated_at else None,
@@ -405,7 +411,9 @@ def setup_trading_settings_events():
                 "value": target.value,
                 "updated_at": target.updated_at.isoformat() if target.updated_at else None
             }
-            log_change(connection, "trading_settings", target.key, "INSERT", data)
+            # For trading_settings, the key is the ID, but change_log requires int record_id
+            # We pass 0 as dummy ID, the real key is in data['key']
+            log_change(connection, "trading_settings", 0, "INSERT", data)
         except Exception as e:
             logger.error(f"Error in trading_setting after_insert event: {e}")
 
@@ -419,20 +427,9 @@ def setup_trading_settings_events():
                 "value": target.value,
                 "updated_at": target.updated_at.isoformat() if target.updated_at else None
             }
-            # For trading_settings, the key is the ID, so we pass target.key as record_id
-            # Note: record_id in log_change is expected to be int usually, but schema allows string?
-            # Let's check change_log model. If record_id is Integer, we might have an issue since key is String.
-            # However, looking at previous code, log_change takes record_id as int.
-            # TradingSetting primary key is 'key' (String). 
-            # We need to check if change_log supports string IDs or if we need a workaround.
-            # Checking change_log.py...
-            
-            # Temporary: Assuming we can pass key string, but if log_change enforces int, we need to check.
-            # Let's check change_log function signature in events.py line 49: record_id: int
-            # Wait, TradingSettings key is a string. This is a problem.
-            # I need to verify change_log model first.
-            
-            log_change(connection, "trading_settings", 0, "UPDATE", data) # using 0 as dummy ID for now, actual key is in data
+            # For trading_settings, the key is the ID, but change_log requires int record_id
+            # We pass 0 as dummy ID, the real key is in data['key']
+            log_change(connection, "trading_settings", 0, "UPDATE", data)
         except Exception as e:
             logger.error(f"Error in trading_setting after_update event: {e}")
 
