@@ -13,8 +13,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Table processing order: dependencies first
-# Table processing order: dependencies first
-TABLE_ORDER = {"users": 0, "commodities": 1, "commodity_aliases": 2, "offers": 3, "trades": 4}
+TABLE_ORDER = {"users": 0, "commodities": 1, "commodity_aliases": 2, "trading_settings": 3, "offers": 4, "trades": 5}
 
 async def verify_signature(request: Request):
     """Verify HMAC signature and timestamp"""
@@ -61,18 +60,17 @@ from sqlalchemy import insert, update, delete
 from models.user import User
 from models.offer import Offer
 from models.trade import Trade
-from models.trade import Trade
 from models.commodity import Commodity, CommodityAlias
+from models.trading_setting import TradingSetting
 
 def get_model_class(table_name: str):
     mapping = {
         "users": User,
         "offers": Offer,
         "trades": Trade,
-        "offers": Offer,
-        "trades": Trade,
         "commodities": Commodity,
-        "commodity_aliases": CommodityAlias
+        "commodity_aliases": CommodityAlias,
+        "trading_settings": TradingSetting
     }
     return mapping.get(table_name)
 
@@ -144,7 +142,31 @@ async def receive_sync_data(
             
 
             try:
-                if operation in ("INSERT", "UPDATE"):
+                if table == "trading_settings":
+                    # Special handling for TradingSettings (Key is String, not Int)
+                    # record_id in payload is likely 0 (dummy), real key is in data['key']
+                    setting_key = data.get('key')
+                    if setting_key:
+                        from sqlalchemy.dialects.postgresql import insert as pg_insert
+                        stmt = pg_insert(model).values(**data)
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=['key'],
+                            set_=data
+                        )
+                        await db.execute(stmt, execution_options={"is_sync": True})
+                        
+                        # Invalidate settings cache
+                        try:
+                             from core.trading_settings import refresh_settings_cache_async
+                             # We schedule this to run after commit ideally, but here is fine too
+                             pass 
+                        except:
+                             pass
+                    else:
+                        logger.warning(f"Skipping trading_setting sync without key: {data}")
+
+                elif operation in ("INSERT", "UPDATE"):
+                    # Standard integer ID models
                     data['id'] = record_id
                     
                     if table == "offers" and operation == "INSERT" and settings.server_mode != "iran":
@@ -171,6 +193,16 @@ async def receive_sync_data(
                 errors.append(error_msg)
         
         await db.commit()
+
+        # Refresh settings cache if needed
+        items_tables = {i.get('table') for i in sorted_items}
+        if "trading_settings" in items_tables:
+            try:
+                from core.trading_settings import refresh_settings_cache_async
+                await refresh_settings_cache_async()
+                logger.info("🔄 Trading settings cache refreshed")
+            except Exception as e:
+                 logger.error(f"Failed to refresh settings cache: {e}")
         
         # --- Handle Offer Publishing on Foreign Server ---
         logger.info(f"DEBUG SYNC: server_mode={settings.server_mode}, new_offers_count={len(new_offers)}")
@@ -222,4 +254,3 @@ async def receive_sync_data(
         await db.rollback()
         logger.error(f"Error processing sync batch: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-

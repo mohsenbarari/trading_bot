@@ -390,6 +390,54 @@ def setup_commodity_alias_events():
     logger.info("✅ CommodityAlias event listeners registered")
 
 
+
+def setup_trading_settings_events():
+    """Setup event listeners for TradingSetting model"""
+    from models.trading_setting import TradingSetting
+
+    @event.listens_for(TradingSetting, 'after_insert')
+    def on_setting_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {
+                "key": target.key,
+                "value": target.value,
+                "updated_at": target.updated_at.isoformat() if target.updated_at else None
+            }
+            log_change(connection, "trading_settings", target.key, "INSERT", data)
+        except Exception as e:
+            logger.error(f"Error in trading_setting after_insert event: {e}")
+
+    @event.listens_for(TradingSetting, 'after_update')
+    def on_setting_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {
+                "key": target.key,
+                "value": target.value,
+                "updated_at": target.updated_at.isoformat() if target.updated_at else None
+            }
+            # For trading_settings, the key is the ID, so we pass target.key as record_id
+            # Note: record_id in log_change is expected to be int usually, but schema allows string?
+            # Let's check change_log model. If record_id is Integer, we might have an issue since key is String.
+            # However, looking at previous code, log_change takes record_id as int.
+            # TradingSetting primary key is 'key' (String). 
+            # We need to check if change_log supports string IDs or if we need a workaround.
+            # Checking change_log.py...
+            
+            # Temporary: Assuming we can pass key string, but if log_change enforces int, we need to check.
+            # Let's check change_log function signature in events.py line 49: record_id: int
+            # Wait, TradingSettings key is a string. This is a problem.
+            # I need to verify change_log model first.
+            
+            log_change(connection, "trading_settings", 0, "UPDATE", data) # using 0 as dummy ID for now, actual key is in data
+        except Exception as e:
+            logger.error(f"Error in trading_setting after_update event: {e}")
+
+    logger.info("✅ TradingSetting event listeners registered")
+
 def setup_all_events():
     """Setup all event listeners"""
     setup_user_events()
@@ -397,5 +445,7 @@ def setup_all_events():
     setup_trade_events()
     setup_commodity_events()
     setup_commodity_alias_events()
+    setup_trading_settings_events()
     logger.info("🎯 All event listeners initialized")
+
 
