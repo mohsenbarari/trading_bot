@@ -39,26 +39,23 @@ function handleNavigate(section: string, data?: any) {
 
 <template>
   <div class="admin-view min-h-screen flex flex-col">
-     <!-- Top Bar -->
-     <div class="admin-top-bar p-4 sticky top-0 z-10">
+     <!-- Top Bar (only when inside a sub-section) -->
+     <div v-if="currentSection !== 'menu'" class="admin-top-bar p-4 sticky top-0 z-10">
          <div class="max-w-[480px] mx-auto flex items-center justify-between">
              <div class="flex items-center gap-3">
-                 <button v-if="currentSection !== 'menu'" @click="handleNavigate('admin_panel')" class="w-10 h-10 rounded-xl bg-white/80 border border-amber-100/50 flex items-center justify-center hover:bg-white transition-colors shadow-sm">
+                 <button @click="handleNavigate('admin_panel')" class="w-10 h-10 rounded-xl bg-white/80 border border-amber-100/50 flex items-center justify-center hover:bg-white transition-colors shadow-sm">
                      <span class="text-lg">→</span>
                  </button>
                  <h1 class="text-lg font-extrabold text-gray-800">
-                     {{ currentSection === 'menu' ? 'پنل مدیریت' : 
-                        currentSection === 'manage_users' ? 'مدیریت کاربران' :
+                     {{ currentSection === 'manage_users' ? 'مدیریت کاربران' :
                         currentSection === 'manage_commodities' ? 'مدیریت کالاها' :
                         currentSection === 'settings' ? 'تنظیمات سیستم' : 
                         currentSection === 'user_profile' ? 'پروفایل کاربر' : 
+                        currentSection === 'create_invitation' ? 'ارسال دعوت‌نامه' :
                         'پنل مدیریت' 
                      }}
                  </h1>
              </div>
-             <button @click="router.push('/')" class="px-3 py-2 bg-white/80 border border-amber-100/50 rounded-xl text-sm text-amber-700 font-bold hover:bg-white transition-colors shadow-sm">
-                 داشبورد ←
-             </button>
          </div>
      </div>
 

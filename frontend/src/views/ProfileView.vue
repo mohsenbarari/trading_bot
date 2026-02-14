@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
-import { User, Phone, Shield, ChevronLeft, Loader2 } from 'lucide-vue-next'
+import { User, Phone, Shield } from 'lucide-vue-next'
 import { apiFetch, forceLogout } from '../utils/auth'
-
-const router = useRouter()
 const user = ref<any>(null)
 const loading = ref(true)
 
@@ -50,14 +47,8 @@ onMounted(fetchUser)
 
     <div v-else-if="user" class="profile-content">
 
-      <!-- Header -->
-      <header class="profile-header">
-        <button @click="router.push('/')" class="back-btn">
-          <ChevronLeft :size="20" />
-        </button>
-        <h1 class="header-title">پروفایل کاربری</h1>
-        <div style="width: 40px;"></div>
-      </header>
+      <!-- Spacer -->
+      <div style="height: 0.5rem;"></div>
 
       <!-- Avatar Section -->
       <div class="avatar-section">
@@ -151,40 +142,6 @@ onMounted(fetchUser)
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
-}
-
-/* Header */
-.profile-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 2rem;
-}
-
-.back-btn {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  border: none;
-  background: white;
-  color: #6b7280;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  transition: all 0.2s;
-  -webkit-tap-highlight-color: transparent;
-}
-.back-btn:active {
-  transform: scale(0.92);
-  background: #f9fafb;
-}
-
-.header-title {
-  font-size: 1rem;
-  font-weight: 800;
-  color: #1f2937;
 }
 
 /* Avatar Section */
