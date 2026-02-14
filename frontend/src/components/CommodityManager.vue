@@ -328,11 +328,6 @@ onMounted(fetchCommodities);
     <!-- Removed generic spinner container -->
 
     <div v-if="viewMode === 'list'" class="card">
-      <div class="header-row">
-        <h2 class="page-title">مدیریت کالاها</h2>
-        <button class="back-button" @click="$emit('navigate', 'admin_panel')">🔙</button>
-      </div>
-
       <div v-if="isLoading">
           <LoadingSkeleton :count="5" :height="60" />
       </div>
@@ -352,9 +347,11 @@ onMounted(fetchCommodities);
     </div>
 
     <div v-if="viewMode === 'aliases' && selectedCommodity" class="card">
-      <div class="header-row">
-        <h2 class="page-title">مدیریت: {{ selectedCommodity.name }}</h2>
-        <button @click="fetchCommodities" class="back-button">🔙</button>
+      <div class="sub-header-row">
+        <button @click="fetchCommodities" class="sub-back-btn">
+          <span class="sub-back-icon">→</span>
+        </button>
+        <h2 class="sub-title">{{ selectedCommodity.name }}</h2>
       </div>
 
       <div v-if="isLoading">
@@ -518,19 +515,23 @@ button.secondary:active { background: #f9fafb; }
 .no-data { text-align: center; color: #9ca3af; padding: 1.5rem 0; font-size: 0.85rem; }
 .divider { border: none; border-top: 1px solid rgba(245, 158, 11, 0.1); margin: 1rem 0; }
 
-/* Header */
-.header-row {
-  display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;
+/* Sub-section header (e.g. aliases view) */
+.sub-header-row {
+  display: flex; align-items: center; gap: 0.625rem; margin-bottom: 1rem;
+  padding-bottom: 0.75rem; border-bottom: 1px solid rgba(245, 158, 11, 0.1);
 }
-.page-title { font-size: 1rem; font-weight: 800; color: #1f2937; margin: 0; }
-.back-button {
-  flex-grow: 0; width: 36px; height: 36px;
-  background: white; border: 1px solid rgba(245, 158, 11, 0.15);
-  border-radius: 0.75rem; font-size: 0.9rem; cursor: pointer; color: #6b7280;
+.sub-back-btn {
+  flex-grow: 0; width: 34px; height: 34px; padding: 0;
+  background: linear-gradient(135deg, #fffbeb, #fef3c7);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 0.625rem; cursor: pointer; color: #b45309;
   display: flex; align-items: center; justify-content: center;
-  transition: all 0.2s; -webkit-tap-highlight-color: transparent; padding: 0;
+  transition: all 0.2s; -webkit-tap-highlight-color: transparent;
 }
-.back-button:active { transform: scale(0.9); background: #f9fafb; }
+.sub-back-btn:hover { background: #fef3c7; border-color: rgba(245, 158, 11, 0.4); }
+.sub-back-btn:active { transform: scale(0.92); }
+.sub-back-icon { font-size: 1rem; font-weight: 700; line-height: 1; }
+.sub-title { font-size: 0.95rem; font-weight: 800; color: #1f2937; margin: 0; }
 
 /* Commodity list */
 .button-list { display: flex; flex-direction: column; gap: 0.5rem; }
