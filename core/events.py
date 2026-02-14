@@ -122,6 +122,7 @@ def setup_offer_events():
         try:
             data = {
                 "id": target.id,
+                "version_id": target.version_id or 1,
                 "user_id": target.user_id,
                 "offer_type": target.offer_type.value if target.offer_type else None,
                 "commodity_id": target.commodity_id,
@@ -130,8 +131,10 @@ def setup_offer_events():
                 "price": target.price,
                 "is_wholesale": target.is_wholesale,
                 "lot_sizes": target.lot_sizes,
+                "original_lot_sizes": target.original_lot_sizes,
                 "notes": target.notes,
                 "status": target.status.value if target.status else None,
+                "channel_message_id": target.channel_message_id,
                 "created_at": target.created_at.isoformat() if target.created_at else None,
             }
             log_change(connection, "offers", target.id, "INSERT", data)
@@ -146,6 +149,7 @@ def setup_offer_events():
         try:
             data = {
                 "id": target.id,
+                "version_id": target.version_id or 1,
                 "user_id": target.user_id,
                 "offer_type": target.offer_type.value if target.offer_type else None,
                 "commodity_id": target.commodity_id,
@@ -154,8 +158,10 @@ def setup_offer_events():
                 "price": target.price,
                 "is_wholesale": target.is_wholesale,
                 "lot_sizes": target.lot_sizes,
+                "original_lot_sizes": target.original_lot_sizes,
                 "notes": target.notes,
                 "status": target.status.value if target.status else None,
+                "channel_message_id": target.channel_message_id,
                 "created_at": target.created_at.isoformat() if target.created_at else None,
                 "idempotency_key": target.idempotency_key,
                 "archived": target.archived
