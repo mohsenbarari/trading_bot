@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import DashboardView from '../views/DashboardView.vue'
 import LoginView from '../views/LoginView.vue'
+import { isTokenExpired, refreshOrLogout } from '../utils/auth'
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
@@ -37,14 +38,31 @@ const router = createRouter({
     ]
 })
 
-// Navigation Guard — redirect to login if not authenticated
-router.beforeEach((to, _from, next) => {
-    const token = localStorage.getItem('auth_token')
-    if (to.meta.requiresAuth && !token) {
-        next({ name: 'login' })
-    } else {
+// Navigation Guard — بررسی اعتبار توکن (نه فقط وجود آن)
+router.beforeEach(async (to, _from, next) => {
+    if (!to.meta.requiresAuth) {
         next()
+        return
     }
+
+    const token = localStorage.getItem('auth_token')
+
+    // توکن وجود نداره
+    if (!token) {
+        next({ name: 'login' })
+        return
+    }
+
+    // توکن منقضی شده → تلاش برای refresh
+    if (isTokenExpired(token)) {
+        const refreshed = await refreshOrLogout()
+        if (!refreshed) {
+            next({ name: 'login' })
+            return
+        }
+    }
+
+    next()
 })
 
 export default router

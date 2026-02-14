@@ -16,9 +16,7 @@ const selectedUserForProfile = ref<any>(null)
 
 onMounted(() => {
   jwtToken.value = localStorage.getItem('auth_token')
-  if (!jwtToken.value) {
-    router.push('/login')
-  }
+  // Router guard handles redirect to login if token is missing/expired
 })
 
 function handleNavigate(section: string, data?: any) {

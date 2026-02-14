@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Bell, Store, LogOut, AlertTriangle, Ban } from 'lucide-vue-next'
+import { apiFetch, forceLogout } from '../utils/auth'
 
 const router = useRouter()
 const user = ref<any>(null)
@@ -37,19 +38,11 @@ const userInitial = computed(() => {
 
 async function fetchUser() {
   try {
-    const token = localStorage.getItem('auth_token')
-    if (!token) return router.push('/login')
-    
-    const res = await fetch('/api/auth/me', {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    
+    const res = await apiFetch('/api/auth/me')
     if (res.ok) {
       user.value = await res.json()
-    } else {
-      localStorage.removeItem('auth_token')
-      router.push('/login')
     }
+    // 401 handling is automatic via apiFetch → forceLogout
   } catch (e) {
     console.error(e)
   } finally {
@@ -58,9 +51,7 @@ async function fetchUser() {
 }
 
 function logout() {
-  localStorage.removeItem('auth_token')
-  localStorage.removeItem('refresh_token')
-  router.push('/login')
+  forceLogout()
 }
 
 onMounted(fetchUser)

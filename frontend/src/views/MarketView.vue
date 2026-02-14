@@ -87,13 +87,13 @@ const filteredOffers = computed(() => {
   return result
 })
 
+import { apiFetch, apiFetchJson } from '../utils/auth'
+
 // API Helpers
 async function fetchCommodities() {
     commoditiesLoading.value = true
     try {
-        const token = localStorage.getItem('auth_token')
-        const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
-        const res = await fetch('/api/commodities/', { headers })
+        const res = await apiFetch('/api/commodities/')
         if (res.ok) commodities.value = await res.json()
     } catch (e) {
         console.error('Failed to load commodities', e)
@@ -104,30 +104,11 @@ async function fetchCommodities() {
 
 async function fetchTradingSettings() {
     try {
-        const token = localStorage.getItem('auth_token')
-        const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
-        const res = await fetch('/api/trading-settings/', { headers })
+        const res = await apiFetch('/api/trading-settings/')
         if (res.ok) tradingSettings.value = await res.json()
     } catch (e) {
         console.error('Failed to load settings', e)
     }
-}
-
-async function apiFetch(endpoint: string, options: RequestInit = {}) {
-  const token = localStorage.getItem('auth_token')
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-  }
-  const response = await fetch(`/api${endpoint}`, {
-    ...options,
-    headers: { ...headers, ...(options.headers || {}) }
-  })
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}))
-    throw new Error(data.detail || `خطا: ${response.status}`)
-  }
-  return response.json()
 }
 
 // Wizard Logic
@@ -191,7 +172,7 @@ function confirmLotSizes() {
 function submitOffer() {
   if (!newOffer.value.price) return
   isSubmitting.value = true
-  apiFetch('/offers/', {
+  apiFetchJson('/offers/', {
       method: 'POST',
       body: JSON.stringify(newOffer.value)
   })
@@ -199,7 +180,7 @@ function submitOffer() {
      successMessage.value = 'لفظ ثبت شد'
      setTimeout(() => successMessage.value = '', 3000)
      showCreateWizard.value = false
-     fetchOffers(localStorage.getItem('auth_token'))
+     fetchOffers()
   })
   .catch(e => console.error(e))
   .finally(() => isSubmitting.value = false)
@@ -210,13 +191,13 @@ function parseAndSubmitTextOffer() {
   isSubmitting.value = true
   parseError.value = ''
   
-  apiFetch('/offers/parse', {
+  apiFetchJson('/offers/parse', {
       method: 'POST',
       body: JSON.stringify({ text: offerText.value })
   })
   .then(res => {
       if (res.success && res.data) {
-          return apiFetch('/offers/', {
+          return apiFetchJson('/offers/', {
              method: 'POST',
              body: JSON.stringify({
                 offer_type: res.data.trade_type,
@@ -236,7 +217,7 @@ function parseAndSubmitTextOffer() {
       successMessage.value = 'لفظ متنی ثبت شد'
       offerText.value = ''
       setTimeout(() => successMessage.value = '', 3000)
-      fetchOffers(localStorage.getItem('auth_token'))
+      fetchOffers()
   })
   .catch(e => parseError.value = e.message)
   .finally(() => isSubmitting.value = false)
@@ -260,9 +241,8 @@ function clearSort() {
 }
 
 onMounted(() => {
-    const token = localStorage.getItem('auth_token')
-    fetchOffers(token)
-    startPolling(token)
+    fetchOffers()
+    startPolling()
     fetchCommodities()
     fetchTradingSettings()
 })

@@ -19,9 +19,8 @@ onMounted(async () => {
   try {
     const token = localStorage.getItem('auth_token')
     if (!token) return
-    const res = await fetch('/api/auth/me', {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const { apiFetch } = await import('../utils/auth')
+    const res = await apiFetch('/api/auth/me')
     if (res.ok) {
       const data = await res.json()
       userRole.value = data.role

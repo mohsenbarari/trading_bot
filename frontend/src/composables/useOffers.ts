@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue';
 import { useWebSocket } from './useWebSocket.ts';
+import { apiFetch } from '../utils/auth';
 
 const offers = ref<any[]>([]);
 const isLoading = ref(false);
@@ -48,21 +49,19 @@ on('offer:completed', handleOfferExpired);
 
 export function useOffers() {
 
-    async function fetchOffers(token: string | null, silent = false) {
+    async function fetchOffers(silent = false) {
+        const token = localStorage.getItem('auth_token');
         if (!token) return;
         if (!silent) isLoading.value = true;
         try {
             // Connect WS if not connected
             connect();
 
-            const response = await fetch('/api/offers/', {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const response = await apiFetch('/api/offers/');
             if (response.ok) {
                 offers.value = await response.json();
-            } else {
-                throw new Error('Failed to fetch offers');
             }
+            // 401 handling is automatic via apiFetch → forceLogout
         } catch (e: any) {
             error.value = e.message;
             console.error(e);
@@ -71,10 +70,9 @@ export function useOffers() {
         }
     }
 
-    function startPolling(token: string | null) {
+    function startPolling() {
         if (pollingInterval) return;
-        // Immediate fetch NOT required here as onMounted usually calls fetchOffers
-        pollingInterval = setInterval(() => fetchOffers(token, true), 1000);
+        pollingInterval = setInterval(() => fetchOffers(true), 1000);
     }
 
     function stopPolling() {

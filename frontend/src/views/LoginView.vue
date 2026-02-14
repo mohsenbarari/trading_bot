@@ -121,6 +121,10 @@ async function verifyOtp() {
     localStorage.setItem('auth_token', data.access_token)
     localStorage.setItem('refresh_token', data.refresh_token)
     
+    // راه‌اندازی تایمر انقضای توکن
+    const { setupExpiryTimer } = await import('../utils/auth')
+    setupExpiryTimer()
+    
     router.push('/')
   } catch (e: any) {
     error.value = e.message

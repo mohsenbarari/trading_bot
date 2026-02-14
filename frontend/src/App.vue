@@ -2,10 +2,14 @@
 import { useRoute } from 'vue-router'
 import { onMounted } from 'vue'
 import BottomNav from './components/BottomNav.vue'
+import { setupExpiryTimer } from './utils/auth'
 
 const route = useRoute()
 
 onMounted(() => {
+  // راه‌اندازی تایمر انقضای توکن — ریدایرکت خودکار به لاگین
+  setupExpiryTimer()
+
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     (window as any).deferredPrompt = e;
