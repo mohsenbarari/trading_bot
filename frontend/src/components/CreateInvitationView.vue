@@ -150,72 +150,75 @@ function normalizeMobile(mobile: string): string {
 </template>
 
 <style scoped>
-/* استایل‌های پایه (بدون تغییر) */
-.card { background-color: var(--card-bg); border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-h2 { margin-top: 0; margin-bottom: 24px; font-size: 20px; }
-.form-group { margin-bottom: 16px; }
-label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; }
+.card {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(245, 158, 11, 0.1);
+  border-radius: 1.25rem;
+  padding: 1.25rem;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+}
+h2 { margin-top: 0; margin-bottom: 1.25rem; font-size: 1rem; font-weight: 800; color: #1f2937; }
+.form-group { margin-bottom: 1rem; }
+label { display: block; margin-bottom: 0.375rem; font-weight: 700; font-size: 0.78rem; color: #6b7280; }
 input, select {
-  width: 100%; padding: 10px 12px; border-radius: 8px;
-  border: 1px solid var(--border-color); background: #f7f7f7;
-  font-size: 15px; font-family: inherit;
-  transition: all 0.2s ease;
+  width: 100%; padding: 0.625rem 0.875rem; border-radius: 0.75rem;
+  border: 1px solid rgba(245, 158, 11, 0.15); background: white;
+  font-size: 0.9rem; font-family: inherit; outline: none;
+  transition: all 0.2s;
 }
-input:focus, select:focus { outline: none; border-color: var(--primary-color); background: white; box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1); }
-.form-actions { display: flex; gap: 12px; margin-top: 24px; }
+input:focus, select:focus {
+  border-color: #f59e0b; background: white;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+}
+.form-actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
 button {
-  flex-grow: 1; background: var(--primary-color); color: white; border: none;
-  cursor: pointer; font-weight: 600; transition: background-color 0.2s ease;
-  padding: 12px; border-radius: 8px; font-size: 15px;
+  flex-grow: 1; background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: white; border: none; cursor: pointer; font-weight: 700;
+  transition: all 0.2s; padding: 0.75rem; border-radius: 0.75rem;
+  font-size: 0.9rem; -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25);
 }
-button:hover { background-color: #0056b3; }
-button:disabled { background-color: #a0a0a0; cursor: not-allowed; }
-button.secondary { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); flex-grow: 0; }
+button:active { transform: scale(0.98); }
+button:disabled { background: #d1d5db; box-shadow: none; cursor: not-allowed; }
+button.secondary {
+  background: white; color: #6b7280; box-shadow: none;
+  border: 1px solid rgba(245, 158, 11, 0.15); flex-grow: 0;
+}
+button.secondary:active { background: #f9fafb; }
 
-/* کادر خطا */
 .result-box.error {
-  margin-top: 20px; padding: 12px; border-radius: 8px;
-  background-color: #fef2f2; color: #991b1b;
-  border: 1px solid #fecaca;
-  font-size: 14px; word-break: break-all;
+  margin-top: 1.25rem; padding: 0.75rem; border-radius: 0.75rem;
+  background: #fef2f2; color: #991b1b; border: 1px solid #fecaca;
+  font-size: 0.8rem; word-break: break-all;
 }
-.result-box :deep(strong) { color: #c0392b; }
+.result-box :deep(strong) { color: #dc2626; }
 
-/* === استایل‌های جدید برای کادر موفقیت (اصلاح شده) === */
 .success-box {
-  margin-top: 20px; padding: 12px; border-radius: 8px;
-  background: #f0f9ff; border: 1px solid #bde5f8;
+  margin-top: 1.25rem; padding: 1rem; border-radius: 1rem;
+  background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+  border: 1px solid #bbf7d0;
 }
 .result-message {
-  color: #0c5460; font-size: 14px; font-weight: 500; margin-bottom: 10px;
+  color: #166534; font-size: 0.8rem; font-weight: 700; margin-bottom: 0.75rem;
 }
 .copy-container {
   display: flex;
-  gap: 8px;
+  gap: 0.5rem;
 }
-
-/* === اصلاحیه اصلی === */
 .copy-container input[type="text"] {
-  /* لغو width: 100% از استایل عمومی */
-  width: 0; 
-  /* اجازه می‌دهد input رشد کند */
-  flex: 1 1 0; 
-  
-  direction: ltr; font-family: monospace; font-size: 14px;
-  background: #ffffff; color: #0c5460;
-  border: 1px solid #bde5f8; cursor: pointer;
+  width: 0; flex: 1 1 0;
+  direction: ltr; font-family: monospace; font-size: 0.8rem;
+  background: white; color: #166534;
+  border: 1px solid #bbf7d0; cursor: pointer;
+  border-radius: 0.625rem; padding: 0.5rem 0.75rem;
 }
 .copy-container .copy-btn {
-  /* لغو flex-grow: 1 از استایل عمومی */
-  flex: 0 0 auto; 
-  width: auto;
-  
-  font-weight: 500; font-size: 14px; padding: 8px 14px;
-  background-color: var(--primary-color); color: white;
+  flex: 0 0 auto; width: auto;
+  font-weight: 700; font-size: 0.8rem; padding: 0.5rem 0.875rem;
+  background: linear-gradient(135deg, #f59e0b, #d97706); color: white;
+  border-radius: 0.625rem;
 }
-/* === پایان اصلاحیه === */
-
-.copy-container .copy-btn:disabled {
-  background-color: #a0a0a0;
-}
+.copy-container .copy-btn:disabled { background: #d1d5db; }
 </style>

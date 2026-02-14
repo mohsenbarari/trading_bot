@@ -69,13 +69,8 @@ onMounted(fetchUsers);
   <div class="user-manager-container">
     
     <div class="card">
-      <div class="header-row">
-        <h2>👥 کاربران</h2>
-        <button class="back-button" @click="$emit('navigate', 'admin_panel')">🔙</button>
-      </div>
-
       <button class="search-button" @click="toggleSearch">
-        {{ showSearch ? '❌ بستن جستجو' : '🔍 جستجوی کاربر' }}
+        {{ showSearch ? 'بستن جستجو' : '🔍 جستجوی کاربر' }}
       </button>
 
       <div v-if="showSearch" class="search-box">
@@ -98,13 +93,16 @@ onMounted(fetchUsers);
         
         <div v-for="user in users" :key="user.id" class="user-item" @click="selectUser(user)">
           <div class="user-info">
-            <div class="name">👤 {{ user.account_name }}</div>
-            <div class="details">
-              <span>📱 {{ user.mobile_number }}</span>
+            <div class="user-avatar">{{ user.account_name ? user.account_name[0] : '?' }}</div>
+            <div class="user-text">
+              <div class="name">{{ user.account_name }}</div>
+              <div class="details" dir="ltr">{{ user.mobile_number }}</div>
             </div>
-            <div class="role-badge" :class="user.role">{{ user.role }}</div>
           </div>
-          <div class="arrow">👈</div>
+          <div class="user-meta">
+            <div class="role-badge" :class="user.role">{{ user.role }}</div>
+            <span class="arrow">←</span>
+          </div>
         </div>
       </div>
     </div>
@@ -116,131 +114,165 @@ onMounted(fetchUsers);
 .user-manager-container {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 0.75rem;
 }
 .card {
-  background-color: var(--card-bg);
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-}
-.header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-h2 { margin: 0; font-size: 18px; }
-.back-button {
-  background: transparent;
-  border: none;
-  font-size: 20px;
-  cursor: pointer;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(245, 158, 11, 0.1);
+  border-radius: 1.25rem;
+  padding: 1.25rem;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.04);
 }
 
-/* استایل دکمه جستجو */
 .search-button {
   width: 100%;
-  padding: 12px;
-  background-color: #e0f2fe;
-  color: #007aff;
-  border: 1px solid #bae6fd;
-  border-radius: 10px;
-  font-weight: 600;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, #fffbeb, #fef3c7);
+  color: #92400e;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 1rem;
+  font-weight: 700;
+  font-size: 0.85rem;
   cursor: pointer;
-  margin-bottom: 20px;
+  margin-bottom: 1rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  transition: background 0.2s;
+  gap: 0.5rem;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
 }
-.search-button:hover {
-  background-color: #bae6fd;
+.search-button:active {
+  transform: scale(0.98);
+  background: #fef3c7;
 }
 
 .search-box {
   display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
   animation: fadeIn 0.3s ease;
 }
 .search-input {
   flex: 1;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid rgba(245, 158, 11, 0.15);
+  border-radius: 0.75rem;
   font-family: inherit;
+  font-size: 0.85rem;
+  background: white;
+  outline: none;
+  transition: all 0.2s;
+}
+.search-input:focus {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
 }
 .do-search-btn {
-  padding: 0 16px;
-  background-color: var(--primary-color);
+  padding: 0 1rem;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
   color: white;
   border: none;
-  border-radius: 8px;
+  border-radius: 0.75rem;
   cursor: pointer;
+  font-weight: 700;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.do-search-btn:active {
+  transform: scale(0.95);
 }
 
 .users-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0.5rem;
 }
 .user-item {
-  background-color: #f9fafb;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  padding: 12px;
+  background: white;
+  border: 1px solid rgba(245, 158, 11, 0.1);
+  border-radius: 1rem;
+  padding: 0.875rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
 }
 .user-item:hover {
-  background-color: #f0f9ff;
-  border-color: #bae6fd;
+  background: #fffbeb;
+  border-color: rgba(245, 158, 11, 0.25);
 }
 .user-item:active {
-  transform: scale(0.99);
+  transform: scale(0.98);
 }
 
 .user-info {
   display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  border-radius: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 800;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.user-text {
+  display: flex;
   flex-direction: column;
 }
 
+.user-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .arrow {
-  font-size: 18px;
-  opacity: 0.5;
+  font-size: 1rem;
+  color: #d1d5db;
+  font-weight: 300;
 }
 
 .name {
   font-weight: 700;
-  font-size: 15px;
-  margin-bottom: 4px;
+  font-size: 0.9rem;
+  color: #1f2937;
 }
 .details {
-  font-size: 13px;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-  font-family: monospace; /* برای نمایش بهتر اعداد */
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-top: 0.15rem;
+  font-family: monospace;
 }
 .role-badge {
-  align-self: flex-start;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  background-color: #eee;
-  color: #555;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  background: #f3f4f6;
+  color: #6b7280;
 }
-/* استایل‌های رنگی برای نقش‌ها */
-.role-badge.مدیر.ارشد { background-color: #fee2e2; color: #991b1b; }
-.role-badge.مدیر.میانی { background-color: #fef3c7; color: #92400e; }
-.role-badge.پلیس { background-color: #e0e7ff; color: #3730a3; }
-.role-badge.عادی { background-color: #d1fae5; color: #065f46; }
+.role-badge.مدیر { background: #fef3c7; color: #92400e; }
+.role-badge.پلیس { background: #ede9fe; color: #5b21b6; }
+.role-badge.عادی { background: #d1fae5; color: #065f46; }
+.role-badge.تماشا { background: #f3f4f6; color: #6b7280; }
 
-.loading, .error, .no-data { text-align: center; padding: 20px; color: var(--text-secondary); }
+.loading, .error, .no-data { text-align: center; padding: 1.5rem; color: #9ca3af; font-size: 0.85rem; }
 .error { color: #ef4444; }
 
 @keyframes fadeIn {

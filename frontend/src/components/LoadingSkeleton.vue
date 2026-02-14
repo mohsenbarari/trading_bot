@@ -33,19 +33,15 @@ defineProps({
 
 .skeleton-item {
   width: 100%;
-  background: #f0f2f5;
-  background: linear-gradient(90deg, #f0f2f5 25%, #e6e8eb 50%, #f0f2f5 75%);
+  background: linear-gradient(90deg, #fefce8 25%, #fef3c7 50%, #fefce8 75%);
   background-size: 200% 100%;
-  border-radius: 12px;
+  border-radius: 1rem;
+  border: 1px solid rgba(245, 158, 11, 0.06);
   animation: loading 1.5s infinite;
 }
 
 @keyframes loading {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 </style>

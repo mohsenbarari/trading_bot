@@ -480,85 +480,111 @@ onMounted(fetchCommodities);
 </template>
 
 <style scoped>
-/* استایل‌های پایه کارت و فرم */
-.card { background-color: var(--card-bg); border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-.form-group { margin-bottom: 16px; }
-label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; }
-input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: #f7f7f7; font-size: 15px; font-family: inherit; }
-.form-actions { display: flex; gap: 12px; margin-top: 24px; }
-button { flex-grow: 1; background: var(--primary-color); color: white; border: none; cursor: pointer; font-weight: 600; padding: 12px; border-radius: 8px; font-size: 15px; }
-button:disabled { background-color: #a0a0a0; cursor: not-allowed; }
-button.secondary { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); flex-grow: 0; }
-.message { padding: 10px; border-radius: 6px; margin-bottom: 15px; font-size: 14px; }
-.message.error { background-color: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
-.message.success { background-color: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
-.loading-container { display: flex; justify-content: center; padding: 20px; }
-.spinner { width: 30px; height: 30px; border: 3px solid rgba(0, 0, 0, 0.1); border-left-color: var(--primary-color); border-radius: 50%; animation: spin 1s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.no-data { text-align: center; color: var(--text-secondary); padding: 20px 0; }
-.divider { border: none; border-top: 1px solid var(--border-color); margin: 16px 0; }
+/* Base card & form */
+.card {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(245, 158, 11, 0.1);
+  border-radius: 1.25rem;
+  padding: 1.25rem;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+}
+.form-group { margin-bottom: 1rem; }
+label { display: block; margin-bottom: 0.5rem; font-weight: 700; font-size: 0.8rem; color: #6b7280; }
+input {
+  width: 100%; padding: 0.625rem 0.875rem; border-radius: 0.75rem;
+  border: 1px solid rgba(245, 158, 11, 0.15); background: white;
+  font-size: 0.9rem; font-family: inherit; outline: none; transition: all 0.2s;
+}
+input:focus { border-color: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1); }
+.form-actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
+button {
+  flex-grow: 1; background: linear-gradient(135deg, #f59e0b, #d97706); color: white;
+  border: none; cursor: pointer; font-weight: 700; padding: 0.75rem;
+  border-radius: 0.75rem; font-size: 0.9rem; transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+button:active { transform: scale(0.98); }
+button:disabled { background: #d1d5db; cursor: not-allowed; }
+button.secondary {
+  background: white; color: #6b7280;
+  border: 1px solid rgba(245, 158, 11, 0.15); flex-grow: 0;
+}
+button.secondary:active { background: #f9fafb; }
+.message { padding: 0.75rem; border-radius: 0.75rem; margin-bottom: 1rem; font-size: 0.8rem; }
+.message.error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.message.success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+.no-data { text-align: center; color: #9ca3af; padding: 1.5rem 0; font-size: 0.85rem; }
+.divider { border: none; border-top: 1px solid rgba(245, 158, 11, 0.1); margin: 1rem 0; }
 
-/* استایل‌های هدر و دکمه بازگشت */
+/* Header */
 .header-row {
-  display: flex;
-  justify-content: space-between; /* عنوان راست، دکمه چپ */
-  align-items: center;
-  margin-bottom: 16px;
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;
 }
-.page-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-color);
-  margin: 0;
-}
+.page-title { font-size: 1rem; font-weight: 800; color: #1f2937; margin: 0; }
 .back-button {
-  flex-grow: 0;
-  width: auto;
-  background: transparent;
-  border: none;
-  padding: 0;
-  margin: 0;
-  font-size: 20px;
-  cursor: pointer;
-  color: var(--text-color);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-grow: 0; width: 36px; height: 36px;
+  background: white; border: 1px solid rgba(245, 158, 11, 0.15);
+  border-radius: 0.75rem; font-size: 0.9rem; cursor: pointer; color: #6b7280;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s; -webkit-tap-highlight-color: transparent; padding: 0;
 }
+.back-button:active { transform: scale(0.9); background: #f9fafb; }
 
-/* لیست کالاها */
-.button-list { display: flex; flex-direction: column; gap: 10px; }
+/* Commodity list */
+.button-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .list-button {
-  width: 100%; background: #f9fafb; color: var(--text-color); border: 1px solid var(--border-color);
-  padding: 14px; font-size: 16px; font-weight: 500; text-align: right;
+  width: 100%; background: white; color: #1f2937;
+  border: 1px solid rgba(245, 158, 11, 0.1); padding: 0.875rem 1rem;
+  font-size: 0.9rem; font-weight: 600; text-align: right;
   display: flex; justify-content: space-between; align-items: center;
+  border-radius: 0.875rem; transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
 }
-.list-button:hover { border-color: var(--primary-color); color: var(--primary-color); background: #f0f9ff; }
-.list-button span:last-child { color: var(--text-secondary); }
-.list-button.add-button { color: var(--primary-color); justify-content: center; }
-.list-button.edit-button { color: #e67e22; justify-content: center; }
-.list-button.delete-button { color: #e74c3c; justify-content: center; }
+.list-button:hover { border-color: rgba(245, 158, 11, 0.3); background: #fffbeb; }
+.list-button:active { transform: scale(0.98); }
+.list-button span:last-child { color: #d1d5db; }
+.list-button.add-button {
+  color: #d97706; justify-content: center;
+  background: linear-gradient(135deg, #fffbeb, #fef3c7);
+  border-color: rgba(245, 158, 11, 0.2);
+}
+.list-button.add-button:hover { background: #fef3c7; }
+.list-button.edit-button {
+  color: #92400e; justify-content: center;
+  background: #fffbeb; border-color: rgba(245, 158, 11, 0.15);
+}
+.list-button.delete-button {
+  color: #dc2626; justify-content: center;
+  background: #fef2f2; border-color: #fecaca;
+}
 
-/* لیست نام‌های مستعار */
-.alias-list { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+/* Aliases */
+.alias-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; }
 .alias-item {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 12px; background: #f9fafb; border-radius: 8px;
+  padding: 0.75rem 0.875rem; background: white; border-radius: 0.75rem;
+  border: 1px solid rgba(245, 158, 11, 0.08);
 }
-.alias-item span { font-weight: 500; }
-.alias-actions { display: flex; gap: 8px; }
+.alias-item span { font-weight: 600; font-size: 0.85rem; color: #1f2937; }
+.alias-actions { display: flex; gap: 0.375rem; }
 .action-btn {
-  padding: 6px 10px; font-size: 14px; border-radius: 6px;
+  padding: 0.375rem 0.625rem; font-size: 0.8rem; border-radius: 0.5rem;
   flex-grow: 0; border: none; background: transparent; cursor: pointer;
+  transition: all 0.2s; -webkit-tap-highlight-color: transparent;
 }
-.action-btn.edit { color: #007aff; background: #e0f2fe; }
-.action-btn.delete { color: #e74c3c; background: #fee2e2; }
+.action-btn:active { transform: scale(0.9); }
+.action-btn.edit { color: #d97706; background: #fffbeb; }
+.action-btn.delete { color: #dc2626; background: #fef2f2; }
+.button-list.stacked { margin-top: 1.25rem; }
 
-.button-list.stacked { margin-top: 20px; }
-
-/* پنجره تأیید حذف */
-.confirmation-dialog p { font-size: 15px; line-height: 1.6; }
-.confirmation-dialog p strong { color: #c0392b; }
-button.delete-confirm { background-color: #e74c3c; }
-button.delete-confirm:hover { background-color: #c0392b; }
+/* Confirmation dialog */
+.confirmation-dialog p { font-size: 0.85rem; line-height: 1.7; color: #4b5563; }
+.confirmation-dialog p strong { color: #dc2626; }
+button.delete-confirm {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+}
+h2 { margin-top: 0; margin-bottom: 1rem; font-size: 1rem; font-weight: 800; color: #1f2937; }
 </style>
