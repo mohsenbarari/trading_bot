@@ -13,7 +13,8 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Table processing order: dependencies first
-TABLE_ORDER = {"users": 0, "commodities": 1, "offers": 2, "trades": 3}
+# Table processing order: dependencies first
+TABLE_ORDER = {"users": 0, "commodities": 1, "commodity_aliases": 2, "offers": 3, "trades": 4}
 
 async def verify_signature(request: Request):
     """Verify HMAC signature and timestamp"""
@@ -60,14 +61,18 @@ from sqlalchemy import insert, update, delete
 from models.user import User
 from models.offer import Offer
 from models.trade import Trade
-from models.commodity import Commodity
+from models.trade import Trade
+from models.commodity import Commodity, CommodityAlias
 
 def get_model_class(table_name: str):
     mapping = {
         "users": User,
         "offers": Offer,
         "trades": Trade,
-        "commodities": Commodity
+        "offers": Offer,
+        "trades": Trade,
+        "commodities": Commodity,
+        "commodity_aliases": CommodityAlias
     }
     return mapping.get(table_name)
 

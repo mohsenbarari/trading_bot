@@ -295,9 +295,107 @@ def setup_user_events():
     logger.info("✅ User event listeners registered")
 
 
+def setup_commodity_events():
+    """Setup event listeners for Commodity model"""
+    from models.commodity import Commodity
+
+    @event.listens_for(Commodity, 'after_insert')
+    def on_commodity_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {
+                "id": target.id,
+                "name": target.name
+            }
+            log_change(connection, "commodities", target.id, "INSERT", data)
+            # Invalidate cache
+            try:
+                from core.cache import invalidate_commodities_cache
+                # We can't await here, so we rely on the sync worker or cache TTL
+                # Or use a sync redis call if strictly necessary, but cache TTL (5min) is acceptable
+            except:
+                pass
+        except Exception as e:
+            logger.error(f"Error in commodity after_insert event: {e}")
+
+    @event.listens_for(Commodity, 'after_update')
+    def on_commodity_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {
+                "id": target.id,
+                "name": target.name
+            }
+            log_change(connection, "commodities", target.id, "UPDATE", data)
+        except Exception as e:
+            logger.error(f"Error in commodity after_update event: {e}")
+
+    @event.listens_for(Commodity, 'after_delete')
+    def on_commodity_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {"id": target.id}
+            log_change(connection, "commodities", target.id, "DELETE", data)
+        except Exception as e:
+            logger.error(f"Error in commodity after_delete event: {e}")
+
+    logger.info("✅ Commodity event listeners registered")
+
+
+def setup_commodity_alias_events():
+    """Setup event listeners for CommodityAlias model"""
+    from models.commodity import CommodityAlias
+
+    @event.listens_for(CommodityAlias, 'after_insert')
+    def on_alias_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {
+                "id": target.id,
+                "alias": target.alias,
+                "commodity_id": target.commodity_id
+            }
+            log_change(connection, "commodity_aliases", target.id, "INSERT", data)
+        except Exception as e:
+            logger.error(f"Error in alias after_insert event: {e}")
+
+    @event.listens_for(CommodityAlias, 'after_update')
+    def on_alias_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {
+                "id": target.id,
+                "alias": target.alias,
+                "commodity_id": target.commodity_id
+            }
+            log_change(connection, "commodity_aliases", target.id, "UPDATE", data)
+        except Exception as e:
+            logger.error(f"Error in alias after_update event: {e}")
+
+    @event.listens_for(CommodityAlias, 'after_delete')
+    def on_alias_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {"id": target.id}
+            log_change(connection, "commodity_aliases", target.id, "DELETE", data)
+        except Exception as e:
+            logger.error(f"Error in alias after_delete event: {e}")
+
+    logger.info("✅ CommodityAlias event listeners registered")
+
+
 def setup_all_events():
     """Setup all event listeners"""
     setup_user_events()
     setup_offer_events()
     setup_trade_events()
+    setup_commodity_events()
+    setup_commodity_alias_events()
     logger.info("🎯 All event listeners initialized")
+
