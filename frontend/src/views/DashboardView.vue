@@ -142,7 +142,6 @@ onMounted(fetchUser)
 <style scoped>
 .dashboard-page {
   min-height: 100dvh;
-  background: linear-gradient(160deg, #fefce8 0%, #ffffff 40%, #fffbeb 100%);
   position: relative;
   overflow-x: hidden;
 }

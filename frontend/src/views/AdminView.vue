@@ -38,15 +38,15 @@ function handleNavigate(section: string, data?: any) {
 </script>
 
 <template>
-  <div class="admin-view min-h-screen bg-gray-50 flex flex-col">
+  <div class="admin-view min-h-screen flex flex-col">
      <!-- Top Bar -->
-     <div class="bg-white shadow-sm p-4 sticky top-0 z-10">
-         <div class="max-w-3xl mx-auto flex items-center justify-between">
+     <div class="admin-top-bar p-4 sticky top-0 z-10">
+         <div class="max-w-[480px] mx-auto flex items-center justify-between">
              <div class="flex items-center gap-3">
-                 <button v-if="currentSection !== 'menu'" @click="handleNavigate('admin_panel')" class="p-2 rounded-full hover:bg-gray-100 transition-colors">
-                     🔙
+                 <button v-if="currentSection !== 'menu'" @click="handleNavigate('admin_panel')" class="w-10 h-10 rounded-xl bg-white/80 border border-amber-100/50 flex items-center justify-center hover:bg-white transition-colors shadow-sm">
+                     <span class="text-lg">→</span>
                  </button>
-                 <h1 class="text-xl font-bold text-gray-800">
+                 <h1 class="text-lg font-extrabold text-gray-800">
                      {{ currentSection === 'menu' ? 'پنل مدیریت' : 
                         currentSection === 'manage_users' ? 'مدیریت کاربران' :
                         currentSection === 'manage_commodities' ? 'مدیریت کالاها' :
@@ -56,15 +56,15 @@ function handleNavigate(section: string, data?: any) {
                      }}
                  </h1>
              </div>
-             <button @click="router.push('/')" class="text-sm text-primary-600 font-medium hover:underline">
-                 بازگشت به داشبورد 🏠
+             <button @click="router.push('/')" class="px-3 py-2 bg-white/80 border border-amber-100/50 rounded-xl text-sm text-amber-700 font-bold hover:bg-white transition-colors shadow-sm">
+                 داشبورد ←
              </button>
          </div>
      </div>
 
      <!-- Content Area -->
-     <div class="flex-1 p-4 overflow-y-auto">
-         <div class="max-w-3xl mx-auto w-full">
+     <div class="flex-1 p-4 overflow-y-auto pb-24">
+         <div class="max-w-[480px] mx-auto w-full">
             
             <transition name="fade" mode="out-in">
                 <AdminPanel v-if="currentSection === 'menu'" @navigate="handleNavigate" />
@@ -111,6 +111,13 @@ function handleNavigate(section: string, data?: any) {
 </template>
 
 <style scoped>
+.admin-top-bar {
+  background: rgba(255, 251, 235, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.1);
+}
+
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.2s ease;

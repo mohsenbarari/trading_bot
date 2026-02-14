@@ -38,61 +38,66 @@ defineEmits(['navigate']);
   gap: 16px; 
 }
 .card.management-card {
-  background-color: var(--card-bg);
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(245, 158, 11, 0.1);
+  border-radius: 1.25rem;
+  padding: 1.5rem;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.04);
 }
 h2 {
   margin-top: 0;
-  margin-bottom: 8px;
+  margin-bottom: 0.5rem;
+  font-weight: 800;
+  font-size: 1.1rem;
+  color: #1f2937;
 }
 p {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin-bottom: 24px;
+  font-size: 0.8rem;
+  color: #9ca3af;
+  margin-bottom: 1.5rem;
 }
 .button-group {
     display: grid;
-    /* یک ستونه شبیه به بات */
     grid-template-columns: 1fr; 
-    gap: 12px;
+    gap: 0.75rem;
 }
 .management-button {
   width: 100%;
-  padding: 14px;
-  font-size: 16px;
-  font-weight: 500;
-  background-color: #f9fafb;
-  color: var(--text-color);
-  border: 1px solid var(--border-color);
-  border-radius: 10px; 
+  padding: 1rem 1.25rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  background: white;
+  color: #1f2937;
+  border: 1px solid rgba(245, 158, 11, 0.15);
+  border-radius: 1rem; 
   cursor: pointer;
   display: flex;
   align-items: center;
-  /* متن را راست‌چین می‌کنیم و آیکون در سمت راست قرار می‌گیرد */
   justify-content: flex-start;
   direction: rtl; 
-  gap: 10px;
+  gap: 0.75rem;
   transition: all 0.2s ease-in-out;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 .management-button:hover {
-  border-color: var(--primary-color);
-  color: var(--primary-color);
-  background-color: #f0f9ff;
+  border-color: #f59e0b;
+  color: #b45309;
+  background: #fffbeb;
 }
 .management-button:active {
-  background-color: #e0f2fe;
-  transform: translateY(1px);
+  background: #fef3c7;
+  transform: scale(0.98);
 }
 .management-button.primary {
-  background: linear-gradient(135deg, #10b981, #059669);
+  background: linear-gradient(135deg, #f59e0b, #d97706);
   color: white;
-  border-color: #10b981;
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
 }
 .management-button.primary:hover {
-  background: linear-gradient(135deg, #059669, #047857);
-  border-color: #059669;
+  background: linear-gradient(135deg, #d97706, #b45309);
   color: white;
 }
 </style>

@@ -20,7 +20,7 @@ onMounted(() => {
 
 
 <template>
-  <div class="min-h-screen bg-gray-50 pb-24 font-sans text-gray-900 antialiased selection:bg-primary-500 selection:text-white">
+  <div class="min-h-screen pb-24 font-sans text-gray-900 antialiased selection:bg-primary-500 selection:text-white" style="background: linear-gradient(160deg, #fefce8 0%, #ffffff 40%, #fffbeb 100%)">
     
     <!-- Page Content -->
     <RouterView v-slot="{ Component }">

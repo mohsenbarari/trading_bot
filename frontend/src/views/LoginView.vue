@@ -196,7 +196,7 @@ watch(() => form.mobile, (newVal) => {
 </script>
 
 <template>
-  <div class="min-h-[100dvh] flex items-center justify-center p-4 bg-gradient-to-br from-amber-50 via-white to-amber-100 overflow-hidden relative">
+  <div class="min-h-[100dvh] flex items-center justify-center p-4 overflow-hidden relative">
     
     <!-- Background Elements -->
     <div class="absolute inset-0 overflow-hidden pointer-events-none">
