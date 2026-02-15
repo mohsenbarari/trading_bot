@@ -10,22 +10,23 @@ defineEmits(['navigate']);
       <p>لطفاً بخش مورد نظر خود را انتخاب کنید:</p>
       
       <div class="button-group">
-        <button class="management-button primary" @click="$emit('navigate', 'create_invitation')">
+        <button class="admin-action-btn primary" @click="$emit('navigate', 'create_invitation')">
           ➕ ارسال لینک دعوت
         </button>
         
-        <button class="management-button primary" @click="$emit('navigate', 'manage_commodities')">
+        <button class="admin-action-btn primary" @click="$emit('navigate', 'manage_commodities')">
           📦 مدیریت کالاها
         </button>
 
-        <button class="management-button primary" @click="$emit('navigate', 'manage_users')">
+        <button class="admin-action-btn primary" @click="$emit('navigate', 'manage_users')">
           👥 مدیریت کاربران
         </button>
         
-        <button class="management-button primary" @click="$emit('navigate', 'settings')">
+        <button class="admin-action-btn primary" @click="$emit('navigate', 'settings')">
           ⚙️ تنظیمات سیستم
         </button>
       </div>
+      <div class="version-tag">UI v1.1</div>
     </div>
 
   </div>
@@ -63,7 +64,7 @@ p {
     grid-template-columns: 1fr; 
     gap: 0.75rem;
 }
-.management-button {
+.admin-action-btn {
   width: 100%;
   padding: 1rem 1.25rem;
   font-size: 0.95rem;
@@ -81,23 +82,30 @@ p {
   transition: all 0.2s ease-in-out;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
-.management-button:hover {
+.admin-action-btn:hover {
   border-color: #f59e0b;
   color: #b45309;
   background: #fffbeb;
 }
-.management-button:active {
+.admin-action-btn:active {
   background: #fef3c7;
   transform: scale(0.98);
 }
-.management-button.primary {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: white;
-  border-color: transparent;
+.admin-action-btn.primary {
+  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+  color: white !important;
+  border-color: transparent !important;
   box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
 }
-.management-button.primary:hover {
-  background: linear-gradient(135deg, #d97706, #b45309);
-  color: white;
+.admin-action-btn.primary:hover {
+  background: linear-gradient(135deg, #d97706, #b45309) !important;
+  color: white !important;
+}
+.version-tag {
+    text-align: center;
+    font-size: 0.7rem;
+    color: #9ca3af;
+    margin-top: 1rem;
+    opacity: 0.5;
 }
 </style>

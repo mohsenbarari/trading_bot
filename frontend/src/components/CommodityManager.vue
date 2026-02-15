@@ -334,13 +334,13 @@ onMounted(fetchCommodities);
       <div v-else>
           <div v-if="commodities.length === 0" class="no-data">هیچ کالایی ثبت نشده است.</div>
           <div class="button-list">
-            <button v-for="comm in commodities" :key="comm.id" @click="onManageAliases(comm)" class="list-button">
+            <button v-for="comm in commodities" :key="comm.id" @click="onManageAliases(comm)" class="comm-list-btn">
               <span>📦 {{ comm.name }}</span>
               <span>&rsaquo;</span>
             </button>
           </div>
           <hr class="divider" />
-          <button class="list-button add-button" @click="onAddCommodityStart">
+          <button class="comm-list-btn comm-add-btn" @click="onAddCommodityStart">
             <span>➕ افزودن کالای جدید</span>
           </button>
       </div>
@@ -370,13 +370,13 @@ onMounted(fetchCommodities);
           </div>
           <hr class="divider" />
           <div class="button-list stacked">
-            <button class="list-button add-button" @click="onAddAliasStart">
+            <button class="comm-list-btn comm-add-btn" @click="onAddAliasStart">
               <span>➕ افزودن نام مستعار جدید</span>
             </button>
-            <button class="list-button edit-button" @click="onEditCommodityNameStart">
+            <button class="comm-list-btn comm-edit-btn" @click="onEditCommodityNameStart">
               <span>✏️ ویرایش نام اصلی کالا</span>
             </button>
-            <button class="list-button delete-button" @click="onDeleteCommodityStart">
+            <button class="comm-list-btn comm-del-btn" @click="onDeleteCommodityStart">
               <span>❌ حذف کامل این کالا</span>
             </button>
           </div>
@@ -535,46 +535,49 @@ button.secondary:active { background: #f9fafb; }
 
 /* Commodity list */
 .button-list { display: flex; flex-direction: column; gap: 0.5rem; }
-.list-button {
+.comm-list-btn {
   width: 100%; background: linear-gradient(135deg, #ffffff, #f9fafb); color: #1f2937;
   border: 1px solid rgba(245, 158, 11, 0.2); padding: 0.875rem 1rem;
   font-size: 0.9rem; font-weight: 700; text-align: right;
   display: flex; justify-content: space-between; align-items: center;
   border-radius: 0.875rem; transition: all 0.2s;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05); /* Added shadow for interactivity */
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
   -webkit-tap-highlight-color: transparent;
 }
-.list-button:hover { border-color: rgba(245, 158, 11, 0.3); background: #fffbeb; }
-.list-button:active { transform: scale(0.98); }
-.list-button span:last-child { color: #d1d5db; }
-.list-button.add-button {
-  color: #78350f; justify-content: center; /* Darker amber text for readability */
-  background: linear-gradient(135deg, #fcd34d, #fbbf24); /* Brighter amber gradient */
-  border-color: rgba(245, 158, 11, 0.3);
-  font-weight: 800; /* Bolder text */
+.comm-list-btn:hover { border-color: rgba(245, 158, 11, 0.3); background: #fffbeb; }
+.comm-list-btn:active { transform: scale(0.98); }
+.comm-list-btn span:last-child { color: #d1d5db; }
+
+.comm-list-btn.comm-add-btn {
+  color: #78350f !important; justify-content: center;
+  background: linear-gradient(135deg, #fcd34d, #fbbf24) !important;
+  border-color: rgba(245, 158, 11, 0.3) !important;
+  font-weight: 800;
   box-shadow: 0 4px 6px rgba(245, 158, 11, 0.15);
 }
-.list-button.add-button:hover { 
-  background: linear-gradient(135deg, #fbbf24, #f59e0b); 
+.comm-list-btn.comm-add-btn:hover { 
+  background: linear-gradient(135deg, #fbbf24, #f59e0b) !important; 
   transform: translateY(-1px);
 }
-.list-button.edit-button {
-  color: #1e3a8a; justify-content: center;
-  background: linear-gradient(135deg, #dbeafe, #bfdbfe); /* Soft blue for edit */
-  border-color: rgba(59, 130, 246, 0.3);
+
+.comm-list-btn.comm-edit-btn {
+  color: #1e3a8a !important; justify-content: center;
+  background: linear-gradient(135deg, #dbeafe, #bfdbfe) !important;
+  border-color: rgba(59, 130, 246, 0.3) !important;
   font-weight: 700;
 }
-.list-button.edit-button:hover {
-  background: linear-gradient(135deg, #bfdbfe, #93c5fd);
+.comm-list-btn.comm-edit-btn:hover {
+  background: linear-gradient(135deg, #bfdbfe, #93c5fd) !important;
 }
-.list-button.delete-button {
-  color: #991b1b; justify-content: center; /* Darker red text */
-  background: linear-gradient(135deg, #fecaca, #fca5a5); /* Softer red gradient but clear */
-  border-color: rgba(239, 68, 68, 0.3);
+
+.comm-list-btn.comm-del-btn {
+  color: #991b1b !important; justify-content: center;
+  background: linear-gradient(135deg, #fecaca, #fca5a5) !important;
+  border-color: rgba(239, 68, 68, 0.3) !important;
   font-weight: 700;
 }
-.list-button.delete-button:hover {
-  background: linear-gradient(135deg, #fca5a5, #f87171);
+.comm-list-btn.comm-del-btn:hover {
+  background: linear-gradient(135deg, #fca5a5, #f87171) !important;
 }
 
 /* Aliases */
