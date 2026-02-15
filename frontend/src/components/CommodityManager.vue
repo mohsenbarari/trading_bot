@@ -602,45 +602,44 @@ input:focus { border-color: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.
   font-size: 1.2rem;
 }
 
-/* Action buttons — saturated colors + white text for clear visibility */
+/* Action buttons — soft pastel bg + bold colored text (matches UserProfile style) */
 .comm-list-btn.comm-add-btn {
-  color: white; justify-content: center;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  border-color: transparent;
+  justify-content: center;
+  background: linear-gradient(135deg, #fffbeb, #fef3c7);
+  color: #92400e;
+  border-color: rgba(245, 158, 11, 0.25);
   font-weight: 700;
-  font-size: 0.9rem;
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
 }
 .comm-list-btn.comm-add-btn:hover {
-  background: linear-gradient(135deg, #d97706, #b45309);
-  transform: translateY(-1px);
-  color: white;
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #78350f;
 }
 
 .comm-list-btn.comm-edit-btn {
-  color: white; justify-content: center;
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  border-color: transparent;
+  justify-content: center;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
   font-weight: 700;
-  font-size: 0.9rem;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
 .comm-list-btn.comm-edit-btn:hover {
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
-  color: white;
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1e40af;
 }
 
 .comm-list-btn.comm-del-btn {
-  color: white; justify-content: center;
-  background: linear-gradient(135deg, #ef4444, #dc2626);
-  border-color: transparent;
+  justify-content: center;
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fecaca;
   font-weight: 700;
-  font-size: 0.9rem;
-  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
 }
 .comm-list-btn.comm-del-btn:hover {
-  background: linear-gradient(135deg, #dc2626, #b91c1c);
-  color: white;
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #b91c1c;
 }
 
 /* ── Aliases ── */
