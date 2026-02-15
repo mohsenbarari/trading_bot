@@ -191,6 +191,7 @@ onMounted(fetchUsers);
   flex-direction: column;
   gap: 0.5rem;
 }
+.user-item {
   background: #ffffff; /* Match AdminPanel */
   border: 1px solid rgba(245, 158, 11, 0.2); /* Standardized border */
   border-radius: 1rem;
