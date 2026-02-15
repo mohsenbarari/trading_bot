@@ -13,7 +13,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Table processing order: dependencies first
-TABLE_ORDER = {"users": 0, "commodities": 1, "commodity_aliases": 2, "trading_settings": 3, "offers": 4, "trades": 5}
+TABLE_ORDER = {"users": 0, "user_blocks": 1, "commodities": 2, "commodity_aliases": 3, "trading_settings": 4, "offers": 5, "trades": 6}
 
 async def verify_signature(request: Request):
     """Verify HMAC signature and timestamp"""
@@ -62,6 +62,10 @@ from models.offer import Offer
 from models.trade import Trade
 from models.commodity import Commodity, CommodityAlias
 from models.trading_setting import TradingSetting
+from models.user_block import UserBlock
+
+# Counter fields that should use MAX logic (greatest value wins) to avoid losing increments
+USER_COUNTER_FIELDS = {"trades_count", "commodities_traded_count", "channel_messages_count"}
 
 def get_model_class(table_name: str):
     mapping = {
@@ -70,7 +74,8 @@ def get_model_class(table_name: str):
         "trades": Trade,
         "commodities": Commodity,
         "commodity_aliases": CommodityAlias,
-        "trading_settings": TradingSetting
+        "trading_settings": TradingSetting,
+        "user_blocks": UserBlock
     }
     return mapping.get(table_name)
 
@@ -174,10 +179,29 @@ async def receive_sync_data(
                         
                     from sqlalchemy.dialects.postgresql import insert as pg_insert
                     stmt = pg_insert(model).values(**data)
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=['id'],
-                        set_=data
-                    )
+
+                    # For users table: use GREATEST for counter fields so the highest value wins
+                    if table == "users":
+                        from sqlalchemy import func as sa_func
+                        set_dict = {}
+                        for k, v in data.items():
+                            if k in USER_COUNTER_FIELDS:
+                                # GREATEST(existing_value, new_value) — highest count wins
+                                set_dict[k] = sa_func.greatest(
+                                    getattr(model, k),
+                                    stmt.excluded[k]
+                                )
+                            else:
+                                set_dict[k] = stmt.excluded[k]
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=['id'],
+                            set_=set_dict
+                        )
+                    else:
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=['id'],
+                            set_=data
+                        )
                     await db.execute(stmt, execution_options={"is_sync": True})
                     
                 elif operation == "DELETE":

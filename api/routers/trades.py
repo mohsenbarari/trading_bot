@@ -291,6 +291,15 @@ async def create_trade(
     if offer.user_id == current_user.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="نمی‌توانید روی لفظ خودتان معامله کنید.")
     
+    # بررسی بلاک بین کاربران (پنهان - کاربر نباید متوجه بلاک شدن بشه)
+    from core.services.block_service import is_blocked
+    blocked, _ = await is_blocked(db, current_user.id, offer.user_id)
+    if blocked:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="امکان انجام این معامله وجود ندارد."
+        )
+    
     if trade_data.quantity > offer.remaining_quantity:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

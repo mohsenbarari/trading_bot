@@ -203,16 +203,23 @@ def setup_trade_events():
 
             data = {
                 "id": target.id,
+                "version_id": target.version_id or 1,
                 "trade_number": target.trade_number,
                 "offer_id": target.offer_id,
                 "offer_user_id": target.offer_user_id,
+                "offer_user_mobile": target.offer_user_mobile,
                 "responder_user_id": target.responder_user_id,
+                "responder_user_mobile": target.responder_user_mobile,
                 "commodity_id": target.commodity_id,
                 "trade_type": trade_type_val,
                 "quantity": target.quantity,
                 "price": target.price,
                 "status": status_val,
+                "note": target.note,
                 "created_at": target.created_at.isoformat() if target.created_at else None,
+                "confirmed_at": target.confirmed_at.isoformat() if target.confirmed_at else None,
+                "completed_at": target.completed_at.isoformat() if target.completed_at else None,
+                "updated_at": target.updated_at.isoformat() if target.updated_at else None,
                 "idempotency_key": target.idempotency_key,
                 "archived": target.archived
             }
@@ -225,14 +232,29 @@ def setup_trade_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
+            trade_type_val = target.trade_type.value if hasattr(target.trade_type, 'value') else target.trade_type
             status_val = target.status.value if hasattr(target.status, 'value') else target.status
-            
+
             data = {
                 "id": target.id,
+                "version_id": target.version_id or 1,
+                "trade_number": target.trade_number,
+                "offer_id": target.offer_id,
+                "offer_user_id": target.offer_user_id,
+                "offer_user_mobile": target.offer_user_mobile,
+                "responder_user_id": target.responder_user_id,
+                "responder_user_mobile": target.responder_user_mobile,
+                "commodity_id": target.commodity_id,
+                "trade_type": trade_type_val,
+                "quantity": target.quantity,
+                "price": target.price,
                 "status": status_val,
+                "note": target.note,
+                "created_at": target.created_at.isoformat() if target.created_at else None,
                 "confirmed_at": target.confirmed_at.isoformat() if target.confirmed_at else None,
                 "completed_at": target.completed_at.isoformat() if target.completed_at else None,
                 "updated_at": target.updated_at.isoformat() if target.updated_at else None,
+                "idempotency_key": target.idempotency_key,
                 "archived": target.archived
             }
             log_change(connection, "trades", target.id, "UPDATE", data)
@@ -262,11 +284,18 @@ def setup_user_events():
                 "role": target.role.value if target.role else None,
                 "has_bot_access": target.has_bot_access,
                 "is_deleted": target.is_deleted,
+                "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
                 "can_block_users": target.can_block_users,
                 "max_blocked_users": target.max_blocked_users,
                 "max_daily_trades": target.max_daily_trades,
                 "max_active_commodities": target.max_active_commodities,
                 "max_daily_requests": target.max_daily_requests,
+                "trading_restricted_until": target.trading_restricted_until.isoformat() if target.trading_restricted_until else None,
+                "limitations_expire_at": target.limitations_expire_at.isoformat() if target.limitations_expire_at else None,
+                "trades_count": target.trades_count,
+                "commodities_traded_count": target.commodities_traded_count,
+                "channel_messages_count": target.channel_messages_count,
+                "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
                 "created_at": target.created_at.isoformat() if target.created_at else None,
             }
             log_change(connection, "users", target.id, "INSERT", data)
@@ -290,8 +319,18 @@ def setup_user_events():
                 "role": target.role.value if target.role else None,
                 "has_bot_access": target.has_bot_access,
                 "is_deleted": target.is_deleted,
+                "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
                 "can_block_users": target.can_block_users,
                 "max_blocked_users": target.max_blocked_users,
+                "max_daily_trades": target.max_daily_trades,
+                "max_active_commodities": target.max_active_commodities,
+                "max_daily_requests": target.max_daily_requests,
+                "trading_restricted_until": target.trading_restricted_until.isoformat() if target.trading_restricted_until else None,
+                "limitations_expire_at": target.limitations_expire_at.isoformat() if target.limitations_expire_at else None,
+                "trades_count": target.trades_count,
+                "commodities_traded_count": target.commodities_traded_count,
+                "channel_messages_count": target.channel_messages_count,
+                "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
                 "updated_at": target.updated_at.isoformat() if target.updated_at else None,
             }
             log_change(connection, "users", target.id, "UPDATE", data)
@@ -397,6 +436,38 @@ def setup_commodity_alias_events():
 
 
 
+def setup_user_block_events():
+    """Setup event listeners for UserBlock model"""
+    from models.user_block import UserBlock
+
+    @event.listens_for(UserBlock, 'after_insert')
+    def on_block_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {
+                "id": target.id,
+                "blocker_id": target.blocker_id,
+                "blocked_id": target.blocked_id,
+                "created_at": target.created_at.isoformat() if target.created_at else None,
+            }
+            log_change(connection, "user_blocks", target.id, "INSERT", data)
+        except Exception as e:
+            logger.error(f"Error in user_block after_insert event: {e}")
+
+    @event.listens_for(UserBlock, 'after_delete')
+    def on_block_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {"id": target.id}
+            log_change(connection, "user_blocks", target.id, "DELETE", data)
+        except Exception as e:
+            logger.error(f"Error in user_block after_delete event: {e}")
+
+    logger.info("✅ UserBlock event listeners registered")
+
+
 def setup_trading_settings_events():
     """Setup event listeners for TradingSetting model"""
     from models.trading_setting import TradingSetting
@@ -443,6 +514,7 @@ def setup_all_events():
     setup_commodity_events()
     setup_commodity_alias_events()
     setup_trading_settings_events()
+    setup_user_block_events()
     logger.info("🎯 All event listeners initialized")
 
 
