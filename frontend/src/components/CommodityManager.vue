@@ -536,29 +536,45 @@ button.secondary:active { background: #f9fafb; }
 /* Commodity list */
 .button-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .list-button {
-  width: 100%; background: white; color: #1f2937;
-  border: 1px solid rgba(245, 158, 11, 0.1); padding: 0.875rem 1rem;
-  font-size: 0.9rem; font-weight: 600; text-align: right;
+  width: 100%; background: linear-gradient(135deg, #ffffff, #f9fafb); color: #1f2937;
+  border: 1px solid rgba(245, 158, 11, 0.2); padding: 0.875rem 1rem;
+  font-size: 0.9rem; font-weight: 700; text-align: right;
   display: flex; justify-content: space-between; align-items: center;
   border-radius: 0.875rem; transition: all 0.2s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05); /* Added shadow for interactivity */
   -webkit-tap-highlight-color: transparent;
 }
 .list-button:hover { border-color: rgba(245, 158, 11, 0.3); background: #fffbeb; }
 .list-button:active { transform: scale(0.98); }
 .list-button span:last-child { color: #d1d5db; }
 .list-button.add-button {
-  color: #d97706; justify-content: center;
-  background: linear-gradient(135deg, #fffbeb, #fef3c7);
-  border-color: rgba(245, 158, 11, 0.2);
+  color: #78350f; justify-content: center; /* Darker amber text for readability */
+  background: linear-gradient(135deg, #fcd34d, #fbbf24); /* Brighter amber gradient */
+  border-color: rgba(245, 158, 11, 0.3);
+  font-weight: 800; /* Bolder text */
+  box-shadow: 0 4px 6px rgba(245, 158, 11, 0.15);
 }
-.list-button.add-button:hover { background: #fef3c7; }
+.list-button.add-button:hover { 
+  background: linear-gradient(135deg, #fbbf24, #f59e0b); 
+  transform: translateY(-1px);
+}
 .list-button.edit-button {
-  color: #92400e; justify-content: center;
-  background: #fffbeb; border-color: rgba(245, 158, 11, 0.15);
+  color: #1e3a8a; justify-content: center;
+  background: linear-gradient(135deg, #dbeafe, #bfdbfe); /* Soft blue for edit */
+  border-color: rgba(59, 130, 246, 0.3);
+  font-weight: 700;
+}
+.list-button.edit-button:hover {
+  background: linear-gradient(135deg, #bfdbfe, #93c5fd);
 }
 .list-button.delete-button {
-  color: #dc2626; justify-content: center;
-  background: #fef2f2; border-color: #fecaca;
+  color: #991b1b; justify-content: center; /* Darker red text */
+  background: linear-gradient(135deg, #fecaca, #fca5a5); /* Softer red gradient but clear */
+  border-color: rgba(239, 68, 68, 0.3);
+  font-weight: 700;
+}
+.list-button.delete-button:hover {
+  background: linear-gradient(135deg, #fca5a5, #f87171);
 }
 
 /* Aliases */

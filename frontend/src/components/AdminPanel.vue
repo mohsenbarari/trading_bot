@@ -14,15 +14,15 @@ defineEmits(['navigate']);
           ➕ ارسال لینک دعوت
         </button>
         
-        <button class="management-button" @click="$emit('navigate', 'manage_commodities')">
+        <button class="management-button primary" @click="$emit('navigate', 'manage_commodities')">
           📦 مدیریت کالاها
         </button>
 
-        <button class="management-button" @click="$emit('navigate', 'manage_users')">
+        <button class="management-button primary" @click="$emit('navigate', 'manage_users')">
           👥 مدیریت کاربران
         </button>
         
-        <button class="management-button" @click="$emit('navigate', 'settings')">
+        <button class="management-button primary" @click="$emit('navigate', 'settings')">
           ⚙️ تنظیمات سیستم
         </button>
       </div>
