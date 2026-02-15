@@ -174,17 +174,43 @@ async def delete_commodity(
 ):
     """
     حذف کامل یک کالا (به همراه تمام نام‌های مستعار آن).
+    اگر لفظ فعالی برای این کالا وجود داشته باشد، حذف مجاز نیست.
     """
     logger.info(f"Deleting commodity ID {commodity_id} via source: {source}")
 
-    stmt = select(Commodity).where(Commodity.id == commodity_id)
+    stmt = select(Commodity).options(selectinload(Commodity.aliases)).where(Commodity.id == commodity_id)
     db_commodity = (await db.execute(stmt)).scalar_one_or_none()
     
     if not db_commodity:
         raise HTTPException(status_code=404, detail="کالا یافت نشد")
     
-    await db.delete(db_commodity)
-    await db.commit()
+    # Check for active offers referencing this commodity
+    from models.offer import Offer, OfferStatus
+    offer_count_stmt = select(Offer).where(
+        Offer.commodity_id == commodity_id,
+        Offer.status == OfferStatus.ACTIVE
+    )
+    active_offers = (await db.execute(offer_count_stmt)).scalars().all()
+    if active_offers:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"امکان حذف این کالا وجود ندارد. {len(active_offers)} لفظ فعال برای این کالا وجود دارد. ابتدا لفظ‌ها را لغو یا حذف کنید."
+        )
+
+    # Delete aliases first (ORM events fire for each), then commodity
+    for alias in list(db_commodity.aliases):
+        await db.delete(alias)
+    
+    try:
+        await db.delete(db_commodity)
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error deleting commodity {commodity_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="امکان حذف این کالا وجود ندارد. لفظ یا معامله‌ای به این کالا متصل است."
+        )
 
     # پاک کردن cache کالاها
     try:
