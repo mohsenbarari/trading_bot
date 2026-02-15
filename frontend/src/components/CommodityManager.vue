@@ -595,42 +595,52 @@ input:focus { border-color: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.
   background: #fffbeb;
 }
 .comm-list-btn:active { transform: scale(0.98); }
-.comm-list-btn span:last-child {
+/* Arrow chevron on regular commodity list items (two-span buttons only) */
+.comm-list-btn span:last-child:not(:first-child) {
   color: #d1d5db;
   font-weight: 400;
   font-size: 1.2rem;
 }
 
+/* Action buttons — saturated colors + white text for clear visibility */
 .comm-list-btn.comm-add-btn {
-  color: #78350f; justify-content: center;
-  background: linear-gradient(135deg, #fcd34d, #fbbf24);
-  border-color: rgba(245, 158, 11, 0.3);
+  color: white; justify-content: center;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  border-color: transparent;
   font-weight: 700;
-  box-shadow: 0 4px 6px rgba(245, 158, 11, 0.15);
+  font-size: 0.9rem;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
 }
 .comm-list-btn.comm-add-btn:hover {
-  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  background: linear-gradient(135deg, #d97706, #b45309);
   transform: translateY(-1px);
+  color: white;
 }
 
 .comm-list-btn.comm-edit-btn {
-  color: #1e3a8a; justify-content: center;
-  background: linear-gradient(135deg, #dbeafe, #bfdbfe);
-  border-color: rgba(59, 130, 246, 0.3);
+  color: white; justify-content: center;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  border-color: transparent;
   font-weight: 700;
+  font-size: 0.9rem;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
 .comm-list-btn.comm-edit-btn:hover {
-  background: linear-gradient(135deg, #bfdbfe, #93c5fd);
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: white;
 }
 
 .comm-list-btn.comm-del-btn {
-  color: #991b1b; justify-content: center;
-  background: linear-gradient(135deg, #fecaca, #fca5a5);
-  border-color: rgba(239, 68, 68, 0.3);
+  color: white; justify-content: center;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  border-color: transparent;
   font-weight: 700;
+  font-size: 0.9rem;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
 }
 .comm-list-btn.comm-del-btn:hover {
-  background: linear-gradient(135deg, #fca5a5, #f87171);
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  color: white;
 }
 
 /* ── Aliases ── */
