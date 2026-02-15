@@ -192,8 +192,8 @@ onMounted(fetchUsers);
   gap: 0.5rem;
 }
 .user-item {
-  background: white;
-  border: 1px solid rgba(245, 158, 11, 0.1);
+  background: linear-gradient(135deg, #ffffff, #f9fafb);
+  border: 1px solid rgba(245, 158, 11, 0.25);
   border-radius: 1rem;
   padding: 0.875rem;
   display: flex;
@@ -201,11 +201,12 @@ onMounted(fetchUsers);
   align-items: center;
   cursor: pointer;
   transition: all 0.2s;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.08); /* Stronger shadow */
   -webkit-tap-highlight-color: transparent;
 }
 .user-item:hover {
   background: #fffbeb;
-  border-color: rgba(245, 158, 11, 0.25);
+  border-color: #f59e0b;
 }
 .user-item:active {
   transform: scale(0.98);
@@ -244,20 +245,21 @@ onMounted(fetchUsers);
 
 .arrow {
   font-size: 1rem;
-  color: #d1d5db;
-  font-weight: 300;
+  color: #d97706; /* Amber arrow */
+  font-weight: 500;
 }
 
 .name {
-  font-weight: 700;
-  font-size: 0.9rem;
-  color: #1f2937;
+  font-weight: 800; /* Bolder */
+  font-size: 0.95rem;
+  color: #111827; /* Darker black */
 }
 .details {
-  font-size: 0.75rem;
-  color: #9ca3af;
+  font-size: 0.8rem;
+  color: #4b5563; /* Darker gray */
   margin-top: 0.15rem;
   font-family: monospace;
+  font-weight: 600;
 }
 .role-badge {
   padding: 0.2rem 0.5rem;

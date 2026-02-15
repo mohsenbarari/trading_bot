@@ -14,19 +14,19 @@ defineEmits(['navigate']);
           ➕ ارسال لینک دعوت
         </button>
         
-        <button class="admin-action-btn primary" @click="$emit('navigate', 'manage_commodities')">
+        <button class="admin-action-btn secondary" @click="$emit('navigate', 'manage_commodities')">
           📦 مدیریت کالاها
         </button>
 
-        <button class="admin-action-btn primary" @click="$emit('navigate', 'manage_users')">
+        <button class="admin-action-btn secondary" @click="$emit('navigate', 'manage_users')">
           👥 مدیریت کاربران
         </button>
         
-        <button class="admin-action-btn primary" @click="$emit('navigate', 'settings')">
+        <button class="admin-action-btn secondary" @click="$emit('navigate', 'settings')">
           ⚙️ تنظیمات سیستم
         </button>
       </div>
-      <div class="version-tag">UI v1.1</div>
+      <div class="version-tag">UI v1.2</div>
     </div>
 
   </div>
@@ -100,6 +100,17 @@ p {
 .admin-action-btn.primary:hover {
   background: linear-gradient(135deg, #d97706, #b45309) !important;
   color: white !important;
+}
+.admin-action-btn.secondary {
+  background: linear-gradient(135deg, #ffffff, #f9fafb) !important;
+  color: #1f2937 !important; /* Dark Gray */
+  border: 1px solid rgba(245, 158, 11, 0.3) !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+.admin-action-btn.secondary:hover {
+  background: #fffbeb !important; /* Very light amber */
+  border-color: #f59e0b !important;
+  color: #b45309 !important;
 }
 .version-tag {
     text-align: center;

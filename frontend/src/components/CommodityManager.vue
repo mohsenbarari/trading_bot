@@ -557,17 +557,29 @@ button.secondary:active { background: #f9fafb; }
 /* Commodity list */
 .button-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .comm-list-btn {
-  width: 100%; background: linear-gradient(135deg, #ffffff, #f9fafb); color: #1f2937;
-  border: 1px solid rgba(245, 158, 11, 0.2); padding: 0.875rem 1rem;
-  font-size: 0.9rem; font-weight: 700; text-align: right;
+  width: 100%; background: linear-gradient(135deg, #ffffff, #f9fafb);
+  color: #111827 !important; /* Very Dark Gray/Black */
+  border: 1px solid rgba(245, 158, 11, 0.25); /* Slightly clearer border */
+  padding: 0.875rem 1rem;
+  font-size: 0.95rem; /* Slightly larger */
+  font-weight: 800 !important; /* Bolder */
+  text-align: right;
   display: flex; justify-content: space-between; align-items: center;
   border-radius: 0.875rem; transition: all 0.2s;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 5px rgba(0,0,0,0.08); /* Stronger shadow */
   -webkit-tap-highlight-color: transparent;
 }
-.comm-list-btn:hover { border-color: rgba(245, 158, 11, 0.3); background: #fffbeb; }
+.comm-list-btn:hover { 
+  border-color: #f59e0b !important; 
+  background: #fffbeb !important;
+  color: #000000 !important;
+}
 .comm-list-btn:active { transform: scale(0.98); }
-.comm-list-btn span:last-child { color: #d1d5db; }
+.comm-list-btn span:last-child { 
+  color: #d97706 !important; /* Amber arrow instead of gray */
+  font-weight: 900;
+  font-size: 1.2rem;
+}
 
 .comm-list-btn.comm-add-btn {
   color: #78350f !important; justify-content: center;
