@@ -31,14 +31,8 @@ async def send_telegram_message(chat_id: int, text: str, parse_mode: str = "Mark
             "timestamp": datetime.utcnow().timestamp()
         }
         
-        # 1. Push to Redis (backup)
-        try:
-            r = _get_sync_redis()
-            r.lpush("sync:outbound", json.dumps(payload, default=str))
-        except Exception as e:
-            logger.error(f"❌ Failed to push notification to Redis: {e}")
-            
-        # 2. Direct Push (fast path)
+        # Direct Push only (no Redis backup for notifications to avoid double-send)
+        # Notifications are ephemeral - if delivery fails, user can retry
         try:
             push_sync_direct(payload)
         except Exception as e:
