@@ -557,12 +557,13 @@ button.secondary:active { background: #f9fafb; }
 /* Commodity list */
 .button-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .comm-list-btn {
-  width: 100%; background: linear-gradient(135deg, #ffffff, #f9fafb);
-  color: #1f2937 !important; /* Dark Gray - Standardized */
+  width: 100%; background: #ffffff; /* Pure white */
+  color: #1f2937 !important; /* Standardized Dark Gray */
   border: 1px solid rgba(245, 158, 11, 0.2); /* Standardized border */
   padding: 0.875rem 1rem;
-  font-size: 0.9rem; /* Standardized size (was 0.95rem) */
-  font-weight: 600 !important; /* Standardized weight (was 800) */
+  font-size: 0.9rem; /* Standardized size */
+  font-family: inherit; /* Ensure div-like font rendering */
+  font-weight: 600 !important; /* Standardized weight */
   text-align: right;
   display: flex; justify-content: space-between; align-items: center;
   border-radius: 0.875rem; transition: all 0.2s;

@@ -26,7 +26,7 @@ defineEmits(['navigate']);
           ⚙️ تنظیمات سیستم
         </button>
       </div>
-      <div class="version-tag">UI v1.3</div>
+      <div class="version-tag">UI v1.4</div>
     </div>
 
   </div>
@@ -81,6 +81,7 @@ p {
   gap: 0.75rem;
   transition: all 0.2s ease-in-out;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  font-family: inherit; /* Ensure font matches div defaults */
 }
 .admin-action-btn:hover {
   border-color: #f59e0b;
@@ -102,9 +103,9 @@ p {
   color: white !important;
 }
 .admin-action-btn.secondary {
-  background: linear-gradient(135deg, #ffffff, #f9fafb) !important;
+  background: white !important; /* Pure white, no gradient */
   color: #1f2937 !important; /* Dark Gray */
-  border: 1px solid rgba(245, 158, 11, 0.3) !important;
+  border: 1px solid rgba(245, 158, 11, 0.2) !important; /* Match UserManager border (0.2) */
   box-shadow: 0 2px 4px rgba(0,0,0,0.05);
 }
 .admin-action-btn.secondary:hover {
