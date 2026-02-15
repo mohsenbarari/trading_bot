@@ -179,7 +179,7 @@ async function onEditCommodityNameSubmit() {
   }
 }
 
-// --- 5. افزودن نام مستعار ---
+// --- 5. افزودن نام مستعار (پشتیبانی از چند نام با جداکننده ، یا -) ---
 function onAddAliasStart() {
   if (!selectedCommodity.value) return;
   resetMessages();
@@ -191,18 +191,39 @@ async function onAddAliasSubmit() {
   isLoading.value = true;
   resetMessages();
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/commodities/${selectedCommodity.value.id}/aliases`, {
-      method: 'POST',
-      headers: API_HEADERS.value,
-      body: JSON.stringify({ alias: form.name.trim() }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-         const errorObj = { detail: data.detail || 'خطا در افزودن نام مستعار' };
-         throw errorObj;
+    // Split by ، or - (same logic as add commodity)
+    const aliasList = form.name.split(/[،\-]/)
+                          .map(a => a.trim())
+                          .filter(a => a.length > 0);
+
+    if (aliasList.length === 0) {
+      throw { detail: 'لطفاً حداقل یک نام مستعار وارد کنید.' };
     }
 
-    successMessage.value = `نام مستعار «${data.alias}» با موفقیت افزوده شد.`;
+    const addedAliases: string[] = [];
+    const failedAliases: string[] = [];
+
+    for (const aliasName of aliasList) {
+      const response = await fetch(`${props.apiBaseUrl}/api/commodities/${selectedCommodity.value.id}/aliases`, {
+        method: 'POST',
+        headers: API_HEADERS.value,
+        body: JSON.stringify({ alias: aliasName }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        addedAliases.push(data.alias);
+      } else {
+        failedAliases.push(`${aliasName}: ${data.detail || 'خطا'}`);
+      }
+    }
+
+    if (addedAliases.length > 0) {
+      successMessage.value = `نام‌های مستعار «${addedAliases.join('، ')}» با موفقیت افزوده شدند.`;
+    }
+    if (failedAliases.length > 0) {
+      errorMessage.value = failedAliases.join('\n');
+    }
+
     await onManageAliases(selectedCommodity.value);
   } catch (e: any) {
     errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
@@ -423,8 +444,8 @@ onMounted(fetchCommodities);
       <h2>افزودن نام مستعار به «{{ selectedCommodity.name }}»</h2>
       <form @submit.prevent="onAddAliasSubmit">
         <div class="form-group">
-          <label for="alias_add_name">نام مستعار جدید</label>
-          <input v-model="form.name" id="alias_add_name" type="text" required />
+          <label for="alias_add_name">نام‌های مستعار (جدا با `،` یا `-`)</label>
+          <input v-model="form.name" id="alias_add_name" type="text" placeholder="مثال: نیم تاریخ پایین ، نیم ت.پ" required />
         </div>
         <div class="form-actions">
           <button type="submit" :disabled="isLoading">
