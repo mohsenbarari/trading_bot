@@ -498,7 +498,14 @@ onMounted(fetchCommodities);
 </template>
 
 <style scoped>
-/* Base card & form */
+/* ── Layout ── */
+.commodity-manager-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* ── Card (glass) ── */
 .card {
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(12px);
@@ -508,41 +515,53 @@ onMounted(fetchCommodities);
   padding: 1.25rem;
   box-shadow: 0 4px 16px rgba(0,0,0,0.04);
 }
+
+/* ── Form elements ── */
 .form-group { margin-bottom: 1rem; }
 label { display: block; margin-bottom: 0.5rem; font-weight: 700; font-size: 0.8rem; color: #6b7280; }
 input {
   width: 100%; padding: 0.625rem 0.875rem; border-radius: 0.75rem;
   border: 1px solid rgba(245, 158, 11, 0.15); background: white;
   font-size: 0.9rem; font-family: inherit; outline: none; transition: all 0.2s;
+  box-sizing: border-box; color: #1f2937;
 }
 input:focus { border-color: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1); }
+
+/* ── Form action buttons (scoped — NOT global button) ── */
 .form-actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
-button {
+.form-actions button {
   flex-grow: 1; background: linear-gradient(135deg, #f59e0b, #d97706); color: white;
   border: none; cursor: pointer; font-weight: 700; padding: 0.75rem;
   border-radius: 0.75rem; font-size: 0.9rem; transition: all 0.2s;
   -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25);
 }
-button:active { transform: scale(0.98); }
-button:disabled { background: #d1d5db; cursor: not-allowed; }
-button.secondary {
-  background: white; color: #6b7280;
+.form-actions button:active { transform: scale(0.98); }
+.form-actions button:disabled { background: #d1d5db; box-shadow: none; cursor: not-allowed; color: white; }
+.form-actions button.secondary {
+  background: white; color: #6b7280; box-shadow: none;
   border: 1px solid rgba(245, 158, 11, 0.15); flex-grow: 0;
 }
-button.secondary:active { background: #f9fafb; }
+.form-actions button.secondary:active { background: #f9fafb; }
+.form-actions .delete-confirm {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+}
+
+/* ── Messages ── */
 .message { padding: 0.75rem; border-radius: 0.75rem; margin-bottom: 1rem; font-size: 0.8rem; }
 .message.error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
 .message.success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
 .no-data { text-align: center; color: #9ca3af; padding: 1.5rem 0; font-size: 0.85rem; }
 .divider { border: none; border-top: 1px solid rgba(245, 158, 11, 0.1); margin: 1rem 0; }
 
-/* Sub-section header (e.g. aliases view) */
+/* ── Sub-section header (aliases view) ── */
 .sub-header-row {
   display: flex; align-items: center; gap: 0.625rem; margin-bottom: 1rem;
   padding-bottom: 0.75rem; border-bottom: 1px solid rgba(245, 158, 11, 0.1);
 }
 .sub-back-btn {
-  flex-grow: 0; width: 34px; height: 34px; padding: 0;
+  flex-shrink: 0; width: 34px; height: 34px; padding: 0;
   background: linear-gradient(135deg, #fffbeb, #fef3c7);
   border: 1px solid rgba(245, 158, 11, 0.2);
   border-radius: 0.625rem; cursor: pointer; color: #b45309;
@@ -554,67 +573,67 @@ button.secondary:active { background: #f9fafb; }
 .sub-back-icon { font-size: 1rem; font-weight: 700; line-height: 1; }
 .sub-title { font-size: 0.95rem; font-weight: 800; color: #1f2937; margin: 0; }
 
-/* Commodity list */
+/* ── Commodity list items ── */
 .button-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .comm-list-btn {
-  width: 100%; background: #ffffff; /* Pure white */
-  color: #1f2937 !important; /* Standardized Dark Gray */
-  border: 1px solid rgba(245, 158, 11, 0.2); /* Standardized border */
+  width: 100%; background: white;
+  color: #1f2937;
+  border: 1px solid rgba(245, 158, 11, 0.15);
   padding: 0.875rem 1rem;
-  font-size: 0.9rem; /* Standardized size */
-  font-family: inherit; /* Ensure div-like font rendering */
-  font-weight: 600 !important; /* Standardized weight */
+  font-size: 0.9rem;
+  font-family: inherit;
+  font-weight: 600;
   text-align: right;
   display: flex; justify-content: space-between; align-items: center;
-  border-radius: 0.875rem; transition: all 0.2s;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05); /* Standardized shadow */
+  border-radius: 1rem; transition: all 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.comm-list-btn:hover { 
-  border-color: #f59e0b !important; 
-  background: #fffbeb !important;
-  color: #b45309 !important; /* Dark Amber on hover */
+.comm-list-btn:hover {
+  border-color: #f59e0b;
+  background: #fffbeb;
 }
 .comm-list-btn:active { transform: scale(0.98); }
-.comm-list-btn span:last-child { 
-  color: #d1d5db !important; /* Revert to lighter arrow for less clutter, or keep Amber if preferred. Let's match standard. */
-  font-weight: 400; /* Standard weight */
+.comm-list-btn span:last-child {
+  color: #d1d5db;
+  font-weight: 400;
   font-size: 1.2rem;
 }
 
 .comm-list-btn.comm-add-btn {
-  color: #78350f !important; justify-content: center;
-  background: linear-gradient(135deg, #fcd34d, #fbbf24) !important;
-  border-color: rgba(245, 158, 11, 0.3) !important;
-  font-weight: 800;
+  color: #78350f; justify-content: center;
+  background: linear-gradient(135deg, #fcd34d, #fbbf24);
+  border-color: rgba(245, 158, 11, 0.3);
+  font-weight: 700;
   box-shadow: 0 4px 6px rgba(245, 158, 11, 0.15);
 }
-.comm-list-btn.comm-add-btn:hover { 
-  background: linear-gradient(135deg, #fbbf24, #f59e0b) !important; 
+.comm-list-btn.comm-add-btn:hover {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
   transform: translateY(-1px);
 }
 
 .comm-list-btn.comm-edit-btn {
-  color: #1e3a8a !important; justify-content: center;
-  background: linear-gradient(135deg, #dbeafe, #bfdbfe) !important;
-  border-color: rgba(59, 130, 246, 0.3) !important;
+  color: #1e3a8a; justify-content: center;
+  background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+  border-color: rgba(59, 130, 246, 0.3);
   font-weight: 700;
 }
 .comm-list-btn.comm-edit-btn:hover {
-  background: linear-gradient(135deg, #bfdbfe, #93c5fd) !important;
+  background: linear-gradient(135deg, #bfdbfe, #93c5fd);
 }
 
 .comm-list-btn.comm-del-btn {
-  color: #991b1b !important; justify-content: center;
-  background: linear-gradient(135deg, #fecaca, #fca5a5) !important;
-  border-color: rgba(239, 68, 68, 0.3) !important;
+  color: #991b1b; justify-content: center;
+  background: linear-gradient(135deg, #fecaca, #fca5a5);
+  border-color: rgba(239, 68, 68, 0.3);
   font-weight: 700;
 }
 .comm-list-btn.comm-del-btn:hover {
-  background: linear-gradient(135deg, #fca5a5, #f87171) !important;
+  background: linear-gradient(135deg, #fca5a5, #f87171);
 }
 
-/* Aliases */
+/* ── Aliases ── */
 .alias-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; }
 .alias-item {
   display: flex; justify-content: space-between; align-items: center;
@@ -625,7 +644,7 @@ button.secondary:active { background: #f9fafb; }
 .alias-actions { display: flex; gap: 0.375rem; }
 .action-btn {
   padding: 0.375rem 0.625rem; font-size: 0.8rem; border-radius: 0.5rem;
-  flex-grow: 0; border: none; background: transparent; cursor: pointer;
+  border: none; background: transparent; cursor: pointer;
   transition: all 0.2s; -webkit-tap-highlight-color: transparent;
 }
 .action-btn:active { transform: scale(0.9); }
@@ -633,12 +652,8 @@ button.secondary:active { background: #f9fafb; }
 .action-btn.delete { color: #dc2626; background: #fef2f2; }
 .button-list.stacked { margin-top: 1.25rem; }
 
-/* Confirmation dialog */
+/* ── Confirmation dialog ── */
 .confirmation-dialog p { font-size: 0.85rem; line-height: 1.7; color: #4b5563; }
 .confirmation-dialog p strong { color: #dc2626; }
-button.delete-confirm {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
-  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
-}
 h2 { margin-top: 0; margin-bottom: 1rem; font-size: 1rem; font-weight: 800; color: #1f2937; }
 </style>

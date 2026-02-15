@@ -1,10 +1,5 @@
 <template>
   <div class="settings-page">
-    <div class="page-header">
-      <h1>⚙️ تنظیمات سیستم</h1>
-      <p>تنظیمات قابل تغییر سیستم معاملاتی</p>
-    </div>
-
     <div v-if="loading" class="loading">
       <div class="spinner"></div>
       <p>در حال بارگذاری...</p>
@@ -209,22 +204,6 @@ onMounted(() => {
 .settings-page {
   max-width: 100%;
   margin: 0 auto;
-}
-
-.page-header {
-  text-align: center;
-  margin-bottom: 1.5rem;
-}
-.page-header h1 {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 800;
-  color: #1f2937;
-}
-.page-header p {
-  color: #9ca3af;
-  margin-top: 0.375rem;
-  font-size: 0.8rem;
 }
 
 .loading {

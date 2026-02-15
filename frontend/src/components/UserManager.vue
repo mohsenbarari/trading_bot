@@ -111,11 +111,14 @@ onMounted(fetchUsers);
 </template>
 
 <style scoped>
+/* ── Layout ── */
 .user-manager-container {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
 }
+
+/* ── Card (glass) — identical to CommodityManager ── */
 .card {
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(12px);
@@ -126,15 +129,16 @@ onMounted(fetchUsers);
   box-shadow: 0 4px 16px rgba(0,0,0,0.04);
 }
 
+/* ── Search button — matches CommodityManager action buttons ── */
 .search-button {
   width: 100%;
-  padding: 0.75rem;
+  padding: 0.875rem 1rem;
   background: linear-gradient(135deg, #fffbeb, #fef3c7);
   color: #92400e;
   border: 1px solid rgba(245, 158, 11, 0.2);
   border-radius: 1rem;
   font-weight: 700;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   cursor: pointer;
   margin-bottom: 1rem;
   display: flex;
@@ -144,11 +148,15 @@ onMounted(fetchUsers);
   transition: all 0.2s;
   -webkit-tap-highlight-color: transparent;
 }
+.search-button:hover {
+  background: #fef3c7;
+  border-color: #f59e0b;
+}
 .search-button:active {
   transform: scale(0.98);
-  background: #fef3c7;
 }
 
+/* ── Search box ── */
 .search-box {
   display: flex;
   gap: 0.5rem;
@@ -161,8 +169,9 @@ onMounted(fetchUsers);
   border: 1px solid rgba(245, 158, 11, 0.15);
   border-radius: 0.75rem;
   font-family: inherit;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   background: white;
+  color: #1f2937;
   outline: none;
   transition: all 0.2s;
 }
@@ -171,37 +180,39 @@ onMounted(fetchUsers);
   box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
 }
 .do-search-btn {
-  padding: 0 1rem;
+  padding: 0 1.25rem;
   background: linear-gradient(135deg, #f59e0b, #d97706);
   color: white;
   border: none;
   border-radius: 0.75rem;
   cursor: pointer;
   font-weight: 700;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   transition: all 0.2s;
   -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25);
 }
 .do-search-btn:active {
   transform: scale(0.95);
 }
 
+/* ── User list items — matches CommodityManager list items ── */
 .users-list {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 .user-item {
-  background: #ffffff; /* Match AdminPanel */
-  border: 1px solid rgba(245, 158, 11, 0.2); /* Standardized border */
+  background: white;
+  border: 1px solid rgba(245, 158, 11, 0.15);
   border-radius: 1rem;
-  padding: 0.875rem;
+  padding: 0.875rem 1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05); /* Standardized shadow */
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   -webkit-tap-highlight-color: transparent;
 }
 .user-item:hover {
@@ -212,12 +223,12 @@ onMounted(fetchUsers);
   transform: scale(0.98);
 }
 
+/* ── User item content ── */
 .user-info {
   display: flex;
   align-items: center;
   gap: 0.75rem;
 }
-
 .user-avatar {
   width: 40px;
   height: 40px;
@@ -231,40 +242,38 @@ onMounted(fetchUsers);
   font-size: 1rem;
   flex-shrink: 0;
 }
-
 .user-text {
   display: flex;
   flex-direction: column;
 }
-
 .user-meta {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
-
 .arrow {
-  font-size: 1rem;
-  color: #d1d5db; /* Standardized arrow color */
-  font-weight: 300;
+  font-size: 1.2rem;
+  color: #d1d5db;
+  font-weight: 400;
 }
-
 .name {
-  font-weight: 600; /* Standardized weight */
-  font-size: 0.9rem; /* Standardized size */
-  color: #1f2937; /* Standardized dark gray */
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #1f2937;
 }
 .details {
-  font-size: 0.8rem; /* Keep existing detail size or 0.75rem? Let's stick to 0.8rem */
-  color: #6b7280; /* Standardized gray */
+  font-size: 0.8rem;
+  color: #6b7280;
   margin-top: 0.15rem;
   font-family: monospace;
-  font-weight: 400; /* Standard weight */
+  font-weight: 400;
 }
+
+/* ── Role badges ── */
 .role-badge {
   padding: 0.2rem 0.5rem;
   border-radius: 0.5rem;
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   font-weight: 700;
   background: #f3f4f6;
   color: #6b7280;
@@ -274,6 +283,7 @@ onMounted(fetchUsers);
 .role-badge.عادی { background: #d1fae5; color: #065f46; }
 .role-badge.تماشا { background: #f3f4f6; color: #6b7280; }
 
+/* ── Status ── */
 .loading, .error, .no-data { text-align: center; padding: 1.5rem; color: #9ca3af; font-size: 0.85rem; }
 .error { color: #ef4444; }
 

@@ -173,20 +173,20 @@ input:focus, select:focus {
   box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
 }
 .form-actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
-button {
+.form-actions button {
   flex-grow: 1; background: linear-gradient(135deg, #f59e0b, #d97706);
   color: white; border: none; cursor: pointer; font-weight: 700;
   transition: all 0.2s; padding: 0.75rem; border-radius: 0.75rem;
   font-size: 0.9rem; -webkit-tap-highlight-color: transparent;
   box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25);
 }
-button:active { transform: scale(0.98); }
-button:disabled { background: #d1d5db; box-shadow: none; cursor: not-allowed; }
-button.secondary {
+.form-actions button:active { transform: scale(0.98); }
+.form-actions button:disabled { background: #d1d5db; box-shadow: none; cursor: not-allowed; color: white; }
+.form-actions button.secondary {
   background: white; color: #6b7280; box-shadow: none;
   border: 1px solid rgba(245, 158, 11, 0.15); flex-grow: 0;
 }
-button.secondary:active { background: #f9fafb; }
+.form-actions button.secondary:active { background: #f9fafb; }
 
 .result-box.error {
   margin-top: 1.25rem; padding: 0.75rem; border-radius: 0.75rem;
