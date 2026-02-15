@@ -26,7 +26,7 @@ defineEmits(['navigate']);
           ⚙️ تنظیمات سیستم
         </button>
       </div>
-      <div class="version-tag">UI v1.2</div>
+      <div class="version-tag">UI v1.3</div>
     </div>
 
   </div>
@@ -67,8 +67,8 @@ p {
 .admin-action-btn {
   width: 100%;
   padding: 1rem 1.25rem;
-  font-size: 0.95rem;
-  font-weight: 700;
+  font-size: 0.9rem; /* Standardized size */
+  font-weight: 600; /* Standardized weight */
   background: white;
   color: #1f2937;
   border: 1px solid rgba(245, 158, 11, 0.15);

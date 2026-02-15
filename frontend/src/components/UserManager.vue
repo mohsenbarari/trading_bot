@@ -191,9 +191,8 @@ onMounted(fetchUsers);
   flex-direction: column;
   gap: 0.5rem;
 }
-.user-item {
-  background: linear-gradient(135deg, #ffffff, #f9fafb);
-  border: 1px solid rgba(245, 158, 11, 0.25);
+  background: #ffffff; /* Match AdminPanel */
+  border: 1px solid rgba(245, 158, 11, 0.2); /* Standardized border */
   border-radius: 1rem;
   padding: 0.875rem;
   display: flex;
@@ -201,7 +200,7 @@ onMounted(fetchUsers);
   align-items: center;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.08); /* Stronger shadow */
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05); /* Standardized shadow */
   -webkit-tap-highlight-color: transparent;
 }
 .user-item:hover {
@@ -245,21 +244,21 @@ onMounted(fetchUsers);
 
 .arrow {
   font-size: 1rem;
-  color: #d97706; /* Amber arrow */
-  font-weight: 500;
+  color: #d1d5db; /* Standardized arrow color */
+  font-weight: 300;
 }
 
 .name {
-  font-weight: 800; /* Bolder */
-  font-size: 0.95rem;
-  color: #111827; /* Darker black */
+  font-weight: 600; /* Standardized weight */
+  font-size: 0.9rem; /* Standardized size */
+  color: #1f2937; /* Standardized dark gray */
 }
 .details {
-  font-size: 0.8rem;
-  color: #4b5563; /* Darker gray */
+  font-size: 0.8rem; /* Keep existing detail size or 0.75rem? Let's stick to 0.8rem */
+  color: #6b7280; /* Standardized gray */
   margin-top: 0.15rem;
   font-family: monospace;
-  font-weight: 600;
+  font-weight: 400; /* Standard weight */
 }
 .role-badge {
   padding: 0.2rem 0.5rem;

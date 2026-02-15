@@ -558,26 +558,26 @@ button.secondary:active { background: #f9fafb; }
 .button-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .comm-list-btn {
   width: 100%; background: linear-gradient(135deg, #ffffff, #f9fafb);
-  color: #111827 !important; /* Very Dark Gray/Black */
-  border: 1px solid rgba(245, 158, 11, 0.25); /* Slightly clearer border */
+  color: #1f2937 !important; /* Dark Gray - Standardized */
+  border: 1px solid rgba(245, 158, 11, 0.2); /* Standardized border */
   padding: 0.875rem 1rem;
-  font-size: 0.95rem; /* Slightly larger */
-  font-weight: 800 !important; /* Bolder */
+  font-size: 0.9rem; /* Standardized size (was 0.95rem) */
+  font-weight: 600 !important; /* Standardized weight (was 800) */
   text-align: right;
   display: flex; justify-content: space-between; align-items: center;
   border-radius: 0.875rem; transition: all 0.2s;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.08); /* Stronger shadow */
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05); /* Standardized shadow */
   -webkit-tap-highlight-color: transparent;
 }
 .comm-list-btn:hover { 
   border-color: #f59e0b !important; 
   background: #fffbeb !important;
-  color: #000000 !important;
+  color: #b45309 !important; /* Dark Amber on hover */
 }
 .comm-list-btn:active { transform: scale(0.98); }
 .comm-list-btn span:last-child { 
-  color: #d97706 !important; /* Amber arrow instead of gray */
-  font-weight: 900;
+  color: #d1d5db !important; /* Revert to lighter arrow for less clutter, or keep Amber if preferred. Let's match standard. */
+  font-weight: 400; /* Standard weight */
   font-size: 1.2rem;
 }
 
