@@ -291,8 +291,9 @@ async def receive_sync_data(
 
         await db.commit()
 
-        # Refresh settings cache if needed
+        # Refresh caches for affected tables
         items_tables = {i.get('table') for i in sorted_items}
+
         if "trading_settings" in items_tables:
             try:
                 from core.trading_settings import refresh_settings_cache_async
@@ -300,6 +301,20 @@ async def receive_sync_data(
                 logger.info("🔄 Trading settings cache refreshed")
             except Exception as e:
                  logger.error(f"Failed to refresh settings cache: {e}")
+
+        if items_tables & {"commodities", "commodity_aliases"}:
+            try:
+                from core.cache import invalidate_commodities_cache
+                await invalidate_commodities_cache()
+                logger.info("🔄 Commodities cache invalidated after sync")
+            except Exception as e:
+                logger.error(f"Failed to invalidate commodities cache: {e}")
+            # Also invalidate bot's commodity cache
+            try:
+                from bot.utils.redis_helpers import invalidate_commodity_cache
+                await invalidate_commodity_cache()
+            except Exception:
+                pass
         
         # --- Handle Offer Publishing on Foreign Server ---
         if settings.server_mode != "iran" and new_offers:
