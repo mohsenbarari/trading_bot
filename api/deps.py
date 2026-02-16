@@ -21,6 +21,10 @@ oauth2_scheme = OAuth2PasswordBearer(
 # DEV_API_KEY for bypass
 DEV_API_KEY_HEADER = "X-DEV-API-KEY"
 
+from fastapi.security import APIKeyHeader
+api_key_header = APIKeyHeader(name=DEV_API_KEY_HEADER, auto_error=False)
+
+
 async def get_current_user(
     db: AsyncSession = Depends(get_db),
     token: str = Depends(oauth2_scheme)
@@ -115,5 +119,4 @@ async def verify_super_admin_or_dev_key(
         detail="Not authenticated"
     )
 
-from fastapi.security import APIKeyHeader
-api_key_header = APIKeyHeader(name=DEV_API_KEY_HEADER, auto_error=False)
+
