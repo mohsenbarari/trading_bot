@@ -1,106 +1,185 @@
-# trading_bot/api/routers/invitations.py (کامل و اصلاح شده)
-
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, delete, func
-from datetime import datetime, timedelta
+from sqlalchemy import select, func
+from pydantic import BaseModel
 import secrets
+import string
+from datetime import datetime, timedelta
+from typing import Optional
 
 from core.db import get_db
-from core.config import settings
-from core.utils import normalize_account_name
-from models.user import User
 from models.invitation import Invitation
-from .auth import get_admin_user_dependency # <--- از این تابع استفاده می‌کنیم
-import schemas
+from models.user import User, UserRole
+from core.config import settings
+from api.deps import get_current_user, verify_super_admin
+from core.sms import send_invitation_sms
+from core.connectivity import is_internet_connected
 
-router = APIRouter(
-    prefix="/invitations",
-    tags=["Invitations"],
-    dependencies=[Depends(get_admin_user_dependency)] 
-)
+router = APIRouter()
 
-async def cleanup_expired_invitations(db: AsyncSession):
-    """دعوت‌نامه‌های منقضی شده را پاک می‌کند"""
-    await db.execute(
-        delete(Invitation).where(Invitation.expires_at < datetime.utcnow())
-    )
-    await db.commit()
+class InvitationCreate(BaseModel):
+    account_name: str
+    mobile_number: str
+    role: UserRole = UserRole.WATCH
 
-@router.post("/", response_model=schemas.InvitationRead)
+class InvitationResponse(BaseModel):
+    token: str
+    link: str
+    short_link: str | None
+    expires_at: datetime
+
+def generate_token():
+    return "INV-" + secrets.token_hex(16)
+
+def generate_short_code():
+    # 8-char random string (alphanumeric)
+    chars = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(chars) for _ in range(8))
+
+@router.post("/", response_model=InvitationResponse)
 async def create_invitation(
-    invitation: schemas.InvitationCreate,
-    current_user: User = Depends(get_admin_user_dependency), 
+    invite: InvitationCreate,
     db: AsyncSession = Depends(get_db),
-    background_tasks: BackgroundTasks = BackgroundTasks()
+    admin: User = Depends(verify_super_admin)
 ):
-    """ایجاد لینک دعوت جدید (فقط مدیر ارشد)"""
-    
-    account_name_normalized = normalize_account_name(invitation.account_name)
-    mobile_number_normalized = invitation.mobile_number
-    
-    if not account_name_normalized or len(account_name_normalized) < 3:
-         raise HTTPException(status_code=422, detail="نام کاربری پس از نرمال‌سازی بسیار کوتاه است")
+    # Normalize mobile (simple check)
+    mobile = invite.mobile_number
+    if not mobile.startswith("09") or len(mobile) != 11:
+        raise HTTPException(status_code=400, detail="شماره موبایل نامعتبر است")
 
-    # بررسی کاربر موجود
+    # Check if user already exists
     stmt = select(User).where(
-        or_(
-            User.account_name == account_name_normalized,
-            User.mobile_number == mobile_number_normalized
-        )
+        (User.account_name == invite.account_name) | 
+        (User.mobile_number == mobile)
     )
     existing_user = (await db.execute(stmt)).scalar_one_or_none()
     if existing_user:
-        if existing_user.mobile_number == mobile_number_normalized:
-            detail = f"کاربری با شماره موبایل **{mobile_number_normalized}** از قبل وجود دارد."
-        else:
-            detail = f"کاربری با نام کاربری **{invitation.account_name}** از قبل وجود دارد."
-        raise HTTPException(status_code=409, detail=detail) # <--- این خطا باقی می‌ماند (برای کاربر تکراری)
+        raise HTTPException(status_code=400, detail="کاربری با این نام کاربری یا موبایل قبلاً ثبت شده است")
 
-    # بررسی دعوت‌نامه موجود
-    stmt_inv = select(Invitation).where(
-        or_(
-            Invitation.account_name == account_name_normalized,
-            Invitation.mobile_number == mobile_number_normalized
-        )
+    # Check active invitation
+    stmt = select(Invitation).where(
+        (Invitation.mobile_number == mobile) &
+        (Invitation.is_used == False) &
+        (Invitation.expires_at > func.now())
     )
-    existing_invitation = (await db.execute(stmt_inv)).scalar_one_or_none()
+    active_inv = (await db.execute(stmt)).scalar_one_or_none()
+    if active_inv:
+        # Return existing active invitation
+        bot_link = f"https://t.me/{settings.bot_username}?start={active_inv.token}"
+        web_link = f"{settings.frontend_url}/register?token={active_inv.token}"
+        short_link = f"{settings.frontend_url}/i/{active_inv.short_code}" if active_inv.short_code else None
+        
+        return {
+            "token": active_inv.token,
+            "link": bot_link,
+            "short_link": short_link,
+            "expires_at": active_inv.expires_at
+        }
+
+    # Create new invitation
+    token = generate_token()
+    short_code = generate_short_code()
+    expires_at = datetime.utcnow() + timedelta(days=settings.invitation_expiry_days)
     
-    background_tasks.add_task(cleanup_expired_invitations, db)
-
-    if existing_invitation:
-        if existing_invitation.expires_at > datetime.utcnow():
-            # --- ۱. منطق اصلی تغییر کرد ---
-            # اگر لینک فعال وجود دارد، به جای خطا، یک پیام ساختاریافته برای بات می‌فرستیم
-            raise HTTPException(
-                status_code=409, 
-                detail=f"EXISTING_ACTIVE_LINK::{existing_invitation.account_name}::{existing_invitation.token}"
-            )
-            # ---------------------------
-        else:
-            # اگر لینک منقضی شده، حذفش می‌کنیم تا جدید بسازیم
-            await db.delete(existing_invitation)
-            await db.commit()
-
-    # (ادامه کد برای ساخت لینک جدید)
-    token = f"INV-{secrets.token_hex(16)}"
-    
-    # استفاده از تنظیمات برای مدت انقضا
-    from core.trading_settings import get_trading_settings
-    ts = get_trading_settings()
-    expires_at = datetime.utcnow() + timedelta(minutes=ts.invitation_expiry_minutes)
-
-    db_invitation = Invitation(
-        account_name=account_name_normalized,
-        mobile_number=mobile_number_normalized,
-        role=invitation.role,
+    new_inv = Invitation(
+        account_name=invite.account_name,
+        mobile_number=mobile,
+        role=invite.role,
         token=token,
-        created_by_id=current_user.id,
+        short_code=short_code,
+        created_by_id=admin.id,
         expires_at=expires_at
     )
     
-    db.add(db_invitation)
+    db.add(new_inv)
     await db.commit()
-    await db.refresh(db_invitation)
+    await db.refresh(new_inv)
     
-    return db_invitation
+    bot_link = f"https://t.me/{settings.bot_username}?start={token}"
+    web_link = f"{settings.frontend_url}/register?token={token}"
+    short_link = f"{settings.frontend_url}/i/{short_code}"
+    
+    # Send SMS based on connectivity
+    is_connected = await is_internet_connected()
+    
+    # Always send two links as requested by user
+    # Text is handled inside send_invitation_sms
+    # We send the direct links, or short link if preferred?
+    # User wanted two links. Let's send the direct links to avoid extra redirect if possible,
+    # OR send the short link if we implement the landing page.
+    # User said: "send both links".
+    
+    # Let's send the direct links for now.
+    # If we want a landing page (short_link), we can use that too.
+    
+    # Actually, sending two long links in SMS is bad.
+    # Let's send the short_link for the landing page which has both buttons?
+    # User rejected landing page idea initially but then accepted "send two links".
+    # Sending two long links in one SMS might fail or cost 3-4 segments.
+    # Short link is best.
+    
+    # But wait, user said: "send both links: one web, one telegram".
+    # So we must send both.
+    
+    send_invitation_sms(
+        mobile=mobile,
+        account_name=invite.account_name,
+        bot_link=bot_link,
+        web_link=web_link
+    )
+    
+    return {
+        "token": token,
+        "link": bot_link,
+        "short_link": short_link,
+        "expires_at": expires_at
+    }
+
+@router.get("/lookup/{short_code}")
+async def lookup_invitation(
+    short_code: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Lookup full token from short code.
+    """
+    stmt = select(Invitation).where(Invitation.short_code == short_code)
+    inv = (await db.execute(stmt)).scalar_one_or_none()
+    
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invalid short code")
+        
+    if inv.is_used:
+        raise HTTPException(status_code=400, detail="Invitation already used")
+        
+    if inv.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Invitation expired")
+        
+    return {"token": inv.token}
+
+@router.get("/validate/{token}")
+async def validate_invitation(
+    token: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Validate invitation token for web registration.
+    """
+    stmt = select(Invitation).where(Invitation.token == token)
+    inv = (await db.execute(stmt)).scalar_one_or_none()
+    
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invalid token")
+        
+    if inv.is_used:
+        raise HTTPException(status_code=400, detail="Invitation already used")
+        
+    if inv.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Invitation expired")
+        
+    return {
+        "valid": True,
+        "account_name": inv.account_name,
+        "mobile_number": inv.mobile_number,
+        "role": inv.role
+    }

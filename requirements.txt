@@ -17,3 +17,4 @@ openpyxl==3.1.2
 reportlab==4.0.9
 arabic-reshaper==3.0.0
 python-bidi==0.4.2
+smsir-python==1.0.8

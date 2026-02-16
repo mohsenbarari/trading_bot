@@ -1,380 +1,349 @@
-# trading_bot/api/routers/auth.py
-"""
-API Router for Authentication - JWT Access Token + Refresh Token
-"""
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from datetime import timedelta
+import logging
+from pydantic import BaseModel
+import random
 import hashlib
 import hmac
-import json
-import logging
-import secrets
-import urllib.parse
-from datetime import datetime, timedelta, timezone
-from typing import Optional
-
-from fastapi import APIRouter, Depends, HTTPException, status, Security
-from fastapi.security import OAuth2PasswordBearer, APIKeyHeader
-from jose import JWTError, jwt
-from redis.asyncio import Redis
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from core.config import settings, Settings
+import time
 from core.db import get_db
-from core.enums import UserRole
-from core.redis import get_redis
+from models.user import User
+from models.invitation import Invitation
 from core.security import (
     create_access_token,
     create_refresh_token,
-    verify_token,
-    verify_refresh_token,
-    create_token_pair,
-    ACCESS_TOKEN_EXPIRE_MINUTES,
+    get_password_hash,
+    verify_password
 )
-from models.user import User
-from models.session import UserSession
-import schemas
+from core.config import settings
+from bot.utils.redis_helpers import get_redis
+from core.notifications import send_telegram_message
+from core.sms import send_otp_sms, send_sms
+from core.connectivity import is_internet_connected
 
+router = APIRouter()
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/auth",
-    tags=["Authentication"]
-)
+# --- Schemas ---
+class Token(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token", auto_error=False)
-api_key_scheme = APIKeyHeader(name="x-api-key", auto_error=False)
+class OTPRequest(BaseModel):
+    mobile_number: str
 
-async def get_settings():
-    return settings
+class OTPVerify(BaseModel):
+    mobile_number: str
+    code: str
 
-# --- توابع کمکی ---
+class WebAppLogin(BaseModel):
+    init_data: str
 
-async def validate_otp(db: AsyncSession, mobile_number: str, otp_code: str):
-    # در نسخه فعلی لاجیک OTP شبیه‌سازی شده است.
-    return True
+class RegisterOTPRequest(BaseModel):
+    token: str
 
-async def get_current_user_from_token(token: str, db: AsyncSession = Depends(get_db)) -> User:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
+class RegisterOTPVerify(BaseModel):
+    token: str
+    code: str
+
+class RegisterComplete(BaseModel):
+    token: str
+    address: str
+
+# --- Endpoints ---
+
+@router.post("/register-otp-request", response_model=dict)
+async def register_otp_request(
+    req: RegisterOTPRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    # Validate invitation
+    stmt = select(Invitation).where(Invitation.token == req.token)
+    inv = (await db.execute(stmt)).scalar_one_or_none()
+    
+    if not inv:
+        raise HTTPException(status_code=404, detail="دعوت‌نامه نامعتبر است")
+    if inv.is_used:
+        raise HTTPException(status_code=400, detail="دعوت‌نامه قبلاً استفاده شده است")
+    if inv.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="دعوت‌نامه منقضی شده است")
+
+    mobile = inv.mobile_number
+    
+    # Rate limiting
+    redis = await get_redis()
+    rate_limit_key = f"otp_limit:{mobile}"
+    if await redis.get(rate_limit_key):
+        raise HTTPException(status_code=429, detail="لطفاً ۲ دقیقه صبر کنید")
+
+    otp_code = str(random.randint(10000, 99999))
+    otp_key = f"reg_otp:{req.token}" # Use token as key identifier for security
+    
+    await redis.setex(otp_key, 120, otp_code)
+    await redis.setex(rate_limit_key, 120, "1")
+    
+    # Send SMS (Always SMS because user is not registered on Telegram yet)
+    if send_otp_sms(mobile, otp_code):
+        return {"detail": "کد تایید ارسال شد", "expires_in": 120}
+    else:
+        raise HTTPException(status_code=500, detail="خطا در ارسال پیامک")
+
+@router.post("/register-otp-verify", response_model=dict)
+async def register_otp_verify(
+    req: RegisterOTPVerify,
+    db: AsyncSession = Depends(get_db)
+):
+    redis = await get_redis()
+    otp_key = f"reg_otp:{req.token}"
+    stored_code = await redis.get(otp_key)
+    
+    if not stored_code or stored_code != req.code:
+        raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است")
+    
+    # Mark as verified (optional, or just rely on client flow if secure enough)
+    # Ideally we should issue a temporary registration token, but for simplicity
+    # and since we re-validate token in complete step, we can just return OK.
+    # However, to prevent skipping verify step, let's set a flag in Redis
+    
+    verify_key = f"reg_verified:{req.token}"
+    await redis.setex(verify_key, 600, "1") # 10 mins to complete registration
+    
+    return {"detail": "کد تایید شد"}
+
+@router.post("/register-complete", response_model=Token)
+async def register_complete(
+    req: RegisterComplete,
+    db: AsyncSession = Depends(get_db)
+):
+    # 1. Check verify flag
+    redis = await get_redis()
+    verify_key = f"reg_verified:{req.token}"
+    if not await redis.get(verify_key):
+        raise HTTPException(status_code=400, detail="لطفاً ابتدا کد تایید را وارد کنید")
+    
+    # 2. Validate invitation again
+    stmt = select(Invitation).where(Invitation.token == req.token)
+    inv = (await db.execute(stmt)).scalar_one_or_none()
+    
+    if not inv or inv.is_used or inv.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="دعوت‌نامه نامعتبر است")
+        
+    # 3. Create User
+    new_user = User(
+        account_name=inv.account_name,
+        mobile_number=inv.mobile_number,
+        role=inv.role,
+        full_name=inv.account_name, # Temporary full name
+        address=req.address,
+        has_bot_access=False, # No bot access yet
+        telegram_id=None # Web only user
     )
+    
+    db.add(new_user)
+    
+    # 4. Mark invitation as used
+    inv.is_used = True
+    
     try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
-        telegram_id_str = payload.get("sub")
-        if telegram_id_str is None:
-            raise credentials_exception
-        
-        # --- تغییر مهم: تبدیل رشته به عدد ---
-        telegram_id = int(telegram_id_str) 
-        # ----------------------------------
-
-    except (JWTError, ValueError): # ValueError برای حالتی که تبدیل به عدد شکست بخورد
-        raise credentials_exception
-    
-    # ===== Redis Cache Check =====
-    from core.cache import get_cached_user_by_telegram_id, set_cached_user
-    
-    cached_user_data = await get_cached_user_by_telegram_id(telegram_id)
-    if cached_user_data:
-        # بازسازی User از کش - فقط برای چک اولیه
-        # برای last_seen باید از DB بخوانیم
-        user_id = cached_user_data.get("id")
-        stmt = select(User).where(User.id == user_id, User.is_deleted == False)
-        result = await db.execute(stmt)
-        user = result.scalar_one_or_none()
-        if user:
-            # Update Last Seen (هر 60 ثانیه)
-            now = datetime.now(timezone.utc)
-            if user.last_seen_at is None or (now - user.last_seen_at).total_seconds() > 60:
-                user.last_seen_at = now
-                await db.commit()
-            return user
-    # =============================
-    
-    # Fallback به DB Query
-    stmt = select(User).where(User.telegram_id == telegram_id, User.is_deleted == False)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise credentials_exception
-    
-    # ===== Cache User =====
-    await set_cached_user(telegram_id, {
-        "id": user.id,
-        "telegram_id": user.telegram_id,
-        "role": user.role.value if hasattr(user.role, 'value') else str(user.role),
-    })
-    # ======================
-        
-    # --- Update Last Seen ---
-    now = datetime.now(timezone.utc)
-    if user.last_seen_at is None or (now - user.last_seen_at).total_seconds() > 60:
-        logger.info(f"DEBUG: Updating last_seen for user {user.id} to {now}")
-        user.last_seen_at = now
         await db.commit()
-    # ------------------------
-    
-    return user
-
-async def get_current_user_optional(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> Optional[User]:
-    if token is None:
-        return None
-    try:
-        return await get_current_user_from_token(token, db)
-    except HTTPException:
-        return None
-
-async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
-    if token is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return await get_current_user_from_token(token, db)
-
-async def verify_super_admin_or_dev_key(
-    api_key_header: Optional[str] = Security(api_key_scheme),
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    settings: Settings = Depends(get_settings)
-):
-    if api_key_header == settings.dev_api_key and settings.dev_api_key:
-        return True
-    if current_user and current_user.role == UserRole.SUPER_ADMIN:
-        return True
-    raise HTTPException(status_code=403, detail="Not a super admin or invalid API key")
-
-async def get_admin_user_dependency(
-    api_key_header: Optional[str] = Security(api_key_scheme),
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    settings: Settings = Depends(get_settings),
-    db: AsyncSession = Depends(get_db)
-) -> User:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Not authenticated as super admin or invalid API key"
-    )
-
-    if current_user:
-        if current_user.role == UserRole.SUPER_ADMIN:
-            return current_user
-        else:
-            raise credentials_exception
-
-    if api_key_header == settings.dev_api_key and settings.dev_api_key:
-        stmt = select(User).where(User.role == UserRole.SUPER_ADMIN, User.is_deleted == False).limit(1)
-        result = await db.execute(stmt)
-        admin_user = result.scalar_one_or_none()
-        if admin_user:
-            return admin_user
-        else:
-            raise HTTPException(status_code=500, detail="DEV_API_KEY is valid, but no SUPER_ADMIN user found in database. Please create one using 'python manage.py create_super_admin'.")
-    
-    raise credentials_exception
-
-# --- اندپوینت‌ها ---
-
-# --- اندپوینت‌ها ---
-
-@router.post("/request-otp")
-async def request_otp(
-    request: schemas.OTPRequest, 
-    db: AsyncSession = Depends(get_db),
-    redis_client: Redis = Depends(get_redis)
-):
-    print(f"DEBUG: request_otp called for {request.mobile_number}", flush=True)
-    # ===== Rate Limiting: 1 request per 2 minutes per mobile =====
-    rate_limit_key = f"OTP_RATE_LIMIT:{request.mobile_number}"
-    existing_limit = await redis_client.get(rate_limit_key)
-    
-    if existing_limit:
-        # محاسبه زمان باقیمانده
-        ttl = await redis_client.ttl(rate_limit_key)
-        raise HTTPException(
-            status_code=429,  # Too Many Requests
-            detail=f"لطفاً {ttl} ثانیه دیگر تلاش کنید."
-        )
-    
-    # 1. Check if user exists
-    stmt = select(User).where(User.mobile_number == request.mobile_number, User.is_deleted == False)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-    
-    if not user:
-        # Security: Don't reveal if user exists? 
-        # For this specific app, returning 404 is fine as it's an invite-only internal app.
-        raise HTTPException(status_code=404, detail="شماره موبایل یافت نشد.")
-
-    # 2. Generate OTP
-    otp_code = "".join([str(secrets.randbelow(10)) for _ in range(5)])  # 5 digit code
-    
-    # 3. Store in Redis (120 seconds expiry)
-    await redis_client.set(f"OTP:{request.mobile_number}", otp_code, ex=120)
-    
-    # ===== ست کردن Rate Limit (120 ثانیه = 2 دقیقه) =====
-    await redis_client.set(rate_limit_key, "1", ex=120)
-    
-    logger.debug(f"OTP generated for {request.mobile_number}")
-    
-    # 4. Send via Telegram (Relay supported)
-    from core.notifications import send_telegram_message
-    try:
-        message_text = f"🔐 کد ورود شما:\n\n`{otp_code}`\n\nاین کد تا ۲ دقیقه معتبر است."
-        await send_telegram_message(chat_id=user.telegram_id, text=message_text, parse_mode="Markdown")
+        await db.refresh(new_user)
     except Exception as e:
-        logger.error(f"Failed to send Telegram OTP message: {e}")
-        # Don't fail the request if just notification fails? Or do we?
-        # Better to log error but return success to avoid blocking user if sync is slightly delayed
-        # But for OTP, if they don't get it, they can't login.
-        # So we should probably return success and let the sync handle it.
-        # But if sync fails completely... 
-        # For now, let's catch and log, return success.
-        pass
-
-    return {"message": "کد تایید به تلگرام شما ارسال شد."}
-
-@router.post("/verify-otp", response_model=schemas.TokenPair)
-async def verify_otp(
-    request: schemas.OTPVerify, 
-    db: AsyncSession = Depends(get_db),
-    redis_client: Redis = Depends(get_redis)
-):
-    """
-    تایید OTP و دریافت جفت توکن (Access + Refresh)
-    """
-    # 1. Verify OTP from Redis
-    stored_otp = await redis_client.get(f"OTP:{request.mobile_number}")
+        await db.rollback()
+        logger.error(f"Registration error: {e}")
+        raise HTTPException(status_code=500, detail="خطا در ثبت کاربر")
+        
+    # 5. Cleanup Redis
+    await redis.delete(f"reg_otp:{req.token}")
+    await redis.delete(verify_key)
     
-    if not stored_otp or str(stored_otp) != str(request.otp_code):
-        raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است.")
+    # 6. Generate Tokens
+    access_token = create_access_token(new_user.id)
+    refresh_token = create_refresh_token(new_user.id)
     
-    # 2. Get User
-    stmt = select(User).where(User.mobile_number == request.mobile_number, User.is_deleted == False)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="کاربر یافت نشد.")
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }
 
-    # 3. Cleanup
-    await redis_client.delete(f"OTP:{request.mobile_number}")
-
-    # 4. Generate Token Pair
-    access_token, refresh_token = create_token_pair(user.id, user.telegram_id)
-    
-    logger.info(f"User {user.id} logged in via OTP")
-    
-    return schemas.TokenPair(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    )
-
-@router.get("/me", response_model=schemas.UserRead)
-async def read_users_me(current_user: User = Depends(get_current_user)):
-    return current_user
-
-@router.post("/webapp-login", response_model=schemas.Token)
-async def webapp_login(init_data_obj: schemas.WebAppInitData, db: AsyncSession = Depends(get_db)):
-    """
-    احراز هویت با داده‌های Telegram WebApp
-    """
-    init_data = init_data_obj.init_data
-    
-    try:
-        parsed_data = urllib.parse.parse_qsl(init_data, keep_blank_values=True)
-        data_dict = dict(parsed_data)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid init_data format")
-
-    hash_ = data_dict.pop('hash', None)
-    if not hash_:
-        raise HTTPException(status_code=400, detail="Hash missing")
-
-    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_dict.items()))
-    
-    secret_key = hmac.new(b"WebAppData", settings.bot_token.encode(), hashlib.sha256).digest()
-    calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-
-    if calculated_hash != hash_:
-        raise HTTPException(status_code=403, detail="Invalid Telegram hash")
-
-    user_data_str = data_dict.get('user')
-    if not user_data_str:
-        raise HTTPException(status_code=400, detail="User data missing")
-    
-    user_data = json.loads(user_data_str)
-    telegram_id = user_data.get('id') # این عدد صحیح است
-
-    stmt = select(User).where(User.telegram_id == telegram_id, User.is_deleted == False)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-
-    if not user:
-        raise HTTPException(status_code=403, detail="User not registered. Please register via bot invitation link first.")
-
-    # Generate Token Pair
-    access_token, refresh_token = create_token_pair(user.id, user.telegram_id)
-    
-    logger.info(f"User {user.id} logged in via WebApp")
-    
-    return schemas.TokenPair(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    )
-
-
-@router.post("/refresh", response_model=schemas.TokenPair)
-async def refresh_access_token(
-    refresh_data: schemas.RefreshRequest,
+@router.post("/request-otp", response_model=dict)
+async def request_otp(
+    request: OTPRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    تمدید Access Token با استفاده از Refresh Token
-    
-    - Refresh Token اعتبار 30 روزه دارد
-    - هر بار یک جفت توکن جدید صادر می‌شود
+    درخواست OTP برای ورود.
+    اگر اینترنت وصل باشد -> کد به بات تلگرام ارسال می‌شود.
+    اگر اینترنت قطع باشد یا کاربر تلگرام نداشته باشد -> کد SMS می‌شود.
     """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Refresh token نامعتبر یا منقضی شده است.",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    mobile = request.mobile_number
+    # اعتبارسنجی ساده شماره موبایل
+    if not mobile.startswith("09") or len(mobile) != 11:
+        raise HTTPException(status_code=400, detail="شماره موبایل نامعتبر است")
+
+    # پیدا کردن کاربر
+    stmt = select(User).where(User.mobile_number == mobile)
+    result = (await db.execute(stmt)).scalar_one_or_none()
     
-    # Verify Refresh Token
-    payload = verify_refresh_token(refresh_data.refresh_token, credentials_exception)
+    if not result:
+        raise HTTPException(status_code=404, detail="کاربری با این شماره موبایل یافت نشد")
+
+    if result.is_deleted:
+        raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
+
+    # Rate limiting
+    redis = await get_redis()
+    rate_limit_key = f"otp_limit:{mobile}"
+    if await redis.get(rate_limit_key):
+        raise HTTPException(status_code=429, detail="لطفاً ۲ دقیقه صبر کنید")
+
+    # تولید کد ۵ رقمی
+    otp_code = str(random.randint(10000, 99999))
     
-    user_id = int(payload.get("sub"))
-    telegram_id = payload.get("telegram_id")
+    # ذخیره در Redis (۲ دقیقه اعتبار)
+    otp_key = f"otp:{mobile}"
+    await redis.setex(otp_key, 120, otp_code)
+    await redis.setex(rate_limit_key, 120, "1")
+
+    # تصمیم‌گیری برای روش ارسال
+    is_connected = await is_internet_connected()
+    has_telegram = result.telegram_id is not None
     
-    # Verify user still exists and is active
-    stmt = select(User).where(User.id == user_id, User.is_deleted == False)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
+    sent_via_telegram = False
+    sent_via_sms = False
+    
+    # اولویت ۱: تلگرام (اگر اینترنت وصله و کاربر تلگرام داره)
+    if is_connected and has_telegram:
+        try:
+            msg_text = f"🔐 کد ورود شما: `{otp_code}`\n\nاین کد تا ۲ دقیقه معتبر است."
+            await send_telegram_message(result.telegram_id, msg_text)
+            sent_via_telegram = True
+        except Exception as e:
+            logger.error(f"Failed to send OTP via Telegram: {e}")
+            # Fallback to SMS handled below
+    
+    # اولویت ۲: SMS (اگر تلگرام نشد یا اینترنت قطعه)
+    if not sent_via_telegram:
+        # اگر اینترنت وصله ولی تلگرام ارسال نشد (یا کاربر تلگرام نداره) -> SMS
+        # اگر اینترنت قطعه -> SMS
+        if send_otp_sms(mobile, otp_code):
+            sent_via_sms = True
+        else:
+            raise HTTPException(status_code=500, detail="خطا در ارسال کد تایید")
+
+    return {
+        "detail": "کد تایید ارسال شد",
+        "method": "telegram" if sent_via_telegram else "sms",
+        "expires_in": 120
+    }
+
+@router.post("/verify-otp", response_model=Token)
+async def verify_otp(
+    request: OTPVerify,
+    db: AsyncSession = Depends(get_db)
+):
+    mobile = request.mobile_number
+    code = request.code
+    
+    redis = await get_redis()
+    otp_key = f"otp:{mobile}"
+    stored_code = await redis.get(otp_key)
+    
+    if not stored_code or stored_code != code:
+        raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است")
+        
+    # کد درست است - توکن صادر کن
+    stmt = select(User).where(User.mobile_number == mobile)
+    user = (await db.execute(stmt)).scalar_one_or_none()
     
     if not user:
-        raise credentials_exception
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+        
+    # پاک کردن کد OTP
+    await redis.delete(otp_key)
+    await redis.delete(f"otp_limit:{mobile}") # Reset rate limit on success
     
-    # Generate new Token Pair
-    access_token, refresh_token = create_token_pair(user.id, user.telegram_id)
+    # تولید توکن با user_id (قبلاً telegram_id بود)
+    # برای backward compatibility فعلا هر دو رو میذاریم توی payload ولی subject اصلی user_id میشه
+    access_token_expires = timedelta(minutes=60) # 1 ساعت
+    refresh_token_expires = timedelta(days=30)
     
-    logger.info(f"User {user.id} refreshed tokens")
-    
-    return schemas.TokenPair(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    # Subject is now User ID (Database ID)
+    access_token = create_access_token(
+        subject=user.id,
+        expires_delta=access_token_expires
     )
+    refresh_token = create_refresh_token(
+        subject=user.id,
+        expires_delta=refresh_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }
 
+@router.post("/webapp-login", response_model=Token)
+async def webapp_login(
+    login_data: WebAppLogin,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Login via Telegram WebApp data validation.
+    """
+    init_data = login_data.init_data
+    
+    if not settings.bot_token:
+        raise HTTPException(status_code=500, detail="Bot token not configured")
 
-async def get_request_source(token: str = Depends(oauth2_scheme)) -> str:
-    """
-    منبع درخواست (مثلاً miniapp) را از توکن استخراج می‌کند.
-    """
+    # Parse and validate init_data
     try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
-        return payload.get("source", "unknown")
-    except JWTError:
-        return "unknown"
+        from urllib.parse import parse_qsl
+        parsed_data = dict(parse_qsl(init_data))
+        hash_val = parsed_data.pop('hash')
+        
+        # Sort keys
+        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
+        
+        # Calculate HMAC
+        secret_key = hmac.new(b"WebAppData", settings.bot_token.encode(), hashlib.sha256).digest()
+        calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+        
+        if calculated_hash != hash_val:
+            raise HTTPException(status_code=403, detail="Invalid data hash")
+            
+        # Check auth_date to prevent replay attacks (optional but recommended)
+        auth_date = int(parsed_data.get('auth_date', 0))
+        if time.time() - auth_date > 86400: # 1 day expiry
+             raise HTTPException(status_code=403, detail="Data expired")
+
+        user_data = json.loads(parsed_data['user'])
+        telegram_id = user_data['id']
+        
+        # Find user by telegram_id
+        stmt = select(User).where(User.telegram_id == telegram_id)
+        user = (await db.execute(stmt)).scalar_one_or_none()
+        
+        if not user:
+            raise HTTPException(status_code=404, detail="User not registered")
+            
+        if user.is_deleted:
+            raise HTTPException(status_code=403, detail="User is blocked")
+
+        # Generate tokens
+        access_token = create_access_token(user.id)
+        refresh_token = create_refresh_token(user.id)
+        
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer"
+        }
+        
+    except Exception as e:
+        logger.error(f"WebApp login error: {e}")
+        raise HTTPException(status_code=400, detail="Authentication failed")

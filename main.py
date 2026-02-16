@@ -5,143 +5,118 @@ from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from api.routers import auth, invitations, commodities, users, notifications, trading_settings, offers, trades, realtime
+from api.routers import (
+    auth, invitations, commodities, users, notifications, 
+    trading_settings, offers, trades, realtime, users_public, chat, blocks, sync
+)
 from core.config import settings
 from core.redis import init_redis, close_redis
+from core.db import init_db
+from core.events import setup_event_listeners
+from core.connectivity import connectivity_monitor_loop
+import asyncio
 import schemas
 
 # -------------------------------------------------------
 # 📋 تنظیمات اولیه
 # -------------------------------------------------------
-BASE_DIR = Path(__file__).resolve().parent
-DIST_DIR = BASE_DIR / "mini_app_dist"
-API_PREFIX = "/api"
-
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("trading_bot.main")
+logger = logging.getLogger(__name__)
 
-
-# -------------------------------------------------------
-# 🔄 Lifespan - مدیریت Lifecycle (Startup/Shutdown)
-# -------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """مدیریت startup و shutdown اپلیکیشن."""
     # Startup
-    logger.info("🚀 Application startup...")
+    logger.info("🚀 Starting up...")
+    await init_db()
     await init_redis()
+    setup_event_listeners()
     
-    # Setup SQLAlchemy event listeners for real-time sync
-    from core.events import setup_all_events
-    setup_all_events()
+    # Start connectivity monitor task (Iran only)
+    if settings.server_mode == "iran":
+        asyncio.create_task(connectivity_monitor_loop())
     
-    yield  # اجرای اپلیکیشن
+    yield
     
     # Shutdown
-    logger.info("🛑 Application shutdown...")
+    logger.info("🛑 Shutting down...")
     await close_redis()
 
-
-app = FastAPI(title="Trading Bot Backend + Vue Frontend", lifespan=lifespan)
-
-# -------------------------------------------------------
-# 🧩 تنظیم CORS
-# -------------------------------------------------------
-# -------------------------------------------------------
-# 🧩 تنظیم CORS (توسط Nginx مدیریت می‌شود)
-# -------------------------------------------------------
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
+app = FastAPI(title="Trading Bot API", lifespan=lifespan)
 
 # -------------------------------------------------------
-# 🔌 ساخت و ثبت یک روتر اصلی برای تمام API ها
+# 🔒 CORS Configuration
 # -------------------------------------------------------
-# 1. یک روتر اصلی برای API می‌سازیم
-api_router = APIRouter(prefix=API_PREFIX)
+origins = [
+    "http://localhost:5173",
+    "http://localhost:8000",
+    "https://mini-app.362514.ir",
+    "https://coin.gold-trade.ir",
+    "http://87.107.110.68"
+]
 
-# 2. روترهای دیگر را به این روتر اصلی اضافه می‌کنیم
-api_router.include_router(auth.router)
-api_router.include_router(invitations.router)
-api_router.include_router(commodities.router)
-api_router.include_router(users.router)
-api_router.include_router(notifications.router)
-api_router.include_router(trading_settings.router)
-api_router.include_router(offers.router)
-api_router.include_router(trades.router)
-api_router.include_router(trades.router)
-api_router.include_router(realtime.router)
-from api.routers import users_public
-api_router.include_router(users_public.router)
-from api.routers import chat
-api_router.include_router(chat.router)
-from api.routers import blocks
-from api.routers import blocks
-api_router.include_router(blocks.router)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # موقت برای توسعه
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-from api.routers import sync
-api_router.include_router(sync.router, prefix="/sync", tags=["sync"])
+# -------------------------------------------------------
+# 🛣️ API Routers
+# -------------------------------------------------------
+api_router = APIRouter(prefix="/api")
 
-# 3. اندپوینت config را به همین روتر اصلی اضافه می‌کنیم
-@api_router.get("/config", response_model=schemas.AppConfig)
-async def get_app_config():
-    """تنظیمات عمومی برنامه را برمی‌گرداند."""
-    return {"bot_username": settings.bot_username}
+api_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
+api_router.include_router(invitations.router, prefix="/invitations", tags=["Invitations"])
+api_router.include_router(commodities.router, prefix="/commodities", tags=["Commodities"])
+api_router.include_router(users.router, prefix="/users", tags=["Users"])
+api_router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
+api_router.include_router(trading_settings.router, prefix="/trading-settings", tags=["Settings"])
+api_router.include_router(offers.router, prefix="/offers", tags=["Offers"])
+api_router.include_router(trades.router, prefix="/trades", tags=["Trades"])
+api_router.include_router(realtime.router, prefix="/realtime", tags=["Realtime"])
+api_router.include_router(users_public.router, prefix="/public", tags=["Public"])
+api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
+api_router.include_router(blocks.router, prefix="/blocks", tags=["Blocks"])
+api_router.include_router(sync.router, prefix="/sync", tags=["Sync"])
 
-# 4. در نهایت، روتر اصلی و کامل شده را به اپلیکیشن FastAPI اضافه می‌کنیم
 app.include_router(api_router)
-logger.info("All API routers are included under /api prefix.")
 
 # -------------------------------------------------------
-# 📁 سرو فایل‌های آپلود شده (مثل تصاویر چت)
+# 📂 Static Files & Frontend Serving
 # -------------------------------------------------------
-UPLOADS_DIR = BASE_DIR / "uploads"
-if not UPLOADS_DIR.exists():
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
-logger.info(f"Mounted uploads directory at /uploads")
+# مسیر بیلد شده Frontend (dist)
+static_dir = Path("mini_app_dist")
 
-
-# -------------------------------------------------------
-# 🪄 سرو فایل‌های استاتیک Vue (مثل CSS و JS)
-# -------------------------------------------------------
-if DIST_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")
-    logger.info(f"Mounted Vue static assets from {DIST_DIR / 'assets'}")
-else:
-    logger.warning(f"⚠️ Vue build directory not found: {DIST_DIR}")
-
-# -------------------------------------------------------
-# 🌐 سرو فایل index.html برای هر مسیر دیگر (باید در انتها باشد)
-# -------------------------------------------------------
-@app.get("/{full_path:path}")
-async def serve_vue_app(full_path: str):
-    """
-    سرو فایل‌های فرانت‌اند (SPA).
-    ابتدا بررسی می‌کند فایل درخواست شده (مثلاً sw.js یا manifest.webmanifest) وجود دارد یا خیر.
-    اگر نبود، index.html را برمی‌گرداند تا Vue Router در سمت کلاینت هندل کند.
-    """
-    # 1. Try to find the file directly in DIST_DIR (e.g., manifest.webmanifest, sw.js)
-    requested_file = DIST_DIR / full_path
-    if full_path and requested_file.is_file():
-        return FileResponse(requested_file)
-
-    # 2. Fallback to index.html for SPA routing
-    index_file = DIST_DIR / "index.html"
-    if index_file.exists():
-        return FileResponse(index_file)
+if static_dir.exists():
+    # Mount assets folder
+    app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
     
-    logger.error("index.html not found in Vue build output.")
-    return {"error": "Frontend not built yet."}, 404
+    # PWA files
+    for file in ["manifest.webmanifest", "sw.js", "workbox-*.js", "favicon.ico"]:
+        if (static_dir / file).exists():
+             app.mount(f"/{file}", StaticFiles(directory=static_dir, html=False), name=file)
 
-# -------------------------------------------------------
-# 🚀 اجرای برنامه
-# -------------------------------------------------------
-if __name__ == "__main__":
-    import uvicorn
-    logger.info("--> Starting FastAPI app for Trading Bot...")
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # Catch-all for SPA (Vue Router)
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        # اگر درخواست API بود و هندل نشده بود -> 404 بده (به index.html نفرست)
+        if full_path.startswith("api/"):
+             return {"detail": "Not Found"}
+             
+        # اگر فایل استاتیک بود و وجود داشت -> سرو کن (مثلا تصاویر)
+        file_path = static_dir / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+            
+        # در غیر این صورت -> index.html (برای Vue Router)
+        return FileResponse(static_dir / "index.html")
+else:
+    logger.warning("⚠️ Frontend build directory not found. Run 'npm run build' first.")
+
+@app.get("/")
+async def root():
+    if static_dir.exists():
+        return FileResponse(static_dir / "index.html")
+    return {"message": "Trading Bot API is running 🚀"}

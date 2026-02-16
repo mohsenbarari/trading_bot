@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     dev_api_key: str | None = None
     invitation_expiry_days: int = 1
+
+    # SMS.ir Service
+    smsir_api_key: str | None = None
+    smsir_line_number: int | None = None
     
     class Config:
         env_file = ".env"
