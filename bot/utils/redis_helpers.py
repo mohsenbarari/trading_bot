@@ -262,3 +262,6 @@ async def invalidate_commodity_cache():
     # Fallback
     if key in _memory_fallback["cache"]:
         del _memory_fallback["cache"][key]
+
+get_redis = get_redis_client
+
