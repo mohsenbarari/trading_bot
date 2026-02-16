@@ -518,3 +518,7 @@ def setup_all_events():
     logger.info("🎯 All event listeners initialized")
 
 
+# Alias for main.py / startup
+setup_event_listeners = setup_all_events
+
+

@@ -18,7 +18,8 @@ from bot.handlers import (
     link_account, # 👈 Added
     default
 )
-from core.db import init_db
+from core.db import init_db, AsyncSessionLocal
+from bot.middlewares import AuthMiddleware
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +35,10 @@ async def main():
 
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
+
+    # Auth: inject user into handler data for ALL updates (must be before routers)
+    auth_mw = AuthMiddleware(AsyncSessionLocal)
+    dp.update.outer_middleware(auth_mw)
 
     # Include routers
     dp.include_router(start.router)

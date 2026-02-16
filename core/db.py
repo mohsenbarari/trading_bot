@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from typing import AsyncGenerator
 from .config import settings
 
-__all__ = ["engine", "AsyncSessionLocal", "get_db"]
+__all__ = ["engine", "AsyncSessionLocal", "get_db", "init_db"]
+
 
 # ===== Engine با Connection Pool =====
 engine = create_async_engine(
@@ -61,3 +62,16 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             yield session
         finally:
             await session.close()
+
+
+async def init_db():
+    """
+    ایجاد جداول دیتابیس (اگر وجود نداشته باشند)
+    """
+    # Import Base and models locally to avoid circular imports
+    from models.database import Base
+    import models  # Register all models with Base
+
+    async with engine.begin() as conn:
+        # await conn.run_sync(Base.metadata.drop_all) # Uncomment to reset DB
+        await conn.run_sync(Base.metadata.create_all)

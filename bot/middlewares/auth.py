@@ -1,10 +1,23 @@
 # bot/middlewares/auth.py (نسخه نهایی و اصلاح شده)
 from typing import Callable, Dict, Any, Awaitable
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject, Message, CallbackQuery
+from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from models.user import User
+
+
+def _get_event_and_from_user(event: TelegramObject):
+    """برگرداندن (event واقعی برای پاسخ، from_user). وقتی روی dp.update ثبت شده، event از نوع Update است."""
+    if isinstance(event, Update):
+        inner = event.message or event.callback_query or event.edited_message
+        if inner and hasattr(inner, "from_user"):
+            return inner, inner.from_user
+        return None, None
+    if isinstance(event, (Message, CallbackQuery)):
+        return event, event.from_user
+    return None, None
+
 
 class AuthMiddleware(BaseMiddleware):
     """
@@ -19,10 +32,7 @@ class AuthMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: Dict[str, Any]
     ) -> Any:
-        
-        user_telegram_obj = None
-        if isinstance(event, (Message, CallbackQuery)):
-            user_telegram_obj = event.from_user
+        inner_event, user_telegram_obj = _get_event_and_from_user(event)
         
         if not user_telegram_obj:
             return await handler(event, data)
@@ -45,10 +55,11 @@ class AuthMiddleware(BaseMiddleware):
                     "لطفاً از طریق MiniApp به سیستم دسترسی پیدا کنید.\n"
                     "برای اطلاعات بیشتر با پشتیبانی تماس بگیرید."
                 )
-                if isinstance(event, Message):
-                    await event.answer(restricted_message)
-                elif isinstance(event, CallbackQuery):
-                    await event.answer(restricted_message, show_alert=True)
+                if inner_event is not None:
+                    if isinstance(inner_event, Message):
+                        await inner_event.answer(restricted_message)
+                    elif isinstance(inner_event, CallbackQuery):
+                        await inner_event.answer(restricted_message, show_alert=True)
                 return  # جلوی ادامه پردازش را بگیر
             
             return await handler(event, data)
