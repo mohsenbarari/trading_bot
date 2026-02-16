@@ -12,7 +12,8 @@ from core.db import get_db
 from core.config import settings
 from models.commodity import Commodity, CommodityAlias
 from models.user import User
-from .auth import verify_super_admin_or_dev_key, oauth2_scheme
+from api.deps import verify_super_admin_or_dev_key, oauth2_scheme
+
 import schemas
 
 # تنظیم لاگر

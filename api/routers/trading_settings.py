@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from .auth import verify_super_admin_or_dev_key
+from api.deps import verify_super_admin_or_dev_key
+
 from core.trading_settings import (
     TradingSettings, 
     load_trading_settings_async,

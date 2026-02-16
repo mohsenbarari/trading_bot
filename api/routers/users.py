@@ -8,7 +8,8 @@ import pytz
 
 from core.db import get_db
 from models.user import User
-from .auth import verify_super_admin_or_dev_key
+from api.deps import verify_super_admin_or_dev_key
+
 from core.utils import create_user_notification, to_jalali_str, send_telegram_notification
 from core.enums import NotificationLevel, NotificationCategory
 import schemas
