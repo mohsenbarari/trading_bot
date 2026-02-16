@@ -19,7 +19,8 @@ from core.enums import MessageType
 from models.message import Message
 from models.conversation import Conversation
 from models.user import User
-from .auth import get_current_user
+from api.deps import get_current_user
+
 from core.utils import publish_user_event
 
 class TypingSignal(BaseModel):

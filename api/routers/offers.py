@@ -21,7 +21,8 @@ from core.utils import check_user_limits, increment_user_counter, to_jalali_str
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
 from models.commodity import Commodity
-from .auth import get_current_user
+from api.deps import get_current_user
+
 
 logger = logging.getLogger(__name__)
 

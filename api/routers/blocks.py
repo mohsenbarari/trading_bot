@@ -10,7 +10,8 @@ from datetime import datetime
 
 from core.db import get_db
 from models.user import User
-from .auth import get_current_user
+from api.deps import get_current_user
+
 from core.services.block_service import (
     block_user,
     unblock_user,

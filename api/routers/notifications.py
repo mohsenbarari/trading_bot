@@ -12,7 +12,8 @@ import json
 from core.db import get_db
 from models.notification import Notification
 from models.user import User
-from .auth import get_current_user
+from api.deps import get_current_user
+
 from core.redis import get_redis, Redis 
 from core.enums import NotificationLevel, NotificationCategory
 

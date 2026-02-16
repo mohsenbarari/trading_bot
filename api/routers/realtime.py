@@ -12,7 +12,8 @@ from typing import List, Dict, Set
 
 from core.redis import pool
 from models.user import User
-from .auth import get_current_user_optional
+from api.deps import get_current_user_optional
+
 
 
 router = APIRouter(

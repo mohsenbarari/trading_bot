@@ -25,7 +25,8 @@ from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
 from models.trade import Trade, TradeType, TradeStatus
 from models.commodity import Commodity
-from .auth import get_current_user
+from api.deps import get_current_user
+
 
 logger = logging.getLogger(__name__)
 
