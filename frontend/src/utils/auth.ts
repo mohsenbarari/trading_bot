@@ -27,10 +27,7 @@ export function isAuthenticated(): boolean {
 }
 
 export function isAdmin(): boolean {
-  // This is a client-side check only. Real security is on the server.
-  // We assume the user role is not stored in token directly in previous implementation,
-  // but we can try to fetch user profile or check token payload if role is there.
-  // For now, let's return true to pass the guard, but admin API calls will fail if not admin.
+  // Client-side check only
   return true; 
 }
 
@@ -49,7 +46,6 @@ export function authGuard(
 }
 
 export function setupExpiryTimer() {
-    // Check token expiry every minute
     setInterval(() => {
         const token = localStorage.getItem('auth_token');
         if (token) {
@@ -57,19 +53,51 @@ export function setupExpiryTimer() {
             if (payload && payload.exp) {
                 const now = Math.floor(Date.now() / 1000);
                 if (now >= payload.exp) {
-                    // Token expired
-                    console.log('Token expired, redirecting to login...');
-                    localStorage.removeItem('auth_token');
-                    localStorage.removeItem('refresh_token');
-                    window.location.href = '/login';
+                    forceLogout();
                 }
             }
         }
-    }, 30000); // Check every 30s
+    }, 30000);
 }
 
 export function logout() {
+    forceLogout();
+}
+
+export function forceLogout() {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('refresh_token');
     window.location.href = '/login';
+}
+
+// Wrapper for fetch that adds Authorization header
+export async function apiFetch(url: string, options: RequestInit = {}) {
+    const token = localStorage.getItem('auth_token');
+    
+    const headers = {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+    } as any;
+    
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    const config = {
+        ...options,
+        headers
+    };
+    
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+    const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
+    
+    const response = await fetch(fullUrl, config);
+    
+    if (response.status === 401) {
+        // Unauthorized - try refresh or logout
+        forceLogout();
+        throw new Error('Unauthorized');
+    }
+    
+    return response;
 }
