@@ -27,7 +27,6 @@ export function isAuthenticated(): boolean {
 }
 
 export function isAdmin(): boolean {
-  // Client-side check only
   return true; 
 }
 
@@ -70,7 +69,6 @@ export function forceLogout() {
     window.location.href = '/login';
 }
 
-// Wrapper for fetch that adds Authorization header
 export async function apiFetch(url: string, options: RequestInit = {}) {
     const token = localStorage.getItem('auth_token');
     
@@ -94,10 +92,17 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
     const response = await fetch(fullUrl, config);
     
     if (response.status === 401) {
-        // Unauthorized - try refresh or logout
         forceLogout();
         throw new Error('Unauthorized');
     }
     
     return response;
+}
+
+export async function apiFetchJson(url: string, options: RequestInit = {}) {
+    const response = await apiFetch(url, options);
+    if (!response.ok) {
+        throw new Error(`API Error: ${response.statusText}`);
+    }
+    return response.json();
 }
