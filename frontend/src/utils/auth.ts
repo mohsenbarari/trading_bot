@@ -1,11 +1,12 @@
-import { RouteLocationNormalized, NavigationGuardNext } from 'vue-router';
+import type { RouteLocationNormalized, NavigationGuardNext } from 'vue-router';
 
 // Helper to decode JWT payload (without validation)
 function parseJwt(token: string) {
     try {
         const base64Url = token.split('.')[1];
+        if (!base64Url) return null;
         const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-        const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+        const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function (c) {
             return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
         }).join(''));
         return JSON.parse(jsonPayload);
@@ -15,33 +16,36 @@ function parseJwt(token: string) {
 }
 
 export function isAuthenticated(): boolean {
-  const token = localStorage.getItem('auth_token');
-  if (!token) return false;
-  
-  // Check expiry
-  const payload = parseJwt(token);
-  if (!payload || !payload.exp) return false;
-  
-  const now = Math.floor(Date.now() / 1000);
-  return payload.exp > now;
+    const token = localStorage.getItem('auth_token');
+    if (!token) return false;
+
+    // Check expiry
+    const payload = parseJwt(token);
+    if (!payload || !payload.exp) return false;
+
+    const now = Math.floor(Date.now() / 1000);
+    return payload.exp > now;
 }
 
 export function isAdmin(): boolean {
-  return true; 
+    return true;
 }
 
 export function authGuard(
-  to: RouteLocationNormalized,
-  from: RouteLocationNormalized,
-  next: NavigationGuardNext
+    to: RouteLocationNormalized,
+    from: RouteLocationNormalized,
+    next: NavigationGuardNext
 ) {
-  if (to.meta.requiresAuth && !isAuthenticated()) {
-    next('/login');
-  } else if (to.meta.requiresAdmin && !isAdmin()) {
-    next('/dashboard');
-  } else {
-    next();
-  }
+    // Cast meta to any to avoid editor-specific TS errors if global augmentation is slow to pick up
+    const meta = to.meta as any;
+
+    if (meta.requiresAuth && !isAuthenticated()) {
+        next('/login');
+    } else if (meta.requiresAdmin && !isAdmin()) {
+        next('/dashboard');
+    } else {
+        next();
+    }
 }
 
 export function setupExpiryTimer() {
@@ -71,31 +75,31 @@ export function forceLogout() {
 
 export async function apiFetch(url: string, options: RequestInit = {}) {
     const token = localStorage.getItem('auth_token');
-    
+
     const headers = {
         'Content-Type': 'application/json',
         ...(options.headers || {}),
     } as any;
-    
+
     if (token) {
         headers['Authorization'] = `Bearer ${token}`;
     }
-    
+
     const config = {
         ...options,
         headers
     };
-    
+
     const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
     const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
-    
+
     const response = await fetch(fullUrl, config);
-    
+
     if (response.status === 401) {
         forceLogout();
         throw new Error('Unauthorized');
     }
-    
+
     return response;
 }
 
