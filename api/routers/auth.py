@@ -197,11 +197,16 @@ async def request_otp(
     # Rate limiting
     redis = await get_redis()
     rate_limit_key = f"otp_limit:{mobile}"
-    if await redis.get(rate_limit_key):
+    limit_val = await redis.get(rate_limit_key)
+    logger.info(f"OTP Request for {mobile}: LimitKey={rate_limit_key}, Exists={limit_val is not None}")
+    
+    if limit_val:
+        logger.info(f"OTP Request Rate Limit Hit for {mobile}")
         raise HTTPException(status_code=429, detail="لطفاً ۲ دقیقه صبر کنید")
 
     # تولید کد ۵ رقمی
     otp_code = str(random.randint(10000, 99999))
+    logger.info(f"Generated NEW OTP for {mobile}: {otp_code[:2]}***")
     
     # ذخیره در Redis (۲ دقیقه اعتبار)
     otp_key = f"otp:{mobile}"
@@ -230,7 +235,7 @@ async def request_otp(
     
     # اولویت ۲: SMS (اگر تلگرام نشد یا اینترنت قطعه)
     if not sent_via_telegram:
-        logger.info(f"Attempting SMS fallback for {mobile}...")
+        logger.info(f"Attempting SMS fallback for {mobile} (Connected={is_connected}, HasTelegram={has_telegram})")
         # اگر اینترنت وصله ولی تلگرام ارسال نشد (یا کاربر تلگرام نداره) -> SMS
         # اگر اینترنت قطعه -> SMS
         if send_otp_sms(mobile, otp_code):
@@ -258,20 +263,24 @@ async def resend_otp_sms(
     mobile = request.mobile_number
     redis = await get_redis()
     
+    logger.info(f"Resend SMS Request for {mobile}")
+
     # Check if OTP exists
     otp_key = f"otp:{mobile}"
     otp_code = await redis.get(otp_key)
     
     if not otp_code:
          # Session expired
+         logger.warning(f"Resend failed for {mobile}: OTP code not found or expired")
          raise HTTPException(status_code=400, detail="کد تایید منقضی شده است. لطفاً مجدد درخواست دهید.")
          
     # Rate limit for SMS resend (prevent spamming button)
     sms_limit_key = f"sms_limit:{mobile}"
     if await redis.get(sms_limit_key):
+        logger.info(f"Resend SMS Rate Limit Hit for {mobile}")
         raise HTTPException(status_code=429, detail="لطفاً ۱ دقیقه صبر کنید")
         
-    logger.info(f"Resending OTP via SMS to {mobile}...")
+    logger.info(f"Resending Existing OTP via SMS to {mobile}: {otp_code[:2]}***")
     
     # Send SMS
     if send_otp_sms(mobile, otp_code):
