@@ -44,6 +44,8 @@ const formattedTimer = computed(() => {
   return `${m}:${s}`
 })
 
+const lastMethod = ref<'telegram' | 'sms' | null>(null)
+
 async function requestOtp() {
   if (!form.mobile || form.mobile.length < 10) {
     error.value = 'شماره موبایل معتبر نیست'
@@ -51,8 +53,6 @@ async function requestOtp() {
   }
   
   if (countdown.value > 0) {
-    // Timer active — don't re-request, but move to OTP step
-    // so user can enter a delayed code
     step.value = 'otp'
     return
   }
@@ -69,15 +69,11 @@ async function requestOtp() {
     
     if (!res.ok) {
       const err = await res.json()
-      // Handle Rate Limit (429)
       if (res.status === 429) {
-        // Try to parse seconds from error details like "Please wait X seconds"
-        // Backend text is: "لطفاً {ttl} ثانیه دیگر تلاش کنید."
         const match = err.detail && typeof err.detail === 'string' ? err.detail.match(/(\d+)/) : null
         if (match) {
           const seconds = parseInt(match[1])
           startTimer(seconds)
-          // Move to OTP step so user can enter a delayed code
           step.value = 'otp'
           return
         }
@@ -85,8 +81,12 @@ async function requestOtp() {
       throw new Error(err.detail || 'خطا در ارسال کد')
     }
     
-    // Success - Start a 120s timer anyway to prevent immediate re-request
-    startTimer(120)
+    const data = await res.json()
+    lastMethod.value = data.method
+    
+    // If Telegram -> 30s timer, else 120s
+    const timerSeconds = data.method === 'telegram' ? 30 : 120
+    startTimer(timerSeconds)
     step.value = 'otp'
     
   } catch (e: any) {
@@ -95,6 +95,42 @@ async function requestOtp() {
     loading.value = false
   }
 }
+
+async function resendOtpSms() {
+  loading.value = true
+  error.value = ''
+  
+  try {
+    const res = await fetch('/api/auth/resend-otp-sms', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ mobile_number: form.mobile })
+    })
+    
+    if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.detail || 'خطا در ارسال پیامک')
+    }
+    
+    // SMS Sent successfully
+    lastMethod.value = 'sms'
+    startTimer(60)
+    
+  } catch (e: any) {
+    error.value = e.message
+  } finally {
+    loading.value = false
+  }
+}
+
+function handleResend() {
+    if (lastMethod.value === 'telegram') {
+        resendOtpSms()
+    } else {
+        requestOtp()
+    }
+}
+
 
 async function verifyOtp() {
   if (!form.code || form.code.length < 4) {
@@ -305,9 +341,10 @@ watch(() => form.mobile, (newVal) => {
                     <Clock :size="14" />
                     <span>{{ formattedTimer }} تا ارسال مجدد</span>
                  </div>
-                 <button v-else @click="requestOtp" class="text-xs text-amber-600 hover:text-amber-700 font-bold transition-colors">
+                 <button v-else @click="handleResend" class="text-xs text-amber-600 hover:text-amber-700 font-bold transition-colors">
                     ارسال مجدد کد
                  </button>
+
             </div>
           </div>
 

@@ -212,6 +212,8 @@ async def request_otp(
     is_connected = await is_internet_connected()
     has_telegram = result.telegram_id is not None
     
+    logger.info(f"OTP Request for {mobile}: Connected={is_connected}, HasTelegram={has_telegram}, TelegramID={result.telegram_id}")
+
     sent_via_telegram = False
     sent_via_sms = False
     
@@ -221,17 +223,21 @@ async def request_otp(
             msg_text = f"🔐 کد ورود شما: `{otp_code}`\n\nاین کد تا ۲ دقیقه معتبر است."
             await send_telegram_message(result.telegram_id, msg_text)
             sent_via_telegram = True
+            logger.info(f"OTP sent via Telegram to {mobile}")
         except Exception as e:
             logger.error(f"Failed to send OTP via Telegram: {e}")
             # Fallback to SMS handled below
     
     # اولویت ۲: SMS (اگر تلگرام نشد یا اینترنت قطعه)
     if not sent_via_telegram:
+        logger.info(f"Attempting SMS fallback for {mobile}...")
         # اگر اینترنت وصله ولی تلگرام ارسال نشد (یا کاربر تلگرام نداره) -> SMS
         # اگر اینترنت قطعه -> SMS
         if send_otp_sms(mobile, otp_code):
             sent_via_sms = True
+            logger.info(f"OTP sent via SMS to {mobile}")
         else:
+            logger.error(f"Failed to send OTP via SMS to {mobile}")
             raise HTTPException(status_code=500, detail="خطا در ارسال کد تایید")
 
     return {
@@ -239,6 +245,43 @@ async def request_otp(
         "method": "telegram" if sent_via_telegram else "sms",
         "expires_in": 120
     }
+
+@router.post("/resend-otp-sms", response_model=dict)
+async def resend_otp_sms(
+    request: OTPRequest,
+):
+    """
+    ارسال مجدد کد فعال از طریق پیامک (Fallback).
+    این متد زمانی صدا زده می‌شود که کد قبلاً (مثلاً به تلگرام) ارسال شده
+    و هنوز منقضی نشده، اما کاربر می‌خواهد آن را via SMS دریافت کند.
+    """
+    mobile = request.mobile_number
+    redis = await get_redis()
+    
+    # Check if OTP exists
+    otp_key = f"otp:{mobile}"
+    otp_code = await redis.get(otp_key)
+    
+    if not otp_code:
+         # Session expired
+         raise HTTPException(status_code=400, detail="کد تایید منقضی شده است. لطفاً مجدد درخواست دهید.")
+         
+    # Rate limit for SMS resend (prevent spamming button)
+    sms_limit_key = f"sms_limit:{mobile}"
+    if await redis.get(sms_limit_key):
+        raise HTTPException(status_code=429, detail="لطفاً ۱ دقیقه صبر کنید")
+        
+    logger.info(f"Resending OTP via SMS to {mobile}...")
+    
+    # Send SMS
+    if send_otp_sms(mobile, otp_code):
+        await redis.setex(sms_limit_key, 60, "1") # 1 min limit for SMS resend
+        return {"detail": "کد از طریق پیامک ارسال شد"}
+    else:
+        logger.error(f"Failed to resend OTP via SMS to {mobile}")
+        raise HTTPException(status_code=500, detail="خطا در ارسال پیامک")
+
+
 
 @router.post("/verify-otp", response_model=Token)
 async def verify_otp(
