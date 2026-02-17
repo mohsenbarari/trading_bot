@@ -94,17 +94,29 @@ async def show_commodity_list(bot: Bot, chat_id: int, user: User, state: FSMCont
         async with httpx.AsyncClient() as client:
             response = await client.get(COMMODITIES_API_URL, timeout=10.0, headers=headers)
             response.raise_for_status()
-            commodities = response.json()
-        
+            raw = response.json()
+        # نرمال کردن به لیست: گاهی پاسخ dict با کلیدهای عددی است
+        if isinstance(raw, dict):
+            commodities = list(raw.values()) if raw else []
+        elif isinstance(raw, list):
+            commodities = raw
+        else:
+            commodities = []
+
         text = "📦 **مدیریت کالاها**\n\nلیست کالاهای ثبت شده:"
         buttons = []
         if not commodities:
             text = "📦 **مدیریت کالاها**\n\nهیچ کالایی ثبت نشده است."
         else:
             for comm in commodities:
-                buttons.append([
-                    InlineKeyboardButton(text=f"📦 {comm['name']}", callback_data=f"comm_manage_aliases_{comm['id']}"),
-                ])
+                if not isinstance(comm, dict):
+                    continue
+                name = comm.get("name")
+                cid = comm.get("id")
+                if name is not None and cid is not None:
+                    buttons.append([
+                        InlineKeyboardButton(text=f"📦 {name}", callback_data=f"comm_manage_aliases_{cid}"),
+                    ])
         buttons.append([InlineKeyboardButton(text="➕ افزودن کالای جدید", callback_data="comm_add_new")])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -372,9 +384,14 @@ async def handle_add_name(message: types.Message, state: FSMContext, user: Optio
         async with httpx.AsyncClient() as client:
             response = await client.get(COMMODITIES_API_URL, headers=get_auth_headers())
             response.raise_for_status()
-            all_commodities = response.json()
-            
-            if any(c['name'] == name for c in all_commodities):
+            raw = response.json()
+            if isinstance(raw, dict):
+                all_commodities = list(raw.values()) if raw else []
+            elif isinstance(raw, list):
+                all_commodities = raw
+            else:
+                all_commodities = []
+            if any(isinstance(c, dict) and c.get("name") == name for c in all_commodities):
                 error_msg = await message.answer(
                     f"❌ کالایی با نام **'{name}'** قبلاً ثبت شده است.\nلطفاً یک نام **جدید** وارد کنید:",
                     reply_markup=get_commodity_fsm_cancel_keyboard(),
