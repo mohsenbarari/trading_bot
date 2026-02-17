@@ -19,21 +19,34 @@ CHECK_INTERVAL = 30  # seconds
 TELEGRAM_API_URL = "https://api.telegram.org"
 
 async def check_connectivity():
-    """Ping Telegram API to check global internet access."""
+    """
+    Check internet connectivity.
+    - Foreign Server: Pings Telegram API directly.
+    - Iran Server: Pings Foreign Server (to verify relay path).
+    """
     try:
-        # Use a simple HEAD request to root or getMe
+        # Determine target based on server mode
+        if settings.server_mode == "iran" and settings.foreign_server_url:
+            # Check connection to Foreign Server
+            target_url = settings.foreign_server_url
+        else:
+            # Check connection to Telegram API
+            target_url = TELEGRAM_API_URL
+
+        # Use a simple HEAD request (or GET if HEAD not supported)
         # We use a short timeout (5s) to fail fast
         async with httpx.AsyncClient(timeout=5.0) as client:
             # We don't need a valid response, just reachability
             # Using base URL is usually blocked if filtering is active
-            resp = await client.get(f"{TELEGRAM_API_URL}")
-            # Any response (even 404) means we reached the server
+            resp = await client.get(f"{target_url}")
+            # Any response (even 404/500) means we reached the server
             return True
     except (httpx.ConnectTimeout, httpx.ConnectError, httpx.ReadTimeout):
         return False
     except Exception as e:
         logger.debug(f"Connectivity check error: {e}")
         return False
+
 
 async def connectivity_monitor_loop():
     """Background task to update connectivity status."""
