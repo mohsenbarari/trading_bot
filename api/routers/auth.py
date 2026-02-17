@@ -198,14 +198,24 @@ async def request_otp(
     redis = await get_redis()
     rate_limit_key = f"otp_limit:{mobile}"
     limit_val = await redis.get(rate_limit_key)
-    logger.info(f"OTP Request for {mobile}: LimitKey={rate_limit_key}, Exists={limit_val is not None}")
     
+    # Strict Check: If valid OTP exists, DO NOT generate new one.
+    otp_key = f"otp:{mobile}"
+    active_otp = await redis.get(otp_key)
+    
+    if active_otp:
+        logger.info(f"OTP Request for {mobile}: Active OTP found ({active_otp[:2]}***). Blocking new generation.")
+        # Calculate remaining TTL
+        ttl = await redis.ttl(otp_key)
+        raise HTTPException(status_code=429, detail=f"کد تایید قبلی هنوز معتبر است. لطفاً {ttl} ثانیه صبر کنید.")
+
     if limit_val:
         logger.info(f"OTP Request Rate Limit Hit for {mobile}")
         raise HTTPException(status_code=429, detail="لطفاً ۲ دقیقه صبر کنید")
 
     # تولید کد ۵ رقمی
     otp_code = str(random.randint(10000, 99999))
+
     logger.info(f"Generated NEW OTP for {mobile}: {otp_code[:2]}***")
     
     # ذخیره در Redis (۲ دقیقه اعتبار)
