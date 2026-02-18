@@ -2,6 +2,9 @@
 import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import CircleTimer from './CircleTimer.vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
+import { useWebSocket } from '../composables/useWebSocket'
+
+const { connect: wsConnect, on: wsOn, off: wsOff } = useWebSocket()
 
 // Props
 const props = defineProps<{
@@ -469,10 +472,12 @@ onMounted(() => {
   else if (activeTab.value === 'my_trades') loadMyTrades()
   
   startPolling()
+  setupWebSocket()
 })
 
 onUnmounted(() => {
   stopPolling()
+  cleanupWebSocket()
 })
 
 function startPolling() {
@@ -486,6 +491,57 @@ function startPolling() {
 
 function stopPolling() {
   if (pollingInterval) clearInterval(pollingInterval)
+}
+
+// --- WebSocket Realtime Handlers ---
+function removeOfferById(offerId: number) {
+  offers.value = offers.value.filter(o => o.id !== offerId)
+  myOffers.value = myOffers.value.filter(o => o.id !== offerId)
+}
+
+function handleOfferExpiredWS(data: any) {
+  if (data?.id) {
+    removeOfferById(data.id)
+  }
+}
+
+function handleOfferCreatedWS(_data: any) {
+  // Reload offers to get the new one with full data
+  if (activeTab.value === 'offers') loadOffers(true)
+}
+
+function handleOfferUpdatedWS(_data: any) {
+  if (activeTab.value === 'offers') loadOffers(true)
+  else if (activeTab.value === 'my_offers') loadMyOffers(true)
+}
+
+function handleTradeCreatedWS(_data: any) {
+  if (activeTab.value === 'offers') loadOffers(true)
+  else if (activeTab.value === 'my_trades') loadMyTrades(true)
+}
+
+function setupWebSocket() {
+  wsConnect()
+  wsOn('offer:expired', handleOfferExpiredWS)
+  wsOn('offer:cancelled', handleOfferExpiredWS)
+  wsOn('offer:completed', handleOfferExpiredWS)
+  wsOn('offer:created', handleOfferCreatedWS)
+  wsOn('offer:updated', handleOfferUpdatedWS)
+  wsOn('trade:created', handleTradeCreatedWS)
+}
+
+function cleanupWebSocket() {
+  wsOff('offer:expired', handleOfferExpiredWS)
+  wsOff('offer:cancelled', handleOfferExpiredWS)
+  wsOff('offer:completed', handleOfferExpiredWS)
+  wsOff('offer:created', handleOfferCreatedWS)
+  wsOff('offer:updated', handleOfferUpdatedWS)
+  wsOff('trade:created', handleTradeCreatedWS)
+}
+
+// Called by CircleTimer when its countdown reaches 0
+function onTimerExpired(offerId: number) {
+  removeOfferById(offerId)
 }
 
 watch(activeTab, (val) => {
@@ -591,6 +647,7 @@ watch(activeTab, (val) => {
               :expires-at="offer.expires_at_ts"
               :total-duration="tradingSettings.offer_expiry_minutes * 60"
               :size="24"
+              @expired="onTimerExpired(offer.id)"
             />
           </div>
           

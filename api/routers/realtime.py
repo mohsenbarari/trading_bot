@@ -97,6 +97,8 @@ async def listen_redis_events(websocket: WebSocket):
                 "events:offer:created",
                 "events:offer:expired",
                 "events:offer:updated",
+                "events:offer:cancelled",
+                "events:offer:completed",
                 "events:trade:created"
             )
             logging.info(f"✅ Subscribed to Redis channels")
