@@ -34,9 +34,7 @@ function startTimer(seconds: number) {
   }, 1000)
 }
 
-onUnmounted(() => {
-  if (timerInterval) clearInterval(timerInterval)
-})
+
 
 const formattedTimer = computed(() => {
   const m = Math.floor(countdown.value / 60).toString().padStart(2, '0')
@@ -231,10 +229,52 @@ watch(() => form.code, (newVal) => {
   }
 })
 
+let ac: AbortController | null = null;
+
+async function initWebOtp() {
+  if ('OTPCredential' in window) {
+    if (ac) ac.abort();
+    ac = new AbortController();
+    
+    try {
+      const content = await navigator.credentials.get({
+        otp: { transport: ['sms'] },
+        signal: ac.signal
+      } as any);
+
+      if (content && (content as any).code) {
+        form.code = (content as any).code;
+        verifyOtp();
+      }
+    } catch (err) {
+      console.log('Web OTP Error:', err);
+    }
+  }
+}
+
+watch(() => step.value, (newStep) => {
+  if (newStep === 'otp') {
+    // Small delay to ensure view transition
+    setTimeout(() => {
+        initWebOtp();
+    }, 100);
+  } else {
+    if (ac) {
+      ac.abort();
+      ac = null;
+    }
+  }
+});
+
 watch(() => form.mobile, (newVal) => {
   if (newVal && newVal.length === 11 && /^09\d{9}$/.test(newVal) && !loading.value && countdown.value === 0) {
     requestOtp()
   }
+})
+
+onUnmounted(() => {
+  if (ac) ac.abort();
+  if (timerInterval) clearInterval(timerInterval)
 })
 </script>
 

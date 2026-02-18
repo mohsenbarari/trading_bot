@@ -50,7 +50,12 @@ def send_sms(mobile: str, message: str) -> bool:
 
 def send_otp_sms(mobile: str, code: str) -> bool:
     """Send OTP code via SMS."""
-    message = f"کد تایید شما: {code}\nاین کد تا ۲ دقیقه معتبر است."
+    message = (
+        f"کد تایید شما: {code}\n"
+        f"این کد تا ۲ دقیقه معتبر است.\n"
+        f"\n"
+        f"@coin.gold-trade.ir #{code}"
+    )
     return send_sms(mobile, message)
 
 
