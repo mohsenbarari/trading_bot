@@ -260,7 +260,10 @@ def refresh_settings_cache() -> None:
 
 async def save_trading_settings_async(settings_dict: dict) -> bool:
     """
-    ذخیره تنظیمات در دیتابیس (async).
+    ذخیره تنظیمات در دیتابیس (async) با استفاده از ORM.
+    
+    از ORM استفاده می‌شود تا SQLAlchemy event listeners فایر بشوند
+    و تنظیمات به صورت خودکار بین سرورها سینک شوند.
     
     Args:
         settings_dict: دیکشنری تنظیمات
@@ -269,8 +272,9 @@ async def save_trading_settings_async(settings_dict: dict) -> bool:
         True اگر موفق بود
     """
     try:
-        from sqlalchemy import text
         from core.db import AsyncSessionLocal
+        from models.trading_setting import TradingSetting
+        from sqlalchemy import select
         
         async with AsyncSessionLocal() as session:
             for key, value in settings_dict.items():
@@ -280,19 +284,21 @@ async def save_trading_settings_async(settings_dict: dict) -> bool:
                 
                 value_json = json.dumps(value)
                 
-                # Upsert
-                stmt = text("""
-                    INSERT INTO trading_settings (key, value, updated_at) 
-                    VALUES (:key, :value, :updated_at)
-                    ON CONFLICT (key) DO UPDATE SET 
-                        value = :value, 
-                        updated_at = :updated_at
-                """)
-                await session.execute(stmt, {
-                    'key': key,
-                    'value': value_json,
-                    'updated_at': datetime.utcnow()
-                })
+                # Check if setting exists
+                existing = await session.get(TradingSetting, key)
+                
+                if existing:
+                    # Update via ORM (triggers after_update event → sync)
+                    existing.value = value_json
+                    existing.updated_at = datetime.utcnow()
+                else:
+                    # Insert via ORM (triggers after_insert event → sync)
+                    new_setting = TradingSetting(
+                        key=key,
+                        value=value_json,
+                        updated_at=datetime.utcnow()
+                    )
+                    session.add(new_setting)
             
             await session.commit()
         
