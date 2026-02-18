@@ -19,6 +19,7 @@ from bot.handlers import (
     default
 )
 from core.db import init_db, AsyncSessionLocal
+from core.events import setup_event_listeners
 from bot.middlewares import AuthMiddleware
 
 # Configure logging
@@ -32,6 +33,9 @@ async def main():
 
     # Initialize Database
     await init_db()
+
+    # Register SQLAlchemy event listeners for sync & realtime events
+    setup_event_listeners()
 
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())

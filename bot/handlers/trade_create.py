@@ -40,7 +40,6 @@ from bot.callbacks import (
     TextOfferActionCallback,
     ACTION_NOOP
 )
-from api.routers.realtime import publish_event
 
 
 logger = logging.getLogger(__name__)
@@ -666,21 +665,8 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
                 if db_user:
                     await increment_user_counter(session, db_user, 'channel_message')
 
-            # ارسال رویداد SSE به وب‌اپلیکیشن
-            await publish_event("offer:created", {
-                "id": new_offer.id,
-                "offer_type": new_offer.offer_type.value,
-                "commodity_id": new_offer.commodity_id,
-                "commodity_name": new_offer.commodity.name,
-                "quantity": new_offer.quantity,
-                "price": new_offer.price,
-                "status": new_offer.status.value,
-                "created_at": to_jalali_str(new_offer.created_at) or "",
-                "user_account_name": user.account_name, # یا user.full_name یا هر چیزی که در وب نمایش داده می‌شود
-                "notes": new_offer.notes,
-                "is_wholesale": new_offer.is_wholesale,
-                "lot_sizes": new_offer.lot_sizes,
-            })
+            # رویداد realtime توسط SQLAlchemy event listener (core/events.py) 
+            # به صورت خودکار هنگام commit ارسال می‌شود
             
             # پیام موفقیت
 
