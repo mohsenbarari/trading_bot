@@ -151,8 +151,9 @@ async function verifyOtp() {
     const res = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ mobile_number: form.mobile, otp_code: form.code })
+        body: JSON.stringify({ mobile_number: form.mobile, code: form.code })
     })
+
     
     if (!res.ok) {
         const err = await res.json()
