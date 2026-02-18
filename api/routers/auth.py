@@ -22,6 +22,9 @@ from bot.utils.redis_helpers import get_redis
 from core.notifications import send_telegram_message
 from core.sms import send_otp_sms, send_sms
 from core.connectivity import is_internet_connected
+from api.deps import get_current_user
+import schemas
+
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -54,6 +57,12 @@ class RegisterComplete(BaseModel):
     address: str
 
 # --- Endpoints ---
+
+@router.get("/me", response_model=schemas.UserRead)
+async def read_users_me(current_user: User = Depends(get_current_user)):
+    """دریافت اطلاعات کاربر جاری"""
+    return current_user
+
 
 @router.post("/register-otp-request", response_model=dict)
 async def register_otp_request(
