@@ -6,6 +6,8 @@ const offers = ref<any[]>([]);
 const isLoading = ref(false);
 const error = ref('');
 let pollingInterval: any = null;
+let isFetching = false;
+
 
 
 // Singleton state (optional, but good if we want shared state across views)
@@ -50,28 +52,37 @@ on('offer:completed', handleOfferExpired);
 export function useOffers() {
 
     async function fetchOffers(silent = false) {
+        if (isFetching && silent) return; // Prevent overlapping polls
+
         const token = localStorage.getItem('auth_token');
         if (!token) return;
-        if (!silent) isLoading.value = true;
-        try {
-            // Connect WS if not connected
-            connect();
 
+        if (!silent) isLoading.value = true;
+        isFetching = true;
+
+        try {
             const response = await apiFetch('/api/offers/');
             if (response.ok) {
-                offers.value = await response.json();
+                const data = await response.json();
+                if (Array.isArray(data)) {
+                    offers.value = data;
+                    error.value = '';
+                }
             }
-            // 401 handling is automatic via apiFetch → forceLogout
         } catch (e: any) {
-            error.value = e.message;
-            console.error(e);
+            // Don't clear offers on transient errors to prevent blinking
+            console.error('Fetch offers error:', e);
+            if (!silent) error.value = e.message;
         } finally {
             if (!silent) isLoading.value = false;
+            isFetching = false;
         }
     }
 
     function startPolling() {
+        connect(); // Ensure WS is connected
         if (pollingInterval) return;
+        fetchOffers(); // Initial fetch
         pollingInterval = setInterval(() => fetchOffers(true), 1000);
     }
 

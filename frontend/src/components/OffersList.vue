@@ -38,7 +38,7 @@ function timeAgo(dateString: string) {
 
     <div v-else class="space-y-3">
       <div 
-        v-for="offer in (limit ? offers.slice(0, limit) : offers)" 
+        v-for="offer in (limit && Array.isArray(offers) ? offers.slice(0, limit) : (Array.isArray(offers) ? offers : []))" 
         :key="offer.id"
         class="offer-card bg-white/70 backdrop-blur-sm p-4 rounded-2xl shadow-sm border border-amber-100/30 flex flex-col gap-3 transition-all hover:shadow-md hover:bg-white/90"
       >
