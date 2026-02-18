@@ -321,7 +321,7 @@ onUnmounted(() => {
 
     <!-- Scrollable Offers List -->
     <div class="flex-1 overflow-y-auto px-4 py-4 pb-32 max-w-[480px] mx-auto w-full">
-      <OffersList :offers="filteredOffers" :loading="isLoading" />
+      <OffersList :offers="filteredOffers" :loading="isLoading" :expiry-minutes="tradingSettings.offer_expiry_minutes" />
     </div>
 
     <!-- Bottom Action Bar -->
