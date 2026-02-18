@@ -115,12 +115,7 @@ function timeAgo(dateString: string) {
         :class="{ 'timer-critical': isCritical(offer), 'has-timer': hasTimer(offer) }"
         :style="cardTimerStyle(offer)"
       >
-        <!-- Timer Glow Bar (top of card) -->
-        <div class="timer-bar-track" v-if="hasTimer(offer)">
-          <div class="timer-bar-fill"></div>
-        </div>
-
-        <div class="offer-card-inner bg-white/70 backdrop-blur-sm p-4 rounded-2xl flex flex-col gap-3 transition-all hover:bg-white/90">
+        <div class="offer-card-inner p-4 flex flex-col gap-3">
         <!-- Top Row -->
         <div class="flex justify-between items-start">
            <div class="flex items-center gap-3">
@@ -164,55 +159,42 @@ function timeAgo(dateString: string) {
 </template>
 
 <style scoped>
-/* Card wrapper with animated border */
+/* Card wrapper — acts as the conic-gradient border frame */
 .offer-card-wrap {
   position: relative;
+  padding: 2px;
   border-radius: 1rem;
-  overflow: hidden;
-  border: 1px solid rgba(251, 191, 36, 0.2);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-  transition: box-shadow 1s linear, border-color 1s linear;
+  background: rgba(251, 191, 36, 0.15);
+  transition: box-shadow 1s linear;
 }
 
+/* Conic-gradient border: fills clockwise from top, shrinks with time */
 .offer-card-wrap.has-timer {
-  border-color: var(--t-c, rgba(251, 191, 36, 0.2));
+  background: conic-gradient(
+    from 0deg at 50% 50%,
+    var(--t-c) calc(var(--t-pct) - 1%),
+    var(--t-cgi) var(--t-pct),
+    rgba(200, 200, 200, 0.1) var(--t-pct)
+  );
   box-shadow:
-    0 0 var(--t-gs, 0px) var(--t-cg, transparent),
-    inset 0 0 calc(var(--t-gs, 0px) * 0.5) var(--t-cgi, transparent);
+    0 0 var(--t-gs, 0px) var(--t-cg, transparent);
 }
 
-/* Glow bar at top */
-.timer-bar-track {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3.5px;
-  background: rgba(128, 128, 128, 0.08);
-  z-index: 2;
+/* Inner card content */
+.offer-card-inner {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(8px);
+  border-radius: calc(1rem - 2px);
+  transition: background 0.2s ease;
 }
 
-.timer-bar-fill {
-  height: 100%;
-  width: var(--t-pct, 100%);
-  background: linear-gradient(90deg, var(--t-c, #10b981), var(--t-cl, #10b981));
-  box-shadow: 0 0 8px var(--t-c, #10b981), 0 0 3px var(--t-c, #10b981);
-  border-radius: 0 3px 3px 0;
-  transition: width 1s linear, background 1.5s ease, box-shadow 1.5s ease;
+.offer-card-wrap:hover .offer-card-inner {
+  background: rgba(255, 255, 255, 0.95);
 }
 
-/* Critical pulsing */
-.offer-card-wrap.timer-critical .timer-bar-fill {
-  animation: bar-pulse 0.8s ease-in-out infinite;
-}
-
+/* Critical pulsing (<15% remaining) */
 .offer-card-wrap.timer-critical {
-  animation: card-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes bar-pulse {
-  0%, 100% { opacity: 0.6; box-shadow: 0 0 6px var(--t-c); }
-  50% { opacity: 1; box-shadow: 0 0 18px var(--t-c), 0 0 6px var(--t-c); }
+  animation: card-pulse 1s ease-in-out infinite;
 }
 
 @keyframes card-pulse {
@@ -221,8 +203,8 @@ function timeAgo(dateString: string) {
   }
   50% {
     box-shadow:
-      0 0 calc(var(--t-gs, 4px) * 2.5) var(--t-cgs, rgba(239,68,68,0.5)),
-      inset 0 0 8px var(--t-cgsb, rgba(239,68,68,0.15));
+      0 0 calc(var(--t-gs, 4px) * 3) var(--t-cgs, rgba(239,68,68,0.5)),
+      0 0 calc(var(--t-gs, 4px) * 6) var(--t-cgsb, rgba(239,68,68,0.15));
   }
 }
 </style>
