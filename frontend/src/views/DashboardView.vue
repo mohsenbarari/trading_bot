@@ -136,7 +136,7 @@ onMounted(fetchUser)
       </footer>
 
     </div>
-  </div>
+
     <!-- DEBUG SECTION -->
     <div v-if="user" class="debug-info" style="background: #333; color: #fff; padding: 10px; margin: 20px; border-radius: 8px; font-size: 10px; direction: ltr; text-align: left; position: relative; z-index: 1000;">
       <p style="font-weight: bold; margin-bottom: 5px;">DEBUG INFO:</p>
