@@ -13,7 +13,10 @@ from core.db import AsyncSessionLocal
 from bot.utils.redis_helpers import check_double_click
 from core.utils import check_user_limits, increment_user_counter
 from core.enums import NotificationLevel, NotificationCategory, UserRole
+from core.enums import NotificationLevel, NotificationCategory, UserRole
 from bot.callbacks import ChannelTradeCallback
+from api.routers.realtime import publish_event
+
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +181,21 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
             from core.utils import increment_user_counter
             await increment_user_counter(session, user, 'trade', actual_amount)
             
+            # ارسال رویداد SSE برای آپدیت یا تکمیل لفظ
+            if new_remaining <= 0:
+                await publish_event("offer:completed", {"id": offer.id})
+            else:
+                await publish_event("offer:updated", {
+                    "id": offer.id,
+                    "remaining_quantity": new_remaining,
+                    "lot_sizes": offer.lot_sizes
+                })
+            
+            # ارسال رویداد معامله جدید (اختیاری - برای داشبورد)
+            # await publish_event("trade:created", { ... })
+
             # اطلاعات معامله
+
             offer_type_fa = "خرید" if offer.offer_type == OfferType.BUY else "فروش"
             respond_type_fa = "فروش" if offer.offer_type == OfferType.BUY else "خرید"
             offer_emoji = "🟢" if offer.offer_type == OfferType.BUY else "🔴"
