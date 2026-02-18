@@ -330,6 +330,7 @@ watch(() => form.mobile, (newVal) => {
                   placeholder="_____"
                   maxlength="5"
                   dir="ltr"
+                  autocomplete="one-time-code"
                   autofocus
                 />
                 <Lock class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 peer-focus:text-amber-500 transition-colors" :size="20"/>
