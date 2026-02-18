@@ -292,7 +292,14 @@ async def resend_otp_sms(
     
     # Get remaining TTL for the timer
     ttl = await redis.ttl(otp_key)
-    if ttl < 0: ttl = 0
+    logger.info(f"TTL for {mobile} (resend-otp-sms): {ttl}")
+    
+    if ttl < 0: 
+        # -1 (no expiry) or -2 (missing). Should not happen here due to check above.
+        # But if it does, default to 0 (or strictly, handle error)
+        logger.warning(f"Unexpected TTL for {mobile}: {ttl}")
+        ttl = 0
+
 
     # Send SMS
     if send_otp_sms(mobile, otp_code):
