@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
-import CircleTimer from './CircleTimer.vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import { useWebSocket } from '../composables/useWebSocket'
 
@@ -122,6 +121,63 @@ const isTrading = ref(false)
 
 // Polling
 let pollingInterval: number | null = null
+let timerTick: number | null = null
+
+// Global timer tick (shared across all offer cards)
+const now = ref(Math.floor(Date.now() / 1000))
+
+// --- Timer Helpers (pure graphical, no numbers) ---
+function getTimerPercent(offer: Offer): number {
+  if (!offer.expires_at_ts) return 100
+  const remaining = offer.expires_at_ts - now.value
+  if (remaining <= 0) return 0
+  const total = tradingSettings.value.offer_expiry_minutes * 60
+  return Math.min(Math.max((remaining / total) * 100, 0), 100)
+}
+
+function getTimerColor(pct: number): [number, number, number] {
+  // Returns [hue, saturation, lightness] for beautiful multi-stop spectrum
+  // Emerald → Green → Gold → Orange → Red
+  if (pct >= 75) {
+    const t = (pct - 75) / 25
+    return [Math.round(120 + t * 40), 78, 42]  // 120→160 emerald/teal
+  } else if (pct >= 50) {
+    const t = (pct - 50) / 25
+    return [Math.round(50 + t * 70), 82, 46]   // 50→120 gold→green
+  } else if (pct >= 25) {
+    const t = (pct - 25) / 25
+    return [Math.round(25 + t * 25), 88, 48]   // 25→50 orange→gold
+  } else {
+    const t = pct / 25
+    return [Math.round(t * 25), 92, 48]         // 0→25 red→orange
+  }
+}
+
+function hsl(c: [number, number, number]): string {
+  return `hsl(${c[0]}, ${c[1]}%, ${c[2]}%)`
+}
+
+function hsla(c: [number, number, number], a: number): string {
+  return `hsla(${c[0]}, ${c[1]}%, ${c[2]}%, ${a.toFixed(2)})`
+}
+
+function getCardTimerStyle(offer: Offer): Record<string, string> {
+  if (!offer.expires_at_ts) return {}
+  const pct = getTimerPercent(offer)
+  const c = getTimerColor(pct)
+  const glowOpacity = Math.max(0.15, (pct / 100) * 0.45)
+  const glowSpread = Math.round(2 + (pct / 100) * 8)
+  return {
+    '--timer-pct': pct + '%',
+    '--timer-color': hsl(c),
+    '--timer-color-glow': hsla(c, glowOpacity),
+    '--timer-color-glow-inner': hsla(c, glowOpacity * 0.5),
+    '--timer-color-light': hsla(c, 0.7),
+    '--timer-glow-spread': glowSpread + 'px',
+    '--timer-glow-strong': hsla(c, Math.min(glowOpacity * 1.8, 0.6)),
+    '--timer-glow-subtle': hsla(c, 0.15)
+  }
+}
 
 // Computed
 const filteredOffers = computed(() => {
@@ -473,11 +529,17 @@ onMounted(() => {
   
   startPolling()
   setupWebSocket()
+
+  // Start global timer tick for all offer cards
+  timerTick = setInterval(() => {
+    now.value = Math.floor(Date.now() / 1000)
+  }, 1000) as any
 })
 
 onUnmounted(() => {
   stopPolling()
   cleanupWebSocket()
+  if (timerTick) clearInterval(timerTick)
 })
 
 function startPolling() {
@@ -539,10 +601,13 @@ function cleanupWebSocket() {
   wsOff('trade:created', handleTradeCreatedWS)
 }
 
-// Called by CircleTimer when its countdown reaches 0
-function onTimerExpired(offerId: number) {
-  removeOfferById(offerId)
-}
+// Watch for client-side timer expiration (offers whose timer hit 0)
+watch(now, () => {
+  const expired = offers.value.filter(o => o.expires_at_ts && o.expires_at_ts <= now.value)
+  for (const o of expired) {
+    removeOfferById(o.id)
+  }
+})
 
 watch(activeTab, (val) => {
    if (val === 'offers') loadOffers()
@@ -627,8 +692,14 @@ watch(activeTab, (val) => {
           v-for="offer in filteredOffers" 
           :key="offer.id" 
           class="offer-card"
-          :class="offer.offer_type"
+          :class="[offer.offer_type, { 'timer-critical': offer.expires_at_ts && getTimerPercent(offer) < 15, 'has-timer': !!offer.expires_at_ts }]"
+          :style="getCardTimerStyle(offer)"
         >
+          <!-- Timer Glow Bar -->
+          <div class="timer-bar-track" v-if="offer.expires_at_ts">
+            <div class="timer-bar-fill"></div>
+          </div>
+
           <div class="offer-header">
             <div class="offer-role">
               <span 
@@ -639,16 +710,6 @@ watch(activeTab, (val) => {
               </span>
             </div>
             <div class="offer-time">{{ offer.created_at }}</div>
-          </div>
-
-          <!-- Expiration Timer (Absolute Positioned) -->
-          <div class="offer-timer-badge" v-if="offer.expires_at_ts">
-            <CircleTimer 
-              :expires-at="offer.expires_at_ts"
-              :total-duration="tradingSettings.offer_expiry_minutes * 60"
-              :size="24"
-              @expired="onTimerExpired(offer.id)"
-            />
           </div>
           
           <div class="offer-body">
@@ -1317,17 +1378,71 @@ watch(activeTab, (val) => {
   border-radius: 12px;
   padding: 14px;
   border: 1px solid var(--border-color);
-  position: relative; /* Context for absolute timer */
+  position: relative;
+  overflow: hidden;
+  transition: box-shadow 1s linear, border-color 1s linear;
 }
 
-.offer-timer-badge {
+/* Animated glowing border for offers with timer */
+.offer-card.has-timer {
+  border-color: var(--timer-color, var(--border-color));
+  box-shadow:
+    0 0 var(--timer-glow-spread, 0px) var(--timer-color-glow, transparent),
+    inset 0 0 calc(var(--timer-glow-spread, 0px) * 0.5) var(--timer-color-glow-inner, transparent);
+}
+
+/* --- Timer Glow Bar (top of card) --- */
+.timer-bar-track {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 5;
-  background: var(--card-bg);
-  border-radius: 50%;
-  padding: 1px;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3.5px;
+  background: rgba(128, 128, 128, 0.1);
+  border-radius: 12px 12px 0 0;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.timer-bar-fill {
+  height: 100%;
+  width: var(--timer-pct, 100%);
+  background: linear-gradient(90deg, var(--timer-color, #10b981), var(--timer-color-light, #10b981));
+  box-shadow: 0 0 8px var(--timer-color, #10b981), 0 0 3px var(--timer-color, #10b981);
+  border-radius: 0 3px 3px 0;
+  transition: width 1s linear, background 1.5s ease, box-shadow 1.5s ease;
+  transform-origin: right;
+}
+
+/* Critical state — pulsing glow */
+.offer-card.timer-critical .timer-bar-fill {
+  animation: timer-pulse 0.8s ease-in-out infinite;
+}
+
+.offer-card.timer-critical {
+  animation: card-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes timer-pulse {
+  0%, 100% {
+    opacity: 0.6;
+    box-shadow: 0 0 6px var(--timer-color);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 18px var(--timer-color), 0 0 6px var(--timer-color);
+  }
+}
+
+@keyframes card-pulse {
+  0%, 100% {
+    box-shadow: 0 0 var(--timer-glow-spread, 4px) var(--timer-color-glow, rgba(239,68,68,0.3));
+  }
+  50% {
+    box-shadow:
+      0 0 calc(var(--timer-glow-spread, 4px) * 2.5) var(--timer-glow-strong, rgba(239,68,68,0.5)),
+      inset 0 0 8px var(--timer-glow-subtle, rgba(239,68,68,0.15));
+  }
 }
 
 .offer-card.buy {
@@ -1336,6 +1451,14 @@ watch(activeTab, (val) => {
 
 .offer-card.sell {
   border-right: 4px solid #ef4444;
+}
+
+.offer-card.buy.has-timer {
+  border-right-color: var(--timer-color, #10b981);
+}
+
+.offer-card.sell.has-timer {
+  border-right-color: var(--timer-color, #ef4444);
 }
 
 .offer-header, .trade-header {
@@ -1351,7 +1474,6 @@ watch(activeTab, (val) => {
 .offer-time, .trade-time {
   color: var(--text-secondary);
   font-size: 11px;
-  padding-left: 30px; /* Space for absolute timer */
 }
 
 .offer-body, .trade-body {
