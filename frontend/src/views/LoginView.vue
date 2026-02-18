@@ -112,9 +112,15 @@ async function resendOtpSms() {
         throw new Error(err.detail || 'خطا در ارسال پیامک')
     }
     
+    const data = await res.json()
+    
     // SMS Sent successfully
     lastMethod.value = 'sms'
-    startTimer(60)
+    
+    // Use remaining TTL from backend if available
+    const ttl = data.expires_in || 60
+    startTimer(ttl)
+
     
   } catch (e: any) {
     error.value = e.message
