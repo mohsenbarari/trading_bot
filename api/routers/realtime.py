@@ -17,9 +17,9 @@ from api.deps import get_current_user_optional
 
 
 router = APIRouter(
-    prefix="/realtime",
     tags=["Real-time"],
 )
+
 
 
 # --- WebSocket Connection Manager ---
