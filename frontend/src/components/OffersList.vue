@@ -11,19 +11,17 @@ const props = defineProps<{
   expiryMinutes?: number;
 }>();
 
-// --- Shared timer tick ---
-const now = ref(Math.floor(Date.now() / 1000))
-let tickInterval: number | null = null
+// --- Smooth timer tick (millisecond precision via requestAnimationFrame) ---
+const now = ref(Date.now() / 1000)
+let rafId: number | null = null
 
-onMounted(() => {
-  tickInterval = setInterval(() => {
-    now.value = Math.floor(Date.now() / 1000)
-  }, 1000) as any
-})
+function tick() {
+  now.value = Date.now() / 1000
+  rafId = requestAnimationFrame(tick)
+}
 
-onUnmounted(() => {
-  if (tickInterval) clearInterval(tickInterval)
-})
+onMounted(() => { rafId = requestAnimationFrame(tick) })
+onUnmounted(() => { if (rafId !== null) cancelAnimationFrame(rafId) })
 
 // --- Timer helpers (pure graphical, no numbers) ---
 function getTimerPercent(offer: any): number {
