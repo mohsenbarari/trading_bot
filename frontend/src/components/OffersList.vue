@@ -32,6 +32,8 @@ const now = ref(Date.now() / 1000)
 let tickInterval: number | null = null
 
 onMounted(() => {
+  // Clear stale timer styles from previous mount so animations restart correctly
+  styleCache.clear()
   tickInterval = setInterval(() => {
     now.value = Date.now() / 1000
   }, 1000) as any
