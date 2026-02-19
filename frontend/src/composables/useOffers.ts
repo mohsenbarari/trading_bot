@@ -65,7 +65,9 @@ export function useOffers() {
             if (response.ok) {
                 const data = await response.json();
                 if (Array.isArray(data)) {
-                    offers.value = data;
+                    // Filter out already-expired offers client-side
+                    const nowSec = Date.now() / 1000
+                    offers.value = data.filter((o: any) => !o.expires_at_ts || o.expires_at_ts > nowSec);
                     error.value = '';
                 }
             }

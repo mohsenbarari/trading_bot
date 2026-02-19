@@ -1,6 +1,6 @@
 <script setup lang="ts">
 
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { Search } from 'lucide-vue-next';
 
 // Define Props
@@ -18,7 +18,7 @@ let tickInterval: number | null = null
 onMounted(() => {
   tickInterval = setInterval(() => {
     now.value = Date.now() / 1000
-  }, 3000) as any
+  }, 1000) as any   // every 1s — to remove expired offers promptly
 })
 
 onUnmounted(() => {
@@ -61,6 +61,19 @@ function hasTimer(offer: any): boolean {
   return !!offer.expires_at_ts
 }
 
+// --- Filter out expired offers client-side (reactive via now) ---
+const filteredOffers = computed(() => {
+  const nowSec = now.value
+  const source = Array.isArray(props.offers) ? props.offers : []
+  const alive = source.filter(o => !o.expires_at_ts || o.expires_at_ts > nowSec)
+  // Clean styleCache for removed offers
+  const aliveIds = new Set(alive.map(o => o.id))
+  for (const id of styleCache.keys()) {
+    if (!aliveIds.has(id)) styleCache.delete(id)
+  }
+  return props.limit ? alive.slice(0, props.limit) : alive
+})
+
 function getStatusBadge(type: string) {
   return type === 'buy' 
     ? { text: 'خرید', bg: 'bg-green-100', color: 'text-green-700' }
@@ -78,7 +91,7 @@ function timeAgo(dateString: string) {
        <div v-for="i in (limit || 3)" :key="i" class="h-24 bg-white/50 rounded-2xl animate-pulse border border-amber-100/30"></div>
     </div>
 
-    <div v-else-if="offers.length === 0" class="text-center py-10">
+    <div v-else-if="filteredOffers.length === 0" class="text-center py-10">
        <div class="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto mb-4 text-amber-400">
           <Search :size="32" />
        </div>
@@ -87,7 +100,7 @@ function timeAgo(dateString: string) {
 
     <div v-else class="space-y-3">
       <div 
-        v-for="offer in (limit && Array.isArray(offers) ? offers.slice(0, limit) : (Array.isArray(offers) ? offers : []))" 
+        v-for="offer in filteredOffers" 
         :key="offer.id"
         class="offer-card-wrap"
         :class="{ 'timer-critical': isCritical(offer), 'has-timer': hasTimer(offer) }"
