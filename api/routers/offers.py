@@ -401,7 +401,7 @@ async def get_active_offers(
     if commodity_id:
         query = query.where(Offer.commodity_id == commodity_id)
     
-    query = query.order_by(Offer.created_at.asc()).offset(skip).limit(limit)
+    query = query.order_by(Offer.created_at.desc()).offset(skip).limit(limit)
     
     result = await db.execute(query)
     offers = result.scalars().all()
