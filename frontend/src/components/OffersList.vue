@@ -136,6 +136,11 @@ function timeAgo(dateString: string) {
            </div>
         </div>
 
+        <!-- Notes -->
+        <p v-if="offer.notes" class="text-xs text-gray-500 bg-gray-50 px-3 py-2 rounded-lg">
+           توضیحات: {{ offer.notes }}
+        </p>
+
         <!-- Action Button -->
          <button class="w-full py-2.5 rounded-xl font-bold text-sm transition-all active:scale-[0.98]"
            :class="offer.offer_type === 'buy' 
