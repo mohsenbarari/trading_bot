@@ -18,7 +18,7 @@ interface TradingSettings {
 }
 
 const { offers, isLoading, fetchOffers, startPolling, stopPolling } = useOffers()
-const currentUserId = ref<number | null>(null)
+const currentUserId = ref<number | undefined>(undefined)
 const filterType = ref<'all' | 'buy' | 'sell'>('all')
 
 // Sort State
