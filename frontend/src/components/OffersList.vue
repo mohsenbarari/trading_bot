@@ -493,11 +493,11 @@ async function executeTrade(offerId: number, quantity: number) {
 }
 
 .trade-btn.buy {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
+  background: linear-gradient(135deg, #10b981, #059669);
 }
 
 .trade-btn.sell {
-  background: linear-gradient(135deg, #10b981, #059669);
+  background: linear-gradient(135deg, #ef4444, #dc2626);
 }
 
 .trade-btn.pending {
