@@ -371,15 +371,16 @@ async function executeTrade(offerId: number, quantity: number) {
   border-radius: calc(12px - 3px);
   padding: 14px;
   z-index: 0;
-  border-right: 4px solid transparent;
+  overflow: hidden;
 }
 
+/* Colored right-side accent via inset shadow (doesn't break mask layout) */
 .offer-card-inner.buy {
-  border-right-color: #10b981;
+  box-shadow: inset -4px 0 0 0 #10b981;
 }
 
 .offer-card-inner.sell {
-  border-right-color: #ef4444;
+  box-shadow: inset -4px 0 0 0 #ef4444;
 }
 
 /* ── Header ── */
