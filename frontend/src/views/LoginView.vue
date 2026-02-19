@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Smartphone, Lock, Loader2, Download, Clock } from 'lucide-vue-next'
+import { setupExpiryTimer } from '../utils/auth'
 
 const router = useRouter()
 const step = ref<'mobile' | 'otp'>('mobile')
@@ -163,7 +164,6 @@ async function verifyOtp() {
     localStorage.setItem('refresh_token', data.refresh_token)
     
     // راه‌اندازی تایمر انقضای توکن
-    const { setupExpiryTimer } = await import('../utils/auth')
     setupExpiryTimer()
     
     router.push('/')

@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Home, Store, User, MessageCircle, Shield, Menu, X } from 'lucide-vue-next'
+import { apiFetch } from '../utils/auth'
 
 const route = useRoute()
 const userRole = ref<string>('')
@@ -19,7 +20,6 @@ onMounted(async () => {
   try {
     const token = localStorage.getItem('auth_token')
     if (!token) return
-    const { apiFetch } = await import('../utils/auth')
     const res = await apiFetch('/api/auth/me')
     if (res.ok) {
       const data = await res.json()
