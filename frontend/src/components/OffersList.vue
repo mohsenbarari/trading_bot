@@ -58,17 +58,10 @@ function cardTimerStyle(offer: any): Record<string, string> {
   if (!offer.expires_at_ts) return {}
   const pct = getTimerPercent(offer)
   const c = getTimerHSL(pct)
-  const gO = Math.max(0.15, (pct / 100) * 0.45)
-  const gS = Math.round(2 + (pct / 100) * 8)
   return {
     '--t-pct': pct + '%',
     '--t-c': hsl(c),
-    '--t-cg': hsla(c, gO),
-    '--t-cgi': hsla(c, gO * 0.5),
-    '--t-cl': hsla(c, 0.7),
-    '--t-gs': gS + 'px',
-    '--t-cgs': hsla(c, Math.min(gO * 1.8, 0.6)),
-    '--t-cgsb': hsla(c, 0.15)
+    '--t-cg': hsla(c, 0.12),
   }
 }
 
@@ -159,52 +152,55 @@ function timeAgo(dateString: string) {
 </template>
 
 <style scoped>
-/* Card wrapper — acts as the conic-gradient border frame */
+/* ── Card wrapper ── */
 .offer-card-wrap {
   position: relative;
-  padding: 2px;
   border-radius: 1rem;
-  background: rgba(251, 191, 36, 0.15);
-  transition: box-shadow 1s linear;
+  border: 3px solid rgba(229, 231, 235, 0.45);
 }
 
-/* Conic-gradient border: fills clockwise from top, shrinks with time */
+/* ── Timer border via ::before + mask (cannot bleed into content) ── */
 .offer-card-wrap.has-timer {
+  border-color: transparent;
+}
+
+.offer-card-wrap.has-timer::before {
+  content: '';
+  position: absolute;
+  inset: -3px;               /* sit on top of the border area */
+  border-radius: 1rem;
+  padding: 3px;              /* thickness of the visible border */
   background: conic-gradient(
     from 0deg at 50% 50%,
     var(--t-c) calc(var(--t-pct) - 1%),
-    var(--t-cgi) var(--t-pct),
-    rgba(200, 200, 200, 0.1) var(--t-pct)
+    var(--t-cg) var(--t-pct),
+    rgba(229, 231, 235, 0.35) var(--t-pct)
   );
-  box-shadow:
-    0 0 var(--t-gs, 0px) var(--t-cg, transparent);
+  /* Mask trick: cut out the inner area so only the 3px ring is visible */
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
 }
 
-/* Inner card content */
+/* ── Inner card — plain white, no transparency ── */
 .offer-card-inner {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(8px);
-  border-radius: calc(1rem - 2px);
-  transition: background 0.2s ease;
+  position: relative;
+  background: #ffffff;
+  border-radius: calc(1rem - 3px);
+  z-index: 0;
 }
 
-.offer-card-wrap:hover .offer-card-inner {
-  background: rgba(255, 255, 255, 0.95);
+/* ── Critical pulse (<15%) ── */
+.offer-card-wrap.timer-critical::before {
+  animation: ring-pulse 1.2s ease-in-out infinite;
 }
 
-/* Critical pulsing (<15% remaining) */
-.offer-card-wrap.timer-critical {
-  animation: card-pulse 1s ease-in-out infinite;
-}
-
-@keyframes card-pulse {
-  0%, 100% {
-    box-shadow: 0 0 var(--t-gs, 4px) var(--t-cg, rgba(239,68,68,0.3));
-  }
-  50% {
-    box-shadow:
-      0 0 calc(var(--t-gs, 4px) * 3) var(--t-cgs, rgba(239,68,68,0.5)),
-      0 0 calc(var(--t-gs, 4px) * 6) var(--t-cgsb, rgba(239,68,68,0.15));
-  }
+@keyframes ring-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
 }
 </style>
