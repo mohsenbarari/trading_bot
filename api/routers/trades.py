@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 
 
 router = APIRouter(
-    prefix="/trades",
     tags=["Trades"],
 )
 
@@ -482,6 +481,7 @@ async def create_trade(
     await publish_event("offer:updated", {
         "id": offer.id,
         "remaining_quantity": offer.remaining_quantity,
+        "lot_sizes": offer.lot_sizes,
         "status": offer.status.value
     })
     

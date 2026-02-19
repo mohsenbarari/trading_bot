@@ -204,12 +204,14 @@ async def publish_event(event_type: str, data: dict):
     try:
         async with redis.Redis(connection_pool=pool) as redis_client:
             channel = f"events:{event_type}"
-            await redis_client.publish(channel, json.dumps(data, ensure_ascii=False))
+            await redis_client.publish(channel, json.dumps(data, ensure_ascii=False, default=str))
     except Exception as e:
         print(f"⚠️ Error publishing event {event_type}: {e}")
 
-
-    await manager.broadcast({
-        "type": event_type,
-        "data": data
-    })
+    try:
+        await manager.broadcast({
+            "type": event_type,
+            "data": data
+        })
+    except Exception as e:
+        print(f"⚠️ Error broadcasting event {event_type}: {e}")

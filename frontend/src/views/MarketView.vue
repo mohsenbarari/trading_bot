@@ -18,6 +18,7 @@ interface TradingSettings {
 }
 
 const { offers, isLoading, fetchOffers, startPolling, stopPolling } = useOffers()
+const currentUserId = ref<number | null>(null)
 const filterType = ref<'all' | 'buy' | 'sell'>('all')
 
 // Sort State
@@ -240,11 +241,24 @@ function clearSort() {
   showSortPanel.value = false
 }
 
+async function fetchCurrentUser() {
+    try {
+        const res = await apiFetch('/api/auth/me')
+        if (res.ok) {
+            const data = await res.json()
+            currentUserId.value = data.id
+        }
+    } catch (e) {
+        console.error('Failed to load current user', e)
+    }
+}
+
 onMounted(() => {
     fetchOffers()
     startPolling()
     fetchCommodities()
     fetchTradingSettings()
+    fetchCurrentUser()
 })
 
 onUnmounted(() => {
@@ -321,7 +335,7 @@ onUnmounted(() => {
 
     <!-- Scrollable Offers List -->
     <div class="flex-1 overflow-y-auto px-4 py-4 pb-32 max-w-[480px] mx-auto w-full">
-      <OffersList :offers="filteredOffers" :loading="isLoading" :expiry-minutes="tradingSettings.offer_expiry_minutes" />
+      <OffersList :offers="filteredOffers" :loading="isLoading" :expiry-minutes="tradingSettings.offer_expiry_minutes" :current-user-id="currentUserId" @trade-completed="fetchOffers()" />
     </div>
 
     <!-- Bottom Action Bar -->
