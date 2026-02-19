@@ -115,8 +115,8 @@ function getLotButtons(offer: any): number[] {
       unique.push(a);
     }
   }
-  // Sort descending so largest is on the left (RTL layout)
-  return unique.sort((a, b) => b - a);
+  // Sort ascending: in RTL flex, first item is on the right, so ascending puts largest on the left
+  return unique.sort((a, b) => a - b);
 }
 
 function isOwnOffer(offer: any): boolean {
