@@ -89,12 +89,6 @@ const filteredOffers = computed(() => {
   return props.limit ? alive.slice(0, props.limit) : alive
 })
 
-function getStatusBadge(type: string) {
-  return type === 'buy' 
-    ? { text: 'خرید', bg: 'bg-green-100', color: 'text-green-700' }
-    : { text: 'فروش', bg: 'bg-red-100', color: 'text-red-700' }
-}
-
 function timeAgo(dateString: string) {
     if (!dateString) return '';
     return dateString;
@@ -196,18 +190,18 @@ async function executeTrade(offerId: number, quantity: number) {
         </div>
     </transition>
 
-    <div v-if="loading" class="space-y-3">
-       <div v-for="i in (limit || 3)" :key="i" class="h-24 bg-white/50 rounded-2xl animate-pulse border border-amber-100/30"></div>
+    <div v-if="loading" class="offers-list">
+       <div v-for="i in (limit || 5)" :key="i" class="skeleton-card"></div>
     </div>
 
-    <div v-else-if="filteredOffers.length === 0" class="text-center py-10">
-       <div class="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto mb-4 text-amber-400">
-          <Search :size="32" />
+    <div v-else-if="filteredOffers.length === 0" class="empty-state">
+       <div class="empty-icon">
+          <Search :size="28" />
        </div>
-       <p class="text-gray-400 font-medium">هیچ لفظ فعالی یافت نشد.</p>
+       <p>هیچ لفظ فعالی یافت نشد.</p>
     </div>
 
-    <div v-else class="space-y-3">
+    <div v-else class="offers-list">
       <div 
         v-for="offer in filteredOffers" 
         :key="offer.id"
@@ -215,72 +209,53 @@ async function executeTrade(offerId: number, quantity: number) {
         :class="{ 'timer-critical': isCritical(offer), 'has-timer': hasTimer(offer) }"
         :style="cardTimerStyle(offer)"
       >
-        <div class="offer-card-inner p-4 flex flex-col gap-3">
-        <!-- Top Row -->
-        <div class="flex justify-between items-start">
-           <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-xl flex items-center justify-center font-bold"
-                 :class="offer.offer_type === 'buy' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'">
-                 {{ offer.offer_type === 'buy' ? 'خ' : 'ف' }}
-              </div>
-              <div>
-                 <h3 class="font-bold text-gray-800">{{ offer.commodity_name }}</h3>
-                 <span class="text-xs text-gray-400">{{ timeAgo(offer.created_at) }}</span>
-              </div>
-           </div>
-           <span class="px-2.5 py-1 rounded-lg text-xs font-bold" :class="getStatusBadge(offer.offer_type).bg + ' ' + getStatusBadge(offer.offer_type).color">
-              {{ getStatusBadge(offer.offer_type).text }}
-           </span>
-        </div>
+        <div class="offer-card-inner" :class="[offer.offer_type]">
 
-        <!-- Details Row -->
-        <div class="grid grid-cols-3 gap-2 bg-amber-50/30 p-3 rounded-xl border border-amber-100/30">
-           <div class="text-center border-l border-amber-200/30 pl-2">
-              <p class="text-xs text-gray-400 mb-1">تعداد</p>
-              <p class="font-bold text-gray-900">{{ offer.quantity }}</p>
-           </div>
-           <div class="text-center border-l border-amber-200/30 pl-2">
-              <p class="text-xs text-gray-400 mb-1">باقیمانده</p>
-              <p class="font-bold" :class="offer.remaining_quantity < offer.quantity ? 'text-amber-600' : 'text-gray-900'">{{ offer.remaining_quantity }}</p>
-           </div>
-           <div class="text-center">
-              <p class="text-xs text-gray-400 mb-1">قیمت واحد</p>
-              <p class="font-bold text-gray-900">{{ offer.price ? offer.price.toLocaleString() : '---' }}</p>
-           </div>
-        </div>
+          <!-- Header: role badge + time -->
+          <div class="offer-header">
+            <span class="role-badge" :class="offer.offer_type">
+              {{ offer.offer_type === 'buy' ? 'خرید' : 'فروش' }}
+            </span>
+            <span class="offer-time">{{ timeAgo(offer.created_at) }}</span>
+          </div>
 
-        <!-- Notes -->
-        <p v-if="offer.notes" class="text-xs text-gray-500 bg-gray-50 px-3 py-2 rounded-lg">
-           توضیحات: {{ offer.notes }}
-        </p>
+          <!-- Body: commodity, remaining, price in one row -->
+          <div class="offer-body">
+            <div class="offer-main">
+              <span class="commodity">{{ offer.commodity_name }}</span>
+              <span class="quantity-badge">{{ offer.remaining_quantity }} عدد</span>
+              <span class="price">{{ offer.price ? offer.price.toLocaleString() : '---' }}</span>
+            </div>
+            <p v-if="offer.notes" class="offer-notes">
+              توضیحات: {{ offer.notes }}
+            </p>
+          </div>
 
-        <!-- Lot Buttons (matching Telegram channel behavior) -->
-        <div v-if="!isOwnOffer(offer) && offer.remaining_quantity > 0" class="flex flex-wrap gap-2">
-          <button
-            v-for="amount in getLotButtons(offer)"
-            :key="amount"
-            @click="handleLotClick(offer.id, amount)"
-            :disabled="tradingOfferId === offer.id"
-            class="lot-btn flex-1 min-w-[70px] py-2.5 rounded-xl font-bold text-sm transition-all active:scale-[0.96]"
-            :class="[
-              isPending(offer.id, amount)
-                ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20 animate-pulse-soft'
-                : (offer.offer_type === 'buy' 
-                  ? 'bg-red-500 hover:bg-red-600 text-white shadow-sm shadow-red-500/10' 
-                  : 'bg-green-500 hover:bg-green-600 text-white shadow-sm shadow-green-500/10'),
-              tradingOfferId === offer.id ? 'opacity-60 cursor-wait' : ''
-            ]"
-          >
-            <Loader2 v-if="tradingOfferId === offer.id && tradingAmount === amount" class="inline animate-spin mr-1" :size="14" />
-            <span v-if="isPending(offer.id, amount)">تایید {{ amount }} عدد؟</span>
-            <span v-else>{{ amount }} عدد</span>
-          </button>
-        </div>
-
-        <!-- Own offer indicator -->
-        <div v-else-if="isOwnOffer(offer)" class="text-center py-2 text-xs text-gray-400 font-medium bg-gray-50 rounded-xl">
-          لفظ شما
-        </div>
+          <!-- Footer: lot buttons or own offer -->
+          <div class="offer-footer">
+            <div v-if="!isOwnOffer(offer) && offer.remaining_quantity > 0" class="trade-buttons">
+              <button
+                v-for="amount in getLotButtons(offer)"
+                :key="amount"
+                @click="handleLotClick(offer.id, amount)"
+                :disabled="tradingOfferId === offer.id"
+                class="trade-btn"
+                :class="[
+                  isPending(offer.id, amount)
+                    ? 'pending'
+                    : offer.offer_type,
+                  tradingOfferId === offer.id ? 'busy' : ''
+                ]"
+              >
+                <Loader2 v-if="tradingOfferId === offer.id && tradingAmount === amount" class="inline animate-spin mr-1" :size="14" />
+                <span v-if="isPending(offer.id, amount)">تایید {{ amount }} عدد؟</span>
+                <span v-else>{{ amount }} عدد</span>
+              </button>
+            </div>
+            <div v-else-if="isOwnOffer(offer)" class="own-offer-indicator">
+              لفظ شما
+            </div>
+          </div>
 
         </div><!-- /offer-card-inner -->
       </div>
@@ -297,14 +272,55 @@ async function executeTrade(offerId: number, quantity: number) {
 </style>
 
 <style scoped>
-/* ── Card wrapper ── */
+/* ══════════════════════════════════════
+   Offer Card — Mini-App-style layout
+   ══════════════════════════════════════ */
+
+/* ── Offers list ── */
+.offers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Loading skeleton ── */
+.skeleton-card {
+  height: 90px;
+  background: rgba(255,255,255,0.5);
+  border-radius: 12px;
+  border: 1px solid rgba(245,158,11,0.12);
+  animation: pulse-skeleton 1.5s ease-in-out infinite;
+}
+@keyframes pulse-skeleton {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
+}
+
+/* ── Empty state ── */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: #9ca3af;
+}
+.empty-icon {
+  width: 56px;
+  height: 56px;
+  background: #fffbeb;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 12px;
+  color: #f59e0b;
+}
+
+/* ── Card wrapper (timer border ring) ── */
 .offer-card-wrap {
   position: relative;
-  border-radius: 1rem;
+  border-radius: 12px;
   border: 3px solid rgba(229, 231, 235, 0.45);
 }
 
-/* ── Timer: pure CSS animation drives --t-pct from current value → 0 ── */
 .offer-card-wrap.has-timer {
   border-color: transparent;
   animation: timer-drain var(--t-dur, 120s) linear forwards;
@@ -314,12 +330,11 @@ async function executeTrade(offerId: number, quantity: number) {
   to { --t-pct: 0; }
 }
 
-/* ── Border ring via ::before + mask ── */
 .offer-card-wrap.has-timer::before {
   content: '';
   position: absolute;
   inset: -3px;
-  border-radius: 1rem;
+  border-radius: 12px;
   padding: 3px;
   background: conic-gradient(
     from 0deg at 50% 50%,
@@ -339,15 +354,6 @@ async function executeTrade(offerId: number, quantity: number) {
   z-index: 1;
 }
 
-/* ── Inner card ── */
-.offer-card-inner {
-  position: relative;
-  background: #ffffff;
-  border-radius: calc(1rem - 3px);
-  z-index: 0;
-}
-
-/* ── Critical pulse (<15%) ── */
 .offer-card-wrap.timer-critical::before {
   animation: ring-pulse 1.2s ease-in-out infinite;
 }
@@ -357,18 +363,174 @@ async function executeTrade(offerId: number, quantity: number) {
   50%      { opacity: 0.4; }
 }
 
-/* ── Lot buttons ── */
-.lot-btn {
+/* ── Inner card ── */
+.offer-card-inner {
+  position: relative;
+  background: #ffffff;
+  border-radius: calc(12px - 3px);
+  padding: 14px;
+  z-index: 0;
+  border-right: 4px solid transparent;
+}
+
+.offer-card-inner.buy {
+  border-right-color: #10b981;
+}
+
+.offer-card-inner.sell {
+  border-right-color: #ef4444;
+}
+
+/* ── Header ── */
+.offer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.role-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.role-badge.buy {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.role-badge.sell {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.offer-time {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+/* ── Body ── */
+.offer-body {
+  margin-bottom: 10px;
+}
+
+.offer-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.commodity {
+  font-weight: 700;
+  font-size: 14px;
+  color: #1f2937;
+}
+
+.quantity-badge {
+  background: #f3f4f6;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.price {
+  font-weight: 800;
+  font-size: 14px;
+  color: #f59e0b;
+}
+
+.offer-notes {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #6b7280;
+  background: #f9fafb;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+/* ── Footer ── */
+.offer-footer {
+  display: flex;
+  align-items: center;
+}
+
+.trade-buttons {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  gap: 6px;
+  width: 100%;
+}
+
+.trade-buttons::-webkit-scrollbar {
+  display: none;
+}
+
+.trade-btn {
+  padding: 8px 12px;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 50px;
+  max-width: 120px;
+  text-align: center;
+  transition: all 0.2s ease;
   letter-spacing: 0.02em;
+}
+
+.trade-btn:active {
+  transform: scale(0.96);
+}
+
+.trade-btn.buy {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+.trade-btn.sell {
+  background: linear-gradient(135deg, #10b981, #059669);
+}
+
+.trade-btn.pending {
+  background: #f59e0b;
+  animation: pulse-soft 1s ease-in-out infinite;
+}
+
+.trade-btn.busy {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.trade-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* ── Own offer ── */
+.own-offer-indicator {
+  width: 100%;
+  text-align: center;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #9ca3af;
+  background: #f3f4f6;
+  font-weight: 500;
 }
 
 /* ── Soft pulse for confirm state ── */
 @keyframes pulse-soft {
   0%, 100% { opacity: 1; transform: scale(1); }
   50%      { opacity: 0.85; transform: scale(0.98); }
-}
-.animate-pulse-soft {
-  animation: pulse-soft 1s ease-in-out infinite;
 }
 
 /* ── Toasts ── */
