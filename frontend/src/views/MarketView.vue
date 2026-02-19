@@ -173,7 +173,7 @@ function confirmLotSizes() {
 function submitOffer() {
   if (!newOffer.value.price) return
   isSubmitting.value = true
-  apiFetchJson('/offers/', {
+  apiFetchJson('/api/offers/', {
       method: 'POST',
       body: JSON.stringify(newOffer.value)
   })
@@ -192,13 +192,13 @@ function parseAndSubmitTextOffer() {
   isSubmitting.value = true
   parseError.value = ''
   
-  apiFetchJson('/offers/parse', {
+  apiFetchJson('/api/offers/parse', {
       method: 'POST',
       body: JSON.stringify({ text: offerText.value })
   })
   .then(res => {
       if (res.success && res.data) {
-          return apiFetchJson('/offers/', {
+          return apiFetchJson('/api/offers/', {
              method: 'POST',
              body: JSON.stringify({
                 offer_type: res.data.trade_type,
