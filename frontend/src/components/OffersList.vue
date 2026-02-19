@@ -18,7 +18,7 @@ let tickInterval: number | null = null
 onMounted(() => {
   tickInterval = setInterval(() => {
     now.value = Date.now() / 1000
-  }, 3000) as any   // every 3s — just to toggle critical class
+  }, 3000) as any
 })
 
 onUnmounted(() => {
@@ -34,17 +34,23 @@ function getTimerPercent(offer: any): number {
   return Math.min(Math.max((remaining / total) * 100, 0), 100)
 }
 
-// --- Card style: set CSS animation start point + duration (computed once per render) ---
+// --- Cached timer styles: computed ONCE per offer, never re-computed ---
+const styleCache = new Map<number, Record<string, string>>()
+
 function cardTimerStyle(offer: any): Record<string, string> {
   if (!offer.expires_at_ts) return {}
+  // Return cached style if it exists (prevents animation restart on re-render)
+  if (styleCache.has(offer.id)) return styleCache.get(offer.id)!
   const remainingSec = offer.expires_at_ts - Date.now() / 1000
   if (remainingSec <= 0) return { '--t-pct': '0', '--t-dur': '0s' }
   const total = (props.expiryMinutes || 2) * 60
   const pct = Math.min(Math.max((remainingSec / total) * 100, 0), 100)
-  return {
+  const style: Record<string, string> = {
     '--t-pct': String(pct),
     '--t-dur': remainingSec.toFixed(1) + 's',
   }
+  styleCache.set(offer.id, style)
+  return style
 }
 
 function isCritical(offer: any): boolean {
