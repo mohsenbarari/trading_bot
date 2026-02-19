@@ -11,19 +11,21 @@ const props = defineProps<{
   expiryMinutes?: number;
 }>();
 
-// --- Smooth timer tick (millisecond precision via requestAnimationFrame) ---
+// --- Low-frequency tick: only for isCritical boolean (not for animation) ---
 const now = ref(Date.now() / 1000)
-let rafId: number | null = null
+let tickInterval: number | null = null
 
-function tick() {
-  now.value = Date.now() / 1000
-  rafId = requestAnimationFrame(tick)
-}
+onMounted(() => {
+  tickInterval = setInterval(() => {
+    now.value = Date.now() / 1000
+  }, 3000) as any   // every 3s — just to toggle critical class
+})
 
-onMounted(() => { rafId = requestAnimationFrame(tick) })
-onUnmounted(() => { if (rafId !== null) cancelAnimationFrame(rafId) })
+onUnmounted(() => {
+  if (tickInterval) clearInterval(tickInterval)
+})
 
-// --- Timer helpers (pure graphical, no numbers) ---
+// --- Timer percent (only for critical check, NOT for visual) ---
 function getTimerPercent(offer: any): number {
   if (!offer.expires_at_ts) return 100
   const remaining = offer.expires_at_ts - now.value
@@ -32,34 +34,16 @@ function getTimerPercent(offer: any): number {
   return Math.min(Math.max((remaining / total) * 100, 0), 100)
 }
 
-function getTimerHSL(pct: number): [number, number, number] {
-  // Emerald → Green → Gold → Orange → Red
-  if (pct >= 75) {
-    const t = (pct - 75) / 25
-    return [Math.round(120 + t * 40), 78, 42]
-  } else if (pct >= 50) {
-    const t = (pct - 50) / 25
-    return [Math.round(50 + t * 70), 82, 46]
-  } else if (pct >= 25) {
-    const t = (pct - 25) / 25
-    return [Math.round(25 + t * 25), 88, 48]
-  } else {
-    const t = pct / 25
-    return [Math.round(t * 25), 92, 48]
-  }
-}
-
-function hsl(c: [number, number, number]) { return `hsl(${c[0]},${c[1]}%,${c[2]}%)` }
-function hsla(c: [number, number, number], a: number) { return `hsla(${c[0]},${c[1]}%,${c[2]}%,${a.toFixed(2)})` }
-
+// --- Card style: set CSS animation start point + duration (computed once per render) ---
 function cardTimerStyle(offer: any): Record<string, string> {
   if (!offer.expires_at_ts) return {}
-  const pct = getTimerPercent(offer)
-  const c = getTimerHSL(pct)
+  const remainingSec = offer.expires_at_ts - Date.now() / 1000
+  if (remainingSec <= 0) return { '--t-pct': '0', '--t-dur': '0s' }
+  const total = (props.expiryMinutes || 2) * 60
+  const pct = Math.min(Math.max((remainingSec / total) * 100, 0), 100)
   return {
-    '--t-pct': pct + '%',
-    '--t-c': hsl(c),
-    '--t-cg': hsla(c, 0.12),
+    '--t-pct': String(pct),
+    '--t-dur': remainingSec.toFixed(1) + 's',
   }
 }
 
@@ -79,9 +63,6 @@ function getStatusBadge(type: string) {
 
 function timeAgo(dateString: string) {
     if (!dateString) return '';
-    // Simple placeholder, ideally use date-fns or moment-jalaali
-    // If dateString is ISO, convert to relative time
-    // For now, return as is (assuming Backend sends processed string or Date)
     return dateString;
 }
 </script>
@@ -149,6 +130,15 @@ function timeAgo(dateString: string) {
     </div>
 </template>
 
+<!-- Global @property (must NOT be scoped) -->
+<style>
+@property --t-pct {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 100;
+}
+</style>
+
 <style scoped>
 /* ── Card wrapper ── */
 .offer-card-wrap {
@@ -157,24 +147,29 @@ function timeAgo(dateString: string) {
   border: 3px solid rgba(229, 231, 235, 0.45);
 }
 
-/* ── Timer border via ::before + mask (cannot bleed into content) ── */
+/* ── Timer: pure CSS animation drives --t-pct from current value → 0 ── */
 .offer-card-wrap.has-timer {
   border-color: transparent;
+  animation: timer-drain var(--t-dur, 120s) linear forwards;
 }
 
+@keyframes timer-drain {
+  to { --t-pct: 0; }
+}
+
+/* ── Border ring via ::before + mask (zero bleed into content) ── */
 .offer-card-wrap.has-timer::before {
   content: '';
   position: absolute;
-  inset: -3px;               /* sit on top of the border area */
+  inset: -3px;
   border-radius: 1rem;
-  padding: 3px;              /* thickness of the visible border */
+  padding: 3px;
   background: conic-gradient(
     from 0deg at 50% 50%,
-    var(--t-c) calc(var(--t-pct) - 1%),
-    var(--t-cg) var(--t-pct),
-    rgba(229, 231, 235, 0.35) var(--t-pct)
+    hsl(calc(var(--t-pct) * 1.6) 82% 45%)          calc(var(--t-pct) * 1% - 1%),
+    hsl(calc(var(--t-pct) * 1.6) 82% 45% / 0.12)   calc(var(--t-pct) * 1%),
+    rgba(229, 231, 235, 0.35)                        calc(var(--t-pct) * 1%)
   );
-  /* Mask trick: cut out the inner area so only the 3px ring is visible */
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
@@ -184,7 +179,7 @@ function timeAgo(dateString: string) {
   z-index: 1;
 }
 
-/* ── Inner card — plain white, no transparency ── */
+/* ── Inner card — fully opaque ── */
 .offer-card-inner {
   position: relative;
   background: #ffffff;
@@ -199,6 +194,6 @@ function timeAgo(dateString: string) {
 
 @keyframes ring-pulse {
   0%, 100% { opacity: 1; }
-  50%      { opacity: 0.5; }
+  50%      { opacity: 0.4; }
 }
 </style>
