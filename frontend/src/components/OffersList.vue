@@ -106,7 +106,7 @@ function getLotButtons(offer: any): number[] {
   
   // Retail: total + individual lots (filter valid ones)
   const allAmounts = [remaining, ...offer.lot_sizes.filter((l: number) => l <= remaining)];
-  // Deduplicate preserving order
+  // Deduplicate
   const seen = new Set<number>();
   const unique: number[] = [];
   for (const a of allAmounts) {
@@ -115,7 +115,8 @@ function getLotButtons(offer: any): number[] {
       unique.push(a);
     }
   }
-  return unique;
+  // Sort descending so largest is on the left (RTL layout)
+  return unique.sort((a, b) => b - a);
 }
 
 function isOwnOffer(offer: any): boolean {
