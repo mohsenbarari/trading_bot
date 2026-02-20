@@ -53,6 +53,7 @@ export default defineConfig({
   build: {
     outDir: '../mini_app_dist',
     emptyOutDir: true,
+    target: 'es2020',  // Ensures compatibility with iOS 14+ / Safari 14+
   },
   server: {
     proxy: {
