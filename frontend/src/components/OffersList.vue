@@ -376,13 +376,13 @@ async function executeTrade(offerId: number, quantity: number) {
   overflow: hidden;
 }
 
-/* Colored right-side accent via inset shadow (doesn't break mask layout) */
+/* Subtle outer shadow for depth (no inset color strip — conflicts with timer ring) */
 .offer-card-inner.buy {
-  box-shadow: inset -4px 0 0 0 #10b981;
+  box-shadow: 0 1px 4px 0 rgba(16, 185, 129, 0.18), 0 1px 2px 0 rgba(0,0,0,0.04);
 }
 
 .offer-card-inner.sell {
-  box-shadow: inset -4px 0 0 0 #ef4444;
+  box-shadow: 0 1px 4px 0 rgba(239, 68, 68, 0.18), 0 1px 2px 0 rgba(0,0,0,0.04);
 }
 
 /* ── Header ── */
