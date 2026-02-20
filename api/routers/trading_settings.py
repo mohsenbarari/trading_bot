@@ -16,7 +16,6 @@ from core.trading_settings import (
 
 
 router = APIRouter(
-    prefix="/trading-settings",
     tags=["Trading Settings"],
 )
 

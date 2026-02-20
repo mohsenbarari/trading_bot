@@ -27,7 +27,6 @@ class TypingSignal(BaseModel):
     receiver_id: int
 
 router = APIRouter(
-    prefix="/chat",
     tags=["Chat"],
     dependencies=[Depends(get_current_user)]
 )

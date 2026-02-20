@@ -20,7 +20,6 @@ import schemas
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/commodities",
     tags=["Commodities"]
     # توجه: dependency مدیر ارشد از سطح روتر حذف شد و به endpoint های خاص اضافه می‌شود
 )

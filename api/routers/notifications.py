@@ -18,7 +18,6 @@ from core.redis import get_redis, Redis
 from core.enums import NotificationLevel, NotificationCategory
 
 router = APIRouter(
-    prefix="/notifications",
     tags=["Notifications"],
     dependencies=[Depends(get_current_user)]
 )

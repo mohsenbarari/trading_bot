@@ -181,7 +181,6 @@ async def send_delayed_removal_notification_api(db_session_factory, user_id: int
     await send_telegram_notification(telegram_id, msg)
 
 router = APIRouter(
-    prefix="/users",
     tags=["Users Management"],
     dependencies=[Depends(verify_super_admin_or_dev_key)]
 )

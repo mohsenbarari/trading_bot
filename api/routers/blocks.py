@@ -23,7 +23,6 @@ from core.services.block_service import (
 )
 
 router = APIRouter(
-    prefix="/blocks",
     tags=["User Blocks"]
 )
 
