@@ -7,7 +7,6 @@ from api.deps import get_current_user
 import schemas
 
 router = APIRouter(
-    prefix="/users-public",
     tags=["Public Users"],
     dependencies=[Depends(get_current_user)]
 )

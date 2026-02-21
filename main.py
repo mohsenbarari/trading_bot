@@ -80,7 +80,7 @@ api_router.include_router(trading_settings.router, prefix="/trading-settings", t
 api_router.include_router(offers.router, prefix="/offers", tags=["Offers"])
 api_router.include_router(trades.router, prefix="/trades", tags=["Trades"])
 api_router.include_router(realtime.router, prefix="/realtime", tags=["Realtime"])
-api_router.include_router(users_public.router, prefix="/public", tags=["Public"])
+api_router.include_router(users_public.router, prefix="/users-public", tags=["Public Users"])
 api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
 api_router.include_router(blocks.router, prefix="/blocks", tags=["Blocks"])
 api_router.include_router(sync.router, prefix="/sync", tags=["Sync"])
