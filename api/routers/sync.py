@@ -56,7 +56,7 @@ async def verify_signature(request: Request):
         logger.error(f"Signature verification error: {e}")
         raise HTTPException(status_code=401, detail="Verification failed")
 
-from sqlalchemy import insert, update, delete, select
+from sqlalchemy import insert, update, delete, select, text
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -294,8 +294,32 @@ async def receive_sync_data(
 
         await db.commit()
 
-        # Refresh caches for affected tables
+        # --- Fix sequences after sync to avoid ID collision ---
+        # Synced records use explicit IDs which don't advance PostgreSQL sequences.
+        # Without this fix, next local INSERT may try an ID that already exists.
         items_tables = {i.get('table') for i in sorted_items}
+        SEQUENCE_MAP = {
+            "users": ("users_id_seq", "users"),
+            "offers": ("offers_id_seq", "offers"),
+            "trades": ("trades_id_seq", "trades"),
+            "commodities": ("commodities_id_seq", "commodities"),
+            "commodity_aliases": ("commodity_aliases_id_seq", "commodity_aliases"),
+            "user_blocks": ("user_blocks_id_seq", "user_blocks"),
+        }
+        for tbl_name in items_tables:
+            seq_info = SEQUENCE_MAP.get(tbl_name)
+            if seq_info:
+                seq_name, real_table = seq_info
+                try:
+                    await db.execute(
+                        text(f"SELECT setval('{seq_name}', COALESCE((SELECT MAX(id) FROM {real_table}), 1))")
+                    )
+                    logger.info(f"🔢 Sequence {seq_name} synced to MAX(id)")
+                except Exception as seq_err:
+                    logger.warning(f"⚠️ Failed to fix sequence {seq_name}: {seq_err}")
+        await db.commit()
+
+        # Refresh caches for affected tables
 
         if "trading_settings" in items_tables:
             try:
