@@ -219,6 +219,13 @@ async function executeTrade(offerId: number, quantity: number) {
               <span class="quantity-badge">{{ offer.remaining_quantity }} عدد</span>
               <span class="price">{{ offer.price ? offer.price.toLocaleString() : '---' }}</span>
             </div>
+            <!-- Lot info indicator -->
+            <div v-if="!offer.is_wholesale && offer.lot_sizes && offer.lot_sizes.length > 0" class="lot-info">
+              🔢 خُرد: {{ offer.lot_sizes.join(' + ') }}
+            </div>
+            <div v-else-if="offer.is_wholesale" class="lot-info wholesale">
+              📦 یکجا
+            </div>
             <p v-if="offer.notes" class="offer-notes">
               توضیحات: {{ offer.notes }}
             </p>
@@ -440,6 +447,18 @@ async function executeTrade(offerId: number, quantity: number) {
   background: #f9fafb;
   padding: 6px 10px;
   border-radius: 6px;
+}
+
+/* ── Lot info ── */
+.lot-info {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #d97706;
+  font-weight: 600;
+  direction: rtl;
+}
+.lot-info.wholesale {
+  color: #6b7280;
 }
 
 /* ── Footer ── */

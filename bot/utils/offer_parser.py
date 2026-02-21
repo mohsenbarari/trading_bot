@@ -218,7 +218,8 @@ async def find_commodity(text: str) -> Tuple[Optional[int], str]:
             name_to_commodity = {item["name"]: (item["id"], item["name"]) for item in commodities_list}
             for item in commodities_list:
                 for alias in item.get("aliases", []):
-                    name_to_commodity[alias] = (item["id"], item["name"])
+                    alias_str = alias["alias"] if isinstance(alias, dict) else alias
+                    name_to_commodity[alias_str] = (item["id"], item["name"])
     
     # جستجو در متن (اولویت با نام‌های کوتاه‌تر/مستعار)
     sorted_names = sorted(name_to_commodity.keys(), key=len, reverse=True)
