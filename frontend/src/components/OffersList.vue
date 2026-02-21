@@ -27,20 +27,21 @@ const tradeSuccess = ref('');
 const pendingConfirm = ref<string | null>(null); // "offerId:amount"
 let confirmTimeout: any = null;
 
-// --- Low-frequency tick: only for isCritical boolean (not for animation) ---
+// --- High-frequency tick for smooth animation ---
 const now = ref(Date.now() / 1000)
-let tickInterval: number | null = null
+let animationFrameId: number | null = null
+
+function tick() {
+  now.value = Date.now() / 1000
+  animationFrameId = requestAnimationFrame(tick)
+}
 
 onMounted(() => {
-  // Clear stale timer styles from previous mount so animations restart correctly
-  styleCache.clear()
-  tickInterval = setInterval(() => {
-    now.value = Date.now() / 1000
-  }, 1000) as any
+  animationFrameId = requestAnimationFrame(tick)
 })
 
 onUnmounted(() => {
-  if (tickInterval) clearInterval(tickInterval)
+  if (animationFrameId) cancelAnimationFrame(animationFrameId)
   if (confirmTimeout) clearTimeout(confirmTimeout)
 })
 
@@ -53,24 +54,15 @@ function getTimerPercent(offer: any): number {
   return Math.min(Math.max((remaining / total) * 100, 0), 100)
 }
 
-// --- Cached timer styles ---
-const styleCache = new Map<number, Record<string, string>>()
-
 function cardTimerStyle(offer: any): Record<string, string> {
   if (!offer.expires_at_ts) return {}
-  if (styleCache.has(offer.id)) return styleCache.get(offer.id)!
-  const remainingSec = offer.expires_at_ts - Date.now() / 1000
-  if (remainingSec <= 0) return { '--t-pct': '0', '--t-total-dur': '0s', '--t-delay': '0s' }
+  const remainingSec = offer.expires_at_ts - now.value
+  if (remainingSec <= 0) return { '--t-pct': '0' }
   const total = (props.expiryMinutes || 2) * 60
-  const elapsed = Math.max(total - remainingSec, 0)
   const pct = Math.min(Math.max((remainingSec / total) * 100, 0), 100)
-  const style: Record<string, string> = {
-    '--t-pct': String(pct),
-    '--t-total-dur': total + 's',
-    '--t-delay': `-${elapsed.toFixed(1)}s`,
+  return {
+    '--t-pct': String(pct)
   }
-  styleCache.set(offer.id, style)
-  return style
 }
 
 function isCritical(offer: any): boolean {
@@ -86,10 +78,6 @@ const filteredOffers = computed(() => {
   const nowSec = now.value
   const source = Array.isArray(props.offers) ? props.offers : []
   const alive = source.filter(o => !o.expires_at_ts || o.expires_at_ts > nowSec)
-  const aliveIds = new Set(alive.map(o => o.id))
-  for (const id of styleCache.keys()) {
-    if (!aliveIds.has(id)) styleCache.delete(id)
-  }
   return props.limit ? alive.slice(0, props.limit) : alive
 })
 
@@ -328,13 +316,6 @@ async function executeTrade(offerId: number, quantity: number) {
 
 .offer-card-wrap.has-timer {
   border-color: transparent;
-  animation: timer-drain var(--t-total-dur, 120s) linear forwards;
-  animation-delay: var(--t-delay, 0s);
-}
-
-@keyframes timer-drain {
-  from { --t-pct: 100; }
-  to { --t-pct: 0; }
 }
 
 .offer-card-wrap.has-timer::before {
