@@ -22,6 +22,10 @@ class Message(Base):
     reply_to_message_id = Column(Integer, ForeignKey("messages.id", name="fk_messages_reply_to_message"), nullable=True)
     reply_to_message = relationship("Message", remote_side="Message.id", backref="replies", foreign_keys=[reply_to_message_id])
     
+    # Forward support
+    forwarded_from_id = Column(Integer, ForeignKey("users.id", name="fk_messages_forwarded_from"), nullable=True)
+    forwarded_from = relationship("User", foreign_keys=[forwarded_from_id])
+    
     # محتوای پیام: متن برای پیام‌های متنی، URL برای تصاویر، ID استیکر برای استیکرها
     content = Column(Text, nullable=False)
     message_type = Column(Enum(MessageType), nullable=False, default=MessageType.TEXT)

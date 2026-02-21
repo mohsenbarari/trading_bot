@@ -59,11 +59,33 @@ class MessageRead(BaseModel):
     updated_at: Optional[datetime] = None
     created_at: datetime
     
+    # Forward support
+    forwarded_from_id: Optional[int] = None
+    forwarded_from_name: Optional[str] = None
+    
     # Reply support
     reply_to_message: Optional[MessageReplyRead] = None
 
     class Config:
         from_attributes = True
+
+    @classmethod
+    def from_orm_with_forwarding(cls, obj: Message):
+        data = {
+            "id": obj.id,
+            "sender_id": obj.sender_id,
+            "receiver_id": obj.receiver_id,
+            "content": obj.content,
+            "message_type": obj.message_type,
+            "is_read": obj.is_read,
+            "is_deleted": obj.is_deleted,
+            "updated_at": obj.updated_at,
+            "created_at": obj.created_at,
+            "reply_to_message": obj.reply_to_message,
+            "forwarded_from_id": obj.forwarded_from_id,
+            "forwarded_from_name": obj.forwarded_from.account_name if getattr(obj, "forwarded_from", None) else None
+        }
+        return cls(**data)
 
     @field_validator('reply_to_message')
     @classmethod
@@ -80,6 +102,7 @@ class MessageSend(BaseModel):
     content: str = Field(..., min_length=1, max_length=4000)
     message_type: MessageType = MessageType.TEXT
     reply_to_message_id: Optional[int] = None
+    forwarded_from_id: Optional[int] = None
 
 
 class MessageUpdate(BaseModel):
@@ -231,10 +254,13 @@ async def search_messages(
         
     query = query.limit(limit)
     
+    # Needs joinedload for forwarding
+    query = query.options(joinedload(Message.forwarded_from), joinedload(Message.reply_to_message))
+    
     result = await db.execute(query)
     messages = result.scalars().all()
-    # Return directly (will be serialized)
-    return messages
+    # Serializing with custom method
+    return [MessageRead.from_orm_with_forwarding(m) for m in messages]
 
 
 @router.get("/messages/{user_id}", response_model=List[MessageRead])
@@ -282,15 +308,15 @@ async def get_messages(
         )
         
         # Execute
-        res_older = await db.execute(stmt_older.options(joinedload(Message.reply_to_message)))
-        res_newer = await db.execute(stmt_newer.options(joinedload(Message.reply_to_message)))
+        res_older = await db.execute(stmt_older.options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from)))
+        res_newer = await db.execute(stmt_newer.options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from)))
         
         older_msgs = res_older.scalars().all() # Descending [M-1, M-2...]
         newer_msgs = res_newer.scalars().all() # Ascending [M, M+1...]
         
         # Combine: older reversed (to be asc) + newer
         messages = list(reversed(older_msgs)) + list(newer_msgs)
-        return messages
+        return [MessageRead.from_orm_with_forwarding(m) for m in messages]
 
     # Default / Pagination (before_id)
     conditions = base_conditions.copy()
@@ -299,7 +325,7 @@ async def get_messages(
     
     stmt = (
         select(Message)
-        .options(joinedload(Message.reply_to_message))
+        .options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from))
         .where(*conditions)
         .order_by(Message.created_at.desc())
         .limit(limit)
@@ -309,7 +335,8 @@ async def get_messages(
     messages = result.scalars().all()
     
     # معکوس کردن برای نمایش صعودی
-    return list(reversed(messages))
+    messages = list(reversed(messages))
+    return [MessageRead.from_orm_with_forwarding(m) for m in messages]
 
 
 @router.post("/typing", status_code=status.HTTP_204_NO_CONTENT)
@@ -349,16 +376,19 @@ async def send_message(
         content=data.content,
         message_type=data.message_type,
         reply_to_message_id=data.reply_to_message_id,
+        forwarded_from_id=data.forwarded_from_id,
         is_read=False
     )
     db.add(message)
     await db.commit()
     await db.refresh(message)
 
-    # Eager load reply if exists (for response)
-    if message.reply_to_message_id:
+    # Eager load reply/forwarded_from if exists (for response)
+    if message.reply_to_message_id or message.forwarded_from_id:
         result = await db.execute(
-            select(Message).options(joinedload(Message.reply_to_message)).where(Message.id == message.id)
+            select(Message)
+            .options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from))
+            .where(Message.id == message.id)
         )
         message = result.scalars().first()
     
@@ -378,10 +408,10 @@ async def send_message(
     
     # انتشار پیام برای گیرنده (Real-time update)
     # استفاده از MessageRead برای سریالایز کردن مناسب
-    msg_data = jsonable_encoder(MessageRead.from_orm(message))
+    msg_data = jsonable_encoder(MessageRead.from_orm_with_forwarding(message))
     await publish_user_event(data.receiver_id, "chat:message", msg_data)
     
-    return message
+    return MessageRead.from_orm_with_forwarding(message)
 
 
 @router.put("/messages/{message_id}", response_model=MessageRead)
@@ -423,12 +453,14 @@ async def update_message(
     
     await db.commit()
     
-    # Eager load reply_to_message to avoid lazy loading in async context
+    # Eager load reply_to_message and forwarded_from to avoid lazy loading in async context
     result = await db.execute(
-        select(Message).options(joinedload(Message.reply_to_message)).where(Message.id == message_id)
+        select(Message)
+        .options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from))
+        .where(Message.id == message_id)
     )
     msg = result.scalars().first()
-    return msg
+    return MessageRead.from_orm_with_forwarding(msg)
 
 
 @router.delete("/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
