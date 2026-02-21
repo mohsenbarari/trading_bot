@@ -188,7 +188,9 @@ async def find_commodity(text: str) -> Tuple[Optional[int], str]:
         name_to_commodity = {item["name"]: (item["id"], item["name"]) for item in cached}
         for item in cached:
             for alias in item.get("aliases", []):
-                name_to_commodity[alias] = (item["id"], item["name"])
+                # alias ممکن است string یا dict باشد (بسته به منبع cache)
+                alias_str = alias["alias"] if isinstance(alias, dict) else alias
+                name_to_commodity[alias_str] = (item["id"], item["name"])
         
         commodities_list = cached
     else:
