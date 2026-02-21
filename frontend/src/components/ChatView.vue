@@ -1196,8 +1196,22 @@ const totalUnread = computed(() => {
   return conversations.value.reduce((sum, c) => sum + c.unread_count, 0)
 })
 
-// Check if current context menu message can be edited/deleted (own message + within 48h)
-const canEditDelete = computed(() => {
+// Check if current context menu message can be edited (own text message, not forwarded + within 48h)
+const canEdit = computed(() => {
+  const msg = contextMenu.value.message
+  if (!msg) return false
+  if (msg.sender_id !== props.currentUserId) return false
+  if (msg.message_type !== 'text') return false
+  // @ts-ignore - forwarded_from_id might not be strictly typed yet but exists
+  if (msg.forwarded_from_id || (msg as any).forwarded_from_name) return false
+  
+  const msgTime = new Date(msg.created_at).getTime()
+  const now = Date.now()
+  return now - msgTime <= 48 * 60 * 60 * 1000
+})
+
+// Check if current context menu message can be deleted (own message + within 48h)
+const canDelete = computed(() => {
   const msg = contextMenu.value.message
   if (!msg) return false
   if (msg.sender_id !== props.currentUserId) return false
@@ -1733,10 +1747,12 @@ defineExpose({ startNewChat })
         <div class="menu-item" @click="handleForwardMessage">
           <span>↪️</span> هدایت پیام
         </div>
-        <template v-if="canEditDelete">
+        <template v-if="canEdit">
             <div class="menu-item" @click="handleEditMessage">
               <span>✏️</span> ویرایش
             </div>
+        </template>
+        <template v-if="canDelete">
             <div class="menu-item delete" @click="handleDeleteMessage">
               <span>🗑️</span> حذف
             </div>

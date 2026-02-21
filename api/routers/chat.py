@@ -431,6 +431,9 @@ async def update_message(
         
     if msg.message_type != MessageType.TEXT:
         raise HTTPException(status_code=400, detail="Only text messages can be edited")
+        
+    if getattr(msg, 'forwarded_from_id', None):
+        raise HTTPException(status_code=400, detail="Forwarded messages cannot be edited")
 
     # بررسی زمان (۴۸ ساعت)
     now = datetime.now(timezone.utc)
