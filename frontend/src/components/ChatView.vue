@@ -1992,6 +1992,14 @@ defineExpose({ startNewChat })
   word-wrap: break-word;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   animation: slideIn 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  
+  /* Prevent native text selection on long press */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  -khtml-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
 }
 
 @keyframes slideIn {
