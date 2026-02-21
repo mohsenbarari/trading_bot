@@ -320,51 +320,46 @@ async def receive_sync_data(
                 pass
         
         # --- Handle Offer Publishing on Foreign Server ---
-        # Uses Redis NX lock per offer to prevent duplicate sends
+        # Uses SELECT FOR UPDATE SKIP LOCKED to prevent duplicate sends
         # (same sync item may arrive via both direct-push and sync_worker)
         if settings.server_mode != "iran" and new_offers:
              try:
                  from sqlalchemy.orm import selectinload
                  from models.offer import OfferStatus
                  from api.routers.offers import send_offer_to_channel
-                 from core.redis import get_redis_client
 
-                 r = get_redis_client()
+                 # Deduplicate offer IDs
+                 unique_offer_ids = list(set(new_offers))
+                 logger.info(f"📋 Channel publish candidates: {unique_offer_ids}")
 
-                 # Filter: only offers we can lock (NX = skip if already locked)
-                 locked_ids = []
-                 for oid in new_offers:
-                     lock_key = f"channel_publish:{oid}"
-                     acquired = await r.set(lock_key, "1", nx=True, ex=120)
-                     if acquired:
-                         locked_ids.append(oid)
-                     else:
-                         logger.info(f"⏭️ Offer {oid} channel-send already in progress, skipping")
-
-                 if locked_ids:
-                     stmt = select(Offer).options(
-                         selectinload(Offer.user), 
-                         selectinload(Offer.commodity)
-                     ).where(
-                         Offer.id.in_(locked_ids), 
-                         Offer.status == OfferStatus.ACTIVE,
-                         Offer.channel_message_id.is_(None)
-                     )
-                     result = await db.execute(stmt)
-                     offers_to_send = result.scalars().all()
-                     
-                     for offer in offers_to_send:
-                         try:
-                             msg_id = await send_offer_to_channel(offer, offer.user)
-                             if msg_id:
-                                 offer.channel_message_id = msg_id
-                                 db.add(offer) 
-                                 logger.info(f"📣 Published synced offer {offer.id} to Telegram. MsgID: {msg_id}")
-                         except Exception as e:
-                             logger.error(f"Failed to publish synced offer {offer.id}: {e}")
-                     
-                     if offers_to_send:
-                         await db.commit()
+                 for oid in unique_offer_ids:
+                     try:
+                         # Each offer in its own mini-transaction with row lock
+                         async with db.begin_nested():
+                             stmt = select(Offer).options(
+                                 selectinload(Offer.user), 
+                                 selectinload(Offer.commodity)
+                             ).where(
+                                 Offer.id == oid, 
+                                 Offer.status == OfferStatus.ACTIVE,
+                                 Offer.channel_message_id.is_(None)
+                             ).with_for_update(skip_locked=True)
+                             result = await db.execute(stmt)
+                             offer = result.scalars().first()
+                             
+                             if offer:
+                                 msg_id = await send_offer_to_channel(offer, offer.user)
+                                 if msg_id:
+                                     offer.channel_message_id = msg_id
+                                     logger.info(f"📣 Published synced offer {offer.id} to Telegram. MsgID: {msg_id}")
+                                 else:
+                                     logger.warning(f"⚠️ send_offer_to_channel returned None for offer {oid}")
+                             else:
+                                 logger.info(f"⏭️ Offer {oid} already published or locked by another request")
+                     except Exception as e:
+                         logger.error(f"Failed to publish synced offer {oid}: {e}")
+                 
+                 await db.commit()
                      
              except ImportError:
                  logger.error("Could not import send_offer_to_channel")

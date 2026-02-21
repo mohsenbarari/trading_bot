@@ -226,7 +226,7 @@ async function executeTrade(offerId: number, quantity: number) {
 
           <!-- Footer: lot buttons or own offer -->
           <div class="offer-footer">
-            <div v-if="!isOwnOffer(offer) && offer.remaining_quantity > 0" class="trade-buttons">
+            <div v-if="!isOwnOffer(offer) && (offer.remaining_quantity ?? offer.quantity) > 0" class="trade-buttons">
               <button
                 v-for="amount in getLotButtons(offer)"
                 :key="amount"

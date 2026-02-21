@@ -10,6 +10,7 @@ const isExpanded = ref(false)
 
 // Auto-collapse on the market page
 const isMarketPage = computed(() => route.name === 'market')
+const isMessengerPage = computed(() => route.name === 'messenger')
 
 // Close when navigating
 watch(() => route.name, () => {
@@ -35,7 +36,7 @@ const isAdmin = computed(() => ['مدیر ارشد', 'مدیر میانی'].incl
 const baseItems = [
   { name: 'dashboard', label: 'خانه', icon: Home, path: '/' },
   { name: 'market', label: 'بازار', icon: Store, path: '/market' },
-  { name: 'messenger', label: 'پیام‌رسان', icon: MessageCircle, path: '#', disabled: true },
+  { name: 'messenger', label: 'پیام‌رسان', icon: MessageCircle, path: '/chat', disabled: false },
   { name: 'profile', label: 'پروفایل', icon: User, path: '/profile' },
 ]
 
@@ -53,8 +54,8 @@ function toggleNav() {
 </script>
 
 <template>
-  <!-- ═══ Normal Bottom Nav (non-market pages) ═══ -->
-  <nav v-if="!isMarketPage" class="bottom-nav-wrapper">
+  <!-- ═══ Normal Bottom Nav (non-market, non-messenger pages) ═══ -->
+  <nav v-if="!isMarketPage && !isMessengerPage" class="bottom-nav-wrapper">
     <div class="bottom-nav-bar">
       <template v-for="item in navItems" :key="item.name">
         <div v-if="item.disabled" class="nav-item disabled">
@@ -72,7 +73,7 @@ function toggleNav() {
     </div>
   </nav>
 
-  <!-- ═══ Collapsed FAB on market page ═══ -->
+  <!-- ═══ Collapsed FAB on market & messenger ═══ -->
   <div v-else class="fab-container">
     <!-- Overlay -->
     <transition name="fade">

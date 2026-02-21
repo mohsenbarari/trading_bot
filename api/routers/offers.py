@@ -354,14 +354,29 @@ async def create_offer(
     # افزایش شمارنده
     await increment_user_counter(db, current_user, 'channel_message')
     
+    # دریافت تنظیمات برای محاسبه انقضا
+    from core.trading_settings import get_trading_settings_async
+    ts = await get_trading_settings_async()
+    
     # ارسال رویداد SSE
     from .realtime import publish_event
+    
+    # محاسبه expires_at_ts برای SSE event
+    sse_expires_at_ts = None
+    try:
+        created_ts = new_offer.created_at.timestamp()
+        sse_expires_at_ts = int(created_ts + ts.offer_expiry_minutes * 60)
+    except Exception:
+        pass
+    
     await publish_event("offer:created", {
         "id": new_offer.id,
+        "user_id": new_offer.user_id,
         "offer_type": new_offer.offer_type.value,
         "commodity_id": new_offer.commodity_id,
         "commodity_name": new_offer.commodity.name,
         "quantity": new_offer.quantity,
+        "remaining_quantity": new_offer.remaining_quantity or new_offer.quantity,
         "price": new_offer.price,
         "status": new_offer.status.value,
         "created_at": to_jalali_str(new_offer.created_at) or "",
@@ -369,11 +384,9 @@ async def create_offer(
         "notes": new_offer.notes,
         "is_wholesale": new_offer.is_wholesale,
         "lot_sizes": new_offer.lot_sizes,
+        "original_lot_sizes": new_offer.original_lot_sizes,
+        "expires_at_ts": sse_expires_at_ts,
     })
-    
-    # دریافت تنظیمات برای محاسبه انقضا
-    from core.trading_settings import get_trading_settings_async
-    ts = await get_trading_settings_async()
     
     return offer_to_response(new_offer, ts)
 
