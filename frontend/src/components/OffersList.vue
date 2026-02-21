@@ -60,12 +60,14 @@ function cardTimerStyle(offer: any): Record<string, string> {
   if (!offer.expires_at_ts) return {}
   if (styleCache.has(offer.id)) return styleCache.get(offer.id)!
   const remainingSec = offer.expires_at_ts - Date.now() / 1000
-  if (remainingSec <= 0) return { '--t-pct': '0', '--t-dur': '0s' }
+  if (remainingSec <= 0) return { '--t-pct': '0', '--t-total-dur': '0s', '--t-delay': '0s' }
   const total = (props.expiryMinutes || 2) * 60
+  const elapsed = Math.max(total - remainingSec, 0)
   const pct = Math.min(Math.max((remainingSec / total) * 100, 0), 100)
   const style: Record<string, string> = {
     '--t-pct': String(pct),
-    '--t-dur': remainingSec.toFixed(1) + 's',
+    '--t-total-dur': total + 's',
+    '--t-delay': `-${elapsed.toFixed(1)}s`,
   }
   styleCache.set(offer.id, style)
   return style
@@ -326,10 +328,12 @@ async function executeTrade(offerId: number, quantity: number) {
 
 .offer-card-wrap.has-timer {
   border-color: transparent;
-  animation: timer-drain var(--t-dur, 120s) linear forwards;
+  animation: timer-drain var(--t-total-dur, 120s) linear forwards;
+  animation-delay: var(--t-delay, 0s);
 }
 
 @keyframes timer-drain {
+  from { --t-pct: 100; }
   to { --t-pct: 0; }
 }
 
