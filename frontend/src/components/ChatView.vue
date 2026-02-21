@@ -111,6 +111,9 @@ const contextMenu = ref<{ visible: boolean; x: number; y: number; message: Messa
 let pollTimer: number | null = null
 const POLL_INTERVAL = 30000
 
+// Forward State
+const showForwardModal = ref(false)
+
 // Status
 const targetUserStatus = ref('آخرین بازدید اخیراً')
 let statusPollTimer: number | null = null
@@ -803,6 +806,59 @@ const clearSelection = () => {
     selectedMessages.value = []
 }
 
+function openForwardModal() {
+  if (selectedMessages.value.length > 0) {
+    showForwardModal.value = true
+  }
+}
+
+function closeForwardModal() {
+  showForwardModal.value = false
+}
+
+async function forwardSelectedMessages(targetUserId: number) {
+  if (selectedMessages.value.length === 0) return
+  
+  isSending.value = true
+  try {
+    for (const msgId of selectedMessages.value) {
+      // Find the original message in current chat
+      const originalMsg = messages.value.find(m => m.id === msgId)
+      if (!originalMsg) continue
+
+      await apiFetch('/chat/send', {
+        method: 'POST',
+        body: JSON.stringify({
+          receiver_id: targetUserId,
+          content: originalMsg.content,
+          message_type: originalMsg.message_type,
+          forwarded_from_id: originalMsg.sender_id
+        })
+      })
+    }
+    
+    selectedMessages.value = []
+    showForwardModal.value = false
+    
+    // Switch to target chat if different
+    if (selectedUserId.value !== targetUserId) {
+        const conv = conversations.value.find(c => c.other_user_id === targetUserId)
+        if (conv) {
+             selectedUserId.value = targetUserId
+             selectedUserName.value = conv.other_user_name
+             loadMessages(targetUserId)
+        }
+    } else {
+        loadMessages(targetUserId, true)
+    }
+  } catch (err) {
+    console.error('Failed to forward', err)
+    alert('خطا در هدایت پیام‌ها')
+  } finally {
+    isSending.value = false
+  }
+}
+
 // Handle Message Click (Delegated)
 const handleMessageClick = (event: MouseEvent | TouchEvent, msg: Message) => {
     if (isSelectionMode.value) {
@@ -915,6 +971,18 @@ const handleReplyMessage = () => {
   handleReply(msg)
   closeContextMenu()
 }
+
+const handleForwardMessage = () => {
+  const msg = contextMenu.value.message
+  if (!msg) return
+  if (!selectedMessages.value.includes(msg.id)) {
+      selectedMessages.value.push(msg.id)
+  }
+  openForwardModal()
+  closeContextMenu()
+}
+
+
 
 
 function updateIsMobile() {
@@ -1257,7 +1325,8 @@ defineExpose({ startNewChat })
   <div class="chat-view">
     <!-- Header - Telegram Style -->
     <div class="chat-header">
-      <!-- Back Button -->
+      <template v-if="!isSelectionMode">
+        <!-- Back Button -->
       <button class="header-btn back-btn" @click="goBack">
         <svg viewBox="0 0 24 24" fill="currentColor">
           <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
@@ -1349,6 +1418,25 @@ defineExpose({ startNewChat })
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
           </svg>
+        </button>
+      </template>
+      </template>
+      <!-- Selection Mode Header -->
+      <template v-else>
+        <!-- Close Selection -->
+        <button class="header-btn" @click="clearSelection">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+          </svg>
+        </button>
+        <div class="header-title" style="flex: 1; margin-right: 16px;">
+          {{ selectedMessages.length }} پیام انتخاب شده
+        </div>
+        <!-- Forward Action -->
+        <button class="header-btn" @click="openForwardModal" style="margin-left: 8px;">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M14 5l7 7-7 7v-4.1c-5 0-8.5 1.6-11 5.1 1-5 4-10 11-11V5z"/>
+          </svg>          
         </button>
       </template>
     </div>
@@ -1444,6 +1532,12 @@ defineExpose({ startNewChat })
               @touchend="endLongPress($event, msg)"
               :style="getSwipeStyle(msg)"
             >
+            <!-- Forwarded Banner -->
+            <div v-if="msg.forwarded_from_name" class="forwarded-banner">
+              <span class="forward-icon">↪️</span>
+              <span class="forward-text">ارسال شده از: {{ msg.forwarded_from_name }}</span>
+            </div>
+            
             <!-- Reply Context -->
             <div 
               v-if="msg.reply_to_message" 
@@ -1603,6 +1697,29 @@ defineExpose({ startNewChat })
         </div>
       </div>
 
+      <!-- Forward Target Modal -->
+      <div v-if="showForwardModal" class="forward-modal-overlay" @click="closeForwardModal">
+        <div class="forward-modal" @click.stop>
+          <div class="forward-modal-header">
+            <h3>ارسال به...</h3>
+            <button class="close-btn" @click="closeForwardModal">✕</button>
+          </div>
+          <div class="forward-modal-body">
+            <div 
+              v-for="conv in sortedConversations" 
+              :key="conv.id"
+              class="forward-conv-item"
+              @click="forwardSelectedMessages(conv.other_user_id)"
+            >
+              <div class="conv-avatar">
+                {{ conv.other_user_name.charAt(0) }}
+              </div>
+              <div class="conv-name">{{ conv.other_user_name }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     <!-- Context Menu (Teleport to body to avoid clipping/position issues) -->
     <Teleport to="body">
       <div 
@@ -1612,6 +1729,9 @@ defineExpose({ startNewChat })
       >
         <div class="menu-item" @click="handleReplyMessage">
           <span>↩️</span> پاسخ
+        </div>
+        <div class="menu-item" @click="handleForwardMessage">
+          <span>↪️</span> هدایت پیام
         </div>
         <template v-if="canEditDelete">
             <div class="menu-item" @click="handleEditMessage">
@@ -2616,5 +2736,74 @@ defineExpose({ startNewChat })
   background-color: rgba(245, 158, 11, 0.2) !important;
   position: relative;
   border: 1px solid #f59e0b;
+}
+
+/* Forward Styles */
+.forwarded-banner {
+  font-size: 11px;
+  color: #8E8E93;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.forward-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.forward-modal {
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 320px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.forward-modal-header {
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #eee;
+}
+.forward-modal-header h3 { margin: 0; font-size: 16px; }
+.close-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: #8e8e93; }
+.forward-modal-body {
+  overflow-y: auto;
+  padding: 8px 0;
+}
+.forward-conv-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  cursor: pointer;
+}
+.forward-conv-item:hover { background: #f5f5f5; }
+.forward-conv-item .conv-avatar {
+  width: 40px; height: 40px;
+  border-radius: 20px;
+  background: #f59e0b;
+  color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: bold;
+  margin-left: 12px;
+}
+.forward-conv-item .conv-name {
+  font-weight: 500;
+  color: #000;
+}
+
+@media (prefers-color-scheme: dark) {
+  .forward-modal { background: #1e1e1e; }
+  .forward-modal-header { border-bottom-color: #333; color: white; }
+  .forward-conv-item:hover { background: #2a2a2a; }
+  .forward-conv-item .conv-name { color: white; }
 }
 </style>
