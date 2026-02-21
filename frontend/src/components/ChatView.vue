@@ -904,13 +904,20 @@ const getSwipeStyle = (msg: Message) => {
   
   if (isSent) {
     if (diff <= 0) return {}
-    const translateX = Math.min(diff, 100)
-    return { transform: `translateX(-${translateX}px)`, transition: 'none' }
+    const translateX = Math.min(diff, 100) // cap at 100px
+    return {
+      transform: `translateX(-${translateX}px)`,
+      // Smooth elastic transition when letting go, tight transition when dragging
+      transition: translateX === 0 ? 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)' : 'none'
+    }
   } else {
     // Received
     if (diff >= 0) return {}
     const translateX = Math.min(Math.abs(diff), 100)
-    return { transform: `translateX(${translateX}px)`, transition: 'none' }
+    return {
+      transform: `translateX(${translateX}px)`,
+      transition: translateX === 0 ? 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)' : 'none'
+    }
   }
 }
 
@@ -1528,24 +1535,31 @@ defineExpose({ startNewChat })
               <span @click="scrollToMessage(group.messages[0].id)">{{ group.label }}</span>
             </div>
 
-            <div 
-              v-for="(msg, index) in group.messages"
-              :key="msg.id"
-              :id="'msg-' + msg.id"
-              class="message-bubble"
-              :class="{ 
-                'sent': msg.sender_id === props.currentUserId, 
-                'received': msg.sender_id !== props.currentUserId,
-                'sending': msg.id < 0 || msg.is_sending,
-                'error': msg.is_error,
-                'selected-message': selectedMessages.includes(msg.id)
-              }"
-              @click="handleMessageClick($event, msg)"
-              @touchstart="startLongPress($event, msg)"
-              @touchmove="cancelLongPress(); handleTouchMove($event, msg)"
-              @touchend="endLongPress($event, msg)"
-              :style="getSwipeStyle(msg)"
-            >
+            <div class="message-wrapper">
+              <div 
+                v-if="swipedMessageId === msg.id" 
+                class="swipe-reply-icon"
+                :class="{ 'sent-side': msg.sender_id === props.currentUserId, 'received-side': msg.sender_id !== props.currentUserId }"
+              >
+                ↩️
+              </div>
+              <div 
+                :key="msg.id"
+                :id="'msg-' + msg.id"
+                class="message-bubble"
+                :class="{ 
+                  'sent': msg.sender_id === props.currentUserId, 
+                  'received': msg.sender_id !== props.currentUserId,
+                  'sending': msg.id < 0 || msg.is_sending,
+                  'error': msg.is_error,
+                  'selected-message': selectedMessages.includes(msg.id)
+                }"
+                @click="handleMessageClick($event, msg)"
+                @touchstart="startLongPress($event, msg)"
+                @touchmove="cancelLongPress(); handleTouchMove($event, msg)"
+                @touchend="endLongPress($event, msg)"
+                :style="getSwipeStyle(msg)"
+              >
             <!-- Forwarded Banner -->
             <div v-if="msg.forwarded_from_name" class="forwarded-banner">
               <span class="forward-icon">↪️</span>
@@ -1604,10 +1618,11 @@ defineExpose({ startNewChat })
                   <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
                 </svg>
               </span>
-            </div>
-          </div>
-          </div>
-        </div>
+            </div> <!-- End .msg-meta -->
+          </div> <!-- End .message-bubble -->
+          </div> <!-- End .message-wrapper -->
+        </div> <!-- End v-for="group.messages" -->
+      </div> <!-- End v-for="groupedMessages" message-group -->
         
         <!-- Scroll to Bottom Button -->
         <button 
@@ -1780,10 +1795,8 @@ defineExpose({ startNewChat })
   bottom: 0;
   display: flex;
   flex-direction: column;
-  /* Light theme background */
-  background-color: #fefce8;
-  /* Telegram-style subtle pattern */
-  /* background-image: url(" Telegram pattern ") */
+  /* Light amber/warm theme background instead of dull yellow */
+  background-color: #fffbeb;
   z-index: 100;
 }
 
@@ -2117,17 +2130,46 @@ defineExpose({ startNewChat })
   gap: 6px;
 }
 
+.message-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.swipe-reply-icon {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 20px;
+  color: #f59e0b;
+  opacity: 0.8;
+  z-index: 1; /* Below the sliding message bubble */
+}
+
+/* Sent message slides left, so icon is on the right */
+.swipe-reply-icon.sent-side {
+  right: 16px;
+}
+
+/* Received message slides right, so icon is on the left */
+.swipe-reply-icon.received-side {
+  left: 16px;
+}
+
 .message-bubble {
   max-width: 85%;
-  padding: 6px 14px;
-  border-radius: 12px;
+  padding: 8px 14px;
+  border-radius: 16px;
   position: relative;
   font-size: 14px;
-  line-height: 1.4;
+  line-height: 1.5;
   white-space: pre-wrap; /* Preserve line breaks */
   word-wrap: break-word;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
   animation: slideIn 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  /* Smooth transition for swipe/returning */
+  transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   
   /* Prevent native text selection on long press */
   -webkit-touch-callout: none;
@@ -2156,24 +2198,29 @@ defineExpose({ startNewChat })
 
 .message-bubble.sent {
   align-self: flex-start;
-  background: #fef3c7; /* Telegram green bubble */
-  color: #000000;
+  background: linear-gradient(135deg, #f59e0b, #d97706); /* App Brand Amber Gradient */
+  color: #ffffff;
   border-radius: 18px 18px 4px 18px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 3px 6px rgba(245, 158, 11, 0.2);
 }
 
 .message-bubble.received {
   align-self: flex-end;
   background: #FFFFFF; /* White bubble */
-  color: #000000;
+  color: #1f2937;
   border-radius: 18px 18px 18px 4px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.06);
 }
 
 
 
 .msg-time {
   font-size: 11px;
+  color: rgba(255, 255, 255, 0.75); /* White-ish for sent messages */
+}
+
+/* Override time color for received messages */
+.message-bubble.received .msg-time {
   color: #8E8E93;
 }
 
@@ -2191,11 +2238,24 @@ defineExpose({ startNewChat })
 }
 
 .icon-read {
-  fill: #4caf50; /* Green for read */
+  fill: #fff; /* White read icon for sent */
 }
 
 .icon-unread {
-  fill: #8e8e93; /* Gray for unread */
+  fill: rgba(255, 255, 255, 0.6); /* Translucent white unread */
+}
+
+/* Forward Styles */
+.forwarded-banner {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.message-bubble.received .forwarded-banner {
+  color: #8E8E93;
 }
 
 .msg-image-link {
