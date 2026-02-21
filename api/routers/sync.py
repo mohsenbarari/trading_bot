@@ -56,7 +56,7 @@ async def verify_signature(request: Request):
         logger.error(f"Signature verification error: {e}")
         raise HTTPException(status_code=401, detail="Verification failed")
 
-from sqlalchemy import insert, update, delete, select, text
+from sqlalchemy import insert, update, delete, select, text as sa_text
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -312,7 +312,7 @@ async def receive_sync_data(
                 seq_name, real_table = seq_info
                 try:
                     await db.execute(
-                        text(f"SELECT setval('{seq_name}', COALESCE((SELECT MAX(id) FROM {real_table}), 1))")
+                        sa_text(f"SELECT setval('{seq_name}', COALESCE((SELECT MAX(id) FROM {real_table}), 1))")
                     )
                     logger.info(f"🔢 Sequence {seq_name} synced to MAX(id)")
                 except Exception as seq_err:
