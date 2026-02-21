@@ -1562,7 +1562,7 @@ defineExpose({ startNewChat })
             @touchstart.prevent="sendMessage()"
             :disabled="isSending"
           >
-            <svg viewBox="0 0 24 24" fill="#007aff">
+            <svg viewBox="0 0 24 24" fill="#f59e0b">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
             </svg>
           </button>
@@ -1645,9 +1645,9 @@ defineExpose({ startNewChat })
   display: flex;
   flex-direction: column;
   /* Light theme background */
-  background-color: #E8E5E0;
+  background-color: #fefce8;
   /* Telegram-style subtle pattern */
-  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d5d2cd' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  /* background-image: url(" Telegram pattern ") */
   z-index: 100;
 }
 
@@ -1705,7 +1705,7 @@ defineExpose({ startNewChat })
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #54A3FF, #0088CC);
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
   color: white;
   display: flex;
   align-items: center;
@@ -1754,7 +1754,7 @@ defineExpose({ startNewChat })
 }
 
 .header-status.online {
-  color: #0088CC; /* Telegram blue for online status */
+  color: #f59e0b; /* Telegram blue for online status */
 }
 
 /* Header Spacer */
@@ -1829,14 +1829,14 @@ defineExpose({ startNewChat })
 }
 
 .conversation-item.has-unread {
-  background: rgba(0, 122, 255, 0.05);
+  background: rgba(245, 158, 11, 0.05);
 }
 
 .conv-avatar {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #54A3FF, #0088CC);
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
   color: white;
   display: flex;
   align-items: center;
@@ -2012,7 +2012,7 @@ defineExpose({ startNewChat })
 
 .message-bubble.sent {
   align-self: flex-start;
-  background: #E1FFC7; /* Telegram green bubble */
+  background: #fef3c7; /* Telegram green bubble */
   color: #000000;
   border-radius: 18px 18px 4px 18px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
@@ -2335,8 +2335,8 @@ defineExpose({ startNewChat })
 
 /* Reply Styles */
 .reply-context {
-  border-left: 2px solid #0088CC;
-  background: rgba(0, 136, 204, 0.08);
+  border-left: 2px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
   border-radius: 4px;
   padding: 4px 8px;
   margin-bottom: 6px;
@@ -2354,7 +2354,7 @@ defineExpose({ startNewChat })
 .reply-name {
   font-size: 11px;
   font-weight: bold;
-  color: #0088CC;
+  color: #f59e0b;
 }
 
 .reply-text {
@@ -2395,7 +2395,7 @@ defineExpose({ startNewChat })
 
 .reply-icon {
   font-size: 11px;
-  color: #0088CC;
+  color: #f59e0b;
   margin-bottom: 2px;
 }
 
@@ -2605,8 +2605,8 @@ defineExpose({ startNewChat })
 }
 
 .selected-message {
-  background-color: rgba(0, 122, 255, 0.2) !important;
+  background-color: rgba(245, 158, 11, 0.2) !important;
   position: relative;
-  border: 1px solid #007aff;
+  border: 1px solid #f59e0b;
 }
 </style>
