@@ -2616,5 +2616,13 @@ defineExpose({ startNewChat })
   background-color: rgba(245, 158, 11, 0.2) !important;
   position: relative;
   border: 1px solid #f59e0b;
+  
+  /* Allow native text selection once the message is selected */
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  -khtml-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
 }
 </style>
