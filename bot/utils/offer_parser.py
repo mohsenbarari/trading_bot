@@ -208,7 +208,7 @@ async def find_commodity(text: str) -> Tuple[Optional[int], str]:
                 item = {"id": c.id, "name": c.name, "aliases": []}
                 for a in aliases:
                     if a.commodity_id == c.id:
-                        item["aliases"].append(a.alias)
+                        item["aliases"].append({"id": a.id, "alias": a.alias, "commodity_id": a.commodity_id})
                 commodities_list.append(item)
             
             # ذخیره در cache (5 دقیقه)
