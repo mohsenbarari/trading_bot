@@ -11,8 +11,7 @@ from models.trade import Trade, TradeType, TradeStatus
 from core.config import settings
 from core.db import AsyncSessionLocal
 from bot.utils.redis_helpers import check_double_click
-from core.utils import check_user_limits, increment_user_counter
-from core.enums import NotificationLevel, NotificationCategory, UserRole
+from core.utils import check_user_limits, increment_user_counter, create_user_notification
 from core.enums import NotificationLevel, NotificationCategory, UserRole
 from bot.callbacks import ChannelTradeCallback
 from api.routers.realtime import publish_event
@@ -303,5 +302,5 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
             
             await callback.answer()
         else:
-            # کلیک اول - Redis ثبت کرده، فقط پاسخ بده
-            await callback.answer()
+            # کلیک اول - Redis ثبت کرده، راهنمایی به کاربر
+            await callback.answer("برای تایید دوباره کلیک کنید ☑️", show_alert=False)
