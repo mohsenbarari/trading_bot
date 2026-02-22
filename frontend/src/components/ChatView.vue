@@ -2158,12 +2158,12 @@ defineExpose({ startNewChat })
 }
 
 .message-bubble {
-  max-width: 85%;
-  padding: 8px 14px;
+  max-width: 92%;
+  padding: 12px 16px;
   border-radius: 16px;
   position: relative;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
   white-space: pre-wrap; /* Preserve line breaks */
   word-wrap: break-word;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
