@@ -46,13 +46,13 @@ def normalize_digits(text: str) -> str:
 def validate_characters(text: str) -> Tuple[bool, Optional[str]]:
     """
     بررسی کاراکترهای مجاز در متن لفظ (قبل از :)
-    مجاز: حروف فارسی/عربی، اعداد، فاصله، - / , 
+    مجاز: حروف فارسی/عربی، اعداد، فاصله، - / , .  و نیم‌فاصله (‌)
     """
-    allowed_pattern = r'^[\u0600-\u06FF\s0-9\-/,]+$'
+    allowed_pattern = r'^[\u0600-\u06FF\u200C\s0-9\-/,.]+$'
     
     if not re.match(allowed_pattern, text):
         for char in text:
-            if not re.match(r'[\u0600-\u06FF\s0-9\-/,]', char):
+            if not re.match(r'[\u0600-\u06FF\u200C\s0-9\-/,.]', char):
                 return False, f"کاراکتر غیرمجاز: «{char}»"
         return False, "کاراکتر غیرمجاز در متن"
     
@@ -221,13 +221,24 @@ async def find_commodity(text: str) -> Tuple[Optional[int], str]:
                     alias_str = alias["alias"] if isinstance(alias, dict) else alias
                     name_to_commodity[alias_str] = (item["id"], item["name"])
     
-    # جستجو در متن (اولویت با نام‌های کوتاه‌تر/مستعار)
+    # جستجو در متن (اولویت با نام‌های بلندتر تا تطبیق دقیق‌تر)
     sorted_names = sorted(name_to_commodity.keys(), key=len, reverse=True)
     for name in sorted_names:
         if name in text:
             return name_to_commodity[name]
     
-    # پیش‌فرض: امام
+    # --- تشخیص: کاربر نام کالا ننوشته یا اشتباه نوشته؟ ---
+    # حذف اعداد و کلمات کلیدی از متن
+    remaining = re.sub(r'\d+', '', text)                    # حذف اعداد
+    remaining = re.sub(r'(?:تا|عدد)', '', remaining)        # حذف کلمات کلیدی تعداد
+    remaining = remaining.strip()
+    remaining = ' '.join(remaining.split())                 # حذف فاصله‌های اضافی
+    
+    # اگر هنوز حروف فارسی/عربی باقی مانده → کاربر نام کالایی نوشته که اشتباه است
+    if re.search(r'[\u0600-\u06FF]', remaining):
+        return None, "نامشخص"
+    
+    # هیچ نام کالایی نوشته نشده → پیش‌فرض: امام
     for item in commodities_list:
         if 'امام' in item["name"]:
             return item["id"], item["name"]
