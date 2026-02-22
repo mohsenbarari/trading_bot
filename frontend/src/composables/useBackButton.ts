@@ -16,8 +16,13 @@ type BackHandler = () => void
 const backStack: BackHandler[] = []
 
 let isListening = false
+let ignoreNextPopState = false
 
 function handlePopState() {
+  if (ignoreNextPopState) {
+    ignoreNextPopState = false
+    return
+  }
   if (backStack.length > 0) {
     const handler = backStack.pop()!
     handler()
@@ -71,6 +76,7 @@ export function pushBackState(onBack: BackHandler) {
 export function popBackState() {
   if (backStack.length > 0) {
     backStack.pop()
+    ignoreNextPopState = true
     // history entry اضافی را بردار
     history.back()
     updateTelegramBackButton()
@@ -86,6 +92,7 @@ export function clearBackStack() {
   backStack.length = 0
   // history entries اضافی را بردار
   if (count > 0) {
+    ignoreNextPopState = true
     history.go(-count)
   }
   updateTelegramBackButton()

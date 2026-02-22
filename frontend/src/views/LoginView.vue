@@ -3,6 +3,7 @@ import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Smartphone, Lock, Loader2, Download, Clock } from 'lucide-vue-next'
 import { setupExpiryTimer } from '../utils/auth'
+import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
 const router = useRouter()
 const step = ref<'mobile' | 'otp'>('mobile')
@@ -45,6 +46,15 @@ const formattedTimer = computed(() => {
 
 const lastMethod = ref<'telegram' | 'sms' | null>(null)
 
+function goToOtpStep() {
+  if (step.value === 'otp') return
+  step.value = 'otp'
+  pushBackState(() => {
+    step.value = 'mobile'
+    error.value = ''
+  })
+}
+
 async function requestOtp() {
   if (!form.mobile || form.mobile.length < 10) {
     error.value = 'شماره موبایل معتبر نیست'
@@ -52,7 +62,7 @@ async function requestOtp() {
   }
   
   if (countdown.value > 0) {
-    step.value = 'otp'
+    goToOtpStep()
     return
   }
 
@@ -73,7 +83,7 @@ async function requestOtp() {
         if (match) {
           const seconds = parseInt(match[1])
           startTimer(seconds)
-          step.value = 'otp'
+          goToOtpStep()
           return
         }
       }
@@ -86,7 +96,7 @@ async function requestOtp() {
     // If Telegram -> 30s timer, else 120s
     const timerSeconds = data.method === 'telegram' ? 30 : 120
     startTimer(timerSeconds)
-    step.value = 'otp'
+    goToOtpStep()
     
   } catch (e: any) {
     error.value = e.message
@@ -275,7 +285,15 @@ watch(() => form.mobile, (newVal) => {
 onUnmounted(() => {
   if (ac) ac.abort();
   if (timerInterval) clearInterval(timerInterval)
+  clearBackStack()
 })
+
+// Back to mobile step (UI-initiated via "ویرایش شماره" button)
+function goBackToMobile() {
+  step.value = 'mobile'
+  error.value = ''
+  popBackState()
+}
 </script>
 
 <template>
@@ -355,7 +373,7 @@ onUnmounted(() => {
           <div v-else key="otp" class="space-y-6">
             <div class="text-center mb-6">
               <p class="text-sm text-gray-500 mb-1">کد ارسال شده به {{ form.mobile }}</p>
-              <button @click="step = 'mobile'" class="text-xs text-amber-600 font-bold hover:text-amber-700 transition-colors bg-amber-50 px-3 py-1 rounded-full">ویرایش شماره</button>
+              <button @click="goBackToMobile()" class="text-xs text-amber-600 font-bold hover:text-amber-700 transition-colors bg-amber-50 px-3 py-1 rounded-full">ویرایش شماره</button>
             </div>
 
             <div class="space-y-2">

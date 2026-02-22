@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, onUnmounted, nextTick } from 'vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
+import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
 // Props
 const props = defineProps<{
@@ -344,6 +345,11 @@ function selectConversation(conv: Conversation) {
   contextMenu.value.visible = false;
   editingMessage.value = null;
   messageInput.value = '';
+  pushBackState(() => {
+    selectedUserId.value = null
+    selectedUserName.value = ''
+    messages.value = []
+  })
 }
 
 // Start new chat (from search or profile)
@@ -351,6 +357,11 @@ function startNewChat(userId: number, userName: string) {
   selectedUserId.value = userId
   selectedUserName.value = userName
   loadMessages(userId)
+  pushBackState(() => {
+    selectedUserId.value = null
+    selectedUserName.value = ''
+    messages.value = []
+  })
 }
 
 // Upload image
@@ -501,6 +512,11 @@ const handleSearchResultClick = async (msg: any) => {
         // Ideally we fetch user name here, for now use placeholder or try to find in conversations list
         const conv = sortedConversations.value.find(c => c.other_user_id === otherId)
         selectedUserName.value = conv ? conv.other_user_name : 'User'
+        pushBackState(() => {
+          selectedUserId.value = null
+          selectedUserName.value = ''
+          messages.value = []
+        })
         
         await loadMessages(otherId, false, msg.id)
         nextTick(() => {
@@ -1261,9 +1277,11 @@ function getImageUrl(path: string) {
 // Go back
 function goBack() {
   if (selectedUserId.value) {
+    // UI-initiated back — pop the back state (clears selection via callback skip + history.back)
     selectedUserId.value = null
     selectedUserName.value = ''
     messages.value = []
+    popBackState()
     // Don't stop polling, we need it for conversation list updates
   } else {
     emit('back')
@@ -1425,6 +1443,11 @@ onMounted(async () => {
     selectedUserId.value = props.targetUserId
     selectedUserName.value = props.targetUserName
     loadMessages(props.targetUserId)
+    pushBackState(() => {
+      selectedUserId.value = null
+      selectedUserName.value = ''
+      messages.value = []
+    })
   }
   
   
@@ -1444,6 +1467,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', updateIsMobile)
   stopPolling()
   stopStatusPolling()
+  clearBackStack()
 })
 
 // Expose for parent to start new chat
@@ -3229,16 +3253,11 @@ defineExpose({ startNewChat })
 .selection-bottom-bar {
   display: flex;
   align-items: center;
-  justify-content: space-evenly;
+  justify-content: space-around;
   width: 100%;
-  padding: 10px 0;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 -1px 8px rgba(0, 0, 0, 0.05);
-  min-height: 60px;
-  position: relative;
-  z-index: 10;
+  padding: 8px 0;
+  background: white;
+  min-height: 56px;
 }
 
 .selection-action-btn {
@@ -3246,51 +3265,33 @@ defineExpose({ startNewChat })
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  background: none;
   border: none;
-  color: #3390ec; /* Vibrant Telegram Blue */
-  font-size: 12px;
+  color: #8e8e93;
+  font-size: 11px;
   font-weight: 500;
-  gap: 6px;
-  padding: 8px 24px;
-  border-radius: 12px;
+  gap: 4px;
+  padding: 6px 16px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transition: opacity 0.2s, background 0.2s;
 }
 
 .selection-action-btn:hover {
-  background: rgba(51, 144, 236, 0.08); /* Light blue tint on hover */
-  transform: translateY(-2px) scale(1.02);
+  background: rgba(0,0,0,0.05);
+  color: #000;
 }
 
-.selection-action-btn:active {
-  transform: scale(0.95);
-  transition: all 0.1s;
+.selection-action-btn.delete {
+  color: #ef4444;
+}
+
+.selection-action-btn.delete:hover {
+  background: rgba(239, 68, 68, 0.1);
 }
 
 .selection-action-btn svg {
   margin-bottom: 2px;
-  stroke: currentColor;
-  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-.selection-action-btn:hover svg {
-  transform: scale(1.1);
-}
-
-.selection-action-btn.delete {
-  color: #ef4444; /* Telegram Red */
-}
-
-.selection-action-btn.delete:hover {
-  background: rgba(239, 68, 68, 0.08);
-}
-
-@media (prefers-color-scheme: dark) {
-  .selection-bottom-bar {
-    background: rgba(30, 30, 32, 0.9);
-    box-shadow: 0 -1px 8px rgba(0, 0, 0, 0.3);
-  }
 }
 
 </style>

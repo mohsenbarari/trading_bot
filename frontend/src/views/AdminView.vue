@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import AdminPanel from '../components/AdminPanel.vue'
@@ -20,42 +20,43 @@ onMounted(() => {
   // Router guard handles redirect to login if token is missing/expired
 })
 
+function goToMenu() {
+  currentSection.value = 'menu'
+  selectedUserForProfile.value = null
+  popBackState()
+}
+
 function handleNavigate(section: string, data?: any) {
   console.log('Navigate to:', section, data)
   
   if (section === 'user_profile' && data) {
+     if (currentSection.value !== 'menu') {
+       // تغییر ساب‌پیج — جایگزینی state قبلی
+       popBackState()
+     }
      selectedUserForProfile.value = data
      currentSection.value = 'user_profile'
+     pushBackState(() => {
+       currentSection.value = 'menu'
+       selectedUserForProfile.value = null
+     })
      return
   }
   
   if (section === 'admin_panel') {
-    currentSection.value = 'menu'
-    selectedUserForProfile.value = null
+    goToMenu()
   } else {
+    if (currentSection.value !== 'menu') {
+      // تغییر ساب‌پیج — جایگزینی state قبلی
+      popBackState()
+    }
     currentSection.value = section
+    pushBackState(() => {
+      currentSection.value = 'menu'
+      selectedUserForProfile.value = null
+    })
   }
 }
-
-// --- Back Button ---
-watch(currentSection, (newVal, oldVal) => {
-  if (newVal !== 'menu' && oldVal === 'menu') {
-    // ورود به ساب‌پیج: push state
-    pushBackState(() => {
-      currentSection.value = 'menu'
-      selectedUserForProfile.value = null
-    })
-  } else if (newVal !== 'menu' && oldVal !== 'menu') {
-    // تغییر ساب‌پیج (مثلاً users → user_profile): جایگزینی
-    popBackState()
-    pushBackState(() => {
-      currentSection.value = 'menu'
-      selectedUserForProfile.value = null
-    })
-  } else if (newVal === 'menu') {
-    // بازگشت به منو: state قبلاً pop شده (توسط back handler یا UI)
-  }
-})
 
 onUnmounted(() => clearBackStack())
 </script>

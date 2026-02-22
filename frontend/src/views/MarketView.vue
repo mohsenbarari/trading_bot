@@ -272,6 +272,7 @@ onMounted(() => {
 
 onUnmounted(() => {
     stopPolling()
+    clearBackStack()
 })
 </script>
 
