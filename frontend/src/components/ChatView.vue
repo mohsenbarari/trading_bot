@@ -1795,8 +1795,8 @@ defineExpose({ startNewChat })
   bottom: 0;
   display: flex;
   flex-direction: column;
-  /* Light amber/warm theme background instead of dull yellow */
-  background-color: #fffbeb;
+  /* Telegram classic light background color */
+  background-color: #e4eaef;
   z-index: 100;
 }
 
@@ -1811,10 +1811,9 @@ defineExpose({ startNewChat })
   display: flex;
   align-items: center;
   padding: 0 8px;
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  background: #ffffff; /* Solid white Telegram header */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border-bottom: none;
   gap: 8px;
   direction: ltr; /* Force LTR layout as requested */
 }
@@ -2080,11 +2079,11 @@ defineExpose({ startNewChat })
 }
 @media (prefers-color-scheme: light) {
     .date-separator span {
-        background-color: rgba(0, 0, 0, 0.06); 
-        color: #555;
+        background-color: rgba(0, 0, 0, 0.2); 
+        color: #fff;
         text-shadow: none;
         font-weight: 500;
-        border: 1px solid rgba(0,0,0,0.05);
+        border: none;
     }
 }
 
@@ -2159,14 +2158,14 @@ defineExpose({ startNewChat })
 
 .message-bubble {
   max-width: 92%;
-  padding: 12px 16px;
-  border-radius: 16px;
+  padding: 8px 12px;
+  border-radius: 12px;
   position: relative;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 15px; /* Telegram font size */
+  line-height: 1.5;
   white-space: pre-wrap; /* Preserve line breaks */
   word-wrap: break-word;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   animation: slideIn 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   /* Smooth transition for swipe/returning */
   transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
@@ -2198,25 +2197,25 @@ defineExpose({ startNewChat })
 
 .message-bubble.sent {
   align-self: flex-start;
-  background: linear-gradient(135deg, #3b82f6, #2563eb); /* Modern sleek blue gradient */
-  color: #ffffff;
-  border-radius: 18px 18px 4px 18px;
-  box-shadow: 0 3px 6px rgba(37, 99, 235, 0.2);
+  background: #eeffde; /* Telegram Sent Green */
+  color: #000000;
+  border-radius: 12px 12px 4px 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
 .message-bubble.received {
   align-self: flex-end;
   background: #FFFFFF; /* White bubble */
-  color: #1f2937;
-  border-radius: 18px 18px 18px 4px;
-  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.06);
+  color: #000000;
+  border-radius: 12px 12px 12px 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
 
 
 .msg-time {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.75); /* White-ish for sent messages */
+  color: rgba(0, 0, 0, 0.4); /* Telegram time color */
 }
 
 /* Override time color for received messages */
@@ -2238,17 +2237,17 @@ defineExpose({ startNewChat })
 }
 
 .icon-read {
-  fill: #fff; /* White read icon for sent */
+  fill: #43A047; /* Telegram green read checkmarks */
 }
 
 .icon-unread {
-  fill: rgba(255, 255, 255, 0.6); /* Translucent white unread */
+  fill: rgba(0, 0, 0, 0.3); /* Translucent unread */
 }
 
 /* Forward Styles */
 .forwarded-banner {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  color: #43A047; /* Green highlight for forward header in sent */
   margin-bottom: 2px;
   display: flex;
   align-items: center;
@@ -2279,17 +2278,16 @@ defineExpose({ startNewChat })
   font-size: 48px;
 }
 
-/* Input Area - Glass effect */
+/* Input Area - Solid Telegram Style */
 .input-area {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  padding: 8px 8px 12px 8px;
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  padding: 8px 12px 12px 12px;
+  background: #ffffff;
   gap: 0;
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  border-top: none;
+  box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .input-container {
@@ -2298,19 +2296,17 @@ defineExpose({ startNewChat })
   flex: 1;
   display: flex;
   align-items: flex-end;
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: #ffffff; /* Telegram input sits flat on white */
   border: none;
   box-shadow: none;
   border-radius: 20px;
-  padding: 8px 14px;
+  padding: 8px 4px;
   min-height: 44px;
   transition: background 0.2s;
 }
 
 .input-container:focus-within {
-  background: rgba(255, 255, 255, 0.8);
+  background: #ffffff;
 }
 
 .input-container textarea {
