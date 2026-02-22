@@ -1454,17 +1454,19 @@ defineExpose({ startNewChat })
       <template v-else>
         <!-- Close Selection -->
         <button class="header-btn" v-ripple @click="clearSelection">
-          <svg viewBox="0 0 24 24" fill="currentColor">
-            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
           </svg>
         </button>
         <div class="header-title" style="flex: 1; margin-right: 16px;">
-          {{ selectedMessages.length }} پیام انتخاب شده
+          {{ selectedMessages.length }}
         </div>
         <!-- Forward Action -->
         <button class="header-btn" v-ripple @click="openForwardModal" style="margin-left: 8px;">
-          <svg viewBox="0 0 24 24" fill="currentColor">
-            <path d="M14 5l7 7-7 7v-4.1c-5 0-8.5 1.6-11 5.1 1-5 4-10 11-11V5z"/>
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 14 20 9 15 4"></polyline>
+            <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
           </svg>          
         </button>
       </template>
@@ -1571,8 +1573,16 @@ defineExpose({ startNewChat })
               >
             <!-- Forwarded Banner -->
             <div v-if="msg.forwarded_from_name" class="forwarded-banner">
-              <span class="forward-icon">↪️</span>
-              <span class="forward-text">ارسال شده از: {{ msg.forwarded_from_name }}</span>
+              <span class="forward-icon">
+                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="15 14 20 9 15 4"></polyline>
+                    <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
+                 </svg>
+              </span>
+              <div class="forward-content">
+                <span class="forward-title">پیام هدایت شده</span>
+                <span class="forward-text">از {{ msg.forwarded_from_name }}</span>
+              </div>
             </div>
             
             <!-- Reply Context -->
@@ -1581,8 +1591,10 @@ defineExpose({ startNewChat })
               class="reply-context"
               @click.stop="scrollToMessage(msg.reply_to_message.id)"
             >
-              <div class="reply-line"></div>
               <div class="reply-content">
+                <span class="reply-author">
+                   {{ msg.reply_to_message.sender_id === props.currentUserId ? 'شما' : selectedUserName }}
+                </span>
                 <span class="reply-text">
                   <template v-if="msg.reply_to_message.message_type === 'image'">🖼️ تصویر</template>
                   <template v-else-if="msg.reply_to_message.message_type === 'sticker'">😊 استیکر</template>
@@ -1650,13 +1662,23 @@ defineExpose({ startNewChat })
       <div class="input-area">
         <!-- Reply Banner -->
         <div v-if="replyingToMessage" class="reply-banner">
-            <div class="reply-info">
-                <span class="reply-icon">↩️ در پاسخ به:</span>
-                <span class="reply-preview">
+            <div class="reply-banner-icon">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#3390ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 14 4 9 9 4"></polyline>
+                <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
+              </svg>
+            </div>
+            <div class="reply-banner-content">
+                <span class="reply-banner-author">{{ replyingToMessage.sender_id === props.currentUserId ? 'شما' : selectedUserName }}</span>
+                <span class="reply-banner-text">
                     {{ replyingToMessage.message_type === 'text' ? replyingToMessage.content : (replyingToMessage.message_type === 'image' ? '🖼️ تصویر' : '😊 استیکر') }}
                 </span>
             </div>
-            <button class="close-reply" @click="cancelReply">✕</button>
+            <button class="close-reply" v-ripple @click="cancelReply">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
         </div>
 
         <!-- Input Container -->
@@ -1778,21 +1800,25 @@ defineExpose({ startNewChat })
           :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
         >
           <div class="menu-item" v-ripple @click="handleReplyMessage">
-            <span>↩️</span> پاسخ
-          </div>
-          <div class="menu-item" v-ripple @click="handleForwardMessage">
-            <span>↪️</span> هدایت پیام
-          </div>
-          <template v-if="canEdit">
-              <div class="menu-item" v-ripple @click="handleEditMessage">
-                <span>✏️</span> ویرایش
-              </div>
-          </template>
-          <template v-if="canDelete">
-              <div class="menu-item delete" v-ripple @click="handleDeleteMessage">
-                <span>🗑️</span> حذف
-              </div>
-          </template>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>
+          <span style="flex:1;">پاسخ</span>
+        </div>
+        <div class="menu-item" v-ripple @click="handleForwardMessage">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>
+          <span style="flex:1;">هدایت پیام</span>
+        </div>
+        <template v-if="canEdit">
+            <div class="menu-item" v-ripple @click="handleEditMessage">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+              <span style="flex:1;">ویرایش</span>
+            </div>
+        </template>
+        <template v-if="canDelete">
+            <div class="menu-item delete" v-ripple @click="handleDeleteMessage">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+              <span style="flex:1;">حذف</span>
+            </div>
+        </template>
         </div>
       </Transition>
       
@@ -2644,8 +2670,8 @@ defineExpose({ startNewChat })
 
 /* Reply Styles */
 .reply-context {
-  border-left: 2px solid #f59e0b;
-  background: rgba(245, 158, 11, 0.08);
+  border-right: 2px solid #3390ec;
+  background: rgba(51, 144, 236, 0.08); /* light blue */
   border-radius: 4px;
   padding: 4px 8px;
   margin-bottom: 6px;
@@ -2656,38 +2682,42 @@ defineExpose({ startNewChat })
   max-width: 100%;
 }
 
-.reply-line {
-  display: none; /* Handled by border-left */
+.message-bubble.sent .reply-context {
+  border-right: 2px solid #43A047;
+  background: rgba(67, 160, 71, 0.1);
 }
 
-.reply-name {
-  font-size: 11px;
-  font-weight: bold;
-  color: #f59e0b;
+.reply-author {
+  font-size: 13px;
+  font-weight: 500;
+  color: #3390ec;
+}
+
+.message-bubble.sent .reply-author {
+  color: #2ea043; /* Telegram Sent Reply Author Green */
 }
 
 .reply-text {
-  font-size: 12px;
+  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   opacity: 0.8;
   display: block;
-  max-width: 100%; /* Force truncation */
+  max-width: 100%;
 }
 
 /* Reply Banner (Input Area) */
 .reply-banner {
   position: relative;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-items: center;
   background: #FFFFFF;
-  padding: 8px 12px;
-  padding-left: 32px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-  animation: slideUp 0.2s ease-out;
-  min-height: 40px;
+  padding: 8px 16px 8px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  animation: slideUp 0.15s ease-out;
+  min-height: 46px;
+  gap: 12px;
 }
 
 @keyframes slideUp {
@@ -2695,49 +2725,56 @@ defineExpose({ startNewChat })
   to { transform: translateY(0); opacity: 1; }
 }
 
-.reply-info {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  width: 100%;
-}
-
-.reply-icon {
-  font-size: 11px;
-  color: #f59e0b;
-  margin-bottom: 2px;
-}
-
-.reply-preview {
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: #000000;
-  display: block;
-  max-width: 100%;
-}
-
-.close-reply {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  background: none;
-  border: none;
-  color: #8E8E93;
-  font-size: 18px;
-  width: 20px;
-  height: 20px;
-  padding: 0;
+.reply-banner-icon {
   display: flex;
   align-items: center;
   justify-content: center;
+  color: #3390ec;
+}
+
+.reply-banner-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-right: 2px solid #3390ec;
+  padding-right: 8px;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.reply-banner-author {
+  font-size: 14px;
+  font-weight: 500;
+  color: #3390ec;
+  line-height: 1.2;
+  margin-bottom: 2px;
+}
+
+.reply-banner-text {
+  font-size: 13px;
+  color: #8e8e93;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.close-reply {
+  background: none;
+  border: none;
+  color: #8E8E93;
   cursor: pointer;
-  line-height: 1;
+  padding: 4px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
 }
 
 .close-reply:hover {
-  color: #000000;
+  background: rgba(0, 0, 0, 0.05);
+  color: #000;
 }
 
 /* Highlight Animation */
@@ -2915,26 +2952,51 @@ defineExpose({ startNewChat })
 
 .selected-message {
   position: relative;
+  z-index: 10;
 }
 
-.selected-message::after {
+.selected-message::before {
   content: '';
   position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  border-radius: inherit;
-  background-color: rgba(0, 0, 0, 0.15); /* Universal dark overlay for both white and blue */
-  border: 2px solid rgba(255, 255, 255, 0.8);
+  top: -4px; right: -16px; bottom: -4px; left: -16px;
+  background-color: rgba(51, 144, 236, 0.15); /* Universal Telegram Select Overlay */
   pointer-events: none;
+  z-index: -1; /* Behind the bubble but over the background */
+  border-radius: 6px;
 }
 
 /* Forward Styles */
 .forwarded-banner {
-  font-size: 11px;
-  color: #8E8E93;
-  margin-bottom: 2px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+.forward-icon {
+  color: #3390ec;
+}
+.message-bubble.sent .forward-icon {
+  color: #43A047;
+}
+.forward-content {
+  display: flex;
+  flex-direction: column;
+}
+.forward-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #3390ec;
+  line-height: 1.2;
+}
+.message-bubble.sent .forward-title {
+  color: #43A047;
+}
+.forward-text {
+  font-size: 13px;
+  color: inherit;
+  opacity: 0.8;
+  line-height: 1.2;
 }
 .forward-modal-overlay {
   position: fixed;
