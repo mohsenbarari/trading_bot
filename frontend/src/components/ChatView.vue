@@ -959,11 +959,17 @@ const scrollToMessage = (msgId: number) => {
             isViewingReply.value = false
         }, 3500)
         
-        // Calculate target position (center of container)
-        const elTop = safeEl.offsetTop
-        const elHeight = safeEl.offsetHeight
-        const containerHeight = safeContainer.clientHeight
-        const targetScrollTop = elTop - (containerHeight / 2) + (elHeight / 2)
+        // Calculate target position using bounding rects to avoid relative offsetParent issues
+        const containerRect = safeContainer.getBoundingClientRect()
+        const elRect = safeEl.getBoundingClientRect()
+        
+        const relativeTop = elRect.top - containerRect.top
+        const elHeight = elRect.height
+        const containerHeight = containerRect.height
+        
+        // Scroll amount needed to center the element
+        const scrollBy = relativeTop - (containerHeight / 2) + (elHeight / 2)
+        const targetScrollTop = safeContainer.scrollTop + scrollBy
         
         // Use custom animation for scroll
         const startScrollTop = safeContainer.scrollTop
