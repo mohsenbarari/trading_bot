@@ -646,6 +646,53 @@ const handleCopyMessage = () => {
   });
 };
 
+const handleDeleteSelected = async () => {
+  if (selectedMessages.value.length === 0) return;
+  if (!confirm('آیا از حذف پیام‌های انتخاب شده اطمینان دارید؟')) return;
+
+  try {
+    for (const msgId of selectedMessages.value) {
+      const msg = messages.value.find(m => m.id === msgId)
+      if (!msg || msg.sender_id !== props.currentUserId) continue
+      const msgTime = new Date(msg.created_at).getTime()
+      if (Date.now() - msgTime > 48 * 60 * 60 * 1000) continue
+      
+      await apiFetch(`/chat/messages/${msgId}`, { method: 'DELETE' });
+      const index = messages.value.findIndex(m => m.id === msgId);
+      if (index !== -1) messages.value.splice(index, 1);
+    }
+    clearSelection();
+  } catch (err) {
+    console.error('Failed to delete selected messages', err);
+    alert('خطا در حذف پیام‌ها');
+  }
+};
+
+const handleCopySelected = () => {
+    const textToCopy = selectedMessages.value.map(id => {
+        const msg = messages.value.find(m => m.id === id);
+        return msg?.message_type === 'text' ? msg.content : '';
+    }).filter(Boolean).join('\n\n');
+    
+    if (textToCopy) {
+        navigator.clipboard.writeText(textToCopy).then(() => {
+            clearSelection();
+        }).catch(err => {
+            console.error('Failed to copy', err);
+        });
+    }
+}
+
+const handleReplySelected = () => {
+    if (selectedMessages.value.length === 1) {
+        const msg = messages.value.find(m => m.id === selectedMessages.value[0]);
+        if (msg) {
+            handleReply(msg);
+            clearSelection();
+        }
+    }
+}
+
 const cancelEdit = () => {
   editingMessage.value = null;
   messageInput.value = '';
@@ -1269,6 +1316,25 @@ const canDelete = computed(() => {
   return now - msgTime <= 48 * 60 * 60 * 1000
 })
 
+const canDeleteSelected = computed(() => {
+   if (selectedMessages.value.length === 0) return false;
+   return selectedMessages.value.every(id => {
+      const msg = messages.value.find(m => m.id === id);
+      if (!msg) return false;
+      if (msg.sender_id !== props.currentUserId) return false;
+      const msgTime = new Date(msg.created_at).getTime();
+      return Date.now() - msgTime <= 48 * 60 * 60 * 1000;
+   });
+})
+
+const canCopySelected = computed(() => {
+   if (selectedMessages.value.length === 0) return false;
+   return selectedMessages.value.every(id => {
+      const msg = messages.value.find(m => m.id === id);
+      return msg && msg.message_type === 'text';
+   });
+})
+
 // Watchers
 watch(selectedUserId, (newVal) => {
   console.log('WATCH selectedUserId:', newVal)
@@ -1504,13 +1570,6 @@ defineExpose({ startNewChat })
         <div class="header-title" style="flex: 1; margin-right: 16px;">
           {{ selectedMessages.length }}
         </div>
-        <!-- Forward Action -->
-        <button class="header-btn" v-ripple @click="openForwardModal" style="margin-left: 8px;">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="15 14 20 9 15 4"></polyline>
-            <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
-          </svg>          
-        </button>
       </template>
     </div>
 
@@ -1732,8 +1791,39 @@ defineExpose({ startNewChat })
             </button>
         </div>
 
+        <!-- Selection Mode Bottom Bar -->
+        <div v-if="isSelectionMode" class="selection-bottom-bar">
+          <button v-if="canDeleteSelected" class="selection-action-btn delete" v-ripple @click="handleDeleteSelected">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+            <span>حذف</span>
+          </button>
+          <button v-if="selectedMessages.length === 1" class="selection-action-btn" v-ripple @click="handleReplySelected">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
+            </svg>
+            <span>پاسخ</span>
+          </button>
+          <button v-if="canCopySelected" class="selection-action-btn" v-ripple @click="handleCopySelected">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>کپی</span>
+          </button>
+          <button class="selection-action-btn" v-ripple @click="openForwardModal">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="15 14 20 9 15 4"></polyline>
+              <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
+            </svg>
+            <span>هدایت</span>
+          </button>
+        </div>
+
         <!-- Input Container -->
-        <div class="input-container">
+        <div v-else class="input-container">
           <!-- Left side buttons - Show voice+attachment when empty, send when has text -->
           <template v-if="!messageInput.trim()">
             <!-- Voice Button -->
@@ -3136,4 +3226,48 @@ defineExpose({ startNewChat })
   .forward-conv-item:hover { background: #2a2a2a; }
   .forward-conv-item .conv-name { color: white; }
 }
+.selection-bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  width: 100%;
+  padding: 8px 0;
+  background: white;
+  min-height: 56px;
+}
+
+.selection-action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #8e8e93;
+  font-size: 11px;
+  font-weight: 500;
+  gap: 4px;
+  padding: 6px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity 0.2s, background 0.2s;
+}
+
+.selection-action-btn:hover {
+  background: rgba(0,0,0,0.05);
+  color: #000;
+}
+
+.selection-action-btn.delete {
+  color: #ef4444;
+}
+
+.selection-action-btn.delete:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.selection-action-btn svg {
+  margin-bottom: 2px;
+}
+
 </style>
