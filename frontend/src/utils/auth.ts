@@ -106,7 +106,9 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
 export async function apiFetchJson(url: string, options: RequestInit = {}) {
     const response = await apiFetch(url, options);
     if (!response.ok) {
-        throw new Error(`API Error: ${response.statusText}`);
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || `خطا: ${response.status}`);
     }
+    if (response.status === 204) return null;
     return response.json();
 }

@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import { useWebSocket } from '../composables/useWebSocket'
+import { apiFetchJson } from '../utils/auth'
 
 const { connect: wsConnect, on: wsOn, off: wsOff } = useWebSocket()
 
@@ -233,26 +234,9 @@ const randomPlaceholder = computed(() => {
   return `خرید ${comm?.name || 'کالا'} 50 عدد 125000`
 })
 
-// API Helper
-async function apiFetch(endpoint: string, options: RequestInit = {}) {
-  const token = localStorage.getItem('auth_token') || props.jwtToken
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-  }
-  
-  const response = await fetch(`${props.apiBaseUrl}/api${endpoint}`, {
-    ...options,
-    headers: { ...headers, ...(options.headers || {}) }
-  })
-  
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}))
-    throw new Error(data.detail || `خطا: ${response.status}`)
-  }
-  
-  if (response.status === 204) return null
-  return response.json()
+// API Helper — uses shared apiFetchJson from auth.ts
+function api(endpoint: string, options: RequestInit = {}) {
+  return apiFetchJson(`/api${endpoint}`, options)
 }
 
 
@@ -263,7 +247,7 @@ async function loadOffers(silent = false) {
       error.value = ''
   }
   try {
-    offers.value = await apiFetch('/offers/')
+    offers.value = await api('/offers/')
   } catch (e: any) {
     console.error(e)
     if (!silent) error.value = 'خطا در دریافت لیست لفظ‌ها'
@@ -278,7 +262,7 @@ async function loadMyOffers(silent = false) {
       error.value = ''
   }
   try {
-    myOffers.value = await apiFetch('/offers/my?since_hours=2')
+    myOffers.value = await api('/offers/my?since_hours=2')
   } catch (e: any) {
     console.error(e)
     if (!silent) error.value = 'خطا در دریافت لفظ‌های من'
@@ -293,7 +277,7 @@ async function loadMyTrades(silent = false) {
       error.value = ''
   }
   try {
-    myTrades.value = await apiFetch('/trades/my')
+    myTrades.value = await api('/trades/my')
   } catch (e: any) {
     console.error(e)
     if (!silent) error.value = 'خطا در دریافت صورت معاملات'
@@ -304,7 +288,7 @@ async function loadMyTrades(silent = false) {
 
 async function loadCommodities() {
   try {
-    commodities.value = await apiFetch('/commodities/')
+    commodities.value = await api('/commodities/')
   } catch (e) {
       console.error('Failed to load commodities', e)
   }
@@ -312,7 +296,7 @@ async function loadCommodities() {
 
 async function loadTradingSettings() {
   try {
-    tradingSettings.value = await apiFetch('/trading-settings/')
+    tradingSettings.value = await api('/trading-settings/')
   } catch (e) {
       console.error('Failed to load settings', e)
   }
@@ -411,7 +395,7 @@ function closeWizard() {
 async function submitOffer() {
   isLoading.value = true
   try {
-    await apiFetch('/offers/', {
+    await api('/offers/', {
       method: 'POST',
       body: JSON.stringify(newOffer.value)
     })
@@ -431,13 +415,13 @@ async function parseAndSubmitTextOffer() {
   isLoading.value = true
   parseError.value = ''
   try {
-    const res = await apiFetch('/offers/parse', {
+    const res = await api('/offers/parse', {
       method: 'POST',
       body: JSON.stringify({ text: offerText.value })
     })
     if (res.success && res.data) {
        // Submit the parsed offer directly
-       await apiFetch('/offers/', {
+       await api('/offers/', {
          method: 'POST',
          body: JSON.stringify({
             offer_type: res.data.trade_type,
@@ -474,7 +458,7 @@ async function executeTrade() {
   if (!selectedOffer.value) return
   isTrading.value = true
   try {
-    await apiFetch('/trades/', {
+    await api('/trades/', {
       method: 'POST',
       body: JSON.stringify({
         offer_id: selectedOffer.value.id,
@@ -494,7 +478,7 @@ async function executeTrade() {
 async function expireOffer(id: number) {
   if (!confirm('آیا مطمئن هستید؟')) return
   try {
-    await apiFetch(`/offers/${id}`, { method: 'DELETE' })
+    await api(`/offers/${id}`, { method: 'DELETE' })
     await loadMyOffers()
     if (activeTab.value === 'offers') await loadOffers()
   } catch (e: any) { error.value = e.message }
