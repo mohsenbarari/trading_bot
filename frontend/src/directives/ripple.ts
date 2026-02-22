@@ -1,4 +1,4 @@
-import { DirectiveBinding } from 'vue'
+import type { DirectiveBinding } from 'vue'
 
 export const vRipple = {
     mounted(el: HTMLElement, binding: DirectiveBinding) {
