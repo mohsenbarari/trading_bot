@@ -921,6 +921,23 @@ const getSwipeStyle = (msg: Message) => {
   }
 }
 
+// Controls the opacity and scale of the background reply icon
+const getIconStyle = (msg: Message) => {
+  if (swipedMessageId.value !== msg.id) return { opacity: 0, transform: 'scale(0.5)' }
+  const diff = Math.abs(touchStartX.value - touchCurrentX.value)
+  
+  if (diff < 20) return { opacity: 0, transform: 'scale(0.5)' }
+  
+  // Max scale/opacity at 80px drag
+  const progress = Math.min((diff - 20) / 60, 1)
+  
+  return {
+      opacity: progress,
+      transform: `scale(${0.5 + (0.5 * progress)})`,
+      transition: diff === 0 ? 'all 0.4s easeOutBounce' : 'none'
+  }
+}
+
 // Scroll to message with custom slow animation
 const scrollToMessage = (msgId: number) => {
     const el = document.getElementById(`msg-${msgId}`)
@@ -1550,9 +1567,18 @@ defineExpose({ startNewChat })
               <div 
                 v-if="swipedMessageId === msg.id" 
                 class="swipe-reply-icon"
-                :class="{ 'sent-side': msg.sender_id === props.currentUserId, 'received-side': msg.sender_id !== props.currentUserId }"
+                :class="{ 
+                    'sent-side': msg.sender_id === props.currentUserId, 
+                    'received-side': msg.sender_id !== props.currentUserId,
+                    'visible': Math.abs(touchStartX - touchCurrentX) > 20
+                }"
               >
-                ↩️
+                <div class="reply-icon-wrapper" :style="getIconStyle(msg)">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="9 14 4 9 9 4"></polyline>
+                        <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
+                    </svg>
+                </div>
               </div>
               <div 
                 :key="msg.id"
@@ -2215,15 +2241,34 @@ defineExpose({ startNewChat })
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 20px;
-  color: #3b82f6; /* Changed to match new blue theme */
-  opacity: 0.8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.05); /* Gentle circle background like Telegram */
+  color: #8e8e93; /* Telegram neutral gray */
   z-index: 1; /* Below the sliding message bubble */
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.swipe-reply-icon.visible {
+  opacity: 1;
+}
+
+.reply-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
 }
 
 /* Sent message slides left, so icon is on the right */
 .swipe-reply-icon.sent-side {
-  right: 16px;
+  right: 12px;
 }
 
 /* Received message slides right, so icon is on the left */
