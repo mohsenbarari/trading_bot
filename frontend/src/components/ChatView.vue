@@ -631,6 +631,21 @@ const handleDeleteMessage = async () => {
   }
 };
 
+const handleCopyMessage = () => {
+  const msg = contextMenu.value.message;
+  if (!msg || msg.message_type !== 'text') {
+    closeContextMenu();
+    return;
+  }
+  
+  navigator.clipboard.writeText(msg.content).then(() => {
+    closeContextMenu();
+  }).catch(err => {
+    console.error('Failed to copy', err);
+    closeContextMenu();
+  });
+};
+
 const cancelEdit = () => {
   editingMessage.value = null;
   messageInput.value = '';
@@ -1843,6 +1858,15 @@ defineExpose({ startNewChat })
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>
           <span style="flex:1;">هدایت پیام</span>
         </div>
+        <template v-if="contextMenu.message?.message_type === 'text'">
+            <div class="menu-item" v-ripple @click="handleCopyMessage">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              <span style="flex:1;">کپی کردن</span>
+            </div>
+        </template>
         <template v-if="canEdit">
             <div class="menu-item" v-ripple @click="handleEditMessage">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
