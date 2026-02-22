@@ -2142,7 +2142,7 @@ defineExpose({ startNewChat })
   top: 50%;
   transform: translateY(-50%);
   font-size: 20px;
-  color: #f59e0b;
+  color: #3b82f6; /* Changed to match new blue theme */
   opacity: 0.8;
   z-index: 1; /* Below the sliding message bubble */
 }
@@ -2198,10 +2198,10 @@ defineExpose({ startNewChat })
 
 .message-bubble.sent {
   align-self: flex-start;
-  background: linear-gradient(135deg, #f59e0b, #d97706); /* App Brand Amber Gradient */
+  background: linear-gradient(135deg, #3b82f6, #2563eb); /* Modern sleek blue gradient */
   color: #ffffff;
   border-radius: 18px 18px 4px 18px;
-  box-shadow: 0 3px 6px rgba(245, 158, 11, 0.2);
+  box-shadow: 0 3px 6px rgba(37, 99, 235, 0.2);
 }
 
 .message-bubble.received {
