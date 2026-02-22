@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import AdminPanel from '../components/AdminPanel.vue'
 import UserManager from '../components/UserManager.vue'
 import CommodityManager from '../components/CommodityManager.vue'
@@ -35,6 +36,28 @@ function handleNavigate(section: string, data?: any) {
     currentSection.value = section
   }
 }
+
+// --- Back Button ---
+watch(currentSection, (newVal, oldVal) => {
+  if (newVal !== 'menu' && oldVal === 'menu') {
+    // ورود به ساب‌پیج: push state
+    pushBackState(() => {
+      currentSection.value = 'menu'
+      selectedUserForProfile.value = null
+    })
+  } else if (newVal !== 'menu' && oldVal !== 'menu') {
+    // تغییر ساب‌پیج (مثلاً users → user_profile): جایگزینی
+    popBackState()
+    pushBackState(() => {
+      currentSection.value = 'menu'
+      selectedUserForProfile.value = null
+    })
+  } else if (newVal === 'menu') {
+    // بازگشت به منو: state قبلاً pop شده (توسط back handler یا UI)
+  }
+})
+
+onUnmounted(() => clearBackStack())
 </script>
 
 <template>

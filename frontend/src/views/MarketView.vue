@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { ArrowUp, ArrowDown, ArrowUpDown, X, Loader2, Send } from 'lucide-vue-next'
 import { useOffers } from '../composables/useOffers'
+import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import OffersList from '../components/OffersList.vue'
 
 interface Commodity {
@@ -127,6 +128,14 @@ function startCreateOffer(type: 'buy' | 'sell') {
   }
   createStep.value = 'commodity'
   showCreateWizard.value = true
+  pushBackState(() => { showCreateWizard.value = false })
+}
+
+function closeWizard() {
+  if (showCreateWizard.value) {
+    showCreateWizard.value = false
+    popBackState() // کاربر از UI بسته — history entry اضافی حذف شود
+  }
 }
 
 function selectCommodity(c: Commodity) {
