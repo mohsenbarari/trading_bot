@@ -2809,9 +2809,17 @@ defineExpose({ startNewChat })
 }
 
 .selected-message {
-  background-color: rgba(245, 158, 11, 0.2) !important;
   position: relative;
-  border: 1px solid #f59e0b;
+}
+
+.selected-message::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  border-radius: inherit;
+  background-color: rgba(0, 0, 0, 0.15); /* Universal dark overlay for both white and blue */
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  pointer-events: none;
 }
 
 /* Forward Styles */
