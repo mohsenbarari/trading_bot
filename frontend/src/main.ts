@@ -11,6 +11,9 @@ const app = createApp(App)
 app.use(createPinia())
 app.use(router)
 
+import { vRipple } from './directives/ripple'
+app.directive('ripple', vRipple)
+
 // --- PWA Service Worker Registration (with iOS error recovery) ---
 import { registerSW } from 'virtual:pwa-register'
 

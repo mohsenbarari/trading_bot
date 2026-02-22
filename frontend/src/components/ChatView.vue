@@ -1348,7 +1348,7 @@ defineExpose({ startNewChat })
     <div class="chat-header">
       <template v-if="!isSelectionMode">
         <!-- Back Button -->
-      <button class="header-btn back-btn" @click="goBack">
+      <button class="header-btn back-btn" v-ripple @click="goBack">
         <svg viewBox="0 0 24 24" fill="currentColor">
           <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
         </svg>
@@ -1383,7 +1383,7 @@ defineExpose({ startNewChat })
             placeholder="جستجو..." 
             class="header-search-input"
          />
-         <button class="header-btn" @click="toggleSearch">✕</button>
+         <button class="header-btn" v-ripple @click="toggleSearch">✕</button>
          
          <!-- Search Results Dropdown -->
          <div v-if="searchResults.length > 0" class="search-results-dropdown">
@@ -1405,14 +1405,14 @@ defineExpose({ startNewChat })
       <!-- Action Buttons (only in chat view) -->
       <!-- Action Buttons -->
       <template v-if="selectedUserId && !isSearchActive">
-        <button class="header-btn" @click="handleCall">
+        <button class="header-btn" v-ripple @click="handleCall">
           <svg viewBox="0 0 24 24" fill="currentColor">
              <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 00-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/>
           </svg>
         </button>
         <!-- Three-dot Menu -->
         <div class="header-menu-container" style="position: relative;">
-            <button class="header-btn" @click.stop="handleHeaderMenu">
+            <button class="header-btn" v-ripple @click.stop="handleHeaderMenu">
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
               </svg>
@@ -1435,7 +1435,7 @@ defineExpose({ startNewChat })
       </template>
       <!-- Conversation List Actions -->
       <template v-else-if="!selectedUserId && !isSearchActive">
-         <button class="header-btn" @click="toggleSearch">
+         <button class="header-btn" v-ripple @click="toggleSearch">
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
           </svg>
@@ -1445,7 +1445,7 @@ defineExpose({ startNewChat })
       <!-- Selection Mode Header -->
       <template v-else>
         <!-- Close Selection -->
-        <button class="header-btn" @click="clearSelection">
+        <button class="header-btn" v-ripple @click="clearSelection">
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
           </svg>
@@ -1454,7 +1454,7 @@ defineExpose({ startNewChat })
           {{ selectedMessages.length }} پیام انتخاب شده
         </div>
         <!-- Forward Action -->
-        <button class="header-btn" @click="openForwardModal" style="margin-left: 8px;">
+        <button class="header-btn" v-ripple @click="openForwardModal" style="margin-left: 8px;">
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path d="M14 5l7 7-7 7v-4.1c-5 0-8.5 1.6-11 5.1 1-5 4-10 11-11V5z"/>
           </svg>          
@@ -1483,7 +1483,8 @@ defineExpose({ startNewChat })
         v-for="conv in sortedConversations" 
         :key="conv.id"
         class="conversation-item"
-        :class="{ 'has-unread': conv.unread_count > 0 }"
+        v-ripple
+        :class="{ 'has-unread': conv.unread_count > 0, 'active': selectedUserId === conv.other_user_id }"
         @click="selectConversation(conv)"
       >
         <div class="conv-avatar">
@@ -1655,7 +1656,7 @@ defineExpose({ startNewChat })
           <!-- Left side buttons - Show voice+attachment when empty, send when has text -->
           <template v-if="!messageInput.trim()">
             <!-- Voice Button -->
-            <button class="voice-btn">
+            <button v-ripple class="voice-btn">
               <svg viewBox="0 0 24 24" fill="#8e8e93">
                 <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
               </svg>
@@ -1669,7 +1670,7 @@ defineExpose({ startNewChat })
               style="display: none" 
               @change="handleImageUpload"
             />
-            <button class="attach-btn" @click="imageInput?.click()" :disabled="isUploading">
+            <button v-ripple class="attach-btn" @click="imageInput?.click()" :disabled="isUploading">
               <svg viewBox="0 0 24 24" fill="#8e8e93">
                 <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/>
               </svg>
@@ -1679,6 +1680,7 @@ defineExpose({ startNewChat })
           <!-- Send Button - Show when has text (same position as voice+attachment) -->
           <button 
             v-else
+            v-ripple
             class="send-btn-inline" 
             @click="sendMessage()" 
             @mousedown.prevent
@@ -1701,7 +1703,7 @@ defineExpose({ startNewChat })
           ></textarea>
           
           <!-- Emoji/Sticker Toggle - Right side inside textbox -->
-          <button class="emoji-btn" @click="showStickerPicker = !showStickerPicker">
+          <button class="emoji-btn" v-ripple @click="showStickerPicker = !showStickerPicker">
             <svg viewBox="0 0 24 24" fill="#8e8e93">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-6c.78 2.34 2.72 4 5 4s4.22-1.66 5-4H7zm1-4c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1zm8 0c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1z"/>
             </svg>
@@ -1751,28 +1753,30 @@ defineExpose({ startNewChat })
 
     <!-- Context Menu (Teleport to body to avoid clipping/position issues) -->
     <Teleport to="body">
-      <div 
-        v-if="contextMenu.visible" 
-        class="context-menu"
-        :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
-      >
-        <div class="menu-item" @click="handleReplyMessage">
-          <span>↩️</span> پاسخ
+      <Transition name="zoom-fade">
+        <div 
+          v-if="contextMenu.visible" 
+          class="context-menu telegram-menu-shadow"
+          :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
+        >
+          <div class="menu-item" v-ripple @click="handleReplyMessage">
+            <span>↩️</span> پاسخ
+          </div>
+          <div class="menu-item" v-ripple @click="handleForwardMessage">
+            <span>↪️</span> هدایت پیام
+          </div>
+          <template v-if="canEdit">
+              <div class="menu-item" v-ripple @click="handleEditMessage">
+                <span>✏️</span> ویرایش
+              </div>
+          </template>
+          <template v-if="canDelete">
+              <div class="menu-item delete" v-ripple @click="handleDeleteMessage">
+                <span>🗑️</span> حذف
+              </div>
+          </template>
         </div>
-        <div class="menu-item" @click="handleForwardMessage">
-          <span>↪️</span> هدایت پیام
-        </div>
-        <template v-if="canEdit">
-            <div class="menu-item" @click="handleEditMessage">
-              <span>✏️</span> ویرایش
-            </div>
-        </template>
-        <template v-if="canDelete">
-            <div class="menu-item delete" @click="handleDeleteMessage">
-              <span>🗑️</span> حذف
-            </div>
-        </template>
-      </div>
+      </Transition>
       
       <!-- Click outside to close (Overlay) -->
       <div 
@@ -1965,15 +1969,21 @@ defineExpose({ startNewChat })
 .conversation-item {
   display: flex;
   align-items: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 10px 16px; /* slightly tighter padding for Telegram feel */
+  border-bottom: none; /* Telegram typically lacks strong dividers here */
   cursor: pointer;
   background: #FFFFFF;
-  transition: background 0.2s;
+  border-radius: 10px; /* Slight roundness in lists */
+  margin: 2px 8px; /* Floating items */
+  transition: background 0.1s ease;
 }
 
 .conversation-item:hover {
-  background: #F5F5F5;
+  background: #f4f4f5; /* Very light modern gray hover */
+}
+
+.conversation-item:active {
+  background: #e4e4e7;
 }
 
 .conversation-item.has-unread {
@@ -2166,9 +2176,10 @@ defineExpose({ startNewChat })
   white-space: pre-wrap; /* Preserve line breaks */
   word-wrap: break-word;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-  animation: slideIn 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  /* Snappier Telegram animation curve */
+  animation: slideIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   /* Smooth transition for swipe/returning */
-  transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   
   /* Prevent native text selection on long press */
   -webkit-touch-callout: none;
@@ -2182,7 +2193,7 @@ defineExpose({ startNewChat })
 @keyframes slideIn {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.98);
+    transform: translateY(20px) scale(0.95);
   }
   to {
     opacity: 1;
@@ -2493,17 +2504,57 @@ defineExpose({ startNewChat })
   border: 1px solid var(--border-color);
 }
 
+.telegram-menu-shadow {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), 0 1px 4px rgba(0, 0, 0, 0.05); /* Softer nested shadow */
+  transform-origin: top left; /* Menu scales from point of click */
+}
+
+/* Telegram Zoom-fade animation classes */
+.zoom-fade-enter-active,
+.zoom-fade-leave-active {
+  transition: opacity 0.15s cubic-bezier(0.2, 0, 0, 1), transform 0.15s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.zoom-fade-enter-from,
+.zoom-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
 .menu-item {
-  padding: 10px 12px;
+  padding: 10px 16px;
+  cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  border-radius: 8px;
-  transition: background 0.2s;
+  gap: 12px;
   font-size: 14px;
   color: var(--text-color);
+  transition: background 0.1s; /* Faster hover transition */
 }
+
+/* Base Ripple Setup */
+.ripple-container {
+  position: relative;
+  overflow: hidden;
+}
+
+.ripple-effect {
+  position: absolute;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.1); /* Default Telegram light-theme ripple */
+  transform: scale(0);
+  animation: ripple 0.6s linear;
+  pointer-events: none; /* Let clicks pass through */
+}
+
+@keyframes ripple {
+  to {
+    transform: scale(4);
+    opacity: 0;
+  }
+}
+
+
 
 .menu-item:hover {
   background: rgba(0,0,0,0.05);
