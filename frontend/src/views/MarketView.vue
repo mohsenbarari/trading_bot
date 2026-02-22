@@ -189,7 +189,7 @@ function submitOffer() {
   .then(() => {
      successMessage.value = 'لفظ ثبت شد'
      setTimeout(() => successMessage.value = '', 3000)
-     showCreateWizard.value = false
+     closeWizard()
      fetchOffers()
   })
   .catch(e => console.error(e))
@@ -386,14 +386,14 @@ onUnmounted(() => {
     </div>
 
     <!-- Wizard Modal -->
-    <div v-if="showCreateWizard" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" @click.self="showCreateWizard = false">
+    <div v-if="showCreateWizard" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" @click.self="closeWizard()">
         <div class="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <!-- Wizard Header -->
             <div class="wizard-header px-6 py-4 flex justify-between items-center">
                 <h3 class="font-bold text-gray-800">
                     {{ newOffer.offer_type === 'buy' ? '🟢 ثبت سفارش خرید' : '🔴 ثبت سفارش فروش' }}
                 </h3>
-                <button @click="showCreateWizard = false" class="p-1.5 rounded-xl hover:bg-gray-100 transition-colors">
+                <button @click="closeWizard()" class="p-1.5 rounded-xl hover:bg-gray-100 transition-colors">
                     <X :size="20" class="text-gray-400" />
                 </button>
             </div>
