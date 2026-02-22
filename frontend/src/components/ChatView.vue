@@ -952,12 +952,16 @@ const scrollToMessage = (msgId: number) => {
         isViewingReply.value = true
         
         // Start highlight immediately (runs alongside scroll)
+        safeEl.classList.remove('highlight-message')
+        // Force reflow to restart animation
+        void safeEl.offsetWidth
         safeEl.classList.add('highlight-message')
         
-        // Re-enable auto-scroll after highlight completes (but don't remove class - let animation end naturally)
+        // Re-enable auto-scroll after highlight completes, and clean up class
         setTimeout(() => {
             isViewingReply.value = false
-        }, 3500)
+            safeEl.classList.remove('highlight-message')
+        }, 3000)
         
         // Calculate target position using bounding rects to avoid relative offsetParent issues
         const containerRect = safeContainer.getBoundingClientRect()
