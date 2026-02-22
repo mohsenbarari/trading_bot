@@ -1535,7 +1535,7 @@ defineExpose({ startNewChat })
               <span @click="scrollToMessage(group.messages[0].id)">{{ group.label }}</span>
             </div>
 
-            <div class="message-wrapper">
+            <div class="message-wrapper" v-for="(msg, index) in group.messages" :key="msg.id">
               <div 
                 v-if="swipedMessageId === msg.id" 
                 class="swipe-reply-icon"
@@ -1620,9 +1620,8 @@ defineExpose({ startNewChat })
               </span>
             </div> <!-- End .msg-meta -->
           </div> <!-- End .message-bubble -->
-          </div> <!-- End .message-wrapper -->
-        </div> <!-- End v-for="group.messages" -->
-      </div> <!-- End v-for="groupedMessages" message-group -->
+            </div> <!-- End .message-wrapper / v-for msg -->
+          </div> <!-- End v-for="groupedMessages" message-group -->
         
         <!-- Scroll to Bottom Button -->
         <button 
@@ -1635,7 +1634,8 @@ defineExpose({ startNewChat })
             <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
           </svg>
         </button>
-      </div>
+      </div> <!-- End .messages-container -->
+      </div> <!-- End .chat-content -->
 
       <!-- Input Area - Telegram Style -->
       <div class="input-area">
