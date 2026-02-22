@@ -1349,8 +1349,8 @@ defineExpose({ startNewChat })
       <template v-if="!isSelectionMode">
         <!-- Back Button -->
       <button class="header-btn back-btn" v-ripple @click="goBack">
-        <svg viewBox="0 0 24 24" fill="currentColor">
-          <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
         </svg>
       </button>
       
@@ -1360,7 +1360,12 @@ defineExpose({ startNewChat })
         <div class="header-user-info" @click="viewProfile">
           <span class="header-name">{{ selectedUserName }}</span>
           <span class="header-status" :class="{ 'online': targetUserStatus.includes('آنلاین') || isTyping }">
-            {{ isTyping ? 'در حال نوشتن...' : targetUserStatus }}
+            <template v-if="isTyping">
+              در حال نوشتن<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
+            </template>
+            <template v-else>
+              {{ targetUserStatus }}
+            </template>
           </span>
         </div>
       </template>
@@ -1406,15 +1411,17 @@ defineExpose({ startNewChat })
       <!-- Action Buttons -->
       <template v-if="selectedUserId && !isSearchActive">
         <button class="header-btn" v-ripple @click="handleCall">
-          <svg viewBox="0 0 24 24" fill="currentColor">
-             <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 00-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/>
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+             <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
           </svg>
         </button>
         <!-- Three-dot Menu -->
         <div class="header-menu-container" style="position: relative;">
             <button class="header-btn" v-ripple @click.stop="handleHeaderMenu">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="1"></circle>
+                <circle cx="12" cy="5" r="1"></circle>
+                <circle cx="12" cy="19" r="1"></circle>
               </svg>
             </button>
             <div v-if="isHeaderMenuOpen" class="header-dropdown-menu" v-click-outside="closeHeaderMenu">
@@ -1436,8 +1443,9 @@ defineExpose({ startNewChat })
       <!-- Conversation List Actions -->
       <template v-else-if="!selectedUserId && !isSearchActive">
          <button class="header-btn" v-ripple @click="toggleSearch">
-          <svg viewBox="0 0 24 24" fill="currentColor">
-            <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
         </button>
       </template>
@@ -1657,8 +1665,11 @@ defineExpose({ startNewChat })
           <template v-if="!messageInput.trim()">
             <!-- Voice Button -->
             <button v-ripple class="voice-btn">
-              <svg viewBox="0 0 24 24" fill="#8e8e93">
-                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
               </svg>
             </button>
             
@@ -1671,8 +1682,8 @@ defineExpose({ startNewChat })
               @change="handleImageUpload"
             />
             <button v-ripple class="attach-btn" @click="imageInput?.click()" :disabled="isUploading">
-              <svg viewBox="0 0 24 24" fill="#8e8e93">
-                <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/>
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
               </svg>
             </button>
           </template>
@@ -1687,8 +1698,10 @@ defineExpose({ startNewChat })
             @touchstart.prevent="sendMessage()"
             :disabled="isSending"
           >
-            <svg viewBox="0 0 24 24" fill="#f59e0b">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            <!-- Telegram Blue Send Icon -->
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#3390ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(45deg); margin-left: -4px;">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
             </svg>
           </button>
 
@@ -1704,29 +1717,34 @@ defineExpose({ startNewChat })
           
           <!-- Emoji/Sticker Toggle - Right side inside textbox -->
           <button class="emoji-btn" v-ripple @click="showStickerPicker = !showStickerPicker">
-            <svg viewBox="0 0 24 24" fill="#8e8e93">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5-6c.78 2.34 2.72 4 5 4s4.22-1.66 5-4H7zm1-4c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1zm8 0c.55 0 1-.45 1-1s-.45-1-1-1-1 .45-1 1 .45 1 1 1z"/>
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
+              <line x1="9" y1="9" x2="9.01" y2="9"></line>
+              <line x1="15" y1="9" x2="15.01" y2="9"></line>
             </svg>
           </button>
         </div>
       </div>
 
-      <!-- Sticker Picker -->
-      <div v-if="showStickerPicker" class="sticker-picker">
-        <div v-for="pack in stickerPacks" :key="pack.id" class="sticker-pack">
-          <div class="pack-name">{{ pack.name }}</div>
-          <div class="stickers-grid">
-            <button 
-              v-for="sticker in pack.stickers" 
-              :key="sticker"
-              class="sticker-item"
-              @click="sendSticker(sticker)"
-            >
-              {{ sticker }}
-            </button>
+      <!-- Sticker Picker (Slide-up) -->
+      <transition name="slide-up">
+        <div v-show="showStickerPicker" class="sticker-picker">
+          <div v-for="pack in stickerPacks" :key="pack.id" class="sticker-pack">
+            <div class="pack-name">{{ pack.name }}</div>
+            <div class="stickers-grid">
+              <button 
+                v-for="sticker in pack.stickers" 
+                :key="sticker"
+                class="sticker-item"
+                @click="sendSticker(sticker)"
+              >
+                {{ sticker }}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      </transition>
 
       <!-- Forward Target Modal -->
       <div v-if="showForwardModal" class="forward-modal-overlay" @click="closeForwardModal">
@@ -2047,11 +2065,29 @@ defineExpose({ startNewChat })
 
 .typing-text {
   color: #2ea043;
-  font-weight: 600;
-  font-style: italic;
+  font-weight: 500;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+}
+
+.typing-dots span {
+  animation: typing-dot 1.4s infinite ease-in-out both;
+  display: inline-block;
+}
+
+.typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+.typing-dots span:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes typing-dot {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .no-selection-placeholder {
@@ -2118,6 +2154,9 @@ defineExpose({ startNewChat })
   overflow: hidden;
   min-height: 0;
   position: relative;
+  /* Space for Slide-up sticker picker when open */
+  padding-bottom: v-bind('showStickerPicker ? "250px" : "0px"');
+  transition: padding-bottom 0.3s cubic-bezier(0.2, 0, 0, 1);
   /* No padding-top - messages will scroll UNDER the glass header */
 }
 
@@ -2299,6 +2338,8 @@ defineExpose({ startNewChat })
   gap: 0;
   border-top: none;
   box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.05);
+  position: relative;
+  z-index: 60; /* Above sticker picker */
 }
 
 .input-container {
@@ -2397,12 +2438,29 @@ defineExpose({ startNewChat })
 
 
 /* Sticker Picker */
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1), opacity 0.3s;
+}
+
+.slide-up-enter-from,
+.slide-up-leave-to {
+  transform: translateY(100%);
+  opacity: 0;
+}
+
 .sticker-picker {
-  background: var(--card-bg);
-  border-top: 1px solid var(--border-color);
-  padding: 12px;
-  max-height: 200px;
+  background: #f4f4f5; /* Telegram Light Ash */
+  border-top: 1px solid rgba(0,0,0,0.05);
+  padding: 16px 12px;
+  max-height: 250px;
   overflow-y: auto;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  transform: translateY(0);
 }
 
 .sticker-pack {
