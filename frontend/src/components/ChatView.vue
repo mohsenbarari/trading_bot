@@ -3229,11 +3229,16 @@ defineExpose({ startNewChat })
 .selection-bottom-bar {
   display: flex;
   align-items: center;
-  justify-content: space-around;
+  justify-content: space-evenly;
   width: 100%;
-  padding: 8px 0;
-  background: white;
-  min-height: 56px;
+  padding: 10px 0;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 -1px 8px rgba(0, 0, 0, 0.05);
+  min-height: 60px;
+  position: relative;
+  z-index: 10;
 }
 
 .selection-action-btn {
@@ -3241,33 +3246,51 @@ defineExpose({ startNewChat })
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: none;
+  background: transparent;
   border: none;
-  color: #8e8e93;
-  font-size: 11px;
+  color: #3390ec; /* Vibrant Telegram Blue */
+  font-size: 12px;
   font-weight: 500;
-  gap: 4px;
-  padding: 6px 16px;
-  border-radius: 8px;
+  gap: 6px;
+  padding: 8px 24px;
+  border-radius: 12px;
   cursor: pointer;
-  transition: opacity 0.2s, background 0.2s;
+  transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 .selection-action-btn:hover {
-  background: rgba(0,0,0,0.05);
-  color: #000;
+  background: rgba(51, 144, 236, 0.08); /* Light blue tint on hover */
+  transform: translateY(-2px) scale(1.02);
 }
 
-.selection-action-btn.delete {
-  color: #ef4444;
-}
-
-.selection-action-btn.delete:hover {
-  background: rgba(239, 68, 68, 0.1);
+.selection-action-btn:active {
+  transform: scale(0.95);
+  transition: all 0.1s;
 }
 
 .selection-action-btn svg {
   margin-bottom: 2px;
+  stroke: currentColor;
+  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.selection-action-btn:hover svg {
+  transform: scale(1.1);
+}
+
+.selection-action-btn.delete {
+  color: #ef4444; /* Telegram Red */
+}
+
+.selection-action-btn.delete:hover {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  .selection-bottom-bar {
+    background: rgba(30, 30, 32, 0.9);
+    box-shadow: 0 -1px 8px rgba(0, 0, 0, 0.3);
+  }
 }
 
 </style>
