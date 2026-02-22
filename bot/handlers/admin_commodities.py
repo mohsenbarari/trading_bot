@@ -30,8 +30,8 @@ ALIASES_API_URL = "http://app:8000/api/commodities/aliases/"
 
 def get_auth_headers() -> dict:
     if not settings.dev_api_key: 
-        return {"x-api-key": "NOT_SET"}
-    return {"x-api-key": settings.dev_api_key}
+        return {"X-DEV-API-KEY": "NOT_SET"}
+    return {"X-DEV-API-KEY": settings.dev_api_key}
 
 def get_error_detail(e: httpx.HTTPStatusError) -> str:
     try:

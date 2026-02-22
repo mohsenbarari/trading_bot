@@ -12,7 +12,7 @@ from core.db import get_db
 from core.config import settings
 from models.commodity import Commodity, CommodityAlias
 from models.user import User
-from api.deps import verify_super_admin_or_dev_key, oauth2_scheme
+from api.deps import verify_super_admin_or_dev_key, oauth2_scheme_optional
 
 import schemas
 
@@ -26,8 +26,8 @@ router = APIRouter(
 
 # --- 👇 تابع جدید برای تشخیص منبع درخواست 👇 ---
 async def get_request_source(
-    api_key: Optional[str] = Header(None, alias="x-api-key"),
-    token: Optional[str] = Depends(oauth2_scheme)
+    api_key: Optional[str] = Header(None, alias="X-DEV-API-KEY"),
+    token: Optional[str] = Depends(oauth2_scheme_optional)
 ) -> str:
     """
     منبع درخواست را تشخیص می‌دهد:

@@ -18,6 +18,12 @@ oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl=f"{settings.frontend_url}/login"
 )
 
+# نسخه اختیاری — برای endpointهایی که هم با token و هم با API key کار می‌کنند
+oauth2_scheme_optional = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.frontend_url}/login",
+    auto_error=False
+)
+
 # DEV_API_KEY for bypass
 DEV_API_KEY_HEADER = "X-DEV-API-KEY"
 
@@ -77,7 +83,7 @@ async def get_current_user(
 
 async def get_current_user_optional(
     db: AsyncSession = Depends(get_db),
-    token: Optional[str] = Depends(oauth2_scheme)
+    token: Optional[str] = Depends(oauth2_scheme_optional)
 ) -> Optional[User]:
     if not token:
         return None
@@ -97,7 +103,7 @@ async def verify_super_admin(
     return current_user
 
 async def verify_super_admin_or_dev_key(
-    token: Optional[str] = Depends(oauth2_scheme),
+    token: Optional[str] = Depends(oauth2_scheme_optional),
     dev_key: Optional[str] = Security(api_key_header),
     db: AsyncSession = Depends(get_db)
 ):
