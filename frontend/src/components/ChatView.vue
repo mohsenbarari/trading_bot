@@ -1,3 +1,4 @@
+<script setup lang="ts">
 import { ref, onMounted, computed, watch, onUnmounted, nextTick } from 'vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
