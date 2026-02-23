@@ -1298,12 +1298,42 @@ function formatDateForSeparator(dateStr: string): string {
 // Get full image URL
 function getImageUrl(path: string) {
   if (!path) return ''
+  
+  if (path.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(path)
+      if (parsed.file_id) {
+        return `${props.apiBaseUrl}/api/chat/files/${parsed.file_id}`
+      }
+    } catch (e) {
+      // Ignore parse error
+    }
+  }
+  
   // If already full URL, return as is
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path
   }
   // Prepend apiBaseUrl for relative paths
   return `${props.apiBaseUrl}${path}`
+}
+
+// Get image thumbnail (base64) from JSON content
+function getImageThumbnail(path: string) {
+  if (!path) return ''
+  
+  if (path.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(path)
+      if (parsed.thumbnail) {
+        return parsed.thumbnail
+      }
+    } catch (e) {
+      // Ignore parse error
+    }
+  }
+  
+  return ''
 }
 
 // Go back
