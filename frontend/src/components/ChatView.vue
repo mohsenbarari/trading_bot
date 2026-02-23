@@ -374,8 +374,9 @@ async function handleImageUpload(event: Event) {
   if (!file) return
   
   isUploading.value = true
+  let step = 'start'
   try {
-    // 1. فشرده‌سازی عکس اصلی (مثلاً مکس ۱۲۸۰ پیکسل و ۵۰۰ کیلوبایت)
+    step = 'compress_main'
     const options = {
       maxSizeMB: 0.5,
       maxWidthOrHeight: 1280,
@@ -383,7 +384,7 @@ async function handleImageUpload(event: Event) {
     }
     const compressedFile = await imageCompression(file, options)
 
-    // 2. ساخت پیش‌نمایش تار و بسیار کوچک (مثلاً ۲۰ پیکسل)
+    step = 'compress_thumb'
     const thumbOptions = {
       maxSizeMB: 0.05,
       maxWidthOrHeight: 20,
@@ -391,17 +392,20 @@ async function handleImageUpload(event: Event) {
     }
     const thumbFile = await imageCompression(file, thumbOptions)
     
-    // تبدیل نسخه کوچک به Base64
-    const thumbBase64 = await new Promise<string>((resolve) => {
+    step = 'read_base64'
+    const thumbBase64 = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader()
-      reader.readAsDataURL(thumbFile)
       reader.onloadend = () => resolve(reader.result as string)
+      reader.onerror = (e) => reject(e)
+      reader.readAsDataURL(thumbFile)
     })
   
+    step = 'prepare_form'
     const formData = new FormData()
     formData.append('file', compressedFile, file.name)
     formData.append('thumbnail', thumbBase64)
     
+    step = 'fetch_api'
     const res = await fetch(`${props.apiBaseUrl}/api/chat/upload-image`, {
       method: 'POST',
       headers: {
@@ -410,26 +414,28 @@ async function handleImageUpload(event: Event) {
       body: formData
     })
     
+    step = 'check_res'
     if (!res.ok) {
         const errText = await res.text()
         throw new Error(`مشکل سرور (${res.status}): ${errText.substring(0, 100)}`)
     }
     const data = await res.json()
     
-    // محتوای پیام رو به صورت JSON استرینگ ذخیره می‌کنیم تا هم آیدی و هم تامنیل رو داشته باشه
+    step = 'prepare_json'
     const messageContent = JSON.stringify({
       file_id: data.file_id,
       thumbnail: data.thumbnail
     })
     
+    step = 'send_ws_message'
     console.log("Sending media message...", messageContent)
     await sendMediaMessage('image', messageContent)
     console.log("Media message sent successfully.")
   } catch (e: any) {
-    console.error("Upload error details v3:", e);
-    const errString = e && e.message ? e.message : String(e);
-    error.value = errString;
-    alert("v3 | جزئیات خطا: " + errString);
+    console.error(`Upload error at step [${step}]:`, e);
+    const errString = e && e.message ? e.message : JSON.stringify(e);
+    error.value = `[${step}] ${errString}`;
+    alert(`خطا در مرحله ${step}: ` + errString);
   } finally {
     isUploading.value = false
     if (input) input.value = ''
