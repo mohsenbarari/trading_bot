@@ -12,10 +12,8 @@ FROM python:3.11-slim-bullseye
 RUN apt-get update && apt-get upgrade -y && apt-get install -y libpq-dev build-essential && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
-# استفاده از pip mirror ایرانی (iranserver)
-RUN pip config set global.index-url https://mirror.iranserver.com/pypi/simple/ && \
-    pip config set global.trusted-host mirror.iranserver.com && \
-    pip install --upgrade pip setuptools wheel
+# Install pip without mirror (default PyPI is faster)
+RUN pip install --upgrade pip setuptools wheel
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
