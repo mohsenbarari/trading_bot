@@ -12,8 +12,10 @@ FROM python:3.11-slim-bullseye
 RUN apt-get update && apt-get upgrade -y && apt-get install -y libpq-dev build-essential && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
-# Install pip without mirror (default PyPI is faster)
-RUN pip install --upgrade pip setuptools wheel
+# Explicitly remove any old pip mirror config & use default PyPI
+RUN pip config unset global.index-url 2>/dev/null; \
+    pip config unset global.trusted-host 2>/dev/null; \
+    pip install --upgrade pip setuptools wheel
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
