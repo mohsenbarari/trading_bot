@@ -14,6 +14,7 @@
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.18",
     "autoprefixer": "^10.4.23",
+    "browser-image-compression": "^2.0.2",
     "lucide-vue-next": "^0.563.0",
     "moment-jalaali": "^0.10.4",
     "pinia": "^3.0.3",

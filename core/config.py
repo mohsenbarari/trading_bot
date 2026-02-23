@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     smsir_api_key: str | None = None
     smsir_line_number: int | None = None
     
+    # S3 Storage Configuration
+    s3_endpoint_url: str | None = None
+    s3_access_key: str | None = None
+    s3_secret_key: str | None = None
+    s3_bucket_name: str | None = None
+    
     class Config:
         env_file = ".env"
 

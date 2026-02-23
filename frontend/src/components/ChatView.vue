@@ -1,7 +1,7 @@
-<script setup lang="ts">
 import { ref, onMounted, computed, watch, onUnmounted, nextTick } from 'vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
+import imageCompression from 'browser-image-compression'
 
 // Props
 const props = defineProps<{
@@ -372,11 +372,35 @@ async function handleImageUpload(event: Event) {
   const file = input.files[0]
   if (!file) return
   
-  const formData = new FormData()
-  formData.append('file', file)
-  
   isUploading.value = true
   try {
+    // 1. فشرده‌سازی عکس اصلی (مثلاً مکس ۱۲۸۰ پیکسل و ۵۰۰ کیلوبایت)
+    const options = {
+      maxSizeMB: 0.5,
+      maxWidthOrHeight: 1280,
+      useWebWorker: true
+    }
+    const compressedFile = await imageCompression(file, options)
+
+    // 2. ساخت پیش‌نمایش تار و بسیار کوچک (مثلاً ۲۰ پیکسل)
+    const thumbOptions = {
+      maxSizeMB: 0.05,
+      maxWidthOrHeight: 20,
+      useWebWorker: true
+    }
+    const thumbFile = await imageCompression(file, thumbOptions)
+    
+    // تبدیل نسخه کوچک به Base64
+    const thumbBase64 = await new Promise<string>((resolve) => {
+      const reader = new FileReader()
+      reader.readAsDataURL(thumbFile)
+      reader.onloadend = () => resolve(reader.result as string)
+    })
+  
+    const formData = new FormData()
+    formData.append('file', compressedFile, file.name)
+    formData.append('thumbnail', thumbBase64)
+    
     const res = await fetch(`${props.apiBaseUrl}/api/chat/upload-image`, {
       method: 'POST',
       headers: {
@@ -386,7 +410,14 @@ async function handleImageUpload(event: Event) {
     })
     if (!res.ok) throw new Error('خطا در آپلود تصویر')
     const data = await res.json()
-    await sendMediaMessage('image', data.url)
+    
+    // محتوای پیام رو به صورت JSON استرینگ ذخیره می‌کنیم تا هم آیدی و هم تامنیل رو داشته باشه
+    const messageContent = JSON.stringify({
+      file_id: data.file_id,
+      thumbnail: data.thumbnail
+    })
+    
+    await sendMediaMessage('image', messageContent)
   } catch (e: any) {
     error.value = e.message
   } finally {
@@ -1744,8 +1775,9 @@ defineExpose({ startNewChat })
             
             <!-- Image -->
             <template v-else-if="msg.message_type === 'image'">
-              <a :href="getImageUrl(msg.content)" target="_blank" class="msg-image-link">
-                <img :src="getImageUrl(msg.content)" alt="تصویر" class="msg-image" />
+              <a :href="getImageUrl(msg.content)" target="_blank" class="msg-image-link"
+                 :style="{ backgroundImage: getImageThumbnail(msg.content) ? `url(${getImageThumbnail(msg.content)})` : 'none', backgroundSize: 'cover' }">
+                <img :src="getImageUrl(msg.content)" alt="تصویر" class="msg-image" loading="lazy" />
               </a>
             </template>
             
