@@ -377,28 +377,38 @@ async function handleImageUpload(event: Event) {
   let step = 'start'
   try {
     step = 'compress_main'
-    const options = {
-      maxSizeMB: 0.5,
-      maxWidthOrHeight: 1280,
-      useWebWorker: false
+    let compressedFile = file;
+    try {
+        const options = {
+          maxSizeMB: 0.5,
+          maxWidthOrHeight: 1280,
+          useWebWorker: false
+        }
+        compressedFile = await imageCompression(file, options)
+    } catch (warn) {
+        console.warn("Compression failed, using original file:", warn)
     }
-    const compressedFile = await imageCompression(file, options)
 
     step = 'compress_thumb'
-    const thumbOptions = {
-      maxSizeMB: 0.05,
-      maxWidthOrHeight: 20,
-      useWebWorker: false
+    let thumbBase64 = '';
+    try {
+        const thumbOptions = {
+          maxSizeMB: 0.05,
+          maxWidthOrHeight: 20,
+          useWebWorker: false
+        }
+        const thumbFile = await imageCompression(file, thumbOptions)
+        
+        step = 'read_base64'
+        thumbBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result as string)
+          reader.onerror = (e) => reject(e)
+          reader.readAsDataURL(thumbFile)
+        })
+    } catch (warn) {
+        console.warn("Thumbnail generation failed:", warn)
     }
-    const thumbFile = await imageCompression(file, thumbOptions)
-    
-    step = 'read_base64'
-    const thumbBase64 = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onloadend = () => resolve(reader.result as string)
-      reader.onerror = (e) => reject(e)
-      reader.readAsDataURL(thumbFile)
-    })
   
     step = 'prepare_form'
     const formData = new FormData()
