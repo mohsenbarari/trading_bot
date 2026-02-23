@@ -21,3 +21,4 @@ smsir-python==1.0.8
 requests
 aiofiles==23.2.1
 async-timeout==5.0.1
+python-magic==0.4.27

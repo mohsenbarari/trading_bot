@@ -15,6 +15,7 @@ import os
 import uuid
 import asyncio
 import aiofiles
+import magic
 
 from core.db import get_db
 from core.enums import MessageType
@@ -627,13 +628,17 @@ async def upload_chat_image(
     current_user: User = Depends(get_current_user)
 ):
     """آپلود تصویر برای چت"""
-    # بررسی نوع فایل
     allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
     if file.content_type not in allowed_types:
         raise HTTPException(status_code=400, detail="Only images are allowed")
     
-    # بررسی سایز (حداکثر 5MB)
+    # بررسی محتوای واقعی فایل با استفاده از Magic bytes
     contents = await file.read()
+    mime = magic.from_buffer(contents, mime=True)
+    if mime not in allowed_types:
+        raise HTTPException(status_code=400, detail=f"Invalid file content. Real type is {mime}")
+    
+    # بررسی سایز (حداکثر 5MB)
     if len(contents) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 5MB)")
     
