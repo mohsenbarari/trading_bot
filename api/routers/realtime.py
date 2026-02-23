@@ -2,15 +2,18 @@
 """
 Real-time WebSocket and SSE for MiniApp - Instant Updates
 """
-from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import StreamingResponse
 import redis.asyncio as redis
 import asyncio
 import json
 import logging
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional
+
+from jose import jwt, JWTError
 
 from core.redis import pool
+from core.config import settings
 from models.user import User
 from api.deps import get_current_user_optional
 
@@ -20,6 +23,20 @@ router = APIRouter(
     tags=["Real-time"],
 )
 
+
+# --- Sensitive fields to strip from broadcast payloads ---
+SENSITIVE_FIELDS = {
+    "offer_user_mobile", "responder_user_mobile",
+    "mobile_number", "address", "telegram_id",
+    "idempotency_key",
+}
+
+
+def sanitize_payload(data: dict) -> dict:
+    """Remove sensitive fields from broadcast data"""
+    if not isinstance(data, dict):
+        return data
+    return {k: v for k, v in data.items() if k not in SENSITIVE_FIELDS}
 
 
 # --- WebSocket Connection Manager ---
@@ -52,12 +69,44 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-# --- WebSocket Endpoint ---
+def verify_ws_token(token: str) -> Optional[int]:
+    """
+    Validate JWT token and return user_id.
+    Returns None if token is invalid.
+    """
+    try:
+        payload = jwt.decode(
+            token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
+        )
+        sub = payload.get("sub")
+        if sub is None:
+            return None
+        return int(sub)
+    except (JWTError, ValueError, Exception):
+        return None
+
+
+# --- WebSocket Endpoint (Authenticated) ---
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(
+    websocket: WebSocket,
+    token: Optional[str] = Query(default=None)
+):
     """
     WebSocket endpoint برای real-time updates آنی
+    Requires JWT token as query parameter: /ws?token=<jwt>
     """
+    # --- Authentication ---
+    if not token:
+        await websocket.close(code=4001, reason="Missing authentication token")
+        return
+    
+    user_id = verify_ws_token(token)
+    if user_id is None:
+        await websocket.close(code=4003, reason="Invalid or expired token")
+        return
+    
+    logging.info(f"✅ WebSocket authenticated: user_id={user_id}")
     await manager.connect(websocket)
     
     try:
@@ -80,7 +129,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logging.warning(f"WebSocket error for user {user_id}: {e}")
     finally:
         manager.disconnect(websocket)
         redis_task.cancel()
@@ -106,23 +155,21 @@ async def listen_redis_events(websocket: WebSocket):
             while True:
                 try:
                     message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-                    if message:
-                        print(f"🔍 DEBUG APP: RAW REDIS MSG: {message}", flush=True)
                     
                     if message and message.get("type") == "message":
                         channel = message.get("channel", b"").decode("utf-8")
                         data_str = message.get("data", b"").decode("utf-8")
                         event_type = channel.replace("events:", "")
                         
-                        logging.info(f"📩 Redis message received: {event_type}")
-                        
                         try:
-                            # Send plain JSON, client parses it
+                            parsed_data = json.loads(data_str)
+                            # Sanitize: strip sensitive fields before broadcasting
+                            safe_data = sanitize_payload(parsed_data)
+                            
                             await websocket.send_json({
                                 "type": event_type,
-                                "data": json.loads(data_str)
+                                "data": safe_data
                             })
-                            logging.info(f"✅ Sent to WebSocket: {event_type}")
                         except Exception as send_err:
                             logging.error(f"❌ Error sending to WebSocket: {send_err}")
                             break
@@ -132,8 +179,6 @@ async def listen_redis_events(websocket: WebSocket):
                     continue
                 except Exception as e:
                     logging.error(f"❌ Redis listener loop error: {e}")
-                    # Don't break immediately on minor errors, but break on critical ones?
-                    # For now, sleep and retry to be robust
                     await asyncio.sleep(1)
                     
     except asyncio.CancelledError:
@@ -166,6 +211,15 @@ async def event_generator(user_id: int):
                     channel = message.get("channel", b"").decode("utf-8")
                     data = message.get("data", b"").decode("utf-8")
                     event_type = channel.replace("events:", "")
+                    
+                    # Sanitize SSE data too
+                    try:
+                        parsed = json.loads(data)
+                        safe = sanitize_payload(parsed)
+                        data = json.dumps(safe)
+                    except:
+                        pass
+                    
                     yield f"event: {event_type}\ndata: {data}\n\n"
                 
                 current_time = asyncio.get_event_loop().time()
@@ -206,12 +260,14 @@ async def publish_event(event_type: str, data: dict):
             channel = f"events:{event_type}"
             await redis_client.publish(channel, json.dumps(data, ensure_ascii=False, default=str))
     except Exception as e:
-        print(f"⚠️ Error publishing event {event_type}: {e}")
+        logging.warning(f"⚠️ Error publishing event {event_type}: {e}")
 
     try:
+        # Sanitize before direct broadcast too
+        safe_data = sanitize_payload(data)
         await manager.broadcast({
             "type": event_type,
-            "data": data
+            "data": safe_data
         })
     except Exception as e:
-        print(f"⚠️ Error broadcasting event {event_type}: {e}")
+        logging.warning(f"⚠️ Error broadcasting event {event_type}: {e}")

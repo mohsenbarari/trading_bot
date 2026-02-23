@@ -21,11 +21,18 @@ export function useWebSocket() {
         // In dev, we force ws://localhost:8000
         // In prod, we use relative (which behaves as window.location.host)
 
+        // Get auth token for authenticated WebSocket connection
+        const authToken = localStorage.getItem('auth_token');
+        if (!authToken) {
+            console.warn('⚠️ No auth token found, skipping WebSocket connection');
+            return;
+        }
+
         let wsUrl = '';
         if (isDev) {
-            wsUrl = `${protocol}//${window.location.hostname}:8000/api/realtime/ws`;
+            wsUrl = `${protocol}//${window.location.hostname}:8000/api/realtime/ws?token=${encodeURIComponent(authToken)}`;
         } else {
-            wsUrl = `${protocol}//${window.location.host}/api/realtime/ws`;
+            wsUrl = `${protocol}//${window.location.host}/api/realtime/ws?token=${encodeURIComponent(authToken)}`;
         }
 
         console.log('Connecting to WebSocket:', wsUrl);
