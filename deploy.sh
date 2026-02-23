@@ -61,6 +61,39 @@ build_frontend() {
 }
 
 # ==========================================
+# 1.5. Prepare Pip Packages (Germany only)
+# ==========================================
+prepare_pip_packages() {
+    print_header "📦 Checking pip dependencies"
+    
+    HASH_FILE="$PROJECT_DIR/pip_packages/.requirements_hash"
+    CURRENT_HASH=$(md5sum "$PROJECT_DIR/requirements.txt" | cut -d' ' -f1)
+    
+    if [ ! -f "$HASH_FILE" ] || [ "$(cat "$HASH_FILE")" != "$CURRENT_HASH" ] || [ ! -d "$PROJECT_DIR/pip_packages" ]; then
+        echo "🔄 requirements.txt changed or packages missing. Downloading..."
+        mkdir -p "$PROJECT_DIR/pip_packages"
+        
+        # Download for Python 3.11 (Docker image version)
+        pip download -r "$PROJECT_DIR/requirements.txt" \
+            -d "$PROJECT_DIR/pip_packages/" \
+            --python-version 311 \
+            --implementation cp \
+            --abi cp311 \
+            --platform manylinux2014_x86_64 \
+            --platform manylinux_2_17_x86_64 \
+            --platform manylinux_2_28_x86_64 \
+            --platform linux_x86_64 \
+            --platform any \
+            --only-binary=:all:
+            
+        echo "$CURRENT_HASH" > "$HASH_FILE"
+        echo "✅ Pip packages updated successfully!"
+    else
+        echo "✅ Pip packages are up to date (hash: $CURRENT_HASH)."
+    fi
+}
+
+# ==========================================
 # 2. Deploy to Iran Server
 # ==========================================
 deploy_iran() {
@@ -128,13 +161,16 @@ case "$TARGET" in
         deploy_iran  # frontend only goes to Iran
         ;;
     iran)
+        prepare_pip_packages
         build_frontend
         deploy_iran
         ;;
     foreign)
+        prepare_pip_packages
         deploy_foreign
         ;;
     all)
+        prepare_pip_packages
         build_frontend
         deploy_iran
         deploy_foreign

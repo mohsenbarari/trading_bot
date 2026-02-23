@@ -20,3 +20,4 @@ python-bidi==0.4.2
 smsir-python==1.0.8
 requests
 aiofiles==23.2.1
+async-timeout==5.0.1
