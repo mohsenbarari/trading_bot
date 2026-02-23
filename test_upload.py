@@ -1,11 +1,22 @@
 import requests
 import jwt
+import sys
+import os
 from datetime import datetime, timedelta
 
-# Create valid token
+from dotenv import load_dotenv
+load_dotenv('.env')
+
+# Create a valid token with actual JWT secret from .env
+secret = os.getenv('JWT_SECRET_KEY')
+if not secret:
+    print("Cannot find JWT_SECRET_KEY")
+    sys.exit(1)
+
+# we need an active user id, assume user 1 (the admin user)
 token = jwt.encode(
-    {"sub": "admin", "exp": datetime.utcnow() + timedelta(days=1)},
-    "5c8b7f8e9d6a2c3b4a5f9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c",
+    {"sub": "1", "exp": datetime.utcnow() + timedelta(days=1)},
+    secret,
     algorithm="HS256"
 )
 

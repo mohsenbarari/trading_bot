@@ -409,7 +409,11 @@ async function handleImageUpload(event: Event) {
       },
       body: formData
     })
-    if (!res.ok) throw new Error('خطا در آپلود تصویر')
+    
+    if (!res.ok) {
+        const errText = await res.text()
+        throw new Error(`مشکل سرور (${res.status}): ${errText.substring(0, 100)}`)
+    }
     const data = await res.json()
     
     // محتوای پیام رو به صورت JSON استرینگ ذخیره می‌کنیم تا هم آیدی و هم تامنیل رو داشته باشه
@@ -422,14 +426,10 @@ async function handleImageUpload(event: Event) {
     await sendMediaMessage('image', messageContent)
     console.log("Media message sent successfully.")
   } catch (e: any) {
-    console.error("Upload error details:", e);
-    if (e instanceof Error) {
-        error.value = e.message
-        alert("خطا در آپلود: " + e.message)
-    } else {
-        error.value = String(e)
-        alert("خطای مدیریت نشده: " + JSON.stringify(e))
-    }
+    console.error("Upload error details v3:", e);
+    const errString = e && e.message ? e.message : String(e);
+    error.value = errString;
+    alert("v3 | جزئیات خطا: " + errString);
   } finally {
     isUploading.value = false
     if (input) input.value = ''
