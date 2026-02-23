@@ -12,8 +12,11 @@ FROM python:3.11-slim-bullseye
 RUN apt-get update && apt-get upgrade -y && apt-get install -y libpq-dev build-essential && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 RUN pip install --upgrade pip setuptools wheel
+# Copy pre-downloaded packages (downloaded on fast German server)
+COPY pip_packages/ /tmp/pip_packages/
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages/ -r requirements.txt \
+    && rm -rf /tmp/pip_packages/
 COPY api/ ./api/
 COPY bot/ ./bot/
 COPY core/ ./core/
