@@ -379,7 +379,7 @@ async function handleImageUpload(event: Event) {
     const options = {
       maxSizeMB: 0.5,
       maxWidthOrHeight: 1280,
-      useWebWorker: true
+      useWebWorker: false
     }
     const compressedFile = await imageCompression(file, options)
 
@@ -387,7 +387,7 @@ async function handleImageUpload(event: Event) {
     const thumbOptions = {
       maxSizeMB: 0.05,
       maxWidthOrHeight: 20,
-      useWebWorker: true
+      useWebWorker: false
     }
     const thumbFile = await imageCompression(file, thumbOptions)
     
@@ -421,6 +421,7 @@ async function handleImageUpload(event: Event) {
     await sendMediaMessage('image', messageContent)
   } catch (e: any) {
     error.value = e.message
+    alert("خطا در آپلود: " + e.message)
   } finally {
     isUploading.value = false
     if (input) input.value = ''
