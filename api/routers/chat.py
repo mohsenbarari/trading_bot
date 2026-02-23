@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, timedelta, timezone
 import os
 import uuid
+import asyncio
+import aiofiles
 
 from core.db import get_db
 from core.enums import MessageType
@@ -635,16 +637,16 @@ async def upload_chat_image(
     if len(contents) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 5MB)")
     
-    # ذخیره فایل
+    # ذخیره فایل (Non-blocking)
     upload_dir = "uploads/chat"
-    os.makedirs(upload_dir, exist_ok=True)
+    await asyncio.to_thread(os.makedirs, upload_dir, exist_ok=True)
     
     ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
     filename = f"{uuid.uuid4()}.{ext}"
     filepath = os.path.join(upload_dir, filename)
     
-    with open(filepath, "wb") as f:
-        f.write(contents)
+    async with aiofiles.open(filepath, "wb") as f:
+        await f.write(contents)
     
     # URL نسبی برای دسترسی
     return {"url": f"/uploads/chat/{filename}"}

@@ -18,4 +18,4 @@ reportlab==4.0.9
 arabic-reshaper==3.0.0
 python-bidi==0.4.2
 smsir-python==1.0.8
-requests
+requestsaiofiles==23.2.1
