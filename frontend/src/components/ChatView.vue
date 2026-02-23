@@ -418,10 +418,18 @@ async function handleImageUpload(event: Event) {
       thumbnail: data.thumbnail
     })
     
+    console.log("Sending media message...", messageContent)
     await sendMediaMessage('image', messageContent)
+    console.log("Media message sent successfully.")
   } catch (e: any) {
-    error.value = e.message
-    alert("خطا در آپلود: " + e.message)
+    console.error("Upload error details:", e);
+    if (e instanceof Error) {
+        error.value = e.message
+        alert("خطا در آپلود: " + e.message)
+    } else {
+        error.value = String(e)
+        alert("خطای مدیریت نشده: " + JSON.stringify(e))
+    }
   } finally {
     isUploading.value = false
     if (input) input.value = ''
