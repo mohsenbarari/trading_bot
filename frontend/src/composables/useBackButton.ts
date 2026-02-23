@@ -86,15 +86,11 @@ export function popBackState() {
 /**
  * پاک کردن همه stateهای مربوط به view فعلی
  * (مثلاً وقتی از یک route خارج می‌شویم)
+ * history entries اضافی را نمی‌بردارد چون Vue Router خودش history را مدیریت می‌کند
+ * و history.go() باعث بهم ریختن navigation می‌شود
  */
 export function clearBackStack() {
-  const count = backStack.length
   backStack.length = 0
-  // history entries اضافی را بردار
-  if (count > 0) {
-    ignoreNextPopState = true
-    history.go(-count)
-  }
   updateTelegramBackButton()
 }
 
