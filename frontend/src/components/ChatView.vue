@@ -529,6 +529,11 @@ async function handleImageUpload(event: Event) {
       thumbnail: data.thumbnail
     })
     
+    // Instantly save the uploaded blob to IndexedDB so we don't fetch it again
+    step = 'save_local_cache'
+    await saveToDB(data.file_id, compressedFile)
+    imageCache.value = { ...imageCache.value, [data.file_id]: URL.createObjectURL(compressedFile) }
+    
     step = 'send_ws_message'
     console.log("Sending media message...", messageContent)
     await sendMediaMessage('image', messageContent)
