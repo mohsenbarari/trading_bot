@@ -88,6 +88,17 @@ api_router.include_router(sync.router, prefix="/sync", tags=["Sync"])
 app.include_router(api_router)
 
 # -------------------------------------------------------
+# 🌐 Public Config Endpoint
+# -------------------------------------------------------
+@app.get("/api/config")
+async def get_public_config():
+    """Public config endpoint — returns non-sensitive settings for frontend."""
+    return {
+        "bot_username": settings.bot_username,
+        "frontend_url": settings.frontend_url,
+    }
+
+# -------------------------------------------------------
 # 📂 Static Files & Frontend Serving
 # -------------------------------------------------------
 # مسیر بیلد شده Frontend (dist)

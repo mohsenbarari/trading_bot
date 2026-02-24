@@ -85,6 +85,88 @@ const isUserAtBottom = ref(true)
 const unreadNewMessagesCount = ref(0)
 const showScrollButton = ref(false)
 
+// === IndexedDB Image Cache ===
+// Maps file_id -> blob URL (reactive, for template binding)
+const imageCache = ref<Record<string, string>>({})
+const DB_NAME = 'chat_image_cache'
+const DB_VERSION = 1
+const STORE_NAME = 'images'
+
+function openImageDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION)
+    req.onupgradeneeded = (e) => {
+      const db = (e.target as IDBOpenDBRequest).result
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME)
+      }
+    }
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+async function getFromDB(key: string): Promise<Blob | null> {
+  try {
+    const db = await openImageDB()
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readonly')
+      const req = tx.objectStore(STORE_NAME).get(key)
+      req.onsuccess = () => resolve(req.result ?? null)
+      req.onerror = () => resolve(null)
+    })
+  } catch { return null }
+}
+
+async function saveToDB(key: string, blob: Blob): Promise<void> {
+  try {
+    const db = await openImageDB()
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      tx.objectStore(STORE_NAME).put(blob, key)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => resolve()
+    })
+  } catch { /* ignore */ }
+}
+
+async function loadImageForMessage(content: string): Promise<void> {
+  if (!content || !content.startsWith('{')) return
+  let fileId = ''
+  try {
+    const parsed = JSON.parse(content)
+    fileId = parsed.file_id
+  } catch { return }
+  if (!fileId || imageCache.value[fileId]) return // already loaded
+
+  // 1. Check IndexedDB first
+  const cached = await getFromDB(fileId)
+  if (cached) {
+    imageCache.value = { ...imageCache.value, [fileId]: URL.createObjectURL(cached) }
+    return
+  }
+
+  // 2. Fetch from server
+  try {
+    const res = await fetch(`${props.apiBaseUrl}/api/chat/files/${fileId}?token=${props.jwtToken}`)
+    if (!res.ok) return
+    const blob = await res.blob()
+    await saveToDB(fileId, blob)
+    imageCache.value = { ...imageCache.value, [fileId]: URL.createObjectURL(blob) }
+  } catch { /* silently fail */ }
+}
+
+function getFileId(content: string): string {
+  if (!content || !content.startsWith('{')) return ''
+  try { return JSON.parse(content).file_id ?? '' } catch { return '' }
+}
+
+function openCachedImage(fileId: string) {
+  const url = imageCache.value[fileId]
+  if (url) window.open(url, '_blank')
+}
+// === End IndexedDB Caching ===
+
 // Input
 const messageInput = ref('')
 const isSending = ref(false)
@@ -1831,10 +1913,27 @@ defineExpose({ startNewChat })
             
             <!-- Image -->
             <template v-else-if="msg.message_type === 'image'">
-              <a :href="getImageUrl(msg.content)" target="_blank" class="msg-image-link"
-                 :style="{ backgroundImage: getImageThumbnail(msg.content) ? `url(${getImageThumbnail(msg.content)})` : 'none', backgroundSize: 'cover' }">
-                <img :src="getImageUrl(msg.content)" alt="تصویر" class="msg-image" loading="lazy" />
-              </a>
+              <div class="msg-image-link"
+                 :style="{ backgroundImage: getImageThumbnail(msg.content) ? `url(${getImageThumbnail(msg.content)})` : 'none', backgroundSize: 'cover' }"
+                 @click="openCachedImage(getFileId(msg.content))"
+                 style="cursor:pointer">
+                <!-- Trigger cache load when this message is rendered -->
+                <span :key="msg.id" style="display:none" :ref="() => loadImageForMessage(msg.content)"></span>
+                <img
+                  v-if="imageCache[getFileId(msg.content)]"
+                  :src="imageCache[getFileId(msg.content)]"
+                  alt="تصویر"
+                  class="msg-image"
+                />
+                <!-- Thumbnail placeholder while loading -->
+                <div v-else-if="getImageThumbnail(msg.content)" class="msg-image msg-image-placeholder">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style="opacity:0.5"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" fill="currentColor"/></svg>
+                </div>
+                <!-- No thumbnail, just spinner -->
+                <div v-else class="msg-image msg-image-placeholder">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style="opacity:0.5"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" fill="currentColor"/></svg>
+                </div>
+              </div>
             </template>
             
             <!-- Sticker -->
@@ -2629,6 +2728,17 @@ defineExpose({ startNewChat })
 
 .msg-image:hover {
   opacity: 0.9;
+}
+
+.msg-image-placeholder {
+  min-width: 120px;
+  min-height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.08);
+  border-radius: 8px;
+  color: #888;
 }
 
 .msg-sticker {

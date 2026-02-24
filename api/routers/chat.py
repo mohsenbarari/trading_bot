@@ -26,7 +26,6 @@ from models.conversation import Conversation
 from models.user import User
 from models.chat_file import ChatFile
 from api.deps import get_current_user
-import aioboto3
 
 from core.utils import publish_user_event
 
@@ -632,7 +631,7 @@ async def upload_chat_image(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """آپلود تصویر برای چت (در S3 و دیتابیس)"""
+    """آپلود تصویر برای چت (ذخیره روی دیسک سرور)"""
     allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
     if file.content_type not in allowed_types:
         raise HTTPException(status_code=400, detail="Only images are allowed")
@@ -643,47 +642,28 @@ async def upload_chat_image(
     if mime not in allowed_types:
         raise HTTPException(status_code=400, detail=f"Invalid file content. Real type is {mime}")
     
-    # بررسی سایز (حداکثر 5MB)
+    # بررسی سایز (حداکثر 10MB)
     size = len(contents)
-    if size > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large (max 5MB)")
-    
-    # آیا تنظیمات S3 وجود دارد؟
-    if not settings.s3_endpoint_url or not settings.s3_access_key or not settings.s3_secret_key:
-        raise HTTPException(status_code=500, detail="S3 configuration is missing")
+    if size > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
         
-    ext = file.filename.split(".")[-1] if "." in file.filename else mime.split("/")[-1]
+    ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else mime.split("/")[-1]
     file_uuid = str(uuid.uuid4())
-    s3_key = f"chat_images/{current_user.id}/{file_uuid}.{ext}"
     
-    # آپلود فایل در S3
-    session = aioboto3.Session()
-    async with session.client(
-        's3',
-        endpoint_url=settings.s3_endpoint_url,
-        aws_access_key_id=settings.s3_access_key,
-        aws_secret_access_key=settings.s3_secret_key,
-    ) as s3_client:
-        try:
-            # ایجاد باکت اگر نباشد (در پارس‌پک ممکنه با خطا مواجه شه اگر دسترسی نداشته باشیم اما تلاش میکنیم)
-            bucket = settings.s3_bucket_name or "tradingbot-chat-files"
-            # نیازی به create_bucket معمولا نیست چون از قبل ساخته شده
+    # ذخیره در پوشه محلی سرور (نه S3)
+    # فضای مخفی - مسیر واقعی هرگز به کاربر نمایش داده نمی‌شود
+    upload_dir = os.path.join("uploads", "chat_files", str(current_user.id))
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    file_path = os.path.join(upload_dir, f"{file_uuid}.{ext}")
+    async with aiofiles.open(file_path, "wb") as f:
+        await f.write(contents)
             
-            await s3_client.put_object(
-                Bucket=bucket,
-                Key=s3_key,
-                Body=contents,
-                ContentType=mime,
-                ACL='private' # فایل‌ها پابلیک نباشند
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to upload to S3: {str(e)}")
-            
-    # ذخیره در دیتابیس
+    # ذخیره در دیتابیس (s3_key = مسیر نسبی فایل روی دیسک)
     chat_file = ChatFile(
         id=file_uuid,
         uploader_id=current_user.id,
-        s3_key=s3_key,
+        s3_key=file_path,  # در اینجا مسیر فایل ذخیره می‌شود
         file_name=file.filename,
         mime_type=mime,
         size=size,
@@ -702,10 +682,9 @@ async def upload_chat_image(
 async def get_chat_file(
     file_id: str,
     db: AsyncSession = Depends(get_db),
-    # Use Query parameter for img src access
     token: str = Query(None)
 ):
-    """دریافت فایل چت (هدایت به لینک امضاشده S3)"""
+    """دریافت امن فایل چت (استریمینگ از دیسک - مسیر واقعی مخفی است)"""
     if not token:
         raise HTTPException(status_code=401, detail="Token is missing")
     
@@ -714,35 +693,22 @@ async def get_chat_file(
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    # 1. پیداکردن رکورد
+    # پیداکردن رکورد در دیتابیس
     chat_file = await db.get(ChatFile, file_id)
     if not chat_file:
         raise HTTPException(status_code=404, detail="File not found")
-        
-    # در اینجا می‌توانیم بررسی کنیم که آیا کاربر دسترسی دارد یا خیر
-    # 예를들면 آیا در مکالمه‌ای که این فایل ارسال شده عضو است؟ 
-    # به عنوان حداقل امنیت، چک می‌کنیم فقط توکن معتبر باشد.
     
-    # 2. ساخت Presigned URL
-    session = aioboto3.Session()
-    async with session.client(
-        's3',
-        endpoint_url=settings.s3_endpoint_url,
-        aws_access_key_id=settings.s3_access_key,
-        aws_secret_access_key=settings.s3_secret_key,
-    ) as s3_client:
-        try:
-            url = await s3_client.generate_presigned_url(
-                'get_object',
-                Params={
-                    'Bucket': settings.s3_bucket_name or "tradingbot-chat-files",
-                    'Key': chat_file.s3_key
-                },
-                ExpiresIn=3600 # اعتبار یک ساعته
-            )
-            # Redirect to the S3 URL
-            from fastapi.responses import RedirectResponse
-            return RedirectResponse(url=url)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to generate S3 URL: {str(e)}")
+    # بررسی وجود فایل روی دیسک
+    file_path = chat_file.s3_key  # s3_key حالا مسیر فایل محلی است
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    
+    # ارسال مستقیم فایل از دیسک (مسیر واقعی هرگز نمایش داده نمی‌شود)
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        path=file_path,
+        media_type=chat_file.mime_type,
+        filename=chat_file.file_name or f"{file_id}"
+    )
+
 

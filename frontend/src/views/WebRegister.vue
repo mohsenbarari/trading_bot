@@ -99,8 +99,8 @@ async function submitRegistration() {
     localStorage.setItem('auth_token', data.access_token);
     localStorage.setItem('refresh_token', data.refresh_token);
     
-    // Redirect to Dashboard
-    router.replace('/dashboard');
+    // Redirect to Home
+    router.replace('/');
     
   } catch (e: any) {
     error.value = e.message;

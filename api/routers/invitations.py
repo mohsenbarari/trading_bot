@@ -125,7 +125,7 @@ async def create_invitation(
         mobile=mobile,
         account_name=invite.account_name,
         bot_link=bot_link,
-        web_link=web_link
+        web_link=short_link
     )
     
     return {

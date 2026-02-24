@@ -6,7 +6,7 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from typing import Optional
 import re
-from fastapi import HTTPException, BackgroundTasks
+from fastapi import HTTPException
 from core.db import AsyncSessionLocal
 from models.user import User
 from core.enums import UserRole
@@ -208,16 +208,15 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
 
     async with AsyncSessionLocal() as db:
         try:
-            code = await create_invitation(
-                invitation=invitation_data,
-                current_user=user,
+            result = await create_invitation(
+                invite=invitation_data,
                 db=db,
-                background_tasks=BackgroundTasks()
+                admin=user
             )
             
             bot_user = await bot.get_me()
             bot_username = bot_user.username
-            invite_link = f"https://t.me/{bot_username}?start={code.token}" 
+            invite_link = f"https://t.me/{bot_username}?start={result['token']}" 
 
             invite_msg = await callback.message.answer(
                 f"✅ لینک دعوت با موفقیت برای نقش **{role.value}** ایجاد شد:\n\n"
