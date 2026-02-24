@@ -167,6 +167,16 @@ function openCachedImage(fileId: string) {
 }
 // === End IndexedDB Caching ===
 
+// Preload images whenever messages change
+watch(messages, (newMsgs) => {
+  newMsgs.forEach(msg => {
+    if (msg.message_type === 'image') {
+      loadImageForMessage(msg.content)
+    }
+  })
+}, { deep: false })
+
+
 // Input
 const messageInput = ref('')
 const isSending = ref(false)
@@ -1917,8 +1927,6 @@ defineExpose({ startNewChat })
                  :style="{ backgroundImage: getImageThumbnail(msg.content) ? `url(${getImageThumbnail(msg.content)})` : 'none', backgroundSize: 'cover' }"
                  @click="openCachedImage(getFileId(msg.content))"
                  style="cursor:pointer">
-                <!-- Trigger cache load when this message is rendered -->
-                <span :key="msg.id" style="display:none" :ref="() => loadImageForMessage(msg.content)"></span>
                 <img
                   v-if="imageCache[getFileId(msg.content)]"
                   :src="imageCache[getFileId(msg.content)]"
