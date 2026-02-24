@@ -3,7 +3,7 @@
 API endpoints for in-app messaging system
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, update, func
@@ -16,6 +16,7 @@ import uuid
 import asyncio
 import aiofiles
 import magic
+from jose import jwt, JWTError
 
 from core.db import get_db
 from core.enums import MessageType
@@ -33,8 +34,7 @@ class TypingSignal(BaseModel):
     receiver_id: int
 
 router = APIRouter(
-    tags=["Chat"],
-    dependencies=[Depends(get_current_user)]
+    tags=["Chat"]
 )
 
 
@@ -702,18 +702,26 @@ async def upload_chat_image(
 async def get_chat_file(
     file_id: str,
     db: AsyncSession = Depends(get_db),
-    # Optional authentication for flexible loading, but typically required
-    current_user: User = Depends(get_current_user)
+    # Use Query parameter for img src access
+    token: str = Query(None)
 ):
     """دریافت فایل چت (هدایت به لینک امضاشده S3)"""
+    if not token:
+        raise HTTPException(status_code=401, detail="Token is missing")
+    
+    try:
+        jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
     # 1. پیداکردن رکورد
     chat_file = await db.get(ChatFile, file_id)
     if not chat_file:
         raise HTTPException(status_code=404, detail="File not found")
         
     # در اینجا می‌توانیم بررسی کنیم که آیا کاربر دسترسی دارد یا خیر
-    # مثلاً آیا در مکالمه‌ای که این فایل ارسال شده عضو است؟ 
-    # به عنوان حداقل امنیت، چک می‌کنیم فقط لاگین باشد.
+    # 예를들면 آیا در مکالمه‌ای که این فایل ارسال شده عضو است؟ 
+    # به عنوان حداقل امنیت، چک می‌کنیم فقط توکن معتبر باشد.
     
     # 2. ساخت Presigned URL
     session = aioboto3.Session()

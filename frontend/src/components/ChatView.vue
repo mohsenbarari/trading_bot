@@ -1328,7 +1328,7 @@ function getImageUrl(path: string) {
     try {
       const parsed = JSON.parse(path)
       if (parsed.file_id) {
-        return `${props.apiBaseUrl}/api/chat/files/${parsed.file_id}`
+        return `${props.apiBaseUrl}/api/chat/files/${parsed.file_id}?token=${props.jwtToken}`
       }
     } catch (e) {
       // Ignore parse error
