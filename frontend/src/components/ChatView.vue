@@ -700,7 +700,6 @@ async function handleMediaUploadWrapper(file: File) {
     optimisticMsg.is_error = true;
   } finally {
     isUploading.value = false
-    if (input) input.value = ''
     // Remove the optimistic message so the real one from WebSocket takes its place
     // Or if error, keep it so user sees the error
     if (!optimisticMsg.is_error) {
@@ -1834,7 +1833,7 @@ defineExpose({ startNewChat })
       @back="goBack"
       @view-profile="viewProfile"
       @toggle-search="toggleSearch"
-      @search="(val) => { searchQuery = val; performSearch(); }"
+      @search="(val: string) => { searchQuery = val; performSearch(); }"
       @result-click="handleSearchResultClick"
       @call="handleCall"
       @clear-selection="clearSelection"
@@ -1926,7 +1925,7 @@ defineExpose({ startNewChat })
               @swipe-reply="handleReply"
               @select="toggleSelection(msg.id)"
               @click-message="handleMessageClick"
-              @context-menu="openContextMenu"
+              @context-menu="showContextMenu"
               @scroll-to="scrollToMessage"
               @media-click="handleMediaClick"
               @download="downloadMedia"
@@ -1963,7 +1962,7 @@ defineExpose({ startNewChat })
         @copy-selected="handleCopySelected"
         @forward-selected="openForwardModal"
         @upload-media="handleMediaUploadWrapper"
-        @send-text="(text) => { messageInput = text; sendMessage(); }"
+        @send-text="(text: string) => { messageInput = text; sendMessage(); }"
         @send-sticker="sendSticker"
         @typing="handleTypingWrapper"
       />
