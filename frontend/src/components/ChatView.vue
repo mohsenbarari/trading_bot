@@ -471,7 +471,7 @@ async function markAsRead() {
 
 // Send message
 // Send message
-async function sendMediaMessage(type: 'image' | 'sticker', content: string) {
+async function sendMediaMessage(type: 'image' | 'video' | 'sticker', content: string, localBlobUrl?: string) {
   if (!selectedUserId.value) return
   
   isSending.value = true
@@ -484,6 +484,9 @@ async function sendMediaMessage(type: 'image' | 'sticker', content: string) {
         message_type: type
       })
     })
+    if (localBlobUrl) {
+      newMsg.local_blob_url = localBlobUrl
+    }
     messages.value.push(newMsg)
     showStickerPicker.value = false
     scrollToBottom()
@@ -587,6 +590,9 @@ async function handleImageUpload(event: Event) {
   }
   messages.value.push(optimisticMsg)
   
+  // Create a reactive reference for progress update
+  const getOptimisticTarget = () => messages.value.find(m => m.id === optimisticId) || optimisticMsg;
+  
   // Auto-scroll to show the uploading item
   await nextTick()
   scrollToBottom()
@@ -642,7 +648,8 @@ async function handleImageUpload(event: Event) {
       
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
-          optimisticMsg.upload_progress = Math.round((e.loaded / e.total) * 100)
+          const target = getOptimisticTarget();
+          target.upload_progress = Math.round((e.loaded / e.total) * 100)
         }
       }
       
@@ -684,7 +691,7 @@ async function handleImageUpload(event: Event) {
     imageCache.value = { ...imageCache.value, [data.file_id]: localUrl }
     
     step = 'send_ws_message'
-    await sendMediaMessage(isVideo ? 'video' : 'image', messageContent)
+    await sendMediaMessage(isVideo ? 'video' : 'image', messageContent, localUrl)
     
   } catch (e: any) {
     console.error(`Upload error at step [${step}]:`, e);
@@ -2087,8 +2094,21 @@ defineExpose({ startNewChat })
                    @click="handleMediaClick(msg)"
                    style="cursor:pointer; position:relative;">
                 
-                <!-- 1. Downloaded or Local Render -->
-                <template v-if="imageCache[getFileId(msg.content)] || msg.local_blob_url">
+                <!-- 1. Uploading State -->
+                <template v-if="msg.is_sending && msg.upload_progress !== undefined">
+                  <div class="msg-media-content msg-media-overlay">
+                    <div class="progress-container">
+                      <svg class="progress-ring" viewBox="0 0 36 36">
+                        <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
+                        <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.upload_progress}, 100`"></circle>
+                      </svg>
+                      <span class="progress-text">{{ msg.upload_progress }}%</span>
+                    </div>
+                  </div>
+                </template>
+                
+                <!-- 2. Downloaded or Local Render -->
+                <template v-else-if="imageCache[getFileId(msg.content)] || msg.local_blob_url">
                   <img v-if="msg.message_type === 'image'"
                        :src="msg.local_blob_url || imageCache[getFileId(msg.content)]"
                        alt="تصویر" class="msg-media-content" />
@@ -2099,19 +2119,6 @@ defineExpose({ startNewChat })
                     <!-- Mini play indicator -->
                     <div class="video-play-indicator">
                       <svg viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M8 5v14l11-7z"/></svg>
-                    </div>
-                  </div>
-                </template>
-                
-                <!-- 2. Uploading State -->
-                <template v-else-if="msg.is_sending && msg.upload_progress !== undefined">
-                  <div class="msg-media-content msg-media-overlay">
-                    <div class="progress-container">
-                      <svg class="progress-ring" viewBox="0 0 36 36">
-                        <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
-                        <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.upload_progress}, 100`"></circle>
-                      </svg>
-                      <span class="progress-text">{{ msg.upload_progress }}%</span>
                     </div>
                   </div>
                 </template>
