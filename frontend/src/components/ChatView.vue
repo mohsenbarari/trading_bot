@@ -647,6 +647,10 @@ async function handleImageUpload(event: Event) {
       }
       
       xhr.onload = () => {
+        if (xhr.status === 401) {
+          reject(new Error("نشست شما منقضی شده است. لطفاً صفحه را رفرش کنید."))
+          return
+        }
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             resolve(JSON.parse(xhr.responseText))
@@ -654,6 +658,13 @@ async function handleImageUpload(event: Event) {
             reject(new Error("Invalid JSON response"))
           }
         } else {
+          try {
+            const parsed = JSON.parse(xhr.responseText)
+            if (parsed.detail) {
+              reject(new Error(`مشکل سرور (${xhr.status}): ${parsed.detail}`))
+              return
+            }
+          } catch (e) {}
           reject(new Error(`مشکل سرور (${xhr.status}): ${xhr.responseText.substring(0, 100)}`))
         }
       }
