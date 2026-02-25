@@ -57,6 +57,7 @@ Iran is identical but **no bot service**. Nginx proxies `/api/` → backend, `/`
 ### Blocks (`/api/blocks`): block/unblock/check/search
 ### Realtime (`/api/realtime`): WebSocket + SSE via Redis pub/sub
 ### Sync (`/api/sync/receive`): HMAC-signed cross-server sync
+### Sync Resync (`/api/sync/resync`): POST, Dev API Key, pushes unsynced change_log entries (params: limit, table_filter)
 ### Config (`/api/config`): Public bot_username + frontend_url
 
 ## Bot Handlers
@@ -157,3 +158,5 @@ make status      # Container status
 5. **Token expiry mismatch**: Access 60min, refresh 30 days — keep consistent
 6. **OTP not deleted after verify**: Must delete Redis OTP key after successful verification
 7. **SMS too long**: Keep invitation SMS under 3 UCS-2 segments (~161 chars)
+8. **Admin user list showing only active users**: GET /api/users defaults `include_deleted=True` so admins see all users. Bot also shows all users with 🗑 icon for deleted ones. Frontend shows deleted users with "حذف شده" badge.
+9. **Sync data not reaching other server**: change_log entries created by events outside SQLAlchemy (direct SQL, scripts) have no sync entries. Use `POST /api/sync/resync` endpoint (Dev API Key required) to push unsynced change_log entries in batches of 50. Real-time sync via events.py works for normal app operations.
