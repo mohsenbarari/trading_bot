@@ -441,22 +441,33 @@ async def resync_from_changelog(
 
     processed = 0
     errors = 0
-    
-    async with httpx_mod.AsyncClient(timeout=10.0, verify=False) as client:
-        for entry in entries:
-            try:
-                data = json.loads(entry.data) if isinstance(entry.data, str) else entry.data
-                payload = {
-                    "type": "db_change",
-                    "operation": entry.operation,
-                    "table": entry.table_name,
-                    "id": entry.record_id,
-                    "data": data,
-                    "hash": entry.hash,
-                    "timestamp": entry.timestamp.timestamp() if entry.timestamp else time.time()
-                }
+    batch_size = 50  # Send items in batches for efficiency
 
-                items = [payload]
+    async with httpx_mod.AsyncClient(timeout=30.0, verify=False) as client:
+        # Group entries into batches
+        for i in range(0, len(entries), batch_size):
+            batch = entries[i:i + batch_size]
+            items = []
+            for entry in batch:
+                try:
+                    data = json.loads(entry.data) if isinstance(entry.data, str) else entry.data
+                    items.append({
+                        "type": "db_change",
+                        "operation": entry.operation,
+                        "table": entry.table_name,
+                        "id": entry.record_id,
+                        "data": data,
+                        "hash": entry.hash,
+                        "timestamp": entry.timestamp.timestamp() if entry.timestamp else time.time()
+                    })
+                except Exception as e:
+                    logger.error(f"Resync parse error for {entry.table_name}:{entry.record_id}: {e}")
+                    errors += 1
+
+            if not items:
+                continue
+
+            try:
                 json_body = json.dumps(items, sort_keys=True, default=str)
                 ts = int(time.time())
                 message = f"{ts}:{json_body}"
@@ -474,15 +485,16 @@ async def resync_from_changelog(
                 )
 
                 if response.status_code == 200:
-                    entry.synced = True
-                    processed += 1
+                    for entry in batch:
+                        entry.synced = True
+                    processed += len(batch)
                 else:
-                    logger.warning(f"Resync failed for {entry.table_name}:{entry.record_id}: {response.status_code}")
-                    errors += 1
+                    logger.warning(f"Resync batch failed: {response.status_code} - {response.text[:200]}")
+                    errors += len(batch)
 
             except Exception as e:
-                logger.error(f"Resync error for {entry.table_name}:{entry.record_id}: {e}")
-                errors += 1
+                logger.error(f"Resync batch error: {e}")
+                errors += len(batch)
 
     await db.commit()
     return {"status": "ok", "processed": processed, "errors": errors, "total_entries": len(entries)}
