@@ -70,7 +70,7 @@
           ref="imageInput" 
           accept="image/*,video/*" 
           style="display: none" 
-          @change="(e) => $emit('upload-media', e)"
+          @change="handleFileUpload"
         />
         <button v-ripple class="attach-btn" @click="imageInput?.click()" :disabled="isUploading">
           <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -158,7 +158,7 @@ const emit = defineEmits<{
   (e: 'reply-selected'): void
   (e: 'copy-selected'): void
   (e: 'forward-selected'): void
-  (e: 'upload-media', event: Event): void
+  (e: 'upload-media', file: File): void
   (e: 'send-text', content: string): void
   (e: 'send-sticker', sticker: string): void
   (e: 'typing'): void
@@ -179,6 +179,14 @@ const adjustTextareaHeight = () => {
   el.style.height = '1px'
   el.style.height = Math.min(el.scrollHeight, 200) + 'px'
   emit('typing')
+}
+
+const handleFileUpload = (e: Event) => {
+  const target = e.target as HTMLInputElement
+  if (target.files && target.files.length > 0) {
+    emit('upload-media', target.files[0])
+    target.value = '' // Clear input so the same file can be selected again
+  }
 }
 
 const handleEnter = (e: KeyboardEvent) => {

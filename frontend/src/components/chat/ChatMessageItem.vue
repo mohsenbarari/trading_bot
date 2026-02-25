@@ -328,8 +328,8 @@ function getImageThumbnail(content: string) {
       return data.thumbnail || ''
   } catch {
       const parts = content.split('::')
-      if (parts.length > 1) {
-          const base64Data = parts[1]
+      const base64Data = parts[1]
+      if (base64Data) {
           if (base64Data.startsWith('data:image')) return base64Data
           return `data:image/jpeg;base64,${base64Data}`
       }
