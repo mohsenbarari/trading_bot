@@ -282,7 +282,7 @@ onUnmounted(() => {
 });
 
 async function saveRole() {
-  if (!props.apiBaseUrl || !props.jwtToken) return;
+  if (!props.jwtToken) return;
   isLoading.value = true;
   try {
     const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
@@ -306,7 +306,7 @@ async function saveRole() {
 }
 
 async function toggleBotAccess() {
-  if (!props.apiBaseUrl || !props.jwtToken) return;
+  if (!props.jwtToken) return;
   if (!confirm(`آیا از ${hasBotAccess.value ? 'غیرفعال' : 'فعال'} کردن دسترسی بات اطمینان دارید؟`)) return;
   
   isLoading.value = true;
@@ -333,7 +333,7 @@ async function toggleBotAccess() {
 }
 
 async function blockUser(minutes: number) {
-  if (!props.apiBaseUrl || !props.jwtToken) return;
+  if (!props.jwtToken) return;
 
   if (minutes === -1) {
       customDate.value = ''; // Reset custom date
@@ -440,7 +440,7 @@ async function sendBlockRequest(restrictedUntil: string) {
 }
 
 async function saveLimitations() {
-    if (!props.apiBaseUrl || !props.jwtToken) return;
+    if (!props.jwtToken) return;
     isLoading.value = true;
     try {
         let expireAt = null;
@@ -508,7 +508,7 @@ function openLimitationsModal() {
 
 async function unblockUser() {
   if (!confirm('آیا از رفع مسدودیت اطمینان دارید؟')) return;
-  if (!props.apiBaseUrl || !props.jwtToken) return;
+  if (!props.jwtToken) return;
   isLoading.value = true;
   try {
     const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
@@ -541,7 +541,7 @@ const hasLimitations = computed(() => {
 
 async function removeLimitations() {
   if (!confirm('آیا از رفع محدودیت‌ها اطمینان دارید؟')) return;
-  if (!props.apiBaseUrl || !props.jwtToken) return;
+  if (!props.jwtToken) return;
   isLoading.value = true;
   try {
     const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
@@ -571,7 +571,7 @@ async function removeLimitations() {
 
 async function deleteUser() {
   if (!confirm('آیا از حذف این کاربر اطمینان دارید؟')) return;
-  if (!props.apiBaseUrl || !props.jwtToken) return;
+  if (!props.jwtToken) return;
   isLoading.value = true;
   try {
     const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
