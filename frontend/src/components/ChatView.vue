@@ -171,8 +171,6 @@ function openCachedImage(fileId: string) {
 }
 // === End IndexedDB Caching ===
 
-// === End IndexedDB Caching ===
-
 // Handle manual media download
 async function downloadMedia(msg: Message) {
   const fileId = getFileId(msg.content);
@@ -470,7 +468,6 @@ async function markAsRead() {
 }
 
 // Send message
-// Send message
 async function sendMediaMessage(type: 'image' | 'video' | 'sticker', content: string, localBlobUrl?: string) {
   if (!selectedUserId.value) return
   
@@ -633,7 +630,8 @@ async function handleImageUpload(event: Event) {
     }
     
     // Update optimistic message with actual thumbnail so it blanks the background
-    optimisticMsg.content = JSON.stringify({ thumbnail: thumbBase64 })
+    const targetMsg = getOptimisticTarget();
+    targetMsg.content = JSON.stringify({ thumbnail: thumbBase64 })
   
     step = 'prepare_form'
     const formData = new FormData()
@@ -724,7 +722,6 @@ function sendSticker(stickerId: string) {
   sendMediaMessage('sticker', stickerId)
 }
 
-// Poll for new messages
 // Poll for new messages
 async function poll() {
   // Always update conversation list to show new unread counts/chats
@@ -2415,10 +2412,11 @@ defineExpose({ startNewChat })
           </div>
         </div>
       </Transition>
+
     </Teleport>
 
     </template>
-  </div>
+    </div>
 </template>
 
 <style scoped>
