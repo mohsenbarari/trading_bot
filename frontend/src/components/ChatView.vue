@@ -176,18 +176,19 @@ async function downloadMedia(msg: Message) {
   const fileId = getFileId(msg.content);
   if (!fileId) return;
   
-  msg.is_downloading = true;
-  msg.download_progress = 0;
+  // Get reactive proxy of the message
+  const targetMsg = messages.value.find(m => m.id === msg.id) || msg;
+  targetMsg.is_downloading = true;
+  targetMsg.download_progress = 0;
   
   try {
     const res = await fetch(`${props.apiBaseUrl}/api/chat/files/${fileId}?token=${props.jwtToken}`);
-    if (!res.ok) throw new Error("Failed to download media");
+    if (!res.ok) throw new Error("Download failed");
     
-    // Track download progress using ReadableStream
+    const contentType = res.headers.get('content-type') || 'application/octet-stream';
     const contentLength = res.headers.get('content-length');
     const total = contentLength ? parseInt(contentLength, 10) : 0;
     
-    // We only track progress if we know the total size
     if (!total || !res.body) {
       const blob = await res.blob();
       await saveToDB(fileId, blob);
@@ -205,18 +206,22 @@ async function downloadMedia(msg: Message) {
       if (value) {
         chunks.push(value);
         received += value.length;
-        msg.download_progress = Math.round((received / total) * 100);
+        targetMsg.download_progress = Math.round((received / total) * 100);
       }
     }
     
-    const blob = new Blob(chunks, { type: res.headers.get('content-type') || 'application/octet-stream' });
-    await saveToDB(fileId, blob);
-    imageCache.value = { ...imageCache.value, [fileId]: URL.createObjectURL(blob) };
+    const combinedBlob = new Blob(chunks, { type: contentType });
+    await saveToDB(fileId, combinedBlob);
+    
+    // Update cache with the new blob URL
+    const newUrl = URL.createObjectURL(combinedBlob);
+    imageCache.value = { ...imageCache.value, [fileId]: newUrl };
+    
   } catch (e) {
     console.error("Download failed:", e);
     alert("خطا در دانلود فایل");
   } finally {
-    msg.is_downloading = false;
+    targetMsg.is_downloading = false;
   }
 }
 
