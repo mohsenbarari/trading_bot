@@ -36,9 +36,13 @@ interface Message {
   sender_id: number
   receiver_id: number
   content: string
-  message_type: 'text' | 'image' | 'sticker'
+  message_type: 'text' | 'image' | 'video' | 'sticker'
   is_read: boolean
   is_sending?: boolean
+  upload_progress?: number
+  download_progress?: number
+  is_downloading?: boolean
+  local_blob_url?: string
   is_error?: boolean
   is_deleted?: boolean
   updated_at?: string
@@ -167,15 +171,76 @@ function openCachedImage(fileId: string) {
 }
 // === End IndexedDB Caching ===
 
-// Preload images whenever messages change
-watch(messages, (newMsgs) => {
-  newMsgs.forEach(msg => {
-    if (msg.message_type === 'image') {
-      loadImageForMessage(msg.content)
-    }
-  })
-}, { deep: false })
+// === End IndexedDB Caching ===
 
+// Handle manual media download
+async function downloadMedia(msg: Message) {
+  const fileId = getFileId(msg.content);
+  if (!fileId) return;
+  
+  msg.is_downloading = true;
+  msg.download_progress = 0;
+  
+  try {
+    const res = await fetch(`${props.apiBaseUrl}/api/chat/files/${fileId}?token=${props.jwtToken}`);
+    if (!res.ok) throw new Error("Failed to download media");
+    
+    // Track download progress using ReadableStream
+    const contentLength = res.headers.get('content-length');
+    const total = contentLength ? parseInt(contentLength, 10) : 0;
+    
+    // We only track progress if we know the total size
+    if (!total || !res.body) {
+      const blob = await res.blob();
+      await saveToDB(fileId, blob);
+      imageCache.value = { ...imageCache.value, [fileId]: URL.createObjectURL(blob) };
+      return;
+    }
+    
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        chunks.push(value);
+        received += value.length;
+        msg.download_progress = Math.round((received / total) * 100);
+      }
+    }
+    
+    const blob = new Blob(chunks, { type: res.headers.get('content-type') || 'application/octet-stream' });
+    await saveToDB(fileId, blob);
+    imageCache.value = { ...imageCache.value, [fileId]: URL.createObjectURL(blob) };
+  } catch (e) {
+    console.error("Download failed:", e);
+    alert("خطا در دانلود فایل");
+  } finally {
+    msg.is_downloading = false;
+  }
+}
+
+// Lightbox State
+const lightboxMedia = ref<{ url: string, type: 'image'|'video' } | null>(null);
+
+function handleMediaClick(msg: Message) {
+  const fileId = getFileId(msg.content);
+  const cacheUrl = imageCache.value[fileId];
+  const url = msg.local_blob_url || cacheUrl;
+  
+  if (url) {
+    lightboxMedia.value = { 
+      url, 
+      type: msg.message_type === 'video' ? 'video' : 'image' 
+    };
+  }
+}
+
+function closeLightbox() {
+  lightboxMedia.value = null;
+}
 
 // Input
 const messageInput = ref('')
@@ -457,7 +522,41 @@ function startNewChat(userId: number, userName: string) {
   })
 }
 
-// Upload image
+// Generate tiny base64 thumbnail for videos locally
+async function generateVideoThumbnail(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video')
+    video.preload = 'metadata'
+    video.src = URL.createObjectURL(file)
+    video.muted = true
+    video.playsInline = true
+    
+    // Once metadata is loaded, seek to 0.1 seconds
+    video.onloadeddata = () => {
+      video.currentTime = 0.1
+    }
+    
+    // Once seeked, draw to canvas
+    video.onseeked = () => {
+      const canvas = document.createElement('canvas')
+      const targetSize = 20 // ultra-low res for blurred preview
+      const scale = Math.min(targetSize / (video.videoWidth || 1), targetSize / (video.videoHeight || 1))
+      canvas.width = Math.max(1, (video.videoWidth || 1) * scale)
+      canvas.height = Math.max(1, (video.videoHeight || 1) * scale)
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+        resolve(canvas.toDataURL('image/jpeg', 0.5))
+      } else {
+        resolve('')
+      }
+      URL.revokeObjectURL(video.src)
+    }
+    video.onerror = (e) => reject(e)
+  })
+}
+
+// Upload image or video
 async function handleImageUpload(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files?.length) return
@@ -465,63 +564,102 @@ async function handleImageUpload(event: Event) {
   const file = input.files[0]
   if (!file) return
   
+  const isVideo = file.type.startsWith('video/')
+  if (!selectedUserId.value) return
+  
   isUploading.value = true
   let step = 'start'
+  
+  // Create an optimistic message to show immediately in UI
+  const optimisticId = -Date.now()
+  const localUrl = URL.createObjectURL(file)
+  const optimisticMsg: Message = {
+    id: optimisticId,
+    sender_id: props.currentUserId,
+    receiver_id: selectedUserId.value,
+    content: JSON.stringify({ placeholder: true }), // Will be replaced by actual thumbnail
+    message_type: isVideo ? 'video' : 'image',
+    is_read: true,
+    is_sending: true,
+    upload_progress: 0,
+    local_blob_url: localUrl,
+    created_at: new Date().toISOString()
+  }
+  messages.value.push(optimisticMsg)
+  
+  // Auto-scroll to show the uploading item
+  await nextTick()
+  scrollToBottom()
+  
   try {
-    step = 'compress_main'
-    let compressedFile = file;
-    try {
-        const options = {
-          maxSizeMB: 0.5,
-          maxWidthOrHeight: 1280,
-          useWebWorker: false
-        }
-        compressedFile = await imageCompression(file, options)
-    } catch (warn) {
-        console.warn("Compression failed, using original file:", warn)
-    }
-
-    step = 'compress_thumb'
+    let uploadFile = file;
     let thumbBase64 = '';
-    try {
-        const thumbOptions = {
-          maxSizeMB: 0.05,
-          maxWidthOrHeight: 20,
-          useWebWorker: false
-        }
+    
+    if (isVideo) {
+      step = 'video_thumb'
+      try {
+        thumbBase64 = await generateVideoThumbnail(file)
+      } catch (warn) {
+        console.warn("Video thumbnail failed:", warn)
+      }
+    } else {
+      step = 'compress_main'
+      try {
+        const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1280, useWebWorker: false }
+        uploadFile = await imageCompression(file, options)
+      } catch (warn) {
+        console.warn("Image compression failed, using original:", warn)
+      }
+
+      step = 'compress_thumb'
+      try {
+        const thumbOptions = { maxSizeMB: 0.05, maxWidthOrHeight: 20, useWebWorker: false }
         const thumbFile = await imageCompression(file, thumbOptions)
-        
-        step = 'read_base64'
         thumbBase64 = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader()
           reader.onloadend = () => resolve(reader.result as string)
           reader.onerror = (e) => reject(e)
           reader.readAsDataURL(thumbFile)
         })
-    } catch (warn) {
-        console.warn("Thumbnail generation failed:", warn)
+      } catch (warn) {
+        console.warn("Image thumbnail generation failed:", warn)
+      }
     }
+    
+    // Update optimistic message with actual thumbnail so it blanks the background
+    optimisticMsg.content = JSON.stringify({ thumbnail: thumbBase64 })
   
     step = 'prepare_form'
     const formData = new FormData()
-    formData.append('file', compressedFile, file.name)
+    formData.append('file', uploadFile, file.name)
     formData.append('thumbnail', thumbBase64)
     
-    step = 'fetch_api'
-    const res = await fetch(`${props.apiBaseUrl}/api/chat/upload-image`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${props.jwtToken}`
-      },
-      body: formData
+    step = 'xhr_upload'
+    const data = await new Promise<any>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${props.apiBaseUrl}/api/chat/upload-image`)
+      xhr.setRequestHeader('Authorization', `Bearer ${props.jwtToken}`)
+      
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          optimisticMsg.upload_progress = Math.round((e.loaded / e.total) * 100)
+        }
+      }
+      
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText))
+          } catch (err) {
+            reject(new Error("Invalid JSON response"))
+          }
+        } else {
+          reject(new Error(`مشکل سرور (${xhr.status}): ${xhr.responseText.substring(0, 100)}`))
+        }
+      }
+      xhr.onerror = () => reject(new Error("Network Error"))
+      xhr.send(formData)
     })
-    
-    step = 'check_res'
-    if (!res.ok) {
-        const errText = await res.text()
-        throw new Error(`مشکل سرور (${res.status}): ${errText.substring(0, 100)}`)
-    }
-    const data = await res.json()
     
     step = 'prepare_json'
     const messageContent = JSON.stringify({
@@ -529,23 +667,28 @@ async function handleImageUpload(event: Event) {
       thumbnail: data.thumbnail
     })
     
-    // Instantly save the uploaded blob to IndexedDB so we don't fetch it again
     step = 'save_local_cache'
-    await saveToDB(data.file_id, compressedFile)
-    imageCache.value = { ...imageCache.value, [data.file_id]: URL.createObjectURL(compressedFile) }
+    // Instantly cache the local blob so downloading isn't needed
+    await saveToDB(data.file_id, uploadFile)
+    imageCache.value = { ...imageCache.value, [data.file_id]: localUrl }
     
     step = 'send_ws_message'
-    console.log("Sending media message...", messageContent)
-    await sendMediaMessage('image', messageContent)
-    console.log("Media message sent successfully.")
+    await sendMediaMessage(isVideo ? 'video' : 'image', messageContent)
+    
   } catch (e: any) {
     console.error(`Upload error at step [${step}]:`, e);
     const errString = e && e.message ? e.message : JSON.stringify(e);
     error.value = `[${step}] ${errString}`;
-    alert(`خطا در مرحله ${step}: ` + errString);
+    alert(`خطا در آپلود: ` + errString);
+    optimisticMsg.is_error = true;
   } finally {
     isUploading.value = false
     if (input) input.value = ''
+    // Remove the optimistic message so the real one from WebSocket takes its place
+    // Or if error, keep it so user sees the error
+    if (!optimisticMsg.is_error) {
+       messages.value = messages.value.filter(m => m.id !== optimisticId)
+    }
   }
 }
 
@@ -1926,26 +2069,65 @@ defineExpose({ startNewChat })
               <p>{{ msg.content }}</p>
             </template>
             
-            <!-- Image -->
-            <template v-else-if="msg.message_type === 'image'">
-              <div class="msg-image-link"
-                 :style="{ backgroundImage: getImageThumbnail(msg.content) ? `url(${getImageThumbnail(msg.content)})` : 'none', backgroundSize: 'cover' }"
-                 @click="openCachedImage(getFileId(msg.content))"
-                 style="cursor:pointer">
-                <img
-                  v-if="imageCache[getFileId(msg.content)]"
-                  :src="imageCache[getFileId(msg.content)]"
-                  alt="تصویر"
-                  class="msg-image"
-                />
-                <!-- Thumbnail placeholder while loading -->
-                <div v-else-if="getImageThumbnail(msg.content)" class="msg-image msg-image-placeholder">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style="opacity:0.5"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" fill="currentColor"/></svg>
-                </div>
-                <!-- No thumbnail, just spinner -->
-                <div v-else class="msg-image msg-image-placeholder">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style="opacity:0.5"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" fill="currentColor"/></svg>
-                </div>
+            <!-- Media (Image/Video) -->
+            <template v-else-if="msg.message_type === 'image' || msg.message_type === 'video'">
+              <div class="msg-media-link"
+                   :style="{ backgroundImage: getImageThumbnail(msg.content) ? `url(${getImageThumbnail(msg.content)})` : 'none', backgroundSize: 'cover' }"
+                   @click="handleMediaClick(msg)"
+                   style="cursor:pointer; position:relative;">
+                
+                <!-- 1. Downloaded or Local Render -->
+                <template v-if="imageCache[getFileId(msg.content)] || msg.local_blob_url">
+                  <img v-if="msg.message_type === 'image'"
+                       :src="msg.local_blob_url || imageCache[getFileId(msg.content)]"
+                       alt="تصویر" class="msg-media-content" />
+                       
+                  <div v-else-if="msg.message_type === 'video'" class="msg-video-wrapper">
+                    <video :src="msg.local_blob_url || imageCache[getFileId(msg.content)]"
+                           class="msg-media-content" autoplay muted loop playsinline></video>
+                    <!-- Mini play indicator -->
+                    <div class="video-play-indicator">
+                      <svg viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+                    </div>
+                  </div>
+                </template>
+                
+                <!-- 2. Uploading State -->
+                <template v-else-if="msg.is_sending && msg.upload_progress !== undefined">
+                  <div class="msg-media-content msg-media-overlay">
+                    <div class="progress-container">
+                      <svg class="progress-ring" viewBox="0 0 36 36">
+                        <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
+                        <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.upload_progress}, 100`"></circle>
+                      </svg>
+                      <span class="progress-text">{{ msg.upload_progress }}%</span>
+                    </div>
+                  </div>
+                </template>
+                
+                <!-- 3. Needs Download State -->
+                <template v-else>
+                  <div class="msg-media-content msg-media-overlay">
+                    <div v-if="msg.is_downloading" class="progress-container">
+                      <svg class="progress-ring" viewBox="0 0 36 36">
+                        <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
+                        <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.download_progress || 0}, 100`"></circle>
+                      </svg>
+                    </div>
+                    <button v-else class="download-btn" @click.stop="downloadMedia(msg)">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                      </svg>
+                    </button>
+                    <!-- Video duration / type badge placeholder -->
+                    <span v-if="msg.message_type === 'video'" class="media-type-badge">
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="white" style="vertical-align: middle;"><path d="M8 5v14l11-7z"/></svg> 
+                      ویدئو
+                    </span>
+                  </div>
+                </template>
               </div>
             </template>
             
@@ -2064,7 +2246,7 @@ defineExpose({ startNewChat })
             <input 
               type="file" 
               ref="imageInput" 
-              accept="image/*" 
+              accept="image/*,video/*" 
               style="display: none" 
               @change="handleImageUpload"
             />
@@ -2202,6 +2384,19 @@ defineExpose({ startNewChat })
         class="context-overlay"
         @click="closeContextMenu"
       ></div>
+    </Teleport>
+
+    <!-- Lightbox Overlay -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="lightboxMedia" class="lightbox-overlay" @click="closeLightbox">
+          <div class="lightbox-content" @click.stop>
+            <button class="lightbox-close" @click="closeLightbox">✕</button>
+            <img v-if="lightboxMedia.type === 'image'" :src="lightboxMedia.url" />
+            <video v-else-if="lightboxMedia.type === 'video'" :src="lightboxMedia.url" controls autoplay></video>
+          </div>
+        </div>
+      </Transition>
     </Teleport>
 
     </template>
@@ -3503,6 +3698,142 @@ defineExpose({ startNewChat })
 
 .selection-action-btn svg {
   margin-bottom: 2px;
+}
+
+/* Telegram-Style Media UI */
+.msg-media-link {
+  border-radius: 8px;
+  overflow: hidden;
+  display: block;
+  min-width: 150px;
+  min-height: 150px;
+}
+.msg-media-content {
+  width: 100%;
+  height: auto;
+  max-height: 300px;
+  object-fit: cover;
+  display: block;
+}
+.msg-video-wrapper {
+  position: relative;
+}
+.video-play-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0,0,0,0.5);
+  border-radius: 50%;
+  padding: 12px;
+  pointer-events: none;
+}
+.msg-media-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.4);
+  backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.progress-container {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.progress-ring {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.ring-bg {
+  fill: none;
+  stroke: rgba(255,255,255,0.2);
+  stroke-width: 3;
+}
+.ring-fg {
+  fill: none;
+  stroke: white;
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.3s ease;
+}
+.progress-text {
+  color: white;
+  font-size: 11px;
+  font-weight: bold;
+}
+.download-btn {
+  background: rgba(0,0,0,0.5);
+  border: none;
+  border-radius: 50%;
+  color: white;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.download-btn:hover {
+  background: rgba(0,0,0,0.7);
+}
+.media-type-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Lightbox */
+.lightbox-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+.lightbox-content {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+}
+.lightbox-content img, .lightbox-content video {
+  max-width: 100%;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
+.lightbox-close {
+  position: absolute;
+  top: -40px;
+  right: 0;
+  background: none;
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
 }
 
 </style>

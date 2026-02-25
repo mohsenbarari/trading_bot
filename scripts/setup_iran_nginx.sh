@@ -25,6 +25,7 @@ cat > /etc/nginx/sites-available/trading-bot << 'EOF'
 server {
     listen 80;
     server_name coin.gold-trade.ir;
+    client_max_body_size 50M;
 
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;

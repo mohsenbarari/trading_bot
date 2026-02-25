@@ -632,9 +632,12 @@ async def upload_chat_image(
     db: AsyncSession = Depends(get_db)
 ):
     """آپلود تصویر برای چت (ذخیره روی دیسک سرور)"""
-    allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+    allowed_types = [
+        "image/jpeg", "image/png", "image/gif", "image/webp",
+        "video/mp4", "video/webm", "video/quicktime", "video/x-matroska"
+    ]
     if file.content_type not in allowed_types:
-        raise HTTPException(status_code=400, detail="Only images are allowed")
+        raise HTTPException(status_code=400, detail="Only images and videos are allowed")
     
     # بررسی محتوای واقعی فایل با استفاده از Magic bytes
     contents = await file.read()
@@ -642,10 +645,10 @@ async def upload_chat_image(
     if mime not in allowed_types:
         raise HTTPException(status_code=400, detail=f"Invalid file content. Real type is {mime}")
     
-    # بررسی سایز (حداکثر 10MB)
+    # بررسی سایز (حداکثر 50MB)
     size = len(contents)
-    if size > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+    if size > 50 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 50MB)")
         
     ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else mime.split("/")[-1]
     file_uuid = str(uuid.uuid4())
