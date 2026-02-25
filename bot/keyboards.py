@@ -60,6 +60,10 @@ def get_users_list_inline_keyboard(users: list, page: int, total_count: int, lim
         # اگر account_name نداشت، نام کامل یا موبایل را نمایش می‌دهیم
         display_name = user.account_name or user.full_name or user.mobile_number or f"User {user.id}"
         
+        # نمایش علامت حذف‌شده
+        if getattr(user, 'is_deleted', False):
+            display_name = f"🗑 {display_name}"
+        
         user_buttons.append(InlineKeyboardButton(text=display_name, callback_data=f"user_profile_{user.id}"))
     
     # 2. تقسیم دکمه‌ها به ردیف‌های 3 تایی (3 ستونه)

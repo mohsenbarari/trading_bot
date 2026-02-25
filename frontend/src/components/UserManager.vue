@@ -16,6 +16,7 @@ interface User {
   account_name: string;
   role: string;
   mobile_number: string;
+  is_deleted?: boolean;
 }
 
 const users = ref<User[]>([]);
@@ -91,11 +92,14 @@ onMounted(fetchUsers);
       <div v-else class="users-list">
         <div v-if="users.length === 0" class="no-data">کاربری یافت نشد.</div>
         
-        <div v-for="user in users" :key="user.id" class="user-item" @click="selectUser(user)">
+        <div v-for="user in users" :key="user.id" class="user-item" :class="{ deleted: user.is_deleted }" @click="selectUser(user)">
           <div class="user-info">
-            <div class="user-avatar">{{ user.account_name ? user.account_name[0] : '?' }}</div>
+            <div class="user-avatar" :class="{ 'avatar-deleted': user.is_deleted }">{{ user.account_name ? user.account_name[0] : '?' }}</div>
             <div class="user-text">
-              <div class="name">{{ user.account_name }}</div>
+              <div class="name">
+                {{ user.account_name }}
+                <span v-if="user.is_deleted" class="deleted-badge">حذف شده</span>
+              </div>
               <div class="details" dir="ltr">{{ user.mobile_number }}</div>
             </div>
           </div>
@@ -282,6 +286,31 @@ onMounted(fetchUsers);
 .role-badge.پلیس { background: #ede9fe; color: #5b21b6; }
 .role-badge.عادی { background: #d1fae5; color: #065f46; }
 .role-badge.تماشا { background: #f3f4f6; color: #6b7280; }
+
+/* ── Deleted user styling ── */
+.user-item.deleted {
+  opacity: 0.6;
+  background: #fef2f2;
+  border-color: rgba(239, 68, 68, 0.15);
+}
+.user-item.deleted:hover {
+  background: #fee2e2;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.avatar-deleted {
+  background: linear-gradient(135deg, #9ca3af, #6b7280) !important;
+}
+.deleted-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #ef4444;
+  background: #fee2e2;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.3rem;
+  margin-right: 0.3rem;
+  vertical-align: middle;
+}
 
 /* ── Status ── */
 .loading, .error, .no-data { text-align: center; padding: 1.5rem; color: #9ca3af; font-size: 0.85rem; }

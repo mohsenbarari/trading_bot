@@ -73,6 +73,7 @@ class UserRead(UserBase):
     id: int
     role: UserRole
     has_bot_access: bool
+    is_deleted: bool = False
     created_at: datetime
     trading_restricted_until: datetime | None = None
     
