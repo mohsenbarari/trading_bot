@@ -89,10 +89,9 @@ async function createInvite() {
       throw new Error(detail);
     }
 
-    const configResp = await fetch(`${props.apiBaseUrl}/api/config`);
-    const config = await configResp.json();
-    inviteLink.value = `https://t.me/${config.bot_username}?start=${data.token}`;
-    webLink.value = data.short_link || `${config.frontend_url}/register?token=${data.token}`;
+    // Use links directly from API response (no need for /api/config)
+    inviteLink.value = data.link;
+    webLink.value = data.short_link || '';
     resultMessage.value = '✅ لینک دعوت با موفقیت ایجاد شد.';
     
     // emit('invite-created', plainTextMessage); // (حذف شد)

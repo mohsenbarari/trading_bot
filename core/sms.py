@@ -70,13 +70,11 @@ def send_invitation_sms(
     Text encourages Telegram registration as the primary method.
     """
     message = (
-        f"سلام {account_name} عزیز!\n"
-        f"شما به سامانه معاملاتی دعوت شدید.\n"
-        f"\n"
-        f"ثبت‌نام از طریق تلگرام (توصیه شده):\n"
+        f"{account_name} عزیز\n"
+        f"دعوت عضویت سامانه معاملاتی\n"
+        f"تلگرام:\n"
         f"{bot_link}\n"
-        f"\n"
-        f"ثبت‌نام از طریق وب:\n"
+        f"وب:\n"
         f"{web_link}"
     )
     return send_sms(mobile, message)
