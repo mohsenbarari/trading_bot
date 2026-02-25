@@ -18,7 +18,9 @@ const invite = reactive({
 const resultMessage = ref('');
 const isLoading = ref(false);
 const inviteLink = ref('');
+const webLink = ref('');
 const copyMessage = ref('');
+const webCopyMessage = ref('');
 
 function resetForm() {
   invite.account_name = '';
@@ -26,6 +28,7 @@ function resetForm() {
   invite.role = 'عادی';
   resultMessage.value = '';
   inviteLink.value = '';
+  webLink.value = '';
   copyMessage.value = '';
 }
 
@@ -38,6 +41,18 @@ function copyToClipboard() {
   } catch (e) {
     copyMessage.value = 'خطا';
     setTimeout(() => { copyMessage.value = ''; }, 2000);
+  }
+}
+
+function copyWebLink() {
+  if (!webLink.value) return;
+  try {
+    navigator.clipboard.writeText(webLink.value);
+    webCopyMessage.value = 'کپی شد!';
+    setTimeout(() => { webCopyMessage.value = ''; }, 2000);
+  } catch (e) {
+    webCopyMessage.value = 'خطا';
+    setTimeout(() => { webCopyMessage.value = ''; }, 2000);
   }
 }
 
@@ -76,9 +91,8 @@ async function createInvite() {
 
     const configResp = await fetch(`${props.apiBaseUrl}/api/config`);
     const config = await configResp.json();
-    const linkText = `https://t.me/${config.bot_username}?start=${data.token}`;
-    
-    inviteLink.value = linkText;
+    inviteLink.value = `https://t.me/${config.bot_username}?start=${data.token}`;
+    webLink.value = data.short_link || `${config.frontend_url}/register?token=${data.token}`;
     resultMessage.value = '✅ لینک دعوت با موفقیت ایجاد شد.';
     
     // emit('invite-created', plainTextMessage); // (حذف شد)
@@ -138,10 +152,18 @@ function normalizeMobile(mobile: string): string {
 
     <div v-if="inviteLink" class="success-box">
       <div class="result-message">✅ لینک دعوت با موفقیت ایجاد شد:</div>
+      <div class="link-label">🔵 لینک تلگرام:</div>
       <div class="copy-container">
         <input type="text" :value="inviteLink" @click="copyToClipboard" readonly />
         <button type="button" @click="copyToClipboard" class="copy-btn">
           {{ copyMessage ? copyMessage : 'کپی' }}
+        </button>
+      </div>
+      <div v-if="webLink" class="link-label" style="margin-top: 0.75rem;">🌐 لینک وب:</div>
+      <div v-if="webLink" class="copy-container">
+        <input type="text" :value="webLink" @click="copyWebLink" readonly />
+        <button type="button" @click="copyWebLink" class="copy-btn web">
+          {{ webCopyMessage ? webCopyMessage : 'کپی' }}
         </button>
       </div>
     </div>
@@ -221,4 +243,12 @@ input:focus, select:focus {
   border-radius: 0.625rem;
 }
 .copy-container .copy-btn:disabled { background: #d1d5db; }
+.copy-container .copy-btn.web {
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.25);
+}
+.link-label {
+  font-size: 0.78rem; font-weight: 700; color: #374151;
+  margin-bottom: 0.375rem;
+}
 </style>

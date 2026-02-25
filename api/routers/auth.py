@@ -56,6 +56,9 @@ class RegisterComplete(BaseModel):
     token: str
     address: str
 
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
 # --- Endpoints ---
 
 @router.get("/me", response_model=schemas.UserRead)
@@ -112,13 +115,12 @@ async def register_otp_verify(
     if not stored_code or stored_code != req.code:
         raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است")
     
-    # Mark as verified (optional, or just rely on client flow if secure enough)
-    # Ideally we should issue a temporary registration token, but for simplicity
-    # and since we re-validate token in complete step, we can just return OK.
-    # However, to prevent skipping verify step, let's set a flag in Redis
+    # Delete OTP to prevent replay attacks
+    await redis.delete(otp_key)
     
+    # Set verified flag — 10 mins to complete registration
     verify_key = f"reg_verified:{req.token}"
-    await redis.setex(verify_key, 600, "1") # 10 mins to complete registration
+    await redis.setex(verify_key, 600, "1")
     
     return {"detail": "کد تایید شد"}
 
@@ -168,15 +170,81 @@ async def register_complete(
     await redis.delete(f"reg_otp:{req.token}")
     await redis.delete(verify_key)
     
-    # 6. Generate Tokens
-    access_token = create_access_token(new_user.id)
-    refresh_token = create_refresh_token(new_user.id)
+    # 6. Generate Tokens (consistent with verify-otp: 60 min access, 30 day refresh)
+    access_token_expires = timedelta(minutes=60)
+    refresh_token_expires = timedelta(days=30)
+    
+    access_token = create_access_token(
+        subject=new_user.id,
+        expires_delta=access_token_expires
+    )
+    refresh_token = create_refresh_token(
+        subject=new_user.id,
+        expires_delta=refresh_token_expires
+    )
     
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer"
     }
+
+@router.post("/refresh", response_model=Token)
+async def refresh_access_token(
+    req: RefreshTokenRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    تمدید توکن دسترسی با استفاده از refresh token.
+    """
+    from jose import jwt, JWTError
+    
+    try:
+        payload = jwt.decode(
+            req.refresh_token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm]
+        )
+        
+        # Verify it's a refresh token
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=401, detail="توکن نامعتبر است")
+        
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="توکن نامعتبر است")
+        
+        # Find user
+        stmt = select(User).where(User.id == int(user_id))
+        user = (await db.execute(stmt)).scalar_one_or_none()
+        
+        if not user:
+            raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+        
+        if user.is_deleted:
+            raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
+        
+        # Issue new tokens
+        access_token_expires = timedelta(minutes=60)
+        refresh_token_expires = timedelta(days=30)
+        
+        new_access = create_access_token(
+            subject=user.id,
+            expires_delta=access_token_expires
+        )
+        new_refresh = create_refresh_token(
+            subject=user.id,
+            expires_delta=refresh_token_expires
+        )
+        
+        return {
+            "access_token": new_access,
+            "refresh_token": new_refresh,
+            "token_type": "bearer"
+        }
+        
+    except JWTError:
+        raise HTTPException(status_code=401, detail="توکن منقضی یا نامعتبر است")
 
 @router.post("/request-otp", response_model=dict)
 async def request_otp(

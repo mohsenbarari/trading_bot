@@ -49,14 +49,18 @@ export function authGuard(
 }
 
 export function setupExpiryTimer() {
-    setInterval(() => {
+    setInterval(async () => {
         const token = localStorage.getItem('auth_token');
         if (token) {
             const payload = parseJwt(token);
             if (payload && payload.exp) {
                 const now = Math.floor(Date.now() / 1000);
                 if (now >= payload.exp) {
-                    forceLogout();
+                    // Token expired — try to refresh before logging out
+                    const refreshed = await tryRefreshToken();
+                    if (!refreshed) {
+                        forceLogout();
+                    }
                 }
             }
         }
@@ -71,6 +75,29 @@ export function forceLogout() {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('refresh_token');
     window.location.href = '/login';
+}
+
+async function tryRefreshToken(): Promise<boolean> {
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) return false;
+    
+    try {
+        const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+        const res = await fetch(`${baseUrl}/api/auth/refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        
+        if (!res.ok) return false;
+        
+        const data = await res.json();
+        localStorage.setItem('auth_token', data.access_token);
+        localStorage.setItem('refresh_token', data.refresh_token);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 export async function apiFetch(url: string, options: RequestInit = {}) {
@@ -96,6 +123,21 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
     const response = await fetch(fullUrl, config);
 
     if (response.status === 401) {
+        // Try refresh before logging out
+        const refreshed = await tryRefreshToken();
+        if (refreshed) {
+            // Retry original request with new token
+            const newToken = localStorage.getItem('auth_token');
+            if (newToken) {
+                headers['Authorization'] = `Bearer ${newToken}`;
+            }
+            const retryResponse = await fetch(fullUrl, { ...config, headers });
+            if (retryResponse.status === 401) {
+                forceLogout();
+                throw new Error('Unauthorized');
+            }
+            return retryResponse;
+        }
         forceLogout();
         throw new Error('Unauthorized');
     }
