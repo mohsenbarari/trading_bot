@@ -80,6 +80,7 @@ Iran is identical but **no bot service**. Nginx proxies `/api/` → backend, `/`
 
 ### Views: DashboardView, LoginView (OTP), MarketView, MessengerView, ProfileView, AdminView, InviteLanding, WebRegister
 ### Key Components: UserProfile (admin actions), UserManager (user list), CreateInvitationView, CommodityManager, ChatView, OffersList, TradingView, NotificationCenter, TradingSettings
+- **Note on Chat Components**: `ChatView.vue` acts as the data orchestrator (WebSockets, IndexedDB, API polling) and delegates UI rendering to 4 extracted subcomponents: `ChatHeader.vue`, `ChatInputBar.vue`, `ChatMessageItem.vue`, and `ChatContextMenu.vue`. When modifying chat features, ensure state management stays in `ChatView.vue` while UI/gesture logic goes into the respective subcomponent.
 
 ### Auth Flow (`utils/auth.ts`)
 - Tokens in `localStorage`: `auth_token`, `refresh_token`
@@ -135,8 +136,14 @@ Store UTC → display Iran time (Asia/Tehran) + Jalali calendar. Persian numeral
 | connectivity.py | Iran server: checks Telegram API accessibility every 30s |
 | trading_settings.py | Dynamic settings: Redis cache → DB → JSON → defaults |
 
-## File Storage
-Local disk (migrated from S3). Upload via `/api/chat/upload-image`. Files served via `/api/chat/files/{id}?token=`. Frontend caches in IndexedDB.
+## Media & File Storage
+- **Backend Storage**: Local disk (migrated from S3). Max size configured to 50MB in Nginx (`client_max_body_size`) and FastAPI. 
+- **Upload Endpoint**: `/api/chat/upload-media` (Accepts `image/*` and `video/*`).
+- **Download Endpoint**: `/api/chat/files/{id}?token=`
+- **Frontend Uploads**: Uses `XMLHttpRequest` instead of `fetch` to accurately track `upload_progress`.
+- **Frontend Downloads**: Uses `fetch` with `ReadableStream` to track `download_progress`. Media is NOT auto-downloaded on load (saves bandwidth).
+- **Frontend Caching**: Uses `IndexedDB` (`trading_bot_images` store) to cache media blobs locally. A base64 `thumbnail` is shipped with the DB message to show a blurred preview while the full file downloads.
+- **UI Rendering Rule**: Always render `<img>` or `<video>` tags unconditionally using `local_blob_url` or `imageCache` when available. Progress rings should be placed as an absolute overlay *on top* of the media, rather than using `v-else-if` to hide the media tag conditionally (which causes the container to collapse).
 
 ## Deploy Commands
 ```bash

@@ -562,11 +562,7 @@ async function generateVideoThumbnail(file: File): Promise<string> {
 }
 
 // Upload image or video
-async function handleImageUpload(event: Event) {
-  const input = event.target as HTMLInputElement
-  if (!input.files?.length) return
-  
-  const file = input.files[0]
+async function handleMediaUploadWrapper(file: File) {
   if (!file) return
   
   const isVideo = file.type.startsWith('video/')
@@ -1728,9 +1724,9 @@ async function sendTypingSignal() {
     } catch (e) { console.error('Typing signal failed', e); }
 }
 
-watch(messageInput, () => {
+const handleTypingWrapper = () => {
     sendTypingSignal();
-});
+};
 
 function handleTypingEvent(e: Event) {
    const data = (e as CustomEvent).detail;
@@ -1824,125 +1820,25 @@ defineExpose({ startNewChat })
 <template>
   <div class="chat-view">
     <!-- Header - Telegram Style -->
-    <div class="chat-header">
-      <template v-if="!isSelectionMode">
-        <!-- Back Button -->
-      <button class="header-btn back-btn" v-ripple @click="goBack">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M19 12H5M12 19l-7-7 7-7"/>
-        </svg>
-      </button>
-      
-      <!-- Avatar + User Info (when in chat) -->
-      <template v-if="selectedUserId">
-        <div class="header-avatar" @click="viewProfile">{{ selectedUserName.charAt(0) }}</div>
-        <div class="header-user-info" @click="viewProfile">
-          <span class="header-name">{{ selectedUserName }}</span>
-          <span class="header-status" :class="{ 'online': targetUserStatus.includes('آنلاین') || isTyping }">
-            <template v-if="isTyping">
-              در حال نوشتن<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
-            </template>
-            <template v-else>
-              {{ targetUserStatus }}
-            </template>
-          </span>
-        </div>
-      </template>
-      
-      <!-- Title (for conversation list) -->
-      <!-- Title (for conversation list) -->
-      <template v-else>
-        <div v-if="!isSearchActive" class="header-title">
-          پیام‌ها
-          <span v-if="totalUnread > 0" class="badge">{{ totalUnread }}</span>
-        </div>
-      </template>
-      
-      <!-- Search Bar Overlay -->
-      <div v-if="isSearchActive" class="search-bar-container">
-         <input 
-            id="search-input"
-            v-model="searchQuery" 
-            @input="performSearch" 
-            placeholder="جستجو..." 
-            class="header-search-input"
-         />
-         <button class="header-btn" v-ripple @click="toggleSearch">✕</button>
-         
-         <!-- Search Results Dropdown -->
-         <div v-if="searchResults.length > 0" class="search-results-dropdown">
-            <div 
-               v-for="res in searchResults" 
-               :key="res.id" 
-               class="search-result-item"
-               @click="handleSearchResultClick(res)"
-            >
-               <span class="search-res-text">{{ res.content.substring(0, 30) }}...</span>
-               <span class="search-res-date">{{ formatDateForSeparator(res.created_at) }}</span>
-            </div>
-         </div>
-      </div>
-      
-      <!-- Spacer -->
-      <div class="header-spacer"></div>
-      
-      <!-- Action Buttons (only in chat view) -->
-      <!-- Action Buttons -->
-      <template v-if="selectedUserId && !isSearchActive">
-        <button class="header-btn" v-ripple @click="handleCall">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-             <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
-          </svg>
-        </button>
-        <!-- Three-dot Menu -->
-        <div class="header-menu-container" style="position: relative;">
-            <button class="header-btn" v-ripple @click.stop="handleHeaderMenu">
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="1"></circle>
-                <circle cx="12" cy="5" r="1"></circle>
-                <circle cx="12" cy="19" r="1"></circle>
-              </svg>
-            </button>
-            <div v-if="isHeaderMenuOpen" class="header-dropdown-menu" v-click-outside="closeHeaderMenu">
-               <div class="header-menu-item" @click="handleMenuSearch">
-                  <span>جستجو</span>
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                    <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
-                  </svg>
-               </div>
-               <!-- Other placeholder items -->
-               <div class="header-menu-item" @click="closeHeaderMenu">
-                  <span>اطلاعات فرد</span>
-               </div>
-            </div>
-            <!-- Overlay to close menu (simple fallback if click-outside directive missing) -->
-            <div v-if="isHeaderMenuOpen" class="menu-overlay" @click="closeHeaderMenu"></div>
-        </div>
-      </template>
-      <!-- Conversation List Actions -->
-      <template v-else-if="!selectedUserId && !isSearchActive">
-         <button class="header-btn" v-ripple @click="toggleSearch">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
-        </button>
-      </template>
-      </template>
-      <!-- Selection Mode Header -->
-      <template v-else>
-        <!-- Close Selection -->
-        <button class="header-btn" v-ripple @click="clearSelection">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
-        <div class="header-title" style="flex: 1; margin-right: 16px;">
-          {{ selectedMessages.length }}
-        </div>
-      </template>
-    </div>
+    <ChatHeader
+      :isSelectionMode="isSelectionMode"
+      :selectedUserId="selectedUserId"
+      :selectedUserName="selectedUserName"
+      :targetUserStatus="targetUserStatus"
+      :isTyping="isTyping"
+      :totalUnread="totalUnread"
+      :isSearchActive="isSearchActive"
+      :searchQuery="searchQuery"
+      :searchResults="searchResults"
+      :selectedMessagesCount="selectedMessages.length"
+      @back="goBack"
+      @view-profile="viewProfile"
+      @toggle-search="toggleSearch"
+      @search="(val) => { searchQuery = val; performSearch(); }"
+      @result-click="handleSearchResultClick"
+      @call="handleCall"
+      @clear-selection="clearSelection"
+    />
 
     <!-- Loading -->
     <div v-if="isLoading" class="loading-state">
@@ -2018,165 +1914,23 @@ defineExpose({ startNewChat })
               <span @click="scrollToMessage(group.messages[0].id)">{{ group.label }}</span>
             </div>
 
-            <div class="message-wrapper" v-for="(msg, index) in group.messages" :key="msg.id">
-              <div 
-                v-if="swipedMessageId === msg.id" 
-                class="swipe-reply-icon"
-                :class="{ 
-                    'sent-side': msg.sender_id === props.currentUserId, 
-                    'received-side': msg.sender_id !== props.currentUserId,
-                    'visible': Math.abs(touchStartX - touchCurrentX) > 20
-                }"
-              >
-                <div class="reply-icon-wrapper" :style="getIconStyle(msg)">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="9 14 4 9 9 4"></polyline>
-                        <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
-                    </svg>
-                </div>
-              </div>
-              <div 
-                :key="msg.id"
-                :id="'msg-' + msg.id"
-                class="message-bubble"
-                :class="{ 
-                  'sent': msg.sender_id === props.currentUserId, 
-                  'received': msg.sender_id !== props.currentUserId,
-                  'sending': msg.id < 0 || msg.is_sending,
-                  'error': msg.is_error,
-                  'selected-message': selectedMessages.includes(msg.id)
-                }"
-                @click="handleMessageClick($event, msg)"
-                @touchstart="startLongPress($event, msg)"
-                @touchmove="cancelLongPress(); handleTouchMove($event, msg)"
-                @touchend="endLongPress($event, msg)"
-                :style="getSwipeStyle(msg)"
-              >
-            <!-- Forwarded Banner -->
-            <div v-if="msg.forwarded_from_name" class="forwarded-banner">
-              <span class="forward-icon">
-                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="15 14 20 9 15 4"></polyline>
-                    <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
-                 </svg>
-              </span>
-              <div class="forward-content">
-                <span class="forward-title">پیام هدایت شده</span>
-                <span class="forward-text">از {{ msg.forwarded_from_name }}</span>
-              </div>
-            </div>
-            
-            <!-- Reply Context -->
-            <div 
-              v-if="msg.reply_to_message" 
-              class="reply-context"
-              @click.stop="scrollToMessage(msg.reply_to_message.id)"
-            >
-              <div class="reply-content">
-                <span class="reply-author">
-                   {{ msg.reply_to_message.sender_id === props.currentUserId ? 'شما' : selectedUserName }}
-                </span>
-                <span class="reply-text">
-                  <template v-if="msg.reply_to_message.message_type === 'image'">🖼️ تصویر</template>
-                  <template v-else-if="msg.reply_to_message.message_type === 'sticker'">😊 استیکر</template>
-                  <template v-else>{{ msg.reply_to_message.content }}</template>
-                </span>
-              </div>
-            </div>
-            
-            <!-- Text -->
-            <template v-if="msg.message_type === 'text'">
-              <p>{{ msg.content }}</p>
-            </template>
-            
-            <!-- Media (Image/Video) -->
-            <template v-else-if="msg.message_type === 'image' || msg.message_type === 'video'">
-              <div class="msg-media-link"
-                   :style="{ backgroundImage: getImageThumbnail(msg.content) ? `url(${getImageThumbnail(msg.content)})` : 'none', backgroundSize: 'cover' }"
-                   @click="handleMediaClick(msg)"
-                   style="cursor:pointer; position:relative;">
-                
-                <!-- 1. Downloaded, Uploading, or Local Render -->
-                <template v-if="imageCache[getFileId(msg.content)] || msg.local_blob_url">
-                  <div style="position: relative; display: inline-block; width: 100%;">
-                    <img v-if="msg.message_type === 'image'"
-                         :src="msg.local_blob_url || imageCache[getFileId(msg.content)]"
-                         alt="تصویر" class="msg-media-content" />
-                         
-                    <div v-else-if="msg.message_type === 'video'" class="msg-video-wrapper">
-                      <video :src="msg.local_blob_url || imageCache[getFileId(msg.content)]"
-                             class="msg-media-content" autoplay muted loop playsinline></video>
-                      <div v-if="!msg.is_sending" class="video-play-indicator">
-                        <svg viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M8 5v14l11-7z"/></svg>
-                      </div>
-                    </div>
-                    
-                    <!-- Overlay for uploading state -->
-                    <div v-if="msg.is_sending && msg.upload_progress !== undefined" class="msg-media-overlay">
-                      <div class="progress-container">
-                        <svg class="progress-ring" viewBox="0 0 36 36">
-                          <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
-                          <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.upload_progress}, 100`"></circle>
-                        </svg>
-                        <span class="progress-text">{{ msg.upload_progress }}%</span>
-                      </div>
-                    </div>
-                  </div>
-                </template>
-                
-                <!-- 2. Needs Download State -->
-                <template v-else>
-                  <div class="msg-media-content msg-media-overlay">
-                    <div v-if="msg.is_downloading" class="progress-container">
-                      <svg class="progress-ring" viewBox="0 0 36 36">
-                        <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
-                        <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.download_progress || 0}, 100`"></circle>
-                      </svg>
-                    </div>
-                    <button v-else class="download-btn" @click.stop="downloadMedia(msg)">
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" y1="15" x2="12" y2="3"></line>
-                      </svg>
-                    </button>
-                    <!-- Video duration / type badge placeholder -->
-                    <span v-if="msg.message_type === 'video'" class="media-type-badge">
-                      <svg viewBox="0 0 24 24" width="12" height="12" fill="white" style="vertical-align: middle;"><path d="M8 5v14l11-7z"/></svg> 
-                      ویدئو
-                    </span>
-                  </div>
-                </template>
-              </div>
-            </template>
-            
-            <!-- Sticker -->
-            <template v-else-if="msg.message_type === 'sticker'">
-              <div class="msg-sticker">{{ msg.content }}</div>
-            </template>
-            
-            <div class="msg-meta">
-              <span class="msg-time">
-                {{ formatTime(msg.created_at) }}
-                <span v-if="msg.updated_at" class="edited-label">(ویرایش شده)</span>
-              </span>
-              <span v-if="msg.sender_id === props.currentUserId" class="msg-status">
-                <!-- Sending -->
-                <svg v-if="msg.id < 0 || msg.is_sending" viewBox="0 0 24 24" class="icon-clock" width="16" height="16" style="color: #aaa;">
-                    <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm4.2 14.2L11 13V7h1.5v5.2l4.5 2.7-.8 1.3z" fill="currentColor"/>
-                </svg>
-                <!-- Read -->
-                <svg v-else-if="msg.is_read" viewBox="0 0 24 24" class="icon-read" width="16" height="16">
-                  <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"/>
-                </svg>
-                <!-- Unread -->
-                <svg v-else viewBox="0 0 24 24" class="icon-unread" width="16" height="16">
-                  <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-                </svg>
-              </span>
-            </div> <!-- End .msg-meta -->
-          </div> <!-- End .message-bubble -->
-            </div> <!-- End .message-wrapper / v-for msg -->
+            <ChatMessageItem
+              v-for="(msg, index) in group.messages"
+              :key="msg.id"
+              :msg="msg"
+              :currentUserId="props.currentUserId"
+              :selectedUserName="selectedUserName"
+              :selectedMessages="selectedMessages"
+              :imageCache="imageCache"
+              :isSelectionMode="isSelectionMode"
+              @swipe-reply="handleReply"
+              @select="toggleSelection(msg.id)"
+              @click-message="handleMessageClick"
+              @context-menu="openContextMenu"
+              @scroll-to="scrollToMessage"
+              @media-click="handleMediaClick"
+              @download="downloadMedia"
+            />
           </div> <!-- End v-for="groupedMessages" message-group -->
         
         <!-- Scroll to Bottom Button -->
@@ -2193,146 +1947,26 @@ defineExpose({ startNewChat })
       </div> <!-- End .messages-container -->
       </div> <!-- End .chat-content -->
 
-      <!-- Input Area - Telegram Style -->
-      <div class="input-area">
-        <!-- Reply Banner -->
-        <div v-if="replyingToMessage" class="reply-banner">
-            <div class="reply-banner-icon">
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#3390ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="9 14 4 9 9 4"></polyline>
-                <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
-              </svg>
-            </div>
-            <div class="reply-banner-content">
-                <span class="reply-banner-author">{{ replyingToMessage.sender_id === props.currentUserId ? 'شما' : selectedUserName }}</span>
-                <span class="reply-banner-text">
-                    {{ replyingToMessage.message_type === 'text' ? replyingToMessage.content : (replyingToMessage.message_type === 'image' ? '🖼️ تصویر' : '😊 استیکر') }}
-                </span>
-            </div>
-            <button class="close-reply" v-ripple @click="cancelReply">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-            </button>
-        </div>
-
-        <!-- Selection Mode Bottom Bar -->
-        <div v-if="isSelectionMode" class="selection-bottom-bar">
-          <button v-if="canDeleteSelected" class="selection-action-btn delete" v-ripple @click="handleDeleteSelected">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-            <span>حذف</span>
-          </button>
-          <button v-if="selectedMessages.length === 1" class="selection-action-btn" v-ripple @click="handleReplySelected">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
-            </svg>
-            <span>پاسخ</span>
-          </button>
-          <button v-if="canCopySelected" class="selection-action-btn" v-ripple @click="handleCopySelected">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-            <span>کپی</span>
-          </button>
-          <button class="selection-action-btn" v-ripple @click="openForwardModal">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="15 14 20 9 15 4"></polyline>
-              <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
-            </svg>
-            <span>هدایت</span>
-          </button>
-        </div>
-
-        <!-- Input Container -->
-        <div v-else class="input-container">
-          <!-- Left side buttons - Show voice+attachment when empty, send when has text -->
-          <template v-if="!messageInput.trim()">
-            <!-- Voice Button -->
-            <button v-ripple class="voice-btn">
-              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                <line x1="12" y1="19" x2="12" y2="23"></line>
-                <line x1="8" y1="23" x2="16" y2="23"></line>
-              </svg>
-            </button>
-            
-            <!-- Attachment Button -->
-            <input 
-              type="file" 
-              ref="imageInput" 
-              accept="image/*,video/*" 
-              style="display: none" 
-              @change="handleImageUpload"
-            />
-            <button v-ripple class="attach-btn" @click="imageInput?.click()" :disabled="isUploading">
-              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
-              </svg>
-            </button>
-          </template>
-          
-          <!-- Send Button - Show when has text (same position as voice+attachment) -->
-          <button 
-            v-else
-            v-ripple
-            class="send-btn-inline" 
-            @click="sendMessage()" 
-            @mousedown.prevent
-            @touchstart.prevent="sendMessage()"
-            :disabled="isSending"
-          >
-            <!-- Telegram Blue Send Icon -->
-            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#3390ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(45deg); margin-left: -4px;">
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-            </svg>
-          </button>
-
-          <!-- Text Input -->
-          <textarea
-            ref="messageInputRef"
-            v-model="messageInput"
-            rows="1"
-            placeholder="پیام..."
-            @input="adjustTextareaHeight"
-            @keydown.enter="handleEnter"
-          ></textarea>
-          
-          <!-- Emoji/Sticker Toggle - Right side inside textbox -->
-          <button class="emoji-btn" v-ripple @click="showStickerPicker = !showStickerPicker">
-            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
-              <line x1="9" y1="9" x2="9.01" y2="9"></line>
-              <line x1="15" y1="9" x2="15.01" y2="9"></line>
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      <!-- Sticker Picker (Slide-up) -->
-      <transition name="slide-up">
-        <div v-show="showStickerPicker" class="sticker-picker">
-          <div v-for="pack in stickerPacks" :key="pack.id" class="sticker-pack">
-            <div class="pack-name">{{ pack.name }}</div>
-            <div class="stickers-grid">
-              <button 
-                v-for="sticker in pack.stickers" 
-                :key="sticker"
-                class="sticker-item"
-                @click="sendSticker(sticker)"
-              >
-                {{ sticker }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </transition>
+      <!-- Input Area -->
+      <ChatInputBar
+        :isSelectionMode="isSelectionMode"
+        :replyingToMessage="replyingToMessage"
+        :selectedUserName="selectedUserName"
+        :currentUserId="props.currentUserId"
+        :selectedMessagesCount="selectedMessages.length"
+        :canDeleteSelected="canDeleteSelected"
+        :canCopySelected="canCopySelected"
+        :isSending="isSending"
+        @cancel-reply="cancelReply"
+        @delete-selected="handleDeleteSelected"
+        @reply-selected="handleReplySelected"
+        @copy-selected="handleCopySelected"
+        @forward-selected="openForwardModal"
+        @upload-media="handleMediaUploadWrapper"
+        @send-text="(text) => { messageInput = text; sendMessage(); }"
+        @send-sticker="sendSticker"
+        @typing="handleTypingWrapper"
+      />
 
       <!-- Forward Target Modal -->
       <div v-if="showForwardModal" class="forward-modal-overlay" @click="closeForwardModal">
@@ -2357,53 +1991,18 @@ defineExpose({ startNewChat })
         </div>
       </div>
 
-    <!-- Context Menu (Teleport to body to avoid clipping/position issues) -->
-    <Teleport to="body">
-      <Transition name="zoom-fade">
-        <div 
-          v-if="contextMenu.visible" 
-          class="context-menu telegram-menu-shadow"
-          :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
-        >
-          <div class="menu-item" v-ripple @click="handleReplyMessage">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>
-          <span style="flex:1;">پاسخ</span>
-        </div>
-        <div class="menu-item" v-ripple @click="handleForwardMessage">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>
-          <span style="flex:1;">هدایت پیام</span>
-        </div>
-        <template v-if="contextMenu.message?.message_type === 'text'">
-            <div class="menu-item" v-ripple @click="handleCopyMessage">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-              <span style="flex:1;">کپی کردن</span>
-            </div>
-        </template>
-        <template v-if="canEdit">
-            <div class="menu-item" v-ripple @click="handleEditMessage">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-              <span style="flex:1;">ویرایش</span>
-            </div>
-        </template>
-        <template v-if="canDelete">
-            <div class="menu-item delete" v-ripple @click="handleDeleteMessage">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-              <span style="flex:1;">حذف</span>
-            </div>
-        </template>
-        </div>
-      </Transition>
-      
-      <!-- Click outside to close (Overlay) -->
-      <div 
-        v-if="contextMenu.visible" 
-        class="context-overlay"
-        @click="closeContextMenu"
-      ></div>
-    </Teleport>
+    <!-- Context Menu -->
+    <ChatContextMenu
+      :menuState="contextMenu"
+      :canEdit="canEdit"
+      :canDelete="canDelete"
+      @reply="handleReplyMessage"
+      @forward="handleForwardMessage"
+      @copy="handleCopyMessage"
+      @edit="handleEditMessage"
+      @delete="handleDeleteMessage"
+      @close="closeContextMenu"
+    />
 
     <!-- Lightbox Overlay -->
     <Teleport to="body">
