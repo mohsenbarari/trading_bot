@@ -1,4 +1,5 @@
 import enum
+from datetime import datetime
 from sqlalchemy import Column, Integer, String, Boolean, Enum, BigInteger, Text, DateTime
 from sqlalchemy.sql import func
 from .database import Base
@@ -48,3 +49,8 @@ class User(Base):
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def soft_delete(self):
+        """Soft delete: mark user as deleted without removing from DB."""
+        self.is_deleted = True
+        self.deleted_at = datetime.utcnow()
