@@ -2096,36 +2096,35 @@ defineExpose({ startNewChat })
                    @click="handleMediaClick(msg)"
                    style="cursor:pointer; position:relative;">
                 
-                <!-- 1. Uploading State -->
-                <template v-if="msg.is_sending && msg.upload_progress !== undefined">
-                  <div class="msg-media-content msg-media-overlay">
-                    <div class="progress-container">
-                      <svg class="progress-ring" viewBox="0 0 36 36">
-                        <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
-                        <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.upload_progress}, 100`"></circle>
-                      </svg>
-                      <span class="progress-text">{{ msg.upload_progress }}%</span>
+                <!-- 1. Downloaded, Uploading, or Local Render -->
+                <template v-if="imageCache[getFileId(msg.content)] || msg.local_blob_url">
+                  <div style="position: relative; display: inline-block; width: 100%;">
+                    <img v-if="msg.message_type === 'image'"
+                         :src="msg.local_blob_url || imageCache[getFileId(msg.content)]"
+                         alt="تصویر" class="msg-media-content" />
+                         
+                    <div v-else-if="msg.message_type === 'video'" class="msg-video-wrapper">
+                      <video :src="msg.local_blob_url || imageCache[getFileId(msg.content)]"
+                             class="msg-media-content" autoplay muted loop playsinline></video>
+                      <div v-if="!msg.is_sending" class="video-play-indicator">
+                        <svg viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+                      </div>
+                    </div>
+                    
+                    <!-- Overlay for uploading state -->
+                    <div v-if="msg.is_sending && msg.upload_progress !== undefined" class="msg-media-overlay">
+                      <div class="progress-container">
+                        <svg class="progress-ring" viewBox="0 0 36 36">
+                          <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
+                          <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.upload_progress}, 100`"></circle>
+                        </svg>
+                        <span class="progress-text">{{ msg.upload_progress }}%</span>
+                      </div>
                     </div>
                   </div>
                 </template>
                 
-                <!-- 2. Downloaded or Local Render -->
-                <template v-else-if="imageCache[getFileId(msg.content)] || msg.local_blob_url">
-                  <img v-if="msg.message_type === 'image'"
-                       :src="msg.local_blob_url || imageCache[getFileId(msg.content)]"
-                       alt="تصویر" class="msg-media-content" />
-                       
-                  <div v-else-if="msg.message_type === 'video'" class="msg-video-wrapper">
-                    <video :src="msg.local_blob_url || imageCache[getFileId(msg.content)]"
-                           class="msg-media-content" autoplay muted loop playsinline></video>
-                    <!-- Mini play indicator -->
-                    <div class="video-play-indicator">
-                      <svg viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M8 5v14l11-7z"/></svg>
-                    </div>
-                  </div>
-                </template>
-                
-                <!-- 3. Needs Download State -->
+                <!-- 2. Needs Download State -->
                 <template v-else>
                   <div class="msg-media-content msg-media-overlay">
                     <div v-if="msg.is_downloading" class="progress-container">
