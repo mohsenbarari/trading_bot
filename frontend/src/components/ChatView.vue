@@ -210,7 +210,7 @@ async function downloadMedia(msg: Message) {
       }
     }
     
-    const combinedBlob = new Blob(chunks, { type: contentType });
+    const combinedBlob = new Blob(chunks as BlobPart[], { type: contentType });
     await saveToDB(fileId, combinedBlob);
     
     // Update cache with the new blob URL
