@@ -398,3 +398,91 @@ async def receive_sync_data(
         await db.rollback()
         logger.error(f"Error processing sync batch: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/resync")
+async def resync_from_changelog(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    limit: int = 100,
+    table_filter: str = None,
+):
+    """
+    Resync unsynced change_log entries to the target server.
+    Requires Dev API Key (X-Dev-Api-Key header).
+    Optional: ?table_filter=users&limit=200
+    """
+    dev_key = request.headers.get("X-Dev-Api-Key")
+    if dev_key != settings.dev_api_key:
+        raise HTTPException(status_code=403, detail="Dev API Key required")
+
+    target_url = getattr(settings, "foreign_server_url", None)
+    api_key = getattr(settings, "sync_api_key", None)
+
+    if not target_url or not api_key:
+        raise HTTPException(status_code=500, detail="Sync not configured (FOREIGN_SERVER_URL or SYNC_API_KEY missing)")
+
+    if target_url.endswith("/"):
+        target_url = target_url[:-1]
+
+    # Read unsynced change_log entries
+    query = select(ChangeLog).where(ChangeLog.synced == False).order_by(ChangeLog.id)
+    if table_filter:
+        query = query.where(ChangeLog.table_name == table_filter)
+    query = query.limit(limit)
+
+    result = await db.execute(query)
+    entries = result.scalars().all()
+
+    if not entries:
+        return {"status": "ok", "message": "No unsynced entries found", "processed": 0}
+
+    import httpx as httpx_mod
+
+    processed = 0
+    errors = 0
+    
+    async with httpx_mod.AsyncClient(timeout=10.0, verify=False) as client:
+        for entry in entries:
+            try:
+                data = json.loads(entry.data) if isinstance(entry.data, str) else entry.data
+                payload = {
+                    "type": "db_change",
+                    "operation": entry.operation,
+                    "table": entry.table_name,
+                    "id": entry.record_id,
+                    "data": data,
+                    "hash": entry.hash,
+                    "timestamp": entry.timestamp.timestamp() if entry.timestamp else time.time()
+                }
+
+                items = [payload]
+                json_body = json.dumps(items, sort_keys=True, default=str)
+                ts = int(time.time())
+                message = f"{ts}:{json_body}"
+                signature = hmac.new(api_key.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+                response = await client.post(
+                    f"{target_url}/api/sync/receive",
+                    content=json_body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-API-Key": api_key,
+                        "X-Timestamp": str(ts),
+                        "X-Signature": signature
+                    }
+                )
+
+                if response.status_code == 200:
+                    entry.synced = True
+                    processed += 1
+                else:
+                    logger.warning(f"Resync failed for {entry.table_name}:{entry.record_id}: {response.status_code}")
+                    errors += 1
+
+            except Exception as e:
+                logger.error(f"Resync error for {entry.table_name}:{entry.record_id}: {e}")
+                errors += 1
+
+    await db.commit()
+    return {"status": "ok", "processed": processed, "errors": errors, "total_entries": len(entries)}
