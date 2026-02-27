@@ -429,7 +429,7 @@ const showContextMenu = (event: MouseEvent | TouchEvent, msg: Message) => {
 
 const closeContextMenu = () => { contextMenu.value.visible = false; };
 
-const handleMessageClick = (event: MouseEvent | TouchEvent, msg: Message) => {
+const handleMessageClick = (event: Event, msg: Message) => {
     if (isSelectionMode.value) {
       event.preventDefault()
       toggleSelection(msg.id)
@@ -826,6 +826,8 @@ defineExpose({ startNewChat })
         :canCopySelected="canCopySelected"
         :isSending="isSending"
         :isDeleted="isSelectedUserDeleted"
+        :selectedMessages="selectedMessages"
+        :isUploading="isUploading"
         @cancel-reply="cancelReply"
         @delete-selected="handleDeleteSelected"
         @reply-selected="handleReplySelected"
