@@ -394,7 +394,7 @@ const startNewChat = (userId: number, userName: string) => {
   })
 }
 
-const showContextMenu = (event: MouseEvent | TouchEvent, msg: Message) => {
+const showContextMenu = (event: Event, msg: Message) => {
   let clientX = 0, clientY = 0;
   if (event instanceof MouseEvent) {
     event.preventDefault();
