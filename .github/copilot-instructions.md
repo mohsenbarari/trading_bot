@@ -165,7 +165,7 @@ make status      # Container status
 5. **Token expiry mismatch**: Access 60min, refresh 30 days — keep consistent
 6. **OTP not deleted after verify**: Must delete Redis OTP key after successful verification
 7. **SMS too long**: Keep invitation SMS under 3 UCS-2 segments (~161 chars)
-8. **Admin user list showing only active users**: GET /api/users defaults `include_deleted=True` so admins see all users. Bot also shows all users with 🗑 icon for deleted ones. Frontend shows deleted users with "حذف شده" badge.
+8. **Admin user list showing only active users**: GET /api/users defaults `include_deleted=False` so only active users are shown. Bot also filters `is_deleted==False`. Deleted users will be viewable later via a dedicated admin section.
 9. **Sync data not reaching other server**: change_log entries created by events outside SQLAlchemy (direct SQL, scripts) have no sync entries. Use `POST /api/sync/resync` endpoint (Dev API Key required) to push unsynced change_log entries in batches of 50. Real-time sync via events.py works for normal app operations.
 
 ## Assistant Collaboration Protocol
@@ -190,3 +190,4 @@ make status      # Container status
 | 2026-02-27 05:58 UTC | Copilot | Removed duplicate `offer_expiry_loop()` from `run_bot.py`. It already runs in `main.py` (app container) on both servers, so running it in bot too caused double execution on the foreign server. |
 | 2026-02-27 06:10 UTC | Antigravity | Refactored `ChatView.vue` UI template and styles into four separate components (`ChatConversationList`, `ChatForwardModal`, `ChatLightbox`, `ChatEmptyState`), reducing `ChatView.vue` logic and markup to under 1000 lines. |
 | 2026-02-27 06:29 UTC | Copilot | Replaced raw `fetch` with `apiFetch` (auto-refresh on 401) in all admin components: `UserManager.vue`, `CommodityManager.vue`, `CreateInvitationView.vue`, `TradingSettings.vue`, `UserProfile.vue`. Fixes "خطا در دریافت لیست کاربران" when JWT expires. |
+| 2026-02-27 06:48 UTC | Copilot | Hide soft-deleted users from bot and web user lists. API `include_deleted` default changed to `False`. Bot query filters `is_deleted==False`. Frontend deleted-user badge/styles removed. Deleted users viewable later via dedicated admin section. |

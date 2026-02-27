@@ -136,12 +136,12 @@ async def show_users_list(bot: Bot, chat_id: int, state: FSMContext, page: int, 
     """لیست کاربران را نمایش می‌دهد."""
     try:
         async with AsyncSessionLocal() as session:
-            # نمایش همه کاربران (حذف شده‌ها با علامت مشخص)
-            count_stmt = select(func.count()).select_from(User)
+            # فقط کاربران فعال (حذف نشده) نمایش داده شوند
+            count_stmt = select(func.count()).select_from(User).where(User.is_deleted == False)
             total_count = (await session.execute(count_stmt)).scalar()
             
             offset = (page - 1) * USERS_PER_PAGE
-            stmt = select(User).order_by(User.id.desc()).offset(offset).limit(USERS_PER_PAGE)
+            stmt = select(User).where(User.is_deleted == False).order_by(User.id.desc()).offset(offset).limit(USERS_PER_PAGE)
             users = (await session.execute(stmt)).scalars().all()
 
         if not users:
