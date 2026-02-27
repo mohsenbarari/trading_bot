@@ -1,8 +1,17 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, onUnmounted, nextTick } from 'vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
+import ChatHeader from './chat/ChatHeader.vue'
+import ChatInputBar from './chat/ChatInputBar.vue'
+import ChatMessageItem from './chat/ChatMessageItem.vue'
+import ChatContextMenu from './chat/ChatContextMenu.vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
-import imageCompression from 'browser-image-compression'
+
+import type { Conversation, Message, StickerPack } from '../types/chat'
+import { useChatMedia } from '../composables/chat/useChatMedia'
+import { useChatWebSocket } from '../composables/chat/useChatWebSocket'
+import { useChatMessages } from '../composables/chat/useChatMessages'
+import { useChatScroll } from '../composables/chat/useChatScroll'
 
 // Props
 const props = defineProps<{
@@ -19,64 +28,21 @@ const emit = defineEmits<{
   (e: 'back'): void
 }>()
 
-// Interfaces
-interface Conversation {
-  id: number
-  other_user_id: number
-  other_user_name: string
-  other_user_is_deleted?: boolean
-  last_message_content: string | null
-  last_message_type: string | null
-  last_message_at: string | null
-  unread_count: number
-  other_user_last_seen_at?: string | null
-}
-
-interface Message {
-  id: number
-  sender_id: number
-  receiver_id: number
-  content: string
-  message_type: 'text' | 'image' | 'video' | 'sticker'
-  is_read: boolean
-  is_sending?: boolean
-  upload_progress?: number
-  download_progress?: number
-  is_downloading?: boolean
-  local_blob_url?: string
-  is_error?: boolean
-  is_deleted?: boolean
-  updated_at?: string
-  created_at: string
-  reply_to_message?: {
-    id: number
-    sender_id: number
-    content: string
-    message_type: string
-  }
-}
-
-interface StickerPack {
-  id: string
-  name: string
-  stickers: string[]
-}
-
 // State
 const isLoading = ref(true)
 const error = ref('')
 
-// Conversations
+// Conversations & Messages
 const conversations = ref<Conversation[]>([])
 const selectedUserId = ref<number | null>(null)
 const selectedUserName = ref('')
-
-// Messages
 const messages = ref<Message[]>([])
+
 // Selection State
 const selectedMessages = ref<number[]>([])
 const isSelectionMode = computed(() => selectedMessages.value.length > 0)
 const longPressTimer = ref<any>(null)
+
 // Search State
 const isSearchActive = ref(false)
 const isHeaderMenuOpen = ref(false)
@@ -84,173 +50,15 @@ const searchQuery = ref('')
 const searchResults = ref<any[]>([])
 const isSearching = ref(false)
 const searchDebounceTimeout = ref<any>(null)
+
+// UI State
 const isLoadingMessages = ref(false)
 const messagesContainer = ref<HTMLElement | null>(null)
 const isUserAtBottom = ref(true)
 const unreadNewMessagesCount = ref(0)
 const showScrollButton = ref(false)
-
-// === IndexedDB Image Cache ===
-// Maps file_id -> blob URL (reactive, for template binding)
-const imageCache = ref<Record<string, string>>({})
-const DB_NAME = 'chat_image_cache'
-const DB_VERSION = 1
-const STORE_NAME = 'images'
-
-function openImageDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION)
-    req.onupgradeneeded = (e) => {
-      const db = (e.target as IDBOpenDBRequest).result
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME)
-      }
-    }
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
-  })
-}
-
-async function getFromDB(key: string): Promise<Blob | null> {
-  try {
-    const db = await openImageDB()
-    return new Promise((resolve) => {
-      const tx = db.transaction(STORE_NAME, 'readonly')
-      const req = tx.objectStore(STORE_NAME).get(key)
-      req.onsuccess = () => resolve(req.result ?? null)
-      req.onerror = () => resolve(null)
-    })
-  } catch { return null }
-}
-
-async function saveToDB(key: string, blob: Blob): Promise<void> {
-  try {
-    const db = await openImageDB()
-    await new Promise<void>((resolve) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite')
-      tx.objectStore(STORE_NAME).put(blob, key)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => resolve()
-    })
-  } catch { /* ignore */ }
-}
-
-async function loadImageForMessage(content: string): Promise<void> {
-  if (!content || !content.startsWith('{')) return
-  let fileId = ''
-  try {
-    const parsed = JSON.parse(content)
-    fileId = parsed.file_id
-  } catch { return }
-  if (!fileId || imageCache.value[fileId]) return // already loaded
-
-  // 1. Check IndexedDB first
-  const cached = await getFromDB(fileId)
-  if (cached) {
-    imageCache.value = { ...imageCache.value, [fileId]: URL.createObjectURL(cached) }
-    return
-  }
-
-  // 2. Fetch from server
-  try {
-    const res = await fetch(`${props.apiBaseUrl}/api/chat/files/${fileId}?token=${props.jwtToken}`)
-    if (!res.ok) return
-    const blob = await res.blob()
-    await saveToDB(fileId, blob)
-    imageCache.value = { ...imageCache.value, [fileId]: URL.createObjectURL(blob) }
-  } catch { /* silently fail */ }
-}
-
-function getFileId(content: string): string {
-  if (!content || !content.startsWith('{')) return ''
-  try { return JSON.parse(content).file_id ?? '' } catch { return '' }
-}
-
-function openCachedImage(fileId: string) {
-  const url = imageCache.value[fileId]
-  if (url) window.open(url, '_blank')
-}
-// === End IndexedDB Caching ===
-
-// Handle manual media download
-async function downloadMedia(msg: Message) {
-  const fileId = getFileId(msg.content);
-  if (!fileId) return;
-  
-  // Get reactive proxy of the message
-  const targetMsg = messages.value.find(m => m.id === msg.id) || msg;
-  targetMsg.is_downloading = true;
-  targetMsg.download_progress = 0;
-  
-  try {
-    const res = await fetch(`${props.apiBaseUrl}/api/chat/files/${fileId}?token=${props.jwtToken}`);
-    if (!res.ok) throw new Error("Download failed");
-    
-    const contentType = res.headers.get('content-type') || 'application/octet-stream';
-    const contentLength = res.headers.get('content-length');
-    const total = contentLength ? parseInt(contentLength, 10) : 0;
-    
-    if (!total || !res.body) {
-      const blob = await res.blob();
-      await saveToDB(fileId, blob);
-      imageCache.value = { ...imageCache.value, [fileId]: URL.createObjectURL(blob) };
-      return;
-    }
-    
-    const reader = res.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let received = 0;
-    
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        chunks.push(value);
-        received += value.length;
-        targetMsg.download_progress = Math.round((received / total) * 100);
-      }
-    }
-    
-    const combinedBlob = new Blob(chunks as BlobPart[], { type: contentType });
-    await saveToDB(fileId, combinedBlob);
-    
-    // Update cache with the new blob URL
-    const newUrl = URL.createObjectURL(combinedBlob);
-    imageCache.value = { ...imageCache.value, [fileId]: newUrl };
-    
-  } catch (e) {
-    console.error("Download failed:", e);
-    alert("خطا در دانلود فایل");
-  } finally {
-    targetMsg.is_downloading = false;
-  }
-}
-
-// Lightbox State
-const lightboxMedia = ref<{ url: string, type: 'image'|'video' } | null>(null);
-
-function handleMediaClick(msg: Message) {
-  const fileId = getFileId(msg.content);
-  const cacheUrl = imageCache.value[fileId];
-  const url = msg.local_blob_url || cacheUrl;
-  
-  if (url) {
-    lightboxMedia.value = { 
-      url, 
-      type: msg.message_type === 'video' ? 'video' : 'image' 
-    };
-  }
-}
-
-function closeLightbox() {
-  lightboxMedia.value = null;
-}
-
-// Derived state
-const isSelectedUserDeleted = computed(() => {
-  const conv = conversations.value.find(c => c.other_user_id === selectedUserId.value)
-  return conv ? !!conv.other_user_is_deleted : false
-})
+const isMobile = ref(false)
+const contextMenu = ref<{ visible: boolean; x: number; y: number; message: Message | null }>({ visible: false, x: 0, y: 0, message: null })
 
 // Input
 const messageInput = ref('')
@@ -261,526 +69,254 @@ const editingMessage = ref<Message | null>(null)
 // Stickers
 const stickerPacks = ref<StickerPack[]>([])
 const showStickerPicker = ref(false)
-
-const imageInput = ref<HTMLInputElement | null>(null)
 const isUploading = ref(false)
 
-// Reply State
+// Reply & Swipe State
 const replyingToMessage = ref<Message | null>(null)
 const touchStartX = ref(0)
 const touchCurrentX = ref(0)
 const swipedMessageId = ref<number | null>(null)
-const isViewingReply = ref(false) // Flag to temporarily disable auto-scroll during reply viewing
-
-// UI State
-const isMobile = ref(false)
-const contextMenu = ref<{ visible: boolean; x: number; y: number; message: Message | null }>({ visible: false, x: 0, y: 0, message: null })
-
-// Poll timer
-let pollTimer: number | null = null
-const POLL_INTERVAL = 30000
+const isViewingReply = ref(false) 
 
 // Forward State
 const showForwardModal = ref(false)
 
 // Status
 const targetUserStatus = ref('آخرین بازدید اخیراً')
-let statusPollTimer: number | null = null
-const typingUsers = ref<Record<number, boolean>>({})
-const typingTimeouts = ref<Record<number, number>>({})
-const isTyping = computed(() => selectedUserId.value ? !!typingUsers.value[selectedUserId.value] : false)
-let lastTypingTime = 0
-const TYPING_THROTTLE = 2000
 
-function formatLastSeen(date: Date): string {
-  const now = new Date()
-  const diffSeconds = Math.floor((now.getTime() - date.getTime()) / 1000)
-  
-  // Online threshold: 3 minutes (180 seconds)
-  if (diffSeconds < 180) {
-    return 'آنلاین'
+function updateIsMobile() {
+  isMobile.value = window.innerWidth < 768
+}
+
+const {
+  isViewingReply: scrollIsViewingReply,
+  scrollToBottom,
+  forceScrollToBottom,
+  handleScroll,
+  scrollToUnreadOrBottom,
+  scrollToMessage
+} = useChatScroll({
+  messagesContainer,
+  messages,
+  currentUserId: props.currentUserId,
+  unreadNewMessagesCount,
+  markAsRead: () => messagesLogic?.markAsRead(),
+  isUserAtBottom,
+  showScrollButton
+})
+
+watch(scrollIsViewingReply, (val) => { isViewingReply.value = val })
+
+const messagesLogic = useChatMessages({
+  apiBaseUrl: props.apiBaseUrl,
+  jwtToken: props.jwtToken,
+  currentUserId: props.currentUserId,
+  selectedUserId,
+  messages,
+  conversations,
+  error,
+  isLoadingMessages,
+  isSending,
+  unreadNewMessagesCount,
+  isUserAtBottom,
+  isViewingReply,
+  targetUserStatus,
+  messageInput,
+  messageInputRef,
+  editingMessage,
+  replyingToMessage,
+  swipedMessageId,
+  isMobile,
+  stickerPacks,
+  showStickerPicker,
+  scrollToBottom,
+  scrollToUnreadOrBottom,
+  forceScrollToBottom,
+  adjustTextareaHeight: () => {
+    const el = messageInputRef.value
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 200) + 'px'
   }
+})
+
+const mediaLogic = useChatMedia({
+  apiBaseUrl: props.apiBaseUrl,
+  jwtToken: props.jwtToken,
+  currentUserId: props.currentUserId,
+  selectedUserId,
+  messages,
+  error,
+  isUploading,
+  scrollToBottom,
+  sendMediaMessage: messagesLogic.sendMediaMessage
+})
+
+const wsLogic = useChatWebSocket({
+  selectedUserId,
+  messageInput,
+  apiFetch: messagesLogic.apiFetch,
+  loadConversations: messagesLogic.loadConversations,
+  loadMessages: messagesLogic.loadMessages,
+  scrollToBottom,
+  markAsRead: messagesLogic.markAsRead
+})
+
+const {
+  imageCache,
+  loadImageForMessage,
+  openCachedImage,
+  downloadMedia,
+  lightboxMedia,
+  handleMediaClick,
+  closeLightbox,
+  handleMediaUploadWrapper
+} = mediaLogic
+
+const {
+  loadConversations,
+  loadMessages,
+  markAsRead,
+  sendMessage,
+  sendMediaMessage,
+  cancelEdit,
+  handleReply,
+  cancelReply,
+  startPolling,
+  stopPolling,
+  startStatusPolling,
+  stopStatusPolling,
+  loadStickers,
+  sendSticker
+} = messagesLogic
+
+const {
+  typingUsers,
+  isTyping,
+  handleTypingWrapper,
+  sendTypingSignal
+} = wsLogic
+
+const isSelectedUserDeleted = computed(() => {
+  const conv = conversations.value.find(c => c.other_user_id === selectedUserId.value)
+  return conv ? !!conv.other_user_is_deleted : false
+})
+
+const sortedConversations = computed(() => {
+  return [...conversations.value].sort((a, b) => {
+    if (!a.last_message_at) return 1
+    if (!b.last_message_at) return -1
+    return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
+  })
+})
+
+const totalUnread = computed(() => {
+  return conversations.value.reduce((sum, c) => sum + c.unread_count, 0)
+})
+
+const canEdit = computed(() => {
+  const msg = contextMenu.value.message
+  if (!msg) return false
+  if (msg.sender_id !== props.currentUserId) return false
+  if (msg.message_type !== 'text') return false
+  if ((msg as any).forwarded_from_id || (msg as any).forwarded_from_name) return false
+  const msgTime = new Date(msg.created_at).getTime()
+  return (Date.now() - msgTime) <= 48 * 60 * 60 * 1000
+})
+
+const canDelete = computed(() => {
+  const msg = contextMenu.value.message
+  if (!msg) return false
+  if (msg.sender_id !== props.currentUserId) return false
+  const msgTime = new Date(msg.created_at).getTime()
+  return (Date.now() - msgTime) <= 48 * 60 * 60 * 1000
+})
+
+const canDeleteSelected = computed(() => {
+   if (selectedMessages.value.length === 0) return false;
+   return selectedMessages.value.every(id => {
+      const msg = messages.value.find(m => m.id === id);
+      if (!msg) return false;
+      if (msg.sender_id !== props.currentUserId) return false;
+      const msgTime = new Date(msg.created_at).getTime();
+      return (Date.now() - msgTime) <= 48 * 60 * 60 * 1000;
+   });
+})
+
+const canCopySelected = computed(() => {
+   if (selectedMessages.value.length === 0) return false;
+   return selectedMessages.value.every(id => {
+      const msg = messages.value.find(m => m.id === id);
+      return msg && msg.message_type === 'text';
+   });
+})
+
+const groupedMessages = computed(() => {
+  const groups: { label: string, messages: any[] }[] = []
+  if (messages.value.length === 0) return groups;
+  const firstMsg = messages.value[0];
+  if (!firstMsg) return groups;
   
-  if (diffSeconds < 3600) {
-    const mins = Math.floor(diffSeconds / 60)
-    return `آخرین بازدید ${mins} دقیقه پیش`
+  let currentLabel = formatDateForSeparator(firstMsg.created_at)
+  let currentGroup: any[] = [firstMsg]
+  
+  for (let i = 1; i < messages.value.length; i++) {
+      const msg = messages.value[i]
+      if (!msg) continue;
+      const label = formatDateForSeparator(msg.created_at)
+      if (label !== currentLabel) {
+          groups.push({ label: currentLabel, messages: currentGroup })
+          currentLabel = label
+          currentGroup = [msg]
+      } else {
+          currentGroup.push(msg)
+      }
   }
-  
-  const isToday = now.getDate() === date.getDate() && 
-                  now.getMonth() === date.getMonth() && 
-                  now.getFullYear() === date.getFullYear()
-                  
-  const hours = date.getHours().toString().padStart(2, '0')
-  const mins = date.getMinutes().toString().padStart(2, '0')
-  
-  if (isToday) {
-    return `آخرین بازدید امروز ${hours}:${mins}`
-  }
-  
-  // Check yesterday
-  const yesterday = new Date(now)
-  yesterday.setDate(yesterday.getDate() - 1)
-  const isYesterday = yesterday.getDate() === date.getDate() &&
-                      yesterday.getMonth() === date.getMonth() &&
-                      yesterday.getFullYear() === date.getFullYear()
-                      
-  if (isYesterday) {
-     return `آخرین بازدید دیروز ${hours}:${mins}`
-  }
-  
-  return `آخرین بازدید ${date.toLocaleDateString('fa-IR')}`
+  groups.push({ label: currentLabel, messages: currentGroup })
+  return groups
+})
+
+function formatTime(dateStr: string) {
+  const date = new Date(dateStr)
+  return date.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
+}
+
+function formatDateForSeparator(dateStr: string): string {
+    const date = new Date(dateStr);
+    const now = new Date();
+    if (date.toDateString() === now.toDateString()) return 'امروز';
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (date.toDateString() === yesterday.toDateString()) return 'دیروز';
+    return date.toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 function isUserOnline(lastSeen: string | null | undefined): boolean {
   if (!lastSeen) return false
   const date = new Date(lastSeen)
-  // 3 minutes threshold (180 seconds)
   return (new Date().getTime() - date.getTime()) < 180000
 }
 
-async function fetchTargetUserStatus(userId: number) {
-  console.log('Fetching status for user:', userId)
-  try {
-    const userData = await apiFetch(`/users-public/${userId}`)
-    
-    if (!userData) {
-        console.warn('No user data returned')
+const performSearch = () => {
+    if (!searchQuery.value.trim()) {
+        searchResults.value = []
         return
     }
-
-    console.log('User Data:', userData)
-    
-    if (userData.last_seen_at) {
-      const serverDate = new Date(userData.last_seen_at)
-      targetUserStatus.value = formatLastSeen(serverDate)
-    } else {
-      targetUserStatus.value = 'آخرین بازدید خیلی وقت پیش'
-    }
-  } catch (e) {
-    console.error("Error fetching status", e)
-  }
-}
-
-// API Helper
-async function apiFetch(endpoint: string, options: RequestInit = {}) {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string> || {})
-  }
-  if (props.jwtToken) {
-    headers['Authorization'] = `Bearer ${props.jwtToken}`
-  }
-  const res = await fetch(`${props.apiBaseUrl}/api${endpoint}`, {
-    ...options,
-    headers
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'خطای سرور' }))
-    throw new Error(err.detail || `HTTP Error ${res.status}`)
-  }
-  if (res.status === 204) return null
-  return res.json()
-}
-
-// Load conversations
-async function loadConversations() {
-  try {
-    conversations.value = await apiFetch('/chat/conversations')
-  } catch (e: any) {
-    error.value = e.message
-  }
-}
-
-
-
-// Load messages
-// Load messages
-async function loadMessages(userId: number, silent = false, aroundId?: number) {
-  if (!silent) isLoadingMessages.value = true
-  try {
-    // Add timestamp to prevent caching
-    let url = `/chat/messages/${userId}?limit=200&_t=${Date.now()}`
-    
-    // Deep Jump Support
-    if (aroundId) {
-        url = `/chat/messages/${userId}?limit=50&around_id=${aroundId}&_t=${Date.now()}`
-        // Clear list to force refresh and correct positioning
-        if (!silent) messages.value = [] 
-    }
-
-    const loadedMessages = await apiFetch(url)
-    
-    if (aroundId) {
-         messages.value = loadedMessages
-         isLoadingMessages.value = false
-         return // Skip normal scroll logic
-    }
-    
-    if (silent) {
-      // Check for strictly new message (by ID)
-      const lastOldMsg = messages.value[messages.value.length - 1]
-      const lastNewMsg = loadedMessages[loadedMessages.length - 1]
-      const isNewMessage = lastNewMsg && (!lastOldMsg || lastNewMsg.id !== lastOldMsg.id)
-      const oldLength = messages.value.length
-
-      // Always update list to ensure consistency
-      // Preserve optimistic messages
-      const tempParams = messages.value.filter(m => m.id < 0)
-      messages.value = [...loadedMessages, ...tempParams]
-      
-      if (isNewMessage) {
-        if (lastNewMsg.sender_id !== props.currentUserId) {
-          // Message from other user
-          if (isUserAtBottom.value && !isViewingReply.value) {
-            // If at bottom, auto-scroll and mark read (unless viewing reply)
-            await nextTick()
-            scrollToBottom()
-            markAsRead()
-          } else {
-            // If scrolled up, increment badge (safely handle length changes)
-             const diff = loadedMessages.length - oldLength
-             unreadNewMessagesCount.value += (diff > 0 ? diff : 1)
-          }
-        } else if (lastNewMsg.sender_id === props.currentUserId) {
-          // Own message (synced), keep bottom if there
-          if (isUserAtBottom.value && !isViewingReply.value) {
-            await nextTick()
-            scrollToBottom()
-          }
-        }
-      }
-    } else {
-      // Initial load
-      messages.value = loadedMessages
-      unreadNewMessagesCount.value = 0
-      isLoadingMessages.value = false
-      await nextTick()
-      scrollToUnreadOrBottom()
-      markAsRead()
-    }
-  } catch (e: any) {
-    if (!silent) error.value = e.message
-    if (!silent) isLoadingMessages.value = false 
-  } finally {
-    if (!silent && isLoadingMessages.value) isLoadingMessages.value = false
-  }
-}
-
-// Mark current chat as read
-async function markAsRead() {
-  if (!selectedUserId.value) return
-  try {
-    await apiFetch(`/chat/read/${selectedUserId.value}`, { method: 'POST' })
-    // Update local unread count immediately
-    const conv = conversations.value.find(c => c.other_user_id === selectedUserId.value)
-    if (conv) conv.unread_count = 0
-  } catch (e) {
-    console.error('Failed to mark as read', e)
-  }
-}
-
-// Send message
-async function sendMediaMessage(type: 'image' | 'video' | 'sticker', content: string, localBlobUrl?: string) {
-  if (!selectedUserId.value) return
-  
-  isSending.value = true
-  try {
-    const newMsg = await apiFetch('/chat/send', {
-      method: 'POST',
-      body: JSON.stringify({
-        receiver_id: selectedUserId.value,
-        content: content,
-        message_type: type
-      })
-    })
-    if (localBlobUrl) {
-      newMsg.local_blob_url = localBlobUrl
-    }
-    messages.value.push(newMsg)
-    showStickerPicker.value = false
-    scrollToBottom()
-  } catch (e: any) {
-    error.value = e.message
-  } finally {
-    isSending.value = false
-  }
-}
-
-// Select conversation
-function selectConversation(conv: Conversation) {
-  selectedUserId.value = conv.other_user_id
-  selectedUserName.value = conv.other_user_name
-  loadMessages(conv.other_user_id)
-  // Clear edit/context state
-  contextMenu.value.visible = false;
-  editingMessage.value = null;
-  messageInput.value = '';
-  pushBackState(() => {
-    selectedUserId.value = null
-    selectedUserName.value = ''
-    messages.value = []
-  })
-}
-
-// Start new chat (from search or profile)
-function startNewChat(userId: number, userName: string) {
-  selectedUserId.value = userId
-  selectedUserName.value = userName
-  loadMessages(userId)
-  pushBackState(() => {
-    selectedUserId.value = null
-    selectedUserName.value = ''
-    messages.value = []
-  })
-}
-
-// Generate tiny base64 thumbnail for videos locally
-async function generateVideoThumbnail(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video')
-    video.preload = 'metadata'
-    video.src = URL.createObjectURL(file)
-    video.muted = true
-    video.playsInline = true
-    
-    // Once metadata is loaded, seek to 0.1 seconds
-    video.onloadeddata = () => {
-      video.currentTime = 0.1
-    }
-    
-    // Once seeked, draw to canvas
-    video.onseeked = () => {
-      const canvas = document.createElement('canvas')
-      const targetSize = 20 // ultra-low res for blurred preview
-      const scale = Math.min(targetSize / (video.videoWidth || 1), targetSize / (video.videoHeight || 1))
-      canvas.width = Math.max(1, (video.videoWidth || 1) * scale)
-      canvas.height = Math.max(1, (video.videoHeight || 1) * scale)
-      const ctx = canvas.getContext('2d')
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-        resolve(canvas.toDataURL('image/jpeg', 0.5))
-      } else {
-        resolve('')
-      }
-      URL.revokeObjectURL(video.src)
-    }
-    video.onerror = (e) => reject(e)
-  })
-}
-
-// Upload image or video
-async function handleMediaUploadWrapper(file: File) {
-  if (!file) return
-  
-  const isVideo = file.type.startsWith('video/')
-  if (!selectedUserId.value) return
-  
-  isUploading.value = true
-  let step = 'start'
-  
-  // Create an optimistic message to show immediately in UI
-  const optimisticId = -Date.now()
-  const localUrl = URL.createObjectURL(file)
-  const optimisticMsg: Message = {
-    id: optimisticId,
-    sender_id: props.currentUserId,
-    receiver_id: selectedUserId.value,
-    content: JSON.stringify({ placeholder: true }), // Will be replaced by actual thumbnail
-    message_type: isVideo ? 'video' : 'image',
-    is_read: true,
-    is_sending: true,
-    upload_progress: 0,
-    local_blob_url: localUrl,
-    created_at: new Date().toISOString()
-  }
-  messages.value.push(optimisticMsg)
-  
-  // Create a reactive reference for progress update
-  const getOptimisticTarget = () => messages.value.find(m => m.id === optimisticId) || optimisticMsg;
-  
-  // Auto-scroll to show the uploading item
-  await nextTick()
-  scrollToBottom()
-  
-  try {
-    let uploadFile = file;
-    let thumbBase64 = '';
-    
-    if (isVideo) {
-      step = 'video_thumb'
-      try {
-        thumbBase64 = await generateVideoThumbnail(file)
-      } catch (warn) {
-        console.warn("Video thumbnail failed:", warn)
-      }
-    } else {
-      step = 'compress_main'
-      try {
-        const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1280, useWebWorker: false }
-        uploadFile = await imageCompression(file, options)
-      } catch (warn) {
-        console.warn("Image compression failed, using original:", warn)
-      }
-
-      step = 'compress_thumb'
-      try {
-        const thumbOptions = { maxSizeMB: 0.05, maxWidthOrHeight: 20, useWebWorker: false }
-        const thumbFile = await imageCompression(file, thumbOptions)
-        thumbBase64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onloadend = () => resolve(reader.result as string)
-          reader.onerror = (e) => reject(e)
-          reader.readAsDataURL(thumbFile)
-        })
-      } catch (warn) {
-        console.warn("Image thumbnail generation failed:", warn)
-      }
-    }
-    
-    // Update optimistic message with actual thumbnail so it blanks the background
-    const targetMsg = getOptimisticTarget();
-    targetMsg.content = JSON.stringify({ thumbnail: thumbBase64 })
-  
-    step = 'prepare_form'
-    const formData = new FormData()
-    formData.append('file', uploadFile, file.name)
-    formData.append('thumbnail', thumbBase64)
-    
-    step = 'xhr_upload'
-    const data = await new Promise<any>((resolve, reject) => {
-      const xhr = new XMLHttpRequest()
-      xhr.open('POST', `${props.apiBaseUrl}/api/chat/upload-image`)
-      xhr.setRequestHeader('Authorization', `Bearer ${props.jwtToken}`)
-      
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          const target = getOptimisticTarget();
-          target.upload_progress = Math.round((e.loaded / e.total) * 100)
-        }
-      }
-      
-      xhr.onload = () => {
-        if (xhr.status === 401) {
-          reject(new Error("نشست شما منقضی شده است. لطفاً صفحه را رفرش کنید."))
-          return
-        }
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            resolve(JSON.parse(xhr.responseText))
-          } catch (err) {
-            reject(new Error("Invalid JSON response"))
-          }
-        } else {
-          try {
-            const parsed = JSON.parse(xhr.responseText)
-            if (parsed.detail) {
-              reject(new Error(`مشکل سرور (${xhr.status}): ${parsed.detail}`))
-              return
+    if (searchDebounceTimeout.value) clearTimeout(searchDebounceTimeout.value)
+    searchDebounceTimeout.value = setTimeout(async () => {
+        isSearching.value = true
+        try {
+            const params = new URLSearchParams()
+            params.append('q', searchQuery.value)
+            if (selectedUserId.value) {
+                params.append('chat_id', selectedUserId.value.toString())
             }
-          } catch (e) {}
-          reject(new Error(`مشکل سرور (${xhr.status}): ${xhr.responseText.substring(0, 100)}`))
+            const response = await messagesLogic.apiFetch(`/chat/search?${params.toString()}`)
+            searchResults.value = response
+        } finally {
+            isSearching.value = false
         }
-      }
-      xhr.onerror = () => reject(new Error("Network Error"))
-      xhr.send(formData)
-    })
-    
-    step = 'prepare_json'
-    const messageContent = JSON.stringify({
-      file_id: data.file_id,
-      thumbnail: data.thumbnail
-    })
-    
-    step = 'save_local_cache'
-    // Instantly cache the local blob so downloading isn't needed
-    await saveToDB(data.file_id, uploadFile)
-    imageCache.value = { ...imageCache.value, [data.file_id]: localUrl }
-    
-    step = 'send_ws_message'
-    await sendMediaMessage(isVideo ? 'video' : 'image', messageContent, localUrl)
-    
-  } catch (e: any) {
-    console.error(`Upload error at step [${step}]:`, e);
-    const errString = e && e.message ? e.message : JSON.stringify(e);
-    error.value = `[${step}] ${errString}`;
-    alert(`خطا در آپلود: ` + errString);
-    optimisticMsg.is_error = true;
-  } finally {
-    isUploading.value = false
-    // Remove the optimistic message so the real one from WebSocket takes its place
-    // Or if error, keep it so user sees the error
-    if (!optimisticMsg.is_error) {
-       messages.value = messages.value.filter(m => m.id !== optimisticId)
-    }
-  }
-}
-
-// Load stickers
-async function loadStickers() {
-  try {
-    stickerPacks.value = await apiFetch('/chat/stickers')
-  } catch (e) {
-    console.warn('Failed to load stickers')
-  }
-}
-
-// Send sticker
-function sendSticker(stickerId: string) {
-  sendMediaMessage('sticker', stickerId)
-}
-
-// Poll for new messages
-async function poll() {
-  // Always update conversation list to show new unread counts/chats
-  await loadConversations()
-  
-  if (selectedUserId.value) {
-    await loadMessages(selectedUserId.value, true)
-  }
-}
-
-function startPolling() {
-  stopPolling()
-  pollTimer = window.setInterval(poll, POLL_INTERVAL)
-}
-
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-}
-
-function startStatusPolling(userId: number) {
-  stopStatusPolling()
-  fetchTargetUserStatus(userId) // Immediate fetch
-  statusPollTimer = window.setInterval(() => fetchTargetUserStatus(userId), 30000) // Every 30 seconds
-}
-
-function stopStatusPolling() {
-  if (statusPollTimer) {
-    clearInterval(statusPollTimer)
-    statusPollTimer = null
-  }
-}
-
-// Header Actions (placeholders for future implementation)
-const handleCall = () => {
-  // TODO: Implement call functionality
-  alert('قابلیت تماس به زودی اضافه می‌شود')
-}
-
-const handleHeaderMenu = () => {
-  isHeaderMenuOpen.value = !isHeaderMenuOpen.value
-}
-
-const closeHeaderMenu = () => {
-  isHeaderMenuOpen.value = false
-}
-
-const handleMenuSearch = () => {
-   closeHeaderMenu()
-   toggleSearch()
+    }, 500)
 }
 
 const toggleSearch = () => {
@@ -796,39 +332,10 @@ const toggleSearch = () => {
     }
 }
 
-const performSearch = () => {
-    if (!searchQuery.value.trim()) {
-        searchResults.value = []
-        return
-    }
-    
-    if (searchDebounceTimeout.value) clearTimeout(searchDebounceTimeout.value)
-    
-    searchDebounceTimeout.value = setTimeout(async () => {
-        isSearching.value = true
-        try {
-            const params = new URLSearchParams()
-            params.append('q', searchQuery.value)
-            if (selectedUserId.value) {
-                params.append('chat_id', selectedUserId.value.toString())
-            }
-            
-            const response = await apiFetch(`/chat/search?${params.toString()}`)
-            searchResults.value = response
-        } finally {
-            isSearching.value = false
-        }
-    }, 500)
-}
-
 const handleSearchResultClick = async (msg: any) => {
     if (!selectedUserId.value) {
-        // Global Search result click logic
         const otherId = msg.sender_id === props.currentUserId ? msg.receiver_id : msg.sender_id;
-        
-        // Enter chat mode
         selectedUserId.value = otherId;
-        // Ideally we fetch user name here, for now use placeholder or try to find in conversations list
         const conv = sortedConversations.value.find(c => c.other_user_id === otherId)
         selectedUserName.value = conv ? conv.other_user_name : 'User'
         pushBackState(() => {
@@ -836,360 +343,19 @@ const handleSearchResultClick = async (msg: any) => {
           selectedUserName.value = ''
           messages.value = []
         })
-        
         await loadMessages(otherId, false, msg.id)
-        nextTick(() => {
-             scrollToMessage(msg.id)
-        })
+        nextTick(() => scrollToMessage(msg.id))
     } else {
-    
-    // In Chat Jump
-    // Check if in list
-    const exists = messages.value.find(m => m.id === msg.id)
-    if (exists) {
-        scrollToMessage(msg.id)
-    } else {
-        await loadMessages(selectedUserId.value!, false, msg.id)
-        nextTick(() => {
+        const exists = messages.value.find(m => m.id === msg.id)
+        if (exists) {
             scrollToMessage(msg.id)
-        })
-    }
-    }
-    // Close search ? Or keep it open? Telegram keeps it open? 
-    // Usually jumps and highlighting remains.
-    // We will keep search active but maybe minimize results?
-    // Let's close results dropdown but keep header.
-}
-
-// Context Menu Logic
-const showContextMenu = (event: MouseEvent | TouchEvent, msg: Message) => {
-  // Context menu is available for ALL messages (Reply), but Edit/Delete only for own messages + 48h limit
-
-  let clientX = 0;
-  let clientY = 0;
-
-  if (event instanceof MouseEvent) {
-    event.preventDefault();
-    clientX = event.clientX;
-    clientY = event.clientY;
-  } else if (event instanceof TouchEvent && event.touches.length > 0) {
-    const touch = event.touches[0];
-    if (touch) {
-      clientX = touch.clientX;
-      clientY = touch.clientY;
-    }
-  }
-
-  // Initial position (will be adjusted)
-  const menuWidth = 160;
-  const menuHeight = 150; // Estimate for 3 items
-  const padding = 10;
-
-  // Prevent overflow right
-  if (clientX + menuWidth > window.innerWidth) {
-    clientX = window.innerWidth - menuWidth - padding;
-  }
-  // Prevent overflow left
-  if (clientX < padding) {
-    clientX = padding;
-  }
-  
-  // Smart vertical positioning: if not enough space below, open ABOVE the touch point
-  if (clientY + menuHeight > window.innerHeight - padding) {
-    // Not enough space below, position above
-    clientY = clientY - menuHeight - padding;
-    // Ensure we don't go above the screen
-    if (clientY < padding) {
-      clientY = padding;
-    }
-  }
-
-  contextMenu.value = {
-    visible: true,
-    x: clientX,
-    y: clientY,
-    message: msg
-  };
-};
-
-const closeContextMenu = () => {
-  contextMenu.value.visible = false;
-};
-
-const handleLongPressStart = (event: TouchEvent, msg: Message) => {
-  longPressTimer.value = window.setTimeout(() => {
-    showContextMenu(event, msg);
-  }, 500);
-};
-
-const handleLongPressEnd = () => {
-  if (longPressTimer.value) {
-    clearTimeout(longPressTimer.value);
-    longPressTimer.value = null;
-  }
-};
-
-const handleEditMessage = () => {
-  const msg = contextMenu.value.message;
-  if (!msg) return;
-  
-  editingMessage.value = msg;
-  messageInput.value = msg.content;
-  closeContextMenu();
-  // Focus input
-  nextTick(() => {
-    messageInputRef.value?.focus();
-    adjustTextareaHeight();
-  });
-};
-
-const handleDeleteMessage = async () => {
-  const msg = contextMenu.value.message;
-  if (!msg) return;
-  
-  if (!confirm('آیا از حذف این پیام اطمینان دارید؟')) {
-    closeContextMenu();
-    return;
-  }
-
-  try {
-    await apiFetch(`/chat/messages/${msg.id}`, { method: 'DELETE' });
-    // Remove from local list
-    const index = messages.value.findIndex(m => m.id === msg.id);
-    if (index !== -1) {
-      messages.value.splice(index, 1); // Remove locally
-    }
-    closeContextMenu();
-  } catch (err) {
-    console.error('Failed to delete message:', err);
-    alert('خطا در حذف پیام');
-  }
-};
-
-const handleCopyMessage = () => {
-  const msg = contextMenu.value.message;
-  if (!msg || msg.message_type !== 'text') {
-    closeContextMenu();
-    return;
-  }
-  
-  navigator.clipboard.writeText(msg.content).then(() => {
-    closeContextMenu();
-  }).catch(err => {
-    console.error('Failed to copy', err);
-    closeContextMenu();
-  });
-};
-
-const handleDeleteSelected = async () => {
-  if (selectedMessages.value.length === 0) return;
-  if (!confirm('آیا از حذف پیام‌های انتخاب شده اطمینان دارید؟')) return;
-
-  try {
-    for (const msgId of selectedMessages.value) {
-      const msg = messages.value.find(m => m.id === msgId)
-      if (!msg || msg.sender_id !== props.currentUserId) continue
-      const msgTime = new Date(msg.created_at).getTime()
-      if (Date.now() - msgTime > 48 * 60 * 60 * 1000) continue
-      
-      await apiFetch(`/chat/messages/${msgId}`, { method: 'DELETE' });
-      const index = messages.value.findIndex(m => m.id === msgId);
-      if (index !== -1) messages.value.splice(index, 1);
-    }
-    clearSelection();
-  } catch (err) {
-    console.error('Failed to delete selected messages', err);
-    alert('خطا در حذف پیام‌ها');
-  }
-};
-
-const handleCopySelected = () => {
-    const textToCopy = selectedMessages.value.map(id => {
-        const msg = messages.value.find(m => m.id === id);
-        return msg?.message_type === 'text' ? msg.content : '';
-    }).filter(Boolean).join('\n\n');
-    
-    if (textToCopy) {
-        navigator.clipboard.writeText(textToCopy).then(() => {
-            clearSelection();
-        }).catch(err => {
-            console.error('Failed to copy', err);
-        });
-    }
-}
-
-const handleReplySelected = () => {
-    if (selectedMessages.value.length === 1) {
-        const msg = messages.value.find(m => m.id === selectedMessages.value[0]);
-        if (msg) {
-            handleReply(msg);
-            clearSelection();
+        } else {
+            await loadMessages(selectedUserId.value!, false, msg.id)
+            nextTick(() => scrollToMessage(msg.id))
         }
     }
 }
 
-const cancelEdit = () => {
-  editingMessage.value = null;
-  messageInput.value = '';
-  adjustTextareaHeight(); // Reset height
-};
-
-const sendMessage = async () => {
-  if (!messageInput.value.trim() && !editingMessage.value) return;
-
-  if (editingMessage.value) {
-    const msgToEdit = editingMessage.value
-    // Update Mode
-    try {
-      const updatedMsg = await apiFetch(`/chat/messages/${msgToEdit.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ content: messageInput.value })
-      });
-      // Update local message
-      const index = messages.value.findIndex(m => m.id === msgToEdit.id);
-      if (index !== -1) {
-        messages.value[index] = updatedMsg;
-      }
-      cancelEdit();
-    } catch (err) {
-      console.error('Failed to edit message:', err);
-      alert('خطا در ویرایش پیام');
-    }
-    return;
-  }
-
-  // Normal Send Mode
-  if (!selectedUserId.value) return;
-  const content = messageInput.value;
-  const replyTo = replyingToMessage.value;
-
-  // Optimistic UI
-  const tempId = -Date.now();
-  const tempMsg: Message = {
-    id: tempId,
-    sender_id: props.currentUserId,
-    receiver_id: selectedUserId.value,
-    content: content,
-    message_type: 'text',
-    is_read: false,
-    created_at: new Date().toISOString(),
-    is_sending: true,
-    reply_to_message: replyTo ? {
-        id: replyTo.id,
-        sender_id: replyTo.sender_id,
-        content: replyTo.content,
-        message_type: replyTo.message_type
-    } : undefined
-  };
-
-  messages.value.push(tempMsg);
-  
-  // Clear UI
-  messageInput.value = '';
-  replyingToMessage.value = null;
-  if (isMobile.value) swipedMessageId.value = null;
-  adjustTextareaHeight();
-  
-  nextTick(() => {
-     if (replyTo) forceScrollToBottom();
-     else scrollToBottom();
-  });
-
-  try {
-    const body: Record<string, any> = {
-        receiver_id: selectedUserId.value,
-        content: content,
-        message_type: 'text'
-    };
-    if (replyTo) body.reply_to_message_id = replyTo.id;
-
-    const serverMsg = await apiFetch('/chat/send', {
-      method: 'POST',
-      body: JSON.stringify(body)
-    });
-    
-    const idx = messages.value.findIndex(m => m.id === tempId);
-    if (idx !== -1) {
-        messages.value[idx] = serverMsg;
-    }
-    
-    nextTick(() => messageInputRef.value?.focus());
-  } catch (err) {
-    console.error('Failed to send message:', err);
-    const idx = messages.value.findIndex(m => m.id === tempId);
-    if (idx !== -1 && messages.value[idx]) {
-        messages.value[idx].is_sending = false;
-        messages.value[idx].is_error = true;
-    }
-  }
-};
-
-const handleReply = (msg: Message) => {
-    replyingToMessage.value = msg
-    nextTick(() => {
-        messageInputRef.value?.focus()
-    })
-}
-
-const cancelReply = () => {
-  replyingToMessage.value = null
-  if (isMobile.value) {
-    swipedMessageId.value = null
-  }
-}
-
-// Swipe Logic
-const SWIPE_THRESHOLD = 100 // Increased to reduce accidental swipes during scroll
-const handleTouchStart = (e: TouchEvent, msg: Message) => {
-  if (e.touches.length > 0) {
-    const touch = e.touches[0]
-    if (touch) {
-      touchStartX.value = touch.clientX
-      touchCurrentX.value = touch.clientX
-      swipedMessageId.value = msg.id
-    }
-  }
-}
-
-const handleTouchMove = (e: TouchEvent, msg: Message) => {
-  if (swipedMessageId.value !== msg.id) return
-  if (e.touches.length > 0) {
-    const touch = e.touches[0]
-    if (touch) {
-      touchCurrentX.value = touch.clientX
-      
-      // Cancel long press if moved significantly
-      if (Math.abs(touchCurrentX.value - touchStartX.value) > 10) {
-        if (longPressTimer.value) {
-          clearTimeout(longPressTimer.value)
-          longPressTimer.value = null
-        }
-      }
-    }
-  }
-}
-
-const handleTouchEnd = (e: TouchEvent, msg: Message) => {
-  if (swipedMessageId.value !== msg.id) return
-  
-  const diff = touchStartX.value - touchCurrentX.value
-  const isSent = msg.sender_id === props.currentUserId
-  
-  // Sent (Right side): Swipe Left (diff > 0)
-  // Received (Left side): Swipe Right (diff < 0)
-  const isValidSwipe = isSent ? (diff > SWIPE_THRESHOLD) : (diff < -SWIPE_THRESHOLD)
-
-  if (isValidSwipe) {
-    handleReply(msg)
-  }
-  
-  // Reset
-  swipedMessageId.value = null
-  touchStartX.value = 0
-  touchCurrentX.value = 0
-}
-
-// Selection Logic
 const toggleSelection = (msgId: number) => {
     const index = selectedMessages.value.indexOf(msgId)
     if (index === -1) {
@@ -1203,10 +369,154 @@ const clearSelection = () => {
     selectedMessages.value = []
 }
 
-function openForwardModal() {
-  if (selectedMessages.value.length > 0) {
-    showForwardModal.value = true
+const selectConversation = (conv: Conversation) => {
+  selectedUserId.value = conv.other_user_id
+  selectedUserName.value = conv.other_user_name
+  loadMessages(conv.other_user_id)
+  contextMenu.value.visible = false;
+  editingMessage.value = null;
+  messageInput.value = '';
+  pushBackState(() => {
+    selectedUserId.value = null
+    selectedUserName.value = ''
+    messages.value = []
+  })
+}
+
+const startNewChat = (userId: number, userName: string) => {
+  selectedUserId.value = userId
+  selectedUserName.value = userName
+  loadMessages(userId)
+  pushBackState(() => {
+    selectedUserId.value = null
+    selectedUserName.value = ''
+    messages.value = []
+  })
+}
+
+const showContextMenu = (event: MouseEvent | TouchEvent, msg: Message) => {
+  let clientX = 0, clientY = 0;
+  if (event instanceof MouseEvent) {
+    event.preventDefault();
+    clientX = event.clientX;
+    clientY = event.clientY;
+  } else if (event instanceof TouchEvent && event.touches.length > 0) {
+    const touch = event.touches[0];
+    if (touch) {
+      clientX = touch.clientX;
+      clientY = touch.clientY;
+    }
   }
+
+  const menuWidth = 160;
+  const menuHeight = 150; 
+  const padding = 10;
+
+  if (clientX + menuWidth > window.innerWidth) clientX = window.innerWidth - menuWidth - padding;
+  if (clientX < padding) clientX = padding;
+  if (clientY + menuHeight > window.innerHeight - padding) {
+    clientY = clientY - menuHeight - padding;
+    if (clientY < padding) clientY = padding;
+  }
+
+  contextMenu.value = {
+    visible: true,
+    x: clientX,
+    y: clientY,
+    message: msg
+  };
+};
+
+const closeContextMenu = () => { contextMenu.value.visible = false; };
+
+const handleMessageClick = (event: MouseEvent | TouchEvent, msg: Message) => {
+    if (isSelectionMode.value) {
+      event.preventDefault()
+      toggleSelection(msg.id)
+    } else {
+      showContextMenu(event, msg)
+    }
+}
+
+const handleEditMessage = () => {
+  const msg = contextMenu.value.message;
+  if (!msg) return;
+  editingMessage.value = msg;
+  messageInput.value = msg.content;
+  closeContextMenu();
+  nextTick(() => {
+    messageInputRef.value?.focus();
+    const el = messageInputRef.value
+    if (el) {
+       el.style.height = 'auto'
+       el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+    }
+  });
+};
+
+const handleDeleteMessage = async () => {
+  const msg = contextMenu.value.message;
+  if (!msg) return;
+  if (!confirm('آیا از حذف این پیام اطمینان دارید؟')) {
+    closeContextMenu();
+    return;
+  }
+  try {
+    await messagesLogic.apiFetch(`/chat/messages/${msg.id}`, { method: 'DELETE' });
+    const index = messages.value.findIndex(m => m.id === msg.id);
+    if (index !== -1) messages.value.splice(index, 1);
+    closeContextMenu();
+  } catch (err) {
+    console.error('Failed to delete message:', err);
+    alert('خطا در حذف پیام');
+  }
+};
+
+const handleCopyMessage = () => {
+  const msg = contextMenu.value.message;
+  if (!msg || msg.message_type !== 'text') { closeContextMenu(); return; }
+  navigator.clipboard.writeText(msg.content).then(() => closeContextMenu());
+};
+
+const handleDeleteSelected = async () => {
+  if (selectedMessages.value.length === 0) return;
+  if (!confirm('آیا از حذف پیام‌های انتخاب شده اطمینان دارید؟')) return;
+  try {
+    for (const msgId of selectedMessages.value) {
+      const msg = messages.value.find(m => m.id === msgId)
+      if (!msg || msg.sender_id !== props.currentUserId) continue
+      const msgTime = new Date(msg.created_at).getTime()
+      if (Date.now() - msgTime > 48 * 60 * 60 * 1000) continue
+      
+      await messagesLogic.apiFetch(`/chat/messages/${msgId}`, { method: 'DELETE' });
+      const index = messages.value.findIndex(m => m.id === msgId);
+      if (index !== -1) messages.value.splice(index, 1);
+    }
+    clearSelection();
+  } catch (err) {}
+};
+
+const handleCopySelected = () => {
+    const textToCopy = selectedMessages.value.map(id => {
+        const msg = messages.value.find(m => m.id === id);
+        return msg?.message_type === 'text' ? msg.content : '';
+    }).filter(Boolean).join('\n\n');
+    
+    if (textToCopy) navigator.clipboard.writeText(textToCopy).then(() => clearSelection());
+}
+
+const handleReplySelected = () => {
+    if (selectedMessages.value.length === 1) {
+        const msg = messages.value.find(m => m.id === selectedMessages.value[0]);
+        if (msg) {
+            handleReply(msg);
+            clearSelection();
+        }
+    }
+}
+
+function openForwardModal() {
+  if (selectedMessages.value.length > 0) showForwardModal.value = true
 }
 
 function closeForwardModal() {
@@ -1215,15 +525,12 @@ function closeForwardModal() {
 
 async function forwardSelectedMessages(targetUserId: number) {
   if (selectedMessages.value.length === 0) return
-  
   isSending.value = true
   try {
     for (const msgId of selectedMessages.value) {
-      // Find the original message in current chat
       const originalMsg = messages.value.find(m => m.id === msgId)
       if (!originalMsg) continue
-
-      await apiFetch('/chat/send', {
+      await messagesLogic.apiFetch('/chat/send', {
         method: 'POST',
         body: JSON.stringify({
           receiver_id: targetUserId,
@@ -1233,11 +540,9 @@ async function forwardSelectedMessages(targetUserId: number) {
         })
       })
     }
-    
     selectedMessages.value = []
     showForwardModal.value = false
     
-    // Switch to target chat if different
     if (selectedUserId.value !== targetUserId) {
         const conv = conversations.value.find(c => c.other_user_id === targetUserId)
         if (conv) {
@@ -1249,151 +554,10 @@ async function forwardSelectedMessages(targetUserId: number) {
         loadMessages(targetUserId, true)
     }
   } catch (err) {
-    console.error('Failed to forward', err)
     alert('خطا در هدایت پیام‌ها')
   } finally {
     isSending.value = false
   }
-}
-
-// Handle Message Click (Delegated)
-const handleMessageClick = (event: MouseEvent | TouchEvent, msg: Message) => {
-    if (isSelectionMode.value) {
-      event.preventDefault()
-      toggleSelection(msg.id)
-    } else {
-      showContextMenu(event, msg)
-    }
-}
-
-// Long Press Handlers
-const startLongPress = (event: TouchEvent, msg: Message) => {
-    longPressTimer.value = setTimeout(() => {
-        if (navigator.vibrate) navigator.vibrate(50)
-        toggleSelection(msg.id)
-        longPressTimer.value = null
-    }, 500)
-    
-    // Pass event to swipe handler too
-    handleTouchStart(event, msg)
-}
-
-const cancelLongPress = () => {
-    if (longPressTimer.value) {
-        clearTimeout(longPressTimer.value)
-        longPressTimer.value = null
-    }
-}
-
-const endLongPress = (event: TouchEvent, msg: Message) => {
-    cancelLongPress()
-    handleTouchEnd(event, msg)
-}
-
-const getSwipeStyle = (msg: Message) => {
-  if (swipedMessageId.value !== msg.id) return {}
-  const diff = touchStartX.value - touchCurrentX.value
-  const isSent = msg.sender_id === props.currentUserId
-
-  // Logic:
-  // Sent (Right): Allow negative translate (Left) -> diff > 0
-  // Received (Left): Allow positive translate (Right) -> diff < 0
-  
-  if (isSent) {
-    if (diff <= 0) return {}
-    const translateX = Math.min(diff, 100) // cap at 100px
-    return {
-      transform: `translateX(-${translateX}px)`,
-      // Smooth elastic transition when letting go, tight transition when dragging
-      transition: translateX === 0 ? 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)' : 'none'
-    }
-  } else {
-    // Received
-    if (diff >= 0) return {}
-    const translateX = Math.min(Math.abs(diff), 100)
-    return {
-      transform: `translateX(${translateX}px)`,
-      transition: translateX === 0 ? 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)' : 'none'
-    }
-  }
-}
-
-// Controls the opacity and scale of the background reply icon
-const getIconStyle = (msg: Message) => {
-  if (swipedMessageId.value !== msg.id) return { opacity: 0, transform: 'scale(0.5)' }
-  const diff = Math.abs(touchStartX.value - touchCurrentX.value)
-  
-  if (diff < 20) return { opacity: 0, transform: 'scale(0.5)' }
-  
-  // Max scale/opacity at 80px drag
-  const progress = Math.min((diff - 20) / 60, 1)
-  
-  return {
-      opacity: progress,
-      transform: `scale(${0.5 + (0.5 * progress)})`,
-      transition: diff === 0 ? 'all 0.4s easeOutBounce' : 'none'
-  }
-}
-
-// Scroll to message with custom slow animation
-const scrollToMessage = (msgId: number) => {
-    const el = document.getElementById(`msg-${msgId}`)
-    const container = messagesContainer.value
-    
-    if (el && container) {
-        // Capture non-null references for closure
-        const safeContainer = container
-        const safeEl = el
-        
-        // Temporarily disable auto-scroll during viewing
-        isViewingReply.value = true
-        
-        // Start highlight immediately (runs alongside scroll)
-        safeEl.classList.remove('highlight-message')
-        // Force reflow to restart animation
-        void safeEl.offsetWidth
-        safeEl.classList.add('highlight-message')
-        
-        // Re-enable auto-scroll after highlight completes, and clean up class
-        setTimeout(() => {
-            isViewingReply.value = false
-            safeEl.classList.remove('highlight-message')
-        }, 3000)
-        
-        // Calculate target position using bounding rects to avoid relative offsetParent issues
-        const containerRect = safeContainer.getBoundingClientRect()
-        const elRect = safeEl.getBoundingClientRect()
-        
-        const relativeTop = elRect.top - containerRect.top
-        const elHeight = elRect.height
-        const containerHeight = containerRect.height
-        
-        // Scroll amount needed to center the element
-        const scrollBy = relativeTop - (containerHeight / 2) + (elHeight / 2)
-        const targetScrollTop = safeContainer.scrollTop + scrollBy
-        
-        // Use custom animation for scroll
-        const startScrollTop = safeContainer.scrollTop
-        const distance = targetScrollTop - startScrollTop
-        const duration = 1000 // 1 second (same as highlight peak at 15% = 0.45s)
-        const startTime = performance.now()
-        
-        function step(currentTime: number) {
-            const elapsed = currentTime - startTime
-            const progress = Math.min(elapsed / duration, 1)
-            
-            // Ease out cubic
-            const ease = 1 - Math.pow(1 - progress, 3)
-            
-            safeContainer.scrollTop = startScrollTop + (distance * ease)
-            
-            if (progress < 1) {
-                requestAnimationFrame(step)
-            }
-        }
-        
-        requestAnimationFrame(step)
-    }
 }
 
 const handleReplyMessage = () => {
@@ -1413,225 +577,12 @@ const handleForwardMessage = () => {
   closeContextMenu()
 }
 
-
-
-
-function updateIsMobile() {
-  isMobile.value = window.innerWidth < 768
-}
-
-// Handle Enter key
-function handleEnter(e: KeyboardEvent) {
-  // On mobile, Enter adds new line (default behavior)
-  if (isMobile.value) return 
-  
-  // On desktop, Enter sends (unless Shift is pressed)
-  if (!e.shiftKey) {
-    e.preventDefault()
-    sendMessage()
-  }
-}
-
-// Auto resize textarea
-function adjustTextareaHeight() {
-  const el = messageInputRef.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 200) + 'px' // Max 200px height
-}
-
-// Scroll to bottom (smooth)
-function scrollToBottom() {
-  // Reset unread count when manually scrolling to bottom
-  if (unreadNewMessagesCount.value > 0) {
-    markAsRead()
-    unreadNewMessagesCount.value = 0
-  }
-  
-  setTimeout(() => {
-    if (messagesContainer.value) {
-      messagesContainer.value.scrollTo({
-        top: messagesContainer.value.scrollHeight,
-        behavior: 'smooth'
-      })
-    }
-  }, 100)
-}
-
-// Force scroll to bottom (instant - for reply cases where smooth fails)
-function forceScrollToBottom() {
-  if (unreadNewMessagesCount.value > 0) {
-    markAsRead()
-    unreadNewMessagesCount.value = 0
-  }
-  
-  // Multiple attempts to ensure scroll works after layout changes
-  const doScroll = () => {
-    if (messagesContainer.value) {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight + 1000
-    }
-  }
-  
-  nextTick(doScroll)
-  setTimeout(doScroll, 50)
-  setTimeout(doScroll, 150)
-  setTimeout(doScroll, 300)
-}
-
-// Handle Scroll
-function handleScroll() {
-  const el = messagesContainer.value
-  if (!el) return
-  
-  const threshold = 100 // px from bottom
-  const distance = el.scrollHeight - el.scrollTop - el.clientHeight
-  const atBottom = distance < threshold
-  
-  isUserAtBottom.value = atBottom
-  showScrollButton.value = !atBottom
-  
-  // If arrived at bottom, mark as read
-  if (atBottom && unreadNewMessagesCount.value > 0) {
-    markAsRead()
-    unreadNewMessagesCount.value = 0
-  }
-}
-
-// Smart scroll - to first unread message or to bottom
-function scrollToUnreadOrBottom() {
-  if (!messagesContainer.value) return
-  
-  // Find first unread message (received and not read)
-  const firstUnreadIndex = messages.value.findIndex(
-    msg => msg.receiver_id === props.currentUserId && !msg.is_read
-  )
-  
-  if (firstUnreadIndex >= 0) {
-    // Scroll to first unread message
-    const messageElements = messagesContainer.value.querySelectorAll('.message-bubble')
-    if (messageElements[firstUnreadIndex]) {
-      // Use 'auto' behavior for instant jump on load
-      messageElements[firstUnreadIndex].scrollIntoView({ behavior: 'auto', block: 'start' })
-    }
-  } else {
-    // All read - scroll to bottom
-    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
-  }
-}
-
-// Format time
-function formatTime(dateStr: string) {
-  const date = new Date(dateStr)
-  return date.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
-}
-
-function shouldShowDateSeparator(index: number): boolean {
-    if (index === 0) return true;
-    const msgs = messages.value;
-    const currentMsg = msgs[index];
-    const prevMsg = msgs[index - 1];
-    
-    if (!currentMsg?.created_at || !prevMsg?.created_at) return false;
-
-    const current = new Date(currentMsg.created_at);
-    const prev = new Date(prevMsg.created_at);
-    return current.toDateString() !== prev.toDateString();
-}
-
-const groupedMessages = computed(() => {
-  const groups: { label: string, messages: any[] }[] = []
-  
-  if (messages.value.length === 0) return groups;
-  const firstMsg = messages.value[0];
-  if (!firstMsg) return groups;
-  
-  // Ensure we sort or assume sorted? Assuming sorted by date ascending.
-  let currentLabel = formatDateForSeparator(firstMsg.created_at)
-  let currentGroup: any[] = [firstMsg]
-  
-  for (let i = 1; i < messages.value.length; i++) {
-      const msg = messages.value[i]
-      if (!msg) continue;
-      const label = formatDateForSeparator(msg.created_at)
-      
-      if (label !== currentLabel) {
-          groups.push({ label: currentLabel, messages: currentGroup })
-          currentLabel = label
-          currentGroup = [msg]
-      } else {
-          currentGroup.push(msg)
-      }
-  }
-  groups.push({ label: currentLabel, messages: currentGroup })
-  
-  return groups
-})
-
-function formatDateForSeparator(dateStr: string): string {
-    const date = new Date(dateStr);
-    const now = new Date();
-    
-    // Check Today
-    if (date.toDateString() === now.toDateString()) return 'امروز';
-    
-    // Check Yesterday
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    if (date.toDateString() === yesterday.toDateString()) return 'دیروز';
-    
-    return date.toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' });
-}
-
-// Get full image URL
-function getImageUrl(path: string) {
-  if (!path) return ''
-  
-  if (path.startsWith('{')) {
-    try {
-      const parsed = JSON.parse(path)
-      if (parsed.file_id) {
-        return `${props.apiBaseUrl}/api/chat/files/${parsed.file_id}?token=${props.jwtToken}`
-      }
-    } catch (e) {
-      // Ignore parse error
-    }
-  }
-  
-  // If already full URL, return as is
-  if (path.startsWith('http://') || path.startsWith('https://')) {
-    return path
-  }
-  // Prepend apiBaseUrl for relative paths
-  return `${props.apiBaseUrl}${path}`
-}
-
-// Get image thumbnail (base64) from JSON content
-function getImageThumbnail(path: string) {
-  if (!path) return ''
-  
-  if (path.startsWith('{')) {
-    try {
-      const parsed = JSON.parse(path)
-      if (parsed.thumbnail) {
-        return parsed.thumbnail
-      }
-    } catch (e) {
-      // Ignore parse error
-    }
-  }
-  
-  return ''
-}
-
-// Go back
 function goBack() {
   if (selectedUserId.value) {
-    // UI-initiated back — pop the back state (clears selection via callback skip + history.back)
     selectedUserId.value = null
     selectedUserName.value = ''
     messages.value = []
     popBackState()
-    // Don't stop polling, we need it for conversation list updates
   } else {
     emit('back')
   }
@@ -1646,65 +597,48 @@ function viewProfile() {
   }
 }
 
-// Computed
-const sortedConversations = computed(() => {
-  return [...conversations.value].sort((a, b) => {
-    if (!a.last_message_at) return 1
-    if (!b.last_message_at) return -1
-    return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
-  })
-})
+const handleCall = () => alert('قابلیت تماس به زودی اضافه می‌شود')
 
-const totalUnread = computed(() => {
-  return conversations.value.reduce((sum, c) => sum + c.unread_count, 0)
-})
+const SWIPE_THRESHOLD = 100 
+const handleTouchStart = (e: TouchEvent, msg: Message) => {
+  if (e.touches.length > 0) {
+    const touch = e.touches[0]
+    if (touch) {
+      touchStartX.value = touch.clientX
+      touchCurrentX.value = touch.clientX
+      swipedMessageId.value = msg.id
+    }
+  }
+}
+const handleTouchMove = (e: TouchEvent, msg: Message) => {
+  if (swipedMessageId.value !== msg.id) return
+  if (e.touches.length > 0) {
+    const touch = e.touches[0]
+    if (touch) {
+      touchCurrentX.value = touch.clientX
+      if (Math.abs(touchCurrentX.value - touchStartX.value) > 10) {
+        if (longPressTimer.value) {
+          clearTimeout(longPressTimer.value)
+          longPressTimer.value = null
+        }
+      }
+    }
+  }
+}
 
-// Check if current context menu message can be edited (own text message, not forwarded + within 48h)
-const canEdit = computed(() => {
-  const msg = contextMenu.value.message
-  if (!msg) return false
-  if (msg.sender_id !== props.currentUserId) return false
-  if (msg.message_type !== 'text') return false
-  // @ts-ignore - forwarded_from_id might not be strictly typed yet but exists
-  if (msg.forwarded_from_id || (msg as any).forwarded_from_name) return false
-  
-  const msgTime = new Date(msg.created_at).getTime()
-  const now = Date.now()
-  return now - msgTime <= 48 * 60 * 60 * 1000
-})
+const handleTouchEnd = (e: TouchEvent, msg: Message) => {
+  if (swipedMessageId.value !== msg.id) return
+  const diff = touchStartX.value - touchCurrentX.value
+  const isSent = msg.sender_id === props.currentUserId
+  const isValidSwipe = isSent ? (diff > SWIPE_THRESHOLD) : (diff < -SWIPE_THRESHOLD)
 
-// Check if current context menu message can be deleted (own message + within 48h)
-const canDelete = computed(() => {
-  const msg = contextMenu.value.message
-  if (!msg) return false
-  if (msg.sender_id !== props.currentUserId) return false
-  const msgTime = new Date(msg.created_at).getTime()
-  const now = Date.now()
-  return now - msgTime <= 48 * 60 * 60 * 1000
-})
+  if (isValidSwipe) handleReply(msg)
+  swipedMessageId.value = null
+  touchStartX.value = 0
+  touchCurrentX.value = 0
+}
 
-const canDeleteSelected = computed(() => {
-   if (selectedMessages.value.length === 0) return false;
-   return selectedMessages.value.every(id => {
-      const msg = messages.value.find(m => m.id === id);
-      if (!msg) return false;
-      if (msg.sender_id !== props.currentUserId) return false;
-      const msgTime = new Date(msg.created_at).getTime();
-      return Date.now() - msgTime <= 48 * 60 * 60 * 1000;
-   });
-})
-
-const canCopySelected = computed(() => {
-   if (selectedMessages.value.length === 0) return false;
-   return selectedMessages.value.every(id => {
-      const msg = messages.value.find(m => m.id === id);
-      return msg && msg.message_type === 'text';
-   });
-})
-
-// Watchers
 watch(selectedUserId, (newVal) => {
-  console.log('WATCH selectedUserId:', newVal)
   if (newVal) {
     startStatusPolling(newVal)
     scrollToBottom()
@@ -1713,81 +647,12 @@ watch(selectedUserId, (newVal) => {
   }
 })
 
-// Typing Logic
-async function sendTypingSignal() {
-    if (!messageInput.value) return; 
-    const now = Date.now();
-    if (now - lastTypingTime < TYPING_THROTTLE) return;
-    lastTypingTime = now;
-    
-    if (!selectedUserId.value) return;
-    
-    try {
-        await apiFetch('/chat/typing', {
-            method: 'POST',
-            body: JSON.stringify({ receiver_id: selectedUserId.value })
-        });
-    } catch (e) { console.error('Typing signal failed', e); }
-}
-
-const handleTypingWrapper = () => {
-    sendTypingSignal();
-};
-
-function handleTypingEvent(e: Event) {
-   const data = (e as CustomEvent).detail;
-   const senderId = data.sender_id;
-   if (senderId) {
-       typingUsers.value[senderId] = true;
-       
-       if (typingTimeouts.value[senderId]) clearTimeout(typingTimeouts.value[senderId]);
-       
-       // Use window.setTimeout to ensure number return type
-       typingTimeouts.value[senderId] = window.setTimeout(() => {
-           typingUsers.value[senderId] = false;
-       }, 5000);
-   }
-}
-
-function handleNewMessageEvent(e: Event) {
-  const notif = (e as CustomEvent).detail
-  const senderId = notif.sender_id
-  
-  // Clear typing on message
-  if (senderId) {
-      typingUsers.value[senderId] = false;
-  }
-  
-  // Always update conversations list (to show new message/count)
-  loadConversations();
-  
-  // Refresh if chat with sender
-  if (selectedUserId.value && (senderId === selectedUserId.value)) {
-      loadMessages(selectedUserId.value, true)
-      markAsRead()
-  }
-}
-
-function handleReadEvent(e: Event) {
-  const data = (e as CustomEvent).detail
-  // If the current chat user read our messages, refresh
-  if (selectedUserId.value && (data.reader_id === selectedUserId.value)) {
-       loadMessages(selectedUserId.value, true)
-  }
-}
-
-// Lifecycle
 onMounted(async () => {
-  window.addEventListener('chat-notification', handleNewMessageEvent)
-  window.addEventListener('chat-message', handleNewMessageEvent)
-  window.addEventListener('chat-typing', handleTypingEvent)
-  window.addEventListener('chat-read', handleReadEvent)
   isLoading.value = true
   await loadConversations()
   await loadStickers()
   isLoading.value = false
   
-  // Auto-select target user if provided (e.g., from public profile)
   if (props.targetUserId && props.targetUserName) {
     selectedUserId.value = props.targetUserId
     selectedUserName.value = props.targetUserName
@@ -1799,29 +664,22 @@ onMounted(async () => {
     })
   }
   
-  
-  // Start polling for updates (conversations list + messages)
   startPolling()
-  
-  // Mobile check
   updateIsMobile()
   window.addEventListener('resize', updateIsMobile)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('chat-message', handleNewMessageEvent)
-  window.removeEventListener('chat-notification', handleNewMessageEvent)
-  window.removeEventListener('chat-typing', handleTypingEvent)
-  window.removeEventListener('chat-read', handleReadEvent)
   window.removeEventListener('resize', updateIsMobile)
   stopPolling()
   stopStatusPolling()
   clearBackStack()
 })
 
-// Expose for parent to start new chat
+// Types/Typescript requires this to be exposed properly
 defineExpose({ startNewChat })
 </script>
+
 
 <template>
   <div class="chat-view">
