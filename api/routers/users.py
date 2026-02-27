@@ -190,7 +190,7 @@ async def read_all_users(
     skip: int = 0,
     limit: int = 100,
     search: Optional[str] = Query(None, min_length=1),
-    include_deleted: bool = Query(True, description="Include soft-deleted users"),
+    include_deleted: bool = Query(False, description="Include soft-deleted users"),
     db: AsyncSession = Depends(get_db)
 ):
     """دریافت لیست کاربران با قابلیت جستجو (فقط برای مدیر ارشد)"""
