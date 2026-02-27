@@ -161,7 +161,7 @@ make status      # Container status
 1. **apiBaseUrl falsy check**: `!props.apiBaseUrl` blocks all admin actions because `'' == falsy`
 2. **soft_delete() missing**: User model needs `soft_delete()` method
 3. **Bot hard delete**: Must soft-delete, not `session.delete()` (FK violations)
-4. **bot_username null on Iran**: `/api/config` returns null on Iran; use API response links directly
+4. **bot_username null on Iran**: Fixed — `BOT_USERNAME=mbmtrading1_bot` added to Iran `.env`. Was missing, causing `https://t.me/None?start=...` links in invitations and SMS.
 5. **Token expiry mismatch**: Access 60min, refresh 30 days — keep consistent
 6. **OTP not deleted after verify**: Must delete Redis OTP key after successful verification
 7. **SMS too long**: Keep invitation SMS under 3 UCS-2 segments (~161 chars)
@@ -191,3 +191,4 @@ make status      # Container status
 | 2026-02-27 06:10 UTC | Antigravity | Refactored `ChatView.vue` UI template and styles into four separate components (`ChatConversationList`, `ChatForwardModal`, `ChatLightbox`, `ChatEmptyState`), reducing `ChatView.vue` logic and markup to under 1000 lines. |
 | 2026-02-27 06:29 UTC | Copilot | Replaced raw `fetch` with `apiFetch` (auto-refresh on 401) in all admin components: `UserManager.vue`, `CommodityManager.vue`, `CreateInvitationView.vue`, `TradingSettings.vue`, `UserProfile.vue`. Fixes "خطا در دریافت لیست کاربران" when JWT expires. |
 | 2026-02-27 06:48 UTC | Copilot | Hide soft-deleted users from bot and web user lists. API `include_deleted` default changed to `False`. Bot query filters `is_deleted==False`. Frontend deleted-user badge/styles removed. Deleted users viewable later via dedicated admin section. |
+| 2026-02-27 07:02 UTC | Copilot | Fixed `bot_username` null on Iran server. Added `BOT_USERNAME=mbmtrading1_bot` to Iran `.env`. This caused invitation links to be `https://t.me/None?start=...` in both API responses and SMS. |
