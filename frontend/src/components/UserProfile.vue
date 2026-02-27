@@ -2,6 +2,7 @@
 import { ref, computed, watchEffect, onUnmounted, watch } from 'vue';
 import moment from 'moment-jalaali';
 import DatePicker from 'vue3-persian-datetime-picker';
+import { apiFetch } from '../utils/auth';
 
 const props = defineProps<{
   user: any;
@@ -285,12 +286,8 @@ async function saveRole() {
   if (!props.jwtToken) return;
   isLoading.value = true;
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
+    const response = await apiFetch(`/api/users/${props.user.id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${props.jwtToken}`
-      },
       body: JSON.stringify({ role: selectedRole.value })
     });
     if (!response.ok) throw new Error('خطا در ذخیره نقش');
@@ -312,12 +309,8 @@ async function toggleBotAccess() {
   isLoading.value = true;
   try {
     const newValue = !hasBotAccess.value;
-    const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
+    const response = await apiFetch(`/api/users/${props.user.id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${props.jwtToken}`
-      },
       body: JSON.stringify({ has_bot_access: newValue })
     });
     if (!response.ok) throw new Error('خطا در تغییر دسترسی');
@@ -415,12 +408,8 @@ async function blockUserCustom() {
 
 async function sendBlockRequest(restrictedUntil: string) {
     try {
-        const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
+        const response = await apiFetch(`/api/users/${props.user.id}`, {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${props.jwtToken}`
-          },
           body: JSON.stringify({ trading_restricted_until: restrictedUntil })
         });
         
@@ -473,12 +462,8 @@ async function saveLimitations() {
             limitations_expire_at: expireAt
         };
 
-        const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
+        const response = await apiFetch(`/api/users/${props.user.id}`, {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${props.jwtToken}`
-            },
             body: JSON.stringify(body)
         });
 
@@ -511,13 +496,9 @@ async function unblockUser() {
   if (!props.jwtToken) return;
   isLoading.value = true;
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
+    const response = await apiFetch(`/api/users/${props.user.id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${props.jwtToken}`
-      },
-      body: JSON.stringify({ trading_restricted_until: null }) // ارسال null برای رفع مسدودیت
+      body: JSON.stringify({ trading_restricted_until: null })
     });
     
     if (!response.ok) throw new Error('خطا در رفع مسدودیت');
@@ -544,12 +525,8 @@ async function removeLimitations() {
   if (!props.jwtToken) return;
   isLoading.value = true;
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
+    const response = await apiFetch(`/api/users/${props.user.id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${props.jwtToken}`
-      },
       body: JSON.stringify({ 
         max_daily_trades: null,
         max_active_commodities: null,
@@ -574,11 +551,8 @@ async function deleteUser() {
   if (!props.jwtToken) return;
   isLoading.value = true;
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/users/${props.user.id}`, {
+    const response = await apiFetch(`/api/users/${props.user.id}`, {
       method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${props.jwtToken}`
-      }
     });
     if (!response.ok) throw new Error('خطا در حذف کاربر');
     alert('کاربر حذف شد.');

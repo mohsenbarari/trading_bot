@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed } from 'vue';
+import { apiFetch } from '../utils/auth';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 
 const props = defineProps<{
@@ -35,11 +36,6 @@ const selectedCommodity = ref<Commodity | null>(null);
 const selectedAlias = ref<CommodityAlias | null>(null);
 const form = reactive<FormState>({ name: '', aliasesText: '' });
 
-const API_HEADERS = computed(() => ({
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${props.jwtToken}`,
-}));
-
 // --- توابع کمکی ---
 function resetMessages() {
   errorMessage.value = '';
@@ -71,7 +67,7 @@ async function fetchCommodities() {
   isLoading.value = true;
   resetMessages();
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/commodities/`, { headers: API_HEADERS.value });
+    const response = await apiFetch(`/api/commodities/`);
     if (!response.ok) throw new Error('خطا در بارگیری لیست کالاها');
     commodities.value = await response.json();
   } catch (e: any) {
@@ -86,7 +82,7 @@ async function onManageAliases(commodity: Commodity) {
   isLoading.value = true;
   resetMessages();
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/commodities/${commodity.id}`, { headers: API_HEADERS.value });
+    const response = await apiFetch(`/api/commodities/${commodity.id}`);
     if (!response.ok) throw new Error('خطا در دریافت اطلاعات کالا');
     selectedCommodity.value = await response.json();
     viewMode.value = 'aliases';
@@ -123,9 +119,8 @@ async function onAddCommoditySubmit() {
         aliases: aliasList
     };
 
-    const response = await fetch(`${props.apiBaseUrl}/api/commodities/`, {
+    const response = await apiFetch(`/api/commodities/`, {
       method: 'POST',
-      headers: API_HEADERS.value,
       body: JSON.stringify(payload),
     });
     
@@ -158,9 +153,8 @@ async function onEditCommodityNameSubmit() {
   isLoading.value = true;
   resetMessages();
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/commodities/${selectedCommodity.value.id}`, {
+    const response = await apiFetch(`/api/commodities/${selectedCommodity.value.id}`, {
       method: 'PUT',
-      headers: API_HEADERS.value,
       body: JSON.stringify({ name: form.name.trim() }),
     });
     const data = await response.json();
@@ -204,9 +198,8 @@ async function onAddAliasSubmit() {
     const failedAliases: string[] = [];
 
     for (const aliasName of aliasList) {
-      const response = await fetch(`${props.apiBaseUrl}/api/commodities/${selectedCommodity.value.id}/aliases`, {
+      const response = await apiFetch(`/api/commodities/${selectedCommodity.value.id}/aliases`, {
         method: 'POST',
-        headers: API_HEADERS.value,
         body: JSON.stringify({ alias: aliasName }),
       });
       const data = await response.json();
@@ -246,9 +239,8 @@ async function onEditAliasSubmit() {
   isLoading.value = true;
   resetMessages();
   try {
-     const response = await fetch(`${props.apiBaseUrl}/api/commodities/aliases/${selectedAlias.value.id}`, {
+     const response = await apiFetch(`/api/commodities/aliases/${selectedAlias.value.id}`, {
       method: 'PUT',
-      headers: API_HEADERS.value,
       body: JSON.stringify({ alias: form.name.trim() }),
     });
     const data = await response.json();
@@ -278,9 +270,8 @@ async function onDeleteCommodityConfirm() {
   isLoading.value = true;
   resetMessages();
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/commodities/${selectedCommodity.value.id}`, {
+    const response = await apiFetch(`/api/commodities/${selectedCommodity.value.id}`, {
       method: 'DELETE',
-      headers: API_HEADERS.value,
     });
     if (!response.ok) {
         const data = response.status !== 204 ? await response.json() : null;
@@ -312,9 +303,8 @@ async function onDeleteAliasConfirm() {
   isLoading.value = true;
   resetMessages();
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/commodities/aliases/${selectedAlias.value.id}`, {
+    const response = await apiFetch(`/api/commodities/aliases/${selectedAlias.value.id}`, {
       method: 'DELETE',
-      headers: API_HEADERS.value,
     });
     if (!response.ok) {
         const data = response.status !== 204 ? await response.json() : null;

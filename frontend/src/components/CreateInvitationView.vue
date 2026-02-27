@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue';
+import { apiFetch } from '../utils/auth';
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -73,12 +74,8 @@ async function createInvite() {
   copyMessage.value = '';
 
   try {
-    const resp = await fetch(`${props.apiBaseUrl}/api/invitations/`, {
+    const resp = await apiFetch(`/api/invitations/`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${props.jwtToken}`,
-      },
       body: JSON.stringify({ ...invite, mobile_number: normalizedMobile }),
     });
     
