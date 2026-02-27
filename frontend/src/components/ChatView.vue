@@ -678,6 +678,11 @@ onUnmounted(() => {
 
 // Types/Typescript requires this to be exposed properly
 defineExpose({ startNewChat })
+
+import ChatConversationList from './chat/ChatConversationList.vue'
+import ChatForwardModal from './chat/ChatForwardModal.vue'
+import ChatLightbox from './chat/ChatLightbox.vue'
+import ChatEmptyState from './chat/ChatEmptyState.vue'
 </script>
 
 
@@ -717,55 +722,17 @@ defineExpose({ startNewChat })
     </div>
 
     <!-- Conversation List -->
-    <div v-else-if="!selectedUserId" class="conversations-list">
-      <div v-if="conversations.length === 0" class="empty-state">
-        <span>💬</span>
-        <p>هنوز گفتگویی ندارید</p>
-      </div>
-      <div 
-        v-for="conv in sortedConversations" 
-        :key="conv.id"
-        class="conversation-item"
-        v-ripple
-        :class="{ 'has-unread': conv.unread_count > 0, 'active': selectedUserId === conv.other_user_id }"
-        @click="selectConversation(conv)"
-      >
-        <div class="conv-avatar">
-          {{ conv.other_user_name.charAt(0) }}
-          <div v-if="isUserOnline(conv.other_user_last_seen_at)" class="online-indicator-dot"></div>
-        </div>
-        <div class="conv-content">
-          <div class="conv-header">
-            <span class="conv-name">
-              {{ conv.other_user_name }}
-              <span v-if="conv.other_user_is_deleted" class="deleted-badge-list">غیرفعال</span>
-            </span>
-            <span class="conv-time" v-if="conv.last_message_at">
-              {{ formatTime(conv.last_message_at) }}
-            </span>
-          </div>
-          <div class="conv-preview">
-            <span v-if="typingUsers[conv.other_user_id]" class="typing-text">
-               🖊️ در حال نوشتن...
-            </span>
-            <template v-else>
-                <template v-if="conv.last_message_type === 'image'">🖼️ تصویر</template>
-                <template v-else-if="conv.last_message_type === 'sticker'">😊 استیکر</template>
-                <template v-else>{{ conv.last_message_content?.substring(0, 30) || '...' }}</template>
-            </template>
-          </div>
-        </div>
-        <div v-if="conv.unread_count > 0" class="unread-badge">
-          {{ conv.unread_count }}
-        </div>
-      </div>
-    </div>
+        <ChatConversationList
+      v-else-if="!selectedUserId"
+      :conversations="sortedConversations"
+      :selectedUserId="selectedUserId"
+      :typingUsers="typingUsers"
+      @select-conversation="selectConversation"
+    />
 
     <!-- Messages View -->
     <template v-else>
-      <div v-if="!selectedUserId" class="no-selection-placeholder">
-        <p>لطفاً یک گفتگو را انتخاب کنید</p>
-      </div>
+      <ChatEmptyState v-if="!selectedUserId" />
       <div class="chat-content">
         <div v-if="isLoadingMessages" class="loading-state">
           <LoadingSkeleton :count="8" :height="50" />
@@ -840,27 +807,12 @@ defineExpose({ startNewChat })
       />
 
       <!-- Forward Target Modal -->
-      <div v-if="showForwardModal" class="forward-modal-overlay" @click="closeForwardModal">
-        <div class="forward-modal" @click.stop>
-          <div class="forward-modal-header">
-            <h3>ارسال به...</h3>
-            <button class="close-btn" @click="closeForwardModal">✕</button>
-          </div>
-          <div class="forward-modal-body">
-            <div 
-              v-for="conv in sortedConversations" 
-              :key="conv.id"
-              class="forward-conv-item"
-              @click="forwardSelectedMessages(conv.other_user_id)"
-            >
-              <div class="conv-avatar">
-                {{ conv.other_user_name.charAt(0) }}
-              </div>
-              <div class="conv-name">{{ conv.other_user_name }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <ChatForwardModal
+        :showForwardModal="showForwardModal"
+        :sortedConversations="sortedConversations"
+        @close="closeForwardModal"
+        @forward-to="forwardSelectedMessages"
+      />
 
     <!-- Context Menu -->
     <ChatContextMenu
@@ -876,18 +828,10 @@ defineExpose({ startNewChat })
     />
 
     <!-- Lightbox Overlay -->
-    <Teleport to="body">
-      <Transition name="fade">
-        <div v-if="lightboxMedia" class="lightbox-overlay" @click="closeLightbox">
-          <div class="lightbox-content" @click.stop>
-            <button class="lightbox-close" @click="closeLightbox">✕</button>
-            <img v-if="lightboxMedia.type === 'image'" :src="lightboxMedia.url" />
-            <video v-else-if="lightboxMedia.type === 'video'" :src="lightboxMedia.url" controls autoplay></video>
-          </div>
-        </div>
-      </Transition>
-
-    </Teleport>
+    <ChatLightbox 
+      :lightboxMedia="lightboxMedia" 
+      @close="closeLightbox" 
+    />
 
     </template>
     </div>
@@ -1038,20 +982,7 @@ defineExpose({ startNewChat })
 }
 
 /* Loading & Empty States */
-.loading-state, .error-state, .empty-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
-  color: var(--text-secondary);
-}
-
-.empty-state span {
-  font-size: 48px;
-  margin-bottom: 12px;
-}
+.loading-state, .error-state, 
 
 .error-state button {
   margin-top: 12px;
@@ -1064,22 +995,7 @@ defineExpose({ startNewChat })
 }
 
 /* Conversations List */
-.conversations-list {
-  flex: 1;
-  overflow-y: auto;
-}
 
-.conversation-item {
-  display: flex;
-  align-items: center;
-  padding: 10px 16px; /* slightly tighter padding for Telegram feel */
-  border-bottom: none; /* Telegram typically lacks strong dividers here */
-  cursor: pointer;
-  background: #FFFFFF;
-  border-radius: 10px; /* Slight roundness in lists */
-  margin: 2px 8px; /* Floating items */
-  transition: background 0.1s ease;
-}
 
 .conversation-item:hover {
   background: #f4f4f5; /* Very light modern gray hover */
@@ -1093,71 +1009,14 @@ defineExpose({ startNewChat })
   background: rgba(245, 158, 11, 0.05);
 }
 
-.conv-avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #fbbf24, #f59e0b);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 600;
-  margin-left: 12px;
-  position: relative;
-}
 
-.online-indicator-dot {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 13px;
-  height: 13px;
-  background-color: #4cd964; /* Telegram Green */
-  border: 2px solid #fff;
-  border-radius: 50%;
-}
 
-.conv-content {
-  flex: 1;
-  min-width: 0;
-}
 
-.conv-header {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 4px;
-}
 
-.conv-name {
-  font-weight: 600;
-  font-size: 14px;
-}
 
-.deleted-badge-list {
-  background: #fef2f2;
-  color: #ef4444;
-  border: 1px solid #fecaca;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 10px;
-  margin-right: 6px;
-  vertical-align: middle;
-}
 
-.conv-time {
-  font-size: 11px;
-  color: #8E8E93;
-}
 
-.conv-preview {
-  font-size: 13px;
-  color: #8E8E93;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+
 
 .typing-text {
   color: #2ea043;
@@ -1186,15 +1045,6 @@ defineExpose({ startNewChat })
   }
 }
 
-.no-selection-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #8E8E93;
-  font-size: 1.1em;
-  background-color: #f5f5f7;
-}
 
 .date-separator {
   display: flex;
@@ -1229,18 +1079,6 @@ defineExpose({ startNewChat })
     }
 }
 
-.unread-badge {
-  min-width: 20px;
-  height: 20px;
-  background: #ff3b30;
-  color: white;
-  border-radius: 10px;
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 6px;
-}
 
 /* Chat Content - Main scrollable area */
 .chat-content {
@@ -2098,65 +1936,7 @@ defineExpose({ startNewChat })
   opacity: 0.8;
   line-height: 1.2;
 }
-.forward-modal-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-}
-.forward-modal {
-  background: white;
-  border-radius: 12px;
-  width: 90%;
-  max-width: 320px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.forward-modal-header {
-  padding: 16px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid #eee;
-}
-.forward-modal-header h3 { margin: 0; font-size: 16px; }
-.close-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: #8e8e93; }
-.forward-modal-body {
-  overflow-y: auto;
-  padding: 8px 0;
-}
-.forward-conv-item {
-  display: flex;
-  align-items: center;
-  padding: 12px 16px;
-  cursor: pointer;
-}
-.forward-conv-item:hover { background: #f5f5f5; }
-.forward-conv-item .conv-avatar {
-  width: 40px; height: 40px;
-  border-radius: 20px;
-  background: #f59e0b;
-  color: white;
-  display: flex; align-items: center; justify-content: center;
-  font-weight: bold;
-  margin-left: 12px;
-}
-.forward-conv-item .conv-name {
-  font-weight: 500;
-  color: #000;
-}
 
-@media (prefers-color-scheme: dark) {
-  .forward-modal { background: #1e1e1e; }
-  .forward-modal-header { border-bottom-color: #333; color: white; }
-  .forward-conv-item:hover { background: #2a2a2a; }
-  .forward-conv-item .conv-name { color: white; }
-}
 .selection-bottom-bar {
   display: flex;
   align-items: center;
@@ -2302,39 +2082,5 @@ defineExpose({ startNewChat })
   gap: 4px;
 }
 
-/* Lightbox */
-.lightbox-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: rgba(0, 0, 0, 0.9);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10000;
-}
-.lightbox-content {
-  position: relative;
-  max-width: 90vw;
-  max-height: 90vh;
-}
-.lightbox-content img, .lightbox-content video {
-  max-width: 100%;
-  max-height: 90vh;
-  object-fit: contain;
-  border-radius: 8px;
-}
-.lightbox-close {
-  position: absolute;
-  top: -40px;
-  right: 0;
-  background: none;
-  border: none;
-  color: white;
-  font-size: 24px;
-  cursor: pointer;
-}
 
 </style>
