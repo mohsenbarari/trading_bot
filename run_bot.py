@@ -20,7 +20,6 @@ from bot.handlers import (
 )
 from core.db import init_db, AsyncSessionLocal
 from core.events import setup_event_listeners
-from core.offer_expiry import offer_expiry_loop
 from bot.middlewares import AuthMiddleware
 
 # Configure logging
@@ -61,9 +60,6 @@ async def main():
     
     # Default router should be last
     dp.include_router(default.router)
-
-    # Start offer auto-expiry background task
-    asyncio.create_task(offer_expiry_loop())
 
     logger.info("🤖 Bot started...")
     try:
