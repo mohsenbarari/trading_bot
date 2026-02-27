@@ -2,7 +2,7 @@ import asyncio
 import logging
 import sys
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
 from core.config import settings
 from bot.handlers import (
     start, 
@@ -39,7 +39,8 @@ async def main():
     setup_event_listeners()
 
     bot = Bot(token=settings.bot_token)
-    dp = Dispatcher(storage=MemoryStorage())
+    storage = RedisStorage.from_url(settings.redis_url)
+    dp = Dispatcher(storage=storage)
 
     # Auth: inject user into handler data for ALL updates (must be before routers)
     auth_mw = AuthMiddleware(AsyncSessionLocal)
