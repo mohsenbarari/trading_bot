@@ -12,9 +12,15 @@
       <template v-if="selectedUserId">
         <div class="header-avatar" @click="$emit('view-profile')">{{ selectedUserName.charAt(0) }}</div>
         <div class="header-user-info" @click="$emit('view-profile')">
-          <span class="header-name">{{ selectedUserName }}</span>
-          <span class="header-status" :class="{ 'online': targetUserStatus.includes('آنلاین') || isTyping }">
-            <template v-if="isTyping">
+          <span class="header-name">
+            {{ selectedUserName }}
+            <span v-if="isDeleted" class="deleted-badge-small">غیرفعال</span>
+          </span>
+          <span class="header-status" :class="{ 'online': targetUserStatus.includes('آنلاین') && !isDeleted || isTyping }">
+            <template v-if="isDeleted">
+              حساب کاربری غیرفعال است
+            </template>
+            <template v-else-if="isTyping">
               در حال نوشتن<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
             </template>
             <template v-else>
@@ -131,6 +137,7 @@ const props = defineProps<{
   searchQuery: string
   searchResults: any[]
   selectedMessagesCount: number
+  isDeleted?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -291,6 +298,17 @@ function formatDateForSeparator(dateString: string) {
   padding: 2px 8px;
   font-size: 12px;
   font-weight: bold;
+}
+
+.deleted-badge-small {
+  background: #fef2f2;
+  color: #ef4444;
+  border: 1px solid #fecaca;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  margin-right: 6px;
+  vertical-align: middle;
 }
 
 .search-bar-container {

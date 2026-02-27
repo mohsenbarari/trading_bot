@@ -120,6 +120,7 @@ class ConversationRead(BaseModel):
     id: int
     other_user_id: int
     other_user_name: str
+    other_user_is_deleted: bool = False
     last_message_content: Optional[str] = None
     last_message_type: Optional[MessageType] = None
     last_message_at: Optional[datetime] = None
@@ -219,6 +220,7 @@ async def get_conversations(
             id=conv.id,
             other_user_id=other_user.id,
             other_user_name=other_user.account_name,
+            other_user_is_deleted=other_user.is_deleted,
             last_message_content=conv.last_message.content if conv.last_message else None,
             last_message_type=conv.last_message.message_type if conv.last_message else None,
             last_message_at=conv.last_message_at,
@@ -370,6 +372,9 @@ async def send_message(
     receiver = await db.get(User, data.receiver_id)
     if not receiver:
         raise HTTPException(status_code=404, detail="Receiver not found")
+        
+    if receiver.is_deleted:
+        raise HTTPException(status_code=400, detail="امکان ارسال پیام به کاربر غیرفعال وجود ندارد")
     
     if data.receiver_id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot send message to yourself")
@@ -582,7 +587,8 @@ async def poll_messages(
         conversations_with_unread.append({
             "user_id": other_user.id,
             "user_name": other_user.account_name,
-            "unread_count": unread
+            "unread_count": unread,
+            "is_deleted": other_user.is_deleted
         })
     
     return PollResponse(

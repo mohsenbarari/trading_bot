@@ -52,6 +52,11 @@
       </button>
     </div>
 
+    <!-- Disabled Banner -->
+    <div v-else-if="isDeleted" class="input-container disabled-banner">
+      <span class="disabled-text">امکان ارسال پیام به این کاربر وجود ندارد.</span>
+    </div>
+
     <!-- Input Container -->
     <div v-else class="input-container">
       <!-- Left side buttons -->
@@ -150,6 +155,7 @@ const props = defineProps<{
   canCopySelected: boolean
   isUploading: boolean
   isSending: boolean
+  isDeleted?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -183,7 +189,7 @@ const adjustTextareaHeight = () => {
 
 const handleFileUpload = (e: Event) => {
   const target = e.target as HTMLInputElement
-  if (target.files && target.files.length > 0) {
+  if (target.files && target.files.length > 0 && target.files[0]) {
     emit('upload-media', target.files[0])
     target.value = '' // Clear input so the same file can be selected again
   }
@@ -249,6 +255,16 @@ const sendSticker = (sticker: string) => {
   min-height: 24px; line-height: 24px; max-height: 200px; font-family: inherit; direction: rtl; text-align: right;
 }
 .input-container textarea::placeholder { color: #8E8E93; }
+
+.disabled-banner {
+  justify-content: center;
+  align-items: center;
+  background: #f9fafb;
+}
+.disabled-text {
+  color: #8E8E93;
+  font-size: 14px;
+}
 
 .emoji-btn, .attach-btn, .voice-btn {
   background: none; border: none; padding: 0; margin: 0; cursor: pointer; display: flex;
