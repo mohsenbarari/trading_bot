@@ -12,7 +12,6 @@ from .offer import Offer, OfferType, OfferStatus
 from .trade import Trade, TradeType, TradeStatus
 from .message import Message
 from .conversation import Conversation
-from .conversation import Conversation
 from .user_block import UserBlock
 from .chat_file import ChatFile
 from .change_log import ChangeLog

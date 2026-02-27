@@ -74,6 +74,9 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
         
+    if user.is_deleted:
+        raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
+        
     # Update last_seen
     if not user.last_seen_at or (datetime.utcnow() - user.last_seen_at).total_seconds() > 60:
         user.last_seen_at = datetime.utcnow()

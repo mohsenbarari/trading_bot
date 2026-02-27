@@ -24,6 +24,7 @@ interface Conversation {
   id: number
   other_user_id: number
   other_user_name: string
+  other_user_is_deleted?: boolean
   last_message_content: string | null
   last_message_type: string | null
   last_message_at: string | null
@@ -244,6 +245,12 @@ function handleMediaClick(msg: Message) {
 function closeLightbox() {
   lightboxMedia.value = null;
 }
+
+// Derived state
+const isSelectedUserDeleted = computed(() => {
+  const conv = conversations.value.find(c => c.other_user_id === selectedUserId.value)
+  return conv ? !!conv.other_user_is_deleted : false
+})
 
 // Input
 const messageInput = ref('')
@@ -1837,6 +1844,7 @@ defineExpose({ startNewChat })
       @result-click="handleSearchResultClick"
       @call="handleCall"
       @clear-selection="clearSelection"
+      :isDeleted="isSelectedUserDeleted"
     />
 
     <!-- Loading -->
@@ -1870,7 +1878,10 @@ defineExpose({ startNewChat })
         </div>
         <div class="conv-content">
           <div class="conv-header">
-            <span class="conv-name">{{ conv.other_user_name }}</span>
+            <span class="conv-name">
+              {{ conv.other_user_name }}
+              <span v-if="conv.other_user_is_deleted" class="deleted-badge-list">غیرفعال</span>
+            </span>
             <span class="conv-time" v-if="conv.last_message_at">
               {{ formatTime(conv.last_message_at) }}
             </span>
@@ -1956,6 +1967,7 @@ defineExpose({ startNewChat })
         :canDeleteSelected="canDeleteSelected"
         :canCopySelected="canCopySelected"
         :isSending="isSending"
+        :isDeleted="isSelectedUserDeleted"
         @cancel-reply="cancelReply"
         @delete-selected="handleDeleteSelected"
         @reply-selected="handleReplySelected"
@@ -2261,6 +2273,17 @@ defineExpose({ startNewChat })
 .conv-name {
   font-weight: 600;
   font-size: 14px;
+}
+
+.deleted-badge-list {
+  background: #fef2f2;
+  color: #ef4444;
+  border: 1px solid #fecaca;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  margin-right: 6px;
+  vertical-align: middle;
 }
 
 .conv-time {
