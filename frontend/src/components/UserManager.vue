@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted } from 'vue';
+import { apiFetch } from '../utils/auth';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 
 const props = defineProps<{
@@ -25,23 +26,16 @@ const errorMessage = ref('');
 const searchQuery = ref('');
 const showSearch = ref(false);
 
-const API_HEADERS = computed(() => ({
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${props.jwtToken}`,
-}));
-
 async function fetchUsers() {
   isLoading.value = true;
   errorMessage.value = '';
   try {
-    let url = `${props.apiBaseUrl}/api/users/`;
+    let url = `/api/users/`;
     if (searchQuery.value.trim()) {
       url += `?search=${encodeURIComponent(searchQuery.value.trim())}`;
     }
     
-    const response = await fetch(url, {
-      headers: API_HEADERS.value
-    });
+    const response = await apiFetch(url);
     if (!response.ok) throw new Error('خطا در دریافت لیست کاربران');
     users.value = await response.json();
   } catch (e: any) {

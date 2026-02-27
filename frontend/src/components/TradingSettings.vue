@@ -92,6 +92,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { apiFetch } from '../utils/auth'
 
 const props = defineProps({
   apiBaseUrl: { type: String, required: true },
@@ -126,15 +127,11 @@ const settings = ref({
 const fetchApi = async (method, endpoint, body = null) => {
   const options = {
     method,
-    headers: {
-      'Authorization': `Bearer ${props.jwtToken}`,
-      'Content-Type': 'application/json'
-    }
   }
   if (body) {
     options.body = JSON.stringify(body)
   }
-  const response = await fetch(`${props.apiBaseUrl}/api${endpoint}`, options)
+  const response = await apiFetch(`/api${endpoint}`, options)
   if (!response.ok) {
     const error = await response.json()
     throw new Error(error.detail || 'خطا در ارتباط با سرور')
