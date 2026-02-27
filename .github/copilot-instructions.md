@@ -184,3 +184,4 @@ make status      # Container status
 | :--- | :--- | :--- |
 | 2026-02-25 | Antigravity | Refactored `ChatView.vue` into `ChatHeader.vue`, `ChatInputBar.vue`, `ChatMessageItem.vue`, and `ChatContextMenu.vue` for modularity. |
 | 2026-02-26 | Antigravity | Established the Assistant Collaboration Protocol and Change History tracking. |
+| 2026-02-27 14:00 | Copilot | Switched bot FSM storage from `MemoryStorage` to `RedisStorage` in `run_bot.py`. FSM state now persists across bot restarts via Redis. |
