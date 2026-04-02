@@ -427,10 +427,21 @@ function getImageThumbnail(content: string) {
 .media-type-badge { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.6); color: white; font-size: 10px; padding: 2px 6px; border-radius: 12px; display: flex; align-items: center; gap: 4px; }
 
 /* Highlight */
-.highlight-message { animation: highlight 3s ease-in-out; }
+.highlight-message::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: highlight 2.5s ease-in-out forwards;
+}
+
 @keyframes highlight {
-  0% { box-shadow: none; }
-  15% { box-shadow: 0 0 0 4px rgba(255, 200, 0, 0.5), 0 0 20px 10px rgba(255, 200, 0, 0.3); }
-  100% { box-shadow: none; }
+  0% { box-shadow: none; background-color: transparent; }
+  15% { box-shadow: 0 0 0 3px rgba(255, 200, 0, 0.6), 0 0 15px 5px rgba(255, 200, 0, 0.2); background-color: rgba(255, 200, 0, 0.1); }
+  100% { box-shadow: none; background-color: transparent; }
 }
 </style>
