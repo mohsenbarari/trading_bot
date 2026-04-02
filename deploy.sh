@@ -167,6 +167,7 @@ case "$TARGET" in
         ;;
     foreign)
         prepare_pip_packages
+        build_frontend
         deploy_foreign
         ;;
     all)
