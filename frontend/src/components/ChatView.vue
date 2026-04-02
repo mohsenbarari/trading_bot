@@ -737,6 +737,7 @@ defineExpose({ startNewChat })
 
 import ChatForwardModal from './chat/ChatForwardModal.vue'
 import ChatLightbox from './chat/ChatLightbox.vue'
+import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 </script>
 
 
@@ -754,16 +755,12 @@ import ChatLightbox from './chat/ChatLightbox.vue'
       :searchQuery="searchQuery"
       :searchResults="searchResults"
       :currentSearchIndex="currentSearchIndex"
-      :showInChatSearchList="showInChatSearchList"
       :selectedMessagesCount="selectedMessages.length"
       @back="goBack"
       @view-profile="viewProfile"
       @toggle-search="toggleSearch"
       @search="(val: string) => { searchQuery = val; performSearch(); }"
       @result-click="handleSearchResultClick"
-      @next-search-result="nextSearchResult"
-      @prev-search-result="prevSearchResult"
-      @toggle-in-chat-list="showInChatSearchList = !showInChatSearchList"
       @call="handleCall"
       @clear-selection="clearSelection"
       :isDeleted="isSelectedUserDeleted"
@@ -852,8 +849,19 @@ import ChatLightbox from './chat/ChatLightbox.vue'
       </div> <!-- End .messages-container -->
       </div> <!-- End .chat-content -->
 
+      <!-- In-Chat Search Navigation Bottom Bar -->
+      <ChatSearchBottomBar
+        v-if="selectedUserId && isSearchActive && searchResults.length > 0 && !showInChatSearchList"
+        :currentSearchIndex="currentSearchIndex"
+        :totalResults="searchResults.length"
+        @next="nextSearchResult"
+        @prev="prevSearchResult"
+        @toggle-list="showInChatSearchList = true"
+      />
+
       <!-- Input Area -->
       <ChatInputBar
+        v-else-if="selectedUserId && !isSelectionMode"
         :isSelectionMode="isSelectionMode"
         :replyingToMessage="replyingToMessage"
         :selectedUserName="selectedUserName"
