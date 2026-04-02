@@ -3,6 +3,7 @@
 const props = defineProps<{
   currentSearchIndex: number
   totalResults: number
+  showInChatSearchList: boolean
 }>()
 
 const emit = defineEmits<{
@@ -42,7 +43,11 @@ const emit = defineEmits<{
          </svg>
        </button>
        <button class="nav-btn toggle-list-btn" v-ripple @click="$emit('toggle-list')">
-         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+         <!-- Chat Icon -> Return to chat, List Icon -> Show list -->
+         <svg v-if="showInChatSearchList" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+         </svg>
+         <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="8" y1="6" x2="21" y2="6"></line>
             <line x1="8" y1="12" x2="21" y2="12"></line>
             <line x1="8" y1="18" x2="21" y2="18"></line>

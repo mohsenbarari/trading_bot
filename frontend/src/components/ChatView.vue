@@ -851,12 +851,13 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 
       <!-- In-Chat Search Navigation Bottom Bar -->
       <ChatSearchBottomBar
-        v-if="selectedUserId && isSearchActive && searchResults.length > 0 && !showInChatSearchList"
+        v-if="selectedUserId && isSearchActive && searchResults.length > 0"
         :currentSearchIndex="currentSearchIndex"
         :totalResults="searchResults.length"
+        :showInChatSearchList="showInChatSearchList"
         @next="nextSearchResult"
         @prev="prevSearchResult"
-        @toggle-list="showInChatSearchList = true"
+        @toggle-list="showInChatSearchList = !showInChatSearchList"
       />
 
       <!-- Input Area -->
