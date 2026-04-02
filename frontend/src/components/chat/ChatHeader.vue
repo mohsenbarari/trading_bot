@@ -57,6 +57,11 @@
            <button class="nav-btn" v-ripple @click="$emit('next-search-result')">
              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
            </button>
+           <button class="nav-btn" v-ripple @click="$emit('toggle-in-chat-list')" style="margin-right: 4px;">
+             <!-- If list is showing, show chat bubble to return, otherwise show list icon -->
+             <svg v-if="showInChatSearchList" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+             <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+           </button>
          </template>
 
          <button class="header-btn" v-ripple @click="$emit('toggle-search')">✕</button>
@@ -136,6 +141,7 @@ const props = defineProps<{
   searchQuery: string
   searchResults: any[]
   currentSearchIndex: number
+  showInChatSearchList?: boolean
   selectedMessagesCount: number
   isDeleted?: boolean
 }>()
@@ -148,6 +154,7 @@ const emit = defineEmits<{
   (e: 'result-click', result: any): void
   (e: 'next-search-result'): void
   (e: 'prev-search-result'): void
+  (e: 'toggle-in-chat-list'): void
   (e: 'call'): void
   (e: 'clear-selection'): void
 }>()
