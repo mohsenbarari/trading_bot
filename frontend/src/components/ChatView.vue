@@ -789,9 +789,9 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       <button @click="error = ''; loadConversations()">تلاش مجدد</button>
     </div>
 
-    <!-- Global Search Results OR In-Chat Search List -->
+    <!-- Global Search Results -->
     <ChatSearchGlobalList
-      v-else-if="isSearchActive && (!selectedUserId || showInChatSearchList)"
+      v-else-if="isSearchActive && !selectedUserId"
       :searchResults="searchResults"
       :searchQuery="searchQuery"
       :conversations="sortedConversations"
@@ -811,7 +811,18 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
     <!-- Messages View -->
     <template v-else>
       <ChatEmptyState v-if="!selectedUserId" />
-      <div class="chat-content">
+      
+      <!-- In-Chat Search List -->
+      <ChatSearchGlobalList
+        v-if="isSearchActive && selectedUserId && showInChatSearchList"
+        :searchResults="searchResults"
+        :searchQuery="searchQuery"
+        :conversations="sortedConversations"
+        :currentUserId="currentUserId"
+        @select-result="handleSearchResultClick"
+      />
+      
+      <div v-else class="chat-content">
         <div v-if="isLoadingMessages" class="loading-state">
           <LoadingSkeleton :count="8" :height="50" />
         </div>
