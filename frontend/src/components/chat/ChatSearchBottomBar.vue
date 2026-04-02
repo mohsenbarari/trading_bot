@@ -16,7 +16,7 @@ const emit = defineEmits<{
 <template>
   <div class="search-bottom-bar" dir="ltr">
     <!-- Left side: Calendar (Optional feature placeholder) -->
-    <button class="nav-btn">
+    <button class="nav-btn" v-if="!showInChatSearchList">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
         <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
         <line x1="16" y1="2" x2="16" y2="6"></line>
@@ -24,20 +24,21 @@ const emit = defineEmits<{
         <line x1="3" y1="10" x2="21" y2="10"></line>
       </svg>
     </button>
+    <div v-else></div> <!-- Layout Spacer -->
     
     <!-- Count -->
-    <div class="search-count-badge">
+    <div class="search-count-badge" v-if="!showInChatSearchList">
        {{ currentSearchIndex + 1 }} از {{ totalResults }}
     </div>
 
     <!-- Right side: Navigation & List Toggle -->
     <div class="right-navs">
-       <button class="nav-btn" v-ripple @click="$emit('prev')">
+       <button class="nav-btn" v-ripple @click="$emit('prev')" v-if="!showInChatSearchList">
          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
            <polyline points="18 15 12 9 6 15"></polyline>
          </svg>
        </button>
-       <button class="nav-btn" v-ripple @click="$emit('next')">
+       <button class="nav-btn" v-ripple @click="$emit('next')" v-if="!showInChatSearchList">
          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
            <polyline points="6 9 12 15 18 9"></polyline>
          </svg>
