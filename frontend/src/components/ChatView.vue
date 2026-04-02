@@ -382,13 +382,21 @@ const prevSearchResult = async () => {
         scrollToMessage(targetMsg.id)
     })
 }
-
+const handleToggleInChatList = () => {
+    showInChatSearchList.value = !showInChatSearchList.value
+    if (!showInChatSearchList.value && searchResults.value.length > 0) {
+        const targetMsg = searchResults.value[currentSearchIndex.value]
+        setTimeout(() => {
+            scrollToMessage(targetMsg.id)
+        }, 150)
+    }
+}
 const handleSearchResultClick = async (msg: any) => {
-    isSearchActive.value = false
-    showInChatSearchList.value = false
-    searchResults.value = []
-    currentSearchIndex.value = 0
     if (!selectedUserId.value) {
+        isSearchActive.value = false
+        showInChatSearchList.value = false
+        searchResults.value = []
+        currentSearchIndex.value = 0
         const otherId = msg.sender_id === props.currentUserId ? msg.receiver_id : msg.sender_id;
         selectedUserId.value = otherId;
         const conv = sortedConversations.value.find(c => c.other_user_id === otherId)
@@ -401,12 +409,16 @@ const handleSearchResultClick = async (msg: any) => {
         await loadMessages(otherId, false, msg.id)
         nextTick(() => scrollToMessage(msg.id))
     } else {
-        const exists = messages.value.find(m => m.id === msg.id)
-        if (exists) {
-            scrollToMessage(msg.id)
+        showInChatSearchList.value = false
+        const idx = searchResults.value.findIndex(r => r.id === msg.id)
+        if (idx !== -1) currentSearchIndex.value = idx
+        
+        const isLoaded = messages.value.some(m => m.id === msg.id)
+        if (isLoaded) {
+            setTimeout(() => scrollToMessage(msg.id), 150)
         } else {
             await loadMessages(selectedUserId.value!, false, msg.id)
-            nextTick(() => scrollToMessage(msg.id))
+            setTimeout(() => scrollToMessage(msg.id), 250)
         }
     }
 }
@@ -857,7 +869,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         :showInChatSearchList="showInChatSearchList"
         @next="nextSearchResult"
         @prev="prevSearchResult"
-        @toggle-list="showInChatSearchList = !showInChatSearchList"
+        @toggle-list="handleToggleInChatList"
       />
 
       <!-- Input Area -->
