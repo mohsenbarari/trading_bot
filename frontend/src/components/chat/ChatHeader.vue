@@ -47,20 +47,19 @@
             placeholder="جستجو..." 
             class="header-search-input"
          />
-         <button class="header-btn" v-ripple @click="$emit('toggle-search')">✕</button>
          
-         <!-- Search Results Dropdown -->
-         <div v-if="searchResults.length > 0" class="search-results-dropdown">
-            <div 
-               v-for="res in searchResults" 
-               :key="res.id" 
-               class="search-result-item"
-               @click="$emit('result-click', res)"
-            >
-               <span class="search-res-text">{{ res.content.substring(0, 30) }}...</span>
-               <span class="search-res-date">{{ formatDateForSeparator(res.created_at) }}</span>
-            </div>
-         </div>
+         <!-- In-Chat Search Navigation -->
+         <template v-if="selectedUserId && searchResults.length > 0">
+           <span class="search-counter">{{ currentSearchIndex + 1 }} از {{ searchResults.length }}</span>
+           <button class="nav-btn" v-ripple @click="$emit('prev-search-result')">
+             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
+           </button>
+           <button class="nav-btn" v-ripple @click="$emit('next-search-result')">
+             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+           </button>
+         </template>
+
+         <button class="header-btn" v-ripple @click="$emit('toggle-search')">✕</button>
       </div>
       
       <!-- Spacer -->
@@ -136,6 +135,7 @@ const props = defineProps<{
   isSearchActive: boolean
   searchQuery: string
   searchResults: any[]
+  currentSearchIndex: number
   selectedMessagesCount: number
   isDeleted?: boolean
 }>()
@@ -146,6 +146,8 @@ const emit = defineEmits<{
   (e: 'toggle-search'): void
   (e: 'search', query: string): void
   (e: 'result-click', result: any): void
+  (e: 'next-search-result'): void
+  (e: 'prev-search-result'): void
   (e: 'call'): void
   (e: 'clear-selection'): void
 }>()
