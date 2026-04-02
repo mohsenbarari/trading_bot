@@ -209,3 +209,4 @@ make status      # Container status
 | 2026-02-27 07:02 UTC | Copilot | Fixed `bot_username` null on Iran server. Added `BOT_USERNAME=mbmtrading1_bot` to Iran `.env`. This caused invitation links to be `https://t.me/None?start=...` in both API responses and SMS. |
 | 2026-04-02 17:31 UTC | Antigravity | Activated Single-Server Development Mode bypassing Iran Server. Stopped `sync_worker` container and updated instructions explicitly prohibiting `make up` in favor of `make foreign`. |
 | 2026-04-02 17:39 UTC | Antigravity | Updated `deploy.sh` to include `build_frontend` under the `foreign` target to ensure UI changes are served locally during single-server mode. |
+| 2026-04-02 17:53 UTC | Antigravity | Fixed layout jump bug in `ChatMessageItem.vue` during scroll-to-reply. The `.highlight-message` animation was overriding `.message-bubble`'s default animation, causing `slideIn` to replay downwards. Used `::after` pseudo-element to isolate the highlight animation. |
