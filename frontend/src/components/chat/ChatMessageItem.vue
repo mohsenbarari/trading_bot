@@ -69,7 +69,7 @@
       
       <!-- Text -->
       <template v-if="msg.message_type === 'text'">
-        <p>{{ msg.content }}</p>
+        <p v-html="highlightedContent"></p>
       </template>
       
       <!-- Media (Image/Video) -->
@@ -171,6 +171,7 @@ const props = defineProps<{
   selectedMessages: number[]
   imageCache: Record<string, string>
   isSelectionMode: boolean
+  searchQuery?: string
 }>()
 
 const emit = defineEmits<{
@@ -193,6 +194,29 @@ const isCached = computed(() => !!props.imageCache[getFileId(props.msg.content)]
 const cachedUrl = computed(() => props.imageCache[getFileId(props.msg.content)])
 const thumbnail = computed(() => getImageThumbnail(props.msg.content))
 const formattedTime = computed(() => formatTime(props.msg.created_at))
+
+function escapeHtml(unsafe: string) {
+  return (unsafe || '').replace(/[&<"'>]/g, function (m) {
+    switch (m) {
+      case '&': return '&amp;';
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '"': return '&quot;';
+      case "'": return '&#039;';
+      default: return m;
+    }
+  });
+}
+
+const highlightedContent = computed(() => {
+  const content = props.msg.content || ''
+  if (!props.searchQuery) return escapeHtml(content)
+  
+  const escapedContent = escapeHtml(content)
+  const escapedQuery = props.searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const regex = new RegExp(`(${escapedQuery})`, 'gi')
+  return escapedContent.replace(regex, '<mark class="in-bubble-highlight">$1</mark>')
+})
 
 // --- Touch & Swipe State ---
 const SWIPE_THRESHOLD = 100
@@ -443,5 +467,12 @@ function getImageThumbnail(content: string) {
   0% { box-shadow: none; background-color: transparent; }
   15% { box-shadow: 0 0 0 3px rgba(255, 200, 0, 0.6), 0 0 15px 5px rgba(255, 200, 0, 0.2); background-color: rgba(255, 200, 0, 0.1); }
   100% { box-shadow: none; background-color: transparent; }
+}
+
+:deep(.in-bubble-highlight) {
+  background-color: rgba(255, 200, 0, 0.5);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 2px;
 }
 </style>

@@ -5,6 +5,9 @@ import ChatHeader from './chat/ChatHeader.vue'
 import ChatInputBar from './chat/ChatInputBar.vue'
 import ChatMessageItem from './chat/ChatMessageItem.vue'
 import ChatContextMenu from './chat/ChatContextMenu.vue'
+import ChatSearchGlobalList from './chat/ChatSearchGlobalList.vue'
+import ChatEmptyState from './chat/ChatEmptyState.vue'
+import ChatConversationList from './chat/ChatConversationList.vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
 import type { Conversation, Message, StickerPack } from '../types/chat'
@@ -49,6 +52,7 @@ const isHeaderMenuOpen = ref(false)
 const searchQuery = ref('')
 const searchResults = ref<any[]>([])
 const isSearching = ref(false)
+const currentSearchIndex = ref(0)
 const searchDebounceTimeout = ref<any>(null)
 
 // UI State
@@ -300,6 +304,7 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
 const performSearch = () => {
     if (!searchQuery.value.trim()) {
         searchResults.value = []
+        currentSearchIndex.value = 0
         return
     }
     if (searchDebounceTimeout.value) clearTimeout(searchDebounceTimeout.value)
@@ -313,6 +318,14 @@ const performSearch = () => {
             }
             const response = await messagesLogic.apiFetch(`/chat/search?${params.toString()}`)
             searchResults.value = response
+            currentSearchIndex.value = 0 // Reset index on new search
+            
+            // If we are in-chat and got results, jump to the first one automatically
+            if (selectedUserId.value && response.length > 0) {
+              setTimeout(() => {
+                scrollToMessage(response[0].id)
+              }, 300)
+            }
         } finally {
             isSearching.value = false
         }
@@ -329,10 +342,26 @@ const toggleSearch = () => {
     } else {
         searchQuery.value = ''
         searchResults.value = []
+        currentSearchIndex.value = 0
     }
 }
 
+const nextSearchResult = () => {
+    if (searchResults.value.length === 0) return
+    currentSearchIndex.value = (currentSearchIndex.value + 1) % searchResults.value.length
+    scrollToMessage(searchResults.value[currentSearchIndex.value].id)
+}
+
+const prevSearchResult = () => {
+    if (searchResults.value.length === 0) return
+    currentSearchIndex.value = (currentSearchIndex.value - 1 + searchResults.value.length) % searchResults.value.length
+    scrollToMessage(searchResults.value[currentSearchIndex.value].id)
+}
+
 const handleSearchResultClick = async (msg: any) => {
+    isSearchActive.value = false
+    searchResults.value = []
+    currentSearchIndex.value = 0
     if (!selectedUserId.value) {
         const otherId = msg.sender_id === props.currentUserId ? msg.receiver_id : msg.sender_id;
         selectedUserId.value = otherId;
@@ -679,10 +708,9 @@ onUnmounted(() => {
 // Types/Typescript requires this to be exposed properly
 defineExpose({ startNewChat })
 
-import ChatConversationList from './chat/ChatConversationList.vue'
+
 import ChatForwardModal from './chat/ChatForwardModal.vue'
 import ChatLightbox from './chat/ChatLightbox.vue'
-import ChatEmptyState from './chat/ChatEmptyState.vue'
 </script>
 
 
@@ -699,12 +727,15 @@ import ChatEmptyState from './chat/ChatEmptyState.vue'
       :isSearchActive="isSearchActive"
       :searchQuery="searchQuery"
       :searchResults="searchResults"
+      :currentSearchIndex="currentSearchIndex"
       :selectedMessagesCount="selectedMessages.length"
       @back="goBack"
       @view-profile="viewProfile"
       @toggle-search="toggleSearch"
       @search="(val: string) => { searchQuery = val; performSearch(); }"
       @result-click="handleSearchResultClick"
+      @next-search-result="nextSearchResult"
+      @prev-search-result="prevSearchResult"
       @call="handleCall"
       @clear-selection="clearSelection"
       :isDeleted="isSelectedUserDeleted"
@@ -721,9 +752,19 @@ import ChatEmptyState from './chat/ChatEmptyState.vue'
       <button @click="error = ''; loadConversations()">تلاش مجدد</button>
     </div>
 
+    <!-- Global Search Results -->
+    <ChatSearchGlobalList
+      v-else-if="!selectedUserId && isSearchActive"
+      :searchResults="searchResults"
+      :searchQuery="searchQuery"
+      :conversations="sortedConversations"
+      :currentUserId="currentUserId"
+      @select-result="handleSearchResultClick"
+    />
+
     <!-- Conversation List -->
-        <ChatConversationList
-      v-else-if="!selectedUserId"
+    <ChatConversationList
+      v-else-if="!selectedUserId && !isSearchActive"
       :conversations="sortedConversations"
       :selectedUserId="selectedUserId"
       :typingUsers="typingUsers"
@@ -758,6 +799,7 @@ import ChatEmptyState from './chat/ChatEmptyState.vue'
               :selectedMessages="selectedMessages"
               :imageCache="imageCache"
               :isSelectionMode="isSelectionMode"
+              :searchQuery="searchQuery"
               @swipe-reply="handleReply"
               @select="toggleSelection(msg.id)"
               @click-message="handleMessageClick"
