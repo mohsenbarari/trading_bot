@@ -53,6 +53,7 @@ const searchQuery = ref('')
 const searchResults = ref<any[]>([])
 const isSearching = ref(false)
 const currentSearchIndex = ref(0)
+const showInChatSearchList = ref(false)
 const searchDebounceTimeout = ref<any>(null)
 
 // UI State
@@ -335,6 +336,10 @@ const performSearch = () => {
 const toggleSearch = () => {
     isSearchActive.value = !isSearchActive.value
     if (isSearchActive.value) {
+        searchQuery.value = ''
+        searchResults.value = []
+        currentSearchIndex.value = 0
+        showInChatSearchList.value = false
         nextTick(() => {
             const input = document.getElementById('search-input')
             if (input) input.focus()
@@ -346,20 +351,41 @@ const toggleSearch = () => {
     }
 }
 
-const nextSearchResult = () => {
+const nextSearchResult = async () => {
     if (searchResults.value.length === 0) return
     currentSearchIndex.value = (currentSearchIndex.value + 1) % searchResults.value.length
-    scrollToMessage(searchResults.value[currentSearchIndex.value].id)
+    const targetMsg = searchResults.value[currentSearchIndex.value]
+    
+    if (selectedUserId.value) {
+        const isLoaded = messages.value.some(m => m.id === targetMsg.id)
+        if (!isLoaded) {
+            await loadMessages(selectedUserId.value, false, targetMsg.id)
+        }
+    }
+    nextTick(() => {
+        scrollToMessage(targetMsg.id)
+    })
 }
 
-const prevSearchResult = () => {
+const prevSearchResult = async () => {
     if (searchResults.value.length === 0) return
     currentSearchIndex.value = (currentSearchIndex.value - 1 + searchResults.value.length) % searchResults.value.length
-    scrollToMessage(searchResults.value[currentSearchIndex.value].id)
+    const targetMsg = searchResults.value[currentSearchIndex.value]
+    
+    if (selectedUserId.value) {
+        const isLoaded = messages.value.some(m => m.id === targetMsg.id)
+        if (!isLoaded) {
+            await loadMessages(selectedUserId.value, false, targetMsg.id)
+        }
+    }
+    nextTick(() => {
+        scrollToMessage(targetMsg.id)
+    })
 }
 
 const handleSearchResultClick = async (msg: any) => {
     isSearchActive.value = false
+    showInChatSearchList.value = false
     searchResults.value = []
     currentSearchIndex.value = 0
     if (!selectedUserId.value) {
@@ -728,6 +754,7 @@ import ChatLightbox from './chat/ChatLightbox.vue'
       :searchQuery="searchQuery"
       :searchResults="searchResults"
       :currentSearchIndex="currentSearchIndex"
+      :showInChatSearchList="showInChatSearchList"
       :selectedMessagesCount="selectedMessages.length"
       @back="goBack"
       @view-profile="viewProfile"
@@ -736,6 +763,7 @@ import ChatLightbox from './chat/ChatLightbox.vue'
       @result-click="handleSearchResultClick"
       @next-search-result="nextSearchResult"
       @prev-search-result="prevSearchResult"
+      @toggle-in-chat-list="showInChatSearchList = !showInChatSearchList"
       @call="handleCall"
       @clear-selection="clearSelection"
       :isDeleted="isSelectedUserDeleted"
@@ -752,9 +780,9 @@ import ChatLightbox from './chat/ChatLightbox.vue'
       <button @click="error = ''; loadConversations()">تلاش مجدد</button>
     </div>
 
-    <!-- Global Search Results -->
+    <!-- Global Search Results OR In-Chat Search List -->
     <ChatSearchGlobalList
-      v-else-if="!selectedUserId && isSearchActive"
+      v-else-if="isSearchActive && (!selectedUserId || showInChatSearchList)"
       :searchResults="searchResults"
       :searchQuery="searchQuery"
       :conversations="sortedConversations"

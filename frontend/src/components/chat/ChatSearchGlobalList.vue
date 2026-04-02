@@ -16,7 +16,15 @@ const emit = defineEmits<{
 function formatTime(dateStr: string) {
   if (!dateStr) return ''
   const date = new Date(dateStr)
-  return date.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
+  
+  const today = new Date()
+  const isToday = date.getDate() === today.getDate() && date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear()
+  
+  const time = date.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
+  if (isToday) return time
+  
+  const dateStrJalali = date.toLocaleDateString('fa-IR', { month: 'short', day: 'numeric' })
+  return `${dateStrJalali} ${time}`
 }
 
 function getOtherUserInfo(msg: any) {
