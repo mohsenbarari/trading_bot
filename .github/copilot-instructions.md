@@ -7,6 +7,20 @@
 
 ## Architecture Overview
 
+> [!WARNING]
+> **TEMPORARY: SINGLE-SERVER DEVELOPMENT MODE IN EFFECT (IRAN INTERNET OUTAGE)**
+> 
+> Due to internet connectivity issues reaching the Iran server (`87.107.110.68`), the following temporary changes are in effect to prevent development from stopping:
+> 1. **DO NOT DEPLOY TO IRAN:** Do not use `make up` or `make iran`. Instead, ONLY use `make foreign` for deployments to build the frontend and serve it from the German API on port 8000.
+> 2. **CROSS-SERVER SYNC OFF:** `trading_bot_sync_worker` container has been stopped via `docker stop` to prevent log floods and connection timeouts.
+> 3. **MESSENGER ON FOREIGN:** The frontend Messenger (`mini_app_dist`) is fully available and testable locally on the Foreign server at `http://<Foreign_IP>:8000/chat`.
+> 
+> **To Revert when regular internet access resumes:**
+> 1. Remove this warning block from `.github/copilot-instructions.md`.
+> 2. Restart sync worker: `docker start trading_bot_sync_worker`.
+> 3. Run full deploy: `make up`.
+> 4. Run `POST /api/sync/resync` to merge any out-of-sync database records between Germany and Iran.
+
 ### Two-Server Deployment
 | Server | Location | Services | Domain |
 |---|---|---|---|
@@ -192,3 +206,4 @@ make status      # Container status
 | 2026-02-27 06:29 UTC | Copilot | Replaced raw `fetch` with `apiFetch` (auto-refresh on 401) in all admin components: `UserManager.vue`, `CommodityManager.vue`, `CreateInvitationView.vue`, `TradingSettings.vue`, `UserProfile.vue`. Fixes "خطا در دریافت لیست کاربران" when JWT expires. |
 | 2026-02-27 06:48 UTC | Copilot | Hide soft-deleted users from bot and web user lists. API `include_deleted` default changed to `False`. Bot query filters `is_deleted==False`. Frontend deleted-user badge/styles removed. Deleted users viewable later via dedicated admin section. |
 | 2026-02-27 07:02 UTC | Copilot | Fixed `bot_username` null on Iran server. Added `BOT_USERNAME=mbmtrading1_bot` to Iran `.env`. This caused invitation links to be `https://t.me/None?start=...` in both API responses and SMS. |
+| 2026-04-02 17:31 UTC | Antigravity | Activated Single-Server Development Mode bypassing Iran Server. Stopped `sync_worker` container and updated instructions explicitly prohibiting `make up` in favor of `make foreign`. |
