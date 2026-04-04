@@ -2,6 +2,7 @@
 import { useRoute } from 'vue-router'
 import { onMounted } from 'vue'
 import BottomNav from './components/BottomNav.vue'
+import SessionApprovalModal from './components/SessionApprovalModal.vue'
 import { setupExpiryTimer } from './utils/auth'
 
 const route = useRoute()
@@ -31,6 +32,9 @@ onMounted(() => {
 
     <!-- Bottom Navigation (Hidden on Login) -->
     <BottomNav v-if="route.name !== 'login'" />
+
+    <!-- Session Approval Modal (always mounted for logged-in users) -->
+    <SessionApprovalModal v-if="route.name !== 'login'" />
     
   </div>
 </template>

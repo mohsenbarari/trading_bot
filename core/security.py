@@ -10,8 +10,10 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    to_encode = data.copy()
+def create_access_token(subject: Union[int, str, Any] = None, data: dict = None, expires_delta: Optional[timedelta] = None) -> str:
+    to_encode = data.copy() if data else {}
+    if subject is not None:
+        to_encode["sub"] = str(subject)
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
@@ -20,8 +22,10 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    to_encode = data.copy()
+def create_refresh_token(subject: Union[int, str, Any] = None, data: dict = None, expires_delta: Optional[timedelta] = None) -> str:
+    to_encode = data.copy() if data else {}
+    if subject is not None:
+        to_encode["sub"] = str(subject)
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:

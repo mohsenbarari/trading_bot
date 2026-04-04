@@ -6,7 +6,7 @@ import { setupExpiryTimer } from '../utils/auth'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
 const router = useRouter()
-const step = ref<'mobile' | 'otp'>('mobile')
+const step = ref<'mobile' | 'otp' | 'waiting_approval'>('mobile')
 const loading = ref(false)
 const error = ref('')
 const isStandalone = ref(false)
@@ -23,6 +23,13 @@ const form = reactive({
   mobile: '',
   code: ''
 })
+
+// Session approval state
+const loginRequestId = ref<string | null>(null)
+const approvalExpiresAt = ref<string | null>(null)
+const approvalCountdown = ref(0)
+let approvalTimerInterval: any = null
+let approvalPollInterval: any = null
 
 function startTimer(seconds: number) {
   if (timerInterval) clearInterval(timerInterval)
@@ -170,6 +177,16 @@ async function verifyOtp() {
     }
     
     const data = await res.json()
+    
+    // Session management: check if approval is required
+    if (data.status === 'approval_required') {
+      loginRequestId.value = data.login_request_id
+      approvalExpiresAt.value = data.expires_at
+      step.value = 'waiting_approval'
+      startApprovalPolling()
+      return
+    }
+    
     localStorage.setItem('auth_token', data.access_token)
     localStorage.setItem('refresh_token', data.refresh_token)
     
@@ -182,6 +199,56 @@ async function verifyOtp() {
   } finally {
     loading.value = false
   }
+}
+
+function startApprovalPolling() {
+  // Start countdown (120s)
+  approvalCountdown.value = 120
+  if (approvalTimerInterval) clearInterval(approvalTimerInterval)
+  approvalTimerInterval = setInterval(() => {
+    approvalCountdown.value--
+    if (approvalCountdown.value <= 0) {
+      clearInterval(approvalTimerInterval)
+      stopApprovalPolling()
+      error.value = 'زمان انتظار تایید به پایان رسید. لطفاً دوباره تلاش کنید.'
+      step.value = 'otp'
+    }
+  }, 1000)
+
+  // Poll every 2 seconds
+  if (approvalPollInterval) clearInterval(approvalPollInterval)
+  approvalPollInterval = setInterval(async () => {
+    if (!loginRequestId.value) return
+    try {
+      const res = await fetch(`/api/sessions/login-requests/${loginRequestId.value}/status`)
+      if (!res.ok) return
+      const data = await res.json()
+      
+      if (data.status === 'approved' && data.access_token) {
+        stopApprovalPolling()
+        localStorage.setItem('auth_token', data.access_token)
+        if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token)
+        setupExpiryTimer()
+        router.push('/')
+      } else if (data.status === 'rejected') {
+        stopApprovalPolling()
+        error.value = 'درخواست ورود شما رد شد.'
+        step.value = 'otp'
+      } else if (data.status === 'expired') {
+        stopApprovalPolling()
+        error.value = 'زمان انتظار تایید به پایان رسید.'
+        step.value = 'otp'
+      }
+    } catch (e) {
+      // Ignore polling errors
+    }
+  }, 2000)
+}
+
+function stopApprovalPolling() {
+  if (approvalTimerInterval) { clearInterval(approvalTimerInterval); approvalTimerInterval = null }
+  if (approvalPollInterval) { clearInterval(approvalPollInterval); approvalPollInterval = null }
+  loginRequestId.value = null
 }
 
 function installPWA() {
@@ -285,6 +352,7 @@ watch(() => form.mobile, (newVal) => {
 onUnmounted(() => {
   if (ac) ac.abort();
   if (timerInterval) clearInterval(timerInterval)
+  stopApprovalPolling()
   clearBackStack()
 })
 
@@ -370,7 +438,7 @@ function goBackToMobile() {
           </div>
 
           <!-- Step 2: OTP -->
-          <div v-else key="otp" class="space-y-6">
+          <div v-else-if="step === 'otp'" key="otp" class="space-y-6">
             <div class="text-center mb-6">
               <p class="text-sm text-gray-500 mb-1">کد ارسال شده به {{ form.mobile }}</p>
               <button @click="goBackToMobile()" class="text-xs text-amber-600 font-bold hover:text-amber-700 transition-colors bg-amber-50 px-3 py-1 rounded-full">ویرایش شماره</button>
@@ -412,6 +480,27 @@ function goBackToMobile() {
                  </button>
 
             </div>
+          </div>
+
+          <!-- Step 3: Waiting for Approval -->
+          <div v-else-if="step === 'waiting_approval'" key="waiting" class="space-y-6 text-center">
+            <div class="flex flex-col items-center gap-4">
+              <div class="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center animate-pulse">
+                <Loader2 class="w-8 h-8 text-amber-500 animate-spin" />
+              </div>
+              <h3 class="text-lg font-bold text-gray-800">در انتظار تایید</h3>
+              <p class="text-sm text-gray-500 leading-relaxed">
+                درخواست ورود شما به دستگاه اصلی ارسال شد.
+                <br/>لطفاً از دستگاه اصلی خود تایید کنید.
+              </p>
+              <div v-if="approvalCountdown > 0" class="inline-flex items-center gap-2 text-sm font-mono text-amber-600 bg-amber-50 px-4 py-2 rounded-full">
+                <Clock :size="16" />
+                <span>{{ Math.floor(approvalCountdown / 60).toString().padStart(2, '0') }}:{{ (approvalCountdown % 60).toString().padStart(2, '0') }}</span>
+              </div>
+            </div>
+            <button @click="stopApprovalPolling(); step = 'otp'; error = ''" class="text-xs text-gray-500 hover:text-gray-700 transition-colors">
+              بازگشت به مرحله قبل
+            </button>
           </div>
 
         </transition>

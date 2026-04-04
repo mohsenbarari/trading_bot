@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from api.routers import (
     auth, invitations, commodities, users, notifications, 
-    trading_settings, offers, trades, realtime, users_public, chat, blocks, sync
+    trading_settings, offers, trades, realtime, users_public, chat, blocks, sync, sessions
 )
 from core.config import settings
 from core.redis import init_redis, close_redis
@@ -84,6 +84,7 @@ api_router.include_router(users_public.router, prefix="/users-public", tags=["Pu
 api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
 api_router.include_router(blocks.router, prefix="/blocks", tags=["Blocks"])
 api_router.include_router(sync.router, prefix="/sync", tags=["Sync"])
+api_router.include_router(sessions.router, prefix="/sessions", tags=["Sessions"])
 
 app.include_router(api_router)
 

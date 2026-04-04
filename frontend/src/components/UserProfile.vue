@@ -28,6 +28,7 @@ const showCustomLimitDateInput = ref(false);
 const showLimitDateModal = ref(false);
 const customLimitDate = ref('');
 const selectedRole = ref(props.user?.role || 'تماشا');
+const editMaxSessions = ref(props.user?.max_sessions ?? 1);
 const hasBotAccess = ref(props.user?.has_bot_access ?? true);
 
 // --- Date Picker Logic ---
@@ -546,6 +547,21 @@ async function removeLimitations() {
   }
 }
 
+async function saveMaxSessions() {
+  try {
+    const response = await apiFetch(`/api/users/${props.user.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ max_sessions: editMaxSessions.value })
+    });
+    if (!response.ok) throw new Error('خطا');
+    const updatedUser = await response.json();
+    Object.assign(props.user, updatedUser);
+  } catch (e) {
+    alert('خطا در ذخیره تنظیمات نشست');
+    editMaxSessions.value = props.user.max_sessions ?? 1;
+  }
+}
+
 async function deleteUser() {
   if (!confirm('آیا از حذف این کاربر اطمینان دارید؟')) return;
   if (!props.jwtToken) return;
@@ -622,6 +638,20 @@ async function deleteUser() {
               <span class="countdown-label">باقی‌مانده:</span>
               <span class="countdown-value">{{ countdownLimitation }}</span>
           </div>
+      </div>
+
+      <!-- تنظیمات نشست -->
+      <div v-if="isAdminView" class="sessions-config-box">
+        <div class="detail-item">
+          <span class="label">حداکثر نشست همزمان</span>
+          <div class="inline-edit">
+            <select v-model.number="editMaxSessions" class="form-select-sm" @change="saveMaxSessions">
+              <option :value="1">۱</option>
+              <option :value="2">۲</option>
+              <option :value="3">۳</option>
+            </select>
+          </div>
+        </div>
       </div>
 
       <!-- ویرایش نقش (مودال داخلی) -->
@@ -1388,5 +1418,29 @@ input[type="number"].form-input::-webkit-inner-spin-button {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.85; }
+}
+
+.sessions-config-box {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 0.75rem;
+}
+.sessions-config-box .detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.inline-edit {
+  display: flex;
+  align-items: center;
+}
+.form-select-sm {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid #d1d5db;
+  font-size: 0.8rem;
+  background: white;
 }
 </style>

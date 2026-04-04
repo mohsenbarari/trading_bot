@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timedelta
@@ -18,6 +18,7 @@ from core.security import (
     verify_password
 )
 from core.config import settings
+import json
 from bot.utils.redis_helpers import get_redis
 from core.notifications import send_telegram_message
 from core.sms import send_otp_sms, send_sms
@@ -26,8 +27,36 @@ from api.deps import get_current_user, oauth2_scheme
 import schemas
 
 
+from core.services.session_service import handle_login_session, get_session_by_refresh_token, hash_token, get_active_sessions
+from models.session import Platform
+
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _extract_device_info(request) -> dict:
+    """Extract device name, IP and platform from request headers."""
+    ua = ""
+    if hasattr(request, 'headers'):
+        ua = request.headers.get("user-agent", "")
+    device_name = request.headers.get("x-device-name", "") if hasattr(request, 'headers') else ""
+    if not device_name:
+        if "Telegram" in ua or "TelegramBot" in ua:
+            device_name = "Telegram Mini App"
+        elif "Mobile" in ua or "Android" in ua or "iPhone" in ua:
+            device_name = "Mobile Browser"
+        else:
+            device_name = "Web Browser"
+    
+    platform_header = request.headers.get("x-platform", "web") if hasattr(request, 'headers') else "web"
+    try:
+        platform = Platform(platform_header)
+    except ValueError:
+        platform = Platform.WEB
+
+    ip = request.client.host if hasattr(request, 'client') and request.client else None
+    return {"device_name": device_name, "device_ip": ip, "platform": platform}
 
 # --- Schemas ---
 class Token(BaseModel):
@@ -127,6 +156,7 @@ async def register_otp_verify(
 @router.post("/register-complete", response_model=Token)
 async def register_complete(
     req: RegisterComplete,
+    raw_request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     # 1. Check verify flag
@@ -183,6 +213,15 @@ async def register_complete(
         expires_delta=refresh_token_expires
     )
     
+    # 7. Create first session (always succeeds for new user - primary)
+    device_info = _extract_device_info(raw_request)
+    await handle_login_session(
+        db, new_user, refresh_token,
+        device_name=device_info["device_name"],
+        device_ip=device_info["device_ip"],
+        platform=device_info["platform"],
+    )
+    
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -196,6 +235,7 @@ async def refresh_access_token(
 ):
     """
     تمدید توکن دسترسی با استفاده از refresh token.
+    Validates session is still active.
     """
     from jose import jwt, JWTError
     
@@ -206,7 +246,6 @@ async def refresh_access_token(
             algorithms=[settings.jwt_algorithm]
         )
         
-        # Verify it's a refresh token
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=401, detail="توکن نامعتبر است")
         
@@ -214,7 +253,6 @@ async def refresh_access_token(
         if not user_id:
             raise HTTPException(status_code=401, detail="توکن نامعتبر است")
         
-        # Find user
         stmt = select(User).where(User.id == int(user_id))
         user = (await db.execute(stmt)).scalar_one_or_none()
         
@@ -223,6 +261,14 @@ async def refresh_access_token(
         
         if user.is_deleted:
             raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
+        
+        # Validate session exists and is active
+        session = await get_session_by_refresh_token(db, req.refresh_token)
+        if not session:
+            raise HTTPException(status_code=401, detail="نشست منقضی شده یا نامعتبر است. لطفاً دوباره وارد شوید.")
+        
+        # Update last_active_at
+        session.last_active_at = datetime.utcnow()
         
         # Issue new tokens
         access_token_expires = timedelta(minutes=60)
@@ -236,6 +282,10 @@ async def refresh_access_token(
             subject=user.id,
             expires_delta=refresh_token_expires
         )
+        
+        # Update session with new refresh token hash
+        session.refresh_token_hash = hash_token(new_refresh)
+        await db.commit()
         
         return {
             "access_token": new_access,
@@ -392,9 +442,10 @@ async def resend_otp_sms(
 
 
 
-@router.post("/verify-otp", response_model=Token)
+@router.post("/verify-otp")
 async def verify_otp(
     request: OTPVerify,
+    raw_request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     mobile = request.mobile_number
@@ -407,7 +458,7 @@ async def verify_otp(
     if not stored_code or stored_code != code:
         raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است")
         
-    # کد درست است - توکن صادر کن
+    # کد درست است
     stmt = select(User).where(User.mobile_number == mobile)
     user = (await db.execute(stmt)).scalar_one_or_none()
     
@@ -416,14 +467,12 @@ async def verify_otp(
         
     # پاک کردن کد OTP
     await redis.delete(otp_key)
-    await redis.delete(f"otp_limit:{mobile}") # Reset rate limit on success
+    await redis.delete(f"otp_limit:{mobile}")
     
-    # تولید توکن با user_id (قبلاً telegram_id بود)
-    # برای backward compatibility فعلا هر دو رو میذاریم توی payload ولی subject اصلی user_id میشه
-    access_token_expires = timedelta(minutes=60) # 1 ساعت
+    # Generate tokens
+    access_token_expires = timedelta(minutes=60)
     refresh_token_expires = timedelta(days=30)
     
-    # Subject is now User ID (Database ID)
     access_token = create_access_token(
         subject=user.id,
         expires_delta=access_token_expires
@@ -432,6 +481,27 @@ async def verify_otp(
         subject=user.id,
         expires_delta=refresh_token_expires
     )
+    
+    # Session management
+    device_info = _extract_device_info(raw_request)
+    session_result = await handle_login_session(
+        db, user, refresh_token,
+        device_name=device_info["device_name"],
+        device_ip=device_info["device_ip"],
+        platform=device_info["platform"],
+    )
+    
+    if session_result["action"] == "blocked":
+        raise HTTPException(status_code=429, detail=session_result["reason"])
+    
+    if session_result["action"] == "approval_required":
+        login_req = session_result["request"]
+        return {
+            "status": "approval_required",
+            "login_request_id": str(login_req.id),
+            "message": "درخواست ورود شما ارسال شد. منتظر تایید از دستگاه اصلی باشید.",
+            "expires_at": login_req.expires_at.isoformat(),
+        }
     
     return {
         "access_token": access_token,
@@ -442,6 +512,7 @@ async def verify_otp(
 @router.post("/webapp-login", response_model=Token)
 async def webapp_login(
     login_data: WebAppLogin,
+    raw_request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -487,8 +558,33 @@ async def webapp_login(
             raise HTTPException(status_code=403, detail="User is blocked")
 
         # Generate tokens
-        access_token = create_access_token(user.id)
-        refresh_token = create_refresh_token(user.id)
+        access_token = create_access_token(subject=user.id)
+        refresh_token = create_refresh_token(subject=user.id)
+        
+        # Session management
+        device_info = _extract_device_info(raw_request)
+        # Override platform to telegram_mini_app for webapp login
+        device_info["platform"] = Platform.TELEGRAM_MINI_APP
+        device_info["device_name"] = "Telegram Mini App"
+        
+        session_result = await handle_login_session(
+            db, user, refresh_token,
+            device_name=device_info["device_name"],
+            device_ip=device_info["device_ip"],
+            platform=device_info["platform"],
+        )
+        
+        if session_result["action"] == "blocked":
+            raise HTTPException(status_code=429, detail=session_result["reason"])
+        
+        if session_result["action"] == "approval_required":
+            login_req = session_result["request"]
+            return {
+                "status": "approval_required",
+                "login_request_id": str(login_req.id),
+                "message": "درخواست ورود شما ارسال شد. منتظر تایید از دستگاه اصلی باشید.",
+                "expires_at": login_req.expires_at.isoformat(),
+            }
         
         return {
             "access_token": access_token,

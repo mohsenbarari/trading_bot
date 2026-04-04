@@ -4,7 +4,7 @@
 """
 from .user import User
 from .invitation import Invitation
-from .session import UserSession, Platform
+from .session import UserSession, Platform, SessionLoginRequest, LoginRequestStatus
 from .commodity import Commodity, CommodityAlias
 from .notification import Notification
 from .trading_setting import TradingSetting
@@ -23,6 +23,8 @@ __all__ = [
     "Invitation",
     "UserSession",
     "Platform",
+    "SessionLoginRequest",
+    "LoginRequestStatus",
     "UserBlock",
     # Commodity
     "Commodity",

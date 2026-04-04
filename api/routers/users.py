@@ -259,6 +259,11 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
     # --- 4. Limitations (محدودیت‌ها) - استفاده از helper function ---
     limitations_changed, limitation_needed, unlimit_needed = track_limitation_changes(user, update_data)
     
+    # --- 4b. Max Sessions ---
+    if 'max_sessions' in update_data:
+        val = update_data['max_sessions']
+        user.max_sessions = max(1, min(val, 3)) if val else 1
+    
     # --- 5. Commit Changes ---
     await db.commit()
     await db.refresh(user)
