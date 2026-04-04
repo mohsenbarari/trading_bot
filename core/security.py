@@ -1,7 +1,7 @@
 from jose import jwt
 from datetime import datetime, timedelta
 from typing import Optional, Union, Any
-from passlib.context import CryptContext
+import bcrypt
 from core.config import settings
 
 # JWT configuration
@@ -9,9 +9,6 @@ SECRET_KEY = settings.jwt_secret_key
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
-
-# Password hashing configuration
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
@@ -36,16 +33,22 @@ def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None) 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     if not plain_password or not hashed_password:
         return False
-    # Manual truncation to 72 chars to satisfy bcrypt limits
-    truncated = plain_password[:72] if len(plain_password) > 72 else plain_password
+    # Encode and truncate to 72 bytes to satisfy bcrypt limits
+    password_bytes = plain_password.encode('utf-8')
+    if len(password_bytes) > 72:
+        password_bytes = password_bytes[:72]
     try:
-        return pwd_context.verify(truncated, hashed_password)
+        return bcrypt.checkpw(password_bytes, hashed_password.encode('utf-8'))
     except Exception:
         return False
 
 def get_password_hash(password: str) -> str:
     if not password:
         return ""
-    # Ensure password isn't too long for bcrypt (max 72 chars)
-    truncated = password[:72] if len(password) > 72 else password
-    return pwd_context.hash(truncated)
+    # Encode and truncate to 72 bytes for bcrypt
+    password_bytes = password.encode('utf-8')
+    if len(password_bytes) > 72:
+        password_bytes = password_bytes[:72]
+    # Generate salt and hash
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password_bytes, salt).decode('utf-8')
