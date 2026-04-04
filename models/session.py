@@ -33,7 +33,7 @@ class UserSession(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     device_name = Column(String(255), nullable=False, default="Unknown Device")
     device_ip = Column(String(45), nullable=True)
-    platform = Column(SAEnum(Platform), nullable=False, default=Platform.WEB)
+    platform = Column(SAEnum(Platform, values_callable=lambda obj: [e.value for e in obj], name="platform"), nullable=False, default=Platform.WEB)
     refresh_token_hash = Column(String(255), nullable=True, index=True)
     is_primary = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False, index=True)
@@ -53,7 +53,7 @@ class SessionLoginRequest(Base):
     requester_device_name = Column(String(255), nullable=False, default="Unknown Device")
     requester_ip = Column(String(45), nullable=True)
     status = Column(
-        SAEnum(LoginRequestStatus),
+        SAEnum(LoginRequestStatus, values_callable=lambda obj: [e.value for e in obj], name="loginrequeststatus"),
         nullable=False,
         default=LoginRequestStatus.PENDING,
         index=True
