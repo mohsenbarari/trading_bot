@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { User, Phone, Shield } from 'lucide-vue-next'
+import { User, Phone, Shield, Smartphone, Trash2, Loader2 } from 'lucide-vue-next'
 import { apiFetch, forceLogout } from '../utils/auth'
 const user = ref<any>(null)
 const loading = ref(true)
+const sessions = ref<any[]>([])
+const sessionsLoading = ref(false)
 
 const userInitial = computed(() => {
   if (!user.value) return '?'
@@ -34,7 +36,44 @@ function logout() {
   forceLogout()
 }
 
-onMounted(fetchUser)
+async function fetchSessions() {
+  sessionsLoading.value = true
+  try {
+    const res = await apiFetch('/api/sessions/active')
+    if (res.ok) {
+      sessions.value = await res.json()
+    }
+  } catch (e) {
+    console.error(e)
+  } finally {
+    sessionsLoading.value = false
+  }
+}
+
+async function terminateSession(sessionId: string) {
+  try {
+    const res = await apiFetch(`/api/sessions/${sessionId}`, { method: 'DELETE' })
+    if (res.ok) {
+      sessions.value = sessions.value.filter(s => s.id !== sessionId)
+    }
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+async function logoutAll() {
+  try {
+    await apiFetch('/api/sessions/logout-all', { method: 'POST' })
+    forceLogout()
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+onMounted(() => {
+  fetchUser()
+  fetchSessions()
+})
 </script>
 
 <template>
@@ -93,6 +132,58 @@ onMounted(fetchUser)
           </div>
         </div>
 
+      </div>
+
+      <!-- Active Sessions -->
+      <div class="sessions-section">
+        <h3 class="section-title">
+          <Smartphone :size="18" />
+          <span>نشست‌های فعال</span>
+        </h3>
+        
+        <div v-if="sessionsLoading" class="text-center py-4">
+          <Loader2 class="w-5 h-5 text-amber-500 animate-spin mx-auto" />
+        </div>
+        
+        <div v-else-if="sessions.length === 0" class="text-center text-sm text-gray-400 py-4">
+          هیچ نشست فعالی یافت نشد
+        </div>
+        
+        <div v-else class="space-y-2">
+          <div v-for="session in sessions" :key="session.id" class="session-card">
+            <div class="flex items-center gap-3 flex-1 min-w-0">
+              <div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                   :class="session.is_primary ? 'bg-amber-100 text-amber-600' : 'bg-gray-100 text-gray-500'">
+                <Smartphone :size="18" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium text-gray-800 truncate">{{ session.device_name }}</span>
+                  <span v-if="session.is_primary" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold shrink-0">اصلی</span>
+                </div>
+                <div class="text-xs text-gray-400 mt-0.5 dir-ltr text-right">
+                  {{ session.platform }} · {{ session.device_ip || '—' }}
+                </div>
+              </div>
+            </div>
+            <button
+              v-if="!session.is_primary"
+              @click="terminateSession(session.id)"
+              class="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+              title="پایان نشست"
+            >
+              <Trash2 :size="16" />
+            </button>
+          </div>
+          
+          <button
+            v-if="sessions.length > 1"
+            @click="logoutAll"
+            class="w-full mt-3 py-2.5 text-sm text-red-500 font-bold border border-red-200 rounded-xl hover:bg-red-50 transition-colors"
+          >
+            خروج از همه نشست‌ها
+          </button>
+        </div>
       </div>
 
       <!-- Logout Button -->
@@ -240,6 +331,29 @@ onMounted(fetchUser)
   font-size: 0.9rem;
   font-weight: 700;
   color: #1f2937;
+}
+
+/* Sessions Section */
+.sessions-section {
+  margin-bottom: 1.5rem;
+}
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #374151;
+  margin-bottom: 0.75rem;
+}
+.session-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem;
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 0.75rem;
 }
 
 /* Logout Button */

@@ -111,7 +111,7 @@ async def websocket_endpoint(
     
     try:
         # شروع گوش دادن به Redis Pub/Sub در یک task جداگانه
-        redis_task = asyncio.create_task(listen_redis_events(websocket))
+        redis_task = asyncio.create_task(listen_redis_events(websocket, user_id))
         
         # گوش دادن به پیام‌های کلاینت (برای keep-alive)
         while True:
@@ -135,22 +135,27 @@ async def websocket_endpoint(
         redis_task.cancel()
 
 
-async def listen_redis_events(websocket: WebSocket):
+async def listen_redis_events(websocket: WebSocket, user_id: int = None):
     """گوش دادن به رویدادهای Redis و ارسال به WebSocket"""
-    logging.info(f"🔴 Redis listener started for WebSocket")
+    logging.info(f"🔴 Redis listener started for WebSocket (user_id={user_id})")
     try:
         async with redis.Redis(connection_pool=pool) as redis_client:
             pubsub = redis_client.pubsub()
             
-            await pubsub.subscribe(
+            channels = [
                 "events:offer:created",
                 "events:offer:expired",
                 "events:offer:updated",
                 "events:offer:cancelled",
                 "events:offer:completed",
                 "events:trade:created"
-            )
-            logging.info(f"✅ Subscribed to Redis channels")
+            ]
+            # Subscribe to user-specific notification channel
+            if user_id:
+                channels.append(f"notifications:{user_id}")
+            
+            await pubsub.subscribe(*channels)
+            logging.info(f"✅ Subscribed to Redis channels: {channels}")
             
             while True:
                 try:
@@ -159,12 +164,17 @@ async def listen_redis_events(websocket: WebSocket):
                     if message and message.get("type") == "message":
                         channel = message.get("channel", b"").decode("utf-8")
                         data_str = message.get("data", b"").decode("utf-8")
-                        event_type = channel.replace("events:", "")
                         
                         try:
                             parsed_data = json.loads(data_str)
-                            # Sanitize: strip sensitive fields before broadcasting
-                            safe_data = sanitize_payload(parsed_data)
+                            
+                            # User-specific notifications channel has different format
+                            if channel.startswith("notifications:"):
+                                event_type = parsed_data.get("event", "notification")
+                                safe_data = sanitize_payload(parsed_data.get("data", {}))
+                            else:
+                                event_type = channel.replace("events:", "")
+                                safe_data = sanitize_payload(parsed_data)
                             
                             await websocket.send_json({
                                 "type": event_type,

@@ -46,6 +46,9 @@ class User(Base):
     commodities_traded_count = Column(Integer, default=0, nullable=False)
     channel_messages_count = Column(Integer, default=0, nullable=False)
 
+    # Session management
+    max_sessions = Column(Integer, default=1, nullable=False)
+
     can_block_users = Column(Boolean, default=True)
     max_blocked_users = Column(Integer, default=10)
 

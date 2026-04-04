@@ -9,7 +9,7 @@ from alembic import context
 from models.database import Base
 from models import User, Invitation, UserSession, Commodity, CommodityAlias
 from models import Notification, TradingSetting, Offer, Trade, Message, Conversation
-from models import UserBlock
+from models import UserBlock, SessionLoginRequest
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
