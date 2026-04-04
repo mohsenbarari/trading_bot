@@ -122,6 +122,22 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
 
     const response = await fetch(fullUrl, config);
 
+    // 🔴 403 Forbidden with specific detail
+    if (response.status === 403) {
+        const clone = response.clone();
+        try {
+            const errorData = await clone.json();
+            if (errorData?.detail === 'REQUIRES_PASSWORD_CHANGE') {
+                if (window.location.pathname !== '/setup-password') {
+                    window.location.href = '/setup-password';
+                }
+                throw new Error('شما باید رمز عبور خود را تغییر دهید');
+            }
+        } catch (e) {
+            // Ignore parsing errors for other 403s
+        }
+    }
+
     if (response.status === 401) {
         // Try refresh before logging out
         const refreshed = await tryRefreshToken();

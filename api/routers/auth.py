@@ -9,7 +9,7 @@ import hashlib
 import hmac
 import time
 from core.db import get_db
-from models.user import User
+from models.user import User, UserRole
 from models.invitation import Invitation
 from core.security import (
     create_access_token,
@@ -22,7 +22,7 @@ from bot.utils.redis_helpers import get_redis
 from core.notifications import send_telegram_message
 from core.sms import send_otp_sms, send_sms
 from core.connectivity import is_internet_connected
-from api.deps import get_current_user
+from api.deps import get_current_user, oauth2_scheme
 import schemas
 
 
@@ -499,3 +499,46 @@ async def webapp_login(
     except Exception as e:
         logger.error(f"WebApp login error: {e}")
         raise HTTPException(status_code=400, detail="Authentication failed")
+
+class SetupPasswordRequest(BaseModel):
+    password: str
+
+@router.post("/setup-password", summary="تغییر رمز عبور اجباری مدیران")
+async def setup_admin_password(
+    req: SetupPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    # Note: Use oauth2 token manually here instead of Depends(get_current_user)
+    # because get_current_user raises 403 on must_change_password!
+    token: str = Depends(oauth2_scheme)
+):
+    from api.deps import get_current_user
+    # We must decode token manually since get_current_user blocks it
+    from jose import jwt, JWTError
+    from pydantic import ValidationError
+    
+    try:
+        payload = jwt.decode(
+            token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
+        )
+        token_data = payload.get("sub")
+        if token_data is None: raise JWTError()
+    except (JWTError, ValidationError):
+        raise HTTPException(status_code=401, detail="Invalid token")
+        
+    user_id = int(token_data)
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user:
+        user = (await db.execute(select(User).where(User.telegram_id == user_id))).scalar_one_or_none()
+        
+    if not user: raise HTTPException(status_code=404)
+    if not user.must_change_password:
+        raise HTTPException(status_code=400, detail="شما نیازی به تغییر رمز عبور ندارید")
+        
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="رمز عبور باید حداقل ۶ کاراکتر باشد")
+        
+    user.admin_password_hash = get_password_hash(req.password)
+    user.must_change_password = False
+    
+    await db.commit()
+    return {"detail": "رمز عبور با موفقیت ثبت شد"}
