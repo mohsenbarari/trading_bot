@@ -5,7 +5,7 @@ from passlib.context import CryptContext
 from core.config import settings
 
 # JWT configuration
-SECRET_KEY = settings.JWT_SECRET_KEY
+SECRET_KEY = settings.jwt_secret_key
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
