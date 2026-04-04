@@ -30,6 +30,10 @@ class User(Base):
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True)
 
+    # Admin Password Management (SUPER_ADMIN / MIDDLE_MANAGER)
+    admin_password_hash = Column(String(255), nullable=True)
+    must_change_password = Column(Boolean, default=False, nullable=False)
+
     # Trading restrictions
     trading_restricted_until = Column(DateTime, nullable=True)
     max_daily_trades = Column(Integer, nullable=True)

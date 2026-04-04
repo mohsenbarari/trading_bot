@@ -77,6 +77,13 @@ async def get_current_user(
     if user.is_deleted:
         raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
         
+    # Check if admin must change password (prevent doing anything else)
+    if user.must_change_password and user.role in [UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="REQUIRES_PASSWORD_CHANGE"
+        )
+        
     # Update last_seen
     if not user.last_seen_at or (datetime.utcnow() - user.last_seen_at).total_seconds() > 60:
         user.last_seen_at = datetime.utcnow()
