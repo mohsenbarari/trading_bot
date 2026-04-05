@@ -1,10 +1,10 @@
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from api.routers import (
     auth, invitations, commodities, users, notifications, 
     trading_settings, offers, trades, realtime, users_public, chat, blocks, sync, sessions
@@ -15,6 +15,7 @@ from core.db import init_db
 from core.events import setup_event_listeners
 from core.connectivity import connectivity_monitor_loop
 from core.offer_expiry import offer_expiry_loop
+from core.session_expiry import session_expiry_loop
 import asyncio
 import schemas
 
@@ -38,6 +39,7 @@ async def lifespan(app: FastAPI):
     
     # Start offer auto-expiry background task
     asyncio.create_task(offer_expiry_loop())
+    asyncio.create_task(session_expiry_loop())
     
     yield
     
@@ -106,26 +108,25 @@ async def get_public_config():
 static_dir = Path("mini_app_dist")
 
 if static_dir.exists():
-    # Mount assets folder
-    app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
     
-    # PWA files
-    for file in ["manifest.webmanifest", "sw.js", "workbox-*.js", "favicon.ico"]:
-        if (static_dir / file).exists():
-             app.mount(f"/{file}", StaticFiles(directory=static_dir, html=False), name=file)
-
     # Catch-all for SPA (Vue Router)
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
         # اگر درخواست API بود و هندل نشده بود -> 404 بده (به index.html نفرست)
         if full_path.startswith("api/"):
-             return {"detail": "Not Found"}
+             return JSONResponse({"detail": "Not Found"}, status_code=404)
              
-        # اگر فایل استاتیک بود و وجود داشت -> سرو کن (مثلا تصاویر)
+        # اگر فایل استاتیک بود و وجود داشت -> سرو کن (تمام asset ها و عکس ها)
         file_path = static_dir / full_path
         if file_path.is_file():
             return FileResponse(file_path)
-            
+        
+        # اگر کاربر یک فایل .js از نسخه قدیمی را درخواست کرد (PWA Cache stale):
+        if full_path.startswith("assets/") and full_path.endswith(".js"):
+             logger.warning(f"Old JS chunk requested: {full_path}. Forcing PWA reload on client.")
+             js_fallback = "console.warn('Stale PWA chunk requested. Forcing hard reload...'); window.location.reload(true);"
+             return Response(content=js_fallback, media_type="application/javascript")
+             
         # در غیر این صورت -> index.html (برای Vue Router)
         return FileResponse(static_dir / "index.html")
 else:

@@ -148,6 +148,10 @@ function toggleNav() {
   transition: all 0.25s;
   -webkit-tap-highlight-color: transparent;
   position: relative;
+  cursor: pointer;
+}
+.nav-item * {
+  pointer-events: none;
 }
 .nav-item.active { color: #d97706; }
 .nav-item.disabled { opacity: 0.4; cursor: default; }
@@ -250,6 +254,10 @@ function toggleNav() {
   font-weight: 600;
   transition: all 0.2s;
   -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+.fab-item * {
+  pointer-events: none;
 }
 .fab-item:active {
   background: #f9fafb;

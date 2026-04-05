@@ -121,6 +121,7 @@ async def handle_login_session(
     device_name: str = "Unknown Device",
     device_ip: Optional[str] = None,
     platform: Platform = Platform.WEB,
+    suspended_refresh_token: Optional[str] = None,
 ) -> dict:
     """
     Core login session logic. Returns one of:
@@ -129,6 +130,34 @@ async def handle_login_session(
     - {"action": "blocked", "reason": str}
     """
     max_sessions = get_effective_max_sessions(user)
+    
+    # Attempt to revive suspended session
+    if suspended_refresh_token:
+        # A suspended session is one where it's still marked is_active=True,
+        # but its expires_at has passed (and frontend caught it, leading to this OTP verification).
+        # OR it might still be technically within the 30 days but the client triggered a re-login.
+        token_hash = hash_token(suspended_refresh_token)
+        stmt = select(UserSession).where(
+            and_(
+                UserSession.user_id == user.id,
+                UserSession.refresh_token_hash == token_hash,
+                UserSession.is_active == True,
+            )
+        )
+        suspended_session = (await db.execute(stmt)).scalar_one_or_none()
+        
+        if suspended_session:
+            # We revive it: update tokens and device info, extend expiry
+            suspended_session.refresh_token_hash = hash_token(refresh_token)
+            suspended_session.device_name = device_name
+            if device_ip:
+                suspended_session.device_ip = device_ip
+            suspended_session.platform = platform
+            suspended_session.last_active_at = datetime.utcnow()
+            suspended_session.expires_at = datetime.utcnow() + timedelta(days=30)
+            await db.commit()
+            return {"action": "session_created", "session": suspended_session}
+
     active_sessions = await get_active_sessions(db, user.id)
 
     # Case 1: No sessions exist → create first session as primary
