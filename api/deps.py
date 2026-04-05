@@ -40,6 +40,7 @@ async def get_current_user(
             token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
         )
         token_data = payload.get("sub")
+        session_id = payload.get("sid")
         
         if token_data is None:
             raise HTTPException(
@@ -54,6 +55,16 @@ async def get_current_user(
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Check if session has been revoked (Redis blacklist)
+    if session_id:
+        from core.services.session_service import is_session_blacklisted
+        if await is_session_blacklisted(session_id):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         
     # Try to find user by ID (new way) or telegram_id (old way)
     # The payload 'sub' is a string. If it's a digit, it could be either.

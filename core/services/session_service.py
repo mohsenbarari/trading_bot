@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 ANTI_ABUSE_BASE = {"daily": 2, "weekly": 5, "monthly": 7}
 # Login request approval timeout
 LOGIN_REQUEST_TIMEOUT_SECONDS = 120
+# Session blacklist TTL: must match access token lifetime (60 min)
+SESSION_BLACKLIST_TTL = 3600
 
 
 def hash_token(token: str) -> str:
@@ -98,9 +100,10 @@ async def create_session(
 
 
 async def deactivate_session(db: AsyncSession, session: UserSession) -> None:
-    """Mark a session as inactive."""
+    """Mark a session as inactive and blacklist its ID."""
     session.is_active = False
     await db.flush()
+    await blacklist_session(session.id)
 
 
 async def promote_next_primary(db: AsyncSession, user_id: int) -> Optional[UserSession]:
@@ -389,4 +392,33 @@ async def force_clear_sessions(
     except Exception as e:
         logger.warning(f"Failed to publish session:revoked event: {e}")
         
+    # Blacklist all session IDs
+    try:
+        from bot.utils.redis_helpers import get_redis
+        r = await get_redis()
+        for s in sessions:
+            await r.setex(f"session_blacklist:{s.id}", SESSION_BLACKLIST_TTL, "1")
+    except Exception as e:
+        logger.warning(f"Failed to blacklist sessions: {e}")
+
     return count
+
+
+async def blacklist_session(session_id) -> None:
+    """Add a session ID to the Redis blacklist so access tokens are immediately invalidated."""
+    try:
+        from bot.utils.redis_helpers import get_redis
+        r = await get_redis()
+        await r.setex(f"session_blacklist:{session_id}", SESSION_BLACKLIST_TTL, "1")
+    except Exception as e:
+        logger.warning(f"Failed to blacklist session {session_id}: {e}")
+
+
+async def is_session_blacklisted(session_id: str) -> bool:
+    """Check if a session ID is in the Redis blacklist."""
+    try:
+        from bot.utils.redis_helpers import get_redis
+        r = await get_redis()
+        return await r.exists(f"session_blacklist:{session_id}") > 0
+    except Exception:
+        return False
