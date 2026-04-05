@@ -86,6 +86,24 @@ def login_request_to_dict(r: SessionLoginRequest) -> dict:
 
 # --- Endpoints ---
 
+class VerifySessionRequest(BaseModel):
+    refresh_token: str
+
+@router.post("/verify")
+async def verify_my_session(
+    req: VerifySessionRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    بررسی اینکه آیا نشست برای یک refresh_token خاص هنوز فعال است یا خیر.
+    (استفاده در فرانت‌اند هنگام دریافت نوتیفیکیشن لغو نشست)
+    """
+    from core.services.session_service import get_session_by_refresh_token
+    session = await get_session_by_refresh_token(db, req.refresh_token)
+    if not session:
+        raise HTTPException(status_code=401, detail="نشست شما باطل شده است")
+    return {"status": "active"}
+
 @router.get("/active", response_model=List[dict])
 async def list_active_sessions(
     db: AsyncSession = Depends(get_db),
