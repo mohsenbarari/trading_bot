@@ -234,7 +234,7 @@ async def approve_login_request(
         return {"error": "درخواست یافت نشد"}
     if login_req.status != LoginRequestStatus.PENDING:
         return {"error": "درخواست قبلاً پردازش شده است"}
-    if login_req.expires_at < datetime.utcnow():
+    if login_req.expires_at.replace(tzinfo=None) < datetime.utcnow():
         login_req.status = LoginRequestStatus.EXPIRED
         await db.commit()
         return {"error": "درخواست منقضی شده است"}

@@ -277,7 +277,7 @@ async def poll_login_request_status(
             response["access_token"] = create_access_token(subject=login_req.user_id)
             response["refresh_token_hash"] = new_session.refresh_token_hash  # Client won't need this directly
             response["token_type"] = "bearer"
-    elif login_req.expires_at < datetime.utcnow():
+    elif login_req.expires_at.replace(tzinfo=None) < datetime.utcnow():
         response["status"] = "expired"
 
     return response

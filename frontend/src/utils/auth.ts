@@ -77,27 +77,42 @@ export function forceLogout() {
     window.location.href = '/login';
 }
 
+let isRefreshing = false;
+let refreshPromise: Promise<boolean> | null = null;
+
 async function tryRefreshToken(): Promise<boolean> {
     const refreshToken = localStorage.getItem('refresh_token');
     if (!refreshToken) return false;
     
-    try {
-        const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
-        const res = await fetch(`${baseUrl}/api/auth/refresh`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refresh_token: refreshToken }),
-        });
-        
-        if (!res.ok) return false;
-        
-        const data = await res.json();
-        localStorage.setItem('auth_token', data.access_token);
-        localStorage.setItem('refresh_token', data.refresh_token);
-        return true;
-    } catch {
-        return false;
+    if (isRefreshing && refreshPromise) {
+        return refreshPromise;
     }
+    
+    isRefreshing = true;
+    refreshPromise = (async () => {
+        try {
+            const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+            const res = await fetch(`${baseUrl}/api/auth/refresh`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: refreshToken }),
+            });
+            
+            if (!res.ok) return false;
+            
+            const data = await res.json();
+            localStorage.setItem('auth_token', data.access_token);
+            localStorage.setItem('refresh_token', data.refresh_token);
+            return true;
+        } catch {
+            return false;
+        } finally {
+            isRefreshing = false;
+            refreshPromise = null;
+        }
+    })();
+    
+    return refreshPromise;
 }
 
 export async function apiFetch(url: string, options: RequestInit = {}) {
