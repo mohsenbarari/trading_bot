@@ -204,6 +204,16 @@ async def handle_login_session(
     )
     existing = (await db.execute(stmt)).scalar_one_or_none()
     if existing:
+        try:
+            from core.utils import publish_user_event
+            await publish_user_event(user.id, "session:login_request", {
+                "request_id": str(existing.id),
+                "device_name": existing.requester_device_name or device_name,
+                "device_ip": existing.requester_ip or device_ip,
+                "expires_at": existing.expires_at.isoformat(),
+            })
+        except Exception as e:
+            logger.warning(f"Failed to publish login request event (existing): {e}")
         return {"action": "approval_required", "request": existing}
 
     # Create login request
@@ -217,6 +227,17 @@ async def handle_login_session(
     )
     db.add(login_request)
 
+    # Increment anti-abuse counters
+    ttls = {"daily": 86400, "weekly": 604800, "monthly": 2592000}
+    for period, ttl in ttls.items():
+        key = f"session_req:{user.id}:{period}"
+        pipe = redis.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, ttl)
+        await pipe.execute()
+
+    await db.commit()
+
     # Notify primary device(s) via real-time pub/sub
     try:
         from core.utils import publish_user_event
@@ -229,16 +250,6 @@ async def handle_login_session(
     except Exception as e:
         logger.warning(f"Failed to publish login request event: {e}")
 
-    # Increment anti-abuse counters
-    ttls = {"daily": 86400, "weekly": 604800, "monthly": 2592000}
-    for period, ttl in ttls.items():
-        key = f"session_req:{user.id}:{period}"
-        pipe = redis.pipeline()
-        pipe.incr(key)
-        pipe.expire(key, ttl)
-        await pipe.execute()
-
-    await db.commit()
     return {"action": "approval_required", "request": login_request}
 
 

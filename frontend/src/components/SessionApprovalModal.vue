@@ -4,7 +4,7 @@ import { useWebSocket } from '../composables/useWebSocket'
 import { apiFetch } from '../utils/auth'
 import { Shield, X, Check, Smartphone } from 'lucide-vue-next'
 
-const { on, off } = useWebSocket()
+const { connect, on, off } = useWebSocket()
 
 const showModal = ref(false)
 const pendingRequest = ref<any>(null)
@@ -61,6 +61,7 @@ async function reject() {
 }
 
 onMounted(() => {
+  connect()
   on('session:login_request', handleLoginRequest)
 })
 
