@@ -60,4 +60,16 @@ const router = createRouter({
 
 router.beforeEach(authGuard)
 
+// Handle dynamic module load errors (e.g. after a new version is built)
+router.onError((error, to) => {
+  const isChunkLoadFailed = error.message.includes('Failed to fetch dynamically imported module') || 
+                            error.message.includes('Importing a module script failed') ||
+                            error.name === 'ChunkLoadError'
+
+  if (isChunkLoadFailed) {
+    console.warn('Chunk load failed in router, forcing a hard reload for:', to.fullPath)
+    window.location.href = to.fullPath
+  }
+})
+
 export default router

@@ -98,6 +98,7 @@ async function requestOtp() {
     }
     
     const data = await res.json()
+      localStorage.removeItem('suspended_refresh_token')
     lastMethod.value = data.method
     
     // If Telegram -> 30s timer, else 120s
@@ -129,6 +130,7 @@ async function resendOtpSms() {
     }
     
     const data = await res.json()
+      localStorage.removeItem('suspended_refresh_token')
     
     // SMS Sent successfully
     lastMethod.value = 'sms'
@@ -167,7 +169,7 @@ async function verifyOtp() {
     const res = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ mobile_number: form.mobile, code: form.code })
+        body: JSON.stringify({ mobile_number: form.mobile, code: form.code, suspended_refresh_token: localStorage.getItem("suspended_refresh_token") || undefined })
     })
 
     
@@ -177,6 +179,7 @@ async function verifyOtp() {
     }
     
     const data = await res.json()
+      localStorage.removeItem('suspended_refresh_token')
     
     // Session management: check if approval is required
     if (data.status === 'approval_required') {
@@ -223,6 +226,7 @@ function startApprovalPolling() {
       const res = await fetch(`/api/sessions/login-requests/${loginRequestId.value}/status`)
       if (!res.ok) return
       const data = await res.json()
+      localStorage.removeItem('suspended_refresh_token')
       
       if (data.status === 'approved' && data.access_token) {
         stopApprovalPolling()

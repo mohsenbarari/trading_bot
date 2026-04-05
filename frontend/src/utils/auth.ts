@@ -59,7 +59,7 @@ export function setupExpiryTimer() {
                     // Token expired — try to refresh before logging out
                     const refreshed = await tryRefreshToken();
                     if (!refreshed) {
-                        forceLogout();
+                        suspendSession();
                     }
                 }
             }
@@ -71,9 +71,20 @@ export function logout() {
     forceLogout();
 }
 
+export function suspendSession() {
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (refreshToken) {
+        localStorage.setItem('suspended_refresh_token', refreshToken);
+    }
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('refresh_token');
+    window.location.href = '/login';
+}
+
 export function forceLogout() {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('refresh_token');
+    localStorage.removeItem('suspended_refresh_token');
     window.location.href = '/login';
 }
 
@@ -169,7 +180,7 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
             }
             return retryResponse;
         }
-        forceLogout();
+        suspendSession();
         throw new Error('Unauthorized');
     }
 

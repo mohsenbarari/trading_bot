@@ -14,6 +14,13 @@ app.use(router)
 import { vRipple } from './directives/ripple'
 app.directive('ripple', vRipple)
 
+// --- Handle Dynamic Import Failures (Vite) ---
+window.addEventListener('vite:preloadError', (event) => {
+  event.preventDefault()
+  console.warn('Vite preload error detected. Forcing hard reload...')
+  window.location.reload()
+})
+
 // --- PWA Service Worker Registration (with iOS error recovery) ---
 import { registerSW } from 'virtual:pwa-register'
 

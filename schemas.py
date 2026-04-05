@@ -60,7 +60,7 @@ class AppConfig(BaseModel):
 
 # --- User Schemas ---
 class UserBase(BaseModel):
-    telegram_id: int
+    telegram_id: int | None = None
     username: str | None = None
     full_name: str
     account_name: str

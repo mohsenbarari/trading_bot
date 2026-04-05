@@ -4,6 +4,7 @@ from sqlalchemy import select
 from datetime import datetime, timedelta
 import logging
 from pydantic import BaseModel
+from typing import Optional
 import random
 import hashlib
 import hmac
@@ -70,6 +71,7 @@ class OTPRequest(BaseModel):
 class OTPVerify(BaseModel):
     mobile_number: str
     code: str
+    suspended_refresh_token: Optional[str] = None
 
 class WebAppLogin(BaseModel):
     init_data: str
@@ -489,6 +491,7 @@ async def verify_otp(
         device_name=device_info["device_name"],
         device_ip=device_info["device_ip"],
         platform=device_info["platform"],
+        suspended_refresh_token=request.suspended_refresh_token,
     )
     
     if session_result["action"] == "blocked":
