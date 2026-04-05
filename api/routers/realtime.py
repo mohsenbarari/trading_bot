@@ -162,8 +162,10 @@ async def listen_redis_events(websocket: WebSocket, user_id: int = None):
                     message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                     
                     if message and message.get("type") == "message":
-                        channel = message.get("channel", b"").decode("utf-8")
-                        data_str = message.get("data", b"").decode("utf-8")
+                        raw_channel = message.get("channel", "")
+                        channel = raw_channel.decode("utf-8") if isinstance(raw_channel, bytes) else str(raw_channel)
+                        raw_data = message.get("data", "")
+                        data_str = raw_data.decode("utf-8") if isinstance(raw_data, bytes) else str(raw_data)
                         
                         try:
                             parsed_data = json.loads(data_str)
@@ -218,8 +220,10 @@ async def event_generator(user_id: int):
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 
                 if message and message.get("type") == "message":
-                    channel = message.get("channel", b"").decode("utf-8")
-                    data = message.get("data", b"").decode("utf-8")
+                    raw_channel = message.get("channel", "")
+                    channel = raw_channel.decode("utf-8") if isinstance(raw_channel, bytes) else str(raw_channel)
+                    raw_data = message.get("data", "")
+                    data = raw_data.decode("utf-8") if isinstance(raw_data, bytes) else str(raw_data)
                     event_type = channel.replace("events:", "")
                     
                     # Sanitize SSE data too
