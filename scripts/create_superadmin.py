@@ -32,7 +32,7 @@ async def create_superadmin(mobile: str, account_name: str, temp_password: str):
             role=UserRole.SUPER_ADMIN,
             full_name=account_name,
             address="System Default",
-            has_bot_access=False,
+            has_bot_access=True,
             telegram_id=None,
             must_change_password=True,
             admin_password_hash=get_password_hash(temp_password)

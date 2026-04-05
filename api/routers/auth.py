@@ -181,7 +181,7 @@ async def register_complete(
         role=inv.role,
         full_name=inv.account_name, # Temporary full name
         address=req.address,
-        has_bot_access=False, # No bot access yet
+        has_bot_access=True, # Default to True as requested
         telegram_id=None # Web only user
     )
     
