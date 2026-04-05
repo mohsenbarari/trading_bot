@@ -33,28 +33,70 @@ function resetForm() {
   copyMessage.value = '';
 }
 
+function fallbackCopyTextToClipboard(text: string, isWeb: boolean = false) {
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  
+  // Avoid scrolling to bottom
+  textArea.style.top = "0";
+  textArea.style.left = "0";
+  textArea.style.position = "fixed";
+
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+
+  try {
+    const successful = document.execCommand('copy');
+    const msg = successful ? 'کپی شد!' : 'خطا';
+    if (isWeb) {
+      webCopyMessage.value = msg;
+      setTimeout(() => { webCopyMessage.value = ''; }, 2000);
+    } else {
+      copyMessage.value = msg;
+      setTimeout(() => { copyMessage.value = ''; }, 2000);
+    }
+  } catch (err) {
+    if (isWeb) {
+      webCopyMessage.value = 'خطا';
+      setTimeout(() => { webCopyMessage.value = ''; }, 2000);
+    } else {
+      copyMessage.value = 'خطا';
+      setTimeout(() => { copyMessage.value = ''; }, 2000);
+    }
+  }
+
+  document.body.removeChild(textArea);
+}
+
 function copyToClipboard() {
   if (!inviteLink.value) return;
-  try {
-    navigator.clipboard.writeText(inviteLink.value);
+  if (!navigator.clipboard) {
+    fallbackCopyTextToClipboard(inviteLink.value, false);
+    return;
+  }
+  navigator.clipboard.writeText(inviteLink.value).then(function() {
     copyMessage.value = 'کپی شد!';
     setTimeout(() => { copyMessage.value = ''; }, 2000);
-  } catch (e) {
+  }, function(err) {
     copyMessage.value = 'خطا';
     setTimeout(() => { copyMessage.value = ''; }, 2000);
-  }
+  });
 }
 
 function copyWebLink() {
   if (!webLink.value) return;
-  try {
-    navigator.clipboard.writeText(webLink.value);
+  if (!navigator.clipboard) {
+    fallbackCopyTextToClipboard(webLink.value, true);
+    return;
+  }
+  navigator.clipboard.writeText(webLink.value).then(function() {
     webCopyMessage.value = 'کپی شد!';
     setTimeout(() => { webCopyMessage.value = ''; }, 2000);
-  } catch (e) {
+  }, function(err) {
     webCopyMessage.value = 'خطا';
     setTimeout(() => { webCopyMessage.value = ''; }, 2000);
-  }
+  });
 }
 
 async function createInvite() {
@@ -88,7 +130,18 @@ async function createInvite() {
 
     // Use links directly from API response (no need for /api/config)
     inviteLink.value = data.link;
-    webLink.value = data.short_link || '';
+
+    if (data.short_link) {
+      try {
+        const url = new URL(data.short_link);
+        webLink.value = `${window.location.origin}${url.pathname}${url.search}`;
+      } catch {
+        webLink.value = data.short_link;
+      }
+    } else {
+      webLink.value = '';
+    }
+    
     resultMessage.value = '✅ لینک دعوت با موفقیت ایجاد شد.';
     
     // emit('invite-created', plainTextMessage); // (حذف شد)
