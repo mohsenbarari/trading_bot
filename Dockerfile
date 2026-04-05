@@ -31,5 +31,6 @@ COPY manage.py .
 COPY run_bot.py .
 COPY schemas.py .
 COPY seed_fake_data.py .
+COPY scripts/ ./scripts/
 
 COPY --from=builder /mini_app_dist /app/mini_app_dist
