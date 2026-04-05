@@ -9,6 +9,7 @@ from typing import Optional, List
 from datetime import datetime
 
 from core.db import get_db
+from core.config import settings
 from api.deps import get_current_user
 from models.user import User, UserRole
 from models.session import UserSession, SessionLoginRequest, LoginRequestStatus, Platform
@@ -106,12 +107,30 @@ async def verify_my_session(
 
 @router.get("/active", response_model=List[dict])
 async def list_active_sessions(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """لیست نشست‌های فعال کاربر جاری"""
+    # Extract session_id from JWT to mark current session
+    current_session_id = None
+    try:
+        from jose import jwt as jose_jwt
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            payload = jose_jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+            current_session_id = payload.get("sid")
+    except Exception:
+        pass
+    
     sessions = await get_active_sessions(db, current_user.id)
-    return [session_to_dict(s) for s in sessions]
+    result = []
+    for s in sessions:
+        d = session_to_dict(s)
+        d["is_current"] = (str(s.id) == current_session_id) if current_session_id else False
+        result.append(d)
+    return result
 
 
 @router.delete("/{session_id}")
@@ -220,6 +239,14 @@ async def approve_request(
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
 
+    # Store actual refresh token in Redis for poll endpoint (TTL 5 min)
+    try:
+        from bot.utils.redis_helpers import get_redis
+        r = await get_redis()
+        await r.setex(f"login_req_token:{request_id}", 300, new_refresh)
+    except Exception as e:
+        logger.warning(f"Failed to store refresh token for poll: {e}")
+
     return {"detail": "درخواست ورود تایید شد", "session": session_to_dict(result["session"])}
 
 
@@ -280,10 +307,8 @@ async def poll_login_request_status(
     
     # If approved, include the session tokens
     if login_req.status == LoginRequestStatus.APPROVED:
-        # Find the session created for this request
         from core.security import create_access_token
-        # Find the new session by looking at resolved_by link
-        # The new session was created during approval — find it by user + newest
+        # Find the new session by user + newest
         stmt2 = select(UserSession).where(
             and_(
                 UserSession.user_id == login_req.user_id,
@@ -292,8 +317,20 @@ async def poll_login_request_status(
         ).order_by(UserSession.created_at.desc()).limit(1)
         new_session = (await db.execute(stmt2)).scalar_one_or_none()
         if new_session:
-            response["access_token"] = create_access_token(subject=login_req.user_id)
-            response["refresh_token_hash"] = new_session.refresh_token_hash  # Client won't need this directly
+            response["access_token"] = create_access_token(
+                subject=login_req.user_id,
+                session_id=str(new_session.id),
+            )
+            # Retrieve actual refresh token from Redis
+            try:
+                from bot.utils.redis_helpers import get_redis
+                r = await get_redis()
+                actual_refresh = await r.get(f"login_req_token:{request_id}")
+                if actual_refresh:
+                    response["refresh_token"] = actual_refresh
+                    await r.delete(f"login_req_token:{request_id}")
+            except Exception:
+                pass
             response["token_type"] = "bearer"
     elif login_req.expires_at.replace(tzinfo=None) < datetime.utcnow():
         response["status"] = "expired"

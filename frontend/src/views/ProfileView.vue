@@ -160,6 +160,7 @@ onMounted(() => {
                 <div class="flex items-center gap-2">
                   <span class="text-sm font-medium text-gray-800 truncate">{{ session.device_name }}</span>
                   <span v-if="session.is_primary" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold shrink-0">اصلی</span>
+                  <span v-if="session.is_current" class="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold shrink-0">این دستگاه</span>
                 </div>
                 <div class="text-xs text-gray-400 mt-0.5 dir-ltr text-right">
                   {{ session.platform }} · {{ session.device_ip || '—' }}
@@ -167,7 +168,7 @@ onMounted(() => {
               </div>
             </div>
             <button
-              v-if="!session.is_primary"
+              v-if="!session.is_primary && !session.is_current"
               @click="terminateSession(session.id)"
               class="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
               title="پایان نشست"

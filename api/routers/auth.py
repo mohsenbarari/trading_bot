@@ -202,14 +202,10 @@ async def register_complete(
     await redis.delete(f"reg_otp:{req.token}")
     await redis.delete(verify_key)
     
-    # 6. Generate Tokens (consistent with verify-otp: 60 min access, 30 day refresh)
-    access_token_expires = timedelta(minutes=60)
+    # 6. Generate refresh token first
     refresh_token_expires = timedelta(days=30)
+    access_token_expires = timedelta(minutes=60)
     
-    access_token = create_access_token(
-        subject=new_user.id,
-        expires_delta=access_token_expires
-    )
     refresh_token = create_refresh_token(
         subject=new_user.id,
         expires_delta=refresh_token_expires
@@ -217,11 +213,19 @@ async def register_complete(
     
     # 7. Create first session (always succeeds for new user - primary)
     device_info = _extract_device_info(raw_request)
-    await handle_login_session(
+    session_result = await handle_login_session(
         db, new_user, refresh_token,
         device_name=device_info["device_name"],
         device_ip=device_info["device_ip"],
         platform=device_info["platform"],
+    )
+    
+    # Generate access token with session_id
+    session_id = str(session_result["session"].id) if session_result.get("session") else None
+    access_token = create_access_token(
+        subject=new_user.id,
+        expires_delta=access_token_expires,
+        session_id=session_id,
     )
     
     return {
@@ -278,7 +282,8 @@ async def refresh_access_token(
         
         new_access = create_access_token(
             subject=user.id,
-            expires_delta=access_token_expires
+            expires_delta=access_token_expires,
+            session_id=str(session.id),
         )
         new_refresh = create_refresh_token(
             subject=user.id,
@@ -475,10 +480,6 @@ async def verify_otp(
     access_token_expires = timedelta(minutes=60)
     refresh_token_expires = timedelta(days=30)
     
-    access_token = create_access_token(
-        subject=user.id,
-        expires_delta=access_token_expires
-    )
     refresh_token = create_refresh_token(
         subject=user.id,
         expires_delta=refresh_token_expires
@@ -505,6 +506,14 @@ async def verify_otp(
             "message": "درخواست ورود شما ارسال شد. منتظر تایید از دستگاه اصلی باشید.",
             "expires_at": login_req.expires_at.isoformat(),
         }
+    
+    # Generate access token with session_id
+    session_id = str(session_result["session"].id) if session_result.get("session") else None
+    access_token = create_access_token(
+        subject=user.id,
+        expires_delta=access_token_expires,
+        session_id=session_id,
+    )
     
     return {
         "access_token": access_token,
@@ -561,7 +570,6 @@ async def webapp_login(
             raise HTTPException(status_code=403, detail="User is blocked")
 
         # Generate tokens
-        access_token = create_access_token(subject=user.id)
         refresh_token = create_refresh_token(subject=user.id)
         
         # Session management
@@ -588,6 +596,9 @@ async def webapp_login(
                 "message": "درخواست ورود شما ارسال شد. منتظر تایید از دستگاه اصلی باشید.",
                 "expires_at": login_req.expires_at.isoformat(),
             }
+        
+        session_id = str(session_result["session"].id) if session_result.get("session") else None
+        access_token = create_access_token(subject=user.id, session_id=session_id)
         
         return {
             "access_token": access_token,

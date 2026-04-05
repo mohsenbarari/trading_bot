@@ -12,7 +12,22 @@ const loading = ref(false)
 const countdown = ref(0)
 let countdownInterval: any = null
 
-function handleLoginRequest(data: any) {
+async function handleLoginRequest(data: any) {
+  // Only show on primary device
+  try {
+    const res = await apiFetch('/api/sessions/active')
+    if (res.ok) {
+      const sessions = await res.json()
+      const myRefresh = localStorage.getItem('refresh_token')
+      // If we can't determine primary status, show anyway as fallback
+      if (Array.isArray(sessions) && myRefresh) {
+        const mySession = sessions.find((s: any) => s.is_current)
+        if (mySession && !mySession.is_primary) return
+      }
+    }
+  } catch {
+    // On error, show modal as fallback
+  }
   pendingRequest.value = data
   showModal.value = true
   // Start 120s countdown
