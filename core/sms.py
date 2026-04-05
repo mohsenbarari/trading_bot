@@ -27,25 +27,34 @@ def send_sms(mobile: str, message: str) -> bool:
     """
     Send a plain text SMS to a mobile number.
     Returns True on success, False on failure.
+    
+    TEMPORARY: SMS sending is disabled due to internet outage.
+    SMS text is logged to console instead of external network call.
     """
-    try:
-        client = _get_client()
-        resp = client.send_sms(number=mobile, message=message)
-
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("status") == 1:
-                logger.info(f"✅ SMS sent to {mobile}")
-                return True
-            else:
-                logger.error(f"❌ SMS.ir error: {data}")
-                return False
-        else:
-            logger.error(f"❌ SMS HTTP {resp.status_code}: {resp.text}")
-            return False
-    except Exception as e:
-        logger.error(f"❌ SMS send failed: {e}")
-        return False
+    
+    logger.info(f"🚫 SMS Sending Disabled (Internet Outage Mode)")
+    logger.info(f"📲 Simulating SMS to {mobile}:\n{message}\n")
+    return True
+    
+    # Original logic commented out
+    # try:
+    #     client = _get_client()
+    #     resp = client.send_sms(number=mobile, message=message)
+    #
+    #     if resp.status_code == 200:
+    #         data = resp.json()
+    #         if data.get("status") == 1:
+    #             logger.info(f"✅ SMS sent to {mobile}")
+    #             return True
+    #         else:
+    #             logger.error(f"❌ SMS.ir error: {data}")
+    #             return False
+    #     else:
+    #         logger.error(f"❌ SMS HTTP {resp.status_code}: {resp.text}")
+    #         return False
+    # except Exception as e:
+    #     logger.error(f"❌ SMS send failed: {e}")
+    #     return False
 
 
 def send_otp_sms(mobile: str, code: str) -> bool:
