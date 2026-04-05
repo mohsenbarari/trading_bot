@@ -363,8 +363,14 @@ async def logout_session(
         new_primary = await promote_next_primary(db, session.user_id)
 
     await db.commit()
+    
+    try:
+        from core.utils import publish_user_event
+        await publish_user_event(session.user_id, "session:revoked", {"action": "check_session"})
+    except Exception as e:
+        logger.warning(f"Failed to publish session:revoked event: {e}")
+        
     return new_primary
-
 
 async def force_clear_sessions(
     db: AsyncSession, user_id: int
@@ -376,4 +382,11 @@ async def force_clear_sessions(
         s.is_active = False
         count += 1
     await db.commit()
+    
+    try:
+        from core.utils import publish_user_event
+        await publish_user_event(user_id, "session:revoked", {"action": "check_session"})
+    except Exception as e:
+        logger.warning(f"Failed to publish session:revoked event: {e}")
+        
     return count

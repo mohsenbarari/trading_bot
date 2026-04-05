@@ -1,15 +1,39 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { onMounted } from 'vue'
 import BottomNav from './components/BottomNav.vue'
 import SessionApprovalModal from './components/SessionApprovalModal.vue'
-import { setupExpiryTimer } from './utils/auth'
+import { setupExpiryTimer, apiFetch, logout } from './utils/auth'
+import { useWebSocket } from './composables/useWebSocket'
 
 const route = useRoute()
+const router = useRouter()
+const { on, connect } = useWebSocket()
 
 onMounted(() => {
   // راه‌اندازی تایمر انقضای توکن — ریدایرکت خودکار به لاگین
   setupExpiryTimer()
+
+  const ensureSessionValidation = async () => {
+    const refreshToken = localStorage.getItem('refresh_token')
+    if (!refreshToken) return
+    try {
+      await apiFetch('/api/sessions/verify', {
+        method: 'POST',
+        body: JSON.stringify({ refresh_token: refreshToken })
+      })
+    } catch(e) {
+      // If 401, apiFetch will automatically log the user out
+    }
+  }
+
+  // وقتی کاربر احراز هویت شد، وب‌سوکت وصل می‌شود و بررسی نشست انجام می‌گیرد
+  if (localStorage.getItem('auth_token')) {
+    connect()
+    ensureSessionValidation()
+  }
+  
+  on('session:revoked', ensureSessionValidation)
 
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
