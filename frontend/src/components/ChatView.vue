@@ -5,9 +5,9 @@ import ChatHeader from './chat/ChatHeader.vue'
 import ChatInputBar from './chat/ChatInputBar.vue'
 import ChatMessageItem from './chat/ChatMessageItem.vue'
 import ChatContextMenu from './chat/ChatContextMenu.vue'
-import ChatSearchGlobalList from './chat/ChatSearchGlobalList.vue'
 import ChatEmptyState from './chat/ChatEmptyState.vue'
 import ChatConversationList from './chat/ChatConversationList.vue'
+import ChatNewConversationModal from './chat/ChatNewConversationModal.vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
 import type { Conversation, Message, StickerPack } from '../types/chat'
@@ -461,6 +461,13 @@ const startNewChat = (userId: number, userName: string) => {
   })
 }
 
+const showNewChatModal = ref(false)
+
+const handleNewChatSearch = (userId: number, userName: string) => {
+    showNewChatModal.value = false
+    startNewChat(userId, userName)
+}
+
 const showContextMenu = (event: Event, msg: Message) => {
   let clientX = 0, clientY = 0;
   if (event instanceof MouseEvent) {
@@ -806,6 +813,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :selectedUserId="selectedUserId"
       :typingUsers="typingUsers"
       @select-conversation="selectConversation"
+      @new-conversation="showNewChatModal = true"
     />
 
     <!-- Messages View -->
@@ -933,6 +941,13 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
     <ChatLightbox 
       :lightboxMedia="lightboxMedia" 
       @close="closeLightbox" 
+    />
+
+    <!-- New Conversation Search Modal -->
+    <ChatNewConversationModal
+      :show="showNewChatModal"
+      @close="showNewChatModal = false"
+      @start-chat="handleNewChatSearch"
     />
 
     </template>
