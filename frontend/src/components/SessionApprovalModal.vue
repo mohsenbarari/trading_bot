@@ -12,6 +12,41 @@ const loading = ref(false)
 const countdown = ref(0)
 let countdownInterval: any = null
 
+async function fetchPendingRequests() {
+  if (showModal.value) return // Already showing a request
+  try {
+    const res = await apiFetch('/api/sessions/login-requests/pending')
+    if (res.ok) {
+      const data = await res.json()
+      if (Array.isArray(data) && data.length > 0) {
+        pendingRequest.value = data[0]
+        showModal.value = true
+        
+        // Start countdown based on expires_at
+        if (data[0].expires_at) {
+          const expires = new Date(data[0].expires_at).getTime()
+          const now = new Date().getTime()
+          countdown.value = Math.max(0, Math.floor((expires - now) / 1000))
+        } else {
+          countdown.value = 120
+        }
+        
+        if (countdownInterval) clearInterval(countdownInterval)
+        countdownInterval = setInterval(() => {
+          countdown.value--
+          if (countdown.value <= 0) {
+            clearInterval(countdownInterval)
+            showModal.value = false
+            pendingRequest.value = null
+          }
+        }, 1000)
+      }
+    }
+  } catch (e) {
+    // Ignore, maybe not primary
+  }
+}
+
 async function handleLoginRequest(data: any) {
   // Only show on primary device
   try {
@@ -31,7 +66,14 @@ async function handleLoginRequest(data: any) {
   pendingRequest.value = data
   showModal.value = true
   // Start 120s countdown
-  countdown.value = 120
+  if (data.expires_at) {
+    const expires = new Date(data.expires_at).getTime()
+    const now = new Date().getTime()
+    countdown.value = Math.max(0, Math.floor((expires - now) / 1000))
+  } else {
+    countdown.value = 120
+  }
+  
   if (countdownInterval) clearInterval(countdownInterval)
   countdownInterval = setInterval(() => {
     countdown.value--
@@ -78,10 +120,22 @@ async function reject() {
 onMounted(() => {
   connect()
   on('session:login_request', handleLoginRequest)
+  on('ws:reconnect', fetchPendingRequests)
+  
+  // Also check when tab comes back to foreground
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === 'visible') {
+      fetchPendingRequests()
+    }
+  })
+  
+  // Check initially just in case
+  setTimeout(fetchPendingRequests, 1000)
 })
 
 onUnmounted(() => {
   off('session:login_request', handleLoginRequest)
+  off('ws:reconnect', fetchPendingRequests)
   if (countdownInterval) clearInterval(countdownInterval)
 })
 </script>

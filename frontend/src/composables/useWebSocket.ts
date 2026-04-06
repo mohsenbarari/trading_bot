@@ -46,6 +46,11 @@ export function useWebSocket() {
                 clearInterval(reconnectInterval);
                 reconnectInterval = null;
             }
+            
+            // Notify local listeners that WS is connected/reconnected
+            if (eventListeners['ws:reconnect']) {
+                eventListeners['ws:reconnect'].forEach((callback) => callback({}));
+            }
         };
 
         socket.onmessage = (event) => {
