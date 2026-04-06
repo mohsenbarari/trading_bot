@@ -13,6 +13,7 @@ const countdown = ref(0)
 let countdownInterval: any = null
 
 async function fetchPendingRequests() {
+  if (!localStorage.getItem('auth_token')) return
   if (showModal.value) return // Already showing a request
   try {
     const res = await apiFetch('/api/sessions/login-requests/pending')
@@ -48,6 +49,7 @@ async function fetchPendingRequests() {
 }
 
 async function handleLoginRequest(data: any) {
+  if (!localStorage.getItem('auth_token')) return
   // Only show on primary device
   try {
     const res = await apiFetch('/api/sessions/active')
