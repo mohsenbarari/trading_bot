@@ -9,6 +9,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'select-conversation', conv: Conversation): void
+  (e: 'new-conversation'): void
 }>()
 
 function formatTime(dateStr: string) {
@@ -24,7 +25,8 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
 </script>
 
 <template>
-  <div class="conversations-list">
+  <div class="conversation-list-wrapper">
+    <div class="conversations-list">
     <div v-if="conversations.length === 0" class="empty-state">
       <span>💬</span>
       <p>هنوز گفتگویی ندارید</p>
@@ -66,10 +68,28 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
         {{ conv.unread_count }}
       </div>
     </div>
+    </div>
+    
+    <!-- Floating Action Button for New Chat -->
+    <button class="fab-new-chat" v-ripple @click="emit('new-conversation')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        <line x1="12" y1="9" x2="12" y2="13"></line>
+        <line x1="10" y1="11" x2="14" y2="11"></line>
+      </svg>
+    </button>
   </div>
 </template>
 
 <style scoped>
+.conversation-list-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .conversations-list {
   flex: 1;
   overflow-y: auto;
@@ -268,4 +288,36 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
   opacity: 0.8;
 }
 
+/* FAB */
+.fab-new-chat {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background-color: #3390ec;
+  color: white;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(51, 144, 236, 0.4);
+  cursor: pointer;
+  z-index: 10;
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.fab-new-chat:hover {
+  transform: scale(1.05);
+}
+
+.fab-new-chat:active {
+  transform: scale(0.95);
+}
+
+.fab-new-chat svg {
+  width: 26px;
+  height: 26px;
+}
 </style>
