@@ -28,6 +28,12 @@ async def reset_user_sessions(mobile: str):
             
         print(f"🔧 در حال ریست کردن سشن‌های کاربر: {user.full_name or user.account_name} ({mobile})")
         
+        # Blacklist active sessions and trigger WS logout event exactly as the API does
+        from core.services.session_service import force_clear_sessions
+        cleared_count = await force_clear_sessions(db, user.id)
+        if cleared_count > 0:
+            print(f"✅ تعداد {cleared_count} نشست فعال باطل و به بلک‌لیست اضافه شد.")
+
         # Delete login requests
         stmt_requests = delete(SessionLoginRequest).where(SessionLoginRequest.user_id == user.id)
         await db.execute(stmt_requests)
