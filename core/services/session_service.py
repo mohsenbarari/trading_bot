@@ -213,7 +213,7 @@ async def handle_login_session(
                 "request_id": str(existing.id),
                 "device_name": existing.requester_device_name or device_name,
                 "device_ip": existing.requester_ip or device_ip,
-                "expires_at": existing.expires_at.isoformat(),
+                "expires_at": existing.expires_at.isoformat() + "Z",
             })
         except Exception as e:
             logger.warning(f"Failed to publish login request event (existing): {e}")
@@ -248,7 +248,7 @@ async def handle_login_session(
             "request_id": str(login_request.id),
             "device_name": device_name,
             "device_ip": device_ip,
-            "expires_at": login_request.expires_at.isoformat(),
+            "expires_at": login_request.expires_at.isoformat() + "Z",
         })
     except Exception as e:
         logger.warning(f"Failed to publish login request event: {e}")

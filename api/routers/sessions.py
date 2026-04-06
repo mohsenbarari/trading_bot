@@ -87,6 +87,58 @@ def login_request_to_dict(r: SessionLoginRequest) -> dict:
 
 # --- Endpoints ---
 
+@router.get("/login-requests/pending", response_model=List[dict])
+async def get_pending_requests(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    لیست درخواست‌های ورود در انتظار تایید (فقط دستگاه اصلی)
+    """
+    current_session_id = None
+    try:
+        from jose import jwt as jose_jwt
+        from core.config import settings
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            payload = jose_jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+            current_session_id = payload.get("sid")
+    except Exception:
+        pass
+    
+    if current_session_id:
+        # Check if the current session is primary
+        stmt_sess = select(UserSession).where(
+            and_(
+                UserSession.id == uuid.UUID(current_session_id),
+                UserSession.is_active == True,
+            )
+        )
+        session = (await db.execute(stmt_sess)).scalar_one_or_none()
+        if not session or not session.is_primary:
+            return [] # Empty list for non-primary devices
+
+    stmt = select(SessionLoginRequest).where(
+        and_(
+            SessionLoginRequest.user_id == current_user.id,
+            SessionLoginRequest.status == LoginRequestStatus.PENDING,
+            SessionLoginRequest.expires_at > datetime.utcnow(),
+        )
+    ).order_by(SessionLoginRequest.created_at.desc())
+    requests = (await db.execute(stmt)).scalars().all()
+    
+    res = []
+    for r in requests:
+        res.append({
+            "request_id": str(r.id),
+            "device_name": r.requester_device_name,
+            "device_ip": r.requester_ip,
+            "expires_at": r.expires_at.isoformat() + "Z" if r.expires_at else None,
+        })
+    return res
+
 class VerifySessionRequest(BaseModel):
     refresh_token: str
 
