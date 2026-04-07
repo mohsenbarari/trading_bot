@@ -272,31 +272,28 @@ async def refresh_access_token(
         session = await get_session_by_refresh_token(db, req.refresh_token)
         if not session:
             raise HTTPException(status_code=401, detail="نشست منقضی شده یا نامعتبر است. لطفاً دوباره وارد شوید.")
+            
+        # Revoke if the overall 30-day validity has passed
+        if session.expires_at and session.expires_at < datetime.utcnow():
+            raise HTTPException(status_code=401, detail="SESSION_EXPIRED_REQUIRE_OTP")
         
         # Update last_active_at
         session.last_active_at = datetime.utcnow()
         
-        # Issue new tokens
+        # Issue new token
         access_token_expires = timedelta(minutes=60)
-        refresh_token_expires = timedelta(days=30)
         
         new_access = create_access_token(
             subject=user.id,
             expires_delta=access_token_expires,
             session_id=str(session.id),
         )
-        new_refresh = create_refresh_token(
-            subject=user.id,
-            expires_delta=refresh_token_expires
-        )
         
-        # Update session with new refresh token hash
-        session.refresh_token_hash = hash_token(new_refresh)
         await db.commit()
         
         return {
             "access_token": new_access,
-            "refresh_token": new_refresh,
+            "refresh_token": req.refresh_token, # keep the same refresh token
             "token_type": "bearer"
         }
         

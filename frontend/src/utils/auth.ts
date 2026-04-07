@@ -15,23 +15,34 @@ function parseJwt(token: string) {
     }
 }
 
-export function isAuthenticated(): boolean {
+export async function isAuthenticated(): Promise<boolean> {
     const token = localStorage.getItem('auth_token');
-    if (!token) return false;
+    const refresh = localStorage.getItem('refresh_token');
+    if (!token && !refresh) return false;
 
-    // Check expiry
-    const payload = parseJwt(token);
-    if (!payload || !payload.exp) return false;
-
-    const now = Math.floor(Date.now() / 1000);
-    return payload.exp > now;
+    if (token) {
+        const payload = parseJwt(token);
+        if (payload && payload.exp) {
+            const now = Math.floor(Date.now() / 1000);
+            if (payload.exp > now + 10) {
+                return true; // Still valid
+            }
+        }
+    }
+    
+    // Token expired but we have refresh token - try refreshing
+    if (refresh) {
+        const refreshed = await tryRefreshToken();
+        return !!refreshed;
+    }
+    return false;
 }
 
 export function isAdmin(): boolean {
     return true;
 }
 
-export function authGuard(
+export async function authGuard(
     to: RouteLocationNormalized,
     from: RouteLocationNormalized,
     next: NavigationGuardNext
@@ -39,13 +50,16 @@ export function authGuard(
     // Cast meta to any to avoid editor-specific TS errors if global augmentation is slow to pick up
     const meta = to.meta as any;
 
-    if (meta.requiresAuth && !isAuthenticated()) {
-        next('/login');
-    } else if (meta.requiresAdmin && !isAdmin()) {
-        next('/dashboard');
-    } else {
-        next();
+    if (meta.requiresAuth) {
+        const isAuth = await isAuthenticated();
+        if (!isAuth) {
+            return next('/login');
+        }
+    } 
+    if (meta.requiresAdmin && !isAdmin()) {
+        return next('/dashboard');
     }
+    next();
 }
 
 export function setupExpiryTimer() {
@@ -55,8 +69,8 @@ export function setupExpiryTimer() {
             const payload = parseJwt(token);
             if (payload && payload.exp) {
                 const now = Math.floor(Date.now() / 1000);
-                if (now >= payload.exp) {
-                    // Token expired — try to refresh before logging out
+                // Attempt refresh 60 seconds before it actually expires
+                if (now >= payload.exp - 60) {
                     const refreshed = await tryRefreshToken();
                     if (!refreshed) {
                         suspendSession();
