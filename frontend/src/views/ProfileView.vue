@@ -32,7 +32,15 @@ async function fetchUser() {
   }
 }
 
-function logout() {
+async function logout() {
+  const currentSession = sessions.value.find(s => s.is_current)
+  if (currentSession) {
+    try {
+      await apiFetch(`/api/sessions/${currentSession.id}`, { method: 'DELETE' })
+    } catch (e) {
+      console.error(e)
+    }
+  }
   forceLogout()
 }
 
@@ -64,7 +72,7 @@ async function terminateSession(sessionId: string) {
 async function logoutAll() {
   try {
     await apiFetch('/api/sessions/logout-all', { method: 'POST' })
-    forceLogout()
+    fetchSessions()
   } catch (e) {
     console.error(e)
   }
@@ -168,7 +176,7 @@ onMounted(() => {
               </div>
             </div>
             <button
-              v-if="!session.is_primary && !session.is_current"
+              v-if="!session.is_current && !session.is_primary && sessions.some(s => s.is_current && s.is_primary)"
               @click="terminateSession(session.id)"
               class="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
               title="پایان نشست"
@@ -178,7 +186,7 @@ onMounted(() => {
           </div>
           
           <button
-            v-if="sessions.length > 1"
+            v-if="sessions.length > 1 && sessions.some(s => s.is_current && s.is_primary)"
             @click="logoutAll"
             class="w-full mt-3 py-2.5 text-sm text-red-500 font-bold border border-red-200 rounded-xl hover:bg-red-50 transition-colors"
           >

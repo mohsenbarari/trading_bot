@@ -5,13 +5,13 @@ from typing import List, Optional
 
 from core.db import get_db
 from models.user import User
-from api.deps import get_current_active_user
+from api.deps import get_current_user
 
 import schemas
 
 router = APIRouter(
     tags=["Public Users"],
-    dependencies=[Depends(get_current_active_user)]
+    dependencies=[Depends(get_current_user)]
 )
 
 @router.get("/search", response_model=List[schemas.UserPublicRead])
@@ -19,7 +19,7 @@ async def search_public_users(
     q: Optional[str] = Query(None, min_length=1),
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """جستجوی عمومی بین کاربران سیستم بر اساس نام، نام کاربری یا شماره فیلتر شده"""
     query = select(User).where(User.is_deleted == False, User.id != current_user.id)
