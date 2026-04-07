@@ -274,11 +274,12 @@ async def refresh_access_token(
             raise HTTPException(status_code=401, detail="نشست منقضی شده یا نامعتبر است. لطفاً دوباره وارد شوید.")
             
         # Revoke if the overall 30-day validity has passed
-        if session.expires_at and session.expires_at < datetime.utcnow():
+        from core.utils import now_utc
+        if session.expires_at and session.expires_at < now_utc():
             raise HTTPException(status_code=401, detail="SESSION_EXPIRED_REQUIRE_OTP")
         
         # Update last_active_at
-        session.last_active_at = datetime.utcnow()
+        session.last_active_at = now_utc()
         
         # Issue new token
         access_token_expires = timedelta(minutes=60)
