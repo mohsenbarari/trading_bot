@@ -376,14 +376,21 @@ async def logout_session(
     return new_primary
 
 async def force_clear_sessions(
-    db: AsyncSession, user_id: int
+    db: AsyncSession, user_id: int, exclude_session_id: Optional[uuid.UUID] = None
 ) -> int:
     """Force-clear all active sessions for a user. Returns count of cleared sessions."""
     sessions = await get_active_sessions(db, user_id)
     count = 0
+    cleared_sessions = []
+    
     for s in sessions:
+        if exclude_session_id and s.id == exclude_session_id:
+            continue
+            
         s.is_active = False
         count += 1
+        cleared_sessions.append(s)
+        
     await db.commit()
     
     try:
@@ -392,11 +399,11 @@ async def force_clear_sessions(
     except Exception as e:
         logger.warning(f"Failed to publish session:revoked event: {e}")
         
-    # Blacklist all session IDs
+    # Blacklist actual cleared session IDs
     try:
         from bot.utils.redis_helpers import get_redis
         r = await get_redis()
-        for s in sessions:
+        for s in cleared_sessions:
             await r.setex(f"session_blacklist:{s.id}", SESSION_BLACKLIST_TTL, "1")
     except Exception as e:
         logger.warning(f"Failed to blacklist sessions: {e}")

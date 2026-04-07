@@ -157,6 +157,7 @@ function handleResend() {
 
 
 async function verifyOtp() {
+  if (loading.value) return
   if (!form.code || form.code.length < 4) {
     error.value = 'کد احراز هویت نامعتبر است'
     return
@@ -195,6 +196,9 @@ async function verifyOtp() {
     
     // راه‌اندازی تایمر انقضای توکن
     setupExpiryTimer()
+    
+    // پاک کردن هیستوری دستی مربوط به مدال لاگین برای جلوگیری از برگشت به مرحله موبایل
+    clearBackStack()
     
     router.push('/')
   } catch (e: any) {

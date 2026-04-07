@@ -188,14 +188,27 @@ async def list_active_sessions(
 @router.delete("/{session_id}")
 async def terminate_session(
     session_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     پایان دادن به یک نشست.
-    - کاربر عادی: فقط نشست‌‌های خودش 
-    - نشست primary را نمی‌توان حذف کرد مگر آخرین نشست باشد
+    - دستگاه غیراصلی: فقط نشست خودش
+    - نشست اصلی: می‌تواند هر نشستی را پایان دهد اما خودش را اگر نشست‌های دیگر باشند نمی‌تواند پایان دهد
     """
+    current_session_id_str = None
+    try:
+        from jose import jwt as jose_jwt
+        from core.config import settings
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            payload = jose_jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+            current_session_id_str = payload.get("sid")
+    except Exception:
+        pass
+
     try:
         sid = uuid.UUID(session_id)
     except ValueError:
@@ -207,6 +220,19 @@ async def terminate_session(
     session = (await db.execute(stmt)).scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="نشست یافت نشد")
+
+    # Access control: If terminating another session, caller must be primary
+    is_trying_to_delete_other = current_session_id_str is None or str(sid) != current_session_id_str
+    if is_trying_to_delete_other:
+        if not current_session_id_str:
+            raise HTTPException(status_code=403, detail="شناسه نشست شما مشخص نیست")
+        caller_stmt = select(UserSession).where(UserSession.id == uuid.UUID(current_session_id_str))
+        caller_session = (await db.execute(caller_stmt)).scalar_one_or_none()
+        if not caller_session or not caller_session.is_primary:
+            raise HTTPException(
+                status_code=403, 
+                detail="شما دسترسی برای حذف نشست دستگاه‌های دیگر را ندارید"
+            )
 
     # Don't allow terminating primary if other sessions exist
     if session.is_primary:
@@ -223,11 +249,37 @@ async def terminate_session(
 
 @router.post("/logout-all")
 async def logout_all_sessions(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """پایان دادن به همه نشست‌ها"""
-    count = await force_clear_sessions(db, current_user.id)
+    """خروج از تمام نشست‌ها به جز نشست جاری دستگاه (فقط برای دستگاه اصلی)"""
+    current_session_id_str = None
+    try:
+        from jose import jwt as jose_jwt
+        from core.config import settings
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            payload = jose_jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+            current_session_id_str = payload.get("sid")
+    except Exception:
+        pass
+
+    if not current_session_id_str:
+        raise HTTPException(status_code=403, detail="شناسه نشست شما مشخص نیست")
+
+    caller_sid = uuid.UUID(current_session_id_str)
+    caller_stmt = select(UserSession).where(UserSession.id == caller_sid)
+    caller_session = (await db.execute(caller_stmt)).scalar_one_or_none()
+    
+    if not caller_session or not caller_session.is_primary:
+        raise HTTPException(
+            status_code=403, 
+            detail="شما اجازه خروج از سایر نشست‌ها را ندارید. (فقط دستگاه اصلی مجاز است)"
+        )
+
+    count = await force_clear_sessions(db, current_user.id, exclude_session_id=caller_sid)
     return {"detail": f"{count} نشست پایان یافت"}
 
 

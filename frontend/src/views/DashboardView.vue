@@ -50,7 +50,17 @@ async function fetchUser() {
   }
 }
 
-function logout() {
+async function logout() {
+  try {
+    const res = await apiFetch('/api/sessions/active')
+    const activeSessions = await res.json()
+    const currentSession = activeSessions.find((s: any) => s.is_current)
+    if (currentSession) {
+      await apiFetch(`/api/sessions/${currentSession.id}`, { method: 'DELETE' })
+    }
+  } catch (e) {
+    console.error(e)
+  }
   forceLogout()
 }
 
