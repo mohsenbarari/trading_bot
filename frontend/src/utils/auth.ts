@@ -15,6 +15,55 @@ function parseJwt(token: string) {
     }
 }
 
+export type RefreshResult = 'success' | 'network_error' | 'auth_error';
+
+let isRefreshing = false;
+let refreshPromise: Promise<RefreshResult> | null = null;
+
+export async function tryRefreshToken(): Promise<RefreshResult> {
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) return 'auth_error';
+    
+    if (isRefreshing && refreshPromise) {
+        return refreshPromise;
+    }
+    
+    isRefreshing = true;
+    refreshPromise = (async (): Promise<RefreshResult> => {
+        try {
+            const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+            const res = await fetch(`${baseUrl}/api/auth/refresh`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: refreshToken }),
+            });
+            
+            if (res.ok) {
+                const data = await res.json();
+                localStorage.setItem('auth_token', data.access_token);
+                localStorage.setItem('refresh_token', data.refresh_token);
+                return 'success';
+            }
+            
+            // Explicit rejection from the server
+            if (res.status === 401 || res.status === 403 || res.status === 404) {
+                return 'auth_error';
+            }
+            
+            // 5xx Server Error or 429 Rate Limit (treat as temporary network issue)
+            return 'network_error';
+        } catch {
+            // Failed to connect to the server (offline, connection drop)
+            return 'network_error';
+        } finally {
+            isRefreshing = false;
+            refreshPromise = null;
+        }
+    })();
+    
+    return refreshPromise;
+}
+
 export async function isAuthenticated(): Promise<boolean> {
     const token = localStorage.getItem('auth_token');
     const refresh = localStorage.getItem('refresh_token');
@@ -32,8 +81,14 @@ export async function isAuthenticated(): Promise<boolean> {
     
     // Token expired but we have refresh token - try refreshing
     if (refresh) {
-        const refreshed = await tryRefreshToken();
-        return !!refreshed;
+        const result = await tryRefreshToken();
+        if (result === 'success') return true;
+        
+        // Prevent booting offline users to the login screen
+        if (result === 'network_error') return true;
+        
+        // Only boot to login if the backend explicitly rejected the token
+        return false;
     }
     return false;
 }
@@ -71,10 +126,12 @@ export function setupExpiryTimer() {
                 const now = Math.floor(Date.now() / 1000);
                 // Attempt refresh 60 seconds before it actually expires
                 if (now >= payload.exp - 60) {
-                    const refreshed = await tryRefreshToken();
-                    if (!refreshed) {
+                    const result = await tryRefreshToken();
+                    if (result === 'auth_error') {
+                        // The server explicitly invalidated the refresh token
                         suspendSession();
                     }
+                    // For 'network_error', we do nothing and let the fetch retry automatically on the next interval
                 }
             }
         }
@@ -100,44 +157,6 @@ export function forceLogout() {
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('suspended_refresh_token');
     window.location.href = '/login';
-}
-
-let isRefreshing = false;
-let refreshPromise: Promise<boolean> | null = null;
-
-async function tryRefreshToken(): Promise<boolean> {
-    const refreshToken = localStorage.getItem('refresh_token');
-    if (!refreshToken) return false;
-    
-    if (isRefreshing && refreshPromise) {
-        return refreshPromise;
-    }
-    
-    isRefreshing = true;
-    refreshPromise = (async () => {
-        try {
-            const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
-            const res = await fetch(`${baseUrl}/api/auth/refresh`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ refresh_token: refreshToken }),
-            });
-            
-            if (!res.ok) return false;
-            
-            const data = await res.json();
-            localStorage.setItem('auth_token', data.access_token);
-            localStorage.setItem('refresh_token', data.refresh_token);
-            return true;
-        } catch {
-            return false;
-        } finally {
-            isRefreshing = false;
-            refreshPromise = null;
-        }
-    })();
-    
-    return refreshPromise;
 }
 
 export async function apiFetch(url: string, options: RequestInit = {}) {
@@ -180,22 +199,32 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
 
     if (response.status === 401) {
         // Try refresh before logging out
-        const refreshed = await tryRefreshToken();
-        if (refreshed) {
+        const result = await tryRefreshToken();
+        
+        if (result === 'success') {
             // Retry original request with new token
             const newToken = localStorage.getItem('auth_token');
             if (newToken) {
                 headers['Authorization'] = `Bearer ${newToken}`;
             }
             const retryResponse = await fetch(fullUrl, { ...config, headers });
+            
+            // If the retry also fails with 401, the user is fundamentally unauthorized
             if (retryResponse.status === 401) {
                 forceLogout();
                 throw new Error('Unauthorized');
             }
             return retryResponse;
         }
-        suspendSession();
-        throw new Error('Unauthorized');
+        
+        // If specifically failed auth, boot to OTP screen
+        if (result === 'auth_error') {
+            suspendSession();
+            throw new Error('نشست شما منقضی شده است. لطفا مجددا وارد شوید');
+        }
+        
+        // Treat as network error or rate limit, so we don't destroy local session
+        throw new Error('خطا در ارتباط با سرور.');
     }
 
     return response;
