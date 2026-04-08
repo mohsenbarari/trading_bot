@@ -29,7 +29,9 @@ import schemas
 
 
 from core.services.session_service import handle_login_session, get_session_by_refresh_token, hash_token, get_active_sessions
-from models.session import Platform
+from models.session import Platform, UserSession
+import uuid
+from core.utils import utc_now
 
 
 router = APIRouter()
@@ -274,12 +276,12 @@ async def refresh_access_token(
             raise HTTPException(status_code=401, detail="نشست منقضی شده یا نامعتبر است. لطفاً دوباره وارد شوید.")
             
         # Revoke if the overall 30-day validity has passed
-        from core.utils import now_utc
-        if session.expires_at and session.expires_at < now_utc():
+        from core.utils import utc_now
+        if session.expires_at and session.expires_at < utc_now():
             raise HTTPException(status_code=401, detail="SESSION_EXPIRED_REQUIRE_OTP")
         
         # Update last_active_at
-        session.last_active_at = now_utc()
+        session.last_active_at = utc_now()
         
         # Issue new token
         access_token_expires = timedelta(minutes=60)
@@ -301,7 +303,72 @@ async def refresh_access_token(
     except JWTError:
         raise HTTPException(status_code=401, detail="توکن منقضی یا نامعتبر است")
 
+
+@router.post("/dev-login")
+async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
+    """ورود ویژه‌ی توسعه‌دهنده (بدون نیاز به کد، محدودیت سشن و ... مقدور از روی رزولوشن محلی)"""
+    client_ip = raw_request.client.host if raw_request.client else ""
+    forwarded = raw_request.headers.get("x-forwarded-for", "")
+    real_ip = forwarded.split(",")[0].strip() if forwarded else client_ip
+    
+    is_local = real_ip in ("127.0.0.1", "::1", "localhost")
+    if not is_local:
+        if real_ip.startswith("172.") or real_ip.startswith("192.168.") or real_ip.startswith("10."):
+            is_local = True
+            
+    dev_key = raw_request.headers.get("X-DEV-API-KEY")
+    if not is_local and (not dev_key or dev_key != settings.dev_api_key):
+        raise HTTPException(status_code=403, detail="دسترسی فقط از محیط برنامه‌نویسی یا با کلید امکان‌پذیر است")
+        
+    dev_mobile = "09999999999"
+    stmt = select(User).where(User.mobile_number == dev_mobile)
+    user = (await db.execute(stmt)).scalar_one_or_none()
+    
+    if not user:
+        user = User(
+            account_name="dev_" + str(int(time.time())),
+            mobile_number=dev_mobile,
+            full_name="کاربر توسعه‌دهنده (تست)",
+            role=UserRole.SUPER_ADMIN,
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        
+    refresh_token = create_refresh_token(subject=user.id)
+    device_info = _extract_device_info(raw_request)
+    
+    session = UserSession(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        device_name="Dev Bypass Terminal",
+        device_ip=real_ip,
+        platform=device_info["platform"],
+        refresh_token_hash=hash_token(refresh_token),
+        is_primary=False,
+        is_active=True,
+        expires_at=utc_now() + timedelta(days=365)
+    )
+    db.add(session)
+    await db.commit()
+    
+    access_token_expires = timedelta(minutes=60)
+    access_token = create_access_token(
+        subject=user.id,
+        expires_delta=access_token_expires,
+        session_id=str(session.id),
+    )
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user_id": user.id,
+        "role": user.role
+    }
+
 @router.post("/request-otp", response_model=dict)
+
 async def request_otp(
     request: OTPRequest,
     db: AsyncSession = Depends(get_db)
