@@ -20,7 +20,7 @@ const isLoading = ref(false)
 const searchUsers = async (query: string = '') => {
   isLoading.value = true
   try {
-    const url = new URL('/api/v1/users/public/search', window.location.origin)
+    const url = new URL('/api/users-public/search', window.location.origin)
     if (query) {
       url.searchParams.append('q', query)
     }
