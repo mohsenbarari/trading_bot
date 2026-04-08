@@ -277,6 +277,39 @@ function installPWA() {
   }
 }
 
+const isDevMode = window.location.hostname === 'localhost' || 
+                    window.location.hostname === '127.0.0.1' || 
+                    window.location.hostname.startsWith('192.168.') || 
+                    window.location.hostname.startsWith('172.') || 
+                    window.location.hostname.startsWith('10.');
+
+async function startDevLogin() {
+  if (loading.value) return
+  loading.value = true
+  error.value = ''
+  try {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+    const res = await fetch(`${baseUrl}/api/auth/dev-login`, { method: 'POST' })
+    if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.detail || 'دسترسی مجاز نیست')
+    }
+    const data = await res.json()
+    localStorage.setItem('auth_token', data.access_token)
+    localStorage.setItem('refresh_token', data.refresh_token)
+    localStorage.removeItem('suspended_refresh_token')
+    
+    // پاک کردن تاریخچه برای جلوگیری از برگشت به صفحه لاگین
+    clearBackStack()
+    
+    router.push('/')
+  } catch (e: any) {
+    error.value = e.message
+  } finally {
+    loading.value = false
+  }
+}
+
 onMounted(() => {
   if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true) {
     isStandalone.value = true
@@ -524,8 +557,15 @@ function goBackToMobile() {
       </div>
       
       <!-- Footer Info -->
-      <div class="text-center mt-8 text-xs text-gray-400 font-medium opacity-60">
-        نسخه ۲.۴.۰ • طراحی شده برای معامله‌گران
+      <div class="text-center mt-8 text-xs text-gray-400 font-medium opacity-60 flex flex-col gap-2 relative z-50">
+        <div>نسخه ۲.۴.۰ • طراحی شده برای معامله‌گران</div>
+        
+        <button 
+          v-if="isDevMode" 
+          @click="startDevLogin" 
+          class="inline-block mt-2 px-3 py-1 bg-amber-100 text-amber-800 rounded-md hover:bg-amber-200 transition-colors mx-auto w-max font-bold border border-amber-300">
+             ورود سریع ۱ ساله (توسعه‌دهنده)
+        </button>
       </div>
       
     </div>
