@@ -329,6 +329,7 @@ async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
             account_name="dev_" + str(int(time.time())),
             mobile_number=dev_mobile,
             full_name="کاربر توسعه‌دهنده (تست)",
+            address="توسعه‌دهنده",
             role=UserRole.SUPER_ADMIN,
         )
         db.add(user)
