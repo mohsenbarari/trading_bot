@@ -1615,11 +1615,10 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 }
 
 /* Fix layout for absolute header */
-.conversations-list, .loading-state, .error-state {
+.conversation-list-wrapper, .loading-state, .error-state {
   flex: 1;
   padding-top: 60px; /* Space for absolute header */
   width: 100%;
-  overflow-y: auto;
 }
 
 .loading-state, .error-state {
