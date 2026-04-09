@@ -3,10 +3,12 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Home, Store, User, MessageCircle, Shield, Menu, X } from 'lucide-vue-next'
 import { apiFetch } from '../utils/auth'
+import { useNotificationStore } from '../stores/notifications'
 
 const route = useRoute()
 const userRole = ref<string>('')
 const isExpanded = ref(false)
+const notificationStore = useNotificationStore()
 
 // Auto-collapse on the market page
 const isMarketPage = computed(() => route.name === 'market')
@@ -66,6 +68,11 @@ function toggleNav() {
         <router-link v-else :to="item.path" class="nav-item" :class="{ active: route.name === item.name }">
           <div class="nav-icon-wrap" :class="{ 'icon-active': route.name === item.name }">
             <component :is="item.icon" :size="22" :stroke-width="route.name === item.name ? 2.5 : 1.8" />
+            
+            <!-- Unread Badge for Messenger -->
+            <div v-if="item.name === 'messenger' && notificationStore.chatUnreadCount > 0" class="nav-unread-badge">
+              {{ notificationStore.chatUnreadCount > 99 ? '99+' : notificationStore.chatUnreadCount }}
+            </div>
           </div>
           <span class="nav-label">{{ item.label }}</span>
         </router-link>
@@ -89,7 +96,13 @@ function toggleNav() {
             <span>{{ item.label }}</span>
           </div>
           <router-link v-else :to="item.path" class="fab-item" :class="{ active: route.name === item.name }" @click="isExpanded = false">
-            <component :is="item.icon" :size="20" />
+            <div class="relative">
+              <component :is="item.icon" :size="20" />
+              <!-- Unread Badge for FAB menu -->
+              <div v-if="item.name === 'messenger' && notificationStore.chatUnreadCount > 0" class="fab-unread-badge">
+                 {{ notificationStore.chatUnreadCount > 9 ? '9+' : notificationStore.chatUnreadCount }}
+              </div>
+            </div>
             <span>{{ item.label }}</span>
           </router-link>
         </template>
@@ -184,6 +197,50 @@ function toggleNav() {
   height: 6px;
   border-radius: 50%;
   background: #3b82f6;
+}
+
+/* ═══ Unread Badges ═══ */
+.nav-unread-badge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  background: #ef4444; /* Tailwind red-500 */
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border: 1.5px solid white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  z-index: 10;
+}
+
+.fab-unread-badge {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  background: #ef4444;
+  color: white;
+  font-size: 0.6rem;
+  font-weight: 700;
+  min-width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  border: 1px solid white;
+  z-index: 10;
+}
+
+.relative {
+  position: relative;
 }
 
 /* ═══════════════════════════════

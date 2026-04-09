@@ -1,6 +1,7 @@
 import { ref, type Ref, nextTick } from 'vue'
 import { apiFetchJson } from '../../utils/auth'
 import type { Conversation, Message, StickerPack } from '../../types/chat'
+import { useNotificationStore } from '../../stores/notifications'
 
 export interface UseChatMessagesOptions {
     apiBaseUrl: string
@@ -58,6 +59,8 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         forceScrollToBottom,
         adjustTextareaHeight
     } = options
+
+    const notificationStore = useNotificationStore()
 
     let pollTimer: number | null = null
     const POLL_INTERVAL = 30000
@@ -170,7 +173,11 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         try {
             await apiFetch(`/chat/read/${selectedUserId.value}`, { method: 'POST' })
             const conv = conversations.value.find(c => c.other_user_id === selectedUserId.value)
-            if (conv) conv.unread_count = 0
+            if (conv) {
+                conv.unread_count = 0
+                // Refresh global total unread count
+                notificationStore.fetchInitialCounts()
+            }
         } catch (e) {
             console.error('Failed to mark as read', e)
         }
