@@ -562,6 +562,12 @@ async function saveMaxSessions() {
   }
 }
 
+function handleAdminSessionClick() {
+  if (props.user.role === 'مدیر ارشد' || props.user.role === 'مدیر میانی') {
+    alert('به دلایل امنیتی، تعداد نشست‌های مجاز برای مدیران سایت نمی‌تواند بیش از ۱ باشد.');
+  }
+}
+
 async function deleteUser() {
   if (!confirm('آیا از حذف این کاربر اطمینان دارید؟')) return;
   if (!props.jwtToken) return;
@@ -644,15 +650,12 @@ async function deleteUser() {
       <div v-if="isAdminView" class="sessions-config-box">
         <div class="detail-item">
           <span class="label">حداکثر نشست همزمان</span>
-          <div class="inline-edit">
-            <select v-model.number="editMaxSessions" class="form-select-sm" @change="saveMaxSessions" :disabled="user.role === 'SUPER_ADMIN' || user.role === 'MIDDLE_MANAGER'">
+          <div class="inline-edit" @click="handleAdminSessionClick">
+            <select v-model.number="editMaxSessions" class="form-select-sm" @change="saveMaxSessions" :disabled="user.role === 'مدیر ارشد' || user.role === 'مدیر میانی'" :style="{ pointerEvents: (user.role === 'مدیر ارشد' || user.role === 'مدیر میانی') ? 'none' : 'auto' }">
               <option :value="1">۱</option>
               <option :value="2">۲</option>
               <option :value="3">۳</option>
             </select>
-            <span v-if="user.role === 'SUPER_ADMIN' || user.role === 'MIDDLE_MANAGER'" class="admin-lock-note">
-              (برای ادمین محدود به ۱ است)
-            </span>
           </div>
         </div>
       </div>

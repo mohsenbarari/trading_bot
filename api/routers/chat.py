@@ -68,6 +68,9 @@ class MessageRead(BaseModel):
     forwarded_from_id: Optional[int] = None
     forwarded_from_name: Optional[str] = None
     
+    # Sender info
+    sender_name: Optional[str] = None
+    
     # Reply support
     reply_to_message: Optional[MessageReplyRead] = None
 
@@ -88,7 +91,8 @@ class MessageRead(BaseModel):
             "created_at": obj.created_at,
             "reply_to_message": obj.reply_to_message,
             "forwarded_from_id": obj.forwarded_from_id,
-            "forwarded_from_name": obj.forwarded_from.account_name if getattr(obj, "forwarded_from", None) else None
+            "forwarded_from_name": obj.forwarded_from.account_name if getattr(obj, "forwarded_from", None) else None,
+            "sender_name": obj.sender.account_name if getattr(obj, "sender", None) else None
         }
         return cls(**data)
 
@@ -262,8 +266,8 @@ async def search_messages(
         
     query = query.limit(limit)
     
-    # Needs joinedload for forwarding
-    query = query.options(joinedload(Message.forwarded_from), joinedload(Message.reply_to_message))
+    # Needs joinedload for forwarding and sender
+    query = query.options(joinedload(Message.forwarded_from), joinedload(Message.reply_to_message), joinedload(Message.sender))
     
     result = await db.execute(query)
     messages = result.scalars().all()
@@ -316,8 +320,8 @@ async def get_messages(
         )
         
         # Execute
-        res_older = await db.execute(stmt_older.options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from)))
-        res_newer = await db.execute(stmt_newer.options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from)))
+        res_older = await db.execute(stmt_older.options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from), joinedload(Message.sender)))
+        res_newer = await db.execute(stmt_newer.options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from), joinedload(Message.sender)))
         
         older_msgs = res_older.scalars().all() # Descending [M-1, M-2...]
         newer_msgs = res_newer.scalars().all() # Ascending [M, M+1...]
@@ -333,7 +337,7 @@ async def get_messages(
     
     stmt = (
         select(Message)
-        .options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from))
+        .options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from), joinedload(Message.sender))
         .where(*conditions)
         .order_by(Message.created_at.desc())
         .limit(limit)
@@ -419,7 +423,10 @@ async def send_message(
     
     # انتشار پیام برای گیرنده (Real-time update)
     # استفاده از MessageRead برای سریالایز کردن مناسب
-    msg_data = jsonable_encoder(MessageRead.from_orm_with_forwarding(message))
+    msg_orm = MessageRead.from_orm_with_forwarding(message)
+    msg_data = jsonable_encoder(msg_orm)
+    # Inject sender_name manually since current_user is the sender
+    msg_data["sender_name"] = current_user.account_name
     await publish_user_event(data.receiver_id, "chat:message", msg_data)
     
     return MessageRead.from_orm_with_forwarding(message)
