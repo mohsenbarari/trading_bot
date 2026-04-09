@@ -15,7 +15,8 @@ export const useNotificationStore = defineStore('notifications', () => {
             const response = await apiFetch('/api/chat/poll')
             if (response.ok) {
                 const data = await response.json()
-                chatUnreadCount.value = data.total_unread || 0
+                // Change: show unread CHATS instead of total messages
+                chatUnreadCount.value = data.unread_chats_count || 0
             }
         } catch (error) {
             console.error('Failed to fetch initial notification counts:', error)
@@ -27,7 +28,8 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
 
     const incrementChatUnread = () => {
-        chatUnreadCount.value++
+        // Instead of blind increment, re-fetch from server to be accurate on chat counts
+        fetchInitialCounts()
     }
 
     const addAppNotification = (notification: any) => {

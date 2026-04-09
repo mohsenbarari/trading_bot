@@ -134,6 +134,7 @@ class ConversationRead(BaseModel):
 class PollResponse(BaseModel):
     """پاسخ پولینگ"""
     total_unread: int
+    unread_chats_count: int
     conversations_with_unread: List[dict]
 
 
@@ -575,6 +576,7 @@ async def poll_messages(
     result = await db.execute(conv_stmt)
     convs = result.unique().scalars().all()
     
+    unread_chats_count = len(convs)
     conversations_with_unread = []
     for conv in convs:
         if conv.user1_id == current_user.id:
@@ -593,6 +595,7 @@ async def poll_messages(
     
     return PollResponse(
         total_unread=total_unread,
+        unread_chats_count=unread_chats_count,
         conversations_with_unread=conversations_with_unread
     )
 
