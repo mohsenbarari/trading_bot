@@ -5,6 +5,7 @@ import { apiFetch } from '../utils/auth'
 export const useNotificationStore = defineStore('notifications', () => {
     const chatUnreadCount = ref(0)
     const appNotifications = ref<any[]>([])
+    const activeToasts = ref<any[]>([])
 
     const fetchInitialCounts = async () => {
         const token = localStorage.getItem('auth_token')
@@ -40,12 +41,28 @@ export const useNotificationStore = defineStore('notifications', () => {
         }
     }
 
+    const addToast = (title: string, body: string) => {
+        const id = Date.now() + Math.random()
+        activeToasts.value.push({ id, title, body })
+        // Auto remove after 5 seconds
+        setTimeout(() => {
+            removeToast(id)
+        }, 5000)
+    }
+
+    const removeToast = (id: number) => {
+        activeToasts.value = activeToasts.value.filter(t => t.id !== id)
+    }
+
     return {
         chatUnreadCount,
         appNotifications,
+        activeToasts,
         fetchInitialCounts,
         setChatUnreadCount,
         incrementChatUnread,
-        addAppNotification
+        addAppNotification,
+        addToast,
+        removeToast
     }
 })

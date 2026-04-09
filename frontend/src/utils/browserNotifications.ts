@@ -19,8 +19,8 @@ export const requestNotificationPermission = async (): Promise<boolean> => {
     return false;
 };
 
-export const showBrowserNotification = (title: string, body: string, options: NotificationOptions = {}) => {
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+export const showBrowserNotification = (title: string, body: string, options: NotificationOptions = {}): boolean => {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return false;
 
     // Truncate body to 300 characters as requested by user
     const truncatedBody = body.length > 300 ? body.substring(0, 297) + '...' : body;
@@ -37,7 +37,10 @@ export const showBrowserNotification = (title: string, body: string, options: No
             notification.close();
             // Custom click handlers can be added if needed
         };
+        
+        return true;
     } catch (err) {
         console.error('Failed to show notification:', err);
+        return false;
     }
 };
