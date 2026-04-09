@@ -645,11 +645,14 @@ async function deleteUser() {
         <div class="detail-item">
           <span class="label">حداکثر نشست همزمان</span>
           <div class="inline-edit">
-            <select v-model.number="editMaxSessions" class="form-select-sm" @change="saveMaxSessions">
+            <select v-model.number="editMaxSessions" class="form-select-sm" @change="saveMaxSessions" :disabled="user.role === 'SUPER_ADMIN' || user.role === 'MIDDLE_MANAGER'">
               <option :value="1">۱</option>
               <option :value="2">۲</option>
               <option :value="3">۳</option>
             </select>
+            <span v-if="user.role === 'SUPER_ADMIN' || user.role === 'MIDDLE_MANAGER'" class="admin-lock-note">
+              (برای ادمین محدود به ۱ است)
+            </span>
           </div>
         </div>
       </div>
@@ -1442,5 +1445,11 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   border: 1px solid #d1d5db;
   font-size: 0.8rem;
   background: white;
+}
+</style><style scoped>
+.admin-lock-note {
+  font-size: 0.75rem;
+  color: #8f9296;
+  margin-right: 0.5rem;
 }
 </style>

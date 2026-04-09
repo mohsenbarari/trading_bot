@@ -35,34 +35,44 @@ onMounted(() => {
     connect()
     ensureSessionValidation()
     notificationStore.fetchInitialCounts()
-    requestNotificationPermission()
   }
   
   on('session:revoked', ensureSessionValidation)
 
+  // --- Notification Permission Helper (Triggered by user interaction) ---
+  const handleFirstInteraction = () => {
+    requestNotificationPermission()
+    window.removeEventListener('click', handleFirstInteraction)
+    window.removeEventListener('touchstart', handleFirstInteraction)
+  }
+  window.addEventListener('click', handleFirstInteraction)
+  window.addEventListener('touchstart', handleFirstInteraction)
+
   // --- Global Notification Listeners ---
   
-  // 1. General App Notifications
+  // 1. General App Notifications (Trade, Admin, etc.)
   on('message', (payload: any) => {
     notificationStore.addAppNotification(payload)
     
-    // Show browser notification if tab is hidden or user requested it
-    if (document.hidden) {
+    // As per user request: Always show notification unless perhaps specifically on notifications page
+    const isNotificationPage = route.path === '/notifications'
+    if (!isNotificationPage) {
         showBrowserNotification(payload.title || 'اعلان جدید', payload.content || '')
     }
   })
 
   // 2. Chat Messages
   on('chat:message', (payload: any) => {
-    // Increment unread count globally
+    // Re-fetch chat unread count to keep badge accurate
     notificationStore.incrementChatUnread()
     
-    // Show browser notification ONLY if we are NOT on the chat page or tab is hidden
+    // Notification logic
     const isChatOpen = route.path.startsWith('/chat')
-    // We could be even more specific and check if we are chat with THAT user, 
-    // but a global check is safer for now.
+    // Check if the current conversation is NOT with the sender of arriving message
+    // We get sender_id from payload
+    const isLookingAtOtherChat = route.params.id && Number(route.params.id) !== Number(payload.sender_id)
     
-    if (document.hidden || !isChatOpen) {
+    if (document.hidden || !isChatOpen || isLookingAtOtherChat) {
         const sender = payload.sender_name || 'پیام جدید'
         showBrowserNotification(sender, payload.content || 'تصویر یا فایل')
     }
