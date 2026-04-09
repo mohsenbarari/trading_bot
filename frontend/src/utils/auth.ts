@@ -1,4 +1,8 @@
+import { ref } from 'vue';
 import type { RouteLocationNormalized, NavigationGuardNext } from 'vue-router';
+
+export const isAppConnecting = ref(false);
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Helper to decode JWT payload (without validation)
 function parseJwt(token: string) {
@@ -160,74 +164,96 @@ export function forceLogout() {
 }
 
 export async function apiFetch(url: string, options: RequestInit = {}) {
-    const token = localStorage.getItem('auth_token');
+    let retries = 0;
+    let didRefresh = false;
 
-    const headers = {
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-    } as any;
+    while (true) {
+        const token = localStorage.getItem('auth_token');
 
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-    }
+        const headers = {
+            'Content-Type': 'application/json',
+            ...(options.headers || {}),
+        } as any;
 
-    const config = {
-        ...options,
-        headers
-    };
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
 
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
-    const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
+        const config = {
+            ...options,
+            headers
+        };
 
-    const response = await fetch(fullUrl, config);
+        const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+        const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
 
-    // 🔴 403 Forbidden with specific detail
-    if (response.status === 403) {
-        const clone = response.clone();
         try {
-            const errorData = await clone.json();
-            if (errorData?.detail === 'REQUIRES_PASSWORD_CHANGE') {
-                if (window.location.pathname !== '/setup-password') {
-                    window.location.href = '/setup-password';
-                }
-                throw new Error('شما باید رمز عبور خود را تغییر دهید');
-            }
-        } catch (e) {
-            // Ignore parsing errors for other 403s
-        }
-    }
-
-    if (response.status === 401) {
-        // Try refresh before logging out
-        const result = await tryRefreshToken();
-        
-        if (result === 'success') {
-            // Retry original request with new token
-            const newToken = localStorage.getItem('auth_token');
-            if (newToken) {
-                headers['Authorization'] = `Bearer ${newToken}`;
-            }
-            const retryResponse = await fetch(fullUrl, { ...config, headers });
+            const response = await fetch(fullUrl, config);
             
-            // If the retry also fails with 401, the user is fundamentally unauthorized
-            if (retryResponse.status === 401) {
-                forceLogout();
-                throw new Error('Unauthorized');
-            }
-            return retryResponse;
-        }
-        
-        // If specifically failed auth, boot to OTP screen
-        if (result === 'auth_error') {
-            suspendSession();
-            throw new Error('نشست شما منقضی شده است. لطفا مجددا وارد شوید');
-        }
-        
-        // Treat as network error or rate limit, so we don't destroy local session
-        throw new Error('خطا در ارتباط با سرور.');
-    }
+            // If we were connecting/retrying, we reconnected successfully
+            if (isAppConnecting.value) isAppConnecting.value = false;
 
-    return response;
+            // 🔴 403 Forbidden with specific detail
+            if (response.status === 403) {
+                const clone = response.clone();
+                try {
+                    const errorData = await clone.json();
+                    if (errorData?.detail === 'REQUIRES_PASSWORD_CHANGE') {
+                        if (window.location.pathname !== '/setup-password') {
+                            window.location.href = '/setup-password';
+                        }
+                        throw new Error('شما باید رمز عبور خود را تغییر دهید');
+                    }
+                } catch (e) {
+                    // Ignore parsing errors for other 403s
+                }
+            }
+
+            if (response.status === 401) {
+                if (didRefresh) {
+                     forceLogout();
+                     throw new Error('Unauthorized');
+                }
+
+                // Try refresh before logging out
+                const result = await tryRefreshToken();
+                
+                if (result === 'success') {
+                    didRefresh = true;
+                    // Start next iteration of the while-loop to retry original request with new token
+                    continue;
+                }
+                
+                // If specifically failed auth, boot to OTP screen
+                if (result === 'auth_error') {
+                    suspendSession();
+                    throw new Error('نشست شما منقضی شده است. لطفا مجددا وارد شوید');
+                }
+                
+                // Treat 'network_error' as a connection drop, loop again
+                throw new Error('NetworkError');
+            }
+
+            return response;
+        } catch (error: any) {
+            // Is this a network fetch drop?
+            if (
+                error.name === 'TypeError' || 
+                error.message === 'Failed to fetch' || 
+                error.message === 'NetworkError' ||
+                error.message === 'خطا در ارتباط با سرور.' ||
+                error.message?.includes('fetch dynamically imported module') ||
+                error.message?.includes('Load failed')
+            ) {
+                isAppConnecting.value = true;
+                retries++;
+                console.warn(`[apiFetch] Connection lost. Retrying (${retries})...`);
+                await sleep(Math.min(3000, 1000 * Math.pow(1.5, retries))); // Max 3s backoff
+                continue;
+            }
+            throw error; // Bubble up real app errors (400, validation, etc)
+        }
+    }
 }
 
 export async function apiFetchJson(url: string, options: RequestInit = {}) {
