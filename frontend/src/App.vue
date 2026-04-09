@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
-import { onMounted } from 'vue'
+import { onMounted, watch } from 'vue'
 import BottomNav from './components/BottomNav.vue'
 import SessionApprovalModal from './components/SessionApprovalModal.vue'
 import { setupExpiryTimer, apiFetch, logout, isAppConnecting } from './utils/auth'
 import { useWebSocket } from './composables/useWebSocket'
+import { useNotificationStore } from './stores/notifications'
+import { requestNotificationPermission, showBrowserNotification } from './utils/browserNotifications'
 
 const route = useRoute()
 const router = useRouter()
 const { on, connect } = useWebSocket()
+const notificationStore = useNotificationStore()
 
 onMounted(() => {
   // راه‌اندازی تایمر انقضای توکن — ریدایرکت خودکار به لاگین
@@ -31,9 +34,39 @@ onMounted(() => {
   if (localStorage.getItem('auth_token')) {
     connect()
     ensureSessionValidation()
+    notificationStore.fetchInitialCounts()
+    requestNotificationPermission()
   }
   
   on('session:revoked', ensureSessionValidation)
+
+  // --- Global Notification Listeners ---
+  
+  // 1. General App Notifications
+  on('message', (payload: any) => {
+    notificationStore.addAppNotification(payload)
+    
+    // Show browser notification if tab is hidden or user requested it
+    if (document.hidden) {
+        showBrowserNotification(payload.title || 'اعلان جدید', payload.content || '')
+    }
+  })
+
+  // 2. Chat Messages
+  on('chat:message', (payload: any) => {
+    // Increment unread count globally
+    notificationStore.incrementChatUnread()
+    
+    // Show browser notification ONLY if we are NOT on the chat page or tab is hidden
+    const isChatOpen = route.path.startsWith('/chat')
+    // We could be even more specific and check if we are chat with THAT user, 
+    // but a global check is safer for now.
+    
+    if (document.hidden || !isChatOpen) {
+        const sender = payload.sender_name || 'پیام جدید'
+        showBrowserNotification(sender, payload.content || 'تصویر یا فایل')
+    }
+  })
 
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();

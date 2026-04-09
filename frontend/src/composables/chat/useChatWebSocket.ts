@@ -74,9 +74,12 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         if (senderId) {
             typingUsers.value[senderId] = false;
             
-            // Fix: Mark messages as read and reload immediately if sender matches selected chat
-            if (selectedUserId.value && (senderId === selectedUserId.value)) {
-                loadMessages(selectedUserId.value, true).then(() => {
+            // Defensively cast to Numbers to avoid strict equality bugs
+            const currentSelected = selectedUserId.value ? Number(selectedUserId.value) : null;
+            const arrivingSender = Number(senderId);
+
+            if (currentSelected !== null && arrivingSender === currentSelected) {
+                loadMessages(currentSelected, true).then(() => {
                     markAsRead();
                     // Optional: scrollToBottom if near bottom
                 });
@@ -100,23 +103,12 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         ws.on('chat:message', handleNewMessageEvent)
         ws.on('chat:typing', handleTypingEvent)
         ws.on('chat:read', handleReadEvent)
-        ws.on('message', handleNewMessageEvent)
-        
-        // Keep legacy listeners just in case backend still broadcasts under old names
-        ws.on('chat-message', handleNewMessageEvent)
-        ws.on('chat-typing', handleTypingEvent)
-        ws.on('chat-read', handleReadEvent)
     }
 
     function teardownWebSocketListeners() {
         ws.off('chat:message', handleNewMessageEvent)
         ws.off('chat:typing', handleTypingEvent)
         ws.off('chat:read', handleReadEvent)
-        ws.off('message', handleNewMessageEvent)
-        
-        ws.off('chat-message', handleNewMessageEvent)
-        ws.off('chat-typing', handleTypingEvent)
-        ws.off('chat-read', handleReadEvent)
     }
 
     onMounted(() => {
