@@ -63,8 +63,9 @@ export function pushBackState(onBack: BackHandler) {
   startListening()
   backStack.push(onBack)
 
-  // یک state خالی به history اضافه کن تا popstate کار کند
-  history.pushState({ backStack: backStack.length }, '')
+  // یک state خالی به history اضافه کن تا popstate کار کند اما state مربوط به روتر Vue پاک نشود
+  const currentState = history.state || {}
+  history.pushState(Object.assign({}, currentState, { backStack: backStack.length }), '')
 
   updateTelegramBackButton()
 }

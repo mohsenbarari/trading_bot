@@ -744,6 +744,19 @@ onMounted(async () => {
   window.addEventListener('resize', updateIsMobile)
 })
 
+watch(() => props.targetUserId, (newId) => {
+  if (newId && props.targetUserName) {
+    selectedUserId.value = newId
+    selectedUserName.value = props.targetUserName
+    loadMessages(newId)
+    pushBackState(() => {
+      selectedUserId.value = null
+      selectedUserName.value = ''
+      messages.value = []
+    })
+  }
+})
+
 onUnmounted(() => {
   window.removeEventListener('resize', updateIsMobile)
   stopPolling()
