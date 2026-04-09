@@ -1,4 +1,5 @@
 import { ref, type Ref, nextTick } from 'vue'
+import { apiFetchJson } from '../../utils/auth'
 import type { Conversation, Message, StickerPack } from '../../types/chat'
 
 export interface UseChatMessagesOptions {
@@ -93,23 +94,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     }
 
     async function apiFetch(endpoint: string, fetchOptions: RequestInit = {}) {
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-            ...(fetchOptions.headers as Record<string, string> || {})
-        }
-        if (jwtToken) headers['Authorization'] = `Bearer ${jwtToken}`
-
-        const res = await fetch(`${apiBaseUrl}/api${endpoint}`, {
-            ...fetchOptions,
-            headers
-        })
-
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({ detail: 'خطای سرور' }))
-            throw new Error(err.detail || `HTTP Error ${res.status}`)
-        }
-        if (res.status === 204) return null
-        return res.json()
+        return await apiFetchJson(`/api${endpoint}`, fetchOptions)
     }
 
     async function loadConversations() {
