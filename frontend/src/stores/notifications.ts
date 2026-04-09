@@ -6,6 +6,8 @@ export const useNotificationStore = defineStore('notifications', () => {
     const chatUnreadCount = ref(0)
     const appNotifications = ref<any[]>([])
     const activeToasts = ref<any[]>([])
+    const isLoadingHistory = ref(false)
+
 
     const fetchInitialCounts = async () => {
         const token = localStorage.getItem('auth_token')
@@ -34,10 +36,65 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
 
     const addAppNotification = (notification: any) => {
-        appNotifications.value.unshift(notification)
-        // Keep only last 50
-        if (appNotifications.value.length > 50) {
-            appNotifications.value.pop()
+        // Prevent exact duplicates if backend sends SSE and then we fetch or vice versa
+        // Usually SSE comes in format: { id: ..., message: ..., level: ..., category: ... } or payload.content
+        
+        // Normalize for the UI
+        const normalized = {
+            ...notification,
+            title: notification.title || (notification.category === 'system' ? 'پیام سیستم' : 'اعلان جدید'),
+            body: notification.content || notification.message || notification.body,
+            id: notification.id || Date.now() + Math.random() // Fallback ID
+        }
+        
+        if (!appNotifications.value.some(n => n.id === normalized.id)) {
+            appNotifications.value.unshift(normalized)
+            // Keep only latest 100 for memory
+            if (appNotifications.value.length > 100) {
+                appNotifications.value.pop()
+            }
+        }
+    }
+
+    const fetchHistory = async () => {
+        isLoadingHistory.value = true
+        try {
+            const res = await apiFetch('/api/notifications/')
+            if (res.ok) {
+                const data = await res.json()
+                appNotifications.value = data.map((n: any) => ({
+                    ...n,
+                    title: n.category === 'system' ? 'پیام مدیریت' : 'اعلان جدید',
+                    body: n.message
+                }))
+            }
+        } catch (e) {
+            console.error('Failed to fetch notifications history:', e)
+        } finally {
+            isLoadingHistory.value = false
+        }
+    }
+
+    const markAllAsRead = async () => {
+        try {
+             await apiFetch('/api/notifications/mark-all-read', { method: 'POST' })
+             appNotifications.value.forEach(n => n.is_read = true)
+        } catch (e) {
+             console.error('Failed to mark all as read:', e)
+        }
+    }
+
+    const deleteNotification = async (id: number) => {
+        // Optimistic delete
+        const originalList = [...appNotifications.value]
+        appNotifications.value = appNotifications.value.filter(n => n.id !== id)
+        
+        try {
+            const res = await apiFetch(`/api/notifications/${id}`, { method: 'DELETE' })
+            if (!res.ok) throw new Error()
+        } catch (e) {
+            appNotifications.value = originalList
+            console.error('Delete failed:', e)
         }
     }
 
@@ -63,6 +120,10 @@ export const useNotificationStore = defineStore('notifications', () => {
         incrementChatUnread,
         addAppNotification,
         addToast,
-        removeToast
+        removeToast,
+        isLoadingHistory,
+        fetchHistory,
+        markAllAsRead,
+        deleteNotification
     }
 })
