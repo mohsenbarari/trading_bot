@@ -944,14 +944,14 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @close="closeLightbox" 
     />
 
-    <!-- New Conversation Search Modal -->
+    </template>
+
+    <!-- New Conversation Search Modal (outside v-if/v-else chain so it's always available) -->
     <ChatNewConversationModal
       :show="showNewChatModal"
       @close="showNewChatModal = false"
       @start-chat="handleNewChatSearch"
     />
-
-    </template>
     </div>
 </template>
 
