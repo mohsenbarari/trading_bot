@@ -1,4 +1,5 @@
 import { ref, computed, onMounted, onUnmounted, type Ref } from 'vue'
+import { useWebSocket } from '../../composables/useWebSocket'
 
 export interface UseChatWebSocketOptions {
     selectedUserId: Ref<number | null>
@@ -20,6 +21,8 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         scrollToBottom,
         markAsRead
     } = options
+
+    const ws = useWebSocket()
 
     const TYPING_THROTTLE = 2000
     let lastTypingTime = 0
@@ -50,8 +53,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         sendTypingSignal();
     };
 
-    function handleTypingEvent(e: Event) {
-        const data = (e as CustomEvent).detail;
+    function handleTypingEvent(data: any) {
         const senderId = data.sender_id;
         if (senderId) {
             typingUsers.value[senderId] = true;
@@ -65,27 +67,29 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         }
     }
 
-    function handleNewMessageEvent(e: Event) {
-        const notif = (e as CustomEvent).detail
-        const senderId = notif.sender_id
+    function handleNewMessageEvent(data: any) {
+        const senderId = data.sender_id;
 
         // Clear typing on message
         if (senderId) {
             typingUsers.value[senderId] = false;
+            
+            // Fix: Mark messages as read and reload immediately if sender matches selected chat
+            if (selectedUserId.value && (senderId === selectedUserId.value)) {
+                loadMessages(selectedUserId.value, true).then(() => {
+                    markAsRead();
+                    // Optional: scrollToBottom if near bottom
+                });
+            }
+        } else {
+            // Unlikely to lack sender_id, but just in case
         }
 
         // Always update conversations list (to show new message/count)
         loadConversations();
-
-        // Refresh if chat with sender
-        if (selectedUserId.value && (senderId === selectedUserId.value)) {
-            loadMessages(selectedUserId.value, true)
-            markAsRead()
-        }
     }
 
-    function handleReadEvent(e: Event) {
-        const data = (e as CustomEvent).detail
+    function handleReadEvent(data: any) {
         // If the current chat user read our messages, refresh
         if (selectedUserId.value && (data.reader_id === selectedUserId.value)) {
             loadMessages(selectedUserId.value, true)
@@ -93,17 +97,26 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     }
 
     function setupWebSocketListeners() {
-        window.addEventListener('chat-notification', handleNewMessageEvent)
-        window.addEventListener('chat-message', handleNewMessageEvent)
-        window.addEventListener('chat-typing', handleTypingEvent)
-        window.addEventListener('chat-read', handleReadEvent)
+        ws.on('chat:message', handleNewMessageEvent)
+        ws.on('chat:typing', handleTypingEvent)
+        ws.on('chat:read', handleReadEvent)
+        ws.on('message', handleNewMessageEvent)
+        
+        // Keep legacy listeners just in case backend still broadcasts under old names
+        ws.on('chat-message', handleNewMessageEvent)
+        ws.on('chat-typing', handleTypingEvent)
+        ws.on('chat-read', handleReadEvent)
     }
 
     function teardownWebSocketListeners() {
-        window.removeEventListener('chat-message', handleNewMessageEvent)
-        window.removeEventListener('chat-notification', handleNewMessageEvent)
-        window.removeEventListener('chat-typing', handleTypingEvent)
-        window.removeEventListener('chat-read', handleReadEvent)
+        ws.off('chat:message', handleNewMessageEvent)
+        ws.off('chat:typing', handleTypingEvent)
+        ws.off('chat:read', handleReadEvent)
+        ws.off('message', handleNewMessageEvent)
+        
+        ws.off('chat-message', handleNewMessageEvent)
+        ws.off('chat-typing', handleTypingEvent)
+        ws.off('chat-read', handleReadEvent)
     }
 
     onMounted(() => {
