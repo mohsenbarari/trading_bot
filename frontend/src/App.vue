@@ -3,6 +3,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { onMounted, watch } from 'vue'
 import BottomNav from './components/BottomNav.vue'
 import SessionApprovalModal from './components/SessionApprovalModal.vue'
+import AppToasts from './components/AppToasts.vue'
 import { setupExpiryTimer, apiFetch, logout, isAppConnecting } from './utils/auth'
 import { useWebSocket } from './composables/useWebSocket'
 import { useNotificationStore } from './stores/notifications'
@@ -57,7 +58,16 @@ onMounted(() => {
     // As per user request: Always show notification unless perhaps specifically on notifications page
     const isNotificationPage = route.path === '/notifications'
     if (!isNotificationPage) {
-        showBrowserNotification(payload.title || 'اعلان جدید', payload.content || '')
+        const title = payload.title || 'اعلان جدید'
+        const body = payload.content || ''
+        
+        // Always show in-app toast
+        notificationStore.addToast(title, body)
+
+        // Try to show native notification if tab is hidden
+        if (document.hidden) {
+            showBrowserNotification(title, body)
+        }
     }
   })
 
@@ -74,7 +84,15 @@ onMounted(() => {
     
     if (document.hidden || !isChatOpen || isLookingAtOtherChat) {
         const sender = payload.sender_name || 'پیام جدید'
-        showBrowserNotification(sender, payload.content || 'تصویر یا فایل')
+        const body = payload.content || 'تصویر یا فایل'
+        
+        // Show in-app toast for chats
+        notificationStore.addToast(sender, body)
+
+        // Only try to show native notification if tab is hidden
+        if (document.hidden) {
+            showBrowserNotification(sender, body)
+        }
     }
   })
 
@@ -111,6 +129,9 @@ onMounted(() => {
 
     <!-- Session Approval Modal (always mounted for logged-in users) -->
     <SessionApprovalModal v-if="route.name !== 'login'" />
+
+    <!-- Global In-App Toast Notifications -->
+    <AppToasts v-if="route.name !== 'login'" />
     
   </div>
 </template>
