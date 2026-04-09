@@ -61,8 +61,8 @@ onMounted(() => {
         const title = payload.title || 'اعلان جدید'
         const body = payload.content || ''
         
-        // Always show in-app toast
-        notificationStore.addToast(title, body)
+        // Always show in-app toast, route to notifications center
+        notificationStore.addToast(title, body, '/notifications')
 
         // Try to show native notification if tab is hidden
         if (document.hidden) {
@@ -84,10 +84,20 @@ onMounted(() => {
     
     if (document.hidden || !isChatOpen || isLookingAtOtherChat) {
         const sender = payload.sender_name || 'پیام جدید'
-        const body = payload.content || 'تصویر یا فایل'
+        let body = payload.content || 'فایل جدید'
+        
+        if (payload.message_type === 'image') {
+            body = 'تصویر'
+        } else if (payload.message_type === 'video') {
+            body = 'ویدئو'
+        } else if (payload.message_type === 'sticker') {
+            body = 'استیکر'
+        }
+        
+        const routePath = `/chat/${payload.sender_id}`
         
         // Show in-app toast for chats
-        notificationStore.addToast(sender, body)
+        notificationStore.addToast(sender, body, routePath)
 
         // Only try to show native notification if tab is hidden
         if (document.hidden) {

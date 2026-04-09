@@ -41,9 +41,9 @@ export const useNotificationStore = defineStore('notifications', () => {
         }
     }
 
-    const addToast = (title: string, body: string) => {
+    const addToast = (title: string, body: string, route?: string) => {
         const id = Date.now() + Math.random()
-        activeToasts.value.push({ id, title, body })
+        activeToasts.value.push({ id, title, body, route })
         // Auto remove after 5 seconds
         setTimeout(() => {
             removeToast(id)

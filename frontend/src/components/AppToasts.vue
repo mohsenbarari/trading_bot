@@ -1,7 +1,55 @@
 <script setup lang="ts">
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useNotificationStore } from '../stores/notifications'
 
 const store = useNotificationStore()
+const router = useRouter()
+
+// Swipe to dismiss logic
+const dragState = ref<Record<number, { startX: number, currentX: number }>>({})
+
+const onTouchStart = (e: TouchEvent, id: number) => {
+  if (!e.touches[0]) return
+  dragState.value[id] = {
+    startX: e.touches[0].clientX,
+    currentX: e.touches[0].clientX
+  }
+}
+
+const onTouchMove = (e: TouchEvent, id: number) => {
+  if (!dragState.value[id] || !e.touches[0]) return
+  dragState.value[id].currentX = e.touches[0].clientX
+}
+
+const onTouchEnd = (id: number) => {
+  if (!dragState.value[id]) return
+  
+  const diff = dragState.value[id].currentX - dragState.value[id].startX
+  if (Math.abs(diff) > 50) {
+    // Swiped enough to dismiss
+    store.removeToast(id)
+  }
+  
+  // Clean up
+  delete dragState.value[id]
+}
+
+const getToastStyle = (id: number) => {
+  if (!dragState.value[id]) return {}
+  const diff = dragState.value[id].currentX - dragState.value[id].startX
+  return {
+    transform: `translateX(${diff}px)`,
+    transition: 'none' // Remove transition while dragging
+  }
+}
+
+const handleToastClick = (toast: any) => {
+  if (toast.route) {
+    router.push(toast.route)
+  }
+  store.removeToast(toast.id)
+}
 </script>
 
 <template>
@@ -10,7 +58,12 @@ const store = useNotificationStore()
       <div 
         v-for="toast in store.activeToasts" 
         :key="toast.id"
-        class="bg-white rounded-2xl shadow-lg border border-gray-100 p-3 max-w-sm w-full pointer-events-auto flex items-start gap-3"
+        class="bg-white rounded-2xl shadow-lg border border-gray-100 p-3 max-w-sm w-full pointer-events-auto flex items-start gap-3 cursor-pointer"
+        :style="getToastStyle(toast.id)"
+        @touchstart="onTouchStart($event, toast.id)"
+        @touchmove="onTouchMove($event, toast.id)"
+        @touchend="onTouchEnd(toast.id)"
+        @click="handleToastClick(toast)"
       >
         <div class="bg-primary-100 text-primary-600 rounded-full p-2 shrink-0">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -22,7 +75,7 @@ const store = useNotificationStore()
           <h4 class="font-bold text-gray-900 text-sm truncate">{{ toast.title }}</h4>
           <p class="text-xs text-gray-500 mt-0.5 line-clamp-2">{{ toast.body }}</p>
         </div>
-        <button @click="store.removeToast(toast.id)" class="text-gray-400 p-1 -mr-2">
+        <button @click.stop="store.removeToast(toast.id)" class="text-gray-400 p-1 -mr-2">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
