@@ -19,7 +19,8 @@ function formatTime(dateStr: string) {
 
 function isUserOnline(lastSeen: string | null | undefined): boolean {
   if (!lastSeen) return false
-  const date = new Date(lastSeen)
+  const serverStr = lastSeen.endsWith('Z') ? lastSeen : lastSeen + 'Z';
+  const date = new Date(serverStr)
   return (new Date().getTime() - date.getTime()) < 180000
 }
 </script>
