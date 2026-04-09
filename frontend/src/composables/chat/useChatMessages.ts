@@ -313,7 +313,8 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             if (!userData) return
 
             if (userData.last_seen_at) {
-                const serverDate = new Date(userData.last_seen_at)
+                const serverStr = userData.last_seen_at.endsWith('Z') ? userData.last_seen_at : userData.last_seen_at + 'Z';
+                const serverDate = new Date(serverStr)
                 targetUserStatus.value = formatLastSeen(serverDate)
             } else {
                 targetUserStatus.value = 'آخرین بازدید خیلی وقت پیش'
