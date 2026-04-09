@@ -77,15 +77,17 @@ onMounted(() => {
     notificationStore.incrementChatUnread()
     
     // Notification logic
-    const isChatOpen = route.path.startsWith('/chat')
+    const isChatOpen = route.path === '/chat'
     // Check if the current conversation is NOT with the sender of arriving message
-    // We get sender_id from payload
-    const isLookingAtOtherChat = route.params.id && Number(route.params.id) !== Number(payload.sender_id)
+    // Note: MessengerView uses query.user_id, not params.id
+    const currentChatId = route.query.user_id ? Number(route.query.user_id) : null
+    const isLookingAtOtherChat = currentChatId !== null && currentChatId !== Number(payload.sender_id)
     
     if (document.hidden || !isChatOpen || isLookingAtOtherChat) {
         const sender = payload.sender_name || 'پیام جدید'
         let body = payload.content || 'فایل جدید'
         
+        // Define media labels
         if (payload.message_type === 'image') {
             body = 'تصویر'
         } else if (payload.message_type === 'video') {
@@ -94,7 +96,8 @@ onMounted(() => {
             body = 'استیکر'
         }
         
-        const routePath = `/chat/${payload.sender_id}`
+        // Correct route for MessengerView.vue (path: /chat, query: user_id)
+        const routePath = `/chat?user_id=${payload.sender_id}&user_name=${encodeURIComponent(sender)}`
         
         // Show in-app toast for chats
         notificationStore.addToast(sender, body, routePath)
