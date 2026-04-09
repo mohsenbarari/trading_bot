@@ -54,6 +54,12 @@ const router = createRouter({
       path: '/register',
       name: 'web-register',
       component: () => import('../views/WebRegister.vue')
+    },
+    {
+      path: '/notifications',
+      name: 'notifications',
+      component: () => import('../views/NotificationsView.vue'),
+      meta: { requiresAuth: true }
     }
   ]
 })
