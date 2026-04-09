@@ -234,12 +234,17 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
                 throw new Error('NetworkError');
             }
 
+            if (response.status >= 500) {
+                throw new Error('NetworkError'); // Trigger auto-reconnect
+            }
+
             return response;
         } catch (error: any) {
             // Is this a network fetch drop?
             if (
                 error.name === 'TypeError' || 
-                error.message === 'Failed to fetch' || 
+                error.message?.includes('Failed to fetch') || 
+                error.message?.toLowerCase().includes('network') ||
                 error.message === 'NetworkError' ||
                 error.message === 'خطا در ارتباط با سرور.' ||
                 error.message?.includes('fetch dynamically imported module') ||
