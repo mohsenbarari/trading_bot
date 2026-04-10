@@ -8,7 +8,7 @@ import { setupExpiryTimer, apiFetch, logout, isAppConnecting } from './utils/aut
 import { useWebSocket } from './composables/useWebSocket'
 import { useNotificationStore } from './stores/notifications'
 import { requestNotificationPermission, showBrowserNotification } from './utils/browserNotifications'
-import { resumeAudioContext } from './utils/audio'
+import { unlockAudioContext } from './utils/audio'
 
 
 const route = useRoute()
@@ -45,7 +45,7 @@ onMounted(() => {
   // --- Notification & Audio Permission Helper (Triggered by user interaction) ---
   const handleFirstInteraction = () => {
     requestNotificationPermission()
-    resumeAudioContext()
+    unlockAudioContext()
     window.removeEventListener('click', handleFirstInteraction)
     window.removeEventListener('touchstart', handleFirstInteraction)
   }
