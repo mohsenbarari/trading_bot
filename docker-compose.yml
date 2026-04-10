@@ -17,6 +17,7 @@ services:
       - ./schemas.py:/app/schemas.py
       - ./mini_app_dist:/app/mini_app_dist
       - ./trading_settings.json:/app/trading_settings.json
+      - uploads_data:/app/uploads
     ports:
       - "8000:8000"
     env_file:
@@ -128,3 +129,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  uploads_data:

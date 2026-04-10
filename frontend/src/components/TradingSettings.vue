@@ -107,7 +107,9 @@ const messageType = ref('success')
 const openSections = ref({
   invitation: true,
   offer: false,
-  expire: false
+  expire: false,
+    login: false,
+    login: false
 })
 
 const toggleSection = (section) => {
@@ -121,7 +123,13 @@ const settings = ref({
   offer_max_quantity: 50,
   max_active_offers: 4,
   offer_expire_rate_per_minute: 2,
-  offer_expire_daily_limit_after_threshold: 10
+  offer_expire_daily_limit_after_threshold: 10,
+    anti_abuse_daily_base: 2,
+    anti_abuse_weekly_base: 5,
+    anti_abuse_monthly_base: 7,
+    anti_abuse_daily_base: 2,
+    anti_abuse_weekly_base: 5,
+    anti_abuse_monthly_base: 7
 })
 
 const fetchApi = async (method, endpoint, body = null) => {

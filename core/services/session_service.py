@@ -12,11 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.session import UserSession, SessionLoginRequest, LoginRequestStatus, Platform
 from models.user import User, UserRole
+from core.trading_settings import get_trading_settings
 
 logger = logging.getLogger(__name__)
 
-# Anti-abuse base thresholds
-ANTI_ABUSE_BASE = {"daily": 2, "weekly": 5, "monthly": 7}
 # Login request approval timeout
 LOGIN_REQUEST_TIMEOUT_SECONDS = 120
 # Session blacklist TTL: must match access token lifetime (60 min)
@@ -186,7 +185,14 @@ async def handle_login_session(
     redis = await get_redis()
 
     # Check anti-abuse thresholds
-    for period, base in ANTI_ABUSE_BASE.items():
+    settings = await get_trading_settings()
+    anti_abuse_base = {
+        "daily": settings.anti_abuse_daily_base,
+        "weekly": settings.anti_abuse_weekly_base,
+        "monthly": settings.anti_abuse_monthly_base
+    }
+    
+    for period, base in anti_abuse_base.items():
         threshold = calculate_threshold(base, max_sessions)
         key = f"session_req:{user.id}:{period}"
         count = await redis.get(key)
