@@ -109,6 +109,13 @@ export async function authGuard(
     // Cast meta to any to avoid editor-specific TS errors if global augmentation is slow to pick up
     const meta = to.meta as any;
 
+    if (to.path === '/login') {
+        const isAuth = await isAuthenticated();
+        if (isAuth) {
+            return next('/');
+        }
+    }
+
     if (meta.requiresAuth) {
         const isAuth = await isAuthenticated();
         if (!isAuth) {
