@@ -82,22 +82,21 @@
         <div v-show="openSections.security" class="accordion-content">
           <div class="security-note">
             💡 این مقادیر آستانه پایه برای جلوگیری از سوءاستفاده (Anti-Abuse) در هنگام لاگین مجدد هستند. 
-            برای کاربرانی با بیش از ۱ نشست، سیستم به صورت خودکار آستانه را بر اساس فرمول زیر افزایش می‌دهد:
-            <div class="formula">Floor(پایه × [ ۱ + ۰.۵ × (تعداد نشست - ۱) ])</div>
+            برای کاربرانی با بیش از ۱ نشست، سیستم به صورت خودکار آستانه را افزایش می‌دهد.
           </div>
           <div class="form-group">
             <label>آستانه پایه روزانه</label>
-            <input type="number" v-model.number="settings.anti_abuse_daily_base" min="1" />
+            <input type="number" v-model.number="settings.anti_abuse_daily_base" min="1" placeholder="2" />
             <span class="hint">تعداد لاگین مجاز در ۲۴ ساعت (برای ۱ نشست)</span>
           </div>
           <div class="form-group">
             <label>آستانه پایه هفتگی</label>
-            <input type="number" v-model.number="settings.anti_abuse_weekly_base" min="1" />
+            <input type="number" v-model.number="settings.anti_abuse_weekly_base" min="1" placeholder="5" />
             <span class="hint">تعداد لاگین مجاز در ۷ روز (برای ۱ نشست)</span>
           </div>
           <div class="form-group">
             <label>آستانه پایه ماهانه</label>
-            <input type="number" v-model.number="settings.anti_abuse_monthly_base" min="1" />
+            <input type="number" v-model.number="settings.anti_abuse_monthly_base" min="1" placeholder="7" />
             <span class="hint">تعداد لاگین مجاز در ۳۰ روز (برای ۱ نشست)</span>
           </div>
         </div>
@@ -335,17 +334,6 @@ onMounted(() => {
   font-size: 0.75rem;
   color: #c2410c;
   line-height: 1.5;
-}
-
-.formula {
-  margin-top: 0.5rem;
-  padding: 0.375rem;
-  background: white;
-  border-radius: 0.5rem;
-  text-align: center;
-  font-weight: 700;
-  color: #1f2937;
-  border: 1px dashed #fdba74;
 }
 
 .form-row {
