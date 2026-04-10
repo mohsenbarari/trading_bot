@@ -28,6 +28,37 @@ from models.chat_file import ChatFile
 from api.deps import get_current_user
 
 from core.utils import publish_user_event
+import httpx
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def generate_location_snapshot(lat: float, lng: float) -> Optional[str]:
+    """Generate a static map image from the internal tileserver and save to uploads."""
+    try:
+        # Use tileserver-gl static API via docker network
+        tile_url = f"http://tileserver:8080/styles/basic-preview/static/{lng},{lat},15/600x400.png"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(tile_url)
+            if resp.status_code != 200:
+                logger.warning(f"Tileserver returned {resp.status_code} for location snapshot")
+                return None
+
+        file_id = str(uuid.uuid4())
+        upload_dir = os.path.join(os.getcwd(), "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, f"{file_id}.png")
+
+        async with aiofiles.open(file_path, "wb") as f:
+            await f.write(resp.content)
+
+        return file_id
+    except Exception as e:
+        logger.warning(f"Failed to generate location snapshot: {e}")
+        return None
+
 
 class TypingSignal(BaseModel):
     receiver_id: int
@@ -428,7 +459,20 @@ async def send_message(
     # Inject sender_name manually since current_user is the sender
     msg_data["sender_name"] = current_user.account_name
     await publish_user_event(data.receiver_id, "chat:message", msg_data)
-    
+
+    # Generate location snapshot in background (non-blocking)
+    if data.message_type == MessageType.LOCATION:
+        async def _generate_snapshot():
+            try:
+                loc = json.loads(data.content)
+                lat, lng = float(loc["latitude"]), float(loc["longitude"])
+                file_id = await generate_location_snapshot(lat, lng)
+                if file_id:
+                    logger.info(f"Location snapshot saved: {file_id} for message {message.id}")
+            except Exception as e:
+                logger.warning(f"Location snapshot generation failed: {e}")
+        asyncio.create_task(_generate_snapshot())
+
     return MessageRead.from_orm_with_forwarding(message)
 
 

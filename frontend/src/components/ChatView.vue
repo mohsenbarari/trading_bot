@@ -9,6 +9,7 @@ import ChatSearchGlobalList from './chat/ChatSearchGlobalList.vue'
 import ChatEmptyState from './chat/ChatEmptyState.vue'
 import ChatConversationList from './chat/ChatConversationList.vue'
 import ChatNewConversationModal from './chat/ChatNewConversationModal.vue'
+import AttachmentMenu from './chat/AttachmentMenu.vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
 import type { Conversation, Message, StickerPack } from '../types/chat'
@@ -86,6 +87,9 @@ const isViewingReply = ref(false)
 
 // Forward State
 const showForwardModal = ref(false)
+
+// Attachment Bottom Sheet
+const showAttachmentMenu = ref(false)
 
 // Status
 const targetUserStatus = ref('آخرین بازدید اخیراً')
@@ -594,6 +598,25 @@ function openForwardModal() {
   if (selectedMessages.value.length > 0) showForwardModal.value = true
 }
 
+async function handleSendLocation(lat: number, lng: number) {
+  if (!selectedUserId.value) return
+  const content = JSON.stringify({ latitude: lat, longitude: lng })
+  try {
+    const newMsg = await messagesLogic.apiFetch('/chat/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        receiver_id: selectedUserId.value,
+        content,
+        message_type: 'location'
+      })
+    })
+    messages.value.push(newMsg)
+    scrollToBottom()
+  } catch (e: any) {
+    error.value = e.message
+  }
+}
+
 function closeForwardModal() {
   showForwardModal.value = false
 }
@@ -924,10 +947,18 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         @reply-selected="handleReplySelected"
         @copy-selected="handleCopySelected"
         @forward-selected="openForwardModal"
-        @upload-media="handleMediaUploadWrapper"
+        @toggle-attachment="showAttachmentMenu = !showAttachmentMenu"
         @send-text="(text: string) => { messageInput = text; sendMessage(); }"
         @send-sticker="sendSticker"
         @typing="handleTypingWrapper"
+      />
+
+      <!-- Attachment Bottom Sheet -->
+      <AttachmentMenu
+        v-model="showAttachmentMenu"
+        @select-media="handleMediaUploadWrapper"
+        @select-file="handleMediaUploadWrapper"
+        @select-location="handleSendLocation"
       />
 
       <!-- Forward Target Modal -->
