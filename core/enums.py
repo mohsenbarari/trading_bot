@@ -31,3 +31,5 @@ class MessageType(str, enum.Enum):
     TEXT = "text"
     IMAGE = "image"
     STICKER = "sticker"
+    VIDEO = "video"
+    LOCATION = "location"
