@@ -27,6 +27,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
         sendMediaMessage
     } = options
 
+    let activeUploadsCount = 0
+
     // === IndexedDB Image Cache ===
     const imageCache = ref<Record<string, string>>({})
     const DB_NAME = 'chat_image_cache'
@@ -219,7 +221,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const isVideo = file.type.startsWith('video/')
         if (!selectedUserId.value) return
 
-        isUploading.value = true
+        activeUploadsCount++
+        isUploading.value = activeUploadsCount > 0
         let step = 'start'
 
         const optimisticId = -Date.now()
@@ -345,7 +348,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
             alert(`خطا در آپلود: ` + errString);
             optimisticMsg.is_error = true;
         } finally {
-            isUploading.value = false
+            activeUploadsCount--
+            isUploading.value = activeUploadsCount > 0
             if (!optimisticMsg.is_error) {
                 messages.value = messages.value.filter(m => m.id !== optimisticId)
             }

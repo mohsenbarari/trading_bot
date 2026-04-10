@@ -74,6 +74,7 @@
           type="file" 
           ref="imageInput" 
           accept="image/*,video/*" 
+          multiple
           style="display: none" 
           @change="handleFileUpload"
         />
@@ -189,8 +190,10 @@ const adjustTextareaHeight = () => {
 
 const handleFileUpload = (e: Event) => {
   const target = e.target as HTMLInputElement
-  if (target.files && target.files.length > 0 && target.files[0]) {
-    emit('upload-media', target.files[0])
+  if (target.files && target.files.length > 0) {
+    Array.from(target.files).forEach(file => {
+      emit('upload-media', file)
+    })
     target.value = '' // Clear input so the same file can be selected again
   }
 }
