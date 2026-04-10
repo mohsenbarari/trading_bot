@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiFetch } from '../utils/auth'
+import { playNotificationSound } from '../utils/audio'
+
 
 export const useNotificationStore = defineStore('notifications', () => {
     const chatUnreadCount = ref(0)
@@ -101,6 +103,10 @@ export const useNotificationStore = defineStore('notifications', () => {
     const addToast = (title: string, body: string, route?: string) => {
         const id = Date.now() + Math.random()
         activeToasts.value.push({ id, title, body, route })
+        
+        // Play notification sound
+        playNotificationSound()
+
         // Auto remove after 5 seconds
         setTimeout(() => {
             removeToast(id)
