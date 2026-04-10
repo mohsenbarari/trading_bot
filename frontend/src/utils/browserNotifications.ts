@@ -29,8 +29,9 @@ export const showBrowserNotification = (title: string, body: string, options: No
         const notification = new Notification(title, {
             body: truncatedBody,
             icon: '/pwa-192x192.png', // Default icon from PWA manifest
+            vibrate: [200, 100, 200], // Vibration pattern for supported devices
             ...options
-        });
+        } as any);
 
         notification.onclick = () => {
             window.focus();
