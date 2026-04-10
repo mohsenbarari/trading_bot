@@ -324,13 +324,17 @@ onMounted(() => {
   transition: all 0.2s;
 }
 .form-group input::placeholder {
-  color: #cbd5e1;
+  color: #9ca3af;
   font-weight: 400;
   opacity: 1;
+}
+.form-group input.is-default {
+  color: #9ca3af;
 }
 .form-group input:focus {
   border-color: #f59e0b;
   box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+  color: #1f2937; /* وقتی فوکوس شد رنگ اصلی برگرده */
 }
 
 .hint {
