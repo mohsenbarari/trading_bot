@@ -73,6 +73,36 @@
         </div>
       </div>
 
+      <!-- امنیت و نشست‌ها -->
+      <div class="accordion-section">
+        <div class="accordion-header" @click="toggleSection('security')">
+          <h2>🔒 امنیت و نشست‌ها</h2>
+          <span class="accordion-icon">{{ openSections.security ? '▼' : '◀' }}</span>
+        </div>
+        <div v-show="openSections.security" class="accordion-content">
+          <div class="security-note">
+            💡 این مقادیر آستانه پایه برای جلوگیری از سوءاستفاده (Anti-Abuse) در هنگام لاگین مجدد هستند. 
+            برای کاربرانی با بیش از ۱ نشست، سیستم به صورت خودکار آستانه را بر اساس فرمول زیر افزایش می‌دهد:
+            <div class="formula">Floor(پایه × [ ۱ + ۰.۵ × (تعداد نشست - ۱) ])</div>
+          </div>
+          <div class="form-group">
+            <label>آستانه پایه روزانه</label>
+            <input type="number" v-model.number="settings.anti_abuse_daily_base" min="1" />
+            <span class="hint">تعداد لاگین مجاز در ۲۴ ساعت (برای ۱ نشست)</span>
+          </div>
+          <div class="form-group">
+            <label>آستانه پایه هفتگی</label>
+            <input type="number" v-model.number="settings.anti_abuse_weekly_base" min="1" />
+            <span class="hint">تعداد لاگین مجاز در ۷ روز (برای ۱ نشست)</span>
+          </div>
+          <div class="form-group">
+            <label>آستانه پایه ماهانه</label>
+            <input type="number" v-model.number="settings.anti_abuse_monthly_base" min="1" />
+            <span class="hint">تعداد لاگین مجاز در ۳۰ روز (برای ۱ نشست)</span>
+          </div>
+        </div>
+      </div>
+
       <!-- دکمه‌ها -->
       <div class="form-actions">
         <button class="btn btn-primary" @click="saveSettings" :disabled="saving">
@@ -108,8 +138,7 @@ const openSections = ref({
   invitation: true,
   offer: false,
   expire: false,
-    login: false,
-    login: false
+  security: false
 })
 
 const toggleSection = (section) => {
@@ -124,12 +153,9 @@ const settings = ref({
   max_active_offers: 4,
   offer_expire_rate_per_minute: 2,
   offer_expire_daily_limit_after_threshold: 10,
-    anti_abuse_daily_base: 2,
-    anti_abuse_weekly_base: 5,
-    anti_abuse_monthly_base: 7,
-    anti_abuse_daily_base: 2,
-    anti_abuse_weekly_base: 5,
-    anti_abuse_monthly_base: 7
+  anti_abuse_daily_base: 2,
+  anti_abuse_weekly_base: 5,
+  anti_abuse_monthly_base: 7
 })
 
 const fetchApi = async (method, endpoint, body = null) => {
@@ -298,6 +324,28 @@ onMounted(() => {
 .hint {
   display: block; font-size: 0.7rem; color: #d1d5db;
   margin-top: 0.25rem;
+}
+
+.security-note {
+  background: #fff7ed;
+  border: 1px solid #ffedd5;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.75rem;
+  color: #c2410c;
+  line-height: 1.5;
+}
+
+.formula {
+  margin-top: 0.5rem;
+  padding: 0.375rem;
+  background: white;
+  border-radius: 0.5rem;
+  text-align: center;
+  font-weight: 700;
+  color: #1f2937;
+  border: 1px dashed #fdba74;
 }
 
 .form-row {
