@@ -15,7 +15,7 @@
         <div v-show="openSections.invitation" class="accordion-content">
           <div class="form-group">
             <label>مدت اعتبار لینک دعوت (روز)</label>
-            <input type="number" v-model.number="settings.invitation_expiry_days" min="1" placeholder="2" />
+            <input type="number" v-model.number="settings.invitation_expiry_days" min="1" placeholder="2" :class="{'is-default': isDefault('invitation_expiry_days')}" />
             <span class="hint">پیش‌فرض: 2 روز</span>
           </div>
         </div>
@@ -30,24 +30,24 @@
         <div v-show="openSections.offer" class="accordion-content">
           <div class="form-group">
             <label>مدت اعتبار لفظ (دقیقه)</label>
-            <input type="number" v-model.number="settings.offer_expiry_minutes" min="1" placeholder="2" />
+            <input type="number" v-model.number="settings.offer_expiry_minutes" min="1" placeholder="2" :class="{'is-default': isDefault('offer_expiry_minutes')}" />
             <span class="hint">پیش‌فرض: 2 دقیقه</span>
           </div>
           <div class="form-row">
             <div class="form-group">
               <label>حداقل تعداد کالا</label>
-              <input type="number" v-model.number="settings.offer_min_quantity" min="1" placeholder="5" />
+              <input type="number" v-model.number="settings.offer_min_quantity" min="1" placeholder="5" :class="{'is-default': isDefault('offer_min_quantity')}" />
               <span class="hint">پیش‌فرض: 5</span>
             </div>
             <div class="form-group">
               <label>حداکثر تعداد کالا</label>
-              <input type="number" v-model.number="settings.offer_max_quantity" min="1" placeholder="50" />
+              <input type="number" v-model.number="settings.offer_max_quantity" min="1" placeholder="50" :class="{'is-default': isDefault('offer_max_quantity')}" />
               <span class="hint">پیش‌فرض: 50</span>
             </div>
           </div>
           <div class="form-group">
             <label>حداکثر لفظ‌های فعال همزمان</label>
-            <input type="number" v-model.number="settings.max_active_offers" min="1" max="20" placeholder="4" />
+            <input type="number" v-model.number="settings.max_active_offers" min="1" max="20" placeholder="4" :class="{'is-default': isDefault('max_active_offers')}" />
             <span class="hint">پیش‌فرض: 4</span>
           </div>
         </div>
@@ -62,12 +62,12 @@
         <div v-show="openSections.expire" class="accordion-content">
           <div class="form-group">
             <label>حداکثر منقضی شدن در دقیقه</label>
-            <input type="number" v-model.number="settings.offer_expire_rate_per_minute" min="1" max="10" placeholder="2" />
+            <input type="number" v-model.number="settings.offer_expire_rate_per_minute" min="1" max="10" placeholder="2" :class="{'is-default': isDefault('offer_expire_rate_per_minute')}" />
             <span class="hint">پیش‌فرض: 2 بار</span>
           </div>
           <div class="form-group">
             <label>آستانه منقضی شدن روزانه</label>
-            <input type="number" v-model.number="settings.offer_expire_daily_limit_after_threshold" min="1" placeholder="10" />
+            <input type="number" v-model.number="settings.offer_expire_daily_limit_after_threshold" min="1" placeholder="10" :class="{'is-default': isDefault('offer_expire_daily_limit_after_threshold')}" />
             <span class="hint">پیش‌فرض: 10 (بعد از این تعداد، محدودیت 1/3 اعمال می‌شود)</span>
           </div>
         </div>
@@ -86,17 +86,17 @@
           </div>
           <div class="form-group">
             <label>آستانه پایه روزانه</label>
-            <input type="number" v-model.number="settings.anti_abuse_daily_base" min="1" placeholder="2" />
+            <input type="number" v-model.number="settings.anti_abuse_daily_base" min="1" placeholder="2" :class="{'is-default': isDefault('anti_abuse_daily_base')}" />
             <span class="hint">تعداد لاگین مجاز در ۲۴ ساعت (برای ۱ نشست)</span>
           </div>
           <div class="form-group">
             <label>آستانه پایه هفتگی</label>
-            <input type="number" v-model.number="settings.anti_abuse_weekly_base" min="1" placeholder="5" />
+            <input type="number" v-model.number="settings.anti_abuse_weekly_base" min="1" placeholder="5" :class="{'is-default': isDefault('anti_abuse_weekly_base')}" />
             <span class="hint">تعداد لاگین مجاز در ۷ روز (برای ۱ نشست)</span>
           </div>
           <div class="form-group">
             <label>آستانه پایه ماهانه</label>
-            <input type="number" v-model.number="settings.anti_abuse_monthly_base" min="1" placeholder="7" />
+            <input type="number" v-model.number="settings.anti_abuse_monthly_base" min="1" placeholder="7" :class="{'is-default': isDefault('anti_abuse_monthly_base')}" />
             <span class="hint">تعداد لاگین مجاز در ۳۰ روز (برای ۱ نشست)</span>
           </div>
         </div>
@@ -144,7 +144,7 @@ const toggleSection = (section) => {
   openSections.value[section] = !openSections.value[section]
 }
 
-const settings = ref({
+const defaultVals = {
   invitation_expiry_days: 2,
   offer_expiry_minutes: 2,
   offer_min_quantity: 5,
@@ -155,6 +155,14 @@ const settings = ref({
   anti_abuse_daily_base: 2,
   anti_abuse_weekly_base: 5,
   anti_abuse_monthly_base: 7
+}
+
+const isDefault = (key) => {
+  return settings.value[key] === defaultVals[key] || settings.value[key] == null || settings.value[key] === ''
+}
+
+const settings = ref({
+  ...defaultVals
 })
 
 const fetchApi = async (method, endpoint, body = null) => {
