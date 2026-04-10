@@ -60,6 +60,11 @@ class TradingSettings(BaseModel):
     # آستانه تعداد منقضی شدن در روز که بعد از آن محدودیت 1/3 اعمال می‌شود
     offer_expire_daily_limit_after_threshold: int = 10
     
+    # حدنصاب پایه برای محدودیت درخواست لاگین به صورت روزانه/هفتگی/ماهانه
+    anti_abuse_daily_base: int = 2
+    anti_abuse_weekly_base: int = 5
+    anti_abuse_monthly_base: int = 7
+    
     # --- مقادیر محاسباتی ---
     @property
     def invitation_expiry_minutes(self) -> int:
