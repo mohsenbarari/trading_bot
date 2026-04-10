@@ -15,7 +15,7 @@
         <div v-show="openSections.invitation" class="accordion-content">
           <div class="form-group">
             <label>مدت اعتبار لینک دعوت (روز)</label>
-            <input type="number" v-model.number="settings.invitation_expiry_days" min="1" />
+            <input type="number" v-model.number="settings.invitation_expiry_days" min="1" placeholder="2" />
             <span class="hint">پیش‌فرض: 2 روز</span>
           </div>
         </div>
@@ -30,24 +30,24 @@
         <div v-show="openSections.offer" class="accordion-content">
           <div class="form-group">
             <label>مدت اعتبار لفظ (دقیقه)</label>
-            <input type="number" v-model.number="settings.offer_expiry_minutes" min="1" />
+            <input type="number" v-model.number="settings.offer_expiry_minutes" min="1" placeholder="2" />
             <span class="hint">پیش‌فرض: 2 دقیقه</span>
           </div>
           <div class="form-row">
             <div class="form-group">
               <label>حداقل تعداد کالا</label>
-              <input type="number" v-model.number="settings.offer_min_quantity" min="1" />
+              <input type="number" v-model.number="settings.offer_min_quantity" min="1" placeholder="5" />
               <span class="hint">پیش‌فرض: 5</span>
             </div>
             <div class="form-group">
               <label>حداکثر تعداد کالا</label>
-              <input type="number" v-model.number="settings.offer_max_quantity" min="1" />
+              <input type="number" v-model.number="settings.offer_max_quantity" min="1" placeholder="50" />
               <span class="hint">پیش‌فرض: 50</span>
             </div>
           </div>
           <div class="form-group">
             <label>حداکثر لفظ‌های فعال همزمان</label>
-            <input type="number" v-model.number="settings.max_active_offers" min="1" max="20" />
+            <input type="number" v-model.number="settings.max_active_offers" min="1" max="20" placeholder="4" />
             <span class="hint">پیش‌فرض: 4</span>
           </div>
         </div>
@@ -62,12 +62,12 @@
         <div v-show="openSections.expire" class="accordion-content">
           <div class="form-group">
             <label>حداکثر منقضی شدن در دقیقه</label>
-            <input type="number" v-model.number="settings.offer_expire_rate_per_minute" min="1" max="10" />
+            <input type="number" v-model.number="settings.offer_expire_rate_per_minute" min="1" max="10" placeholder="2" />
             <span class="hint">پیش‌فرض: 2 بار</span>
           </div>
           <div class="form-group">
             <label>آستانه منقضی شدن روزانه</label>
-            <input type="number" v-model.number="settings.offer_expire_daily_limit_after_threshold" min="1" />
+            <input type="number" v-model.number="settings.offer_expire_daily_limit_after_threshold" min="1" placeholder="10" />
             <span class="hint">پیش‌فرض: 10 (بعد از این تعداد، محدودیت 1/3 اعمال می‌شود)</span>
           </div>
         </div>
