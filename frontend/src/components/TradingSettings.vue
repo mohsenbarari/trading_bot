@@ -53,10 +53,10 @@
         </div>
       </div>
 
-      <!-- محدودیت منقضی شدن -->
+      <!-- محدودیت منقضی کردن -->
       <div class="accordion-section">
         <div class="accordion-header" @click="toggleSection('expire')">
-          <h2>⏰ محدودیت منقضی کردن</h2>
+          <h2>⏰ محدودیت منقضی کردن لفظ‌ها</h2>
           <span class="accordion-icon">{{ openSections.expire ? '▼' : '◀' }}</span>
         </div>
         <div v-show="openSections.expire" class="accordion-content">
@@ -134,7 +134,7 @@ const message = ref('')
 const messageType = ref('success')
 
 const openSections = ref({
-  invitation: true,
+  invitation: false,
   offer: false,
   expire: false,
   security: false
@@ -314,6 +314,11 @@ onMounted(() => {
   border: 1px solid rgba(245, 158, 11, 0.15); border-radius: 0.75rem;
   font-size: 0.9rem; background: white; color: #1f2937; outline: none;
   transition: all 0.2s;
+}
+.form-group input::placeholder {
+  color: #cbd5e1;
+  font-weight: 400;
+  opacity: 1;
 }
 .form-group input:focus {
   border-color: #f59e0b;
