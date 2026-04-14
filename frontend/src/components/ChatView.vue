@@ -183,6 +183,21 @@ const {
   handleMediaUploadWrapper
 } = mediaLogic
 
+const selectedLocation = ref<{ lat: number, lng: number } | null>(null)
+
+function handleLocationClick(msg: Message) {
+  try {
+    const loc = JSON.parse(msg.content)
+    selectedLocation.value = loc
+  } catch {
+    console.error('Failed to parse location data')
+  }
+}
+
+function closeLocationModal() {
+  selectedLocation.value = null
+}
+
 const {
   loadConversations,
   loadMessages,
@@ -793,6 +808,7 @@ defineExpose({ startNewChat })
 
 import ChatForwardModal from './chat/ChatForwardModal.vue'
 import ChatLightbox from './chat/ChatLightbox.vue'
+import ChatLocationModal from './chat/ChatLocationModal.vue'
 import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 </script>
 
@@ -899,6 +915,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
               @context-menu="showContextMenu"
               @scroll-to="scrollToMessage"
               @media-click="handleMediaClick"
+              @location-click="handleLocationClick"
               @download="downloadMedia"
             />
           </div> <!-- End v-for="groupedMessages" message-group -->
@@ -986,6 +1003,12 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
     <ChatLightbox 
       :lightboxMedia="lightboxMedia" 
       @close="closeLightbox" 
+    />
+
+    <!-- Location Modal Overlay -->
+    <ChatLocationModal
+      :location="selectedLocation"
+      @close="closeLocationModal"
     />
 
     </template>

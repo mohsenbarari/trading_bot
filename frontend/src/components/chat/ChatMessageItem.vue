@@ -140,7 +140,7 @@
 
       <!-- Location -->
       <template v-else-if="msg.message_type === 'location'">
-        <div class="msg-location" @click="openLocationInMaps">
+        <div class="msg-location" @click="$emit('location-click', msg)">
           <div class="location-preview">
             <svg viewBox="0 0 24 24" width="32" height="32" fill="#E53935">
               <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
@@ -194,6 +194,7 @@ const emit = defineEmits<{
   (e: 'click-message', event: Event, msg: any): void
   (e: 'scroll-to', msgId: number): void
   (e: 'media-click', msg: any): void
+  (e: 'location-click', msg: any): void
   (e: 'download', msg: any): void
 }>()
 
@@ -207,15 +208,6 @@ const isCached = computed(() => !!props.imageCache[getFileId(props.msg.content)]
 const cachedUrl = computed(() => props.imageCache[getFileId(props.msg.content)])
 const thumbnail = computed(() => getImageThumbnail(props.msg.content))
 const formattedTime = computed(() => formatTime(props.msg.created_at))
-
-function openLocationInMaps() {
-  try {
-    const loc = JSON.parse(props.msg.content)
-    const lat = loc.latitude
-    const lng = loc.longitude
-    window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank')
-  } catch { /* ignore */ }
-}
 
 function escapeHtml(unsafe: string) {
   return (unsafe || '').replace(/[&<"'>]/g, function (m) {
