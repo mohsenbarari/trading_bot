@@ -195,9 +195,32 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
         const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
 
         try {
-            const response = await fetch(fullUrl, config);
+            const originalResponse = await fetch(fullUrl, config);
             
             // If we were connecting/retrying, we reconnected successfully
+            if (isAppConnecting.value) isAppConnecting.value = false;
+
+            // Proxy the response to intercept json() and clone()
+            const response = new Proxy(originalResponse, {
+                get(target: any, prop: string) {
+                    if (prop === 'json') {
+                        return async () => {
+                            const data = await target.json();
+                            return cleanDeletedSuffixes(data);
+                        };
+                    }
+                    if (prop === 'clone') {
+                        return () => {
+                            const cloned = target.clone();
+                            return new Proxy(cloned, this); // apply the same handler to the clone
+                        };
+                    }
+                    const value = target[prop];
+                    return typeof value === 'function' ? value.bind(target) : value;
+                }
+            });
+
+            // 🔴 403 Forbidden with specific detail
             if (isAppConnecting.value) isAppConnecting.value = false;
 
             // 🔴 403 Forbidden with specific detail
@@ -267,6 +290,8 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
         }
     }
 }
+
+import { cleanDeletedSuffixes } from './formatters';
 
 export async function apiFetchJson(url: string, options: RequestInit = {}) {
     const response = await apiFetch(url, options);

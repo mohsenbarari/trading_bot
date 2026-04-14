@@ -156,12 +156,16 @@ let startY = 0
 let currentTranslateY = 0
 
 function onTouchStart(e: TouchEvent) {
-  startY = e.touches[0].clientY
+  const touch = e.touches[0]
+  if (!touch) return
+  startY = touch.clientY
   currentTranslateY = 0
 }
 
 function onTouchMove(e: TouchEvent) {
-  const dy = e.touches[0].clientY - startY
+  const touch = e.touches[0]
+  if (!touch) return
+  const dy = touch.clientY - startY
   if (dy > 0) {
     currentTranslateY = dy
     if (sheetRef.value) {
