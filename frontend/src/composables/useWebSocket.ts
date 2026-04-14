@@ -1,5 +1,7 @@
 import { ref } from 'vue';
 
+import { cleanDeletedSuffixes } from '../utils/formatters';
+
 const isConnected = ref(false);
 let socket: WebSocket | null = null;
 let reconnectInterval: any = null;
@@ -55,7 +57,8 @@ export function useWebSocket() {
 
         socket.onmessage = (event) => {
             try {
-                const message = JSON.parse(event.data);
+                let message = JSON.parse(event.data);
+                message = cleanDeletedSuffixes(message);
                 if (message.type === 'heartbeat') return;
 
                 // Dispatch to listeners

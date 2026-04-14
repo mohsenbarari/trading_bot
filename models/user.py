@@ -61,3 +61,7 @@ class User(Base):
         """Soft delete: mark user as deleted without removing from DB."""
         self.is_deleted = True
         self.deleted_at = datetime.utcnow()
+        if hasattr(self, "id") and self.id:
+            self.account_name = f"{self.account_name}_del_{self.id}"
+            self.mobile_number = f"{self.mobile_number}_del_{self.id}"
+        self.telegram_id = None
