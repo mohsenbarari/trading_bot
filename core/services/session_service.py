@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.session import UserSession, SessionLoginRequest, LoginRequestStatus, Platform
 from models.user import User, UserRole
-from core.trading_settings import get_trading_settings
+from core.trading_settings import get_trading_settings_async
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +185,7 @@ async def handle_login_session(
     redis = await get_redis()
 
     # Check anti-abuse thresholds
-    settings = await get_trading_settings()
+    settings = await get_trading_settings_async()
     anti_abuse_base = {
         "daily": settings.anti_abuse_daily_base,
         "weekly": settings.anti_abuse_weekly_base,
