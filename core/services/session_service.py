@@ -291,13 +291,27 @@ async def approve_login_request(
     # Load user to get max_sessions
     user = (await db.execute(select(User).where(User.id == login_req.user_id))).scalar_one()
     active_sessions = await get_active_sessions(db, login_req.user_id)
+    max_sessions_allowed = get_effective_max_sessions(user)
 
-    # Find the newest non-primary session to evict
-    non_primary = [s for s in active_sessions if not s.is_primary]
-    if non_primary:
-        # Evict the newest non-primary session
-        newest_non_primary = non_primary[-1]  # list is ordered ASC, so last is newest
-        await deactivate_session(db, newest_non_primary)
+    # Determine how many sessions to evict to make room for the new one
+    num_to_evict = max(0, len(active_sessions) - max_sessions_allowed + 1)
+    
+    for _ in range(num_to_evict):
+        if not active_sessions: 
+            break
+        non_primary = [s for s in active_sessions if not s.is_primary]
+        if non_primary:
+            # Evict newest non-primary session
+            to_evict = non_primary[-1]
+        else:
+            # Reached max_sessions and only primary left, we must evict the primary to respect the limit
+            primaries = [s for s in active_sessions if s.is_primary]
+            to_evict = primaries[-1] if primaries else active_sessions[-1]
+            
+        await deactivate_session(db, to_evict)
+        active_sessions.remove(to_evict)
+
+    has_primary = any(s.is_primary for s in active_sessions)
 
     # Mark request as approved
     login_req.status = LoginRequestStatus.APPROVED
@@ -309,7 +323,7 @@ async def approve_login_request(
         login_req.requester_device_name,
         login_req.requester_ip,
         platform,
-        is_primary=False,
+        is_primary=(not has_primary),
     )
 
     await db.commit()
