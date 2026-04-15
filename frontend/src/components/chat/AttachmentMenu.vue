@@ -10,7 +10,7 @@
       <div
         v-if="modelValue"
         ref="sheetRef"
-        class="attachment-sheet"
+        :class="['attachment-sheet', { 'full-screen-sheet': activeTab === 'location' }]"
         @touchstart="onTouchStart"
         @touchmove="onTouchMove"
         @touchend="onTouchEnd"
@@ -94,6 +94,13 @@
                   attribution="&copy; OpenStreetMap"
                 />
               </l-map>
+              <!-- Return to my location button -->
+              <button class="my-location-btn" @click="goToMyLocation(false)" title="مکان من">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2v2M12 20v2M2 12h2M20 12h2M12 5a7 7 0 1 0 0 14 7 7 0 0 0 0-14z"/>
+                  <circle cx="12" cy="12" r="2" fill="currentColor"/>
+                </svg>
+              </button>
               <!-- Fixed center pin -->
               <div class="center-pin">
                 <svg viewBox="0 0 24 36" width="36" height="48" fill="#E53935">
@@ -192,6 +199,16 @@ watch(() => props.modelValue, (val) => {
   if (val) activeTab.value = 'gallery'
 })
 
+watch(() => activeTab.value, (val) => {
+  if (val === 'location') {
+    // Optionally trigger map resize to fix leaflet gray rendering
+    setTimeout(() => {
+      mapRef.value?.leafletObject?.invalidateSize()
+      goToMyLocation(true) // Automatically try to fetch location on open
+    }, 300)
+  }
+})
+
 // Gallery file handler (compresses images)
 async function onGalleryFile(e: Event) {
   const input = e.target as HTMLInputElement
@@ -238,6 +255,35 @@ function onMapMoveEnd() {
   }
 }
 
+function goToMyLocation(silent = false) {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude
+        const lng = position.coords.longitude
+        mapCenter.value = [lat, lng]
+        selectedLatLng.value = { lat, lng }
+        
+        const map = mapRef.value?.leafletObject
+        if (map) {
+          map.setView([lat, lng], 15)
+        }
+      },
+      (error) => {
+        console.error('Geolocation error:', error)
+        if (silent !== true) {
+          alert('امکان دریافت مکان شما وجود ندارد. لطفا دسترسی مرورگر را بررسی کنید.')
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    )
+  } else {
+    if (silent !== true) {
+      alert('مرورگر شما از مکان‌یابی پشتیبانی نمی‌کند.')
+    }
+  }
+}
+
 function sendLocation() {
   emit('select-location', selectedLatLng.value.lat, selectedLatLng.value.lng)
   close()
@@ -264,8 +310,38 @@ function sendLocation() {
   display: flex;
   flex-direction: column;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.15);
-  transition: transform 0.15s ease-out;
-  will-change: transform;
+  transition: all 0.2s ease-out;
+  will-change: transform, height, max-height, border-radius;
+}
+
+.full-screen-sheet {
+  max-height: 100vh !important;
+  height: 100dvh !important;
+  border-radius: 0 !important;
+}
+
+.full-screen-sheet .sheet-content {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.full-screen-sheet .location-panel {
+  flex: 1;
+  gap: 0;
+}
+
+.full-screen-sheet .map-wrapper {
+  height: auto;
+  border-radius: 0;
+  border: none;
+  flex: 1;
+}
+
+.full-screen-sheet .send-location-btn {
+  border-radius: 0;
+  padding: 16px 12px;
+  font-size: 16px;
 }
 
 .sheet-handle {
@@ -377,6 +453,30 @@ function sendLocation() {
   width: 100%;
   height: 100%;
   z-index: 1;
+}
+
+.my-location-btn {
+  position: absolute;
+  bottom: 24px;
+  right: 16px;
+  z-index: 1000;
+  width: 48px;
+  height: 48px;
+  background: white;
+  border: none;
+  border-radius: 50%;
+  border: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #3390ec;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.my-location-btn:active {
+  transform: scale(0.9);
+  background: #f3f4f6;
 }
 
 .center-pin {
