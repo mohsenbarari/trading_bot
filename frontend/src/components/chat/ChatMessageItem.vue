@@ -141,7 +141,15 @@
       <!-- Location -->
       <template v-else-if="msg.message_type === 'location'">
         <div class="msg-location" @click="$emit('location-click', msg)">
-          <div class="location-preview">
+          <div v-if="mapSnapshotUrl" class="location-snapshot" :style="{ backgroundImage: `url(${mapSnapshotUrl})` }">
+            <div class="location-pin">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="#E53935">
+                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+              </svg>
+            </div>
+            <div class="location-label-overlay">📍 موقعیت مکانی</div>
+          </div>
+          <div v-else class="location-preview fallback">
             <svg viewBox="0 0 24 24" width="32" height="32" fill="#E53935">
               <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
             </svg>
@@ -208,6 +216,27 @@ const isCached = computed(() => !!props.imageCache[getFileId(props.msg.content)]
 const cachedUrl = computed(() => props.imageCache[getFileId(props.msg.content)])
 const thumbnail = computed(() => getImageThumbnail(props.msg.content))
 const formattedTime = computed(() => formatTime(props.msg.created_at))
+
+// Location parsing
+const locationData = computed(() => {
+  if (props.msg.message_type === 'location' && props.msg.content) {
+    try {
+      return JSON.parse(props.msg.content)
+    } catch {
+      return null
+    }
+  }
+  return null
+})
+
+const mapSnapshotUrl = computed(() => {
+  if (locationData.value && locationData.value.snapshot_id) {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+    const token = localStorage.getItem('auth_token') || ''
+    return `${baseUrl}/api/chat/files/${locationData.value.snapshot_id}?token=${token}`
+  }
+  return null
+})
 
 function escapeHtml(unsafe: string) {
   return (unsafe || '').replace(/[&<"'>]/g, function (m) {
@@ -436,9 +465,39 @@ function getImageThumbnail(content: string) {
 .msg-sticker { font-size: 48px; }
 .msg-location {
   cursor: pointer;
-  padding: 8px;
+  padding: 4px;
 }
-.location-preview {
+.location-snapshot {
+  position: relative;
+  width: 250px;
+  height: 150px;
+  background-size: cover;
+  background-position: center;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.location-pin {
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+  transform: translateY(-8px); /* Adjust to make pin point to center */
+}
+.location-label-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  text-align: center;
+  font-size: 12px;
+  padding: 4px 0;
+  font-weight: 500;
+  backdrop-filter: blur(2px);
+}
+.location-preview.fallback {
   display: flex;
   align-items: center;
   gap: 8px;
