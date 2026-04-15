@@ -488,6 +488,19 @@ async def send_message(
     msg_data["sender_name"] = current_user.account_name
     await publish_user_event(data.receiver_id, "chat:message", msg_data)
 
+    return MessageRead.from_orm_with_forwarding(message)
+
+
+@router.put("/messages/{message_id}", response_model=MessageRead)
+async def update_message(
+    message_id: int,
+    data: MessageUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """ویرایش پیام (محدودیت ۴۸ ساعت)"""
+    msg = await db.get(Message, message_id)
+    if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
         
     if msg.sender_id != current_user.id:
