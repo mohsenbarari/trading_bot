@@ -161,8 +161,18 @@ const tabs = [
 // Swipe to dismiss
 let startY = 0
 let currentTranslateY = 0
+let isDraggingAllowed = true
 
 function onTouchStart(e: TouchEvent) {
+  isDraggingAllowed = true
+  const target = e.target as HTMLElement
+  
+  // Prevent drag-to-dismiss if the user is interacting with the map
+  if (target.closest('.map-wrapper')) {
+    isDraggingAllowed = false
+    return
+  }
+
   const touch = e.touches[0]
   if (!touch) return
   startY = touch.clientY
@@ -170,6 +180,8 @@ function onTouchStart(e: TouchEvent) {
 }
 
 function onTouchMove(e: TouchEvent) {
+  if (!isDraggingAllowed) return
+  
   const touch = e.touches[0]
   if (!touch) return
   const dy = touch.clientY - startY
@@ -182,6 +194,8 @@ function onTouchMove(e: TouchEvent) {
 }
 
 function onTouchEnd() {
+  if (!isDraggingAllowed) return
+  
   if (currentTranslateY > 100) {
     close()
   } else if (sheetRef.value) {
