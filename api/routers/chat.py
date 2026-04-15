@@ -35,8 +35,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-async def generate_location_snapshot(lat: float, lng: float) -> Optional[str]:
-    """Generate a static map image from the internal tileserver and save to uploads."""
+async def generate_location_snapshot(db: AsyncSession, uploader_id: int, lat: float, lng: float) -> Optional[str]:
+    """Generate a static map image from the internal tileserver, save to uploads, and create ChatFile entry."""
     try:
         # Use tileserver-gl static API via docker network
         tile_url = f"http://tileserver:8080/styles/basic-preview/static/{lng},{lat},15/600x400.png"
@@ -53,6 +53,18 @@ async def generate_location_snapshot(lat: float, lng: float) -> Optional[str]:
 
         async with aiofiles.open(file_path, "wb") as f:
             await f.write(resp.content)
+
+        # Create DB entry for the file so the frontend can request it via /api/chat/files/{id}
+        chat_file = ChatFile(
+            id=file_id,
+            uploader_id=uploader_id,
+            s3_key=file_path,
+            file_name=f"location_preview_{file_id[:8]}.png",
+            mime_type="image/png",
+            size=len(resp.content)
+        )
+        db.add(chat_file)
+        await db.flush()
 
         return file_id
     except Exception as e:
@@ -414,6 +426,22 @@ async def send_message(
     
     if data.receiver_id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot send message to yourself")
+        
+    # Synchronously generate location snapshot to attach its ID in content immediately
+    if data.message_type == MessageType.LOCATION:
+        try:
+            loc = json.loads(data.content)
+            lat = float(loc.get("lat", loc.get("latitude")))
+            lng = float(loc.get("lng", loc.get("longitude")))
+            loc["lat"], loc["lng"] = lat, lng # normalize
+            
+            file_id = await generate_location_snapshot(db, current_user.id, lat, lng)
+            if file_id:
+                loc["snapshot_id"] = file_id
+            
+            data.content = json.dumps(loc)
+        except Exception as e:
+            logger.warning(f"Failed to generate location snapshot: {e}")
     
     # ایجاد پیام
     message = Message(
@@ -460,32 +488,6 @@ async def send_message(
     msg_data["sender_name"] = current_user.account_name
     await publish_user_event(data.receiver_id, "chat:message", msg_data)
 
-    # Generate location snapshot in background (non-blocking)
-    if data.message_type == MessageType.LOCATION:
-        async def _generate_snapshot():
-            try:
-                loc = json.loads(data.content)
-                lat, lng = float(loc["latitude"]), float(loc["longitude"])
-                file_id = await generate_location_snapshot(lat, lng)
-                if file_id:
-                    logger.info(f"Location snapshot saved: {file_id} for message {message.id}")
-            except Exception as e:
-                logger.warning(f"Location snapshot generation failed: {e}")
-        asyncio.create_task(_generate_snapshot())
-
-    return MessageRead.from_orm_with_forwarding(message)
-
-
-@router.put("/messages/{message_id}", response_model=MessageRead)
-async def update_message(
-    message_id: int,
-    data: MessageUpdate,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """ویرایش پیام (محدودیت ۴۸ ساعت)"""
-    msg = await db.get(Message, message_id)
-    if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
         
     if msg.sender_id != current_user.id:
