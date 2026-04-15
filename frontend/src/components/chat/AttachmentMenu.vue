@@ -311,12 +311,13 @@ function sendLocation() {
   flex-direction: column;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.15);
   transition: all 0.2s ease-out;
-  will-change: transform, height, max-height, border-radius;
+  will-change: transform, height, max-height, border-radius, top;
 }
 
 .full-screen-sheet {
-  max-height: 100vh !important;
-  height: 100dvh !important;
+  top: 0 !important;
+  max-height: 100% !important;
+  height: 100% !important;
   border-radius: 0 !important;
 }
 
