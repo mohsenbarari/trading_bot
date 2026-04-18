@@ -62,11 +62,35 @@
       
       <!-- Recording Overlay state -->
       <template v-if="isRecording">
+        <!-- Send Button on the right -->
+        <button 
+          v-ripple
+          class="send-btn-inline" 
+          @click="stopVoiceRecording" 
+        >
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#3390ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(45deg); margin-left: -4px;">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+
         <div class="recording-state">
           <div class="mic-active-pulse"></div>
           <span class="recording-time">{{ recordingDisplay }}</span>
-          <span class="recording-hint">👈 برای لغو بکشید</span>
+          <span class="recording-hint animate-pulse" style="color: #3390ec;">درحال ضبط...</span>
         </div>
+
+        <!-- Cancel Button on the left -->
+        <button 
+          v-ripple
+          class="cancel-voice-btn" 
+          @click="cancelVoiceRecording"
+        >
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </button>
       </template>
 
       <!-- Left side buttons (Only if not recording) -->
@@ -74,14 +98,7 @@
         <button 
           v-ripple 
           class="voice-btn"
-          @touchstart.stop.prevent="startVoiceRecording"
-          @touchmove.stop="handleVoiceMove"
-          @touchend.stop="stopVoiceRecording"
-          @touchcancel.stop="cancelVoiceRecording"
-          @mousedown.left.prevent="startVoiceRecording"
-          @mousemove.prevent="handleVoiceMove"
-          @mouseup.left.prevent="stopVoiceRecording"
-          @mouseleave.prevent="cancelVoiceRecording"
+          @click="startVoiceRecording"
         >
           <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
@@ -214,20 +231,8 @@ const recordingDisplay = computed(() => {
 })
 
 let recorder: AudioRecorder | null = null
-let startX = 0
-let currentX = 0
-const MOUSE_CANCEL_THRESHOLD = 80 // swipe left distance to cancel
 
-const startVoiceRecording = async (e: TouchEvent | MouseEvent) => {
-  if (e instanceof TouchEvent) {
-    const touch = e.touches[0] || e.changedTouches?.[0]
-    if (!touch) return
-    startX = touch.clientX
-  } else {
-    startX = e.clientX
-  }
-  currentX = startX
-  
+const startVoiceRecording = async () => {
   if (!recorder) {
     recorder = new AudioRecorder((ms) => {
       recordingTimeMs.value = ms
@@ -244,28 +249,13 @@ const startVoiceRecording = async (e: TouchEvent | MouseEvent) => {
   }
 }
 
-const handleVoiceMove = (e: TouchEvent | MouseEvent) => {
-  if (!isRecording.value) return
-  if (e instanceof TouchEvent) {
-    const touch = e.touches[0] || e.changedTouches?.[0]
-    if (!touch) return
-    currentX = touch.clientX
-  } else {
-    currentX = e.clientX
-  }
-  
-  if (startX - currentX > MOUSE_CANCEL_THRESHOLD) {
-    cancelVoiceRecording()
-  }
-}
-
 const stopVoiceRecording = async () => {
   if (!isRecording.value || !recorder) return
   isRecording.value = false
   const blob = await recorder.stop()
   
-  // Only send if more than 1 second recorded
-  if (blob && recordingTimeMs.value > 1000) {
+  // Only send if more than 0.5 second recorded
+  if (blob && recordingTimeMs.value > 500) {
     emit('send-voice', blob, recordingTimeMs.value)
   }
   recordingTimeMs.value = 0
@@ -395,13 +385,14 @@ const sendSticker = (sticker: string) => {
   font-size: 14px;
 }
 
-.emoji-btn, .attach-btn, .voice-btn {
+.emoji-btn, .attach-btn, .voice-btn, .cancel-voice-btn {
   background: none; border: none; padding: 0; margin: 0; cursor: pointer; display: flex;
   align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px;
 }
-.emoji-btn svg, .attach-btn svg, .voice-btn svg { width: 28px; height: 28px; }
+.emoji-btn svg, .attach-btn svg, .voice-btn svg, .cancel-voice-btn svg { width: 28px; height: 28px; }
 .emoji-btn { margin-left: 4px; }
 .attach-btn, .voice-btn { margin-right: 4px; }
+.cancel-voice-btn { margin-left: 4px; }
 
 .send-btn-inline {
   background: none; border: none; padding: 0; margin: 0; cursor: pointer; display: flex;
