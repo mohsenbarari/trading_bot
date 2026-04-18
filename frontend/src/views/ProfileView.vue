@@ -236,8 +236,7 @@ onMounted(() => {
 /* Content */
 .profile-content {
   padding: 1.25rem;
-  padding-bottom: 2rem;
-  max-width: 480px;
+  padding-bottom: 2rem;  width: 100%;  max-width: 480px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
