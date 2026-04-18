@@ -213,7 +213,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useAudioStore } from '../../stores/audio'
 
 const props = defineProps<{
   msg: any
@@ -236,6 +237,8 @@ const emit = defineEmits<{
   (e: 'location-click', msg: any): void
   (e: 'download', msg: any): void
 }>()
+
+const audioStore = useAudioStore()
 
 // --- Computed State ---
 const isSent = computed(() => props.msg.sender_id === props.currentUserId)
@@ -296,11 +299,22 @@ const formattedVoiceTime = computed(() => {
   return `${mins}:${secs.toString().padStart(2, '0')}`
 })
 
+// Stop playing if global state changes to another message
+watch(() => audioStore.currentPlayingId, (newId) => {
+  if (newId !== props.msg.id && isPlaying.value && audioRef.value) {
+    audioRef.value.pause()
+    isPlaying.value = false
+  }
+})
+
 const toggleVoice = () => {
   if (!audioRef.value) return
   if (isPlaying.value) {
     audioRef.value.pause()
+    audioStore.setCurrentPlaying(null)
   } else {
+    // Set this message as currently playing (will stop others via watch)
+    audioStore.setCurrentPlaying(props.msg.id)
     audioRef.value.play()
   }
   isPlaying.value = !isPlaying.value
@@ -323,6 +337,9 @@ const onAudioEnded = () => {
   isPlaying.value = false
   voiceProgress.value = 0
   voiceCurrentTime.value = 0
+  if (audioStore.currentPlayingId === props.msg.id) {
+    audioStore.setCurrentPlaying(null)
+  }
 }
 
 const seekVoice = (e: MouseEvent) => {
