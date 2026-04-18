@@ -1,18 +1,26 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { usePWAInstall } from '../utils/pwaInstall'
 
 const { isInstallable, isInstalled, installApp } = usePWAInstall()
 const showOverlay = ref(false)
 
+// تشخیص سیستم‌عامل برای نمایش راهنمای اختصاصی
+const isIOS = computed(() => {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
+})
+
 onMounted(() => {
-  // Check if we should show the prompt (not installed and haven't dismissed it recently)
   const lastDismissed = localStorage.getItem('pwa_prompt_dismissed')
   const now = Date.now()
   
-  // Wait 3 seconds after load to show the prompt for better UX
   setTimeout(() => {
-    if (isInstallable.value && !isInstalled.value) {
+    // در اندروید/دسکتاپ از isInstallable استفاده می‌کنیم (Chrome/Edge)
+    // در iOS چون رویداد beforeinstallprompt نداریم، همیشه دکمه راهنما را نشان می‌دهیم اگر نصب نشده باشد
+    const shouldShowForAndroid = isInstallable.value && !isInstalled.value
+    const shouldShowForIOS = isIOS.value && !isInstalled.value && !((window.navigator as any).standalone)
+
+    if (shouldShowForAndroid || shouldShowForIOS) {
         if (!lastDismissed || (now - parseInt(lastDismissed)) > 24 * 60 * 60 * 1000) {
             showOverlay.value = true
         }
@@ -26,6 +34,11 @@ const dismiss = () => {
 }
 
 const handleInstall = async () => {
+    if (isIOS.value) {
+        // در iOS فقط راهنما نشان می‌دهیم چون API نصب خودکار وجود ندارد
+        alert('در مرورگر Safari، روی دکمه Share (پایین صفحه) بزنید و سپس گزینه "Add to Home Screen" را انتخاب کنید.')
+        return
+    }
     const success = await installApp()
     if (success) {
         showOverlay.value = false
@@ -42,11 +55,14 @@ const handleInstall = async () => {
         </div>
         <div class="pwa-info">
           <h3>نصب اپلیکیشن</h3>
-          <p>برای دسترسی سریع‌تر و تجربه بهتر، نسخه اپلیکیشن را نصب کنید.</p>
+          <p v-if="isIOS">برای نصب در آیفون، از منوی پایین Safari گزینه Add to Home Screen را بزنید.</p>
+          <p v-else>برای دسترسی سریع‌تر و تجربه بهتر، نسخه اپلیکیشن را نصب کنید.</p>
         </div>
         <div class="pwa-actions">
           <button class="btn-dismiss" @click="dismiss">بعداً</button>
-          <button class="btn-install" @click="handleInstall">نصب</button>
+          <button class="btn-install" @click="handleInstall">
+            {{ isIOS ? 'راهنما' : 'نصب' }}
+          </button>
         </div>
       </div>
     </div>
