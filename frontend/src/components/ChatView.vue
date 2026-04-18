@@ -925,6 +925,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
               @media-click="handleMediaClick"
               @location-click="handleLocationClick"
               @download="downloadMedia"
+              :on-load="() => loadImageForMessage(msg.content, msg.message_type)"
             />
           </div> <!-- End v-for="groupedMessages" message-group -->
         
