@@ -3,6 +3,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { onMounted, watch } from 'vue'
 import BottomNav from './components/BottomNav.vue'
 import SessionApprovalModal from './components/SessionApprovalModal.vue'
+import PWAInstallOverlay from './components/PWAInstallOverlay.vue'
 import AppToasts from './components/AppToasts.vue'
 import { setupExpiryTimer, apiFetch, logout, isAppConnecting } from './utils/auth'
 import { useWebSocket } from './composables/useWebSocket'
@@ -148,6 +149,9 @@ onMounted(() => {
 
     <!-- Global In-App Toast Notifications -->
     <AppToasts v-if="route.name !== 'login'" />
+
+    <!-- PWA Install Overlay -->
+    <PWAInstallOverlay />
     
   </div>
 </template>
