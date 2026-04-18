@@ -61,6 +61,19 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     } = options
 
     const notificationStore = useNotificationStore()
+    const textSendControllers = new Map<number, AbortController>()
+
+    function cancelTextMessage(id: number) {
+        const controller = textSendControllers.get(id);
+        if (controller) {
+            controller.abort();
+            textSendControllers.delete(id);
+        }
+        const index = messages.value.findIndex(m => m.id === id);
+        if (index !== -1) {
+            messages.value.splice(index, 1);
+        }
+    }
 
     let pollTimer: number | null = null
     const POLL_INTERVAL = 30000
@@ -273,10 +286,16 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             };
             if (replyTo) body.reply_to_message_id = replyTo.id;
 
+            const abortController = new AbortController();
+            textSendControllers.set(tempId, abortController);
+
             const serverMsg = await apiFetch('/chat/send', {
                 method: 'POST',
-                body: JSON.stringify(body)
+                body: JSON.stringify(body),
+                signal: abortController.signal
             });
+
+            textSendControllers.delete(tempId);
 
             const idx = messages.value.findIndex(m => m.id === tempId);
             if (idx !== -1) {
@@ -284,7 +303,10 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             }
 
             nextTick(() => messageInputRef.value?.focus());
-        } catch (err) {
+        } catch (err: any) {
+            textSendControllers.delete(tempId);
+            if (err.name === 'AbortError') return;
+
             console.error('Failed to send message:', err);
             const idx = messages.value.findIndex(m => m.id === tempId);
             if (idx !== -1 && messages.value[idx]) {
@@ -376,6 +398,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     }
 
     return {
+        cancelTextMessage,
         apiFetch,
         loadConversations,
         loadMessages,

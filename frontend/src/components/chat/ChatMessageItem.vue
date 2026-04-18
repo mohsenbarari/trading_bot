@@ -103,6 +103,7 @@
                     <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
                     <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.upload_progress}, 100`"></circle>
                   </svg>
+                  <div class="progress-cancel" @click.stop="$emit('cancel-send', msg)">✕</div>
                   <span class="progress-text">{{ msg.upload_progress }}%</span>
                 </div>
               </div>
@@ -153,11 +154,12 @@
             <div class="voice-time">{{ formattedVoiceTime }}</div>
           </div>
           
-          <div v-if="msg.is_sending && msg.upload_progress !== undefined" class="msg-voice-uploading">
+          <div v-if="msg.is_sending && msg.upload_progress !== undefined" class="msg-voice-uploading" @click.stop="$emit('cancel-send', msg)">
             <svg class="progress-ring-small" viewBox="0 0 36 36">
               <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
               <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.upload_progress}, 100`"></circle>
             </svg>
+            <div class="voice-cancel-icon" style="position: absolute; top:50%; left:50%; transform: translate(-50%, -50%); font-size:12px; color:white;">✕</div>
           </div>
           <audio ref="audioRef" :src="cachedUrl || msg.local_blob_url" @timeupdate="onAudioTimeUpdate" @ended="onAudioEnded" @loadedmetadata="onAudioLoaded"></audio>
         </div>
@@ -195,9 +197,12 @@
         </span>
         <span v-if="isSent" class="msg-status">
           <!-- Sending -->
-          <svg v-if="isSending" viewBox="0 0 24 24" class="icon-clock" width="16" height="16" style="color: #aaa;">
-              <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm4.2 14.2L11 13V7h1.5v5.2l4.5 2.7-.8 1.3z" fill="currentColor"/>
-          </svg>
+          <div v-if="isSending" class="sending-status-wrapper">
+             <span class="cancel-text-btn" @click.stop="$emit('cancel-send', msg)" title="لغو ارسال">✕</span>
+             <svg viewBox="0 0 24 24" class="icon-clock" width="16" height="16" style="color: #aaa;">
+                 <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm4.2 14.2L11 13V7h1.5v5.2l4.5 2.7-.8 1.3z" fill="currentColor"/>
+             </svg>
+          </div>
           <!-- Read -->
           <svg v-else-if="msg.is_read" viewBox="0 0 24 24" class="icon-read" width="16" height="16">
             <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"/>
@@ -236,6 +241,7 @@ const emit = defineEmits<{
   (e: 'media-click', msg: any): void
   (e: 'location-click', msg: any): void
   (e: 'download', msg: any): void
+  (e: 'cancel-send', msg: any): void
 }>()
 
 const audioStore = useAudioStore()
@@ -676,6 +682,45 @@ function getImageThumbnail(content: string) {
   background-color: rgba(255, 200, 0, 0.5);
   color: inherit;
   border-radius: 2px;
+  padding: 0 2px;
+}
+
+.progress-cancel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+  background: rgba(0,0,0,0.5);
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.voice-cancel-icon {
+  background: rgba(0,0,0,0.5);
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.sending-status-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.cancel-text-btn {
+  color: #ff4444;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: bold;
   padding: 0 2px;
 }
 </style>

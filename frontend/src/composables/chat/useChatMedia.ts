@@ -28,6 +28,17 @@ export function useChatMedia(options: UseChatMediaOptions) {
     } = options
 
     let activeUploadsCount = 0
+    const uploadControllers = new Map<number, { abort: () => void }>()
+
+    function cancelUpload(id: number) {
+        const controller = uploadControllers.get(id);
+        if (controller) {
+            controller.abort();
+            uploadControllers.delete(id);
+            activeUploadsCount = Math.max(0, activeUploadsCount - 1);
+            isUploading.value = activeUploadsCount > 0;
+        }
+    }
 
     // === IndexedDB Image Cache ===
     const imageCache = ref<Record<string, string>>({})
@@ -311,6 +322,16 @@ export function useChatMedia(options: UseChatMediaOptions) {
             step = 'xhr_upload'
             const data = await new Promise<any>((resolve, reject) => {
                 const xhr = new XMLHttpRequest()
+                uploadControllers.set(optimisticId, {
+                    abort: () => {
+                        const target = getOptimisticTarget();
+                        if (target) target.is_error = false; // to prevent error UI
+                        xhr.abort();
+                        const index = messages.value.findIndex(m => m.id === optimisticId);
+                        if (index !== -1) messages.value.splice(index, 1);
+                        reject(new Error('UploadCancelled'))
+                    }
+                });
                 xhr.open('POST', `${apiBaseUrl}/api/chat/upload-media`)
                 xhr.setRequestHeader('Authorization', `Bearer ${jwtToken}`)
 
@@ -344,8 +365,17 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     }
                 }
                 xhr.onerror = () => reject(new Error("Network Error"))
-                xhr.send(formData)
+                xhr.onabort = () => {
+                uploadControllers.delete(optimisticId)
+            }
+            
+            xhr.onloadend = () => {
+                uploadControllers.delete(optimisticId)
+            }
+            
+            xhr.send(formData)
             })
+            uploadControllers.delete(optimisticId);
 
             step = 'prepare_json'
             const contentObj: any = {
@@ -385,6 +415,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
     }
 
     return {
+        cancelUpload,
         imageCache,
         loadImageForMessage,
         openCachedImage,

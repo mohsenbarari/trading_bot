@@ -178,6 +178,7 @@ const {
   openCachedImage,
   downloadMedia,
   lightboxMedia,
+  cancelUpload,
   handleMediaClick,
   closeLightbox,
   handleMediaUploadWrapper
@@ -194,6 +195,14 @@ function handleLocationClick(msg: Message) {
   }
 }
 
+const handleCancelSend = (msg: any) => {
+  if (msg.message_type === 'text') {
+    cancelTextMessage(msg.id);
+  } else {
+    cancelUpload(msg.id);
+  }
+};
+
 function closeLocationModal() {
   selectedLocation.value = null
 }
@@ -204,6 +213,7 @@ const {
   markAsRead,
   sendMessage,
   sendMediaMessage,
+  cancelTextMessage,
   cancelEdit,
   handleReply,
   cancelReply,
@@ -925,6 +935,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
               @media-click="handleMediaClick"
               @location-click="handleLocationClick"
               @download="downloadMedia"
+              @cancel-send="handleCancelSend"
               :on-load="() => loadImageForMessage(msg.content, msg.message_type)"
             />
           </div> <!-- End v-for="groupedMessages" message-group -->
