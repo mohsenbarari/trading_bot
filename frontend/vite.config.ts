@@ -13,9 +13,9 @@ export default defineConfig({
         clientsClaim: true,
         skipWaiting: true
       },
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
+      includeAssets: ['favicon.ico', 'pwa-192x192.png', 'pwa-512x512.png'],
       manifest: {
-        id: '/',
+        id: '/?source=pwa',
         name: 'Gold',
         short_name: 'Gold',
         description: 'بازار امن معاملات طلا و سکه',
@@ -27,25 +27,25 @@ export default defineConfig({
         orientation: 'portrait',
         icons: [
           {
-            src: 'pwa-192x192.png',
+            src: '/pwa-192x192.png',
             sizes: '192x192',
             type: 'image/png',
             purpose: 'any'
           },
           {
-            src: 'pwa-192x192.png',
+            src: '/pwa-192x192.png',
             sizes: '192x192',
             type: 'image/png',
             purpose: 'maskable'
           },
           {
-            src: 'pwa-512x512.png',
+            src: '/pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any'
           },
           {
-            src: 'pwa-512x512.png',
+            src: '/pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable'
@@ -57,7 +57,7 @@ export default defineConfig({
   build: {
     outDir: '../mini_app_dist',
     emptyOutDir: true,
-    target: 'es2020',  // Ensures compatibility with iOS 14+ / Safari 14+
+    target: 'es2020',
   },
   server: {
     proxy: {
