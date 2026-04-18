@@ -162,34 +162,6 @@
         </div>
       </template>
       
-      <!-- Voice Message -->
-      <template v-else-if="msg.message_type === 'voice'">
-        <div class="msg-voice">
-          <button class="voice-play-btn" @click.stop="toggleVoice">
-            <svg v-if="!isPlaying" viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
-              <path d="M8 5v14l11-7z"/>
-            </svg>
-            <svg v-else viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
-              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-            </svg>
-          </button>
-          <div class="voice-progress-container">
-            <div class="voice-waveform" ref="waveformRef" @click="seekVoice">
-              <div class="voice-progress-fill" :style="{ width: `${voiceProgress}%` }"></div>
-            </div>
-            <div class="voice-time">{{ formattedVoiceTime }}</div>
-          </div>
-          
-          <div v-if="msg.is_sending && msg.upload_progress !== undefined" class="msg-voice-uploading">
-            <svg class="progress-ring-small" viewBox="0 0 36 36">
-              <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
-              <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.upload_progress}, 100`"></circle>
-            </svg>
-          </div>
-          <audio ref="audioRef" :src="cachedUrl || msg.local_blob_url" @timeupdate="onAudioTimeUpdate" @ended="onAudioEnded" @loadedmetadata="onAudioLoaded"></audio>
-        </div>
-      </template>
-      
       <!-- Sticker -->
       <template v-else-if="msg.message_type === 'sticker'">
         <div class="msg-sticker">{{ msg.content }}</div>
@@ -294,60 +266,6 @@ const mapSnapshotUrl = computed(() => {
   }
   return null
 })
-
-// Voice State
-const audioRef = ref<HTMLAudioElement | null>(null)
-const isPlaying = ref(false)
-const voiceProgress = ref(0)
-const voiceDuration = ref(0)
-const voiceCurrentTime = ref(0)
-
-const formattedVoiceTime = computed(() => {
-  const time = isPlaying.value ? voiceCurrentTime.value : (voiceDuration.value || 0)
-  const mins = Math.floor(time / 60)
-  const secs = Math.floor(time % 60)
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-})
-
-const toggleVoice = () => {
-  if (!audioRef.value) return
-  if (isPlaying.value) {
-    audioRef.value.pause()
-  } else {
-    audioRef.value.play()
-  }
-  isPlaying.value = !isPlaying.value
-}
-
-const onAudioTimeUpdate = (e: Event) => {
-  const t = e.target as HTMLAudioElement
-  voiceCurrentTime.value = t.currentTime
-  voiceProgress.value = (t.currentTime / (voiceDuration.value || 1)) * 100
-}
-
-const onAudioLoaded = (e: Event) => {
-  const t = e.target as HTMLAudioElement
-  if (t.duration && t.duration !== Infinity && !isNaN(t.duration)) {
-     voiceDuration.value = t.duration
-  } else {
-    // fallback if metadata doesn't contain duration
-    voiceDuration.value = 0
-  }
-}
-
-const onAudioEnded = () => {
-  isPlaying.value = false
-  voiceProgress.value = 0
-  voiceCurrentTime.value = 0
-}
-
-const seekVoice = (e: MouseEvent) => {
-  if (!audioRef.value) return
-  const el = e.currentTarget as HTMLElement
-  const rect = el.getBoundingClientRect()
-  const percent = (e.clientX - rect.left) / rect.width
-  audioRef.value.currentTime = percent * (voiceDuration.value || 1)
-}
 
 function escapeHtml(unsafe: string) {
   return (unsafe || '').replace(/[&<"'>]/g, function (m) {
@@ -676,62 +594,5 @@ function getImageThumbnail(content: string) {
   color: inherit;
   border-radius: 2px;
   padding: 0 2px;
-}
-</style>
-<style scoped>
-.msg-voice {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: rgba(0,0,0,0.05);
-  border-radius: 8px;
-  padding: 10px;
-  width: 250px;
-  direction: ltr; /* Force LTR for audio player */
-}
-.voice-play-btn {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: var(--primary-color, #4A90E2);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.voice-play-btn svg {
-  width: 24px;
-  height: 24px;
-  fill: currentColor;
-}
-
-.voice-waveform {
-  flex-grow: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.voice-progress-container {
-  width: 100%;
-  height: 4px;
-  background: rgba(0,0,0,0.1);
-  border-radius: 2px;
-  cursor: pointer;
-  position: relative;
-}
-.voice-progress-fill {
-  height: 100%;
-  background: var(--primary-color, #4A90E2);
-  border-radius: 2px;
-  position: absolute;
-  left: 0;
-  top: 0;
-}
-
-.voice-time {
-  font-size: 0.75rem;
-  color: #666;
 }
 </style>
