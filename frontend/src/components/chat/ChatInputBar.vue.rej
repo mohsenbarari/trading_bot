@@ -1,0 +1,74 @@
+--- ChatInputBar.vue
++++ ChatInputBar.vue
+@@ -3,6 +3,7 @@
+ import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+ import type { Message } from '../../schemas'
+ import { useChatMedia } from '../../composables/chat/useChatMedia'
++import { AudioRecorder } from '../../utils/audioRecorder'
+ 
+ const props = defineProps<{
+   currentUserId: number
+@@ -34,6 +36,63 @@
+   if (!el) return
+   el.style.height = '1px'
+   el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+   emit('typing')
+ }
+ 
++// Voice Recording State
++const isRecording = ref(false)
++const recordingTimeMs = ref(0)
++const recordingDisplay = computed(() => {
++  const totalSeconds = Math.floor(recordingTimeMs.value / 1000)
++  const mins = Math.floor(totalSeconds / 60)
++  const secs = totalSeconds % 60
++  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
++})
++
++let recorder: AudioRecorder | null = null
++let startX = 0
++let currentX = 0
++const MOUSE_CANCEL_THRESHOLD = 50 // pixels to swipe left to cancel
++
++const startVoiceRecording = async (e: TouchEvent | MouseEvent) => {
++  e.preventDefault()
++  if (e instanceof TouchEvent) {
++    startX = e.touches[0].clientX
++  } else {
++    startX = e.clientX
++  }
++  currentX = startX
++  
++  recorder = new AudioRecorder((ms) => {
++    recordingTimeMs.value = ms
++  })
++  try {
++    await recorder.start()
++    isRecording.value = true
++  } catch (error) {
++    console.error('Failed to start recording:', error)
++  }
++}
++
++const handleVoiceMove = (e: TouchEvent | MouseEvent) => {
++  if (!isRecording.value || !recorder) return
++  if (e instanceof TouchEvent) {
++    currentX = e.touches[0].clientX
++  } else {
++    currentX = e.clientX
++  }
++  if (startX - currentX > MOUSE_CANCEL_THRESHOLD) {
++    cancelVoiceRecording()
++  }
++}
++
++const stopVoiceRecording = async () => {
++  if (!isRecording.value || !recorder) return
++  isRecording.value = false
++  const blob = await recorder.stop()
++  if (blob && recordingTimeMs.value > 1000) { // at least 1 second
++    emit('send-voice', blob, recordingTimeMs.value)
++  }
++  recordingTimeMs.value = 0
++}
++

@@ -613,6 +613,12 @@ function openForwardModal() {
   if (selectedMessages.value.length > 0) showForwardModal.value = true
 }
 
+async function handleSendVoice(blob: Blob, durationMs: number) {
+  if (!selectedUserId.value || !blob) return
+  const file = new File([blob], `voice_${Date.now()}.webm`, { type: blob.type || 'audio/webm' })
+  await handleMediaUploadWrapper(file)
+}
+
 async function handleSendLocation(lat: number, lng: number) {
   if (!selectedUserId.value) return
   const content = JSON.stringify({ latitude: lat, longitude: lng })
@@ -967,6 +973,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         @toggle-attachment="showAttachmentMenu = !showAttachmentMenu"
         @send-text="(text: string) => { messageInput = text; sendMessage(); }"
         @send-sticker="sendSticker"
+        @send-voice="handleSendVoice"
         @typing="handleTypingWrapper"
       />
 

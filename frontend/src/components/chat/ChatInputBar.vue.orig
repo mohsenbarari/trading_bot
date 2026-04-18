@@ -59,30 +59,9 @@
 
     <!-- Input Container -->
     <div v-else class="input-container">
-      
-      <!-- Recording Overlay state -->
-      <template v-if="isRecording">
-        <div class="recording-state">
-          <div class="mic-active-pulse"></div>
-          <span class="recording-time">{{ recordingDisplay }}</span>
-          <span class="recording-hint">👈 برای لغو بکشید</span>
-        </div>
-      </template>
-
-      <!-- Left side buttons (Only if not recording) -->
-      <template v-if="!messageInput.trim() && !isRecording">
-        <button 
-          v-ripple 
-          class="voice-btn"
-          @touchstart.stop.prevent="startVoiceRecording"
-          @touchmove.stop="handleVoiceMove"
-          @touchend.stop="stopVoiceRecording"
-          @touchcancel.stop="cancelVoiceRecording"
-          @mousedown.left.prevent="startVoiceRecording"
-          @mousemove.prevent="handleVoiceMove"
-          @mouseup.left.prevent="stopVoiceRecording"
-          @mouseleave.prevent="cancelVoiceRecording"
-        >
+      <!-- Left side buttons -->
+      <template v-if="!messageInput.trim()">
+        <button v-ripple class="voice-btn">
           <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
             <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
@@ -100,7 +79,7 @@
 
       <!-- Send Button -->
       <button 
-        v-else-if="!isRecording"
+        v-else
         v-ripple
         class="send-btn-inline" 
         @click="sendMessage" 
@@ -114,9 +93,8 @@
         </svg>
       </button>
 
-      <!-- Text Input (Hide when recording) -->
+      <!-- Text Input -->
       <textarea
-        v-show="!isRecording"
         ref="messageInputRef"
         v-model="messageInput"
         rows="1"
@@ -126,7 +104,7 @@
       ></textarea>
 
       <!-- Emoji/Sticker Toggle -->
-      <button v-if="!isRecording" class="emoji-btn" v-ripple @click="showStickerPicker = !showStickerPicker">
+      <button class="emoji-btn" v-ripple @click="showStickerPicker = !showStickerPicker">
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"></circle>
           <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
@@ -158,8 +136,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
-import { AudioRecorder } from '../../utils/audioRecorder'
+import { ref, nextTick } from 'vue'
 
 const props = defineProps<{
   replyingToMessage: any | null
@@ -183,7 +160,6 @@ const emit = defineEmits<{
   (e: 'toggle-attachment'): void
   (e: 'send-text', content: string): void
   (e: 'send-sticker', sticker: string): void
-  (e: 'send-voice', blob: Blob, durationMs: number): void
   (e: 'typing'): void
 }>()
 
@@ -201,86 +177,6 @@ const adjustTextareaHeight = () => {
   el.style.height = '1px'
   el.style.height = Math.min(el.scrollHeight, 200) + 'px'
   emit('typing')
-}
-
-// Voice Recording State
-const isRecording = ref(false)
-const recordingTimeMs = ref(0)
-const recordingDisplay = computed(() => {
-  const totalSeconds = Math.floor(recordingTimeMs.value / 1000)
-  const mins = Math.floor(totalSeconds / 60)
-  const secs = totalSeconds % 60
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-})
-
-let recorder: AudioRecorder | null = null
-let startX = 0
-let currentX = 0
-const MOUSE_CANCEL_THRESHOLD = 80 // swipe left distance to cancel
-
-const startVoiceRecording = async (e: TouchEvent | MouseEvent) => {
-  if (e instanceof TouchEvent) {
-    const touch = e.touches[0] || e.changedTouches?.[0]
-    if (!touch) return
-    startX = touch.clientX
-  } else {
-    startX = e.clientX
-  }
-  currentX = startX
-  
-  if (!recorder) {
-    recorder = new AudioRecorder((ms) => {
-      recordingTimeMs.value = ms
-    })
-  }
-
-  try {
-    await navigator.mediaDevices.getUserMedia({ audio: true }) // Request permission explicitly if needed
-    await recorder.start()
-    isRecording.value = true
-  } catch (err) {
-    console.error('Failed to start mic', err)
-    alert('امکان دسترسی به میکروفون وجود ندارد.')
-  }
-}
-
-const handleVoiceMove = (e: TouchEvent | MouseEvent) => {
-  if (!isRecording.value) return
-  if (e instanceof TouchEvent) {
-    const touch = e.touches[0] || e.changedTouches?.[0]
-    if (!touch) return
-    currentX = touch.clientX
-  } else {
-    currentX = e.clientX
-  }
-  
-  if (startX - currentX > MOUSE_CANCEL_THRESHOLD) {
-    cancelVoiceRecording()
-  }
-}
-
-const stopVoiceRecording = async () => {
-  if (!isRecording.value || !recorder) return
-  isRecording.value = false
-  const blob = await recorder.stop()
-  
-  // Only send if more than 1 second recorded
-  if (blob && recordingTimeMs.value > 1000) {
-    emit('send-voice', blob, recordingTimeMs.value)
-  }
-  recordingTimeMs.value = 0
-  
-  // reset input height just in case
-  nextTick(() => {
-    if (messageInputRef.value) messageInputRef.value.style.height = 'auto'
-  })
-}
-
-const cancelVoiceRecording = () => {
-  if (!isRecording.value || !recorder) return
-  isRecording.value = false
-  recorder.cancel()
-  recordingTimeMs.value = 0
 }
 
 const handleEnter = (e: KeyboardEvent) => {
@@ -310,47 +206,6 @@ const sendSticker = (sticker: string) => {
 </script>
 
 <style scoped>
-.recording-state {
-  display: flex;
-  align-items: center;
-  flex: 1;
-  padding: 0 12px;
-  gap: 12px;
-}
-.mic-active-pulse {
-  width: 10px;
-  height: 10px;
-  background-color: #E53935;
-  border-radius: 50%;
-  animation: pulse-red 1.2s infinite;
-}
-@keyframes pulse-red {
-  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(229, 57, 53, 0.7); }
-  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(229, 57, 53, 0); }
-  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(229, 57, 53, 0); }
-}
-.recording-time {
-  font-family: monospace;
-  font-size: 16px;
-  font-weight: 500;
-  color: #333;
-}
-.recording-hint {
-  font-size: 14px;
-  color: #8E8E93;
-  margin-right: auto;
-  opacity: 0.8;
-}
-.voice-btn {
-  user-select: none;
-  touch-action: none; /* important for preventing scroll while swiping */
-}
-.voice-btn:active svg {
-  transform: scale(1.2);
-  transition: transform 0.1s;
-  stroke: #3390ec;
-}
-
 .input-area {
   display: flex;
   flex-direction: column;

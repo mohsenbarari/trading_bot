@@ -219,6 +219,12 @@ export function useChatMedia(options: UseChatMediaOptions) {
         if (!file) return
 
         const isVideo = file.type.startsWith('video/')
+        const isAudio = file.type.startsWith('audio/')
+        
+        let msgType: 'video' | 'voice' | 'image' = 'image'
+        if (isVideo) msgType = 'video'
+        else if (isAudio) msgType = 'voice'
+        
         if (!selectedUserId.value) return
 
         activeUploadsCount++
@@ -232,7 +238,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             sender_id: currentUserId,
             receiver_id: selectedUserId.value,
             content: JSON.stringify({ placeholder: true }),
-            message_type: isVideo ? 'video' : 'image',
+            message_type: msgType,
             is_read: true,
             is_sending: true,
             upload_progress: 0,
@@ -257,6 +263,9 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 } catch (warn) {
                     console.warn("Video thumbnail failed:", warn)
                 }
+            } else if (isAudio) {
+                step = 'skip_audio_thumb'
+                // No thumbnail processing for voice
             } else {
                 step = 'compress_main'
                 try {
@@ -292,7 +301,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             step = 'xhr_upload'
             const data = await new Promise<any>((resolve, reject) => {
                 const xhr = new XMLHttpRequest()
-                xhr.open('POST', `${apiBaseUrl}/api/chat/upload-image`)
+                xhr.open('POST', `${apiBaseUrl}/api/chat/upload-media`)
                 xhr.setRequestHeader('Authorization', `Bearer ${jwtToken}`)
 
                 xhr.upload.onprogress = (e) => {
@@ -336,10 +345,15 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
             step = 'save_local_cache'
             await saveToDB(data.file_id, uploadFile)
-            imageCache.value = { ...imageCache.value, [data.file_id]: localUrl }
+            if (!isAudio) {
+                // we probably don't need a Blob URL in the image cache for voice, but it's safe to store
+                imageCache.value = { ...imageCache.value, [data.file_id]: localUrl }
+            } else {
+                imageCache.value = { ...imageCache.value, [data.file_id]: localUrl }
+            }
 
             step = 'send_ws_message'
-            await sendMediaMessage(isVideo ? 'video' : 'image', messageContent, localUrl)
+            await sendMediaMessage(msgType, messageContent, localUrl)
 
         } catch (e: any) {
             console.error(`Upload error at step [${step}]:`, e);
