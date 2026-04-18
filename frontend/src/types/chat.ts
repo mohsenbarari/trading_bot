@@ -15,7 +15,7 @@ export interface Message {
     sender_id: number
     receiver_id: number
     content: string
-    message_type: 'text' | 'image' | 'video' | 'sticker' | 'location'
+    message_type: 'text' | 'image' | 'video' | 'voice' | 'sticker' | 'location'
     is_read: boolean
     is_sending?: boolean
     upload_progress?: number
