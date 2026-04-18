@@ -15,6 +15,7 @@ export default defineConfig({
       },
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
+        id: '/',
         name: 'Gold',
         short_name: 'Gold',
         description: 'بازار امن معاملات طلا و سکه',
@@ -22,17 +23,20 @@ export default defineConfig({
         background_color: '#ffffff',
         display: 'standalone',
         start_url: '/',
+        scope: '/',
         orientation: 'portrait',
         icons: [
           {
             src: 'pwa-192x192.png',
             sizes: '192x192',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any'
           },
           {
-            src: 'pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png'
+            src: 'pwa-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'maskable'
           },
           {
             src: 'pwa-512x512.png',
