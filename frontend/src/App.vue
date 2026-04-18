@@ -123,7 +123,7 @@ onMounted(() => {
 
 
 <template>
-  <div class="min-h-screen pb-24 font-sans text-gray-900 antialiased selection:bg-primary-500 selection:text-white" style="background: linear-gradient(160deg, #fefce8 0%, #ffffff 40%, #fffbeb 100%)">
+  <div class="h-full flex flex-col font-sans text-gray-900 antialiased selection:bg-primary-500 selection:text-white overflow-hidden" style="background: linear-gradient(160deg, #fefce8 0%, #ffffff 40%, #fffbeb 100%)">
     
     <!-- Global Connecting State -->
     <div v-if="isAppConnecting" class="fixed top-0 left-0 w-full bg-amber-500 text-white text-sm py-1.5 flex items-center justify-center z-[200] gap-2 font-medium shadow-md">
@@ -134,12 +134,14 @@ onMounted(() => {
       در حال اتصال...
     </div>
 
-    <!-- Page Content -->
-    <RouterView v-slot="{ Component }">
-      <transition name="fade" mode="out-in">
-        <component :is="Component" />
-      </transition>
-    </RouterView>
+    <!-- Page Content Container -->
+    <div class="flex-1 relative overflow-y-auto overflow-x-hidden min-h-0 bg-transparent">
+      <RouterView v-slot="{ Component }">
+        <transition name="fade" mode="out-in">
+          <component :is="Component" />
+        </transition>
+      </RouterView>
+    </div>
 
     <!-- Bottom Navigation (Hidden on Login) -->
     <BottomNav v-if="route.name !== 'login'" />

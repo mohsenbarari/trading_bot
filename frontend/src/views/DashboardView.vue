@@ -154,9 +154,8 @@ onMounted(fetchUser)
 
 <style scoped>
 .dashboard-page {
-  min-height: 100dvh;
+  /* No fixed height here, let parent manage it */
   position: relative;
-  overflow-x: hidden;
 }
 
 /* Loading */
@@ -181,12 +180,11 @@ onMounted(fetchUser)
 /* Content */
 .dashboard-content {
   padding: 1.25rem;
-  padding-bottom: 6rem;
+  padding-bottom: 2rem; /* Reduced since App.vue handles scroll margin */
   max-width: 480px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
 }
 
 /* ═══ Top Bar ═══ */
