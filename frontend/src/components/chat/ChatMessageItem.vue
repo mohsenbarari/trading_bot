@@ -145,35 +145,8 @@
               <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
             </svg>
           </button>
-          <div class="voice-progress-container">
-            <div class="voice-waveform" ref="waveformRef" @click="seekVoice">
-              <div class="voice-progress-fill" :style="{ width: `${voiceProgress}%` }"></div>
-            </div>
-            <div class="voice-time">{{ formattedVoiceTime }}</div>
-          </div>
           
-          <div v-if="msg.is_sending && msg.upload_progress !== undefined" class="msg-voice-uploading">
-            <svg class="progress-ring-small" viewBox="0 0 36 36">
-              <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
-              <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.upload_progress}, 100`"></circle>
-            </svg>
-          </div>
-          <audio ref="audioRef" :src="cachedUrl || msg.local_blob_url" @timeupdate="onAudioTimeUpdate" @ended="onAudioEnded" @loadedmetadata="onAudioLoaded"></audio>
-        </div>
-      </template>
-      
-      <!-- Voice Message -->
-      <template v-else-if="msg.message_type === 'voice'">
-        <div class="msg-voice">
-          <button class="voice-play-btn" @click.stop="toggleVoice">
-            <svg v-if="!isPlaying" viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
-              <path d="M8 5v14l11-7z"/>
-            </svg>
-            <svg v-else viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
-              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-            </svg>
-          </button>
-          <div class="voice-progress-container">
+          <div class="voice-body">
             <div class="voice-waveform" ref="waveformRef" @click="seekVoice">
               <div class="voice-progress-fill" :style="{ width: `${voiceProgress}%` }"></div>
             </div>
@@ -240,7 +213,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 const props = defineProps<{
   msg: any
@@ -302,6 +275,17 @@ const voiceProgress = ref(0)
 const voiceDuration = ref(0)
 const voiceCurrentTime = ref(0)
 
+onMounted(() => {
+  if (props.msg.message_type === 'voice' && props.msg.content) {
+    try {
+      const p = JSON.parse(props.msg.content)
+      if (p.durationMs) {
+        voiceDuration.value = p.durationMs / 1000
+      }
+    } catch { }
+  }
+})
+
 const formattedVoiceTime = computed(() => {
   const time = isPlaying.value ? voiceCurrentTime.value : (voiceDuration.value || 0)
   const mins = Math.floor(time / 60)
@@ -329,9 +313,6 @@ const onAudioLoaded = (e: Event) => {
   const t = e.target as HTMLAudioElement
   if (t.duration && t.duration !== Infinity && !isNaN(t.duration)) {
      voiceDuration.value = t.duration
-  } else {
-    // fallback if metadata doesn't contain duration
-    voiceDuration.value = 0
   }
 }
 
@@ -707,19 +688,21 @@ function getImageThumbnail(content: string) {
   fill: currentColor;
 }
 
-.voice-waveform {
-  flex-grow: 1;
+.voice-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  flex-grow: 1;
+  gap: 8px;
+  justify-content: center;
 }
-.voice-progress-container {
+.voice-waveform {
   width: 100%;
   height: 4px;
-  background: rgba(0,0,0,0.1);
+  background: rgba(0,0,0,0.15);
   border-radius: 2px;
   cursor: pointer;
   position: relative;
+  overflow: hidden; /* Prevent fill overflow */
 }
 .voice-progress-fill {
   height: 100%;
@@ -733,5 +716,6 @@ function getImageThumbnail(content: string) {
 .voice-time {
   font-size: 0.75rem;
   color: #666;
+  line-height: 1;
 }
 </style>

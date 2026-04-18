@@ -11,7 +11,7 @@ export interface UseChatMediaOptions {
     error: Ref<string>
     isUploading: Ref<boolean>
     scrollToBottom: () => void
-    sendMediaMessage: (type: 'image' | 'video' | 'sticker', content: string, localBlobUrl?: string) => Promise<void>
+    sendMediaMessage: (type: 'image' | 'video' | 'voice' | 'sticker', content: string, localBlobUrl?: string) => Promise<void>
 }
 
 export function useChatMedia(options: UseChatMediaOptions) {
@@ -221,7 +221,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const isVideo = file.type.startsWith('video/')
         const isAudio = file.type.startsWith('audio/')
         
-        let msgType: 'video' | 'voice' | 'image' = 'image'
+        let msgType: 'video' | 'image' | 'voice' = 'image'
         if (isVideo) msgType = 'video'
         else if (isAudio) msgType = 'voice'
         
@@ -237,7 +237,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             id: optimisticId,
             sender_id: currentUserId,
             receiver_id: selectedUserId.value,
-            content: JSON.stringify({ placeholder: true }),
+            content: JSON.stringify({ placeholder: true, durationMs: (file as any).durationMs }),
             message_type: msgType,
             is_read: true,
             is_sending: true,
@@ -338,10 +338,14 @@ export function useChatMedia(options: UseChatMediaOptions) {
             })
 
             step = 'prepare_json'
-            const messageContent = JSON.stringify({
+            const contentObj: any = {
                 file_id: data.file_id,
                 thumbnail: data.thumbnail
-            })
+            }
+            if ((file as any).durationMs !== undefined) {
+                contentObj.durationMs = (file as any).durationMs
+            }
+            const messageContent = JSON.stringify(contentObj)
 
             step = 'save_local_cache'
             await saveToDB(data.file_id, uploadFile)

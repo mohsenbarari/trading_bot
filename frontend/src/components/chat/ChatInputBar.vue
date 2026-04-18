@@ -240,7 +240,7 @@ const startVoiceRecording = async () => {
   }
 
   try {
-    await navigator.mediaDevices.getUserMedia({ audio: true }) // Request permission explicitly if needed
+    // navigator.mediaDevices.getUserMedia removed here to prevent open microphone leak
     await recorder.start()
     isRecording.value = true
   } catch (err) {

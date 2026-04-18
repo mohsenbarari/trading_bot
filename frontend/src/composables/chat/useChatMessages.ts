@@ -183,7 +183,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         }
     }
 
-    async function sendMediaMessage(type: 'image' | 'video' | 'sticker', content: string, localBlobUrl?: string) {
+    async function sendMediaMessage(type: 'image' | 'video' | 'voice' | 'sticker', content: string, localBlobUrl?: string) {
         if (!selectedUserId.value) return
 
         isSending.value = true
