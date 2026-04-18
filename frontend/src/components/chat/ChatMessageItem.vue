@@ -223,6 +223,7 @@ const props = defineProps<{
   imageCache: Record<string, string>
   isSelectionMode: boolean
   searchQuery?: string
+  onLoad?: () => void
 }>()
 
 const emit = defineEmits<{
@@ -276,6 +277,8 @@ const voiceDuration = ref(0)
 const voiceCurrentTime = ref(0)
 
 onMounted(() => {
+  if (props.onLoad) props.onLoad()
+
   if (props.msg.message_type === 'voice' && props.msg.content) {
     try {
       const p = JSON.parse(props.msg.content)

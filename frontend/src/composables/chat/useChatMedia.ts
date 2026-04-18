@@ -73,7 +73,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         } catch { /* ignore */ }
     }
 
-    async function loadImageForMessage(content: string): Promise<void> {
+    async function loadImageForMessage(content: string, type?: string): Promise<void> {
         if (!content || !content.startsWith('{')) return
         let fileId = ''
         try {
@@ -87,6 +87,16 @@ export function useChatMedia(options: UseChatMediaOptions) {
         if (cached) {
             imageCache.value = { ...imageCache.value, [fileId]: URL.createObjectURL(cached) }
             return
+        }
+
+        // For voice messages, we auto-download if it's not in cache
+        // but image/video might still require manual download click.
+        // We'll allow auto-downloading voice here.
+        if (type !== 'voice' && type !== 'sticker') {
+            // Stickers are small, voice are small enough. 
+            // Images/Videos are large, we only load them if they are in cache,
+            // otherwise the user must click Download.
+            return 
         }
 
         // 2. Fetch from server
