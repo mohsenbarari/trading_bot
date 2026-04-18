@@ -699,26 +699,35 @@ async def get_stickers():
     return stickers
 
 
-@router.post("/upload-image")
-async def upload_chat_image(
+@router.post("/upload-media")
+async def upload_chat_media(
     file: UploadFile = File(...),
     thumbnail: str = File(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """آپلود تصویر برای چت (ذخیره روی دیسک سرور)"""
+    """آپلود فایل برای چت (ذخیره روی دیسک سرور)"""
     allowed_types = [
         "image/jpeg", "image/png", "image/gif", "image/webp",
-        "video/mp4", "video/webm", "video/quicktime", "video/x-matroska"
+        "video/mp4", "video/webm", "video/quicktime", "video/x-matroska",
+        "audio/mp4", "audio/webm", "audio/ogg", "audio/mpeg", "audio/aac", "audio/x-m4a", "audio/wav", "audio/x-wav"
     ]
-    if file.content_type not in allowed_types:
-        raise HTTPException(status_code=400, detail="Only images and videos are allowed")
+    
+    base_content_type = file.content_type.split(";")[0].strip()
+    
+    if base_content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
     
     # بررسی محتوای واقعی فایل با استفاده از Magic bytes
     contents = await file.read()
     mime = magic.from_buffer(contents, mime=True)
+    
+    # allow magic to return "video/webm" for "audio/webm" files
+    if mime == 'video/webm' and base_content_type == 'audio/webm':
+        mime = 'audio/webm'
+
     if mime not in allowed_types:
-        raise HTTPException(status_code=400, detail=f"Invalid file content. Real type is {mime}")
+        raise HTTPException(status_code=400, detail=f"Invalid file content. Real type is {mime} and base type is {base_content_type}")
     
     # بررسی سایز (حداکثر 50MB)
     size = len(contents)
