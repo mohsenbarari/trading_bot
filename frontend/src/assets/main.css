@@ -46,6 +46,17 @@
     overscroll-behavior: none;
     /* Prevents rubber-banding */
     -webkit-overflow-scrolling: touch;
+    
+    /* Global Text Selection Prevention */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  
+  /* Override for elements that MUST be selectable */
+  input, textarea, [contenteditable="true"], .msg-text-content {
+    -webkit-user-select: text;
+    user-select: text;
   }
 
   #app {

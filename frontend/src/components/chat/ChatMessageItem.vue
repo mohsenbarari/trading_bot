@@ -77,9 +77,8 @@
       <!-- Media (Image/Video) -->
       <template v-else-if="msg.message_type === 'image' || msg.message_type === 'video'">
         <div class="msg-media-link"
-             :style="{ backgroundImage: thumbnail ? `url(${thumbnail})` : 'none', backgroundSize: 'cover' }"
-             @click.stop="$emit('media-click', msg)"
-             style="cursor:pointer; position:relative;">
+             :style="mediaStyle"
+             @click.stop="$emit('media-click', msg)">
           
           <!-- 1. Downloaded, Uploading, or Local Render -->
           <template v-if="isCached || msg.local_blob_url">
@@ -196,16 +195,24 @@
       <!-- Document/File Message -->
       <template v-else-if="msg.message_type === 'document'">
         <div class="msg-document" @click.stop="$emit('download', msg)">
-          <div class="doc-icon" :class="docIconClass">
+          <div v-if="msg.is_sending" class="doc-icon doc-uploading" @click.stop="$emit('cancel-send', msg)">
+            <svg class="progress-ring-small" viewBox="0 0 36 36" style="width:36px;height:36px;">
+              <circle class="ring-bg" cx="18" cy="18" r="16" stroke="rgba(255,255,255,0.3)" stroke-width="3" fill="none"></circle>
+              <circle class="ring-fg" cx="18" cy="18" r="16" stroke="#fff" stroke-width="3" fill="none" :stroke-dasharray="`${msg.upload_progress || 0}, 100`" transform="rotate(-90 18 18)"></circle>
+            </svg>
+            <div class="doc-cancel-icon">✕</div>
+          </div>
+          <div v-else class="doc-icon" :class="docIconClass">
             <svg v-if="docExt === 'pdf'" viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h3v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z"/></svg>
             <svg v-else-if="docExt === 'zip' || docExt === 'rar'" viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-6 10h-4v-1h4v1zm0-2h-4v-1h4v1zm0-2h-4V9h4v3z"/></svg>
             <svg v-else viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
           </div>
           <div class="doc-info">
-            <div class="doc-name">{{ docFileName }}</div>
-            <div class="doc-size">{{ docFileSize }}</div>
+            <div class="doc-name">{{ msg.is_sending && msg.local_blob_url ? 'در حال ارسال...' : docFileName }}</div>
+            <div class="doc-size" v-if="msg.is_sending">{{ formatBytes(msg.upload_loaded || 0) }} / {{ formatBytes(msg.upload_total || 0) }}</div>
+            <div class="doc-size" v-else>{{ docFileSize }}</div>
           </div>
-          <div class="doc-download-icon">
+          <div v-if="!msg.is_sending" class="doc-download-icon">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="7 10 12 15 17 10"></polyline>
@@ -292,6 +299,27 @@ const cachedUrl = computed(() => props.imageCache[getFileId(props.msg.content)])
 const thumbnail = computed(() => getImageThumbnail(props.msg.content))
 const formattedTime = computed(() => formatTime(props.msg.created_at))
 
+const mediaStyle = computed(() => {
+  const style: any = {
+    cursor: 'pointer',
+    position: 'relative',
+    backgroundSize: 'cover',
+  }
+  if (thumbnail.value) {
+    style.backgroundImage = `url(${thumbnail.value})`
+  }
+  if (props.msg.message_type === 'image' || props.msg.message_type === 'video') {
+    try {
+      const content = JSON.parse(props.msg.content)
+      if (content.width && content.height) {
+        style.aspectRatio = `${content.width} / ${content.height}`
+        style.maxWidth = '320px'
+      }
+    } catch {}
+  }
+  return style
+})
+
 // Location parsing
 const locationData = computed(() => {
   if (props.msg.message_type === 'location' && props.msg.content) {
@@ -353,100 +381,109 @@ onMounted(() => {
     try {
       const p = JSON.parse(props.msg.content)
       if (p.durationMs) {
-        voiceDuration.value = p.durationMs / 1000
-      }
-    } catch { }
-  }
-})
+        const initWaveSurfer = () => {
+  if (!audioUrl.value || props.msg.message_type !== 'voice') return
+  nextTick(() => {
+    if (wavesurfer) {
+      wavesurfer.destroy()
+    }
+    if (!waveformRef.value) return
+    
+    wavesurfer = WaveSurfer.create({
+      container: waveformRef.value,
+      waveColor: isSent.value ? 'rgba(74, 144, 226, 0.4)' : 'rgba(0, 0, 0, 0.15)',
+      progressColor: isSent.value ? '#3390ec' : 'var(--primary-color, #4A90E2)',
+      cursorWidth: 0,
+      barWidth: 2,
+      barGap: 1.5,
+      barRadius: 2,
+      height: 24,
+      barAlign: 'bottom',
+      normalize: true,
+      url: audioUrl.value,
+      renderFunction: (channels, ctx) => {
+        const { width, height } = ctx.canvas;
+        const barWidth = 2;
+        const barGap = 2;
+        const barCount = Math.floor(width / (barWidth + barGap));
+        const channelData = channels[0];
+        if (!channelData) return;
+        const step = Math.floor(channelData.length / barCount);
+        const activeIndex = Math.floor(wavesurfer.getCurrentTime() / wavesurfer.getDuration() * barCount || 0);
 
-const audioUrl = computed(() => cachedUrl.value || props.msg.local_blob_url)
+        ctx.clearRect(0, 0, width, height);
 
-watch(audioUrl, (newUrl) => {
-  if (newUrl && props.msg.message_type === 'voice') {
-    nextTick(() => {
-      if (wavesurfer) {
-        wavesurfer.destroy()
-      }
-      if (!waveformRef.value) return
-      
-      wavesurfer = WaveSurfer.create({
-        container: waveformRef.value,
-        waveColor: isSent.value ? 'rgba(74, 144, 226, 0.4)' : 'rgba(0, 0, 0, 0.15)',
-        progressColor: isSent.value ? '#3390ec' : 'var(--primary-color, #4A90E2)',
-        cursorWidth: 0,
-        barWidth: 2,
-        barGap: 1.5,
-        barRadius: 2,
-        height: 24,
-        barAlign: 'bottom',
-        normalize: true,
-        url: newUrl,
-        renderFunction: (channels, ctx) => {
-          const { width, height } = ctx.canvas;
-          const barWidth = 2;
-          const barGap = 2;
-          const barCount = Math.floor(width / (barWidth + barGap));
-          const channelData = channels[0];
-          if (!channelData) return;
-          const step = Math.floor(channelData.length / barCount);
-          const activeIndex = Math.floor(wavesurfer.getCurrentTime() / wavesurfer.getDuration() * barCount || 0);
-
-          ctx.clearRect(0, 0, width, height);
-
-          for (let i = 0; i < barCount; i++) {
-            let sum = 0;
-            for (let j = 0; j < step; j++) {
-              sum += Math.abs(channelData[i * step + j] || 0);
-            }
-            const avg = sum / step;
-            const barHeight = Math.max(2, avg * height * 1.5);
-            
-            ctx.fillStyle = i <= activeIndex ? (isSent.value ? '#3390ec' : '#4A90E2') : (isSent.value ? 'rgba(74, 144, 226, 0.4)' : 'rgba(0,0,0,0.15)');
-            
-            // Draw bar from bottom
-            const x = i * (barWidth + barGap);
-            const y = height - barHeight;
-            
-            // Rounded rect
-            const radius = 2;
-            ctx.beginPath();
-            ctx.moveTo(x + radius, y);
-            ctx.lineTo(x + barWidth - radius, y);
-            ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
-            ctx.lineTo(x + barWidth, height);
-            ctx.lineTo(x, height);
-            ctx.lineTo(x, y + radius);
-            ctx.quadraticCurveTo(x, y, x + radius, y);
-            ctx.closePath();
-            ctx.fill();
+        for (let i = 0; i < barCount; i++) {
+          let sum = 0;
+          for (let j = 0; j < step; j++) {
+            sum += Math.abs(channelData[i * step + j] || 0);
           }
+          const avg = sum / step;
+          const barHeight = Math.max(2, avg * height * 1.5);
+          
+          ctx.fillStyle = i <= activeIndex ? (isSent.value ? '#3390ec' : '#4A90E2') : (isSent.value ? 'rgba(74, 144, 226, 0.4)' : 'rgba(0,0,0,0.15)');
+          
+          // Draw bar from bottom
+          const x = i * (barWidth + barGap);
+          const y = height - barHeight;
+          
+          // Rounded rect
+          const radius = 2;
+          ctx.beginPath();
+          ctx.moveTo(x + radius, y);
+          ctx.lineTo(x + barWidth - radius, y);
+          ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
+          ctx.lineTo(x + barWidth, height);
+          ctx.lineTo(x, height);
+          ctx.lineTo(x, y + radius);
+          ctx.quadraticCurveTo(x, y, x + radius, y);
+          ctx.closePath();
+          ctx.fill();
         }
-      })
+      }
+    })
 
-      wavesurfer.on('ready', () => {
-        const d = wavesurfer.getDuration()
-        if (d && !isNaN(d) && d !== Infinity) {
-          voiceDuration.value = d
-        }
-      })
+    wavesurfer.on('ready', () => {
+      const d = wavesurfer.getDuration()
+      if (d && !isNaN(d) && d !== Infinity) {
+        voiceDuration.value = d
+      }
+    })
 
-      wavesurfer.on('audioprocess', () => {
-        voiceCurrentTime.value = wavesurfer.getCurrentTime()
-      })
-      
-      wavesurfer.on('seeking', () => {
-        voiceCurrentTime.value = wavesurfer.getCurrentTime()
-      })
+    wavesurfer.on('audioprocess', () => {
+      voiceCurrentTime.value = wavesurfer.getCurrentTime()
+    })
+    
+    wavesurfer.on('seeking', () => {
+      voiceCurrentTime.value = wavesurfer.getCurrentTime()
+    })
 
-      wavesurfer.on('finish', () => {
-        isPlaying.value = false
-        voiceCurrentTime.value = 0
-        if (audioStore.currentPlayingId === props.msg.id) {
-          audioStore.setCurrentPlaying(null)
-        }
-      })
+    wavesurfer.on('finish', () => {
+      isPlaying.value = false
+      voiceCurrentTime.value = 0
+      if (audioStore.currentPlayingId === props.msg.id) {
+        audioStore.setCurrentPlaying(null)
+      }
+    })
 
-      wavesurfer.on('play', () => {
+    wavesurfer.on('play', () => {
+      isPlaying.value = true
+    })
+
+    wavesurfer.on('pause', () => {
+      isPlaying.value = false
+    })
+  })
+}
+
+watch(audioUrl, initWaveSurfer)
+
+// Make sure to init on mounted if url is already present
+onMounted(() => {
+  if (audioUrl.value) {
+    initWaveSurfer()
+  }
+})r.on('play', () => {
         isPlaying.value = true
       })
 
@@ -788,6 +825,18 @@ function getImageThumbnail(content: string) {
 .doc-icon.doc-excel { background: linear-gradient(135deg, #43a047, #2e7d32); }
 .doc-icon.doc-word { background: linear-gradient(135deg, #1e88e5, #1565c0); }
 .doc-icon.doc-generic { background: linear-gradient(135deg, #78909c, #546e7a); }
+.doc-icon.doc-uploading {
+  background: var(--primary-color, #3390ec);
+  position: relative;
+}
+.doc-cancel-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  font-weight: bold;
+}
 .doc-info {
   flex: 1;
   min-width: 0;
