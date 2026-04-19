@@ -1,7 +1,7 @@
 @import "tailwindcss";
 /* @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@100..900&display=swap'); */
 
-@theme {
+/* @theme {
   --font-sans: 'Vazirmatn', sans-serif;
 
   --color-primary-50: #fffbf0;
@@ -13,6 +13,7 @@
   --color-primary-600: #d97706;
   --color-primary-700: #b45309;
   --color-primary-800: #92400e;
+} */
   --color-primary-900: #78350f;
 
   --color-secondary-50: #f8fafc;
@@ -25,7 +26,6 @@
   --color-secondary-700: #334155;
   --color-secondary-800: #1e293b;
   --color-secondary-900: #0f172a;
-}
 
 
 @layer base {
@@ -59,17 +59,54 @@
 
 @layer utilities {
   .btn-primary {
-    @apply w-full py-3 px-4 bg-gradient-to-r from-primary-500 to-primary-600 text-white font-bold rounded-xl shadow-lg hover:shadow-xl active:scale-95 transition-all duration-200 flex items-center justify-center gap-2;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: linear-gradient(to right, var(--color-primary-500), var(--color-primary-600));
+    color: white;
+    font-weight: 700;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+  .btn-primary:hover {
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  }
+  .btn-primary:active {
+    transform: scale(0.95);
   }
 
   .input-premium {
-    @apply w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition-all duration-200 text-right placeholder:text-gray-400;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background-color: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.75rem;
+    outline: none;
+    transition: all 0.2s;
+    text-align: right;
+  }
+  .input-premium:focus {
+    box-shadow: 0 0 0 2px var(--color-primary-500);
+    border-color: transparent;
+  }
+  .input-premium::placeholder {
+    color: #9ca3af;
+  }
+  
+  .input-premium {
     direction: rtl;
   }
 
   .card-glass {
-    @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-lg rounded-2xl;
-    /* shadow-glass not native, used standard shadow */
+    background-color: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    border-radius: 1rem;
   }
 }
 

@@ -981,7 +981,7 @@ async function deleteUser() {
 
 /* Hide header submit/check buttons to prevent reset bug */
 .vpd-header .vpd-icon-btn svg {
-    /* We cannot verify the SVG path easily in CSS, but checking for specific classes usually helps */
+    display: block;
 }
 
 /* Specific fix for the top-left button in Time View (which resets date) */

@@ -46,6 +46,7 @@ onMounted(() => {
   // Handle Resize
   const resizeObserver = new ResizeObserver(entries => {
       const entry = entries[0];
+      if (!entry) return;
       const { width, height } = entry.contentRect;
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
