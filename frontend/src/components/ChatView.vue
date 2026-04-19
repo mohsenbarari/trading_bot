@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch, onUnmounted, nextTick } from 'vue'
 import ConversationSkeleton from './chat/ConversationSkeleton.vue'
 import ChatSkeleton from './chat/ChatSkeleton.vue'
+import ChatAlbumLayout from './chat/ChatAlbumLayout.vue'
 import ChatHeader from './chat/ChatHeader.vue'
 import ChatInputBar from './chat/ChatInputBar.vue'
 import ChatMessageItem from './chat/ChatMessageItem.vue'
@@ -289,27 +290,56 @@ const canCopySelected = computed(() => {
 })
 
 const groupedMessages = computed(() => {
-  const groups: { label: string, messages: any[] }[] = []
+  const groups: { label: string, items: any[] }[] = []
   if (messages.value.length === 0) return groups;
-  const firstMsg = messages.value[0];
-  if (!firstMsg) return groups;
   
-  let currentLabel = formatDateForSeparator(firstMsg.created_at)
-  let currentGroup: any[] = [firstMsg]
+  let currentLabel = formatDateForSeparator(messages.value[0].created_at)
+  let currentGroup: any[] = [messages.value[0]]
   
   for (let i = 1; i < messages.value.length; i++) {
       const msg = messages.value[i]
       if (!msg) continue;
       const label = formatDateForSeparator(msg.created_at)
       if (label !== currentLabel) {
-          groups.push({ label: currentLabel, messages: currentGroup })
+          groups.push({ label: currentLabel, items: currentGroup })
           currentLabel = label
           currentGroup = [msg]
       } else {
           currentGroup.push(msg)
       }
   }
-  groups.push({ label: currentLabel, messages: currentGroup })
+  groups.push({ label: currentLabel, items: currentGroup })
+
+  // Collapse consecutive media into albums
+  groups.forEach(group => {
+    const collapsedItems: any[] = []
+    let currentAlbum: any = null
+
+    group.items.forEach(msg => {
+      const isMedia = msg.message_type === 'image' || msg.message_type === 'video'
+      if (isMedia && !msg.reply_to_message) {
+        if (!currentAlbum) {
+          currentAlbum = { type: 'album', id: 'album_' + msg.id, sender_id: msg.sender_id, messages: [msg] }
+        } else if (currentAlbum.sender_id === msg.sender_id) {
+          currentAlbum.messages.push(msg)
+        } else {
+          collapsedItems.push(currentAlbum.messages.length > 1 ? currentAlbum : currentAlbum.messages[0])
+          currentAlbum = { type: 'album', id: 'album_' + msg.id, sender_id: msg.sender_id, messages: [msg] }
+        }
+      } else {
+        if (currentAlbum) {
+          collapsedItems.push(currentAlbum.messages.length > 1 ? currentAlbum : currentAlbum.messages[0])
+          currentAlbum = null
+        }
+        collapsedItems.push(msg)
+      }
+    })
+    if (currentAlbum) {
+      collapsedItems.push(currentAlbum.messages.length > 1 ? currentAlbum : currentAlbum.messages[0])
+    }
+    group.items = collapsedItems
+  })
+
   return groups
 })
 
@@ -945,30 +975,41 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
           
           <div v-for="group in groupedMessages" :key="group.label" class="message-group" v-auto-animate>
             <div class="date-separator sticky-date">
-              <span @click="scrollToMessage(group.messages[0].id)">{{ group.label }}</span>
+              <span @click="scrollToMessage(group.items[0].id || group.items[0].messages[0].id)">{{ group.label }}</span>
             </div>
 
-            <ChatMessageItem
-              v-for="(msg, index) in group.messages"
-              :key="msg.id"
-              :msg="msg"
-              :currentUserId="props.currentUserId"
-              :selectedUserName="selectedUserName"
-              :selectedMessages="selectedMessages"
-              :imageCache="imageCache"
-              :isSelectionMode="isSelectionMode"
-              :searchQuery="searchQuery"
-              @swipe-reply="handleReply"
-              @select="toggleSelection(msg.id)"
-              @click-message="handleMessageClick"
-              @context-menu="showContextMenu"
-              @scroll-to="scrollToMessage"
-              @media-click="handleMediaClick"
-              @location-click="handleLocationClick"
-              @download="downloadMedia"
-              @cancel-send="handleCancelSend"
-              :on-load="() => loadImageForMessage(msg.content, msg.message_type)"
-            />
+            <template v-for="(item, index) in group.items" :key="item.id">
+              <div v-if="item.type === 'album'" class="album-wrapper" :style="{ display: 'flex', justifyContent: item.sender_id === props.currentUserId ? 'flex-end' : 'flex-start', marginBottom: '8px', padding: '0 16px' }">
+                <ChatAlbumLayout
+                  :items="item.messages.map(m => {
+                    const content = (() => { try { return JSON.parse(m.content) } catch { return {} } })();
+                    return { msg: m, url: m.local_blob_url || imageCache[content.file_id] || content.thumbnail, type: m.message_type };
+                  })"
+                  @media-click="handleMediaClick"
+                  @download="downloadMedia"
+                />
+              </div>
+              <ChatMessageItem
+                v-else
+                :msg="item"
+                :currentUserId="props.currentUserId"
+                :selectedUserName="selectedUserName"
+                :selectedMessages="selectedMessages"
+                :imageCache="imageCache"
+                :isSelectionMode="isSelectionMode"
+                :searchQuery="searchQuery"
+                @swipe-reply="handleReply"
+                @select="toggleSelection(item.id)"
+                @click-message="handleMessageClick"
+                @context-menu="showContextMenu"
+                @scroll-to="scrollToMessage"
+                @media-click="handleMediaClick"
+                @location-click="handleLocationClick"
+                @download="downloadMedia"
+                @cancel-send="handleCancelSend"
+                :on-load="() => loadImageForMessage(item.content, item.message_type)"
+              />
+            </template>
           </div> <!-- End v-for="groupedMessages" message-group -->
         
         <!-- Scroll to Bottom Button -->

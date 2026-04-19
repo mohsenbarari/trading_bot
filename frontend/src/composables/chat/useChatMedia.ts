@@ -254,6 +254,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 });
 
                 lightbox.init();
+                lightbox.loadAndOpen(Math.max(0, startIndex));
             } else {
                 lightboxMedia.value = {
                     url,
