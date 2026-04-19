@@ -88,21 +88,21 @@
 
       <!-- Media (Image/Video) -->
       <template v-else-if="msg.message_type === 'image' || msg.message_type === 'video'">
-        <div class="msg-media-link"
+        <div class="msg-media-link max-w-xs sm:max-w-sm rounded-lg overflow-hidden relative"
              :style="mediaStyle"
              @click.stop="$emit('media-click', msg)">
           
           <!-- 1. Downloaded, Uploading, or Local Render -->
           <template v-if="isCached || msg.local_blob_url">
-            <div style="position: relative; display: flex; width: 100%; min-height: 150px; align-items: center; justify-content: center;">
+            <div class="relative flex w-full items-center justify-center min-h-[150px]">
               <img v-if="msg.message_type === 'image'"
                    v-show="!msg.is_sending || thumbnail"
                    :src="msg.local_blob_url || cachedUrl"
-                   alt="تصویر" class="msg-media-content" />
+                   alt="تصویر" class="w-full h-auto max-h-72 object-cover block" />
                    
-              <div v-else-if="msg.message_type === 'video'" class="msg-video-wrapper" :style="{ minHeight: msg.is_sending ? '150px' : 'auto', width: '100%' }">
+              <div v-else-if="msg.message_type === 'video'" class="relative w-full h-full">
                 <video v-show="!msg.is_sending" :src="msg.local_blob_url || cachedUrl"
-                       class="msg-media-content" autoplay muted loop playsinline></video>
+                       class="w-full h-auto max-h-72 object-cover block" autoplay muted loop playsinline></video>
                 <div v-if="!msg.is_sending" class="video-play-indicator">
                   <svg viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M8 5v14l11-7z"/></svg>
                 </div>
@@ -127,7 +127,7 @@
           
           <!-- 2. Needs Download State -->
           <template v-else>
-            <div class="msg-media-content msg-media-overlay" @click.stop>
+            <div class="w-full h-full min-h-[150px] msg-media-overlay" @click.stop>
               <div v-if="msg.is_downloading" class="progress-container">
                 <svg class="progress-ring" viewBox="0 0 36 36">
                   <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
@@ -331,7 +331,6 @@ const mediaStyle = computed(() => {
       const content = JSON.parse(props.msg.content)
       if (content.width && content.height) {
         style.aspectRatio = `${content.width} / ${content.height}`
-        style.maxWidth = '320px'
       }
     } catch {}
   }
@@ -888,8 +887,6 @@ function getImageThumbnail(content: string) {
 }
 
 /* Base Media Styles */
-.msg-media-link { border-radius: 8px; overflow: hidden; display: block; min-width: 150px; min-height: 150px; }
-.msg-media-content { width: 100%; height: 100%; max-height: 300px; object-fit: cover; display: block; }
 .msg-video-wrapper { position: relative; width: 100%; height: 100%; }
 .video-play-indicator { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.5); border-radius: 50%; padding: 12px; pointer-events: none; }
 .msg-media-overlay {
