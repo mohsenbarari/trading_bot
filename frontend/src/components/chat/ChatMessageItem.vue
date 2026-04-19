@@ -97,14 +97,16 @@
               </div>
               
               <!-- Overlay for uploading state -->
-              <div v-if="msg.is_sending && msg.upload_progress !== undefined" class="msg-media-overlay" @click.stop>
-                <div class="progress-container">
-                  <svg class="progress-ring" viewBox="0 0 36 36">
+              <div v-if="msg.is_sending && msg.upload_progress !== undefined" class="msg-media-overlay cancelable-overlay" @click.stop="$emit('cancel-send', msg)" style="cursor:pointer;">
+                <div v-if="msg.upload_total > 0" class="telegram-size-badge">
+                  {{ formatBytes(msg.upload_loaded) }} / {{ formatBytes(msg.upload_total) }}
+                </div>
+                <div class="progress-container cancelable" style="background: rgba(0,0,0,0.5); border-radius: 50%; padding: 8px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;">
+                  <svg class="progress-ring" viewBox="0 0 36 36" style="position: absolute; width: 44px; height: 44px;">
                     <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
                     <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.upload_progress}, 100`"></circle>
                   </svg>
-                  <div class="progress-cancel" @click.stop="$emit('cancel-send', msg)">✕</div>
-                  <span class="progress-text">{{ msg.upload_progress }}%</span>
+                  <div class="progress-cancel-icon" style="color: white; font-size: 18px; z-index: 2;">✕</div>
                 </div>
               </div>
             </div>
@@ -218,6 +220,15 @@
 </template>
 
 <script setup lang="ts">
+const formatBytes = (bytes: number, decimals = 2) => {
+  if (!+bytes) return "0 Bytes"
+  const k = 1024
+  const dm = decimals < 0 ? 0 : decimals
+  const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
+}
+
 import { ref, computed, onMounted, watch } from 'vue'
 import { useAudioStore } from '../../stores/audio'
 
@@ -723,7 +734,67 @@ function getImageThumbnail(content: string) {
   font-weight: bold;
   padding: 0 2px;
 }
+
+.telegram-size-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  backdrop-filter: blur(4px);
+  direction: ltr; /* English text formatting */
+}
+.cancelable-overlay {
+  transition: background 0.2s;
+}
+.cancelable-overlay:hover {
+  background: rgba(0,0,0,0.3);
+}
+
+.telegram-size-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  backdrop-filter: blur(4px);
+  direction: ltr; /* English text formatting */
+}
+.cancelable-overlay {
+  transition: background 0.2s;
+}
+.cancelable-overlay:hover {
+  background: rgba(0,0,0,0.3);
+}
+
+.telegram-size-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  backdrop-filter: blur(4px);
+  direction: ltr; /* English text formatting */
+}
+.cancelable-overlay {
+  transition: background 0.2s;
+}
+.cancelable-overlay:hover {
+  background: rgba(0,0,0,0.3);
+}
 </style>
+
+
+
 <style scoped>
 .msg-voice {
   display: flex;

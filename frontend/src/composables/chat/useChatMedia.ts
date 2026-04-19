@@ -213,6 +213,16 @@ export function useChatMedia(options: UseChatMediaOptions) {
             video.muted = true
             video.playsInline = true
 
+            const fallbackTimeout = setTimeout(() => {
+                console.warn("Video thumbnail generation timed out after 3s.");
+                resolve('');
+            }, 3000);
+
+            const fallbackTimeout = setTimeout(() => {
+                console.warn("Video thumbnail generation timed out after 3s.");
+                resolve('');
+            }, 3000);
+
             video.onloadeddata = () => {
                 video.currentTime = 0.1
             }
@@ -230,9 +240,13 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 } else {
                     resolve('')
                 }
+                clearTimeout(fallbackTimeout);
                 URL.revokeObjectURL(video.src)
             }
-            video.onerror = (e) => reject(e)
+            video.onerror = (e) => {
+                clearTimeout(fallbackTimeout);
+                reject(e);
+            }
         })
     }
 
@@ -263,6 +277,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
             is_read: true,
             is_sending: true,
             upload_progress: 0,
+            upload_loaded: 0,
+            upload_total: 0,
             local_blob_url: localUrl,
             created_at: new Date().toISOString()
         }
@@ -333,12 +349,14 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     }
                 });
                 xhr.open('POST', `${apiBaseUrl}/api/chat/upload-media`)
-                xhr.setRequestHeader('Authorization', `Bearer ${jwtToken}`)
+                xhr.setRequestHeader('Authorization', `Bearer ${localStorage.getItem('auth_token') || jwtToken}`)
 
                 xhr.upload.onprogress = (e) => {
                     if (e.lengthComputable) {
                         const target = getOptimisticTarget();
                         target.upload_progress = Math.round((e.loaded / e.total) * 100)
+                        target.upload_loaded = e.loaded
+                        target.upload_total = e.total
                     }
                 }
 
@@ -361,7 +379,12 @@ export function useChatMedia(options: UseChatMediaOptions) {
                                 return
                             }
                         } catch (e) { }
-                        reject(new Error(`مشکل سرور (${xhr.status}): ${xhr.responseText.substring(0, 100)}`))
+                        
+                        let safeResponse = xhr.responseText.substring(0, 100);
+                        if (safeResponse.toLowerCase().includes('<html')) {
+                            safeResponse = "خطای سرور یا عدم اتصال"; // Sanitize HTML
+                        }
+                        reject(new Error(`مشکل سرور (${xhr.status}): ${safeResponse}`))
                     }
                 }
                 xhr.onerror = () => reject(new Error("Network Error"))
@@ -400,6 +423,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
             await sendMediaMessage(msgType, messageContent, localUrl)
 
         } catch (e: any) {
+            if (e.message === 'UploadCancelled') {
+                console.log('Upload was cancelled explicitly.');
+                return; // Early return to avoid error UI
+            }
             console.error(`Upload error at step [${step}]:`, e);
             const errString = e && e.message ? e.message : JSON.stringify(e);
             error.value = `[${step}] ${errString}`;

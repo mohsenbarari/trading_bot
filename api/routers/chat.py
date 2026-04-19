@@ -709,7 +709,7 @@ async def upload_chat_media(
     """آپلود فایل برای چت (ذخیره روی دیسک سرور)"""
     allowed_types = [
         "image/jpeg", "image/png", "image/gif", "image/webp",
-        "video/mp4", "video/webm", "video/quicktime", "video/x-matroska",
+        "video/mp4", "video/webm", "video/quicktime", "video/x-matroska", "application/mp4", "video/x-m4v", "video/3gpp", "video/quicktime", "application/octet-stream",
         "audio/mp4", "audio/webm", "audio/ogg", "audio/mpeg", "audio/aac", "audio/x-m4a", "audio/wav", "audio/x-wav"
     ]
     
