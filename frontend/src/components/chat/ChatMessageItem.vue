@@ -151,8 +151,8 @@
             </svg>
           </button>
           
-          <div class="voice-body" style="min-width: 0;">
-            <div class="voice-waveform" ref="waveformRef" @click.prevent style="min-height: 30px; display: flex; align-items: center; width: 100%;">
+          <div class="voice-body" style="min-width: 0; flex: 1;">
+            <div class="voice-waveform" ref="waveformRef" @click.prevent style="width: 100%; height: 24px; position: relative; overflow: hidden; display: block;">
               <!-- WaveSurfer will inject canvas here -->
             </div>
             <div class="voice-time">{{ formattedVoiceTime }}</div>
