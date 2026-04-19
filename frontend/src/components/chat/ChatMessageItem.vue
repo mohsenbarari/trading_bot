@@ -192,7 +192,29 @@
           </div>
         </div>
       </template>
-      
+
+      <!-- Document/File Message -->
+      <template v-else-if="msg.message_type === 'document'">
+        <div class="msg-document" @click.stop="$emit('download', msg)">
+          <div class="doc-icon" :class="docIconClass">
+            <svg v-if="docExt === 'pdf'" viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h3v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z"/></svg>
+            <svg v-else-if="docExt === 'zip' || docExt === 'rar'" viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-6 10h-4v-1h4v1zm0-2h-4v-1h4v1zm0-2h-4V9h4v3z"/></svg>
+            <svg v-else viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+          </div>
+          <div class="doc-info">
+            <div class="doc-name">{{ docFileName }}</div>
+            <div class="doc-size">{{ docFileSize }}</div>
+          </div>
+          <div class="doc-download-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </div>
+        </div>
+      </template>
+
       <div class="msg-meta">
         <span class="msg-time">
           {{ formattedTime }}
@@ -289,6 +311,32 @@ const mapSnapshotUrl = computed(() => {
     return `${baseUrl}/api/chat/files/${locationData.value.snapshot_id}?token=${token}`
   }
   return null
+})
+
+// Document computed properties
+const docParsed = computed(() => {
+  if (props.msg.message_type === 'document' && props.msg.content) {
+    try { return JSON.parse(props.msg.content) } catch { return null }
+  }
+  return null
+})
+const docFileName = computed(() => docParsed.value?.file_name || 'فایل')
+const docFileSize = computed(() => {
+  const size = docParsed.value?.size
+  return size ? formatBytes(size) : ''
+})
+const docExt = computed(() => {
+  const name = docFileName.value
+  const parts = name.split('.')
+  return parts.length > 1 ? parts.pop()?.toLowerCase() || '' : ''
+})
+const docIconClass = computed(() => {
+  const ext = docExt.value
+  if (ext === 'pdf') return 'doc-pdf'
+  if (ext === 'zip' || ext === 'rar' || ext === '7z') return 'doc-archive'
+  if (ext === 'xls' || ext === 'xlsx' || ext === 'csv') return 'doc-excel'
+  if (ext === 'doc' || ext === 'docx') return 'doc-word'
+  return 'doc-generic'
 })
 
 // Voice State
@@ -715,6 +763,53 @@ function getImageThumbnail(content: string) {
   color: #374151;
   font-weight: 500;
 }
+
+/* Document Message */
+.msg-document {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  cursor: pointer;
+  min-width: 200px;
+}
+.doc-icon {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+.doc-icon.doc-pdf { background: linear-gradient(135deg, #e53935, #c62828); }
+.doc-icon.doc-archive { background: linear-gradient(135deg, #ff9800, #e65100); }
+.doc-icon.doc-excel { background: linear-gradient(135deg, #43a047, #2e7d32); }
+.doc-icon.doc-word { background: linear-gradient(135deg, #1e88e5, #1565c0); }
+.doc-icon.doc-generic { background: linear-gradient(135deg, #78909c, #546e7a); }
+.doc-info {
+  flex: 1;
+  min-width: 0;
+}
+.doc-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.doc-size {
+  font-size: 12px;
+  color: #8e8e93;
+  margin-top: 2px;
+}
+.doc-download-icon {
+  color: #3390ec;
+  flex-shrink: 0;
+}
+
 .edited-label { font-size: 10px; font-style: italic; opacity: 0.7; margin-right: 4px; }
 
 /* Selection */

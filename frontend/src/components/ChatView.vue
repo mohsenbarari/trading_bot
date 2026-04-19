@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, onUnmounted, nextTick } from 'vue'
-import LoadingSkeleton from './LoadingSkeleton.vue'
+import ConversationSkeleton from './chat/ConversationSkeleton.vue'
+import ChatSkeleton from './chat/ChatSkeleton.vue'
 import ChatHeader from './chat/ChatHeader.vue'
 import ChatInputBar from './chat/ChatInputBar.vue'
 import ChatMessageItem from './chat/ChatMessageItem.vue'
@@ -888,7 +889,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 
     <!-- Loading -->
     <div v-if="isLoading" class="loading-state">
-      <LoadingSkeleton :count="5" :height="60" />
+      <ConversationSkeleton :count="6" />
     </div>
 
     <!-- Error -->
@@ -933,7 +934,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       
       <div v-else class="chat-content">
         <div v-if="isLoadingMessages" class="loading-state">
-          <LoadingSkeleton :count="8" :height="50" />
+          <ChatSkeleton :count="8" />
         </div>
         
         <div v-else class="messages-container" ref="messagesContainer" @scroll="handleScroll">
