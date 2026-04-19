@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { type Conversation } from '../../types/chat'
+import { vAutoAnimate } from '@formkit/auto-animate/vue'
 
 const props = defineProps<{
   conversations: Conversation[]
@@ -27,7 +28,7 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
 
 <template>
   <div class="conversation-list-wrapper">
-    <div class="conversations-list">
+    <div class="conversations-list" v-auto-animate>
     <div v-if="conversations.length === 0" class="empty-state">
       <span>💬</span>
       <p>هنوز گفتگویی ندارید</p>
@@ -60,7 +61,10 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
           </span>
           <template v-else>
               <template v-if="conv.last_message_type === 'image'">🖼️ تصویر</template>
+              <template v-else-if="conv.last_message_type === 'video'">📹 ویدئو</template>
+              <template v-else-if="conv.last_message_type === 'voice'">🎤 پیام صوتی</template>
               <template v-else-if="conv.last_message_type === 'sticker'">😊 استیکر</template>
+              <template v-else-if="conv.last_message_type === 'location'">📍 موقعیت</template>
               <template v-else>{{ conv.last_message_content?.substring(0, 30) || '...' }}</template>
           </template>
         </div>

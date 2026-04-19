@@ -10,6 +10,7 @@ import ChatEmptyState from './chat/ChatEmptyState.vue'
 import ChatConversationList from './chat/ChatConversationList.vue'
 import ChatNewConversationModal from './chat/ChatNewConversationModal.vue'
 import AttachmentMenu from './chat/AttachmentMenu.vue'
+import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
 import type { Conversation, Message, StickerPack } from '../types/chat'
@@ -582,6 +583,35 @@ const handleCopyMessage = () => {
   navigator.clipboard.writeText(msg.content).then(() => closeContextMenu());
 };
 
+const handleSaveMedia = () => {
+  const msg = contextMenu.value.message;
+  if (!msg) { closeContextMenu(); return; }
+  try {
+    const parsed = JSON.parse(msg.content);
+    const fileId = parsed?.file_id;
+    if (!fileId) return;
+    const cachedUrl = imageCache.value[fileId];
+    if (!cachedUrl) {
+      // Download first, then save
+      downloadMedia(msg);
+      closeContextMenu();
+      return;
+    }
+    // Trigger browser download via hidden <a> tag
+    const ext = msg.message_type === 'video' ? 'mp4' : 'jpg';
+    const a = document.createElement('a');
+    a.href = cachedUrl;
+    a.download = `${fileId}.${ext}`;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch (e) {
+    console.error('Save media error:', e);
+  }
+  closeContextMenu();
+};
+
 const handleDeleteSelected = async () => {
   if (selectedMessages.value.length === 0) return;
   if (!confirm('آیا از حذف پیام‌های انتخاب شده اطمینان دارید؟')) return;
@@ -912,7 +942,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
             <p>شروع گفتگو...</p>
           </div>
           
-          <div v-for="group in groupedMessages" :key="group.label" class="message-group">
+          <div v-for="group in groupedMessages" :key="group.label" class="message-group" v-auto-animate>
             <div class="date-separator sticky-date">
               <span @click="scrollToMessage(group.messages[0].id)">{{ group.label }}</span>
             </div>
@@ -1018,6 +1048,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @edit="handleEditMessage"
       @delete="handleDeleteMessage"
       @close="closeContextMenu"
+      @save-media="handleSaveMedia"
     />
 
     <!-- Lightbox Overlay -->

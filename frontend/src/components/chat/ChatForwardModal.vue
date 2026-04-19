@@ -13,27 +13,31 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div v-if="showForwardModal" class="forward-modal-overlay" @click="emit('close')">
-    <div class="forward-modal" @click.stop>
-      <div class="forward-modal-header">
-        <h3>ارسال به...</h3>
-        <button class="close-btn" @click="emit('close')">✕</button>
-      </div>
-      <div class="forward-modal-body">
-        <div 
-          v-for="conv in sortedConversations" 
-          :key="conv.id"
-          class="forward-conv-item"
-          @click="emit('forward-to', conv.other_user_id)"
-        >
-          <div class="conv-avatar">
-            {{ conv.other_user_name.charAt(0) }}
+  <Teleport to="body">
+    <Transition name="modal-slide">
+      <div v-if="showForwardModal" class="forward-modal-overlay" @click="emit('close')">
+        <div class="forward-modal" @click.stop>
+          <div class="forward-modal-header">
+            <h3>ارسال به...</h3>
+            <button class="close-btn" @click="emit('close')">✕</button>
           </div>
-          <div class="conv-name">{{ conv.other_user_name }}</div>
+          <div class="forward-modal-body">
+            <div 
+              v-for="conv in sortedConversations" 
+              :key="conv.id"
+              class="forward-conv-item"
+              @click="emit('forward-to', conv.other_user_id)"
+            >
+              <div class="conv-avatar">
+                {{ conv.other_user_name.charAt(0) }}
+              </div>
+              <div class="conv-name">{{ conv.other_user_name }}</div>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
-  </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -117,5 +121,27 @@ const emit = defineEmits<{
 .forward-conv-item .conv-name {
   font-size: 16px;
   color: #333;
+}
+
+/* Modal slide-up transition */
+.modal-slide-enter-active,
+.modal-slide-leave-active {
+  transition: opacity 0.25s ease;
+}
+.modal-slide-enter-active .forward-modal,
+.modal-slide-leave-active .forward-modal {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+}
+.modal-slide-enter-from,
+.modal-slide-leave-to {
+  opacity: 0;
+}
+.modal-slide-enter-from .forward-modal {
+  transform: translateY(40px) scale(0.95);
+  opacity: 0;
+}
+.modal-slide-leave-to .forward-modal {
+  transform: translateY(20px) scale(0.97);
+  opacity: 0;
 }
 </style>
