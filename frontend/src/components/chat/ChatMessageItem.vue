@@ -152,7 +152,7 @@
           </button>
           
           <div class="voice-body">
-            <div class="voice-waveform" ref="waveformRef" @click.prevent style="min-height: 30px; display: flex; align-items: center;">
+            <div class="voice-waveform" ref="waveformRef" @click.prevent>
               <!-- WaveSurfer will inject canvas here -->
             </div>
             <div class="voice-time">{{ formattedVoiceTime }}</div>
@@ -318,8 +318,10 @@ watch(audioUrl, (newUrl) => {
     nextTick(() => {
       if (wavesurfer) {
         wavesurfer.destroy()
+        wavesurfer = null
       }
       if (!waveformRef.value) return
+      waveformRef.value.innerHTML = ''
       
       wavesurfer = WaveSurfer.create({
         container: waveformRef.value,
@@ -327,9 +329,11 @@ watch(audioUrl, (newUrl) => {
         progressColor: isSent.value ? '#3390ec' : 'var(--primary-color, #4A90E2)',
         cursorWidth: 0,
         barWidth: 2,
-        barGap: 1,
+        barGap: 1.5,
         barRadius: 2,
         height: 24,
+        barAlign: 'bottom',
+        normalize: true,
         url: newUrl
       })
 
@@ -861,6 +865,7 @@ function getImageThumbnail(content: string) {
   display: flex;
   flex-direction: column;
   flex-grow: 1;
+  min-width: 0;
   gap: 8px;
   justify-content: center;
 }
@@ -870,6 +875,7 @@ function getImageThumbnail(content: string) {
   border-radius: 2px;
   cursor: pointer;
   position: relative;
+  overflow: hidden;
 }
 .voice-progress-fill {
   display: none;
