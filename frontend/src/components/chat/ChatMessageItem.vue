@@ -332,7 +332,46 @@ watch(audioUrl, (newUrl) => {
         height: 24,
         barAlign: 'bottom',
         normalize: true,
-        url: newUrl
+        url: newUrl,
+        renderFunction: (channels, ctx) => {
+          const { width, height } = ctx.canvas;
+          const barWidth = 2;
+          const barGap = 2;
+          const barCount = Math.floor(width / (barWidth + barGap));
+          const channelData = channels[0];
+          const step = Math.floor(channelData.length / barCount);
+          const activeIndex = Math.floor(wavesurfer.getCurrentTime() / wavesurfer.getDuration() * barCount);
+
+          ctx.clearRect(0, 0, width, height);
+
+          for (let i = 0; i < barCount; i++) {
+            let sum = 0;
+            for (let j = 0; j < step; j++) {
+              sum += Math.abs(channelData[i * step + j] || 0);
+            }
+            const avg = sum / step;
+            const barHeight = Math.max(2, avg * height * 1.5);
+            
+            ctx.fillStyle = i <= activeIndex ? (isSent.value ? '#3390ec' : '#4A90E2') : (isSent.value ? 'rgba(74, 144, 226, 0.4)' : 'rgba(0,0,0,0.15)');
+            
+            // Draw bar from bottom
+            const x = i * (barWidth + barGap);
+            const y = height - barHeight;
+            
+            // Rounded rect
+            const radius = 2;
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + barWidth - radius, y);
+            ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
+            ctx.lineTo(x + barWidth, height);
+            ctx.lineTo(x, height);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
       })
 
       wavesurfer.on('ready', () => {
