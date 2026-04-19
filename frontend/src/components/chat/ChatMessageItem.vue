@@ -250,6 +250,11 @@
 </template>
 
 <script setup lang="ts">
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useAudioStore } from '../../stores/audio'
+import WaveSurfer from 'wavesurfer.js'
+import type { Message } from '../../types/chat'
+
 const formatBytes = (bytes: number, decimals = 2) => {
   if (!+bytes) return "0 Bytes"
   const k = 1024
@@ -258,10 +263,6 @@ const formatBytes = (bytes: number, decimals = 2) => {
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
 }
-
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useAudioStore } from '../../stores/audio'
-import WaveSurfer from 'wavesurfer.js'
 
 const props = defineProps<{
   msg: any
@@ -298,6 +299,7 @@ const isCached = computed(() => !!props.imageCache[getFileId(props.msg.content)]
 const cachedUrl = computed(() => props.imageCache[getFileId(props.msg.content)])
 const thumbnail = computed(() => getImageThumbnail(props.msg.content))
 const formattedTime = computed(() => formatTime(props.msg.created_at))
+const audioUrl = computed(() => cachedUrl.value || props.msg.local_blob_url)
 
 const mediaStyle = computed(() => {
   const style: any = {
@@ -381,7 +383,13 @@ onMounted(() => {
     try {
       const p = JSON.parse(props.msg.content)
       if (p.durationMs) {
-        const initWaveSurfer = () => {
+        voiceDuration.value = p.durationMs / 1000
+      }
+    } catch { }
+  }
+})
+
+const initWaveSurfer = () => {
   if (!audioUrl.value || props.msg.message_type !== 'voice') return
   nextTick(() => {
     if (wavesurfer) {
@@ -483,16 +491,7 @@ onMounted(() => {
   if (audioUrl.value) {
     initWaveSurfer()
   }
-})r.on('play', () => {
-        isPlaying.value = true
-      })
-
-      wavesurfer.on('pause', () => {
-        isPlaying.value = false
-      })
-    })
-  }
-}, { immediate: true })
+})
 
 onUnmounted(() => {
   if (wavesurfer) {

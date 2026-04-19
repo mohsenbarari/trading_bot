@@ -293,8 +293,11 @@ const groupedMessages = computed(() => {
   const groups: { label: string, items: any[] }[] = []
   if (messages.value.length === 0) return groups;
   
-  let currentLabel = formatDateForSeparator(messages.value[0].created_at)
-  let currentGroup: any[] = [messages.value[0]]
+  const firstMsg = messages.value[0]
+  if (!firstMsg) return groups
+  
+  let currentLabel = formatDateForSeparator(firstMsg.created_at)
+  let currentGroup: any[] = [firstMsg]
   
   for (let i = 1; i < messages.value.length; i++) {
       const msg = messages.value[i]
@@ -975,13 +978,16 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
           
           <div v-for="group in groupedMessages" :key="group.label" class="message-group" v-auto-animate>
             <div class="date-separator sticky-date">
-              <span @click="scrollToMessage(group.items[0].id || group.items[0].messages[0].id)">{{ group.label }}</span>
+              <span @click="scrollToMessage(group.items[0].id)">{{ group.label }}</span>
             </div>
 
             <template v-for="(item, index) in group.items" :key="item.id">
-              <div v-if="item.type === 'album'" class="album-wrapper" :style="{ display: 'flex', justifyContent: item.sender_id === props.currentUserId ? 'flex-end' : 'flex-start', marginBottom: '8px', padding: '0 16px' }">
+              <div v-if="item.type === 'album'" 
+                   :id="'msg-' + item.id"
+                   class="album-wrapper" 
+                   :style="{ display: 'flex', justifyContent: item.sender_id === props.currentUserId ? 'flex-end' : 'flex-start', marginBottom: '8px', padding: '0 16px' }">
                 <ChatAlbumLayout
-                  :items="item.messages.map(m => {
+                  :items="item.messages.map((m: any) => {
                     const content = (() => { try { return JSON.parse(m.content) } catch { return {} } })();
                     return { msg: m, url: m.local_blob_url || imageCache[content.file_id] || content.thumbnail, type: m.message_type };
                   })"
