@@ -339,8 +339,9 @@ watch(audioUrl, (newUrl) => {
           const barGap = 2;
           const barCount = Math.floor(width / (barWidth + barGap));
           const channelData = channels[0];
+          if (!channelData) return;
           const step = Math.floor(channelData.length / barCount);
-          const activeIndex = Math.floor(wavesurfer.getCurrentTime() / wavesurfer.getDuration() * barCount);
+          const activeIndex = Math.floor(wavesurfer.getCurrentTime() / wavesurfer.getDuration() * barCount || 0);
 
           ctx.clearRect(0, 0, width, height);
 
