@@ -152,8 +152,8 @@
           </button>
           
           <div class="voice-body">
-            <div class="voice-waveform" ref="waveformRef" @click="seekVoice">
-              <div class="voice-progress-fill" :style="{ width: `${voiceProgress}%` }"></div>
+            <div class="voice-waveform" ref="waveformRef" @click.prevent style="min-height: 30px; display: flex; align-items: center;">
+              <!-- WaveSurfer will inject canvas here -->
             </div>
             <div class="voice-time">{{ formattedVoiceTime }}</div>
           </div>
@@ -165,7 +165,6 @@
             </svg>
             <div class="voice-cancel-icon" style="position: absolute; top:50%; left:50%; transform: translate(-50%, -50%); font-size:12px; color:white;">✕</div>
           </div>
-          <audio ref="audioRef" :src="cachedUrl || msg.local_blob_url" @timeupdate="onAudioTimeUpdate" @ended="onAudioEnded" @loadedmetadata="onAudioLoaded"></audio>
         </div>
       </template>
       
@@ -231,8 +230,9 @@ const formatBytes = (bytes: number, decimals = 2) => {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
 }
 
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useAudioStore } from '../../stores/audio'
+import WaveSurfer from 'wavesurfer.js'
 
 const props = defineProps<{
   msg: any
@@ -292,9 +292,9 @@ const mapSnapshotUrl = computed(() => {
 })
 
 // Voice State
-const audioRef = ref<HTMLAudioElement | null>(null)
+const waveformRef = ref<HTMLElement | null>(null)
+let wavesurfer: any = null
 const isPlaying = ref(false)
-const voiceProgress = ref(0)
 const voiceDuration = ref(0)
 const voiceCurrentTime = ref(0)
 
@@ -311,6 +311,69 @@ onMounted(() => {
   }
 })
 
+const audioUrl = computed(() => cachedUrl.value || props.msg.local_blob_url)
+
+watch(audioUrl, (newUrl) => {
+  if (newUrl && props.msg.message_type === 'voice') {
+    nextTick(() => {
+      if (wavesurfer) {
+        wavesurfer.destroy()
+      }
+      if (!waveformRef.value) return
+      
+      wavesurfer = WaveSurfer.create({
+        container: waveformRef.value,
+        waveColor: isSent.value ? 'rgba(74, 144, 226, 0.4)' : 'rgba(0, 0, 0, 0.15)',
+        progressColor: isSent.value ? '#3390ec' : 'var(--primary-color, #4A90E2)',
+        cursorWidth: 0,
+        barWidth: 2,
+        barGap: 1,
+        barRadius: 2,
+        height: 24,
+        url: newUrl
+      })
+
+      wavesurfer.on('ready', () => {
+        const d = wavesurfer.getDuration()
+        if (d && !isNaN(d) && d !== Infinity) {
+          voiceDuration.value = d
+        }
+      })
+
+      wavesurfer.on('audioprocess', () => {
+        voiceCurrentTime.value = wavesurfer.getCurrentTime()
+      })
+      
+      wavesurfer.on('seeking', () => {
+        voiceCurrentTime.value = wavesurfer.getCurrentTime()
+      })
+
+      wavesurfer.on('finish', () => {
+        isPlaying.value = false
+        voiceCurrentTime.value = 0
+        if (audioStore.currentPlayingId === props.msg.id) {
+          audioStore.setCurrentPlaying(null)
+        }
+      })
+
+      wavesurfer.on('play', () => {
+        isPlaying.value = true
+      })
+
+      wavesurfer.on('pause', () => {
+        isPlaying.value = false
+      })
+    })
+  }
+}, { immediate: true })
+
+onUnmounted(() => {
+  if (wavesurfer) {
+    wavesurfer.destroy()
+    wavesurfer = null
+  }
+})
+
 const formattedVoiceTime = computed(() => {
   const time = isPlaying.value ? voiceCurrentTime.value : (voiceDuration.value || 0)
   const mins = Math.floor(time / 60)
@@ -320,53 +383,21 @@ const formattedVoiceTime = computed(() => {
 
 // Stop playing if global state changes to another message
 watch(() => audioStore.currentPlayingId, (newId) => {
-  if (newId !== props.msg.id && isPlaying.value && audioRef.value) {
-    audioRef.value.pause()
-    isPlaying.value = false
+  if (newId !== props.msg.id && isPlaying.value && wavesurfer) {
+    wavesurfer.pause()
   }
 })
 
 const toggleVoice = () => {
-  if (!audioRef.value) return
+  if (!wavesurfer) return
   if (isPlaying.value) {
-    audioRef.value.pause()
+    wavesurfer.pause()
     audioStore.setCurrentPlaying(null)
   } else {
     // Set this message as currently playing (will stop others via watch)
     audioStore.setCurrentPlaying(props.msg.id)
-    audioRef.value.play()
+    wavesurfer.play()
   }
-  isPlaying.value = !isPlaying.value
-}
-
-const onAudioTimeUpdate = (e: Event) => {
-  const t = e.target as HTMLAudioElement
-  voiceCurrentTime.value = t.currentTime
-  voiceProgress.value = (t.currentTime / (voiceDuration.value || 1)) * 100
-}
-
-const onAudioLoaded = (e: Event) => {
-  const t = e.target as HTMLAudioElement
-  if (t.duration && t.duration !== Infinity && !isNaN(t.duration)) {
-     voiceDuration.value = t.duration
-  }
-}
-
-const onAudioEnded = () => {
-  isPlaying.value = false
-  voiceProgress.value = 0
-  voiceCurrentTime.value = 0
-  if (audioStore.currentPlayingId === props.msg.id) {
-    audioStore.setCurrentPlaying(null)
-  }
-}
-
-const seekVoice = (e: MouseEvent) => {
-  if (!audioRef.value) return
-  const el = e.currentTarget as HTMLElement
-  const rect = el.getBoundingClientRect()
-  const percent = (e.clientX - rect.left) / rect.width
-  audioRef.value.currentTime = percent * (voiceDuration.value || 1)
 }
 
 function escapeHtml(unsafe: string) {
@@ -835,20 +866,13 @@ function getImageThumbnail(content: string) {
 }
 .voice-waveform {
   width: 100%;
-  height: 4px;
-  background: rgba(0,0,0,0.15);
+  height: 24px;
   border-radius: 2px;
   cursor: pointer;
   position: relative;
-  overflow: hidden; /* Prevent fill overflow */
 }
 .voice-progress-fill {
-  height: 100%;
-  background: var(--primary-color, #4A90E2);
-  border-radius: 2px;
-  position: absolute;
-  left: 0;
-  top: 0;
+  display: none;
 }
 
 .voice-time {
