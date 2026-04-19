@@ -982,22 +982,10 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
             </div>
 
             <template v-for="(item, index) in group.items" :key="item.id">
-              <div v-if="item.type === 'album'" 
-                   :id="'msg-' + item.id"
-                   class="album-wrapper" 
-                   :style="{ display: 'flex', justifyContent: item.sender_id === props.currentUserId ? 'flex-end' : 'flex-start', marginBottom: '8px', padding: '0 16px' }">
-                <ChatAlbumLayout
-                  :items="item.messages.map((m: any) => {
-                    const content = (() => { try { return JSON.parse(m.content) } catch { return {} } })();
-                    return { msg: m, url: m.local_blob_url || imageCache[content.file_id] || content.thumbnail, type: m.message_type };
-                  })"
-                  @media-click="handleMediaClick"
-                  @download="downloadMedia"
-                />
-              </div>
               <ChatMessageItem
-                v-else
-                :msg="item"
+                :msg="item.type === 'album' ? item.messages[0] : item"
+                :isAlbum="item.type === 'album'"
+                :albumItems="item.type === 'album' ? item.messages : []"
                 :currentUserId="props.currentUserId"
                 :selectedUserName="selectedUserName"
                 :selectedMessages="selectedMessages"

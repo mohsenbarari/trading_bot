@@ -74,6 +74,18 @@
         <p v-html="highlightedContent"></p>
       </template>
       
+      <!-- Album -->
+      <template v-if="props.isAlbum">
+        <ChatAlbumLayout
+          :items="(props.albumItems || []).map((m: any) => {
+            const content = (() => { try { return JSON.parse(m.content) } catch { return {} } })();
+            return { msg: m, url: m.local_blob_url || imageCache[getFileId(m.content)] || content.thumbnail, type: m.message_type };
+          })"
+          @media-click="$emit('media-click', $event)"
+          @download="$emit('download', $event)"
+        />
+      </template>
+
       <!-- Media (Image/Video) -->
       <template v-else-if="msg.message_type === 'image' || msg.message_type === 'video'">
         <div class="msg-media-link"
@@ -254,6 +266,8 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useAudioStore } from '../../stores/audio'
 import WaveSurfer from 'wavesurfer.js'
 import type { Message } from '../../types/chat'
+import ChatAlbumLayout from './ChatAlbumLayout.vue'
+
 
 const formatBytes = (bytes: number, decimals = 2) => {
   if (!+bytes) return "0 Bytes"
@@ -273,6 +287,8 @@ const props = defineProps<{
   isSelectionMode: boolean
   searchQuery?: string
   onLoad?: () => void
+  isAlbum?: boolean
+  albumItems?: any[]
 }>()
 
 const emit = defineEmits<{
@@ -415,7 +431,11 @@ const initWaveSurfer = () => {
         const barGap = 2;
         const barCount = Math.floor(width / (barWidth + barGap));
         const channelData = channels[0];
-        if (!channelData) return;
+        if (!channelData) {
+          ctx.fillStyle = isSent.value ? 'rgba(74, 144, 226, 0.4)' : 'rgba(0,0,0,0.15)';
+          ctx.fillRect(0, height - 2, width, 2);
+          return;
+        }
         const step = Math.floor(channelData.length / barCount);
         const activeIndex = Math.floor(wavesurfer.getCurrentTime() / wavesurfer.getDuration() * barCount || 0);
 
@@ -869,8 +889,8 @@ function getImageThumbnail(content: string) {
 
 /* Base Media Styles */
 .msg-media-link { border-radius: 8px; overflow: hidden; display: block; min-width: 150px; min-height: 150px; }
-.msg-media-content { width: 100%; height: auto; max-height: 300px; object-fit: cover; display: block; }
-.msg-video-wrapper { position: relative; }
+.msg-media-content { width: 100%; height: 100%; max-height: 300px; object-fit: cover; display: block; }
+.msg-video-wrapper { position: relative; width: 100%; height: 100%; }
 .video-play-indicator { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.5); border-radius: 50%; padding: 12px; pointer-events: none; }
 .msg-media-overlay {
   position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); backdrop-filter: blur(5px);
