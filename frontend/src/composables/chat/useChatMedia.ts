@@ -235,6 +235,65 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     pswpModule: () => import('photoswipe'),
                     bgOpacity: 0.9,
                     wheelToZoom: true,
+                    arrowPrev: false,
+                    arrowNext: false,
+                    counter: false,
+                });
+
+                lightbox.on('uiRegister', function() {
+                    // Download Button
+                    lightbox.pswp?.ui?.registerElement({
+                        name: 'download-button',
+                        order: 8,
+                        isButton: true,
+                        tagName: 'button',
+                        html: '<svg width="32" height="32" viewBox="0 0 32 32" fill="none"><path d="M20.5 14L16 18.5L11.5 14M16 8V18.5M8 22H24" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+                        onClick: (event: any, el: any, pswp: any) => {
+                            const currSlide = pswp.currSlide;
+                            if (!currSlide || !currSlide.data.src) return;
+                            const link = document.createElement('a');
+                            link.href = currSlide.data.src;
+                            link.download = `media_${currSlide.data.msgId}.jpg`;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                        }
+                    });
+
+                    // Thumbnails Carousel
+                    lightbox.pswp?.ui?.registerElement({
+                        name: 'thumbnails-carousel',
+                        order: 9,
+                        isButton: false,
+                        appendTo: 'wrapper',
+                        html: '<div class="pswp-thumbnails" style="position:absolute; bottom:20px; width:100%; display:flex; justify-content:center; gap:8px; overflow-x:auto; padding: 0 20px; z-index:10000;"></div>',
+                        onInit: (el: any, pswp: any) => {
+                            const container = el.querySelector('.pswp-thumbnails');
+                            dataSource.forEach((item, i) => {
+                               const img = document.createElement('img');
+                               img.src = item.msrc || item.src || '';
+                               img.style.height = '48px';
+                               img.style.width = '48px';
+                               img.style.objectFit = 'cover';
+                               img.style.borderRadius = '4px';
+                               img.style.cursor = 'pointer';
+                               img.style.opacity = i === pswp.currIndex ? '1' : '0.5';
+                               img.style.transition = 'opacity 0.2s';
+                               img.onclick = () => pswp.goTo(i);
+                               container.appendChild(img);
+                            });
+
+                            pswp.on('change', () => {
+                                const imgs = container.querySelectorAll('img');
+                                imgs.forEach((img: any, idx: number) => {
+                                    img.style.opacity = idx === pswp.currIndex ? '1' : '0.5';
+                                    if (idx === pswp.currIndex) {
+                                        img.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                                    }
+                                });
+                            });
+                        }
+                    });
                 });
 
                 lightbox.on('contentLoad', (e) => {
@@ -378,7 +437,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 if (isCancelledLocally) throw new Error('UploadCancelled');
                 step = 'compress_main'
                 try {
-                    const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1280, useWebWorker: false }
+                    const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1280, useWebWorker: true }
                     uploadFile = await imageCompression(file, options)
                 } catch (warn) {
                     console.warn("Image compression failed, using original:", warn)
@@ -387,7 +446,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 if (isCancelledLocally) throw new Error('UploadCancelled');
                 step = 'compress_thumb'
                 try {
-                    const thumbOptions = { maxSizeMB: 0.05, maxWidthOrHeight: 20, useWebWorker: false }
+                    const thumbOptions = { maxSizeMB: 0.05, maxWidthOrHeight: 20, useWebWorker: true }
                     const thumbFile = await imageCompression(file, thumbOptions)
                     thumbBase64 = await new Promise<string>((resolve, reject) => {
                         const reader = new FileReader()
