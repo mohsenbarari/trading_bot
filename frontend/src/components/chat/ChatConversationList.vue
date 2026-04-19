@@ -65,6 +65,7 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
               <template v-else-if="conv.last_message_type === 'voice'">🎤 پیام صوتی</template>
               <template v-else-if="conv.last_message_type === 'sticker'">😊 استیکر</template>
               <template v-else-if="conv.last_message_type === 'location'">📍 موقعیت</template>
+              <template v-else-if="conv.last_message_type === 'document'">📎 فایل</template>
               <template v-else>{{ conv.last_message_content?.substring(0, 30) || '...' }}</template>
           </template>
         </div>
