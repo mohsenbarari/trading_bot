@@ -1,5 +1,7 @@
 import { ref, type Ref, nextTick } from 'vue'
 import imageCompression from 'browser-image-compression'
+import PhotoSwipeLightbox from 'photoswipe/lightbox'
+import 'photoswipe/style.css'
 import type { Message } from '../../types/chat'
 
 export interface UseChatMediaOptions {
@@ -35,8 +37,15 @@ export function useChatMedia(options: UseChatMediaOptions) {
         if (controller) {
             controller.abort();
             uploadControllers.delete(id);
-            activeUploadsCount = Math.max(0, activeUploadsCount - 1);
-            isUploading.value = activeUploadsCount > 0;
+            // Counter decremented in finally block of handleMediaUploadWrapper
+        } else {
+            // Forcible cleanup if clicked before XHR starts or after XHR finished but stuck in IndexedDB step
+            const index = messages.value.findIndex(m => m.id === id);
+            const msg = messages.value[index];
+            if (msg && msg.is_sending) {
+                msg.is_error = true; // prevents 'finally' from removing a non-error message if it shouldn't, though splice removes it anyway
+                messages.value.splice(index, 1);
+            }
         }
     }
 
@@ -76,10 +85,15 @@ export function useChatMedia(options: UseChatMediaOptions) {
         try {
             const db = await openImageDB()
             await new Promise<void>((resolve) => {
-                const tx = db.transaction(STORE_NAME, 'readwrite')
-                tx.objectStore(STORE_NAME).put(blob, key)
-                tx.oncomplete = () => resolve()
-                tx.onerror = () => resolve()
+                try {
+                    const tx = db.transaction(STORE_NAME, 'readwrite')
+                    tx.objectStore(STORE_NAME).put(blob, key)
+                    tx.oncomplete = () => resolve()
+                    tx.onerror = () => resolve()
+                } catch (e) {
+                    console.warn('IndexedDB put error, skipping cache:', e)
+                    resolve()
+                }
             })
         } catch { /* ignore */ }
     }
@@ -193,10 +207,59 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const url = msg.local_blob_url || cacheUrl;
 
         if (url) {
-            lightboxMedia.value = {
-                url,
-                type: msg.message_type === 'video' ? 'video' : 'image'
-            };
+            if (msg.message_type === 'image') {
+                // Collect all images in current chat for the gallery
+                const imageMessages = messages.value.filter(m => m.message_type === 'image');
+                
+                const dataSource = imageMessages.map(m => {
+                    const mFileId = getFileId(m.content);
+                    const src = m.local_blob_url || imageCache.value[mFileId];
+                    let thumb = '';
+                    try { thumb = JSON.parse(m.content).thumbnail ?? '' } catch { }
+                    
+                    return {
+                        src: src || thumb,
+                        msrc: thumb,
+                        msgId: m.id,
+                        element: (document.getElementById(`msg-${m.id}`)?.querySelector('img.msg-media-content') as HTMLElement) || undefined,
+                        w: 0,
+                        h: 0
+                    };
+                }).filter(img => img.src);
+                
+                const startIndex = dataSource.findIndex(item => item.msgId === msg.id);
+
+                const lightbox = new PhotoSwipeLightbox({
+                    dataSource,
+                    index: Math.max(0, startIndex),
+                    pswpModule: () => import('photoswipe'),
+                    bgOpacity: 0.9,
+                    wheelToZoom: true,
+                });
+
+                lightbox.on('contentLoad', (e) => {
+                    const { content } = e;
+                    if (content.type === 'image' && content.data.w === 0 && content.data.src) {
+                        const img = new Image();
+                        img.onload = () => {
+                            content.data.w = img.naturalWidth;
+                            content.data.h = img.naturalHeight;
+                            if (content.element) {
+                                content.updateImageBaseSize();
+                                content.updateImageSize();
+                            }
+                        };
+                        img.src = content.data.src;
+                    }
+                });
+
+                lightbox.init();
+            } else {
+                lightboxMedia.value = {
+                    url,
+                    type: 'video'
+                };
+            }
         }
     }
 
@@ -218,10 +281,6 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 resolve('');
             }, 3000);
 
-            const fallbackTimeout = setTimeout(() => {
-                console.warn("Video thumbnail generation timed out after 3s.");
-                resolve('');
-            }, 3000);
 
             video.onloadeddata = () => {
                 video.currentTime = 0.1
@@ -284,6 +343,16 @@ export function useChatMedia(options: UseChatMediaOptions) {
         }
         messages.value.push(optimisticMsg)
 
+        let isCancelledLocally = false;
+        uploadControllers.set(optimisticId, {
+            abort: () => {
+                isCancelledLocally = true;
+                const index = messages.value.findIndex(m => m.id === optimisticId);
+                if (index !== -1) messages.value.splice(index, 1);
+                uploadControllers.delete(optimisticId);
+            }
+        });
+
         const getOptimisticTarget = () => messages.value.find(m => m.id === optimisticId) || optimisticMsg;
 
         await nextTick()
@@ -297,6 +366,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 step = 'video_thumb'
                 try {
                     thumbBase64 = await generateVideoThumbnail(file)
+                    getOptimisticTarget().content = JSON.stringify({ thumbnail: thumbBase64, placeholder: true })
                 } catch (warn) {
                     console.warn("Video thumbnail failed:", warn)
                 }
@@ -304,6 +374,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 step = 'skip_audio_thumb'
                 // No thumbnail processing for voice
             } else {
+                if (isCancelledLocally) throw new Error('UploadCancelled');
                 step = 'compress_main'
                 try {
                     const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1280, useWebWorker: false }
@@ -312,6 +383,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     console.warn("Image compression failed, using original:", warn)
                 }
 
+                if (isCancelledLocally) throw new Error('UploadCancelled');
                 step = 'compress_thumb'
                 try {
                     const thumbOptions = { maxSizeMB: 0.05, maxWidthOrHeight: 20, useWebWorker: false }
@@ -326,6 +398,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     console.warn("Image thumbnail generation failed:", warn)
                 }
             }
+
+            if (isCancelledLocally) throw new Error('UploadCancelled');
 
             const targetMsg = getOptimisticTarget();
             targetMsg.content = JSON.stringify({ thumbnail: thumbBase64 })

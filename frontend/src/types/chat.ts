@@ -19,6 +19,8 @@ export interface Message {
     is_read: boolean
     is_sending?: boolean
     upload_progress?: number
+    upload_loaded?: number
+    upload_total?: number
     download_progress?: number
     is_downloading?: boolean
     local_blob_url?: string

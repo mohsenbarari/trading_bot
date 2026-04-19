@@ -83,13 +83,14 @@
           
           <!-- 1. Downloaded, Uploading, or Local Render -->
           <template v-if="isCached || msg.local_blob_url">
-            <div style="position: relative; display: inline-block; width: 100%;">
+            <div style="position: relative; display: flex; width: 100%; min-height: 150px; align-items: center; justify-content: center;">
               <img v-if="msg.message_type === 'image'"
+                   v-show="!msg.is_sending || thumbnail"
                    :src="msg.local_blob_url || cachedUrl"
                    alt="تصویر" class="msg-media-content" />
                    
-              <div v-else-if="msg.message_type === 'video'" class="msg-video-wrapper">
-                <video :src="msg.local_blob_url || cachedUrl"
+              <div v-else-if="msg.message_type === 'video'" class="msg-video-wrapper" :style="{ minHeight: msg.is_sending ? '150px' : 'auto', width: '100%' }">
+                <video v-show="!msg.is_sending" :src="msg.local_blob_url || cachedUrl"
                        class="msg-media-content" autoplay muted loop playsinline></video>
                 <div v-if="!msg.is_sending" class="video-play-indicator">
                   <svg viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M8 5v14l11-7z"/></svg>
@@ -98,8 +99,9 @@
               
               <!-- Overlay for uploading state -->
               <div v-if="msg.is_sending && msg.upload_progress !== undefined" class="msg-media-overlay cancelable-overlay" @click.stop="$emit('cancel-send', msg)" style="cursor:pointer;">
-                <div v-if="msg.upload_total > 0" class="telegram-size-badge">
-                  {{ formatBytes(msg.upload_loaded) }} / {{ formatBytes(msg.upload_total) }}
+                <div v-if="msg.upload_total > 0" class="telegram-size-badge" :style="{ direction: msg.upload_progress === 100 ? 'rtl' : 'ltr' }">
+                  <span v-if="msg.upload_progress === 100">در حال پردازش...</span>
+                  <span v-else>{{ formatBytes(msg.upload_loaded) }} / {{ formatBytes(msg.upload_total) }}</span>
                 </div>
                 <div class="progress-container cancelable" style="background: rgba(0,0,0,0.5); border-radius: 50%; padding: 8px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;">
                   <svg class="progress-ring" viewBox="0 0 36 36" style="position: absolute; width: 44px; height: 44px;">
