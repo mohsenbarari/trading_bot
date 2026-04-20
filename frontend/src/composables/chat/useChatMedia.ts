@@ -83,6 +83,15 @@ export interface UseChatMediaOptions {
     sendMediaMessage: (type: 'image' | 'video' | 'voice' | 'sticker', content: string, localBlobUrl?: string) => Promise<void>
 }
 
+type LightboxItem = {
+    src: string
+    msrc: string
+    msgId: number
+    element?: HTMLImageElement
+    w: number
+    h: number
+}
+
 export function useChatMedia(options: UseChatMediaOptions) {
     const {
         apiBaseUrl,
@@ -206,6 +215,112 @@ export function useChatMedia(options: UseChatMediaOptions) {
         try { return JSON.parse(content).file_id ?? '' } catch { return '' }
     }
 
+    function parseMediaPayload(content: string): Record<string, any> {
+        if (!content || !content.startsWith('{')) return {}
+        try {
+            return JSON.parse(content)
+        } catch {
+            return {}
+        }
+    }
+
+    function getRenderedImageElement(messageId: number): HTMLImageElement | null {
+        return document.querySelector(`img[data-media-msg-id="${messageId}"]`) as HTMLImageElement | null
+    }
+
+    function loadImageDimensions(src: string): Promise<{ width: number; height: number }> {
+        return new Promise((resolve) => {
+            const img = new Image()
+            img.onload = () => {
+                resolve({
+                    width: Math.max(1, img.naturalWidth || 0),
+                    height: Math.max(1, img.naturalHeight || 0)
+                })
+            }
+            img.onerror = () => resolve({ width: 0, height: 0 })
+            img.src = src
+        })
+    }
+
+    async function resolveLightboxImageData(messageId: number, src: string, fallbackWidth = 0, fallbackHeight = 0) {
+        const element = getRenderedImageElement(messageId)
+        const resolvedSrc = element?.currentSrc || element?.src || src
+
+        if (element?.naturalWidth && element?.naturalHeight) {
+            return {
+                src: resolvedSrc,
+                element,
+                width: element.naturalWidth,
+                height: element.naturalHeight,
+            }
+        }
+
+        const loaded = await loadImageDimensions(resolvedSrc)
+        return {
+            src: resolvedSrc,
+            element: element ?? undefined,
+            width: loaded.width || fallbackWidth || 1,
+            height: loaded.height || fallbackHeight || 1,
+        }
+    }
+
+    async function buildLightboxItem(msg: Message): Promise<LightboxItem | null> {
+        const payload = parseMediaPayload(msg.content)
+        const fileId = typeof payload.file_id === 'string' ? payload.file_id : getFileId(msg.content)
+        const fallbackSrc = msg.local_blob_url || imageCache.value[fileId] || payload.thumbnail || ''
+
+        if (!fallbackSrc) return null
+
+        const fallbackWidth = Number(payload.width) || 0
+        const fallbackHeight = Number(payload.height) || 0
+        const resolved = await resolveLightboxImageData(msg.id, fallbackSrc, fallbackWidth, fallbackHeight)
+
+        return {
+            src: resolved.src,
+            msrc: payload.thumbnail || resolved.src,
+            msgId: msg.id,
+            element: resolved.element,
+            w: resolved.width,
+            h: resolved.height,
+        }
+    }
+
+    async function syncLightboxContentSize(content: any) {
+        if (content.type !== 'image' || !content.data?.src) return
+
+        const resolved = await resolveLightboxImageData(
+            Number(content.data.msgId),
+            content.data.src,
+            Number(content.data.w) || 0,
+            Number(content.data.h) || 0,
+        )
+
+        const sizeChanged = resolved.width !== content.data.w || resolved.height !== content.data.h
+        const srcChanged = resolved.src !== content.data.src
+
+        if (!sizeChanged && !srcChanged) return
+
+        content.data.src = resolved.src
+        content.data.element = resolved.element
+        content.data.w = resolved.width
+        content.data.h = resolved.height
+
+        content.width = resolved.width
+        content.height = resolved.height
+
+        if (content.element instanceof HTMLImageElement && content.element.src !== resolved.src) {
+            content.element.src = resolved.src
+        }
+
+        if (content.slide) {
+            content.slide.width = resolved.width
+            content.slide.height = resolved.height
+            if (typeof content.slide.updateContentSize === 'function') {
+                content.slide.updateContentSize(true)
+            }
+        }
+    }
+
     function openCachedImage(fileId: string) {
         const url = imageCache.value[fileId]
         if (url) window.open(url, '_blank')
@@ -268,7 +383,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
     // === Lightbox State ===
     const lightboxMedia = ref<{ url: string, type: 'image' | 'video' } | null>(null);
 
-    function handleMediaClick(msg: Message) {
+    async function handleMediaClick(msg: Message) {
         const fileId = getFileId(msg.content);
         const cacheUrl = imageCache.value[fileId];
         const url = msg.local_blob_url || cacheUrl;
@@ -277,22 +392,13 @@ export function useChatMedia(options: UseChatMediaOptions) {
             if (msg.message_type === 'image') {
                 // Collect all images in current chat for the gallery
                 const imageMessages = messages.value.filter(m => m.message_type === 'image');
-                
-                const dataSource = imageMessages.map(m => {
-                    const mFileId = getFileId(m.content);
-                    const src = m.local_blob_url || imageCache.value[mFileId];
-                    let thumb = '';
-                    try { thumb = JSON.parse(m.content).thumbnail ?? '' } catch { }
-                    
-                    return {
-                        src: src || thumb,
-                        msrc: thumb,
-                        msgId: m.id,
-                        element: (document.getElementById(`msg-${m.id}`)?.querySelector('img.msg-media-content') as HTMLElement) || undefined,
-                        w: 0,
-                        h: 0
-                    };
-                }).filter(img => img.src);
+
+                const dataSource = (await Promise.all(imageMessages.map(buildLightboxItem)))
+                    .filter((item): item is LightboxItem => !!item);
+
+                if (dataSource.length === 0) {
+                    return;
+                }
                 
                 const startIndex = dataSource.findIndex(item => item.msgId === msg.id);
 
@@ -364,19 +470,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 });
 
                 lightbox.on('contentLoad', (e) => {
-                    const { content } = e;
-                    if (content.type === 'image' && content.data.w === 0 && content.data.src) {
-                        const img = new Image();
-                        img.onload = () => {
-                            content.data.w = img.naturalWidth;
-                            content.data.h = img.naturalHeight;
-                            if (content.element) {
-                                content.updateImageBaseSize();
-                                content.updateImageSize();
-                            }
-                        };
-                        img.src = content.data.src;
-                    }
+                    void syncLightboxContentSize(e.content);
                 });
 
                 lightbox.init();
