@@ -38,8 +38,9 @@ function getLayoutClass(): string {
       <img
         v-if="item.type === 'image'"
         :src="item.url"
+        :data-media-msg-id="item.msg.id"
         loading="lazy"
-        class="album-media"
+        class="album-media msg-media-content"
       />
       <video
         v-else

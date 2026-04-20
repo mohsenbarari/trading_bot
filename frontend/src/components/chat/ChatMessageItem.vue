@@ -97,8 +97,9 @@
             <div class="absolute inset-0 w-full h-full flex items-center justify-center">
               <img v-if="msg.message_type === 'image'"
                    v-show="!msg.is_sending || thumbnail"
+                    :data-media-msg-id="msg.id"
                    :src="msg.local_blob_url || cachedUrl"
-                   alt="تصویر" class="w-full h-full object-cover absolute inset-0 block" />
+                    alt="تصویر" class="msg-media-content w-full h-full object-cover absolute inset-0 block" />
                    
               <div v-else-if="msg.message_type === 'video'" class="absolute inset-0 w-full h-full">
                 <video v-show="!msg.is_sending" :src="msg.local_blob_url || cachedUrl"
