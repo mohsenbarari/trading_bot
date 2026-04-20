@@ -124,7 +124,6 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import imageCompression from 'browser-image-compression'
 import 'leaflet/dist/leaflet.css'
 import { LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
 
@@ -223,26 +222,14 @@ watch(() => activeTab.value, (val) => {
   }
 })
 
-// Gallery file handler (compresses images)
+// Gallery file handler.
+// Do not pre-compress here: useChatMedia.ts performs the EXIF-safe pipeline.
 async function onGalleryFile(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files?.length) return
 
   for (const file of Array.from(input.files)) {
-    if (file.type.startsWith('image/') && !file.type.includes('gif')) {
-      try {
-        const compressed = await imageCompression(file, {
-          maxSizeMB: 0.5,
-          maxWidthOrHeight: 1280,
-          useWebWorker: false
-        })
-        emit('select-media', compressed)
-      } catch {
-        emit('select-media', file)
-      }
-    } else {
-      emit('select-media', file)
-    }
+    emit('select-media', file)
   }
   input.value = ''
   close()
