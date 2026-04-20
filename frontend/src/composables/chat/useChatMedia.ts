@@ -447,7 +447,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 step = 'compress_thumb'
                 try {
                     const thumbOptions = { maxSizeMB: 0.05, maxWidthOrHeight: 20, useWebWorker: true, exifOrientation: true as any }
-                    const thumbFile = await imageCompression(file, thumbOptions)
+                    const thumbFile = await imageCompression(uploadFile, thumbOptions)
                     thumbBase64 = await new Promise<string>((resolve, reject) => {
                         const reader = new FileReader()
                         reader.onloadend = () => resolve(reader.result as string)
@@ -469,27 +469,26 @@ export function useChatMedia(options: UseChatMediaOptions) {
             if (msgType === 'image' || msgType === 'video') {
                 try {
                     await new Promise<void>((resolve) => {
-                        const url = URL.createObjectURL(uploadFile);
+                        const rotatedUrl = URL.createObjectURL(uploadFile);
+                        getOptimisticTarget().local_blob_url = rotatedUrl; // Update UI with rotated image immediately
                         if (msgType === 'image') {
                             const img = new Image();
                             img.onload = () => {
                                 finalWidth = img.naturalWidth;
                                 finalHeight = img.naturalHeight;
-                                URL.revokeObjectURL(url);
                                 resolve();
                             };
                             img.onerror = () => resolve();
-                            img.src = url;
+                            img.src = rotatedUrl;
                         } else {
                             const video = document.createElement('video');
                             video.onloadedmetadata = () => {
                                 finalWidth = video.videoWidth;
                                 finalHeight = video.videoHeight;
-                                URL.revokeObjectURL(url);
                                 resolve();
                             };
                             video.onerror = () => resolve();
-                            video.src = url;
+                            video.src = rotatedUrl;
                         }
                     });
                 } catch (e) {
@@ -583,15 +582,16 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
             step = 'save_local_cache'
             await saveToDB(data.file_id, uploadFile)
+            const finalLocalUrl = getOptimisticTarget()?.local_blob_url || localUrl
             if (!isAudio) {
                 // we probably don't need a Blob URL in the image cache for voice, but it's safe to store
-                imageCache.value = { ...imageCache.value, [data.file_id]: localUrl }
+                imageCache.value = { ...imageCache.value, [data.file_id]: finalLocalUrl }
             } else {
-                imageCache.value = { ...imageCache.value, [data.file_id]: localUrl }
+                imageCache.value = { ...imageCache.value, [data.file_id]: finalLocalUrl }
             }
 
             step = 'send_ws_message'
-            await sendMediaMessage(msgType, messageContent, localUrl)
+            await sendMediaMessage(msgType, messageContent, finalLocalUrl)
 
         } catch (e: any) {
             if (e.message === 'UploadCancelled') {
