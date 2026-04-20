@@ -437,7 +437,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 if (isCancelledLocally) throw new Error('UploadCancelled');
                 step = 'compress_main'
                 try {
-                    const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1280, useWebWorker: true }
+                    const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1280, useWebWorker: true, exifOrientation: true as any }
                     uploadFile = await imageCompression(file, options)
                 } catch (warn) {
                     console.warn("Image compression failed, using original:", warn)
@@ -446,7 +446,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 if (isCancelledLocally) throw new Error('UploadCancelled');
                 step = 'compress_thumb'
                 try {
-                    const thumbOptions = { maxSizeMB: 0.05, maxWidthOrHeight: 20, useWebWorker: true }
+                    const thumbOptions = { maxSizeMB: 0.05, maxWidthOrHeight: 20, useWebWorker: true, exifOrientation: true as any }
                     const thumbFile = await imageCompression(file, thumbOptions)
                     thumbBase64 = await new Promise<string>((resolve, reject) => {
                         const reader = new FileReader()
@@ -463,6 +463,39 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
             const targetMsg = getOptimisticTarget();
             targetMsg.content = JSON.stringify({ thumbnail: thumbBase64 })
+            
+            let finalWidth = 0;
+            let finalHeight = 0;
+            if (msgType === 'image' || msgType === 'video') {
+                try {
+                    await new Promise<void>((resolve) => {
+                        const url = URL.createObjectURL(uploadFile);
+                        if (msgType === 'image') {
+                            const img = new Image();
+                            img.onload = () => {
+                                finalWidth = img.naturalWidth;
+                                finalHeight = img.naturalHeight;
+                                URL.revokeObjectURL(url);
+                                resolve();
+                            };
+                            img.onerror = () => resolve();
+                            img.src = url;
+                        } else {
+                            const video = document.createElement('video');
+                            video.onloadedmetadata = () => {
+                                finalWidth = video.videoWidth;
+                                finalHeight = video.videoHeight;
+                                URL.revokeObjectURL(url);
+                                resolve();
+                            };
+                            video.onerror = () => resolve();
+                            video.src = url;
+                        }
+                    });
+                } catch (e) {
+                    console.warn("Could not extract final dimensions:", e);
+                }
+            }
 
             step = 'prepare_form'
             const formData = new FormData()
@@ -538,6 +571,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
             const contentObj: any = {
                 file_id: data.file_id,
                 thumbnail: data.thumbnail
+            }
+            if (finalWidth && finalHeight) {
+                contentObj.width = finalWidth;
+                contentObj.height = finalHeight;
             }
             if ((file as any).durationMs !== undefined) {
                 contentObj.durationMs = (file as any).durationMs
