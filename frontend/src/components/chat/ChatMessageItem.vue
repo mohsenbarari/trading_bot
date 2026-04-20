@@ -94,15 +94,15 @@
           
           <!-- 1. Downloaded, Uploading, or Local Render -->
           <template v-if="isCached || msg.local_blob_url">
-            <div class="relative flex w-full items-center justify-center min-h-[150px]">
+            <div class="absolute inset-0 w-full h-full flex items-center justify-center">
               <img v-if="msg.message_type === 'image'"
                    v-show="!msg.is_sending || thumbnail"
                    :src="msg.local_blob_url || cachedUrl"
-                   alt="تصویر" class="w-full h-auto max-h-72 object-cover block" />
+                   alt="تصویر" class="w-full h-full object-cover absolute inset-0 block" />
                    
-              <div v-else-if="msg.message_type === 'video'" class="relative w-full h-full">
+              <div v-else-if="msg.message_type === 'video'" class="absolute inset-0 w-full h-full">
                 <video v-show="!msg.is_sending" :src="msg.local_blob_url || cachedUrl"
-                       class="w-full h-auto max-h-72 object-cover block" autoplay muted loop playsinline></video>
+                       class="w-full h-full object-cover absolute inset-0 block" autoplay muted loop playsinline></video>
                 <div v-if="!msg.is_sending" class="video-play-indicator">
                   <svg viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M8 5v14l11-7z"/></svg>
                 </div>
@@ -127,7 +127,7 @@
           
           <!-- 2. Needs Download State -->
           <template v-else>
-            <div class="w-full h-full min-h-[150px] msg-media-overlay" @click.stop>
+            <div class="w-full h-full absolute inset-0 msg-media-overlay z-10" @click.stop>
               <div v-if="msg.is_downloading" class="progress-container">
                 <svg class="progress-ring" viewBox="0 0 36 36">
                   <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
@@ -330,9 +330,15 @@ const mediaStyle = computed(() => {
     try {
       const content = JSON.parse(props.msg.content)
       if (content.width && content.height) {
-        style.aspectRatio = `${content.width} / ${content.height}`
+        const ratio = content.width / content.height
+        const clampedRatio = Math.max(0.6, Math.min(ratio, 2.5))
+        style.aspectRatio = `${clampedRatio}`
+      } else {
+        style.minHeight = '200px'
       }
-    } catch {}
+    } catch {
+      style.minHeight = '200px'
+    }
   }
   return style
 })
