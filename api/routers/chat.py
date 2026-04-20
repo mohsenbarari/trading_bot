@@ -743,6 +743,26 @@ async def upload_chat_media(
     os.makedirs(upload_dir, exist_ok=True)
     
     file_path = os.path.join(upload_dir, f"{file_uuid}.{ext}")
+
+    # EXIF transpose for images: rotate pixels to match EXIF orientation, then strip the tag
+    img_width = None
+    img_height = None
+    if mime.startswith("image/") and mime != "image/gif":
+        try:
+            from PIL import Image as PILImage, ImageOps
+            import io
+            pil_img = PILImage.open(io.BytesIO(contents))
+            pil_img = ImageOps.exif_transpose(pil_img)
+            img_width, img_height = pil_img.size
+            # Re-encode to strip EXIF and persist the correct orientation
+            buf = io.BytesIO()
+            fmt = "JPEG" if mime in ("image/jpeg", "image/jpg") else ("PNG" if mime == "image/png" else "WEBP")
+            pil_img.save(buf, format=fmt, quality=90)
+            contents = buf.getvalue()
+            size = len(contents)
+        except Exception as e:
+            logger.warning(f"Pillow EXIF transpose failed, saving original: {e}")
+
     async with aiofiles.open(file_path, "wb") as f:
         await f.write(contents)
             
@@ -759,11 +779,15 @@ async def upload_chat_media(
     db.add(chat_file)
     await db.commit()
     
-    # برگرداندن شناسه و تامنیل
-    return {
+    # برگرداندن شناسه، تامنیل و ابعاد تصویر
+    result = {
         "file_id": chat_file.id,
         "thumbnail": chat_file.thumbnail
     }
+    if img_width and img_height:
+        result["width"] = img_width
+        result["height"] = img_height
+    return result
 
 @router.get("/files/{file_id}")
 async def get_chat_file(
