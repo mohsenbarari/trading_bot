@@ -457,7 +457,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 step = 'compress_main'
                 try {
                     // Step 1: ALWAYS compress and apply EXIF rotation FIRST
-                    const options = { maxSizeMB: 1, maxWidthOrHeight: 1920, useWebWorker: true, exifOrientation: true as any }
+                    const options = { maxSizeMB: 1, maxWidthOrHeight: 1920, exifOrientation: true as any }
                     uploadFile = await imageCompression(file, options)
 
                     // Step 2: Extract dimensions ONLY from the processed Blob
@@ -481,7 +481,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 step = 'compress_thumb'
                 try {
                     // Step 3: Generate thumbnail from the processed Blob
-                    const thumbOptions = { maxSizeMB: 0.05, maxWidthOrHeight: 20, useWebWorker: true, exifOrientation: true as any }
+                    const thumbOptions = { maxSizeMB: 0.05, maxWidthOrHeight: 20, exifOrientation: true as any }
                     const thumbFile = await imageCompression(uploadFile, thumbOptions)
                     thumbBase64 = await new Promise<string>((resolve, reject) => {
                         const reader = new FileReader()
@@ -494,11 +494,6 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 }
             }
 
-            if (isCancelledLocally) throw new Error('UploadCancelled');
-
-            const targetMsg = getOptimisticTarget();
-            targetMsg.content = JSON.stringify({ thumbnail: thumbBase64 })
-            
             if (msgType === 'video') {
                 try {
                     await new Promise<void>((resolve) => {
@@ -517,6 +512,27 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     console.warn("Could not extract final video dimensions:", e);
                 }
             }
+
+            // Check if EXIF orientation is still present (meaning compression skipped or didn't strip it)
+            if (msgType === 'image') {
+                try {
+                    const orientation = await imageCompression.getExifOrientation(uploadFile).catch(() => 1);
+                    if (orientation >= 5 && orientation <= 8) {
+                        const temp = finalWidth;
+                        finalWidth = finalHeight;
+                        finalHeight = temp;
+                    }
+                } catch(e) {}
+            }
+
+            const targetMsg = getOptimisticTarget();
+            const optimisticContent: any = { thumbnail: thumbBase64 };
+            if (finalWidth && finalHeight) {
+                optimisticContent.width = finalWidth;
+                optimisticContent.height = finalHeight;
+            }
+            if (isVideo) optimisticContent.placeholder = true;
+            targetMsg.content = JSON.stringify(optimisticContent);
 
             step = 'prepare_form'
             const formData = new FormData()
