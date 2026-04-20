@@ -4,6 +4,22 @@ import PhotoSwipeLightbox from 'photoswipe/lightbox'
 import 'photoswipe/style.css'
 import type { Message } from '../../types/chat'
 
+const extractTrueDimensions = (fileOrBlob: File | Blob): Promise<{ width: number, height: number }> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(fileOrBlob);
+    img.onload = () => {
+      resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+      URL.revokeObjectURL(objectUrl);
+    };
+    img.onerror = (e) => {
+      URL.revokeObjectURL(objectUrl);
+      reject(e);
+    };
+    img.src = objectUrl;
+  });
+};
+
 export interface UseChatMediaOptions {
     apiBaseUrl: string
     jwtToken: string | null
@@ -422,6 +438,9 @@ export function useChatMedia(options: UseChatMediaOptions) {
             let uploadFile = file;
             let thumbBase64 = '';
 
+            let finalWidth = 0;
+            let finalHeight = 0;
+
             if (isVideo) {
                 step = 'video_thumb'
                 try {
@@ -437,15 +456,31 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 if (isCancelledLocally) throw new Error('UploadCancelled');
                 step = 'compress_main'
                 try {
-                    const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1280, useWebWorker: true, exifOrientation: true as any }
+                    // Step 1: ALWAYS compress and apply EXIF rotation FIRST
+                    const options = { maxSizeMB: 1, maxWidthOrHeight: 1920, useWebWorker: true, exifOrientation: true as any }
                     uploadFile = await imageCompression(file, options)
+
+                    // Step 2: Extract dimensions ONLY from the processed Blob
+                    const { width, height } = await extractTrueDimensions(uploadFile)
+                    finalWidth = width
+                    finalHeight = height
+
+                    // Update UI immediately with rotated URL
+                    const rotatedUrl = URL.createObjectURL(uploadFile);
+                    getOptimisticTarget().local_blob_url = rotatedUrl;
                 } catch (warn) {
                     console.warn("Image compression failed, using original:", warn)
+                    try {
+                        const { width, height } = await extractTrueDimensions(file)
+                        finalWidth = width
+                        finalHeight = height
+                    } catch(e) {}
                 }
 
                 if (isCancelledLocally) throw new Error('UploadCancelled');
                 step = 'compress_thumb'
                 try {
+                    // Step 3: Generate thumbnail from the processed Blob
                     const thumbOptions = { maxSizeMB: 0.05, maxWidthOrHeight: 20, useWebWorker: true, exifOrientation: true as any }
                     const thumbFile = await imageCompression(uploadFile, thumbOptions)
                     thumbBase64 = await new Promise<string>((resolve, reject) => {
@@ -464,35 +499,22 @@ export function useChatMedia(options: UseChatMediaOptions) {
             const targetMsg = getOptimisticTarget();
             targetMsg.content = JSON.stringify({ thumbnail: thumbBase64 })
             
-            let finalWidth = 0;
-            let finalHeight = 0;
-            if (msgType === 'image' || msgType === 'video') {
+            if (msgType === 'video') {
                 try {
                     await new Promise<void>((resolve) => {
                         const rotatedUrl = URL.createObjectURL(uploadFile);
-                        getOptimisticTarget().local_blob_url = rotatedUrl; // Update UI with rotated image immediately
-                        if (msgType === 'image') {
-                            const img = new Image();
-                            img.onload = () => {
-                                finalWidth = img.naturalWidth;
-                                finalHeight = img.naturalHeight;
-                                resolve();
-                            };
-                            img.onerror = () => resolve();
-                            img.src = rotatedUrl;
-                        } else {
-                            const video = document.createElement('video');
-                            video.onloadedmetadata = () => {
-                                finalWidth = video.videoWidth;
-                                finalHeight = video.videoHeight;
-                                resolve();
-                            };
-                            video.onerror = () => resolve();
-                            video.src = rotatedUrl;
-                        }
+                        getOptimisticTarget().local_blob_url = rotatedUrl; // Update UI with video immediately
+                        const video = document.createElement('video');
+                        video.onloadedmetadata = () => {
+                            finalWidth = video.videoWidth;
+                            finalHeight = video.videoHeight;
+                            resolve();
+                        };
+                        video.onerror = () => resolve();
+                        video.src = rotatedUrl;
                     });
                 } catch (e) {
-                    console.warn("Could not extract final dimensions:", e);
+                    console.warn("Could not extract final video dimensions:", e);
                 }
             }
 
