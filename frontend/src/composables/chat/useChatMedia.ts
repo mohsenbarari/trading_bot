@@ -1,16 +1,35 @@
 import { ref, type Ref, nextTick } from 'vue'
-import imageCompression from 'browser-image-compression'
 import PhotoSwipeLightbox from 'photoswipe/lightbox'
 import 'photoswipe/style.css'
 import type { Message } from '../../types/chat'
 
-const extractTrueDimensions = (fileOrBlob: File | Blob): Promise<{ width: number, height: number }> => {
+/**
+ * Native, foolproof image compressor that relies on modern browser engines
+ * to automatically handle EXIF orientation without double-rotating.
+ */
+const nativeImageCompress = (file: File | Blob, maxWidthOrHeight: number = 1920, quality: number = 0.8): Promise<{ blob: Blob, width: number, height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    const objectUrl = URL.createObjectURL(fileOrBlob);
+    const objectUrl = URL.createObjectURL(file);
     img.onload = () => {
-      resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
       URL.revokeObjectURL(objectUrl);
+      let width = img.naturalWidth || img.width;
+      let height = img.naturalHeight || img.height;
+      if (width > maxWidthOrHeight || height > maxWidthOrHeight) {
+        const ratio = Math.min(maxWidthOrHeight / width, maxWidthOrHeight / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return reject(new Error('No canvas context'));
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => {
+        if (blob) resolve({ blob, width, height });
+        else reject(new Error('Canvas toBlob failed'));
+      }, 'image/jpeg', quality);
     };
     img.onerror = (e) => {
       URL.revokeObjectURL(objectUrl);
@@ -435,7 +454,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         scrollToBottom()
 
         try {
-            let uploadFile = file;
+            let uploadFile: File | Blob = file;
             let thumbBase64 = '';
 
             let finalWidth = 0;
@@ -456,14 +475,11 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 if (isCancelledLocally) throw new Error('UploadCancelled');
                 step = 'compress_main'
                 try {
-                    // Step 1: ALWAYS compress and apply EXIF rotation FIRST
-                    const options = { maxSizeMB: 1, maxWidthOrHeight: 1920, exifOrientation: true as any }
-                    uploadFile = await imageCompression(file, options)
-
-                    // Step 2: Extract dimensions ONLY from the processed Blob
-                    const { width, height } = await extractTrueDimensions(uploadFile)
-                    finalWidth = width
-                    finalHeight = height
+                    // EXIF-safe native compression
+                    const compressed = await nativeImageCompress(file, 1920, 0.85);
+                    uploadFile = compressed.blob;
+                    finalWidth = compressed.width;
+                    finalHeight = compressed.height;
 
                     // Update UI immediately with rotated URL
                     const rotatedUrl = URL.createObjectURL(uploadFile);
@@ -471,23 +487,22 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 } catch (warn) {
                     console.warn("Image compression failed, using original:", warn)
                     try {
-                        const { width, height } = await extractTrueDimensions(file)
-                        finalWidth = width
-                        finalHeight = height
+                        const original = await nativeImageCompress(file, 9999, 1.0);
+                        finalWidth = original.width;
+                        finalHeight = original.height;
                     } catch(e) {}
                 }
 
                 if (isCancelledLocally) throw new Error('UploadCancelled');
                 step = 'compress_thumb'
                 try {
-                    // Step 3: Generate thumbnail from the processed Blob
-                    const thumbOptions = { maxSizeMB: 0.05, maxWidthOrHeight: 20, exifOrientation: true as any }
-                    const thumbFile = await imageCompression(uploadFile, thumbOptions)
+                    // Generate base64 thumbnail
+                    const thumb = await nativeImageCompress(uploadFile, 20, 0.5);
                     thumbBase64 = await new Promise<string>((resolve, reject) => {
                         const reader = new FileReader()
                         reader.onloadend = () => resolve(reader.result as string)
                         reader.onerror = (e) => reject(e)
-                        reader.readAsDataURL(thumbFile)
+                        reader.readAsDataURL(thumb.blob)
                     })
                 } catch (warn) {
                     console.warn("Image thumbnail generation failed:", warn)
@@ -511,18 +526,6 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 } catch (e) {
                     console.warn("Could not extract final video dimensions:", e);
                 }
-            }
-
-            // Check if EXIF orientation is still present (meaning compression skipped or didn't strip it)
-            if (msgType === 'image') {
-                try {
-                    const orientation = await imageCompression.getExifOrientation(uploadFile).catch(() => 1);
-                    if (orientation >= 5 && orientation <= 8) {
-                        const temp = finalWidth;
-                        finalWidth = finalHeight;
-                        finalHeight = temp;
-                    }
-                } catch(e) {}
             }
 
             const targetMsg = getOptimisticTarget();
