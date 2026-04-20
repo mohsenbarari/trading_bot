@@ -6,36 +6,39 @@ import type { Message } from '../../types/chat'
 /**
  * Native, foolproof image compressor that relies on modern browser engines
  * to automatically handle EXIF orientation without double-rotating.
+ * Uses createImageBitmap which is the modern standard for correctly oriented image data.
  */
 const nativeImageCompress = (file: File | Blob, maxWidthOrHeight: number = 1920, quality: number = 0.8): Promise<{ blob: Blob, width: number, height: number }> => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const objectUrl = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      let width = img.naturalWidth || img.width;
-      let height = img.naturalHeight || img.height;
+  return new Promise(async (resolve, reject) => {
+    try {
+      // orientation: 'from-image' is the key to fixing the EXIF rotation bug
+      const bitmap = await createImageBitmap(file, { orientation: 'from-image' } as any);
+      
+      let width = bitmap.width;
+      let height = bitmap.height;
+      
       if (width > maxWidthOrHeight || height > maxWidthOrHeight) {
         const ratio = Math.min(maxWidthOrHeight / width, maxWidthOrHeight / height);
         width = Math.round(width * ratio);
         height = Math.round(height * ratio);
       }
+      
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       if (!ctx) return reject(new Error('No canvas context'));
-      ctx.drawImage(img, 0, 0, width, height);
+      
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      bitmap.close(); // Release memory
+      
       canvas.toBlob((blob) => {
         if (blob) resolve({ blob, width, height });
         else reject(new Error('Canvas toBlob failed'));
       }, 'image/jpeg', quality);
-    };
-    img.onerror = (e) => {
-      URL.revokeObjectURL(objectUrl);
+    } catch (e) {
       reject(e);
-    };
-    img.src = objectUrl;
+    }
   });
 };
 

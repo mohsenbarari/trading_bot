@@ -88,7 +88,7 @@
 
       <!-- Media (Image/Video) -->
       <template v-else-if="msg.message_type === 'image' || msg.message_type === 'video'">
-        <div class="msg-media-link max-w-xs sm:max-w-sm rounded-lg overflow-hidden relative"
+        <div class="msg-media-link w-[280px] sm:w-[320px] max-w-full rounded-lg overflow-hidden relative"
              :style="mediaStyle"
              @click.stop="$emit('media-click', msg)">
           
