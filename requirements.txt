@@ -22,6 +22,7 @@ requests
 aiofiles==23.2.1
 async-timeout==5.0.1
 python-magic==0.4.27
+Pillow==10.4.0
 aioboto3==15.5.0
 aiobotocore==2.25.1
 boto3==1.40.61

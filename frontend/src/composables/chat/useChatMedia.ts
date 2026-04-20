@@ -6,32 +6,61 @@ import type { Message } from '../../types/chat'
 /**
  * Native, foolproof image compressor that relies on modern browser engines
  * to automatically handle EXIF orientation without double-rotating.
- * Uses createImageBitmap which is the modern standard for correctly oriented image data.
+ * Uses createImageBitmap (with correct imageOrientation property) as primary path,
+ * and falls back to <img> element drawing for browsers that don't support the option.
  */
 const nativeImageCompress = (file: File | Blob, maxWidthOrHeight: number = 1920, quality: number = 0.8): Promise<{ blob: Blob, width: number, height: number }> => {
   return new Promise(async (resolve, reject) => {
     try {
-      // orientation: 'from-image' is the key to fixing the EXIF rotation bug
-      const bitmap = await createImageBitmap(file, { orientation: 'from-image' } as any);
-      
-      let width = bitmap.width;
-      let height = bitmap.height;
-      
+      let bitmap: ImageBitmap | null = null;
+      try {
+        // imageOrientation (NOT 'orientation') is the correct property name
+        bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      } catch {
+        // Fallback: some browsers don't support the imageOrientation option
+        try {
+          bitmap = await createImageBitmap(file);
+        } catch {
+          bitmap = null;
+        }
+      }
+
+      let width: number;
+      let height: number;
+      let drawSource: CanvasImageSource;
+
+      if (bitmap) {
+        width = bitmap.width;
+        height = bitmap.height;
+        drawSource = bitmap;
+      } else {
+        // Final fallback: use <img> which auto-applies EXIF in all modern browsers
+        const img = await new Promise<HTMLImageElement>((res, rej) => {
+          const el = new Image();
+          el.onload = () => res(el);
+          el.onerror = rej;
+          el.src = URL.createObjectURL(file);
+        });
+        width = img.naturalWidth;
+        height = img.naturalHeight;
+        drawSource = img;
+      }
+
       if (width > maxWidthOrHeight || height > maxWidthOrHeight) {
         const ratio = Math.min(maxWidthOrHeight / width, maxWidthOrHeight / height);
         width = Math.round(width * ratio);
         height = Math.round(height * ratio);
       }
-      
+
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       if (!ctx) return reject(new Error('No canvas context'));
-      
-      ctx.drawImage(bitmap, 0, 0, width, height);
-      bitmap.close(); // Release memory
-      
+
+      ctx.drawImage(drawSource, 0, 0, width, height);
+      if (bitmap) bitmap.close();
+
       canvas.toBlob((blob) => {
         if (blob) resolve({ blob, width, height });
         else reject(new Error('Canvas toBlob failed'));
@@ -611,6 +640,11 @@ export function useChatMedia(options: UseChatMediaOptions) {
             uploadControllers.delete(optimisticId);
 
             step = 'prepare_json'
+            // Prefer server-returned dimensions (EXIF-transposed) over local ones
+            if (data.width && data.height) {
+                finalWidth = data.width;
+                finalHeight = data.height;
+            }
             const contentObj: any = {
                 file_id: data.file_id,
                 thumbnail: data.thumbnail
