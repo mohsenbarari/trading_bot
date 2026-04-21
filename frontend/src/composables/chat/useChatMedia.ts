@@ -7,6 +7,14 @@ import { primeMediaPreprocessTelemetry, recordMediaPreprocessTelemetry } from '.
 
 const CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const CHAT_MEDIA_MAX_UPLOAD_LABEL = '50MB'
+const HEIC_MIME_TYPES = new Set([
+    'image/heic',
+    'image/heic-sequence',
+    'image/heif',
+    'image/heif-sequence',
+])
+
+let optimisticUploadSequence = 0
 
 function formatFileSizeMb(bytes: number) {
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
@@ -18,6 +26,54 @@ function buildUploadTooLargeMessage(bytes?: number) {
         : ''
 
     return `حجم فایل از حد مجاز ${CHAT_MEDIA_MAX_UPLOAD_LABEL} بیشتر است${actualSize}.`
+}
+
+function isHeicLikeFile(file: File) {
+    const mimeType = (file.type || '').toLowerCase()
+    const fileName = (file.name || '').toLowerCase()
+
+    return HEIC_MIME_TYPES.has(mimeType) || fileName.endsWith('.heic') || fileName.endsWith('.heif')
+}
+
+function buildConvertedImageName(fileName: string) {
+    if (!fileName) {
+        return `image_${Date.now()}.jpg`
+    }
+
+    return fileName.replace(/\.(heic|heif)$/i, '.jpg')
+}
+
+async function normalizeImageUploadFile(file: File): Promise<File> {
+    if (!isHeicLikeFile(file)) {
+        return file
+    }
+
+    try {
+        const { default: heic2any } = await import('heic2any')
+        const converted = await heic2any({
+            blob: file,
+            toType: 'image/jpeg',
+            quality: 0.9,
+        })
+        const convertedBlob = Array.isArray(converted) ? converted[0] : converted
+
+        if (!(convertedBlob instanceof Blob)) {
+            throw new Error('HEIC conversion returned no blob')
+        }
+
+        return new File([convertedBlob], buildConvertedImageName(file.name), {
+            type: 'image/jpeg',
+            lastModified: file.lastModified || Date.now(),
+        })
+    } catch (error) {
+        console.error('HEIC conversion failed:', error)
+        throw new Error('تبدیل تصویر HEIC در این دستگاه ناموفق بود. لطفاً فایل را به JPG یا PNG تبدیل کنید.')
+    }
+}
+
+function createOptimisticUploadId() {
+    optimisticUploadSequence = (optimisticUploadSequence + 1) % 1000
+    return -((Date.now() * 1000) + optimisticUploadSequence)
 }
 
 /**
@@ -1195,7 +1251,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         let step = 'start'
         const processingAbortController = new AbortController()
 
-        const optimisticId = -Date.now()
+        const optimisticId = createOptimisticUploadId()
         const localUrl = URL.createObjectURL(file)
         const initialContent = appendAlbumMetadata({
             placeholder: true,
@@ -1247,7 +1303,25 @@ export function useChatMedia(options: UseChatMediaOptions) {
         await waitForNextPaint()
 
         try {
-            let uploadFile: File | Blob = file;
+            let sourceFile = file
+            if (!isVideo && !isAudio) {
+                step = 'normalize_heic'
+                sourceFile = await normalizeImageUploadFile(file)
+
+                if (sourceFile !== file) {
+                    const normalizedUrl = URL.createObjectURL(sourceFile)
+                    const target = getOptimisticTarget()
+                    const previousUrl = target.local_blob_url
+
+                    if (previousUrl && previousUrl.startsWith('blob:') && previousUrl !== normalizedUrl) {
+                        URL.revokeObjectURL(previousUrl)
+                    }
+
+                    target.local_blob_url = normalizedUrl
+                }
+            }
+
+            let uploadFile: File | Blob = sourceFile;
             let thumbBase64 = '';
 
             let finalWidth = 0;
@@ -1326,7 +1400,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     if (canUseImagePreprocessWorker()) {
                         step = 'worker_preprocess'
                         const processed = await runAdaptivePreprocessTask(preprocessLimit, () =>
-                            processImageInWorker(file, processingAbortController.signal)
+                            processImageInWorker(sourceFile, processingAbortController.signal)
                         )
 
                         uploadFile = processed.blob
@@ -1337,7 +1411,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                         step = 'main_thread_preprocess'
                         await waitForNextPaint()
                         const processed = await runAdaptivePreprocessTask(preprocessLimit, () =>
-                            preprocessImageOnMainThread(file)
+                            preprocessImageOnMainThread(sourceFile)
                         )
 
                         uploadFile = processed.blob
@@ -1377,7 +1451,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     const imageFallbackStartedAt = performance.now()
                     try {
                         const compressed = await runAdaptivePreprocessTask(preprocessLimit, () =>
-                            nativeImageCompress(file, 1920, 0.85)
+                            nativeImageCompress(sourceFile, 1920, 0.85)
                         )
                         uploadFile = compressed.blob;
                         finalWidth = compressed.width;
@@ -1385,7 +1459,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     } catch (warn) {
                         console.warn("Image compression failed, using original:", warn)
                         try {
-                            const original = await nativeImageCompress(file, 9999, 1.0);
+                            const original = await nativeImageCompress(sourceFile, 9999, 1.0);
                             finalWidth = original.width;
                             finalHeight = original.height;
                         } catch (error) {
@@ -1504,7 +1578,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             }
 
             const formData = new FormData()
-            formData.append('file', uploadFile, file.name)
+            formData.append('file', uploadFile, sourceFile.name)
             formData.append('thumbnail', thumbBase64)
 
             step = 'xhr_upload'
