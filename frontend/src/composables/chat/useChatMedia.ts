@@ -5,6 +5,21 @@ import type { Message } from '../../types/chat'
 import { canUseImagePreprocessWorker, getRecommendedImagePreprocessParallelism, processImageInWorker } from '../../utils/imagePreprocessClient'
 import { primeMediaPreprocessTelemetry, recordMediaPreprocessTelemetry } from '../../utils/chatMediaTelemetry'
 
+const CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+const CHAT_MEDIA_MAX_UPLOAD_LABEL = '50MB'
+
+function formatFileSizeMb(bytes: number) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+}
+
+function buildUploadTooLargeMessage(bytes?: number) {
+    const actualSize = typeof bytes === 'number' && Number.isFinite(bytes) && bytes > 0
+        ? ` (حجم فایل: ${formatFileSizeMb(bytes)})`
+        : ''
+
+    return `حجم فایل از حد مجاز ${CHAT_MEDIA_MAX_UPLOAD_LABEL} بیشتر است${actualSize}.`
+}
+
 /**
  * Native, foolproof image compressor that relies on modern browser engines
  * to automatically handle EXIF orientation without double-rotating.
@@ -1169,6 +1184,13 @@ export function useChatMedia(options: UseChatMediaOptions) {
         
         if (!selectedUserId.value) return
 
+        if ((isVideo || isAudio) && file.size > CHAT_MEDIA_MAX_UPLOAD_BYTES) {
+            const tooLargeMessage = buildUploadTooLargeMessage(file.size)
+            error.value = tooLargeMessage
+            alert(tooLargeMessage)
+            return
+        }
+
         activeUploadsCount++
         isUploading.value = activeUploadsCount > 0
         let step = 'start'
@@ -1478,6 +1500,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
             targetMsg.content = JSON.stringify(optimisticContent);
 
             step = 'prepare_form'
+            if (uploadFile.size > CHAT_MEDIA_MAX_UPLOAD_BYTES) {
+                throw new Error(buildUploadTooLargeMessage(uploadFile.size))
+            }
+
             const formData = new FormData()
             formData.append('file', uploadFile, file.name)
             formData.append('thumbnail', thumbBase64)
@@ -1511,6 +1537,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 xhr.onload = () => {
                     if (xhr.status === 401) {
                         reject(new Error("نشست شما منقضی شده است. لطفاً صفحه را رفرش کنید."))
+                        return
+                    }
+                    if (xhr.status === 413) {
+                        reject(new Error(buildUploadTooLargeMessage(uploadFile.size)))
                         return
                     }
                     if (xhr.status >= 200 && xhr.status < 300) {
