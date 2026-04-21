@@ -96,6 +96,30 @@ export interface UseChatMediaOptions {
     sendMediaMessage: (type: 'image' | 'video' | 'voice' | 'sticker', content: string, localBlobUrl?: string, optimisticId?: number) => Promise<Message | null>
 }
 
+type ImagePreprocessWorkerSuccessResponse = {
+    id: string
+    ok: true
+    blob: Blob
+    width: number
+    height: number
+    thumbnailDataUrl: string
+}
+
+type ImagePreprocessWorkerErrorResponse = {
+    id: string
+    ok: false
+    error: string
+}
+
+type ImagePreprocessWorkerResponse = ImagePreprocessWorkerSuccessResponse | ImagePreprocessWorkerErrorResponse
+
+type WorkerImagePreprocessResult = {
+    blob: Blob
+    width: number
+    height: number
+    thumbnailDataUrl: string
+}
+
 type LightboxItem = {
     src: string
     msrc: string
@@ -120,6 +144,98 @@ type PendingAlbumBatch = {
     expectedCount: number
     items: Map<number, PendingAlbumItem>
     flushPromise: Promise<void> | null
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onloadend = () => resolve(reader.result as string)
+        reader.onerror = (event) => reject(event)
+        reader.readAsDataURL(blob)
+    })
+}
+
+async function generateImageThumbnailDataUrl(file: Blob): Promise<string> {
+    const thumb = await nativeImageCompress(file, 20, 0.5)
+    return await blobToDataUrl(thumb.blob)
+}
+
+function runImagePreprocessWorker(
+    file: File,
+    signal?: AbortSignal,
+    onWorkerStateChange?: (worker: Worker | null) => void
+): Promise<WorkerImagePreprocessResult> {
+    return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new Error('UploadCancelled'))
+            return
+        }
+
+        const jobId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+        let worker: Worker
+
+        try {
+            worker = new Worker(new URL('../../workers/imagePreprocess.worker.ts', import.meta.url), { type: 'module' })
+        } catch (error) {
+            reject(error)
+            return
+        }
+
+        onWorkerStateChange?.(worker)
+
+        const cleanup = () => {
+            signal?.removeEventListener('abort', handleAbort)
+            onWorkerStateChange?.(null)
+            worker.terminate()
+        }
+
+        const handleAbort = () => {
+            cleanup()
+            reject(new Error('UploadCancelled'))
+        }
+
+        const handleError = (error: unknown) => {
+            cleanup()
+            reject(error instanceof Error ? error : new Error('Image preprocessing worker failed'))
+        }
+
+        signal?.addEventListener('abort', handleAbort, { once: true })
+
+        worker.onmessage = (event: MessageEvent<ImagePreprocessWorkerResponse>) => {
+            const response = event.data
+            if (!response || response.id !== jobId) {
+                return
+            }
+
+            cleanup()
+
+            if (!response.ok) {
+                reject(new Error(response.error || 'Image preprocessing worker failed'))
+                return
+            }
+
+            resolve({
+                blob: response.blob,
+                width: response.width,
+                height: response.height,
+                thumbnailDataUrl: response.thumbnailDataUrl,
+            })
+        }
+
+        worker.onerror = (event) => {
+            const message = event.message || 'Image preprocessing worker crashed'
+            handleError(new Error(message))
+        }
+
+        worker.postMessage({
+            id: jobId,
+            file,
+            maxWidthOrHeight: 1920,
+            quality: 0.85,
+            thumbnailMaxWidthOrHeight: 20,
+            thumbnailQuality: 0.5,
+        })
+    })
 }
 
 export function useChatMedia(options: UseChatMediaOptions) {
@@ -719,6 +835,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
         activeUploadsCount++
         isUploading.value = activeUploadsCount > 0
         let step = 'start'
+        const processingAbortController = new AbortController()
+        let activeProcessingWorker: Worker | null = null
 
         const optimisticId = -Date.now()
         const localUrl = URL.createObjectURL(file)
@@ -757,6 +875,11 @@ export function useChatMedia(options: UseChatMediaOptions) {
         uploadControllers.set(optimisticId, {
             abort: () => {
                 isCancelledLocally = true;
+                processingAbortController.abort();
+                if (activeProcessingWorker) {
+                    activeProcessingWorker.terminate();
+                    activeProcessingWorker = null;
+                }
                 const index = messages.value.findIndex(m => m.id === optimisticId);
                 if (index !== -1) messages.value.splice(index, 1);
                 markAlbumItemState(normalizedAlbumId, optimisticId, 'cancelled')
@@ -792,40 +915,56 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 // No thumbnail processing for voice
             } else {
                 if (isCancelledLocally) throw new Error('UploadCancelled');
-                step = 'compress_main'
-                try {
-                    // EXIF-safe native compression
-                    const compressed = await nativeImageCompress(file, 1920, 0.85);
-                    uploadFile = compressed.blob;
-                    finalWidth = compressed.width;
-                    finalHeight = compressed.height;
 
-                    // Update UI immediately with rotated URL
-                    const rotatedUrl = URL.createObjectURL(uploadFile);
-                    getOptimisticTarget().local_blob_url = rotatedUrl;
-                } catch (warn) {
-                    console.warn("Image compression failed, using original:", warn)
+                try {
+                    step = 'worker_preprocess'
+                    const processed = await runImagePreprocessWorker(
+                        file,
+                        processingAbortController.signal,
+                        (worker) => {
+                            activeProcessingWorker = worker
+                        }
+                    )
+
+                    uploadFile = processed.blob
+                    finalWidth = processed.width
+                    finalHeight = processed.height
+                    thumbBase64 = processed.thumbnailDataUrl
+                } catch (workerWarn) {
+                    if (isCancelledLocally) throw new Error('UploadCancelled');
+
+                    console.warn("Image worker preprocessing failed, using main thread fallback:", workerWarn)
+
+                    step = 'compress_main'
                     try {
-                        const original = await nativeImageCompress(file, 9999, 1.0);
-                        finalWidth = original.width;
-                        finalHeight = original.height;
-                    } catch(e) {}
+                        const compressed = await nativeImageCompress(file, 1920, 0.85);
+                        uploadFile = compressed.blob;
+                        finalWidth = compressed.width;
+                        finalHeight = compressed.height;
+                    } catch (warn) {
+                        console.warn("Image compression failed, using original:", warn)
+                        try {
+                            const original = await nativeImageCompress(file, 9999, 1.0);
+                            finalWidth = original.width;
+                            finalHeight = original.height;
+                        } catch (error) {
+                            console.warn("Original image dimension fallback failed:", error)
+                        }
+                    }
+
+                    if (isCancelledLocally) throw new Error('UploadCancelled');
+                    step = 'compress_thumb'
+                    try {
+                        thumbBase64 = await generateImageThumbnailDataUrl(uploadFile)
+                    } catch (warn) {
+                        console.warn("Image thumbnail generation failed:", warn)
+                    }
                 }
 
                 if (isCancelledLocally) throw new Error('UploadCancelled');
-                step = 'compress_thumb'
-                try {
-                    // Generate base64 thumbnail
-                    const thumb = await nativeImageCompress(uploadFile, 20, 0.5);
-                    thumbBase64 = await new Promise<string>((resolve, reject) => {
-                        const reader = new FileReader()
-                        reader.onloadend = () => resolve(reader.result as string)
-                        reader.onerror = (e) => reject(e)
-                        reader.readAsDataURL(thumb.blob)
-                    })
-                } catch (warn) {
-                    console.warn("Image thumbnail generation failed:", warn)
-                }
+
+                const rotatedUrl = URL.createObjectURL(uploadFile);
+                getOptimisticTarget().local_blob_url = rotatedUrl;
             }
 
             if (msgType === 'video') {
