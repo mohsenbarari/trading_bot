@@ -47,6 +47,8 @@ const emit = defineEmits<{
   (e: 'cancel-send', msg: any): void
 }>()
 
+const hasActiveUpload = computed(() => props.items.some(item => Boolean(item.msg?.is_sending)))
+
 function formatBytes(bytes: number, decimals = 1) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
 
@@ -66,6 +68,10 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function extractAspectRatio(item: AlbumItem) {
+  if (hasActiveUpload.value) {
+    return 1
+  }
+
   const width = Number(item.width)
   const height = Number(item.height)
 

@@ -327,6 +327,12 @@ const mediaStyle = computed(() => {
     style.backgroundImage = `url(${thumbnail.value})`
   }
   if (props.msg.message_type === 'image' || props.msg.message_type === 'video') {
+    if (isSending.value) {
+      style.aspectRatio = '1'
+      style.minHeight = '200px'
+      return style
+    }
+
     try {
       const content = JSON.parse(props.msg.content)
       if (content.width && content.height) {
