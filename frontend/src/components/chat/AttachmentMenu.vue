@@ -233,11 +233,21 @@ async function onGalleryFile(e: Event) {
     ? (globalThis.crypto?.randomUUID?.() ?? `album_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`)
     : null
 
+  input.value = ''
+  close()
+
+  await new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame !== 'function') {
+      setTimeout(resolve, 0)
+      return
+    }
+
+    requestAnimationFrame(() => resolve())
+  })
+
   files.forEach((file, index) => {
     emit('select-media', file, albumId, index, files.length)
   })
-  input.value = ''
-  close()
 }
 
 // File handler (no compression)
