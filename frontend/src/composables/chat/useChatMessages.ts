@@ -233,7 +233,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             scrollToBottom()
             return hydratedMsg
         } catch (e: any) {
-            error.value = e.message
+            alert(e?.message || 'خطا در ارسال رسانه')
             return null
         } finally {
             isSending.value = false

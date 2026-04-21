@@ -1186,7 +1186,6 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
         if ((isVideo || isAudio) && file.size > CHAT_MEDIA_MAX_UPLOAD_BYTES) {
             const tooLargeMessage = buildUploadTooLargeMessage(file.size)
-            error.value = tooLargeMessage
             alert(tooLargeMessage)
             return
         }
@@ -1633,7 +1632,6 @@ export function useChatMedia(options: UseChatMediaOptions) {
             }
             console.error(`Upload error at step [${step}]:`, e);
             const errString = e && e.message ? e.message : JSON.stringify(e);
-            error.value = `[${step}] ${errString}`;
             alert(`خطا در آپلود: ` + errString);
             optimisticMsg.is_error = true;
             markAlbumItemState(normalizedAlbumId, optimisticId, 'failed')
