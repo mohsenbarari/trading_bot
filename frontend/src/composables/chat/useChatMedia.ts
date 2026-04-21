@@ -601,20 +601,22 @@ export function useChatMedia(options: UseChatMediaOptions) {
         } catch { /* ignore */ }
     }
 
-    async function loadImageForMessage(content: string, type?: string): Promise<void> {
-        if (!content || !content.startsWith('{')) return
+    async function loadImageForMessage(content: string, type?: string): Promise<string | null> {
+        if (!content || !content.startsWith('{')) return null
         let fileId = ''
         try {
             const parsed = JSON.parse(content)
             fileId = parsed.file_id
-        } catch { return }
-        if (!fileId || imageCache.value[fileId]) return // already loaded
+        } catch { return null }
+        if (!fileId) return null
+        if (imageCache.value[fileId]) return imageCache.value[fileId] || null
 
         // 1. Check IndexedDB first
         const cached = await getFromDB(fileId)
         if (cached) {
-            imageCache.value = { ...imageCache.value, [fileId]: URL.createObjectURL(cached) }
-            return
+            const objectUrl = URL.createObjectURL(cached)
+            imageCache.value = { ...imageCache.value, [fileId]: objectUrl }
+            return objectUrl
         }
 
         // For voice messages, we auto-download if it's not in cache
@@ -624,17 +626,30 @@ export function useChatMedia(options: UseChatMediaOptions) {
             // Stickers are small, voice are small enough. 
             // Images/Videos are large, we only load them if they are in cache,
             // otherwise the user must click Download.
-            return 
+            return null
         }
 
         // 2. Fetch from server
         try {
             const res = await fetch(`${apiBaseUrl}/api/chat/files/${fileId}?token=${jwtToken}`)
-            if (!res.ok) return
+            if (!res.ok) return null
             const blob = await res.blob()
             await saveToDB(fileId, blob)
-            imageCache.value = { ...imageCache.value, [fileId]: URL.createObjectURL(blob) }
-        } catch { /* silently fail */ }
+            const objectUrl = URL.createObjectURL(blob)
+            imageCache.value = { ...imageCache.value, [fileId]: objectUrl }
+            return objectUrl
+        } catch {
+            return null
+        }
+    }
+
+    async function resolveMediaUrlForMessage(msg: Message): Promise<string> {
+        const fileId = getFileId(msg.content)
+        const existingUrl = msg.local_blob_url || imageCache.value[fileId] || ''
+        if (existingUrl) return existingUrl
+
+        const restoredUrl = await loadImageForMessage(msg.content, msg.message_type)
+        return msg.local_blob_url || restoredUrl || imageCache.value[fileId] || ''
     }
 
     function getFileId(content: string): string {
@@ -812,8 +827,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
     async function handleMediaClick(msg: Message) {
         const fileId = getFileId(msg.content);
-        const cacheUrl = imageCache.value[fileId];
-        const url = msg.local_blob_url || cacheUrl;
+        const url = await resolveMediaUrlForMessage(msg)
 
         if (url) {
             if (msg.message_type === 'image') {

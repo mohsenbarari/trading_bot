@@ -309,6 +309,18 @@ function getAlbumMeta(msg: Message): { albumId: string | null, albumIndex: numbe
   }
 }
 
+async function hydrateRenderedMedia(item: any) {
+  if (item?.type === 'album') {
+    const albumMessages = Array.isArray(item.messages) ? item.messages : []
+    await Promise.all(albumMessages.map((message: Message) => loadImageForMessage(message.content, message.message_type)))
+    return
+  }
+
+  if (item?.content) {
+    await loadImageForMessage(item.content, item.message_type)
+  }
+}
+
 const groupedMessages = computed(() => {
   const groups: { label: string, items: any[] }[] = []
   if (messages.value.length === 0) return groups;
@@ -1051,7 +1063,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
                 @location-click="handleLocationClick"
                 @download="downloadMedia"
                 @cancel-send="handleCancelSend"
-                :on-load="() => loadImageForMessage(item.content, item.message_type)"
+                :on-load="() => hydrateRenderedMedia(item)"
               />
             </template>
           </div> <!-- End v-for="groupedMessages" message-group -->
