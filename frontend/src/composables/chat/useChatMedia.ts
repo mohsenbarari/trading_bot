@@ -851,6 +851,14 @@ export function useChatMedia(options: UseChatMediaOptions) {
         }
     }
 
+    function buildAuthenticatedMediaUrl(fileId: string): string {
+        if (!fileId || !jwtToken) {
+            return ''
+        }
+
+        return `${apiBaseUrl}/api/chat/files/${fileId}?token=${jwtToken}`
+    }
+
     function getAlbumIndexFromMessage(msg: Message) {
         const payload = parseMediaPayload(msg.content)
         return typeof payload.album_index === 'number' && Number.isFinite(payload.album_index)
@@ -888,7 +896,12 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const payload = parseMediaPayload(msg.content)
         const fileId = typeof payload.file_id === 'string' ? payload.file_id : getFileId(msg.content)
         const resolvedUrl = await resolveMediaUrlForMessage(msg)
-        const fallbackUrl = resolvedUrl || msg.local_blob_url || imageCache.value[fileId] || payload.thumbnail || ''
+        const fallbackUrl = resolvedUrl
+            || msg.local_blob_url
+            || imageCache.value[fileId]
+            || buildAuthenticatedMediaUrl(fileId)
+            || payload.thumbnail
+            || ''
 
         if (!fallbackUrl) return null
 
