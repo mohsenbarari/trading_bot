@@ -260,9 +260,8 @@ const layout = computed(() => buildLayout(props.items))
           class="album-upload-overlay"
           @click.stop="emit('cancel-send', cell.item.msg)"
         >
-          <div class="album-upload-badge">
-            <span v-if="(cell.item.msg.upload_progress || 0) >= 100">در انتظار آلبوم...</span>
-            <span v-else>
+          <div v-if="(cell.item.msg.upload_progress || 0) < 100" class="album-upload-badge">
+            <span>
               {{ formatBytes(cell.item.msg.upload_loaded || 0) }} / {{ formatBytes(cell.item.msg.upload_total || 0) }}
             </span>
           </div>

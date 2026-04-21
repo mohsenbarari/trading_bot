@@ -1619,7 +1619,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     localBlobUrl: finalLocalUrl,
                     status: 'uploaded'
                 })
-                await flushAlbumBatchIfReady(normalizedAlbumId)
+                void flushAlbumBatchIfReady(normalizedAlbumId)
             } else {
                 step = 'send_ws_message'
                 await sendMediaMessage(msgType, messageContent, finalLocalUrl, optimisticId)
