@@ -2,7 +2,8 @@ import { ref, type Ref, nextTick } from 'vue'
 import PhotoSwipeLightbox from 'photoswipe/lightbox'
 import 'photoswipe/style.css'
 import type { Message } from '../../types/chat'
-import { canUseImagePreprocessWorker, processImageInWorker } from '../../utils/imagePreprocessClient'
+import { canUseImagePreprocessWorker, getRecommendedImagePreprocessParallelism, processImageInWorker } from '../../utils/imagePreprocessClient'
+import { primeMediaPreprocessTelemetry, recordMediaPreprocessTelemetry } from '../../utils/chatMediaTelemetry'
 
 /**
  * Native, foolproof image compressor that relies on modern browser engines
@@ -252,6 +253,13 @@ type VideoPreviewResult = {
     height: number
 }
 
+type PreprocessJob = {
+    limit: number
+    run: () => Promise<unknown>
+    resolve: (value: unknown) => void
+    reject: (reason?: unknown) => void
+}
+
 function blobToDataUrl(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader()
@@ -280,8 +288,113 @@ export function useChatMedia(options: UseChatMediaOptions) {
     } = options
 
     let activeUploadsCount = 0
+    let activePreprocessCount = 0
     const uploadControllers = new Map<number, { abort: () => void }>()
     const albumBatches = new Map<string, PendingAlbumBatch>()
+    const preprocessQueue: PreprocessJob[] = []
+
+    primeMediaPreprocessTelemetry()
+
+    function getAdaptivePreprocessLimit(albumSize: number, mediaType: 'image' | 'video' | 'voice') {
+        if (typeof navigator === 'undefined') return 1
+
+        const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection
+        const saveData = Boolean(connection?.saveData)
+        const effectiveType = connection?.effectiveType || ''
+        const cpuCount = navigator.hardwareConcurrency || 4
+        const deviceMemory = typeof (navigator as Navigator & { deviceMemory?: number }).deviceMemory === 'number'
+            ? (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 0
+            : 0
+
+        if (mediaType === 'voice') return 3
+        if (saveData || effectiveType === 'slow-2g' || effectiveType === '2g') return 1
+        if (deviceMemory > 0 && deviceMemory <= 2) return 1
+        if (cpuCount <= 4) return 1
+
+        const recommended = getRecommendedImagePreprocessParallelism()
+        if (albumSize >= 5) return Math.max(1, Math.min(recommended, 2))
+        if (mediaType === 'video') return 1
+        return Math.max(1, Math.min(recommended + 1, 3))
+    }
+
+    function launchPreprocessJob(job: PreprocessJob) {
+        activePreprocessCount += 1
+        void job.run()
+            .then((value) => job.resolve(value))
+            .catch((reason) => job.reject(reason))
+            .finally(() => {
+                activePreprocessCount = Math.max(0, activePreprocessCount - 1)
+                pumpPreprocessQueue()
+            })
+    }
+
+    function pumpPreprocessQueue() {
+        while (preprocessQueue.length > 0) {
+            const nextIndex = preprocessQueue.findIndex(job => activePreprocessCount < job.limit)
+            if (nextIndex === -1) {
+                return
+            }
+
+            const [nextJob] = preprocessQueue.splice(nextIndex, 1)
+            if (!nextJob) {
+                return
+            }
+
+            launchPreprocessJob(nextJob)
+        }
+    }
+
+    function runAdaptivePreprocessTask<T>(
+        limit: number,
+        run: () => Promise<T>
+    ): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            const normalizedLimit = Math.max(1, limit)
+            const job: PreprocessJob = {
+                limit: normalizedLimit,
+                run: () => run() as Promise<unknown>,
+                resolve: (value) => resolve(value as T),
+                reject,
+            }
+
+            if (activePreprocessCount < normalizedLimit) {
+                launchPreprocessJob(job)
+                return
+            }
+
+            preprocessQueue.push(job)
+        })
+    }
+
+    function trackPreprocessEvent(payload: {
+        mediaType: 'image' | 'video' | 'voice'
+        path: 'image_worker' | 'image_main_thread' | 'image_legacy_fallback' | 'video_preview' | 'video_metadata_fallback' | 'voice_passthrough'
+        status: 'success' | 'failed' | 'cancelled'
+        startedAt: number
+        batchSize: number
+        schedulerLimit: number
+        usedWorker: boolean
+        fallbackReason?: string
+        width?: number
+        height?: number
+        errorMessage?: string
+    }) {
+        recordMediaPreprocessTelemetry({
+            userId: currentUserId,
+            mediaType: payload.mediaType,
+            path: payload.path,
+            status: payload.status,
+            durationMs: Math.max(0, Math.round(performance.now() - payload.startedAt)),
+            batchSize: payload.batchSize,
+            schedulerLimit: payload.schedulerLimit,
+            usedWorker: payload.usedWorker,
+            fallbackReason: payload.fallbackReason,
+            width: payload.width,
+            height: payload.height,
+            errorMessage: payload.errorMessage,
+            timestamp: new Date().toISOString(),
+        })
+    }
 
     function appendAlbumMetadata(
         content: Record<string, unknown>,
@@ -928,6 +1041,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const normalizedAlbumId = (msgType === 'image' || msgType === 'video') ? albumId : null
         const normalizedAlbumIndex = typeof albumIndex === 'number' ? albumIndex : 0
         const normalizedAlbumSize = normalizedAlbumId ? Math.max(albumSize ?? 0, 1) : 0
+        const preprocessBatchSize = normalizedAlbumSize || 1
+        const preprocessLimit = getAdaptivePreprocessLimit(preprocessBatchSize, msgType)
         
         if (!selectedUserId.value) return
 
@@ -996,11 +1111,26 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
             if (isVideo) {
                 step = 'video_preprocess'
+                const videoPreviewStartedAt = performance.now()
                 try {
-                    const preview = await preprocessVideoPreview(localUrl, processingAbortController.signal)
+                    const preview = await runAdaptivePreprocessTask(preprocessLimit, () =>
+                        preprocessVideoPreview(localUrl, processingAbortController.signal)
+                    )
                     thumbBase64 = preview.thumbnailDataUrl
                     finalWidth = preview.width
                     finalHeight = preview.height
+
+                    trackPreprocessEvent({
+                        mediaType: 'video',
+                        path: 'video_preview',
+                        status: 'success',
+                        startedAt: videoPreviewStartedAt,
+                        batchSize: preprocessBatchSize,
+                        schedulerLimit: preprocessLimit,
+                        usedWorker: false,
+                        width: finalWidth,
+                        height: finalHeight,
+                    })
 
                     const previewContent: any = appendAlbumMetadata({
                         thumbnail: thumbBase64,
@@ -1014,19 +1144,46 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
                     getOptimisticTarget().content = JSON.stringify(previewContent)
                 } catch (warn) {
+                    trackPreprocessEvent({
+                        mediaType: 'video',
+                        path: 'video_preview',
+                        status: isCancelledLocally ? 'cancelled' : 'failed',
+                        startedAt: videoPreviewStartedAt,
+                        batchSize: preprocessBatchSize,
+                        schedulerLimit: preprocessLimit,
+                        usedWorker: false,
+                        fallbackReason: 'preview_failed',
+                        errorMessage: warn instanceof Error ? warn.message : String(warn),
+                    })
                     if (isCancelledLocally) throw new Error('UploadCancelled')
                     console.warn("Video preview preprocessing failed:", warn)
                 }
             } else if (isAudio) {
                 step = 'skip_audio_thumb'
+                trackPreprocessEvent({
+                    mediaType: 'voice',
+                    path: 'voice_passthrough',
+                    status: 'success',
+                    startedAt: performance.now(),
+                    batchSize: preprocessBatchSize,
+                    schedulerLimit: preprocessLimit,
+                    usedWorker: false,
+                })
                 // No thumbnail processing for voice
             } else {
                 if (isCancelledLocally) throw new Error('UploadCancelled');
 
+                const imageFastPathStartedAt = performance.now()
+                let imagePath: 'image_worker' | 'image_main_thread' = canUseImagePreprocessWorker()
+                    ? 'image_worker'
+                    : 'image_main_thread'
+
                 try {
                     if (canUseImagePreprocessWorker()) {
                         step = 'worker_preprocess'
-                        const processed = await processImageInWorker(file, processingAbortController.signal)
+                        const processed = await runAdaptivePreprocessTask(preprocessLimit, () =>
+                            processImageInWorker(file, processingAbortController.signal)
+                        )
 
                         uploadFile = processed.blob
                         finalWidth = processed.width
@@ -1035,21 +1192,49 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     } else {
                         step = 'main_thread_preprocess'
                         await waitForNextPaint()
-                        const processed = await preprocessImageOnMainThread(file)
+                        const processed = await runAdaptivePreprocessTask(preprocessLimit, () =>
+                            preprocessImageOnMainThread(file)
+                        )
 
                         uploadFile = processed.blob
                         finalWidth = processed.width
                         finalHeight = processed.height
                         thumbBase64 = processed.thumbnailDataUrl
                     }
+
+                    trackPreprocessEvent({
+                        mediaType: 'image',
+                        path: imagePath,
+                        status: 'success',
+                        startedAt: imageFastPathStartedAt,
+                        batchSize: preprocessBatchSize,
+                        schedulerLimit: preprocessLimit,
+                        usedWorker: imagePath === 'image_worker',
+                        width: finalWidth,
+                        height: finalHeight,
+                    })
                 } catch (workerWarn) {
+                    trackPreprocessEvent({
+                        mediaType: 'image',
+                        path: imagePath,
+                        status: isCancelledLocally ? 'cancelled' : 'failed',
+                        startedAt: imageFastPathStartedAt,
+                        batchSize: preprocessBatchSize,
+                        schedulerLimit: preprocessLimit,
+                        usedWorker: imagePath === 'image_worker',
+                        fallbackReason: imagePath === 'image_worker' ? 'worker_failed' : 'main_thread_failed',
+                        errorMessage: workerWarn instanceof Error ? workerWarn.message : String(workerWarn),
+                    })
                     if (isCancelledLocally) throw new Error('UploadCancelled');
 
                     console.warn("Image preprocessing fast path failed, using legacy fallback:", workerWarn)
 
                     step = 'compress_main'
+                    const imageFallbackStartedAt = performance.now()
                     try {
-                        const compressed = await nativeImageCompress(file, 1920, 0.85);
+                        const compressed = await runAdaptivePreprocessTask(preprocessLimit, () =>
+                            nativeImageCompress(file, 1920, 0.85)
+                        )
                         uploadFile = compressed.blob;
                         finalWidth = compressed.width;
                         finalHeight = compressed.height;
@@ -1067,10 +1252,25 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     if (isCancelledLocally) throw new Error('UploadCancelled');
                     step = 'compress_thumb'
                     try {
-                        thumbBase64 = await generateImageThumbnailDataUrl(uploadFile)
+                        thumbBase64 = await runAdaptivePreprocessTask(preprocessLimit, () =>
+                            generateImageThumbnailDataUrl(uploadFile)
+                        )
                     } catch (warn) {
                         console.warn("Image thumbnail generation failed:", warn)
                     }
+
+                    trackPreprocessEvent({
+                        mediaType: 'image',
+                        path: 'image_legacy_fallback',
+                        status: 'success',
+                        startedAt: imageFallbackStartedAt,
+                        batchSize: preprocessBatchSize,
+                        schedulerLimit: preprocessLimit,
+                        usedWorker: false,
+                        fallbackReason: imagePath === 'image_worker' ? 'worker_failed' : 'main_thread_failed',
+                        width: finalWidth,
+                        height: finalHeight,
+                    })
                 }
 
                 if (isCancelledLocally) throw new Error('UploadCancelled');
@@ -1080,8 +1280,9 @@ export function useChatMedia(options: UseChatMediaOptions) {
             }
 
             if (msgType === 'video' && (!finalWidth || !finalHeight)) {
+                const videoMetadataStartedAt = performance.now()
                 try {
-                    await new Promise<void>((resolve) => {
+                    await runAdaptivePreprocessTask(preprocessLimit, () => new Promise<void>((resolve) => {
                         const video = document.createElement('video');
                         const cleanup = () => {
                             video.onloadedmetadata = null
@@ -1114,8 +1315,32 @@ export function useChatMedia(options: UseChatMediaOptions) {
                             resolve()
                         };
                         video.src = localUrl;
-                    });
+                    }));
+
+                    trackPreprocessEvent({
+                        mediaType: 'video',
+                        path: 'video_metadata_fallback',
+                        status: 'success',
+                        startedAt: videoMetadataStartedAt,
+                        batchSize: preprocessBatchSize,
+                        schedulerLimit: preprocessLimit,
+                        usedWorker: false,
+                        fallbackReason: 'missing_preview_dimensions',
+                        width: finalWidth,
+                        height: finalHeight,
+                    })
                 } catch (e) {
+                    trackPreprocessEvent({
+                        mediaType: 'video',
+                        path: 'video_metadata_fallback',
+                        status: 'failed',
+                        startedAt: videoMetadataStartedAt,
+                        batchSize: preprocessBatchSize,
+                        schedulerLimit: preprocessLimit,
+                        usedWorker: false,
+                        fallbackReason: 'metadata_failed',
+                        errorMessage: e instanceof Error ? e.message : String(e),
+                    })
                     console.warn("Could not extract final video dimensions:", e);
                 }
             }
