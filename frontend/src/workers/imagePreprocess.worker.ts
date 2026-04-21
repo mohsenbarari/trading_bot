@@ -40,7 +40,26 @@ async function createBitmapFromBlob(blob: Blob) {
   }
 }
 
-async function compressImage(blob: Blob, maxWidthOrHeight: number, quality: number) {
+function getScaledDimensions(width: number, height: number, maxWidthOrHeight: number) {
+  let nextWidth = width
+  let nextHeight = height
+
+  if (nextWidth > maxWidthOrHeight || nextHeight > maxWidthOrHeight) {
+    const ratio = Math.min(maxWidthOrHeight / nextWidth, maxWidthOrHeight / nextHeight)
+    nextWidth = Math.max(1, Math.round(nextWidth * ratio))
+    nextHeight = Math.max(1, Math.round(nextHeight * ratio))
+  }
+
+  return { width: nextWidth, height: nextHeight }
+}
+
+async function preprocessImage(
+  blob: Blob,
+  maxWidthOrHeight: number,
+  quality: number,
+  thumbnailMaxWidthOrHeight: number,
+  thumbnailQuality: number
+) {
   if (typeof OffscreenCanvas === 'undefined') {
     throw new Error('OffscreenCanvas is unavailable in worker')
   }
@@ -48,14 +67,9 @@ async function compressImage(blob: Blob, maxWidthOrHeight: number, quality: numb
   const bitmap = await createBitmapFromBlob(blob)
 
   try {
-    let width = bitmap.width
-    let height = bitmap.height
-
-    if (width > maxWidthOrHeight || height > maxWidthOrHeight) {
-      const ratio = Math.min(maxWidthOrHeight / width, maxWidthOrHeight / height)
-      width = Math.max(1, Math.round(width * ratio))
-      height = Math.max(1, Math.round(height * ratio))
-    }
+    const scaled = getScaledDimensions(bitmap.width, bitmap.height, maxWidthOrHeight)
+    const width = scaled.width
+    const height = scaled.height
 
     const canvas = new OffscreenCanvas(width, height)
     const context = canvas.getContext('2d')
@@ -66,7 +80,25 @@ async function compressImage(blob: Blob, maxWidthOrHeight: number, quality: numb
     context.drawImage(bitmap, 0, 0, width, height)
     const output = await canvas.convertToBlob({ type: 'image/jpeg', quality })
 
-    return { blob: output, width, height }
+    const thumbnailScaled = getScaledDimensions(width, height, thumbnailMaxWidthOrHeight)
+    const thumbnailCanvas = new OffscreenCanvas(thumbnailScaled.width, thumbnailScaled.height)
+    const thumbnailContext = thumbnailCanvas.getContext('2d')
+    if (!thumbnailContext) {
+      throw new Error('No OffscreenCanvas thumbnail context')
+    }
+
+    thumbnailContext.drawImage(canvas, 0, 0, thumbnailScaled.width, thumbnailScaled.height)
+    const thumbnailBlob = await thumbnailCanvas.convertToBlob({
+      type: 'image/jpeg',
+      quality: thumbnailQuality,
+    })
+
+    return {
+      blob: output,
+      width,
+      height,
+      thumbnailDataUrl: await blobToDataUrl(thumbnailBlob),
+    }
   } finally {
     bitmap.close()
   }
@@ -97,15 +129,20 @@ workerScope.onmessage = async (event: MessageEvent<ImagePreprocessRequest>) => {
   } = event.data
 
   try {
-    const compressed = await compressImage(file, maxWidthOrHeight, quality)
-    const thumbnail = await compressImage(compressed.blob, thumbnailMaxWidthOrHeight, thumbnailQuality)
+    const processed = await preprocessImage(
+      file,
+      maxWidthOrHeight,
+      quality,
+      thumbnailMaxWidthOrHeight,
+      thumbnailQuality
+    )
     const response: ImagePreprocessResponse = {
       id,
       ok: true,
-      blob: compressed.blob,
-      width: compressed.width,
-      height: compressed.height,
-      thumbnailDataUrl: await blobToDataUrl(thumbnail.blob),
+      blob: processed.blob,
+      width: processed.width,
+      height: processed.height,
+      thumbnailDataUrl: processed.thumbnailDataUrl,
     }
 
     workerScope.postMessage(response)

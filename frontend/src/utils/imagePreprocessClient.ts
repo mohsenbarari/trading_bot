@@ -40,6 +40,14 @@ const queuedJobs: PendingJob[] = []
 const activeAbortCleanups = new Map<string, () => void>()
 const workerSlots: WorkerSlot[] = []
 
+export function canUseImagePreprocessWorker() {
+  return (
+    typeof Worker !== 'undefined' &&
+    typeof OffscreenCanvas !== 'undefined' &&
+    typeof createImageBitmap === 'function'
+  )
+}
+
 function getPoolSize() {
   if (typeof navigator === 'undefined') return 1
 
@@ -50,7 +58,7 @@ function getPoolSize() {
 }
 
 function supportsWorkerPreprocess() {
-  return typeof Worker !== 'undefined'
+  return canUseImagePreprocessWorker()
 }
 
 function createWorkerInstance() {
