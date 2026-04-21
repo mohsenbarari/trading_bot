@@ -2,6 +2,7 @@ import { ref, type Ref, nextTick } from 'vue'
 import PhotoSwipeLightbox from 'photoswipe/lightbox'
 import 'photoswipe/style.css'
 import type { Message } from '../../types/chat'
+import { processImageInWorker } from '../../utils/imagePreprocessClient'
 
 /**
  * Native, foolproof image compressor that relies on modern browser engines
@@ -96,30 +97,6 @@ export interface UseChatMediaOptions {
     sendMediaMessage: (type: 'image' | 'video' | 'voice' | 'sticker', content: string, localBlobUrl?: string, optimisticId?: number) => Promise<Message | null>
 }
 
-type ImagePreprocessWorkerSuccessResponse = {
-    id: string
-    ok: true
-    blob: Blob
-    width: number
-    height: number
-    thumbnailDataUrl: string
-}
-
-type ImagePreprocessWorkerErrorResponse = {
-    id: string
-    ok: false
-    error: string
-}
-
-type ImagePreprocessWorkerResponse = ImagePreprocessWorkerSuccessResponse | ImagePreprocessWorkerErrorResponse
-
-type WorkerImagePreprocessResult = {
-    blob: Blob
-    width: number
-    height: number
-    thumbnailDataUrl: string
-}
-
 type LightboxItem = {
     src: string
     msrc: string
@@ -158,84 +135,6 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 async function generateImageThumbnailDataUrl(file: Blob): Promise<string> {
     const thumb = await nativeImageCompress(file, 20, 0.5)
     return await blobToDataUrl(thumb.blob)
-}
-
-function runImagePreprocessWorker(
-    file: File,
-    signal?: AbortSignal,
-    onWorkerStateChange?: (worker: Worker | null) => void
-): Promise<WorkerImagePreprocessResult> {
-    return new Promise((resolve, reject) => {
-        if (signal?.aborted) {
-            reject(new Error('UploadCancelled'))
-            return
-        }
-
-        const jobId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-        let worker: Worker
-
-        try {
-            worker = new Worker(new URL('../../workers/imagePreprocess.worker.ts', import.meta.url), { type: 'module' })
-        } catch (error) {
-            reject(error)
-            return
-        }
-
-        onWorkerStateChange?.(worker)
-
-        const cleanup = () => {
-            signal?.removeEventListener('abort', handleAbort)
-            onWorkerStateChange?.(null)
-            worker.terminate()
-        }
-
-        const handleAbort = () => {
-            cleanup()
-            reject(new Error('UploadCancelled'))
-        }
-
-        const handleError = (error: unknown) => {
-            cleanup()
-            reject(error instanceof Error ? error : new Error('Image preprocessing worker failed'))
-        }
-
-        signal?.addEventListener('abort', handleAbort, { once: true })
-
-        worker.onmessage = (event: MessageEvent<ImagePreprocessWorkerResponse>) => {
-            const response = event.data
-            if (!response || response.id !== jobId) {
-                return
-            }
-
-            cleanup()
-
-            if (!response.ok) {
-                reject(new Error(response.error || 'Image preprocessing worker failed'))
-                return
-            }
-
-            resolve({
-                blob: response.blob,
-                width: response.width,
-                height: response.height,
-                thumbnailDataUrl: response.thumbnailDataUrl,
-            })
-        }
-
-        worker.onerror = (event) => {
-            const message = event.message || 'Image preprocessing worker crashed'
-            handleError(new Error(message))
-        }
-
-        worker.postMessage({
-            id: jobId,
-            file,
-            maxWidthOrHeight: 1920,
-            quality: 0.85,
-            thumbnailMaxWidthOrHeight: 20,
-            thumbnailQuality: 0.5,
-        })
-    })
 }
 
 export function useChatMedia(options: UseChatMediaOptions) {
@@ -836,7 +735,6 @@ export function useChatMedia(options: UseChatMediaOptions) {
         isUploading.value = activeUploadsCount > 0
         let step = 'start'
         const processingAbortController = new AbortController()
-        let activeProcessingWorker: Worker | null = null
 
         const optimisticId = -Date.now()
         const localUrl = URL.createObjectURL(file)
@@ -876,10 +774,6 @@ export function useChatMedia(options: UseChatMediaOptions) {
             abort: () => {
                 isCancelledLocally = true;
                 processingAbortController.abort();
-                if (activeProcessingWorker) {
-                    activeProcessingWorker.terminate();
-                    activeProcessingWorker = null;
-                }
                 const index = messages.value.findIndex(m => m.id === optimisticId);
                 if (index !== -1) messages.value.splice(index, 1);
                 markAlbumItemState(normalizedAlbumId, optimisticId, 'cancelled')
@@ -918,13 +812,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
                 try {
                     step = 'worker_preprocess'
-                    const processed = await runImagePreprocessWorker(
-                        file,
-                        processingAbortController.signal,
-                        (worker) => {
-                            activeProcessingWorker = worker
-                        }
-                    )
+                    const processed = await processImageInWorker(file, processingAbortController.signal)
 
                     uploadFile = processed.blob
                     finalWidth = processed.width
