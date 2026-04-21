@@ -48,10 +48,15 @@ export function canUseImagePreprocessWorker() {
   )
 }
 
-function getPoolSize() {
+export function getRecommendedImagePreprocessParallelism() {
   if (typeof navigator === 'undefined') return 1
 
   const cpuCount = navigator.hardwareConcurrency || 4
+  const memory = typeof (navigator as Navigator & { deviceMemory?: number }).deviceMemory === 'number'
+    ? (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 0
+    : 0
+
+  if (memory > 0 && memory <= 2) return 1
   if (cpuCount >= 8) return 2
   if (cpuCount >= 4) return 2
   return 1
@@ -172,7 +177,7 @@ function ensureWorkerPool() {
     return workerSlots
   }
 
-  const poolSize = getPoolSize()
+  const poolSize = getRecommendedImagePreprocessParallelism()
   for (let index = 0; index < poolSize; index += 1) {
     const slot: WorkerSlot = {
       worker: createWorkerInstance(),
