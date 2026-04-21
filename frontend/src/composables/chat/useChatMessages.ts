@@ -196,7 +196,12 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         }
     }
 
-    async function sendMediaMessage(type: 'image' | 'video' | 'voice' | 'sticker', content: string, localBlobUrl?: string) {
+    async function sendMediaMessage(
+        type: 'image' | 'video' | 'voice' | 'sticker',
+        content: string,
+        localBlobUrl?: string,
+        optimisticId?: number
+    ) {
         if (!selectedUserId.value) return
 
         isSending.value = true
@@ -209,10 +214,21 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                     message_type: type
                 })
             })
-            if (localBlobUrl) {
-                newMsg.local_blob_url = localBlobUrl
+            const hydratedMsg = localBlobUrl
+                ? { ...newMsg, local_blob_url: localBlobUrl }
+                : newMsg
+
+            if (typeof optimisticId === 'number') {
+                const optimisticIndex = messages.value.findIndex(m => m.id === optimisticId)
+                if (optimisticIndex !== -1) {
+                    messages.value[optimisticIndex] = hydratedMsg
+                } else {
+                    messages.value.push(hydratedMsg)
+                }
+            } else {
+                messages.value.push(hydratedMsg)
             }
-            messages.value.push(newMsg)
+
             showStickerPicker.value = false
             scrollToBottom()
         } catch (e: any) {

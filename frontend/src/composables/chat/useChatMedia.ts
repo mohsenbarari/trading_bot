@@ -80,7 +80,7 @@ export interface UseChatMediaOptions {
     error: Ref<string>
     isUploading: Ref<boolean>
     scrollToBottom: () => void
-    sendMediaMessage: (type: 'image' | 'video' | 'voice' | 'sticker', content: string, localBlobUrl?: string) => Promise<void>
+    sendMediaMessage: (type: 'image' | 'video' | 'voice' | 'sticker', content: string, localBlobUrl?: string, optimisticId?: number) => Promise<void>
 }
 
 type LightboxItem = {
@@ -107,6 +107,19 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
     let activeUploadsCount = 0
     const uploadControllers = new Map<number, { abort: () => void }>()
+
+    function appendAlbumMetadata(
+        content: Record<string, unknown>,
+        msgType: 'image' | 'video' | 'voice',
+        albumId?: string | null,
+        albumIndex?: number
+    ) {
+        if ((msgType === 'image' || msgType === 'video') && albumId) {
+            content.album_id = albumId
+            content.album_index = typeof albumIndex === 'number' ? albumIndex : 0
+        }
+        return content
+    }
 
     function cancelUpload(id: number) {
         const controller = uploadControllers.get(id);
@@ -530,7 +543,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         })
     }
 
-    async function handleMediaUploadWrapper(file: File) {
+    async function handleMediaUploadWrapper(file: File, albumId?: string | null, albumIndex?: number) {
         if (!file) return
 
         const isVideo = file.type.startsWith('video/')
@@ -548,11 +561,17 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
         const optimisticId = -Date.now()
         const localUrl = URL.createObjectURL(file)
+        const initialContent = appendAlbumMetadata(
+            { placeholder: true, durationMs: (file as any).durationMs },
+            msgType,
+            albumId,
+            albumIndex
+        )
         const optimisticMsg: Message = {
             id: optimisticId,
             sender_id: currentUserId,
             receiver_id: selectedUserId.value,
-            content: JSON.stringify({ placeholder: true, durationMs: (file as any).durationMs }),
+            content: JSON.stringify(initialContent),
             message_type: msgType,
             is_read: true,
             is_sending: true,
@@ -590,7 +609,9 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 step = 'video_thumb'
                 try {
                     thumbBase64 = await generateVideoThumbnail(file)
-                    getOptimisticTarget().content = JSON.stringify({ thumbnail: thumbBase64, placeholder: true })
+                    getOptimisticTarget().content = JSON.stringify(
+                        appendAlbumMetadata({ thumbnail: thumbBase64, placeholder: true }, msgType, albumId, albumIndex)
+                    )
                 } catch (warn) {
                     console.warn("Video thumbnail failed:", warn)
                 }
@@ -655,7 +676,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             }
 
             const targetMsg = getOptimisticTarget();
-            const optimisticContent: any = { thumbnail: thumbBase64 };
+            const optimisticContent: any = appendAlbumMetadata({ thumbnail: thumbBase64 }, msgType, albumId, albumIndex);
             if (finalWidth && finalHeight) {
                 optimisticContent.width = finalWidth;
                 optimisticContent.height = finalHeight;
@@ -739,10 +760,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 finalWidth = data.width;
                 finalHeight = data.height;
             }
-            const contentObj: any = {
+            const contentObj: any = appendAlbumMetadata({
                 file_id: data.file_id,
                 thumbnail: data.thumbnail
-            }
+            }, msgType, albumId, albumIndex)
             if (finalWidth && finalHeight) {
                 contentObj.width = finalWidth;
                 contentObj.height = finalHeight;
@@ -763,7 +784,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             }
 
             step = 'send_ws_message'
-            await sendMediaMessage(msgType, messageContent, finalLocalUrl)
+            await sendMediaMessage(msgType, messageContent, finalLocalUrl, optimisticId)
 
         } catch (e: any) {
             if (e.message === 'UploadCancelled') {
@@ -778,9 +799,6 @@ export function useChatMedia(options: UseChatMediaOptions) {
         } finally {
             activeUploadsCount--
             isUploading.value = activeUploadsCount > 0
-            if (!optimisticMsg.is_error) {
-                messages.value = messages.value.filter(m => m.id !== optimisticId)
-            }
         }
     }
 

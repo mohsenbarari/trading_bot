@@ -133,7 +133,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:modelValue', val: boolean): void
-  (e: 'select-media', file: File): void
+  (e: 'select-media', file: File, albumId?: string | null, albumIndex?: number): void
   (e: 'select-file', file: File): void
   (e: 'select-location', lat: number, lng: number): void
 }>()
@@ -228,9 +228,14 @@ async function onGalleryFile(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files?.length) return
 
-  for (const file of Array.from(input.files)) {
-    emit('select-media', file)
-  }
+  const files = Array.from(input.files)
+  const albumId = files.length > 1
+    ? (globalThis.crypto?.randomUUID?.() ?? `album_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`)
+    : null
+
+  files.forEach((file, index) => {
+    emit('select-media', file, albumId, index)
+  })
   input.value = ''
   close()
 }
