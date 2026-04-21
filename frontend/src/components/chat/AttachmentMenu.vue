@@ -2,13 +2,93 @@
   <teleport to="body">
     <!-- Backdrop -->
     <transition name="fade">
-      <div v-if="modelValue" class="attachment-backdrop" @click="close"></div>
+      <div v-if="modelValue && !showCameraCapture" class="attachment-backdrop" @click="close"></div>
+    </transition>
+
+    <transition name="fade">
+      <div v-if="modelValue && showCameraCapture" class="camera-capture-overlay">
+        <div class="camera-capture-shell">
+          <div class="camera-topbar">
+            <button class="camera-icon-btn" @click="closeCameraCapture" title="بازگشت">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
+
+            <div class="camera-mode-switch">
+              <button
+                class="camera-mode-btn"
+                :class="{ active: cameraMode === 'photo' }"
+                :disabled="isRecording"
+                @click="setCameraMode('photo')"
+              >
+                عکس
+              </button>
+              <button
+                class="camera-mode-btn"
+                :class="{ active: cameraMode === 'video' }"
+                :disabled="isRecording"
+                @click="setCameraMode('video')"
+              >
+                ویدئو
+              </button>
+            </div>
+
+            <button class="camera-icon-btn" @click="toggleFacingMode" :disabled="isRecording || isCameraStarting" title="تغییر دوربین">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 1l4 4-4 4"></path>
+                <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+                <path d="M7 23l-4-4 4-4"></path>
+                <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+              </svg>
+            </button>
+          </div>
+
+          <div class="camera-preview-frame">
+            <video
+              ref="cameraPreviewRef"
+              class="camera-preview"
+              autoplay
+              playsinline
+              muted
+            ></video>
+
+            <div v-if="isCameraStarting" class="camera-status-overlay">
+              در حال آماده‌سازی دوربین...
+            </div>
+
+            <div v-else-if="cameraError" class="camera-status-overlay error">
+              <div>{{ cameraError }}</div>
+              <button class="camera-error-btn" @click="startCameraStream">تلاش مجدد</button>
+            </div>
+
+            <div v-if="isRecording" class="camera-recording-badge">
+              <span class="recording-dot"></span>
+              {{ formattedRecordingTime }}
+            </div>
+          </div>
+
+          <div class="camera-control-bar">
+            <button
+              class="camera-shutter-btn"
+              :class="{ recording: isRecording, video: cameraMode === 'video' }"
+              :disabled="!isCameraReady"
+              @click="handlePrimaryCameraAction"
+            >
+              <span class="camera-shutter-core"></span>
+            </button>
+            <div class="camera-capture-label">
+              {{ cameraMode === 'photo' ? 'ثبت عکس' : (isRecording ? 'توقف ضبط' : 'شروع ضبط ویدئو') }}
+            </div>
+          </div>
+        </div>
+      </div>
     </transition>
 
     <!-- Bottom Sheet -->
     <transition name="slide-up">
       <div
-        v-if="modelValue"
+        v-if="modelValue && !showCameraCapture"
         ref="sheetRef"
         :class="['attachment-sheet', { 'full-screen-sheet': activeTab === 'location' }]"
         @touchstart="onTouchStart"
@@ -38,7 +118,7 @@
             <input ref="cameraInput" type="file" accept="image/*,video/*" capture="environment" style="display:none" @change="onGalleryFile" />
             <input ref="galleryInput" type="file" accept="image/*,video/*" multiple style="display:none" @change="onGalleryFile" />
 
-            <button class="action-card" @click="cameraInput?.click()">
+            <button class="action-card" @click="openCameraCapture()">
               <div class="action-icon camera-icon">
                 <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
@@ -123,7 +203,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import 'leaflet/dist/leaflet.css'
 import { LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
 
@@ -144,12 +224,33 @@ const galleryInput = ref<HTMLInputElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const sheetRef = ref<HTMLElement | null>(null)
 const mapRef = ref<any>(null)
+const cameraPreviewRef = ref<HTMLVideoElement | null>(null)
+
+const showCameraCapture = ref(false)
+const cameraMode = ref<'photo' | 'video'>('photo')
+const activeFacingMode = ref<'environment' | 'user'>('environment')
+const isCameraStarting = ref(false)
+const cameraError = ref('')
+const isRecording = ref(false)
+const recordingSeconds = ref(0)
+
+let cameraStream: MediaStream | null = null
+let mediaRecorder: MediaRecorder | null = null
+let recordedChunks: BlobPart[] = []
+let recordingTimer: number | null = null
 
 // Default: Tehran
 const mapCenter = ref<[number, number]>([35.6892, 51.3890])
 const selectedLatLng = ref<{ lat: number; lng: number }>({ lat: 35.6892, lng: 51.3890 })
 
 const tileUrl = ref('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
+
+const isCameraReady = computed(() => Boolean(cameraStream) && !isCameraStarting.value && !cameraError.value)
+const formattedRecordingTime = computed(() => {
+  const mins = Math.floor(recordingSeconds.value / 60)
+  const secs = recordingSeconds.value % 60
+  return `${mins}:${secs.toString().padStart(2, '0')}`
+})
 
 const tabs = [
   { id: 'gallery' as const, label: 'گالری', icon: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>' },
@@ -161,6 +262,258 @@ const tabs = [
 let startY = 0
 let currentTranslateY = 0
 let isDraggingAllowed = true
+
+function stopRecordingTimer() {
+  if (recordingTimer !== null) {
+    window.clearInterval(recordingTimer)
+    recordingTimer = null
+  }
+}
+
+function stopCameraTracks() {
+  if (cameraPreviewRef.value) {
+    try {
+      cameraPreviewRef.value.pause()
+      cameraPreviewRef.value.srcObject = null
+    } catch {
+      // Ignore preview cleanup failures.
+    }
+  }
+
+  cameraStream?.getTracks().forEach((track) => track.stop())
+  cameraStream = null
+}
+
+function cleanupCamera(discardRecording = true) {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.onstop = null
+    try {
+      mediaRecorder.stop()
+    } catch {
+      // Ignore recorder stop failures.
+    }
+  }
+
+  if (discardRecording) {
+    recordedChunks = []
+  }
+
+  mediaRecorder = null
+  isRecording.value = false
+  recordingSeconds.value = 0
+  stopRecordingTimer()
+  stopCameraTracks()
+  cameraError.value = ''
+  isCameraStarting.value = false
+  showCameraCapture.value = false
+}
+
+async function attachCameraStream(stream: MediaStream) {
+  await nextTick()
+  const preview = cameraPreviewRef.value
+  if (!preview) return
+
+  preview.srcObject = stream
+  preview.muted = true
+
+  try {
+    await preview.play()
+  } catch (error) {
+    console.warn('Camera preview play failed:', error)
+  }
+}
+
+async function requestCameraStream(includeAudio: boolean) {
+  return navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: { ideal: activeFacingMode.value },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+    },
+    audio: includeAudio,
+  })
+}
+
+async function startCameraStream() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    cameraInput.value?.click()
+    return
+  }
+
+  isCameraStarting.value = true
+  cameraError.value = ''
+  stopCameraTracks()
+
+  try {
+    const wantsAudio = cameraMode.value === 'video'
+    let stream: MediaStream
+
+    try {
+      stream = await requestCameraStream(wantsAudio)
+    } catch (error) {
+      if (!wantsAudio) throw error
+      stream = await requestCameraStream(false)
+    }
+
+    cameraStream = stream
+    showCameraCapture.value = true
+    await attachCameraStream(stream)
+  } catch (error) {
+    console.error('Camera start error:', error)
+    cameraError.value = 'امکان دسترسی به دوربین وجود ندارد. لطفا دسترسی مرورگر را بررسی کنید.'
+    showCameraCapture.value = true
+  } finally {
+    isCameraStarting.value = false
+  }
+}
+
+function getSupportedVideoMimeType() {
+  if (typeof MediaRecorder === 'undefined') return ''
+
+  const candidates = [
+    'video/mp4;codecs=h264,aac',
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm',
+  ]
+
+  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || ''
+}
+
+async function emitCapturedMedia(file: File) {
+  cleanupCamera(true)
+  emit('update:modelValue', false)
+  emit('select-media', file)
+}
+
+async function capturePhoto() {
+  const preview = cameraPreviewRef.value
+  if (!preview || !cameraStream) return
+
+  const width = Math.max(1, preview.videoWidth || 1080)
+  const height = Math.max(1, preview.videoHeight || 1920)
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    alert('خطا در ثبت تصویر')
+    return
+  }
+
+  ctx.drawImage(preview, 0, 0, width, height)
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92))
+  if (!blob) {
+    alert('خطا در ثبت تصویر')
+    return
+  }
+
+  const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' })
+  await emitCapturedMedia(file)
+}
+
+function startVideoRecording() {
+  if (!cameraStream) return
+  if (typeof MediaRecorder === 'undefined') {
+    alert('مرورگر شما از فیلم‌برداری پشتیبانی نمی‌کند.')
+    return
+  }
+
+  recordedChunks = []
+  const mimeType = getSupportedVideoMimeType()
+
+  try {
+    mediaRecorder = mimeType
+      ? new MediaRecorder(cameraStream, { mimeType })
+      : new MediaRecorder(cameraStream)
+  } catch (error) {
+    console.error('MediaRecorder init failed:', error)
+    alert('مرورگر شما از فیلم‌برداری پشتیبانی نمی‌کند.')
+    return
+  }
+
+  mediaRecorder.ondataavailable = (event) => {
+    if (event.data && event.data.size > 0) {
+      recordedChunks.push(event.data)
+    }
+  }
+
+  mediaRecorder.onstop = async () => {
+    const blob = new Blob(recordedChunks, { type: mediaRecorder?.mimeType || mimeType || 'video/webm' })
+    if (blob.size <= 0) return
+
+    const extension = blob.type.includes('mp4') ? 'mp4' : 'webm'
+    const file = new File([blob], `camera_${Date.now()}.${extension}`, { type: blob.type || 'video/webm' })
+    await emitCapturedMedia(file)
+  }
+
+  mediaRecorder.start(200)
+  isRecording.value = true
+  recordingSeconds.value = 0
+  stopRecordingTimer()
+  recordingTimer = window.setInterval(() => {
+    recordingSeconds.value += 1
+  }, 1000)
+}
+
+function stopVideoRecording() {
+  if (!mediaRecorder || mediaRecorder.state === 'inactive') return
+
+  isRecording.value = false
+  stopRecordingTimer()
+  mediaRecorder.stop()
+}
+
+function handlePrimaryCameraAction() {
+  if (!isCameraReady.value) return
+
+  if (cameraMode.value === 'photo') {
+    void capturePhoto()
+    return
+  }
+
+  if (isRecording.value) {
+    stopVideoRecording()
+    return
+  }
+
+  startVideoRecording()
+}
+
+function openCameraCapture() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    cameraInput.value?.click()
+    return
+  }
+
+  cameraMode.value = 'photo'
+  activeFacingMode.value = 'environment'
+  showCameraCapture.value = true
+  void startCameraStream()
+}
+
+async function setCameraMode(mode: 'photo' | 'video') {
+  if (cameraMode.value === mode || isRecording.value) return
+  cameraMode.value = mode
+
+  if (showCameraCapture.value) {
+    await startCameraStream()
+  }
+}
+
+async function toggleFacingMode() {
+  if (isRecording.value) return
+  activeFacingMode.value = activeFacingMode.value === 'environment' ? 'user' : 'environment'
+
+  if (showCameraCapture.value) {
+    await startCameraStream()
+  }
+}
+
+function closeCameraCapture() {
+  cleanupCamera(true)
+}
 
 function onTouchStart(e: TouchEvent) {
   isDraggingAllowed = true
@@ -204,12 +557,14 @@ function onTouchEnd() {
 }
 
 function close() {
+  cleanupCamera(true)
   emit('update:modelValue', false)
 }
 
 // Reset tab on open
 watch(() => props.modelValue, (val) => {
   if (val) activeTab.value = 'gallery'
+  if (!val) cleanupCamera(true)
 })
 
 watch(() => activeTab.value, (val) => {
@@ -304,6 +659,10 @@ function sendLocation() {
   emit('select-location', selectedLatLng.value.lat, selectedLatLng.value.lng)
   close()
 }
+
+onBeforeUnmount(() => {
+  cleanupCamera(true)
+})
 </script>
 
 <style scoped>
@@ -312,6 +671,206 @@ function sendLocation() {
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
   z-index: 999;
+}
+
+.camera-capture-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  background: #000;
+}
+
+.camera-capture-shell {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  color: #fff;
+}
+
+.camera-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.camera-icon-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  cursor: pointer;
+}
+
+.camera-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.camera-mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.camera-mode-btn {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.camera-mode-btn.active {
+  background: rgba(255, 255, 255, 0.22);
+  color: white;
+}
+
+.camera-mode-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.camera-preview-frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.camera-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #050505;
+}
+
+.camera-status-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 20px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(10px);
+}
+
+.camera-status-overlay.error {
+  background: rgba(15, 15, 15, 0.82);
+}
+
+.camera-error-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  background: #3390ec;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.camera-recording-badge {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.58);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  backdrop-filter: blur(8px);
+}
+
+.recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.16);
+}
+
+.camera-control-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.76), rgba(0, 0, 0, 0.36));
+}
+
+.camera-shutter-btn {
+  width: 88px;
+  height: 88px;
+  border-radius: 999px;
+  border: 4px solid rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+
+.camera-shutter-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.camera-shutter-btn:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+.camera-shutter-core {
+  width: 68px;
+  height: 68px;
+  border-radius: 999px;
+  background: white;
+  transition: all 0.18s ease;
+}
+
+.camera-shutter-btn.video .camera-shutter-core {
+  width: 54px;
+  height: 54px;
+  background: #ef4444;
+}
+
+.camera-shutter-btn.recording .camera-shutter-core {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+}
+
+.camera-capture-label {
+  min-height: 20px;
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .attachment-sheet {
@@ -533,4 +1092,28 @@ function sendLocation() {
 .slide-up-enter-active { transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1); }
 .slide-up-leave-active { transition: transform 0.25s cubic-bezier(0.4, 0, 1, 1); }
 .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); }
+
+@media (max-width: 640px) {
+  .camera-topbar {
+    padding: 10px 10px 0;
+  }
+
+  .camera-mode-btn {
+    padding: 8px 12px;
+  }
+
+  .camera-control-bar {
+    padding: 14px 14px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .camera-shutter-btn {
+    width: 82px;
+    height: 82px;
+  }
+
+  .camera-shutter-core {
+    width: 62px;
+    height: 62px;
+  }
+}
 </style>

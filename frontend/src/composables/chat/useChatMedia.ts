@@ -307,6 +307,8 @@ type LightboxMediaItem = {
     type: 'image' | 'video'
     url: string
     thumbnail: string
+    senderId: number | null
+    createdAt: string
 }
 
 type LightboxState = {
@@ -896,6 +898,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
             type: msg.message_type === 'video' ? 'video' : 'image',
             url: fallbackUrl,
             thumbnail: payload.thumbnail || fallbackUrl,
+            senderId: typeof msg.sender_id === 'number' ? msg.sender_id : null,
+            createdAt: msg.created_at,
         }
     }
 
