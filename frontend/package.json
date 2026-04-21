@@ -21,6 +21,7 @@
     "autoprefixer": "^10.4.23",
     "blurhash": "^2.0.5",
     "browser-image-compression": "^2.0.2",
+    "heic2any": "^0.0.4",
     "leaflet": "^1.9.4",
     "lucide-vue-next": "^0.563.0",
     "moment-jalaali": "^0.10.4",
