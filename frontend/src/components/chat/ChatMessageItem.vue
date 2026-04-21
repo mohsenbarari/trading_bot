@@ -19,6 +19,7 @@
     
     <div 
       :id="'msg-' + msg.id"
+      ref="messageBubbleRef"
       class="message-bubble"
       :class="{ 
         'sent': isSent, 
@@ -397,14 +398,66 @@ const docIconClass = computed(() => {
 })
 
 // Voice State
+const messageBubbleRef = ref<HTMLElement | null>(null)
 const waveformRef = ref<HTMLElement | null>(null)
 let wavesurfer: any = null
+let visibilityObserver: IntersectionObserver | null = null
+const hasTriggeredDeferredLoad = ref(false)
 const isPlaying = ref(false)
 const voiceDuration = ref(0)
 const voiceCurrentTime = ref(0)
 
+const shouldDeferMediaHydration = computed(() => {
+  return Boolean(props.onLoad) && (
+    props.isAlbum ||
+    props.msg.message_type === 'image' ||
+    props.msg.message_type === 'video'
+  )
+})
+
+function cleanupVisibilityObserver() {
+  if (visibilityObserver) {
+    visibilityObserver.disconnect()
+    visibilityObserver = null
+  }
+}
+
+function triggerDeferredLoad() {
+  if (hasTriggeredDeferredLoad.value || !props.onLoad) return
+  hasTriggeredDeferredLoad.value = true
+  props.onLoad()
+  cleanupVisibilityObserver()
+}
+
+function setupDeferredMediaHydration() {
+  if (!shouldDeferMediaHydration.value) return
+
+  const target = messageBubbleRef.value
+  if (!target) {
+    triggerDeferredLoad()
+    return
+  }
+
+  if (typeof IntersectionObserver === 'undefined') {
+    window.setTimeout(() => triggerDeferredLoad(), 0)
+    return
+  }
+
+  visibilityObserver = new IntersectionObserver((entries) => {
+    const isVisible = entries.some(entry => entry.isIntersecting || entry.intersectionRatio > 0)
+    if (isVisible) {
+      triggerDeferredLoad()
+    }
+  }, {
+    threshold: 0.01,
+    rootMargin: '900px 0px 900px 0px'
+  })
+
+  visibilityObserver.observe(target)
+}
+
 onMounted(() => {
-  if (props.onLoad) props.onLoad()
+  setupDeferredMediaHydration()
 
   if (props.msg.message_type === 'voice' && props.msg.content) {
     try {
@@ -525,6 +578,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  cleanupVisibilityObserver()
   if (wavesurfer) {
     wavesurfer.destroy()
     wavesurfer = null

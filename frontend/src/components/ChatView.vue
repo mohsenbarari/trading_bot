@@ -177,8 +177,7 @@ const wsLogic = useChatWebSocket({
 
 const {
   imageCache,
-  loadImageForMessage,
-  openCachedImage,
+  scheduleMediaHydration,
   downloadMedia,
   lightboxMedia,
   cancelUpload,
@@ -309,15 +308,17 @@ function getAlbumMeta(msg: Message): { albumId: string | null, albumIndex: numbe
   }
 }
 
-async function hydrateRenderedMedia(item: any) {
+function hydrateRenderedMedia(item: any) {
   if (item?.type === 'album') {
     const albumMessages = Array.isArray(item.messages) ? item.messages : []
-    await Promise.all(albumMessages.map((message: Message) => loadImageForMessage(message.content, message.message_type)))
+    albumMessages.forEach((message: Message) => {
+      scheduleMediaHydration(message.content, message.message_type)
+    })
     return
   }
 
   if (item?.content) {
-    await loadImageForMessage(item.content, item.message_type)
+    scheduleMediaHydration(item.content, item.message_type)
   }
 }
 
