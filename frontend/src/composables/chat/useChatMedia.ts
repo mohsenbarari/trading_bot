@@ -209,6 +209,17 @@ const waitForNextPaint = (): Promise<void> => {
     })
 }
 
+const scheduleIdleTask = (task: () => void) => {
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        ;(window as Window & {
+            requestIdleCallback: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number
+        }).requestIdleCallback(() => task(), { timeout: 500 })
+        return
+    }
+
+    setTimeout(task, 16)
+}
+
 export interface UseChatMediaOptions {
     apiBaseUrl: string
     jwtToken: string | null
@@ -292,6 +303,14 @@ export function useChatMedia(options: UseChatMediaOptions) {
     const uploadControllers = new Map<number, { abort: () => void }>()
     const albumBatches = new Map<string, PendingAlbumBatch>()
     const preprocessQueue: PreprocessJob[] = []
+    const pendingMediaLoads = new Map<string, Promise<string | null>>()
+    const pendingHydrationIds = new Set<string>()
+    const hydrationQueue: Array<{ fileId: string; content: string; type?: string }> = []
+    let activeHydrationCount = 0
+    let hydrationPumpScheduled = false
+    let imageDbPromise: Promise<IDBDatabase> | null = null
+
+    const MAX_CONCURRENT_HYDRATIONS = 1
 
     primeMediaPreprocessTelemetry()
 
@@ -559,7 +578,11 @@ export function useChatMedia(options: UseChatMediaOptions) {
     const STORE_NAME = 'images'
 
     function openImageDB(): Promise<IDBDatabase> {
-        return new Promise((resolve, reject) => {
+        if (imageDbPromise) {
+            return imageDbPromise
+        }
+
+        imageDbPromise = new Promise((resolve, reject) => {
             const req = indexedDB.open(DB_NAME, DB_VERSION)
             req.onupgradeneeded = (e) => {
                 const db = (e.target as IDBOpenDBRequest).result
@@ -567,9 +590,93 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     db.createObjectStore(STORE_NAME)
                 }
             }
-            req.onsuccess = () => resolve(req.result)
-            req.onerror = () => reject(req.error)
+            req.onsuccess = () => {
+                const db = req.result
+                db.onversionchange = () => {
+                    db.close()
+                    imageDbPromise = null
+                }
+                resolve(db)
+            }
+            req.onerror = () => {
+                imageDbPromise = null
+                reject(req.error)
+            }
         })
+
+        return imageDbPromise
+    }
+
+    function setCachedMediaUrl(fileId: string, objectUrl: string) {
+        const previousUrl = imageCache.value[fileId]
+        if (previousUrl === objectUrl) {
+            return
+        }
+
+        if (previousUrl && previousUrl !== objectUrl && previousUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(previousUrl)
+        }
+
+        imageCache.value[fileId] = objectUrl
+    }
+
+    function pumpHydrationQueue() {
+        hydrationPumpScheduled = false
+
+        while (activeHydrationCount < MAX_CONCURRENT_HYDRATIONS && hydrationQueue.length > 0) {
+            const nextItem = hydrationQueue.shift()
+            if (!nextItem) {
+                return
+            }
+
+            if (imageCache.value[nextItem.fileId]) {
+                pendingHydrationIds.delete(nextItem.fileId)
+                continue
+            }
+
+            activeHydrationCount += 1
+
+            scheduleIdleTask(() => {
+                void (async () => {
+                    try {
+                        await waitForNextPaint()
+                        if (!imageCache.value[nextItem.fileId]) {
+                            await loadImageForMessage(nextItem.content, nextItem.type)
+                        }
+                    } finally {
+                        pendingHydrationIds.delete(nextItem.fileId)
+                        activeHydrationCount = Math.max(0, activeHydrationCount - 1)
+                        if (hydrationQueue.length > 0) {
+                            scheduleHydrationPump()
+                        }
+                    }
+                })()
+            })
+        }
+    }
+
+    function scheduleHydrationPump() {
+        if (hydrationPumpScheduled) {
+            return
+        }
+
+        hydrationPumpScheduled = true
+        scheduleIdleTask(() => pumpHydrationQueue())
+    }
+
+    function scheduleMediaHydration(content: string, type?: string) {
+        const fileId = getFileId(content)
+        if (!fileId) {
+            return
+        }
+
+        if (imageCache.value[fileId] || pendingMediaLoads.has(fileId) || pendingHydrationIds.has(fileId)) {
+            return
+        }
+
+        pendingHydrationIds.add(fileId)
+        hydrationQueue.push({ fileId, content, type })
+        scheduleHydrationPump()
     }
 
     async function getFromDB(key: string): Promise<Blob | null> {
@@ -602,44 +709,46 @@ export function useChatMedia(options: UseChatMediaOptions) {
     }
 
     async function loadImageForMessage(content: string, type?: string): Promise<string | null> {
-        if (!content || !content.startsWith('{')) return null
-        let fileId = ''
-        try {
-            const parsed = JSON.parse(content)
-            fileId = parsed.file_id
-        } catch { return null }
+        const fileId = getFileId(content)
         if (!fileId) return null
         if (imageCache.value[fileId]) return imageCache.value[fileId] || null
 
-        // 1. Check IndexedDB first
-        const cached = await getFromDB(fileId)
-        if (cached) {
-            const objectUrl = URL.createObjectURL(cached)
-            imageCache.value = { ...imageCache.value, [fileId]: objectUrl }
-            return objectUrl
+        const pendingLoad = pendingMediaLoads.get(fileId)
+        if (pendingLoad) {
+            return pendingLoad
         }
 
-        // For voice messages, we auto-download if it's not in cache
-        // but image/video might still require manual download click.
-        // We'll allow auto-downloading voice here.
-        if (type !== 'voice' && type !== 'sticker') {
-            // Stickers are small, voice are small enough. 
-            // Images/Videos are large, we only load them if they are in cache,
-            // otherwise the user must click Download.
-            return null
-        }
+        const loadPromise = (async () => {
+            const cached = await getFromDB(fileId)
+            if (cached) {
+                const objectUrl = URL.createObjectURL(cached)
+                setCachedMediaUrl(fileId, objectUrl)
+                return objectUrl
+            }
 
-        // 2. Fetch from server
+            if (type !== 'voice' && type !== 'sticker') {
+                return null
+            }
+
+            try {
+                const res = await fetch(`${apiBaseUrl}/api/chat/files/${fileId}?token=${jwtToken}`)
+                if (!res.ok) return null
+                const blob = await res.blob()
+                await saveToDB(fileId, blob)
+                const objectUrl = URL.createObjectURL(blob)
+                setCachedMediaUrl(fileId, objectUrl)
+                return objectUrl
+            } catch {
+                return null
+            }
+        })()
+
+        pendingMediaLoads.set(fileId, loadPromise)
+
         try {
-            const res = await fetch(`${apiBaseUrl}/api/chat/files/${fileId}?token=${jwtToken}`)
-            if (!res.ok) return null
-            const blob = await res.blob()
-            await saveToDB(fileId, blob)
-            const objectUrl = URL.createObjectURL(blob)
-            imageCache.value = { ...imageCache.value, [fileId]: objectUrl }
-            return objectUrl
-        } catch {
-            return null
+            return await loadPromise
+        } finally {
+            pendingMediaLoads.delete(fileId)
         }
     }
 
@@ -789,7 +898,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             if (!total || !res.body) {
                 const blob = await res.blob();
                 await saveToDB(fileId, blob);
-                imageCache.value = { ...imageCache.value, [fileId]: URL.createObjectURL(blob) };
+                setCachedMediaUrl(fileId, URL.createObjectURL(blob));
                 return;
             }
 
@@ -812,7 +921,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
             // Update cache with the new blob URL
             const newUrl = URL.createObjectURL(combinedBlob);
-            imageCache.value = { ...imageCache.value, [fileId]: newUrl };
+            setCachedMediaUrl(fileId, newUrl);
 
         } catch (e) {
             console.error("Download failed:", e);
@@ -1463,9 +1572,9 @@ export function useChatMedia(options: UseChatMediaOptions) {
             const finalLocalUrl = getOptimisticTarget()?.local_blob_url || localUrl
             if (!isAudio) {
                 // we probably don't need a Blob URL in the image cache for voice, but it's safe to store
-                imageCache.value = { ...imageCache.value, [data.file_id]: finalLocalUrl }
+                setCachedMediaUrl(data.file_id, finalLocalUrl)
             } else {
-                imageCache.value = { ...imageCache.value, [data.file_id]: finalLocalUrl }
+                setCachedMediaUrl(data.file_id, finalLocalUrl)
             }
 
             const targetAfterUpload = getOptimisticTarget()
@@ -1508,6 +1617,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         cancelUpload,
         imageCache,
         loadImageForMessage,
+        scheduleMediaHydration,
         openCachedImage,
         downloadMedia,
         lightboxMedia,
