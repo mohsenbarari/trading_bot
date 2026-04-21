@@ -366,11 +366,112 @@ function getContextMenuMessageIds(msg: Message) {
 }
 
 function openForwardModalForIds(messageIds: number[]) {
-  const normalized = normalizeMessageIds(messageIds)
+  const normalized = sortMessageIdsByChatOrder(messageIds)
   if (normalized.length === 0) return
 
   selectedMessages.value = normalized
   showForwardModal.value = true
+}
+
+function sortMessageIdsByChatOrder(messageIds: number[]) {
+  const normalized = normalizeMessageIds(messageIds)
+  const positionById = new Map<number, number>()
+
+  messages.value.forEach((message, index) => {
+    positionById.set(message.id, index)
+  })
+
+  return [...normalized].sort((left, right) => {
+    return (positionById.get(left) ?? Number.MAX_SAFE_INTEGER) - (positionById.get(right) ?? Number.MAX_SAFE_INTEGER)
+  })
+}
+
+function toggleSelectionBatch(messageIds: number[]) {
+  const normalized = sortMessageIdsByChatOrder(messageIds)
+  if (normalized.length === 0) return
+
+  const allSelected = normalized.every(messageId => selectedMessages.value.includes(messageId))
+  if (allSelected) {
+    selectedMessages.value = selectedMessages.value.filter(messageId => !normalized.includes(messageId))
+    return
+  }
+
+  selectedMessages.value = sortMessageIdsByChatOrder([
+    ...selectedMessages.value,
+    ...normalized,
+  ])
+}
+
+function buildForwardContent(message: Message, forwardedAlbumId: string | null, forwardedAlbumIndex?: number) {
+  if (message.message_type !== 'image' && message.message_type !== 'video') {
+    return message.content
+  }
+
+  try {
+    const parsed = JSON.parse(message.content)
+    if (!parsed || typeof parsed !== 'object') {
+      return message.content
+    }
+
+    if (forwardedAlbumId) {
+      parsed.album_id = forwardedAlbumId
+      parsed.album_index = typeof forwardedAlbumIndex === 'number' ? forwardedAlbumIndex : 0
+    } else {
+      delete parsed.album_id
+      delete parsed.album_index
+    }
+
+    return JSON.stringify(parsed)
+  } catch {
+    return message.content
+  }
+}
+
+function prepareForwardBatch(messageIds: number[]) {
+  const orderedIds = sortMessageIdsByChatOrder(messageIds)
+  const selectedSet = new Set(orderedIds)
+  const albumAssignments = new Map<number, { albumId: string, albumIndex: number }>()
+  const visitedAlbumIds = new Set<string>()
+
+  orderedIds.forEach((messageId) => {
+    const message = messages.value.find(candidate => candidate.id === messageId)
+    if (!message) return
+
+    const albumMeta = getAlbumMeta(message)
+    if (!albumMeta.albumId || visitedAlbumIds.has(albumMeta.albumId)) return
+
+    visitedAlbumIds.add(albumMeta.albumId)
+    const albumMessages = getAlbumMessagesForMessage(message)
+    if (albumMessages.length <= 1) return
+
+    const isWholeAlbumSelected = albumMessages.every(albumMessage => selectedSet.has(albumMessage.id))
+    if (!isWholeAlbumSelected) return
+
+    const forwardedAlbumId = globalThis.crypto?.randomUUID?.()
+      ?? `forward_album_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+
+    albumMessages.forEach((albumMessage, index) => {
+      if (!selectedSet.has(albumMessage.id)) return
+      albumAssignments.set(albumMessage.id, { albumId: forwardedAlbumId, albumIndex: index })
+    })
+  })
+
+  return orderedIds
+    .map((messageId) => {
+      const message = messages.value.find(candidate => candidate.id === messageId)
+      if (!message) return null
+
+      const albumAssignment = albumAssignments.get(message.id)
+      const forwardedFromRaw = (message as any).forwarded_from_id
+      const forwardedFromId = typeof forwardedFromRaw === 'number' ? forwardedFromRaw : message.sender_id
+
+      return {
+        message,
+        content: buildForwardContent(message, albumAssignment?.albumId ?? null, albumAssignment?.albumIndex),
+        forwardedFromId,
+      }
+    })
+    .filter((item): item is { message: Message, content: string, forwardedFromId: number } => Boolean(item))
 }
 
 async function deleteMessagesByIds(messageIds: number[], confirmMessage: string) {
@@ -649,6 +750,17 @@ const toggleSelection = (msgId: number) => {
     }
 }
 
+function handleGroupedItemSelection(item: any) {
+  if (item?.type === 'album' && Array.isArray(item.messages)) {
+    toggleSelectionBatch(item.messages.map((message: Message) => message.id))
+    return
+  }
+
+  if (typeof item?.id === 'number') {
+    toggleSelection(item.id)
+  }
+}
+
 const clearSelection = () => {
     selectedMessages.value = []
 }
@@ -858,25 +970,41 @@ function closeForwardModal() {
 }
 
 async function forwardSelectedMessages(targetUserId: number) {
-  const messageIds = normalizeMessageIds(selectedMessages.value)
-  if (messageIds.length === 0) return
+  const preparedBatch = prepareForwardBatch(selectedMessages.value)
+  if (preparedBatch.length === 0) return
+
   isSending.value = true
   try {
-    for (const msgId of messageIds) {
-      const originalMsg = messages.value.find(m => m.id === msgId)
-      if (!originalMsg) continue
-      await messagesLogic.apiFetch('/chat/send', {
-        method: 'POST',
-        body: JSON.stringify({
-          receiver_id: targetUserId,
-          content: originalMsg.content,
-          message_type: originalMsg.message_type,
-          forwarded_from_id: originalMsg.sender_id
+    const failedMessageIds: number[] = []
+
+    for (const item of preparedBatch) {
+      try {
+        await messagesLogic.apiFetch('/chat/send', {
+          method: 'POST',
+          body: JSON.stringify({
+            receiver_id: targetUserId,
+            content: item.content,
+            message_type: item.message.message_type,
+            forwarded_from_id: item.forwardedFromId,
+          })
         })
-      })
+      } catch (forwardError) {
+        console.error('Failed to forward message:', item.message.id, forwardError)
+        failedMessageIds.push(item.message.id)
+      }
     }
+
+    if (failedMessageIds.length === preparedBatch.length) {
+      alert('خطا در هدایت پیام‌ها')
+      return
+    }
+
     selectedMessages.value = []
     showForwardModal.value = false
+
+    if (failedMessageIds.length > 0) {
+      alert('بخشی از پیام‌ها هدایت نشدند. دوباره تلاش کنید.')
+    }
     
     if (selectedUserId.value !== targetUserId) {
         const conv = conversations.value.find(c => c.other_user_id === targetUserId)
@@ -888,8 +1016,6 @@ async function forwardSelectedMessages(targetUserId: number) {
     } else {
         loadMessages(targetUserId, true)
     }
-  } catch (err) {
-    alert('خطا در هدایت پیام‌ها')
   } finally {
     isSending.value = false
   }
@@ -1164,7 +1290,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
                 :isSelectionMode="isSelectionMode"
                 :searchQuery="searchQuery"
                 @swipe-reply="handleReply"
-                @select="toggleSelection(item.id)"
+                @select="handleGroupedItemSelection(item)"
                 @click-message="handleMessageClick"
                 @context-menu="showContextMenu"
                 @scroll-to="scrollToMessage"
