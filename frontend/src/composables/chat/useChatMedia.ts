@@ -1,6 +1,4 @@
 import { ref, type Ref, nextTick } from 'vue'
-import PhotoSwipeLightbox from 'photoswipe/lightbox'
-import 'photoswipe/style.css'
 import type { Message } from '../../types/chat'
 import { canUseImagePreprocessWorker, getRecommendedImagePreprocessParallelism, processImageInWorker } from '../../utils/imagePreprocessClient'
 import { primeMediaPreprocessTelemetry, recordMediaPreprocessTelemetry } from '../../utils/chatMediaTelemetry'
@@ -303,13 +301,18 @@ export interface UseChatMediaOptions {
     sendMediaMessage: (type: 'image' | 'video' | 'voice' | 'sticker', content: string, localBlobUrl?: string, optimisticId?: number) => Promise<Message | null>
 }
 
-type LightboxItem = {
-    src: string
-    msrc: string
+type LightboxMediaItem = {
     msgId: number
-    element?: HTMLImageElement
-    w: number
-    h: number
+    fileId: string
+    type: 'image' | 'video'
+    url: string
+    thumbnail: string
+}
+
+type LightboxState = {
+    items: LightboxMediaItem[]
+    currentIndex: number
+    albumId: string | null
 }
 
 type AlbumBatchItemStatus = 'uploading' | 'uploaded' | 'sending' | 'sent' | 'cancelled' | 'failed'
@@ -846,267 +849,146 @@ export function useChatMedia(options: UseChatMediaOptions) {
         }
     }
 
-    function getRenderedImageElement(messageId: number): HTMLImageElement | null {
-        return document.querySelector(`img[data-media-msg-id="${messageId}"]`) as HTMLImageElement | null
+    function getAlbumIndexFromMessage(msg: Message) {
+        const payload = parseMediaPayload(msg.content)
+        return typeof payload.album_index === 'number' && Number.isFinite(payload.album_index)
+            ? payload.album_index
+            : Number.MAX_SAFE_INTEGER
     }
 
-    function loadImageDimensions(src: string): Promise<{ width: number; height: number }> {
-        return new Promise((resolve) => {
-            const img = new Image()
-            img.onload = () => {
-                resolve({
-                    width: Math.max(1, img.naturalWidth || 0),
-                    height: Math.max(1, img.naturalHeight || 0)
-                })
-            }
-            img.onerror = () => resolve({ width: 0, height: 0 })
-            img.src = src
-        })
-    }
-
-    async function resolveLightboxImageData(messageId: number, src: string, fallbackWidth = 0, fallbackHeight = 0) {
-        const element = getRenderedImageElement(messageId)
-        const resolvedSrc = element?.currentSrc || element?.src || src
-
-        if (element?.naturalWidth && element?.naturalHeight) {
-            return {
-                src: resolvedSrc,
-                element,
-                width: element.naturalWidth,
-                height: element.naturalHeight,
-            }
+    function getAlbumMessages(msg: Message) {
+        const albumId = getAlbumIdFromMessage(msg)
+        if (!albumId) {
+            return [msg]
         }
 
-        const loaded = await loadImageDimensions(resolvedSrc)
-        return {
-            src: resolvedSrc,
-            element: element ?? undefined,
-            width: loaded.width || fallbackWidth || 1,
-            height: loaded.height || fallbackHeight || 1,
-        }
+        const albumMessages = messages.value
+            .filter(candidate => {
+                if (candidate.message_type !== 'image' && candidate.message_type !== 'video') return false
+                if (candidate.is_error) return false
+                if (candidate.sender_id !== msg.sender_id) return false
+                return getAlbumIdFromMessage(candidate) === albumId
+            })
+            .sort((left, right) => {
+                const byIndex = getAlbumIndexFromMessage(left) - getAlbumIndexFromMessage(right)
+                if (byIndex !== 0) return byIndex
+
+                const byCreatedAt = new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+                if (byCreatedAt !== 0) return byCreatedAt
+
+                return left.id - right.id
+            })
+
+        return albumMessages.length > 0 ? albumMessages : [msg]
     }
 
-    async function buildLightboxItem(msg: Message): Promise<LightboxItem | null> {
+    async function buildLightboxMediaItem(msg: Message): Promise<LightboxMediaItem | null> {
         const payload = parseMediaPayload(msg.content)
         const fileId = typeof payload.file_id === 'string' ? payload.file_id : getFileId(msg.content)
-        const fallbackSrc = msg.local_blob_url || imageCache.value[fileId] || payload.thumbnail || ''
+        const resolvedUrl = await resolveMediaUrlForMessage(msg)
+        const fallbackUrl = resolvedUrl || msg.local_blob_url || imageCache.value[fileId] || payload.thumbnail || ''
 
-        if (!fallbackSrc) return null
-
-        const fallbackWidth = Number(payload.width) || 0
-        const fallbackHeight = Number(payload.height) || 0
-        const resolved = await resolveLightboxImageData(msg.id, fallbackSrc, fallbackWidth, fallbackHeight)
+        if (!fallbackUrl) return null
 
         return {
-            src: resolved.src,
-            msrc: payload.thumbnail || resolved.src,
             msgId: msg.id,
-            element: resolved.element,
-            w: resolved.width,
-            h: resolved.height,
+            fileId,
+            type: msg.message_type === 'video' ? 'video' : 'image',
+            url: fallbackUrl,
+            thumbnail: payload.thumbnail || fallbackUrl,
         }
-    }
-
-    async function syncLightboxContentSize(content: any) {
-        if (content.type !== 'image' || !content.data?.src) return
-
-        const resolved = await resolveLightboxImageData(
-            Number(content.data.msgId),
-            content.data.src,
-            Number(content.data.w) || 0,
-            Number(content.data.h) || 0,
-        )
-
-        const sizeChanged = resolved.width !== content.data.w || resolved.height !== content.data.h
-        const srcChanged = resolved.src !== content.data.src
-
-        if (!sizeChanged && !srcChanged) return
-
-        content.data.src = resolved.src
-        content.data.element = resolved.element
-        content.data.w = resolved.width
-        content.data.h = resolved.height
-
-        content.width = resolved.width
-        content.height = resolved.height
-
-        if (content.element instanceof HTMLImageElement && content.element.src !== resolved.src) {
-            content.element.src = resolved.src
-        }
-
-        if (content.slide) {
-            content.slide.width = resolved.width
-            content.slide.height = resolved.height
-            if (typeof content.slide.updateContentSize === 'function') {
-                content.slide.updateContentSize(true)
-            }
-        }
-    }
-
-    function openCachedImage(fileId: string) {
-        const url = imageCache.value[fileId]
-        if (url) window.open(url, '_blank')
     }
 
     // === Media Download ===
     async function downloadMedia(msg: Message) {
-        const fileId = getFileId(msg.content);
-        if (!fileId) return;
+        const fileId = getFileId(msg.content)
+        if (!fileId) return
 
-        // Get reactive proxy of the message
-        const targetMsg = messages.value.find(m => m.id === msg.id) || msg;
-        targetMsg.is_downloading = true;
-        targetMsg.download_progress = 0;
+        const targetMsg = messages.value.find(m => m.id === msg.id) || msg
+        targetMsg.is_downloading = true
+        targetMsg.download_progress = 0
 
         try {
-            const res = await fetch(`${apiBaseUrl}/api/chat/files/${fileId}?token=${jwtToken}`);
-            if (!res.ok) throw new Error("Download failed");
+            const res = await fetch(`${apiBaseUrl}/api/chat/files/${fileId}?token=${jwtToken}`)
+            if (!res.ok) throw new Error('Download failed')
 
-            const contentType = res.headers.get('content-type') || 'application/octet-stream';
-            const contentLength = res.headers.get('content-length');
-            const total = contentLength ? parseInt(contentLength, 10) : 0;
+            const contentType = res.headers.get('content-type') || 'application/octet-stream'
+            const contentLength = res.headers.get('content-length')
+            const total = contentLength ? parseInt(contentLength, 10) : 0
 
             if (!total || !res.body) {
-                const blob = await res.blob();
-                await saveToDB(fileId, blob);
-                setCachedMediaUrl(fileId, URL.createObjectURL(blob));
-                return;
+                const blob = await res.blob()
+                await saveToDB(fileId, blob)
+                setCachedMediaUrl(fileId, URL.createObjectURL(blob))
+                return
             }
 
-            const reader = res.body.getReader();
-            const chunks: Uint8Array[] = [];
-            let received = 0;
+            const reader = res.body.getReader()
+            const chunks: Uint8Array[] = []
+            let received = 0
 
             while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+                const { done, value } = await reader.read()
+                if (done) break
                 if (value) {
-                    chunks.push(value);
-                    received += value.length;
-                    targetMsg.download_progress = Math.round((received / total) * 100);
+                    chunks.push(value)
+                    received += value.length
+                    targetMsg.download_progress = Math.round((received / total) * 100)
                 }
             }
 
-            const combinedBlob = new Blob(chunks as BlobPart[], { type: contentType });
-            await saveToDB(fileId, combinedBlob);
-
-            // Update cache with the new blob URL
-            const newUrl = URL.createObjectURL(combinedBlob);
-            setCachedMediaUrl(fileId, newUrl);
-
+            const combinedBlob = new Blob(chunks as BlobPart[], { type: contentType })
+            await saveToDB(fileId, combinedBlob)
+            setCachedMediaUrl(fileId, URL.createObjectURL(combinedBlob))
         } catch (e) {
-            console.error("Download failed:", e);
-            alert("خطا در دانلود فایل");
+            console.error('Download failed:', e)
+            alert('خطا در دانلود فایل')
         } finally {
-            targetMsg.is_downloading = false;
+            targetMsg.is_downloading = false
         }
     }
 
     // === Lightbox State ===
-    const lightboxMedia = ref<{ url: string, type: 'image' | 'video' } | null>(null);
+    const lightboxMedia = ref<LightboxState | null>(null)
 
     async function handleMediaClick(msg: Message) {
-        const fileId = getFileId(msg.content);
-        const url = await resolveMediaUrlForMessage(msg)
+        if (msg.message_type !== 'image' && msg.message_type !== 'video') {
+            return
+        }
 
-        if (url) {
-            if (msg.message_type === 'image') {
-                // Collect all images in current chat for the gallery
-                const imageMessages = messages.value.filter(m => m.message_type === 'image');
+        const albumMessages = getAlbumMessages(msg)
+        const items = (await Promise.all(albumMessages.map(buildLightboxMediaItem)))
+            .filter((item): item is LightboxMediaItem => !!item)
 
-                const dataSource = (await Promise.all(imageMessages.map(buildLightboxItem)))
-                    .filter((item): item is LightboxItem => !!item);
+        if (items.length === 0) {
+            return
+        }
 
-                if (dataSource.length === 0) {
-                    return;
-                }
-                
-                const startIndex = dataSource.findIndex(item => item.msgId === msg.id);
+        const currentIndex = Math.max(0, items.findIndex(item => item.msgId === msg.id))
+        const albumId = items.length > 1 ? getAlbumIdFromMessage(msg) : null
 
-                const lightbox = new PhotoSwipeLightbox({
-                    dataSource,
-                    index: Math.max(0, startIndex),
-                    pswpModule: () => import('photoswipe'),
-                    bgOpacity: 0.9,
-                    wheelToZoom: true,
-                    arrowPrev: false,
-                    arrowNext: false,
-                    counter: false,
-                });
+        lightboxMedia.value = {
+            items,
+            currentIndex,
+            albumId,
+        }
+    }
 
-                lightbox.on('uiRegister', function() {
-                    // Download Button
-                    lightbox.pswp?.ui?.registerElement({
-                        name: 'download-button',
-                        order: 8,
-                        isButton: true,
-                        tagName: 'button',
-                        html: '<svg width="32" height="32" viewBox="0 0 32 32" fill="none"><path d="M20.5 14L16 18.5L11.5 14M16 8V18.5M8 22H24" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-                        onClick: (event: any, el: any, pswp: any) => {
-                            const currSlide = pswp.currSlide;
-                            if (!currSlide || !currSlide.data.src) return;
-                            const link = document.createElement('a');
-                            link.href = currSlide.data.src;
-                            link.download = `media_${currSlide.data.msgId}.jpg`;
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                        }
-                    });
+    function setLightboxIndex(index: number) {
+        const state = lightboxMedia.value
+        if (!state) return
 
-                    // Thumbnails Carousel
-                    lightbox.pswp?.ui?.registerElement({
-                        name: 'thumbnails-carousel',
-                        order: 9,
-                        isButton: false,
-                        appendTo: 'wrapper',
-                        html: '<div class="pswp-thumbnails" style="position:absolute; bottom:20px; width:100%; display:flex; justify-content:center; gap:8px; overflow-x:auto; padding: 0 20px; z-index:10000;"></div>',
-                        onInit: (el: any, pswp: any) => {
-                            const container = el.querySelector('.pswp-thumbnails');
-                            dataSource.forEach((item, i) => {
-                               const img = document.createElement('img');
-                               img.src = item.msrc || item.src || '';
-                               img.style.height = '48px';
-                               img.style.width = '48px';
-                               img.style.objectFit = 'cover';
-                               img.style.borderRadius = '4px';
-                               img.style.cursor = 'pointer';
-                               img.style.opacity = i === pswp.currIndex ? '1' : '0.5';
-                               img.style.transition = 'opacity 0.2s';
-                               img.onclick = () => pswp.goTo(i);
-                               container.appendChild(img);
-                            });
+        const nextIndex = Math.max(0, Math.min(index, state.items.length - 1))
+        if (nextIndex === state.currentIndex) return
 
-                            pswp.on('change', () => {
-                                const imgs = container.querySelectorAll('img');
-                                imgs.forEach((img: any, idx: number) => {
-                                    img.style.opacity = idx === pswp.currIndex ? '1' : '0.5';
-                                    if (idx === pswp.currIndex) {
-                                        img.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-                                    }
-                                });
-                            });
-                        }
-                    });
-                });
-
-                lightbox.on('contentLoad', (e) => {
-                    void syncLightboxContentSize(e.content);
-                });
-
-                lightbox.init();
-                lightbox.loadAndOpen(Math.max(0, startIndex));
-            } else {
-                lightboxMedia.value = {
-                    url,
-                    type: 'video'
-                };
-            }
+        lightboxMedia.value = {
+            ...state,
+            currentIndex: nextIndex,
         }
     }
 
     function closeLightbox() {
-        lightboxMedia.value = null;
+        lightboxMedia.value = null
     }
 
     // === Media Upload ===
@@ -1720,10 +1602,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
         imageCache,
         loadImageForMessage,
         scheduleMediaHydration,
-        openCachedImage,
         downloadMedia,
         lightboxMedia,
         handleMediaClick,
+        setLightboxIndex,
         closeLightbox,
         handleMediaUploadWrapper
     }

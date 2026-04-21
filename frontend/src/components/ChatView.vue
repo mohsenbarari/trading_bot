@@ -68,7 +68,7 @@ const isUserAtBottom = ref(true)
 const unreadNewMessagesCount = ref(0)
 const showScrollButton = ref(false)
 const isMobile = ref(false)
-const contextMenu = ref<{ visible: boolean; x: number; y: number; message: Message | null }>({ visible: false, x: 0, y: 0, message: null })
+const contextMenu = ref<{ visible: boolean; x: number; y: number; message: Message | null; messageIds: number[] }>({ visible: false, x: 0, y: 0, message: null, messageIds: [] })
 
 // Input
 const messageInput = ref('')
@@ -182,6 +182,7 @@ const {
   lightboxMedia,
   cancelUpload,
   handleMediaClick,
+  setLightboxIndex,
   closeLightbox,
   handleMediaUploadWrapper
 } = mediaLogic
@@ -251,9 +252,30 @@ const totalUnread = computed(() => {
   return conversations.value.reduce((sum, c) => sum + c.unread_count, 0)
 })
 
+function isDeletableMessage(msg?: Message | null) {
+  if (!msg) return false
+  if (msg.sender_id !== props.currentUserId) return false
+  const msgTime = new Date(msg.created_at).getTime()
+  return (Date.now() - msgTime) <= 48 * 60 * 60 * 1000
+}
+
+function normalizeMessageIds(messageIds: number[]) {
+  const seen = new Set<number>()
+  const normalized: number[] = []
+
+  messageIds.forEach((messageId) => {
+    if (!Number.isFinite(messageId) || seen.has(messageId)) return
+    seen.add(messageId)
+    normalized.push(messageId)
+  })
+
+  return normalized
+}
+
 const canEdit = computed(() => {
   const msg = contextMenu.value.message
   if (!msg) return false
+  if (contextMenu.value.messageIds.length !== 1) return false
   if (msg.sender_id !== props.currentUserId) return false
   if (msg.message_type !== 'text') return false
   if ((msg as any).forwarded_from_id || (msg as any).forwarded_from_name) return false
@@ -262,11 +284,13 @@ const canEdit = computed(() => {
 })
 
 const canDelete = computed(() => {
-  const msg = contextMenu.value.message
-  if (!msg) return false
-  if (msg.sender_id !== props.currentUserId) return false
-  const msgTime = new Date(msg.created_at).getTime()
-  return (Date.now() - msgTime) <= 48 * 60 * 60 * 1000
+  const messageIds = normalizeMessageIds(contextMenu.value.messageIds)
+  if (messageIds.length === 0) return false
+
+  return messageIds.every((messageId) => {
+    const msg = messages.value.find(message => message.id === messageId)
+    return isDeletableMessage(msg)
+  })
 })
 
 const canDeleteSelected = computed(() => {
@@ -305,6 +329,71 @@ function getAlbumMeta(msg: Message): { albumId: string | null, albumIndex: numbe
     return { albumId, albumIndex }
   } catch {
     return { albumId: null, albumIndex: Number.MAX_SAFE_INTEGER }
+  }
+}
+
+function getAlbumMessagesForMessage(msg: Message) {
+  const albumMeta = getAlbumMeta(msg)
+  if (!albumMeta.albumId) {
+    return [msg]
+  }
+
+  const albumMessages = messages.value
+    .filter(candidate => {
+      if (candidate.message_type !== 'image' && candidate.message_type !== 'video') return false
+      if (candidate.reply_to_message || candidate.is_error) return false
+      if (candidate.sender_id !== msg.sender_id) return false
+      return getAlbumMeta(candidate).albumId === albumMeta.albumId
+    })
+    .sort((left, right) => {
+      const leftMeta = getAlbumMeta(left)
+      const rightMeta = getAlbumMeta(right)
+      const byIndex = leftMeta.albumIndex - rightMeta.albumIndex
+      if (byIndex !== 0) return byIndex
+
+      const byCreatedAt = new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+      if (byCreatedAt !== 0) return byCreatedAt
+
+      return left.id - right.id
+    })
+
+  return albumMessages.length > 0 ? albumMessages : [msg]
+}
+
+function getContextMenuMessageIds(msg: Message) {
+  const albumMessages = getAlbumMessagesForMessage(msg)
+  return normalizeMessageIds(albumMessages.length > 1 ? albumMessages.map(message => message.id) : [msg.id])
+}
+
+function openForwardModalForIds(messageIds: number[]) {
+  const normalized = normalizeMessageIds(messageIds)
+  if (normalized.length === 0) return
+
+  selectedMessages.value = normalized
+  showForwardModal.value = true
+}
+
+async function deleteMessagesByIds(messageIds: number[], confirmMessage: string) {
+  const normalized = normalizeMessageIds(messageIds)
+  if (normalized.length === 0) return false
+
+  if (!confirm(confirmMessage)) return false
+
+  try {
+    for (const msgId of normalized) {
+      const msg = messages.value.find(message => message.id === msgId)
+      if (!isDeletableMessage(msg)) continue
+
+      await messagesLogic.apiFetch(`/chat/messages/${msgId}`, { method: 'DELETE' })
+      const index = messages.value.findIndex(message => message.id === msgId)
+      if (index !== -1) messages.value.splice(index, 1)
+    }
+
+    return true
+  } catch (err) {
+    console.error('Failed to delete messages:', err)
+    alert('خطا در حذف پیام')
+    return false
   }
 }
 
@@ -625,11 +714,14 @@ const showContextMenu = (event: Event, msg: Message) => {
     visible: true,
     x: clientX,
     y: clientY,
-    message: msg
-  };
+    message: msg,
+    messageIds: getContextMenuMessageIds(msg)
+  }
 };
 
-const closeContextMenu = () => { contextMenu.value.visible = false; };
+const closeContextMenu = () => {
+  contextMenu.value = { visible: false, x: 0, y: 0, message: null, messageIds: [] }
+};
 
 const handleMessageClick = (event: Event, msg: Message) => {
     if (isSelectionMode.value) {
@@ -657,22 +749,18 @@ const handleEditMessage = () => {
 };
 
 const handleDeleteMessage = async () => {
-  const msg = contextMenu.value.message;
-  if (!msg) return;
-  if (!confirm('آیا از حذف این پیام اطمینان دارید؟')) {
-    closeContextMenu();
-    return;
+  const messageIds = normalizeMessageIds(contextMenu.value.messageIds)
+  if (messageIds.length === 0) return
+
+  const deleted = await deleteMessagesByIds(
+    messageIds,
+    messageIds.length > 1 ? 'آیا از حذف این آلبوم اطمینان دارید؟' : 'آیا از حذف این پیام اطمینان دارید؟'
+  )
+
+  if (deleted) {
+    closeContextMenu()
   }
-  try {
-    await messagesLogic.apiFetch(`/chat/messages/${msg.id}`, { method: 'DELETE' });
-    const index = messages.value.findIndex(m => m.id === msg.id);
-    if (index !== -1) messages.value.splice(index, 1);
-    closeContextMenu();
-  } catch (err) {
-    console.error('Failed to delete message:', err);
-    alert('خطا در حذف پیام');
-  }
-};
+}
 
 const handleCopyMessage = () => {
   const msg = contextMenu.value.message;
@@ -710,22 +798,10 @@ const handleSaveMedia = () => {
 };
 
 const handleDeleteSelected = async () => {
-  if (selectedMessages.value.length === 0) return;
-  if (!confirm('آیا از حذف پیام‌های انتخاب شده اطمینان دارید؟')) return;
-  try {
-    for (const msgId of selectedMessages.value) {
-      const msg = messages.value.find(m => m.id === msgId)
-      if (!msg || msg.sender_id !== props.currentUserId) continue
-      const msgTime = new Date(msg.created_at).getTime()
-      if (Date.now() - msgTime > 48 * 60 * 60 * 1000) continue
-      
-      await messagesLogic.apiFetch(`/chat/messages/${msgId}`, { method: 'DELETE' });
-      const index = messages.value.findIndex(m => m.id === msgId);
-      if (index !== -1) messages.value.splice(index, 1);
-    }
-    clearSelection();
-  } catch (err) {}
-};
+  if (selectedMessages.value.length === 0) return
+  const deleted = await deleteMessagesByIds(selectedMessages.value, 'آیا از حذف پیام‌های انتخاب شده اطمینان دارید؟')
+  if (deleted) clearSelection()
+}
 
 const handleCopySelected = () => {
     const textToCopy = selectedMessages.value.map(id => {
@@ -782,10 +858,11 @@ function closeForwardModal() {
 }
 
 async function forwardSelectedMessages(targetUserId: number) {
-  if (selectedMessages.value.length === 0) return
+  const messageIds = normalizeMessageIds(selectedMessages.value)
+  if (messageIds.length === 0) return
   isSending.value = true
   try {
-    for (const msgId of selectedMessages.value) {
+    for (const msgId of messageIds) {
       const originalMsg = messages.value.find(m => m.id === msgId)
       if (!originalMsg) continue
       await messagesLogic.apiFetch('/chat/send', {
@@ -826,13 +903,24 @@ const handleReplyMessage = () => {
 }
 
 const handleForwardMessage = () => {
-  const msg = contextMenu.value.message
-  if (!msg) return
-  if (!selectedMessages.value.includes(msg.id)) {
-      selectedMessages.value.push(msg.id)
-  }
-  openForwardModal()
+  openForwardModalForIds(contextMenu.value.messageIds)
   closeContextMenu()
+}
+
+function handleAlbumReplyItem(msg: Message) {
+  handleReply(msg)
+}
+
+function handleAlbumForwardItem(msg: Message) {
+  openForwardModalForIds([msg.id])
+}
+
+async function handleAlbumDeleteItem(msg: Message) {
+  await deleteMessagesByIds([msg.id], 'آیا از حذف این مدیا اطمینان دارید؟')
+}
+
+function handleLightboxNavigate(index: number) {
+  setLightboxIndex(index)
 }
 
 function goBack() {
@@ -1064,6 +1152,9 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
                 @location-click="handleLocationClick"
                 @download="downloadMedia"
                 @cancel-send="handleCancelSend"
+                @reply-album-item="handleAlbumReplyItem"
+                @forward-album-item="handleAlbumForwardItem"
+                @delete-album-item="handleAlbumDeleteItem"
                 :on-load="() => hydrateRenderedMedia(item)"
               />
             </template>
@@ -1139,6 +1230,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
     <!-- Context Menu -->
     <ChatContextMenu
       :menuState="contextMenu"
+      :isAlbumSelection="contextMenu.messageIds.length > 1"
       :canEdit="canEdit"
       :canDelete="canDelete"
       @reply="handleReplyMessage"
@@ -1154,6 +1246,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
     <ChatLightbox 
       :lightboxMedia="lightboxMedia" 
       @close="closeLightbox" 
+      @navigate="handleLightboxNavigate"
     />
 
     <!-- Location Modal Overlay -->

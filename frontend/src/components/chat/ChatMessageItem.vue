@@ -86,9 +86,13 @@
       <template v-if="props.isAlbum">
         <ChatAlbumLayout
           :items="albumLayoutItems"
+          :currentUserId="currentUserId"
           @media-click="$emit('media-click', $event)"
           @download="$emit('download', $event)"
           @cancel-send="$emit('cancel-send', $event)"
+          @reply-item="$emit('reply-album-item', $event)"
+          @forward-item="$emit('forward-album-item', $event)"
+          @delete-item="$emit('delete-album-item', $event)"
         />
       </template>
 
@@ -308,6 +312,9 @@ const emit = defineEmits<{
   (e: 'location-click', msg: any): void
   (e: 'download', msg: any): void
   (e: 'cancel-send', msg: any): void
+  (e: 'reply-album-item', msg: any): void
+  (e: 'forward-album-item', msg: any): void
+  (e: 'delete-album-item', msg: any): void
 }>()
 
 const audioStore = useAudioStore()

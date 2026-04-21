@@ -15,7 +15,7 @@
         </div>
         <div class="menu-item" v-ripple @click="$emit('forward')" role="menuitem">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>
-          <span style="flex:1;">هدایت پیام</span>
+          <span style="flex:1;">{{ isAlbumSelection ? 'هدایت آلبوم' : 'هدایت پیام' }}</span>
         </div>
         <template v-if="menuState.message?.message_type === 'text'">
             <div class="menu-item" v-ripple @click="$emit('copy')" role="menuitem">
@@ -27,7 +27,7 @@
             </div>
         </template>
         <!-- Save media option for images/videos -->
-        <template v-if="menuState.message?.message_type === 'image' || menuState.message?.message_type === 'video'">
+        <template v-if="!isAlbumSelection && (menuState.message?.message_type === 'image' || menuState.message?.message_type === 'video')">
             <div class="menu-item" v-ripple @click="$emit('save-media')" role="menuitem">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -67,7 +67,9 @@ const props = defineProps<{
     y: number
     visible: boolean
     message: any | null
+    messageIds?: number[]
   }
+  isAlbumSelection: boolean
   canEdit: boolean
   canDelete: boolean
 }>()

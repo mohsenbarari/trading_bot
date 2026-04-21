@@ -35,7 +35,7 @@
         <div class="sheet-content">
           <!-- Gallery Tab -->
           <div v-if="activeTab === 'gallery'" class="tab-panel gallery-panel">
-            <input ref="cameraInput" type="file" accept="image/*" capture="environment" style="display:none" @change="onGalleryFile" />
+            <input ref="cameraInput" type="file" accept="image/*,video/*" capture="environment" style="display:none" @change="onGalleryFile" />
             <input ref="galleryInput" type="file" accept="image/*,video/*" multiple style="display:none" @change="onGalleryFile" />
 
             <button class="action-card" @click="cameraInput?.click()">
