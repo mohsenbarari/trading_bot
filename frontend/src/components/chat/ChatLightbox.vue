@@ -251,7 +251,7 @@ function handleTouchEnd() {
 .lightbox-overlay {
   position: fixed;
   inset: 0;
-  padding: 14px 14px 18px;
+  padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
   background: rgba(7, 10, 16, 0.76);
   display: flex;
   align-items: center;
@@ -262,9 +262,11 @@ function handleTouchEnd() {
 
 .lightbox-shell {
   width: min(92vw, 920px);
-  height: min(calc(100vh - 32px), 920px);
+  max-width: 100%;
+  height: min(100%, 920px);
+  max-height: 100%;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 12px;
   color: white;
 }
@@ -274,6 +276,7 @@ function handleTouchEnd() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
@@ -333,13 +336,15 @@ function handleTouchEnd() {
 
 .lightbox-stage-wrap {
   min-height: 0;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .lightbox-stage {
-  width: min(82vw, 820px);
+  width: min(100%, 820px);
+  height: 100%;
   max-width: 100%;
   max-height: 100%;
   padding: 10px;
@@ -357,9 +362,10 @@ function handleTouchEnd() {
   width: auto;
   height: auto;
   max-width: 100%;
-  max-height: min(72vh, 720px);
+  max-height: 100%;
   object-fit: contain;
   background: transparent;
+  margin: auto;
 }
 
 .lightbox-strip-slot {
@@ -434,12 +440,12 @@ function handleTouchEnd() {
 
 @media (max-width: 640px) {
   .lightbox-overlay {
-    padding: 10px 10px 14px;
+    padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
   }
 
   .lightbox-shell {
     width: 100%;
-    height: calc(100vh - 24px);
+    height: 100%;
     gap: 10px;
   }
 
@@ -460,10 +466,6 @@ function handleTouchEnd() {
     width: 100%;
     padding: 8px;
     border-radius: 18px;
-  }
-
-  .lightbox-media {
-    max-height: min(66vh, 560px);
   }
 
   .lightbox-strip-slot {
