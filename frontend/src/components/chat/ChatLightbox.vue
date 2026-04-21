@@ -378,6 +378,8 @@ function handleTouchEnd() {
 .lightbox-strip {
   width: 100%;
   display: flex;
+  direction: ltr;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
   gap: 10px;
