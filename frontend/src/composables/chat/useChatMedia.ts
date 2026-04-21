@@ -71,6 +71,19 @@ const nativeImageCompress = (file: File | Blob, maxWidthOrHeight: number = 1920,
   });
 };
 
+const waitForNextPaint = (): Promise<void> => {
+    return new Promise((resolve) => {
+        if (typeof requestAnimationFrame !== 'function') {
+            setTimeout(() => resolve(), 0)
+            return
+        }
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => resolve())
+        })
+    })
+}
+
 export interface UseChatMediaOptions {
     apiBaseUrl: string
     jwtToken: string | null
@@ -687,87 +700,6 @@ export function useChatMedia(options: UseChatMediaOptions) {
         })
     }
 
-    async function extractPreviewDimensions(file: File, msgType: 'image' | 'video' | 'voice'): Promise<{ width: number; height: number }> {
-        if (msgType === 'voice') {
-            return { width: 0, height: 0 }
-        }
-
-        if (msgType === 'video') {
-            return new Promise((resolve) => {
-                const video = document.createElement('video')
-                const objectUrl = URL.createObjectURL(file)
-
-                const cleanup = () => {
-                    URL.revokeObjectURL(objectUrl)
-                    video.removeAttribute('src')
-                    video.load()
-                }
-
-                video.preload = 'metadata'
-                video.muted = true
-                video.playsInline = true
-                video.onloadedmetadata = () => {
-                    const width = Math.max(0, video.videoWidth || 0)
-                    const height = Math.max(0, video.videoHeight || 0)
-                    cleanup()
-                    resolve({ width, height })
-                }
-                video.onerror = () => {
-                    cleanup()
-                    resolve({ width: 0, height: 0 })
-                }
-                video.src = objectUrl
-            })
-        }
-
-        try {
-            let bitmap: ImageBitmap | null = null
-            try {
-                bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
-            } catch {
-                try {
-                    bitmap = await createImageBitmap(file)
-                } catch {
-                    bitmap = null
-                }
-            }
-
-            if (bitmap) {
-                const dimensions = {
-                    width: Math.max(0, bitmap.width || 0),
-                    height: Math.max(0, bitmap.height || 0)
-                }
-                bitmap.close()
-                return dimensions
-            }
-        } catch {
-            // Fall through to <img> fallback below.
-        }
-
-        return new Promise((resolve) => {
-            const img = new Image()
-            const objectUrl = URL.createObjectURL(file)
-
-            const cleanup = () => {
-                URL.revokeObjectURL(objectUrl)
-                img.onload = null
-                img.onerror = null
-            }
-
-            img.onload = () => {
-                const width = Math.max(0, img.naturalWidth || 0)
-                const height = Math.max(0, img.naturalHeight || 0)
-                cleanup()
-                resolve({ width, height })
-            }
-            img.onerror = () => {
-                cleanup()
-                resolve({ width: 0, height: 0 })
-            }
-            img.src = objectUrl
-        })
-    }
-
     async function handleMediaUploadWrapper(file: File, albumId?: string | null, albumIndex?: number, albumSize?: number) {
         if (!file) return
 
@@ -788,25 +720,11 @@ export function useChatMedia(options: UseChatMediaOptions) {
         isUploading.value = activeUploadsCount > 0
         let step = 'start'
 
-        let previewWidth = 0
-        let previewHeight = 0
-        if (msgType === 'image' || msgType === 'video') {
-            step = 'probe_dimensions'
-            try {
-                const dimensions = await extractPreviewDimensions(file, msgType)
-                previewWidth = dimensions.width
-                previewHeight = dimensions.height
-            } catch (warn) {
-                console.warn('Preview dimension probing failed:', warn)
-            }
-        }
-
         const optimisticId = -Date.now()
         const localUrl = URL.createObjectURL(file)
         const initialContent = appendAlbumMetadata({
             placeholder: true,
             durationMs: (file as any).durationMs,
-            ...(previewWidth && previewHeight ? { width: previewWidth, height: previewHeight } : {})
         }, msgType, normalizedAlbumId, normalizedAlbumIndex)
         const optimisticMsg: Message = {
             id: optimisticId,
@@ -850,13 +768,14 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
         await nextTick()
         scrollToBottom()
+        await waitForNextPaint()
 
         try {
             let uploadFile: File | Blob = file;
             let thumbBase64 = '';
 
-            let finalWidth = previewWidth;
-            let finalHeight = previewHeight;
+            let finalWidth = 0;
+            let finalHeight = 0;
 
             if (isVideo) {
                 step = 'video_thumb'
