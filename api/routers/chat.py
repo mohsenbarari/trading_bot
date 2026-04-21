@@ -34,6 +34,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+CHAT_MEDIA_MAX_UPLOAD_LABEL = "50MB"
+
 
 async def generate_location_snapshot(db: AsyncSession, uploader_id: int, lat: float, lng: float) -> Optional[str]:
     """Generate a static map image from the internal tileserver, save to uploads, and create ChatFile entry."""
@@ -731,8 +734,8 @@ async def upload_chat_media(
     
     # بررسی سایز (حداکثر 50MB)
     size = len(contents)
-    if size > 50 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large (max 50MB)")
+    if size > CHAT_MEDIA_MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large (max {CHAT_MEDIA_MAX_UPLOAD_LABEL})")
         
     ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else mime.split("/")[-1]
     file_uuid = str(uuid.uuid4())
