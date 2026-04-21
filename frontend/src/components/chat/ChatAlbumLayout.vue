@@ -1,15 +1,44 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+
 /**
  * ChatAlbumLayout.vue
- * Telegram-style mosaic layout for image/video albums.
- * Renders every item in the album without collapsing extra media into a +N overlay.
+ * Telegram-like dynamic album layout driven by media aspect ratios.
  */
+type AlbumItem = {
+  msg: any
+  url: string
+  type: 'image' | 'video'
+  width?: number
+  height?: number
+}
+
+type AlbumCell = {
+  item: AlbumItem
+  width: number
+  height: number
+}
+
+type AlbumRow = {
+  key: string
+  height: number
+  cells: AlbumCell[]
+}
+
+type AlbumLayout = {
+  width: number
+  height: number
+  rows: AlbumRow[]
+}
+
+const GAP = 2
+const MAX_ALBUM_WIDTH = 320
+const MIN_ALBUM_WIDTH = 232
+const MIN_ROW_HEIGHT = 84
+const MAX_ROW_HEIGHT = 196
+
 const props = defineProps<{
-  items: Array<{
-    msg: any
-    url: string
-    type: 'image' | 'video'
-  }>
+  items: AlbumItem[]
 }>()
 
 const emit = defineEmits<{
@@ -17,71 +46,194 @@ const emit = defineEmits<{
   (e: 'download', msg: any): void
 }>()
 
-function getLayoutClass(): string {
-  const count = props.items.length
-  if (count >= 5) return 'album-grid-many'
-  if (count === 2) return 'album-grid-2'
-  if (count === 3) return 'album-grid-3'
-  if (count >= 4) return 'album-grid-4'
-  return 'album-grid-1'
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
 }
 
-function getItemStyle(index: number): Record<string, string> {
-  const count = props.items.length
+function extractAspectRatio(item: AlbumItem) {
+  const width = Number(item.width)
+  const height = Number(item.height)
 
-  if (count === 5 || count === 8) {
-    return index < 2 ? { gridColumn: 'span 3' } : { gridColumn: 'span 2' }
+  if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+    return clamp(width / height, 0.66, 1.85)
   }
 
-  if (count === 7) {
-    return index === 0 ? { gridColumn: 'span 6' } : { gridColumn: 'span 2' }
-  }
-
-  if (count >= 9) {
-    const remainder = count % 3
-    if (remainder === 1 && index === count - 1) {
-      return { gridColumn: 'span 6' }
-    }
-    if (remainder === 2 && index >= count - 2) {
-      return { gridColumn: 'span 3' }
-    }
-  }
-
-  if (count >= 5) {
-    return { gridColumn: 'span 2' }
-  }
-
-  return {}
+  return 1
 }
+
+function getPreferredAlbumWidth(count: number, averageRatio: number) {
+  if (count === 1) {
+    if (averageRatio < 0.8) return 236
+    if (averageRatio > 1.45) return 320
+    return 288
+  }
+
+  if (averageRatio < 0.82) return 252
+  if (averageRatio < 0.96) return 286
+  if (count >= 5 || averageRatio > 1.18) return 320
+  return 304
+}
+
+function buildPartitions(total: number, maxRowSize = 3, prefix: number[] = [], results: number[][] = []) {
+  if (total === 0) {
+    results.push(prefix)
+    return results
+  }
+
+  for (let size = 1; size <= Math.min(maxRowSize, total); size += 1) {
+    buildPartitions(total - size, maxRowSize, [...prefix, size], results)
+  }
+
+  return results
+}
+
+function createSingleLayout(items: AlbumItem[]): AlbumLayout {
+  const [item] = items
+  if (!item) {
+    return { width: MIN_ALBUM_WIDTH, height: MIN_ROW_HEIGHT, rows: [] }
+  }
+
+  const ratio = extractAspectRatio(item)
+  const width = getPreferredAlbumWidth(1, ratio)
+  const height = clamp(Math.round(width / ratio), 148, 420)
+
+  return {
+    width,
+    height,
+    rows: [
+      {
+        key: `row-${item.msg.id}`,
+        height,
+        cells: [{ item, width, height }]
+      }
+    ]
+  }
+}
+
+function buildLayout(items: AlbumItem[]): AlbumLayout {
+  if (items.length <= 1) {
+    return createSingleLayout(items)
+  }
+
+  const ratios = items.map(extractAspectRatio)
+  const averageRatio = ratios.reduce((sum, ratio) => sum + ratio, 0) / ratios.length
+  const albumWidth = clamp(getPreferredAlbumWidth(items.length, averageRatio), MIN_ALBUM_WIDTH, MAX_ALBUM_WIDTH)
+  const targetHeight = clamp(albumWidth / clamp(averageRatio, 0.78, 1.28), 190, 440)
+  const partitions = buildPartitions(items.length)
+
+  let bestLayout: AlbumLayout | null = null
+  let bestScore = Number.POSITIVE_INFINITY
+
+  for (const partition of partitions) {
+    let cursor = 0
+    let totalHeight = 0
+    let penalty = 0
+    const rowHeights: number[] = []
+    const rows: AlbumRow[] = []
+
+    for (const rowSize of partition) {
+      const rowItems = items.slice(cursor, cursor + rowSize)
+      const rowRatios = ratios.slice(cursor, cursor + rowSize)
+      cursor += rowSize
+
+      const ratioSum = rowRatios.reduce((sum, ratio) => sum + ratio, 0)
+      const rawRowHeight = (albumWidth - GAP * (rowItems.length - 1)) / ratioSum
+      const rowHeight = Math.round(rawRowHeight)
+
+      if (rowHeight < MIN_ROW_HEIGHT) {
+        penalty += (MIN_ROW_HEIGHT - rowHeight) * 7
+      }
+      if (rowHeight > MAX_ROW_HEIGHT) {
+        penalty += (rowHeight - MAX_ROW_HEIGHT) * 5
+      }
+      if (rowSize === 1 && items.length > 2) {
+        penalty += 18
+      }
+      if (rowSize === 1 && partition.length > 2) {
+        penalty += 14
+      }
+
+      rowHeights.push(rowHeight)
+      totalHeight += rowHeight
+
+      const availableWidth = albumWidth - GAP * (rowItems.length - 1)
+      let consumedWidth = 0
+      const cells: AlbumCell[] = rowItems.map((item, index) => {
+        const isLast = index === rowItems.length - 1
+        const ratio = rowRatios[index] ?? 1
+        const width = isLast
+          ? availableWidth - consumedWidth
+          : Math.round(rowHeight * ratio)
+
+        consumedWidth += width
+        return {
+          item,
+          width,
+          height: rowHeight
+        }
+      })
+
+      rows.push({
+        key: `row-${cursor}-${rowSize}`,
+        height: rowHeight,
+        cells
+      })
+    }
+
+    totalHeight += GAP * (partition.length - 1)
+    const meanHeight = rowHeights.reduce((sum, height) => sum + height, 0) / rowHeights.length
+    const variancePenalty = rowHeights.reduce((sum, height) => sum + Math.abs(height - meanHeight), 0)
+    const score = Math.abs(totalHeight - targetHeight) + penalty + variancePenalty
+
+    if (score < bestScore) {
+      bestScore = score
+      bestLayout = {
+        width: albumWidth,
+        height: totalHeight,
+        rows
+      }
+    }
+  }
+
+  return bestLayout ?? createSingleLayout(items)
+}
+
+const layout = computed(() => buildLayout(props.items))
 </script>
 
 <template>
-  <div class="album-layout" :class="getLayoutClass()">
+  <div class="album-layout" :style="{ width: `${layout.width}px` }">
     <div
-      v-for="(item, index) in items"
-      :key="index"
-      class="album-item"
-      :class="`album-pos-${index}`"
-      :style="getItemStyle(index)"
-      @click="emit('media-click', item.msg)"
+      v-for="row in layout.rows"
+      :key="row.key"
+      class="album-row"
+      :style="{ height: `${row.height}px` }"
     >
-      <img
-        v-if="item.type === 'image'"
-        :src="item.url"
-        :data-media-msg-id="item.msg.id"
-        loading="lazy"
-        class="album-media msg-media-content"
-      />
-      <video
-        v-else
-        :src="item.url"
-        class="album-media"
-        muted
-        loop
-        playsinline
-      ></video>
-      <div v-if="item.type === 'video'" class="album-video-badge">
-        <svg viewBox="0 0 24 24" width="12" height="12" fill="white"><path d="M8 5v14l11-7z"/></svg>
+      <div
+        v-for="cell in row.cells"
+        :key="cell.item.msg.id"
+        class="album-item"
+        :style="{ width: `${cell.width}px`, height: `${cell.height}px` }"
+        @click="emit('media-click', cell.item.msg)"
+      >
+        <img
+          v-if="cell.item.type === 'image'"
+          :src="cell.item.url"
+          :data-media-msg-id="cell.item.msg.id"
+          loading="lazy"
+          class="album-media msg-media-content"
+        />
+        <video
+          v-else
+          :src="cell.item.url"
+          class="album-media"
+          muted
+          loop
+          playsinline
+        ></video>
+        <div v-if="cell.item.type === 'video'" class="album-video-badge">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="white"><path d="M8 5v14l11-7z"/></svg>
+        </div>
       </div>
     </div>
   </div>
@@ -89,47 +241,26 @@ function getItemStyle(index: number): Record<string, string> {
 
 <style scoped>
 .album-layout {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 2px;
-  border-radius: 12px;
+  border-radius: 14px;
   overflow: hidden;
-  max-width: 320px;
+  max-width: 100%;
   cursor: pointer;
+  background: rgba(0, 0, 0, 0.04);
 }
 
-.album-grid-1 {
-  grid-template-columns: 1fr;
-}
-
-.album-grid-2 {
-  grid-template-columns: 1fr 1fr;
-  aspect-ratio: 2/1;
-}
-
-.album-grid-3 {
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
-}
-
-.album-grid-3 .album-pos-0 {
-  grid-row: 1 / 3;
-}
-
-.album-grid-4 {
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
-}
-
-.album-grid-many {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  grid-auto-rows: 96px;
-  grid-auto-flow: dense;
+.album-row {
+  display: flex;
+  gap: 2px;
 }
 
 .album-item {
   position: relative;
   overflow: hidden;
-  min-height: 80px;
+  flex: none;
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .album-media {
@@ -141,13 +272,14 @@ function getItemStyle(index: number): Record<string, string> {
 
 .album-video-badge {
   position: absolute;
-  bottom: 4px;
-  left: 4px;
-  background: rgba(0, 0, 0, 0.5);
-  border-radius: 8px;
-  padding: 2px 6px;
+  bottom: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.56);
+  border-radius: 999px;
+  padding: 3px 7px;
   display: flex;
   align-items: center;
   gap: 2px;
+  backdrop-filter: blur(8px);
 }
 </style>

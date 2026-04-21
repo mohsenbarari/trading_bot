@@ -25,7 +25,8 @@
         'received': !isSent,
         'sending': isSending,
         'error': isError,
-        'selected-message': isSelected
+        'selected-message': isSelected,
+        'album-bubble': props.isAlbum
       }"
       @click="handleClick($event)"
       @touchstart="handleTouchStart($event)"
@@ -77,10 +78,7 @@
       <!-- Album -->
       <template v-if="props.isAlbum">
         <ChatAlbumLayout
-          :items="(props.albumItems || []).map((m: any) => {
-            const content = (() => { try { return JSON.parse(m.content) } catch { return {} } })();
-            return { msg: m, url: m.local_blob_url || imageCache[getFileId(m.content)] || content.thumbnail, type: m.message_type };
-          })"
+          :items="albumLayoutItems"
           @media-click="$emit('media-click', $event)"
           @download="$emit('download', $event)"
         />
@@ -575,6 +573,26 @@ const highlightedContent = computed(() => {
   return escapedContent.replace(regex, '<mark class="in-bubble-highlight">$1</mark>')
 })
 
+const albumLayoutItems = computed(() => {
+  return (props.albumItems || []).map((message: any) => {
+    const parsedContent = (() => {
+      try {
+        return JSON.parse(message.content)
+      } catch {
+        return {}
+      }
+    })()
+
+    return {
+      msg: message,
+      url: message.local_blob_url || props.imageCache[getFileId(message.content)] || parsedContent.thumbnail,
+      type: message.message_type,
+      width: parsedContent.width,
+      height: parsedContent.height
+    }
+  })
+})
+
 // --- Touch & Swipe State ---
 const SWIPE_THRESHOLD = 100
 const touchStartX = ref(0)
@@ -744,6 +762,11 @@ function getImageThumbnail(content: string) {
   from { opacity: 0; transform: translateY(20px) scale(0.95); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+.message-bubble.album-bubble {
+  padding: 4px 4px 6px;
+  width: fit-content;
+  max-width: min(92%, 336px);
+}
 .message-bubble.sent { align-self: flex-start; background: #eeffde; color: #000000; border-radius: 12px 12px 4px 12px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
 .message-bubble.received { align-self: flex-end; background: #FFFFFF; color: #000000; border-radius: 12px 12px 12px 4px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
 .message-bubble p { margin: 0; }
@@ -751,6 +774,7 @@ function getImageThumbnail(content: string) {
 .msg-time { font-size: 11px; color: rgba(0, 0, 0, 0.4); }
 .message-bubble.received .msg-time { color: #8E8E93; }
 .msg-meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 4px; }
+.message-bubble.album-bubble .msg-meta { padding: 0 4px 0 2px; margin-top: 5px; }
 .msg-status { display: flex; align-items: center; }
 .icon-read { fill: #43A047; }
 .icon-unread { fill: rgba(0, 0, 0, 0.3); }
