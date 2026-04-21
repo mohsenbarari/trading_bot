@@ -342,6 +342,7 @@ function handleTouchEnd() {
   width: min(82vw, 820px);
   max-width: 100%;
   max-height: 100%;
+  padding: 10px;
   border-radius: 24px;
   overflow: hidden;
   display: flex;
@@ -353,7 +354,8 @@ function handleTouchEnd() {
 
 .lightbox-media {
   display: block;
-  width: 100%;
+  width: auto;
+  height: auto;
   max-width: 100%;
   max-height: min(72vh, 720px);
   object-fit: contain;
@@ -456,6 +458,7 @@ function handleTouchEnd() {
 
   .lightbox-stage {
     width: 100%;
+    padding: 8px;
     border-radius: 18px;
   }
 

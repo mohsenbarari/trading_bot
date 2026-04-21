@@ -67,12 +67,6 @@ function handleCellClick(msg: any) {
   emit('media-click', msg)
 }
 
-function canDeleteItem(msg: any) {
-  if (!msg || msg.sender_id !== props.currentUserId) return false
-  const msgTime = new Date(msg.created_at).getTime()
-  return (Date.now() - msgTime) <= 48 * 60 * 60 * 1000
-}
-
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
@@ -248,22 +242,6 @@ const layout = computed(() => buildLayout(props.items))
         :style="{ width: `${cell.width}px`, height: `${cell.height}px` }"
         @click="handleCellClick(cell.item.msg)"
       >
-        <div v-if="!cell.item.msg.is_sending" class="album-item-actions" data-context-ignore>
-          <button class="album-action-btn" title="پاسخ" @click.stop="emit('reply-item', cell.item.msg)">
-            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>
-          </button>
-          <button class="album-action-btn" title="هدایت" @click.stop="emit('forward-item', cell.item.msg)">
-            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>
-          </button>
-          <button
-            v-if="canDeleteItem(cell.item.msg)"
-            class="album-action-btn delete"
-            title="حذف"
-            @click.stop="emit('delete-item', cell.item.msg)"
-          >
-            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-          </button>
-        </div>
         <img
           v-if="cell.item.type === 'image'"
           :src="cell.item.url"
@@ -358,39 +336,6 @@ const layout = computed(() => buildLayout(props.items))
     box-shadow: none;
     background: transparent;
   }
-}
-
-.album-item-actions {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.album-action-btn {
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  background: rgba(0, 0, 0, 0.48);
-  backdrop-filter: blur(8px);
-  cursor: pointer;
-  transition: background 0.18s ease, transform 0.18s ease;
-}
-
-.album-action-btn:active {
-  transform: scale(0.94);
-}
-
-.album-action-btn.delete {
-  background: rgba(185, 28, 28, 0.62);
 }
 
 .album-media {
