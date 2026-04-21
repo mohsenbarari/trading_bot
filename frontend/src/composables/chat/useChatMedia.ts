@@ -246,6 +246,12 @@ type PendingAlbumBatch = {
     flushPromise: Promise<void> | null
 }
 
+type VideoPreviewResult = {
+    thumbnailDataUrl: string
+    width: number
+    height: number
+}
+
 function blobToDataUrl(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader()
@@ -797,43 +803,114 @@ export function useChatMedia(options: UseChatMediaOptions) {
     }
 
     // === Media Upload ===
-    async function generateVideoThumbnail(file: File): Promise<string> {
+    async function preprocessVideoPreview(srcUrl: string, signal?: AbortSignal): Promise<VideoPreviewResult> {
         return new Promise((resolve, reject) => {
             const video = document.createElement('video')
-            video.preload = 'metadata'
-            video.src = URL.createObjectURL(file)
+            let settled = false
+            let width = 0
+            let height = 0
+            let seekScheduled = false
+
+            const cleanup = () => {
+                clearTimeout(fallbackTimeout)
+                signal?.removeEventListener('abort', handleAbort)
+                video.onloadedmetadata = null
+                video.onloadeddata = null
+                video.onseeked = null
+                video.onerror = null
+                try {
+                    video.pause()
+                    video.removeAttribute('src')
+                    video.load()
+                } catch {
+                    // Ignore cleanup failures.
+                }
+            }
+
+            const finish = (result: VideoPreviewResult) => {
+                if (settled) return
+                settled = true
+                cleanup()
+                resolve(result)
+            }
+
+            const fail = (error: Error) => {
+                if (settled) return
+                settled = true
+                cleanup()
+                reject(error)
+            }
+
+            const captureFrame = () => {
+                try {
+                    const sourceWidth = video.videoWidth || width || 1
+                    const sourceHeight = video.videoHeight || height || 1
+                    const canvas = document.createElement('canvas')
+                    const targetSize = 20
+                    const scale = Math.min(targetSize / sourceWidth, targetSize / sourceHeight)
+                    canvas.width = Math.max(1, Math.round(sourceWidth * scale))
+                    canvas.height = Math.max(1, Math.round(sourceHeight * scale))
+                    const ctx = canvas.getContext('2d')
+                    if (!ctx) {
+                        finish({ thumbnailDataUrl: '', width, height })
+                        return
+                    }
+
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+                    finish({
+                        thumbnailDataUrl: canvas.toDataURL('image/jpeg', 0.5),
+                        width,
+                        height,
+                    })
+                } catch {
+                    finish({ thumbnailDataUrl: '', width, height })
+                }
+            }
+
+            const handleAbort = () => fail(new Error('UploadCancelled'))
+
+            signal?.addEventListener('abort', handleAbort, { once: true })
+
+            video.preload = 'auto'
             video.muted = true
             video.playsInline = true
+            video.src = srcUrl
 
             const fallbackTimeout = setTimeout(() => {
-                console.warn("Video thumbnail generation timed out after 3s.");
-                resolve('');
+                console.warn("Video preview preprocessing timed out after 3s.");
+                finish({ thumbnailDataUrl: '', width, height })
             }, 3000);
 
+            video.onloadedmetadata = () => {
+                width = video.videoWidth || width
+                height = video.videoHeight || height
+
+                const targetTime = Number.isFinite(video.duration) && video.duration > 0
+                    ? Math.min(0.1, Math.max(video.duration * 0.25, 0))
+                    : 0
+
+                if (targetTime > 0) {
+                    seekScheduled = true
+                    try {
+                        video.currentTime = targetTime
+                    } catch {
+                        seekScheduled = false
+                    }
+                }
+            }
 
             video.onloadeddata = () => {
-                video.currentTime = 0.1
+                if (!seekScheduled) {
+                    captureFrame()
+                }
             }
 
             video.onseeked = () => {
-                const canvas = document.createElement('canvas')
-                const targetSize = 20
-                const scale = Math.min(targetSize / (video.videoWidth || 1), targetSize / (video.videoHeight || 1))
-                canvas.width = Math.max(1, (video.videoWidth || 1) * scale)
-                canvas.height = Math.max(1, (video.videoHeight || 1) * scale)
-                const ctx = canvas.getContext('2d')
-                if (ctx) {
-                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-                    resolve(canvas.toDataURL('image/jpeg', 0.5))
-                } else {
-                    resolve('')
-                }
-                clearTimeout(fallbackTimeout);
-                URL.revokeObjectURL(video.src)
+                captureFrame()
             }
-            video.onerror = (e) => {
-                clearTimeout(fallbackTimeout);
-                reject(e);
+
+            video.onerror = () => {
+                finish({ thumbnailDataUrl: '', width, height })
             }
         })
     }
@@ -918,14 +995,27 @@ export function useChatMedia(options: UseChatMediaOptions) {
             let finalHeight = 0;
 
             if (isVideo) {
-                step = 'video_thumb'
+                step = 'video_preprocess'
                 try {
-                    thumbBase64 = await generateVideoThumbnail(file)
-                    getOptimisticTarget().content = JSON.stringify(
-                        appendAlbumMetadata({ thumbnail: thumbBase64, placeholder: true }, msgType, normalizedAlbumId, normalizedAlbumIndex)
-                    )
+                    const preview = await preprocessVideoPreview(localUrl, processingAbortController.signal)
+                    thumbBase64 = preview.thumbnailDataUrl
+                    finalWidth = preview.width
+                    finalHeight = preview.height
+
+                    const previewContent: any = appendAlbumMetadata({
+                        thumbnail: thumbBase64,
+                        placeholder: true,
+                    }, msgType, normalizedAlbumId, normalizedAlbumIndex)
+
+                    if (finalWidth && finalHeight) {
+                        previewContent.width = finalWidth
+                        previewContent.height = finalHeight
+                    }
+
+                    getOptimisticTarget().content = JSON.stringify(previewContent)
                 } catch (warn) {
-                    console.warn("Video thumbnail failed:", warn)
+                    if (isCancelledLocally) throw new Error('UploadCancelled')
+                    console.warn("Video preview preprocessing failed:", warn)
                 }
             } else if (isAudio) {
                 step = 'skip_audio_thumb'
@@ -989,19 +1079,41 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 getOptimisticTarget().local_blob_url = rotatedUrl;
             }
 
-            if (msgType === 'video') {
+            if (msgType === 'video' && (!finalWidth || !finalHeight)) {
                 try {
                     await new Promise<void>((resolve) => {
-                        const rotatedUrl = URL.createObjectURL(uploadFile);
-                        getOptimisticTarget().local_blob_url = rotatedUrl; // Update UI with video immediately
                         const video = document.createElement('video');
+                        const cleanup = () => {
+                            video.onloadedmetadata = null
+                            video.onerror = null
+                            try {
+                                video.pause()
+                                video.removeAttribute('src')
+                                video.load()
+                            } catch {
+                                // Ignore cleanup failures.
+                            }
+                        }
+
+                        const timeoutId = setTimeout(() => {
+                            cleanup()
+                            resolve()
+                        }, 1500)
+
+                        video.preload = 'metadata'
                         video.onloadedmetadata = () => {
                             finalWidth = video.videoWidth;
                             finalHeight = video.videoHeight;
+                            clearTimeout(timeoutId)
+                            cleanup()
                             resolve();
                         };
-                        video.onerror = () => resolve();
-                        video.src = rotatedUrl;
+                        video.onerror = () => {
+                            clearTimeout(timeoutId)
+                            cleanup()
+                            resolve()
+                        };
+                        video.src = localUrl;
                     });
                 } catch (e) {
                     console.warn("Could not extract final video dimensions:", e);
