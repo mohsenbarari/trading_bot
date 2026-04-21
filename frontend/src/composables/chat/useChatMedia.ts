@@ -2,7 +2,7 @@ import { ref, type Ref, nextTick } from 'vue'
 import PhotoSwipeLightbox from 'photoswipe/lightbox'
 import 'photoswipe/style.css'
 import type { Message } from '../../types/chat'
-import { processImageInWorker } from '../../utils/imagePreprocessClient'
+import { canUseImagePreprocessWorker, processImageInWorker } from '../../utils/imagePreprocessClient'
 
 /**
  * Native, foolproof image compressor that relies on modern browser engines
@@ -71,6 +71,129 @@ const nativeImageCompress = (file: File | Blob, maxWidthOrHeight: number = 1920,
     }
   });
 };
+
+type DecodedImageSource = {
+    source: CanvasImageSource
+    width: number
+    height: number
+    cleanup: () => void
+}
+
+function getScaledDimensions(width: number, height: number, maxWidthOrHeight: number) {
+    let nextWidth = width
+    let nextHeight = height
+
+    if (nextWidth > maxWidthOrHeight || nextHeight > maxWidthOrHeight) {
+        const ratio = Math.min(maxWidthOrHeight / nextWidth, maxWidthOrHeight / nextHeight)
+        nextWidth = Math.max(1, Math.round(nextWidth * ratio))
+        nextHeight = Math.max(1, Math.round(nextHeight * ratio))
+    }
+
+    return { width: nextWidth, height: nextHeight }
+}
+
+async function decodeImageSource(file: File | Blob): Promise<DecodedImageSource> {
+    try {
+        let bitmap: ImageBitmap | null = null
+        try {
+            bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
+        } catch {
+            bitmap = await createImageBitmap(file)
+        }
+
+        return {
+            source: bitmap,
+            width: bitmap.width,
+            height: bitmap.height,
+            cleanup: () => bitmap?.close(),
+        }
+    } catch {
+        return await new Promise((resolve, reject) => {
+            const img = new Image()
+            const objectUrl = URL.createObjectURL(file)
+
+            img.onload = () => {
+                resolve({
+                    source: img,
+                    width: img.naturalWidth,
+                    height: img.naturalHeight,
+                    cleanup: () => {
+                        URL.revokeObjectURL(objectUrl)
+                        img.onload = null
+                        img.onerror = null
+                    }
+                })
+            }
+
+            img.onerror = (error) => {
+                URL.revokeObjectURL(objectUrl)
+                reject(error)
+            }
+
+            img.src = objectUrl
+        })
+    }
+}
+
+function htmlCanvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+            if (blob) {
+                resolve(blob)
+                return
+            }
+
+            reject(new Error('Canvas toBlob failed'))
+        }, 'image/jpeg', quality)
+    })
+}
+
+async function preprocessImageOnMainThread(
+    file: File | Blob,
+    maxWidthOrHeight = 1920,
+    quality = 0.85,
+    thumbnailMaxWidthOrHeight = 20,
+    thumbnailQuality = 0.5,
+) {
+    const decoded = await decodeImageSource(file)
+
+    try {
+        const scaled = getScaledDimensions(decoded.width, decoded.height, maxWidthOrHeight)
+        const canvas = document.createElement('canvas')
+        canvas.width = scaled.width
+        canvas.height = scaled.height
+
+        const context = canvas.getContext('2d')
+        if (!context) {
+            throw new Error('No canvas context')
+        }
+
+        context.drawImage(decoded.source, 0, 0, scaled.width, scaled.height)
+        const blob = await htmlCanvasToBlob(canvas, quality)
+
+        const thumbnailScaled = getScaledDimensions(scaled.width, scaled.height, thumbnailMaxWidthOrHeight)
+        const thumbnailCanvas = document.createElement('canvas')
+        thumbnailCanvas.width = thumbnailScaled.width
+        thumbnailCanvas.height = thumbnailScaled.height
+
+        const thumbnailContext = thumbnailCanvas.getContext('2d')
+        if (!thumbnailContext) {
+            throw new Error('No thumbnail canvas context')
+        }
+
+        thumbnailContext.drawImage(canvas, 0, 0, thumbnailScaled.width, thumbnailScaled.height)
+        const thumbnailBlob = await htmlCanvasToBlob(thumbnailCanvas, thumbnailQuality)
+
+        return {
+            blob,
+            width: scaled.width,
+            height: scaled.height,
+            thumbnailDataUrl: await blobToDataUrl(thumbnailBlob),
+        }
+    } finally {
+        decoded.cleanup()
+    }
+}
 
 const waitForNextPaint = (): Promise<void> => {
     return new Promise((resolve) => {
@@ -811,17 +934,28 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 if (isCancelledLocally) throw new Error('UploadCancelled');
 
                 try {
-                    step = 'worker_preprocess'
-                    const processed = await processImageInWorker(file, processingAbortController.signal)
+                    if (canUseImagePreprocessWorker()) {
+                        step = 'worker_preprocess'
+                        const processed = await processImageInWorker(file, processingAbortController.signal)
 
-                    uploadFile = processed.blob
-                    finalWidth = processed.width
-                    finalHeight = processed.height
-                    thumbBase64 = processed.thumbnailDataUrl
+                        uploadFile = processed.blob
+                        finalWidth = processed.width
+                        finalHeight = processed.height
+                        thumbBase64 = processed.thumbnailDataUrl
+                    } else {
+                        step = 'main_thread_preprocess'
+                        await waitForNextPaint()
+                        const processed = await preprocessImageOnMainThread(file)
+
+                        uploadFile = processed.blob
+                        finalWidth = processed.width
+                        finalHeight = processed.height
+                        thumbBase64 = processed.thumbnailDataUrl
+                    }
                 } catch (workerWarn) {
                     if (isCancelledLocally) throw new Error('UploadCancelled');
 
-                    console.warn("Image worker preprocessing failed, using main thread fallback:", workerWarn)
+                    console.warn("Image preprocessing fast path failed, using legacy fallback:", workerWarn)
 
                     step = 'compress_main'
                     try {
