@@ -243,6 +243,7 @@ const layout = computed(() => buildLayout(props.items))
       <div
         v-for="cell in row.cells"
         :key="cell.item.msg.id"
+        :id="`album-item-${cell.item.msg.id}`"
         class="album-item"
         :style="{ width: `${cell.width}px`, height: `${cell.height}px` }"
         @click="handleCellClick(cell.item.msg)"
@@ -332,6 +333,31 @@ const layout = computed(() => buildLayout(props.items))
   overflow: hidden;
   flex: none;
   background: rgba(0, 0, 0, 0.06);
+}
+
+.album-item.highlight-message::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: album-item-highlight 2.5s ease-in-out forwards;
+  z-index: 2;
+}
+
+@keyframes album-item-highlight {
+  0% {
+    box-shadow: none;
+    background: transparent;
+  }
+  15% {
+    box-shadow: inset 0 0 0 3px rgba(255, 200, 0, 0.92), 0 0 0 2px rgba(255, 200, 0, 0.35);
+    background: rgba(255, 200, 0, 0.12);
+  }
+  100% {
+    box-shadow: none;
+    background: transparent;
+  }
 }
 
 .album-item-actions {

@@ -923,6 +923,26 @@ function handleLightboxNavigate(index: number) {
   setLightboxIndex(index)
 }
 
+function handleLightboxReply(msgId: number) {
+  const msg = messages.value.find(message => message.id === msgId)
+  if (!msg) return
+
+  handleReply(msg)
+  closeLightbox()
+}
+
+function handleLightboxForward(msgId: number) {
+  openForwardModalForIds([msgId])
+  closeLightbox()
+}
+
+async function handleLightboxDelete(msgId: number) {
+  const deleted = await deleteMessagesByIds([msgId], 'آیا از حذف این مدیا اطمینان دارید؟')
+  if (deleted) {
+    closeLightbox()
+  }
+}
+
 function goBack() {
   if (selectedUserId.value) {
     selectedUserId.value = null
@@ -1245,8 +1265,12 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
     <!-- Lightbox Overlay -->
     <ChatLightbox 
       :lightboxMedia="lightboxMedia" 
+      :currentUserId="props.currentUserId"
       @close="closeLightbox" 
       @navigate="handleLightboxNavigate"
+      @reply="handleLightboxReply"
+      @forward="handleLightboxForward"
+      @delete="handleLightboxDelete"
     />
 
     <!-- Location Modal Overlay -->
