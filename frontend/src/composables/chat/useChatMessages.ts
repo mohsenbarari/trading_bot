@@ -202,7 +202,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         localBlobUrl?: string,
         optimisticId?: number
     ) {
-        if (!selectedUserId.value) return
+        if (!selectedUserId.value) return null
 
         isSending.value = true
         try {
@@ -231,8 +231,10 @@ export function useChatMessages(options: UseChatMessagesOptions) {
 
             showStickerPicker.value = false
             scrollToBottom()
+            return hydratedMsg
         } catch (e: any) {
             error.value = e.message
+            return null
         } finally {
             isSending.value = false
         }

@@ -133,7 +133,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:modelValue', val: boolean): void
-  (e: 'select-media', file: File, albumId?: string | null, albumIndex?: number): void
+  (e: 'select-media', file: File, albumId?: string | null, albumIndex?: number, albumSize?: number): void
   (e: 'select-file', file: File): void
   (e: 'select-location', lat: number, lng: number): void
 }>()
@@ -234,7 +234,7 @@ async function onGalleryFile(e: Event) {
     : null
 
   files.forEach((file, index) => {
-    emit('select-media', file, albumId, index)
+    emit('select-media', file, albumId, index, files.length)
   })
   input.value = ''
   close()

@@ -80,7 +80,7 @@ export interface UseChatMediaOptions {
     error: Ref<string>
     isUploading: Ref<boolean>
     scrollToBottom: () => void
-    sendMediaMessage: (type: 'image' | 'video' | 'voice' | 'sticker', content: string, localBlobUrl?: string, optimisticId?: number) => Promise<void>
+    sendMediaMessage: (type: 'image' | 'video' | 'voice' | 'sticker', content: string, localBlobUrl?: string, optimisticId?: number) => Promise<Message | null>
 }
 
 type LightboxItem = {
@@ -90,6 +90,23 @@ type LightboxItem = {
     element?: HTMLImageElement
     w: number
     h: number
+}
+
+type AlbumBatchItemStatus = 'uploading' | 'uploaded' | 'sending' | 'sent' | 'cancelled' | 'failed'
+
+type PendingAlbumItem = {
+    optimisticId: number
+    albumIndex: number
+    type: 'image' | 'video'
+    content?: string
+    localBlobUrl?: string
+    status: AlbumBatchItemStatus
+}
+
+type PendingAlbumBatch = {
+    expectedCount: number
+    items: Map<number, PendingAlbumItem>
+    flushPromise: Promise<void> | null
 }
 
 export function useChatMedia(options: UseChatMediaOptions) {
@@ -107,6 +124,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
     let activeUploadsCount = 0
     const uploadControllers = new Map<number, { abort: () => void }>()
+    const albumBatches = new Map<string, PendingAlbumBatch>()
 
     function appendAlbumMetadata(
         content: Record<string, unknown>,
@@ -121,6 +139,130 @@ export function useChatMedia(options: UseChatMediaOptions) {
         return content
     }
 
+    function getAlbumIdFromMessage(msg?: Message | null) {
+        if (!msg?.content) return null
+
+        try {
+            const parsed = JSON.parse(msg.content)
+            return typeof parsed.album_id === 'string' && parsed.album_id.trim()
+                ? parsed.album_id.trim()
+                : null
+        } catch {
+            return null
+        }
+    }
+
+    function ensureAlbumBatch(albumId: string, expectedCount: number) {
+        const existing = albumBatches.get(albumId)
+        if (existing) {
+            existing.expectedCount = Math.max(existing.expectedCount, expectedCount)
+            return existing
+        }
+
+        const created: PendingAlbumBatch = {
+            expectedCount,
+            items: new Map(),
+            flushPromise: null
+        }
+        albumBatches.set(albumId, created)
+        return created
+    }
+
+    function updateAlbumBatchItem(albumId: string, optimisticId: number, updates: Partial<PendingAlbumItem>) {
+        const batch = albumBatches.get(albumId)
+        if (!batch) return
+
+        const existing = batch.items.get(optimisticId)
+        if (!existing) return
+
+        batch.items.set(optimisticId, { ...existing, ...updates })
+    }
+
+    function cleanupAlbumBatchIfSettled(albumId: string) {
+        const batch = albumBatches.get(albumId)
+        if (!batch) return
+
+        const allSettled = Array.from(batch.items.values()).every(item =>
+            item.status === 'sent' || item.status === 'cancelled' || item.status === 'failed'
+        )
+
+        if (allSettled && batch.items.size >= batch.expectedCount) {
+            albumBatches.delete(albumId)
+        }
+    }
+
+    async function flushAlbumBatchIfReady(albumId: string) {
+        const batch = albumBatches.get(albumId)
+        if (!batch) return
+
+        if (batch.flushPromise) {
+            await batch.flushPromise
+            return
+        }
+
+        if (batch.items.size < batch.expectedCount) {
+            return
+        }
+
+        const hasPendingUploads = Array.from(batch.items.values()).some(item =>
+            item.status === 'uploading' || item.status === 'sending'
+        )
+        if (hasPendingUploads) {
+            return
+        }
+
+        const itemsToSend = Array.from(batch.items.values())
+            .filter(item => item.status === 'uploaded' && item.content)
+            .sort((left, right) => left.albumIndex - right.albumIndex)
+
+        if (itemsToSend.length === 0) {
+            cleanupAlbumBatchIfSettled(albumId)
+            return
+        }
+
+        batch.flushPromise = (async () => {
+            for (const queuedItem of itemsToSend) {
+                const currentItem = batch.items.get(queuedItem.optimisticId)
+                if (!currentItem || currentItem.status !== 'uploaded' || !currentItem.content) {
+                    continue
+                }
+
+                updateAlbumBatchItem(albumId, queuedItem.optimisticId, { status: 'sending' })
+                const result = await sendMediaMessage(
+                    currentItem.type,
+                    currentItem.content,
+                    currentItem.localBlobUrl,
+                    currentItem.optimisticId
+                )
+
+                if (result) {
+                    updateAlbumBatchItem(albumId, queuedItem.optimisticId, { status: 'sent' })
+                } else {
+                    updateAlbumBatchItem(albumId, queuedItem.optimisticId, { status: 'failed' })
+                    const failedMessage = messages.value.find(message => message.id === queuedItem.optimisticId)
+                    if (failedMessage) {
+                        failedMessage.is_error = true
+                        failedMessage.is_sending = false
+                    }
+                }
+            }
+        })()
+
+        try {
+            await batch.flushPromise
+        } finally {
+            batch.flushPromise = null
+            cleanupAlbumBatchIfSettled(albumId)
+        }
+    }
+
+    function markAlbumItemState(albumId: string | null | undefined, optimisticId: number, status: 'cancelled' | 'failed') {
+        if (!albumId) return
+
+        updateAlbumBatchItem(albumId, optimisticId, { status })
+        void flushAlbumBatchIfReady(albumId)
+    }
+
     function cancelUpload(id: number) {
         const controller = uploadControllers.get(id);
         if (controller) {
@@ -132,6 +274,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
             const index = messages.value.findIndex(m => m.id === id);
             const msg = messages.value[index];
             if (msg && msg.is_sending) {
+                const albumId = getAlbumIdFromMessage(msg)
+                markAlbumItemState(albumId, id, 'cancelled')
                 msg.is_error = true; // prevents 'finally' from removing a non-error message if it shouldn't, though splice removes it anyway
                 messages.value.splice(index, 1);
             }
@@ -543,7 +687,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         })
     }
 
-    async function handleMediaUploadWrapper(file: File, albumId?: string | null, albumIndex?: number) {
+    async function handleMediaUploadWrapper(file: File, albumId?: string | null, albumIndex?: number, albumSize?: number) {
         if (!file) return
 
         const isVideo = file.type.startsWith('video/')
@@ -552,6 +696,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
         let msgType: 'video' | 'image' | 'voice' = 'image'
         if (isVideo) msgType = 'video'
         else if (isAudio) msgType = 'voice'
+
+        const normalizedAlbumId = (msgType === 'image' || msgType === 'video') ? albumId : null
+        const normalizedAlbumIndex = typeof albumIndex === 'number' ? albumIndex : 0
+        const normalizedAlbumSize = normalizedAlbumId ? Math.max(albumSize ?? 0, 1) : 0
         
         if (!selectedUserId.value) return
 
@@ -564,8 +712,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const initialContent = appendAlbumMetadata(
             { placeholder: true, durationMs: (file as any).durationMs },
             msgType,
-            albumId,
-            albumIndex
+            normalizedAlbumId,
+            normalizedAlbumIndex
         )
         const optimisticMsg: Message = {
             id: optimisticId,
@@ -581,6 +729,17 @@ export function useChatMedia(options: UseChatMediaOptions) {
             local_blob_url: localUrl,
             created_at: new Date().toISOString()
         }
+
+        if (normalizedAlbumId) {
+            const batch = ensureAlbumBatch(normalizedAlbumId, normalizedAlbumSize)
+            batch.items.set(optimisticId, {
+                optimisticId,
+                albumIndex: normalizedAlbumIndex,
+                type: msgType === 'video' ? 'video' : 'image',
+                status: 'uploading'
+            })
+        }
+
         messages.value.push(optimisticMsg)
 
         let isCancelledLocally = false;
@@ -589,6 +748,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 isCancelledLocally = true;
                 const index = messages.value.findIndex(m => m.id === optimisticId);
                 if (index !== -1) messages.value.splice(index, 1);
+                markAlbumItemState(normalizedAlbumId, optimisticId, 'cancelled')
                 uploadControllers.delete(optimisticId);
             }
         });
@@ -610,7 +770,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 try {
                     thumbBase64 = await generateVideoThumbnail(file)
                     getOptimisticTarget().content = JSON.stringify(
-                        appendAlbumMetadata({ thumbnail: thumbBase64, placeholder: true }, msgType, albumId, albumIndex)
+                        appendAlbumMetadata({ thumbnail: thumbBase64, placeholder: true }, msgType, normalizedAlbumId, normalizedAlbumIndex)
                     )
                 } catch (warn) {
                     console.warn("Video thumbnail failed:", warn)
@@ -676,7 +836,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             }
 
             const targetMsg = getOptimisticTarget();
-            const optimisticContent: any = appendAlbumMetadata({ thumbnail: thumbBase64 }, msgType, albumId, albumIndex);
+            const optimisticContent: any = appendAlbumMetadata({ thumbnail: thumbBase64 }, msgType, normalizedAlbumId, normalizedAlbumIndex);
             if (finalWidth && finalHeight) {
                 optimisticContent.width = finalWidth;
                 optimisticContent.height = finalHeight;
@@ -699,6 +859,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                         xhr.abort();
                         const index = messages.value.findIndex(m => m.id === optimisticId);
                         if (index !== -1) messages.value.splice(index, 1);
+                        markAlbumItemState(normalizedAlbumId, optimisticId, 'cancelled')
                         reject(new Error('UploadCancelled'))
                     }
                 });
@@ -763,7 +924,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             const contentObj: any = appendAlbumMetadata({
                 file_id: data.file_id,
                 thumbnail: data.thumbnail
-            }, msgType, albumId, albumIndex)
+            }, msgType, normalizedAlbumId, normalizedAlbumIndex)
             if (finalWidth && finalHeight) {
                 contentObj.width = finalWidth;
                 contentObj.height = finalHeight;
@@ -783,8 +944,24 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 imageCache.value = { ...imageCache.value, [data.file_id]: finalLocalUrl }
             }
 
-            step = 'send_ws_message'
-            await sendMediaMessage(msgType, messageContent, finalLocalUrl, optimisticId)
+            const targetAfterUpload = getOptimisticTarget()
+            if (targetAfterUpload) {
+                targetAfterUpload.upload_progress = 100
+                targetAfterUpload.upload_loaded = targetAfterUpload.upload_total || file.size
+                targetAfterUpload.upload_total = targetAfterUpload.upload_total || file.size
+            }
+
+            if (normalizedAlbumId && (msgType === 'image' || msgType === 'video')) {
+                updateAlbumBatchItem(normalizedAlbumId, optimisticId, {
+                    content: messageContent,
+                    localBlobUrl: finalLocalUrl,
+                    status: 'uploaded'
+                })
+                await flushAlbumBatchIfReady(normalizedAlbumId)
+            } else {
+                step = 'send_ws_message'
+                await sendMediaMessage(msgType, messageContent, finalLocalUrl, optimisticId)
+            }
 
         } catch (e: any) {
             if (e.message === 'UploadCancelled') {
@@ -796,6 +973,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             error.value = `[${step}] ${errString}`;
             alert(`خطا در آپلود: ` + errString);
             optimisticMsg.is_error = true;
+            markAlbumItemState(normalizedAlbumId, optimisticId, 'failed')
         } finally {
             activeUploadsCount--
             isUploading.value = activeUploadsCount > 0

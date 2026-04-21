@@ -44,7 +44,22 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'media-click', msg: any): void
   (e: 'download', msg: any): void
+  (e: 'cancel-send', msg: any): void
 }>()
+
+function formatBytes(bytes: number, decimals = 1) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const factor = 1024
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(factor)), units.length - 1)
+  return `${(bytes / Math.pow(factor, index)).toFixed(decimals)} ${units[index]}`
+}
+
+function handleCellClick(msg: any) {
+  if (msg?.is_sending) return
+  emit('media-click', msg)
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
@@ -214,7 +229,7 @@ const layout = computed(() => buildLayout(props.items))
         :key="cell.item.msg.id"
         class="album-item"
         :style="{ width: `${cell.width}px`, height: `${cell.height}px` }"
-        @click="emit('media-click', cell.item.msg)"
+        @click="handleCellClick(cell.item.msg)"
       >
         <img
           v-if="cell.item.type === 'image'"
@@ -233,6 +248,31 @@ const layout = computed(() => buildLayout(props.items))
         ></video>
         <div v-if="cell.item.type === 'video'" class="album-video-badge">
           <svg viewBox="0 0 24 24" width="12" height="12" fill="white"><path d="M8 5v14l11-7z"/></svg>
+        </div>
+        <div
+          v-if="cell.item.msg.is_sending"
+          class="album-upload-overlay"
+          @click.stop="emit('cancel-send', cell.item.msg)"
+        >
+          <div class="album-upload-badge">
+            <span v-if="(cell.item.msg.upload_progress || 0) >= 100">در انتظار آلبوم...</span>
+            <span v-else>
+              {{ formatBytes(cell.item.msg.upload_loaded || 0) }} / {{ formatBytes(cell.item.msg.upload_total || 0) }}
+            </span>
+          </div>
+          <div class="album-progress-shell">
+            <svg class="album-progress-ring" viewBox="0 0 36 36">
+              <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
+              <circle
+                class="ring-fg"
+                cx="18"
+                cy="18"
+                r="16"
+                :stroke-dasharray="`${cell.item.msg.upload_progress || 0}, 100`"
+              ></circle>
+            </svg>
+            <span class="album-progress-cancel">✕</span>
+          </div>
         </div>
       </div>
     </div>
@@ -281,5 +321,66 @@ const layout = computed(() => buildLayout(props.items))
   align-items: center;
   gap: 2px;
   backdrop-filter: blur(8px);
+}
+
+.album-upload-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  cursor: pointer;
+}
+
+.album-upload-badge {
+  max-width: calc(100% - 18px);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.38);
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.album-progress-shell {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.album-progress-ring {
+  position: absolute;
+  inset: 0;
+  width: 46px;
+  height: 46px;
+}
+
+.album-progress-cancel {
+  position: relative;
+  z-index: 1;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.ring-bg {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-width: 3;
+}
+
+.ring-fg {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 3;
+  transform: rotate(-90deg);
+  transform-origin: center;
 }
 </style>

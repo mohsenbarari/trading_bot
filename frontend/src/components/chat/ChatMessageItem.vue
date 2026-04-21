@@ -81,6 +81,7 @@
           :items="albumLayoutItems"
           @media-click="$emit('media-click', $event)"
           @download="$emit('download', $event)"
+          @cancel-send="$emit('cancel-send', $event)"
         />
       </template>
 
@@ -241,7 +242,7 @@
         <span v-if="isSent" class="msg-status">
           <!-- Sending -->
           <div v-if="isSending" class="sending-status-wrapper">
-             <span class="cancel-text-btn" @click.stop="$emit('cancel-send', msg)" title="لغو ارسال">✕</span>
+             <span v-if="!props.isAlbum" class="cancel-text-btn" @click.stop="$emit('cancel-send', msg)" title="لغو ارسال">✕</span>
              <svg viewBox="0 0 24 24" class="icon-clock" width="16" height="16" style="color: #aaa;">
                  <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm4.2 14.2L11 13V7h1.5v5.2l4.5 2.7-.8 1.3z" fill="currentColor"/>
              </svg>
