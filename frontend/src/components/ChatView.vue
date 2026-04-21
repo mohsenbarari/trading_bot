@@ -289,6 +289,26 @@ const canCopySelected = computed(() => {
    });
 })
 
+function getAlbumMeta(msg: Message): { albumId: string | null, albumIndex: number } {
+  if (msg.message_type !== 'image' && msg.message_type !== 'video') {
+    return { albumId: null, albumIndex: Number.MAX_SAFE_INTEGER }
+  }
+
+  try {
+    const content = JSON.parse(msg.content)
+    const albumId = typeof content.album_id === 'string' && content.album_id.trim()
+      ? content.album_id.trim()
+      : null
+    const albumIndex = typeof content.album_index === 'number' && Number.isFinite(content.album_index)
+      ? content.album_index
+      : Number.MAX_SAFE_INTEGER
+
+    return { albumId, albumIndex }
+  } catch {
+    return { albumId: null, albumIndex: Number.MAX_SAFE_INTEGER }
+  }
+}
+
 const groupedMessages = computed(() => {
   const groups: { label: string, items: any[] }[] = []
   if (messages.value.length === 0) return groups;
@@ -313,33 +333,63 @@ const groupedMessages = computed(() => {
   }
   groups.push({ label: currentLabel, items: currentGroup })
 
-  // Collapse consecutive media into albums
+  // Group only messages that were explicitly sent in the same album batch.
   groups.forEach(group => {
     const collapsedItems: any[] = []
-    let currentAlbum: any = null
+    const consumedAlbumIds = new Set<string>()
+    const albumMetaByMessageId = new Map<number, { albumId: string | null, albumIndex: number }>()
+
+    group.items.forEach(msg => {
+      albumMetaByMessageId.set(msg.id, getAlbumMeta(msg))
+    })
 
     group.items.forEach(msg => {
       const isMedia = msg.message_type === 'image' || msg.message_type === 'video'
-      if (isMedia && !msg.reply_to_message) {
-        if (!currentAlbum) {
-          currentAlbum = { type: 'album', id: 'album_' + msg.id, sender_id: msg.sender_id, messages: [msg] }
-        } else if (currentAlbum.sender_id === msg.sender_id) {
-          currentAlbum.messages.push(msg)
-        } else {
-          collapsedItems.push(currentAlbum.messages.length > 1 ? currentAlbum : currentAlbum.messages[0])
-          currentAlbum = { type: 'album', id: 'album_' + msg.id, sender_id: msg.sender_id, messages: [msg] }
-        }
-      } else {
-        if (currentAlbum) {
-          collapsedItems.push(currentAlbum.messages.length > 1 ? currentAlbum : currentAlbum.messages[0])
-          currentAlbum = null
-        }
+      if (!isMedia || msg.reply_to_message || msg.is_error) {
         collapsedItems.push(msg)
+        return
       }
+
+      const albumMeta = albumMetaByMessageId.get(msg.id)
+      if (!albumMeta?.albumId) {
+        collapsedItems.push(msg)
+        return
+      }
+
+      if (consumedAlbumIds.has(albumMeta.albumId)) {
+        return
+      }
+
+      consumedAlbumIds.add(albumMeta.albumId)
+
+      const albumMessages = group.items
+        .filter(candidate => {
+          if (candidate.sender_id !== msg.sender_id) return false
+          if (candidate.reply_to_message) return false
+          if (candidate.is_error) return false
+          if (candidate.message_type !== 'image' && candidate.message_type !== 'video') return false
+
+          return albumMetaByMessageId.get(candidate.id)?.albumId === albumMeta.albumId
+        })
+        .sort((left, right) => {
+          const leftMeta = albumMetaByMessageId.get(left.id)
+          const rightMeta = albumMetaByMessageId.get(right.id)
+          const byIndex = (leftMeta?.albumIndex ?? Number.MAX_SAFE_INTEGER) - (rightMeta?.albumIndex ?? Number.MAX_SAFE_INTEGER)
+          if (byIndex !== 0) return byIndex
+
+          const byCreatedAt = new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+          if (byCreatedAt !== 0) return byCreatedAt
+
+          return left.id - right.id
+        })
+
+      collapsedItems.push(
+        albumMessages.length > 1
+          ? { type: 'album', id: `album_${albumMeta.albumId}`, sender_id: msg.sender_id, messages: albumMessages }
+          : msg
+      )
     })
-    if (currentAlbum) {
-      collapsedItems.push(currentAlbum.messages.length > 1 ? currentAlbum : currentAlbum.messages[0])
-    }
+
     group.items = collapsedItems
   })
 
