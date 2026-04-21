@@ -1,5 +1,13 @@
 <template>
-  <div class="message-wrapper">
+  <div
+    class="message-wrapper"
+    @click="handleWrapperClick($event)"
+    @touchstart="handleWrapperTouchStart($event)"
+    @touchmove="handleWrapperTouchMove($event)"
+    @touchend="handleWrapperTouchEnd()"
+    @touchcancel="handleWrapperTouchCancel()"
+    @contextmenu.prevent="handleWrapperContextMenu($event)"
+  >
     <div 
       v-if="isSwiping" 
       class="swipe-reply-icon"
@@ -29,11 +37,9 @@
         'selected-message': isSelected,
         'album-bubble': props.isAlbum
       }"
-      @click="handleClick($event)"
       @touchstart="handleTouchStart($event)"
       @touchmove="handleTouchMove($event)"
       @touchend="handleTouchEnd($event)"
-      @contextmenu.prevent="handleContextMenu($event)"
       :style="getSwipeStyle()"
     >
       <!-- Forwarded Banner -->
@@ -660,6 +666,111 @@ const touchStartX = ref(0)
 const touchCurrentX = ref(0)
 const isSwiping = ref(false)
 const longPressTimer = ref<number | null>(null)
+const contextTouchStart = ref<{ x: number; y: number } | null>(null)
+const suppressContextClickUntil = ref(0)
+
+const INTERACTIVE_CONTEXT_TARGET_SELECTOR = [
+  '[data-context-ignore]',
+  '.msg-media-link',
+  '.msg-location',
+  '.msg-document',
+  '.reply-context',
+  '.voice-play-btn',
+  '.voice-waveform',
+  '.download-btn',
+  '.cancel-text-btn',
+  '.cancelable-overlay',
+  '.msg-voice-uploading',
+  '.doc-icon',
+  '.doc-download-icon',
+  '.album-layout',
+  '.album-item',
+  'button',
+  'a',
+  'input',
+  'textarea',
+  'select',
+  'label',
+  'video',
+  'img'
+].join(', ')
+
+function clearLongPressTimer() {
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value)
+    longPressTimer.value = null
+  }
+}
+
+function shouldIgnoreContextMenuTarget(target: EventTarget | null) {
+  const element = target instanceof Element ? target : null
+  if (!element) return false
+  return Boolean(element.closest(INTERACTIVE_CONTEXT_TARGET_SELECTOR))
+}
+
+const handleWrapperClick = (e: MouseEvent) => {
+  if (Date.now() < suppressContextClickUntil.value) {
+    return
+  }
+
+  if (props.isSelectionMode) {
+    emit('select', props.msg)
+    return
+  }
+
+  if (shouldIgnoreContextMenuTarget(e.target)) {
+    return
+  }
+
+  emit('click-message', e, props.msg)
+}
+
+const handleWrapperTouchStart = (e: TouchEvent) => {
+  if (props.isSelectionMode || shouldIgnoreContextMenuTarget(e.target)) return
+
+  const touch = e.touches[0]
+  if (!touch) return
+
+  contextTouchStart.value = { x: touch.clientX, y: touch.clientY }
+  clearLongPressTimer()
+
+  longPressTimer.value = window.setTimeout(() => {
+    suppressContextClickUntil.value = Date.now() + 650
+    emit('context-menu', new MouseEvent('contextmenu', {
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+    }), props.msg)
+    clearLongPressTimer()
+  }, 420)
+}
+
+const handleWrapperTouchMove = (e: TouchEvent) => {
+  const startPoint = contextTouchStart.value
+  const touch = e.touches[0]
+  if (!startPoint || !touch) return
+
+  if (Math.abs(touch.clientX - startPoint.x) > 8 || Math.abs(touch.clientY - startPoint.y) > 8) {
+    clearLongPressTimer()
+  }
+}
+
+const handleWrapperTouchEnd = () => {
+  contextTouchStart.value = null
+  clearLongPressTimer()
+}
+
+const handleWrapperTouchCancel = () => {
+  contextTouchStart.value = null
+  clearLongPressTimer()
+}
+
+const handleWrapperContextMenu = (e: MouseEvent) => {
+  if (shouldIgnoreContextMenuTarget(e.target)) {
+    return
+  }
+
+  emit('context-menu', e, props.msg)
+}
 
 const handleTouchStart = (e: TouchEvent) => {
   if (props.isSelectionMode) return
@@ -671,11 +782,6 @@ const handleTouchStart = (e: TouchEvent) => {
       isSwiping.value = true
     }
   }
-
-  if (longPressTimer.value) clearTimeout(longPressTimer.value)
-  longPressTimer.value = window.setTimeout(() => {
-    emit('context-menu', e, props.msg)
-  }, 500)
 }
 
 const handleTouchMove = (e: TouchEvent) => {
@@ -684,24 +790,11 @@ const handleTouchMove = (e: TouchEvent) => {
     const touch = e.touches[0]
     if (touch) {
       touchCurrentX.value = touch.clientX
-      
-      // Cancel long press if moved significantly
-      if (Math.abs(touchCurrentX.value - touchStartX.value) > 10) {
-        if (longPressTimer.value) {
-          clearTimeout(longPressTimer.value)
-          longPressTimer.value = null
-        }
-      }
     }
   }
 }
 
 const handleTouchEnd = (e: TouchEvent) => {
-  if (longPressTimer.value) {
-    clearTimeout(longPressTimer.value)
-    longPressTimer.value = null
-  }
-  
   if (!isSwiping.value) return
   
   const diff = touchStartX.value - touchCurrentX.value
@@ -715,18 +808,6 @@ const handleTouchEnd = (e: TouchEvent) => {
   isSwiping.value = false
   touchStartX.value = 0
   touchCurrentX.value = 0
-}
-
-const handleClick = (e: Event) => {
-  if (props.isSelectionMode) {
-    emit('select', props.msg)
-  } else {
-    emit('click-message', e, props.msg)
-  }
-}
-
-const handleContextMenu = (e: MouseEvent) => {
-  emit('context-menu', e, props.msg)
 }
 
 function getSwipeStyle() {
