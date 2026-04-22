@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 type LightboxItem = {
   msgId: number
@@ -59,6 +59,14 @@ const stageTransform = computed(() => {
     transform: `translate3d(${dragOffsetX.value}px, ${dragOffsetY.value}px, 0) scale(${scale})`,
     transition: gestureStart.value ? 'none' : 'transform 0.22s ease'
   }
+})
+
+watch(() => props.lightboxMedia?.currentIndex, () => {
+  resetGesture()
+})
+
+watch(() => props.lightboxMedia?.albumId, () => {
+  resetGesture()
 })
 
 function resetGesture() {
@@ -265,6 +273,7 @@ function handleTouchEnd() {
   max-width: 100%;
   height: min(100%, 920px);
   max-height: 100%;
+  overflow: hidden;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 12px;
@@ -337,22 +346,25 @@ function handleTouchEnd() {
 .lightbox-stage-wrap {
   min-height: 0;
   min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
 }
 
 .lightbox-stage {
   width: min(100%, 820px);
   height: 100%;
+  min-width: 0;
+  min-height: 0;
   max-width: 100%;
   max-height: 100%;
   padding: 10px;
   border-radius: 24px;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   background: rgba(10, 14, 20, 0.72);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
 }
@@ -364,6 +376,7 @@ function handleTouchEnd() {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+  object-position: center center;
   background: transparent;
   margin: auto;
 }
