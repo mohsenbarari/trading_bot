@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { ArrowUp, ArrowDown, ArrowUpDown, X, Loader2, Send } from 'lucide-vue-next'
 import { useOffers } from '../composables/useOffers'
+import { useTradingSort } from '../composables/useTradingSort'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import OffersList from '../components/OffersList.vue'
 
@@ -20,12 +21,16 @@ interface TradingSettings {
 
 const { offers, isLoading, fetchOffers, startPolling, stopPolling } = useOffers()
 const currentUserId = ref<number | undefined>(undefined)
-const filterType = ref<'all' | 'buy' | 'sell'>('all')
 
-// Sort State
-const sortCommodity = ref('')
-const sortDirection = ref<'none' | 'asc' | 'desc'>('none')
-const showSortPanel = ref(false)
+const {
+  filterType,
+  sortCommodity,
+  sortDirection,
+  showSortPanel,
+  filteredOffers,
+  toggleSort,
+  clearSort,
+} = useTradingSort(offers)
 const commodities = ref<Commodity[]>([])
 const commoditiesLoading = ref(false)
 const tradingSettings = ref<TradingSettings>({
@@ -67,26 +72,6 @@ const randomPlaceholder = computed(() => {
   }
   const comm = commodities.value[Math.floor(Math.random() * commodities.value.length)]
   return `خرید ${comm?.name || 'کالا'} 50 عدد 125000`
-})
-
-const filteredOffers = computed(() => {
-  let result = [...offers.value]
-  if (filterType.value !== 'all') {
-    result = result.filter(o => o.offer_type === filterType.value)
-  }
-  if (sortCommodity.value && sortDirection.value !== 'none') {
-    const commodity = sortCommodity.value
-    const dir = sortDirection.value
-    result.sort((a, b) => {
-      const aMatch = a.commodity_name === commodity
-      const bMatch = b.commodity_name === commodity
-      if (aMatch && !bMatch) return -1
-      if (!aMatch && bMatch) return 1
-      if (!aMatch && !bMatch) return 0
-      return dir === 'asc' ? a.price - b.price : b.price - a.price
-    })
-  }
-  return result
 })
 
 import { apiFetch, apiFetchJson } from '../utils/auth'
@@ -231,23 +216,6 @@ function parseAndSubmitTextOffer() {
   })
   .catch(e => parseError.value = e.message)
   .finally(() => isSubmitting.value = false)
-}
-
-function toggleSort(name: string) {
-  if (sortCommodity.value === name) {
-    if (sortDirection.value === 'none') sortDirection.value = 'asc'
-    else if (sortDirection.value === 'asc') sortDirection.value = 'desc'
-    else { sortDirection.value = 'none'; sortCommodity.value = '' }
-  } else {
-    sortCommodity.value = name
-    sortDirection.value = 'asc'
-  }
-}
-
-function clearSort() {
-  sortCommodity.value = ''
-  sortDirection.value = 'none'
-  showSortPanel.value = false
 }
 
 async function fetchCurrentUser() {
