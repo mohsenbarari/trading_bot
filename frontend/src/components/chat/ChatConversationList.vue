@@ -36,6 +36,19 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
     <div 
       v-for="conv in conversations" 
       :key="conv.id"
+      v-memo="[
+        conv.id,
+        conv.other_user_id,
+        conv.other_user_name,
+        conv.other_user_is_deleted,
+        conv.other_user_last_seen_at,
+        conv.last_message_at,
+        conv.last_message_type,
+        conv.last_message_content,
+        conv.unread_count,
+        selectedUserId === conv.other_user_id,
+        !!typingUsers[conv.other_user_id],
+      ]"
       class="conversation-item"
       v-ripple
       :class="{ 'has-unread': conv.unread_count > 0, 'active': selectedUserId === conv.other_user_id }"
