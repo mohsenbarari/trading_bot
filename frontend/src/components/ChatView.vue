@@ -542,6 +542,18 @@ function hydrateRenderedMedia(item: any) {
 // on each new incoming WebSocket message.
 const albumWrapperCache = new Map<string, { signature: string, wrapper: any }>()
 
+// Per-ISO-string cache for `formatDateForSeparator`. `toLocaleDateString('fa-IR', ...)`
+// is expensive on weak devices, and `groupedMessages` re-runs on every
+// reactive tick. Same `created_at` string always resolves to the same
+// Persian date label, so memoize by that string.
+const dateSeparatorLabelCache = new Map<string, string>()
+
+// Stable group wrapper cache: preserve the exact group object reference
+// when the group's date label and items list signature haven't changed.
+// This lets a `v-memo` on `.message-group` skip patching untouched
+// older day-groups when only the latest group grows with a new message.
+const groupWrapperCache = new Map<string, { signature: string, group: { label: string, items: any[] } }>()
+
 const groupedMessages = computed(() => {
   const groups: { label: string, items: any[] }[] = []
   if (messages.value.length === 0) return groups;
@@ -642,7 +654,46 @@ const groupedMessages = computed(() => {
     group.items = collapsedItems
   })
 
-  return groups
+  // Stable group wrappers: preserve the exact group wrapper reference when
+  // the ordered list of item *references* hasn't changed. This lets a
+  // `v-memo` at the `.message-group` level skip patching older day-groups
+  // entirely when only the latest group grows with a new message.
+  //
+  // NOTE: we compare by reference identity (not by id) because upstream
+  // paths like `messages.value[idx] = serverMsg` replace the message
+  // object while keeping the id stable — if the cached group kept the
+  // stale reference, the child `<ChatMessageItem v-memo="[item, ...]">`
+  // would never invalidate on edits/send-complete.
+  const stableGroups: { label: string, items: any[] }[] = []
+  const seenLabels = new Set<string>()
+  for (const group of groups) {
+    const cacheKey = group.label
+    const cached = groupWrapperCache.get(cacheKey)
+    let reuse = false
+    if (cached && cached.group.items.length === group.items.length) {
+      reuse = true
+      const prevItems = cached.group.items
+      const nextItems = group.items
+      for (let i = 0; i < nextItems.length; i++) {
+        if (prevItems[i] !== nextItems[i]) { reuse = false; break }
+      }
+    }
+    if (reuse && cached) {
+      stableGroups.push(cached.group)
+    } else {
+      const stable = { label: group.label, items: group.items }
+      groupWrapperCache.set(cacheKey, { signature: '', group: stable })
+      stableGroups.push(stable)
+    }
+    seenLabels.add(cacheKey)
+  }
+  if (groupWrapperCache.size > seenLabels.size) {
+    for (const key of groupWrapperCache.keys()) {
+      if (!seenLabels.has(key)) groupWrapperCache.delete(key)
+    }
+  }
+
+  return stableGroups
 })
 
 function formatTime(dateStr: string) {
@@ -651,13 +702,25 @@ function formatTime(dateStr: string) {
 }
 
 function formatDateForSeparator(dateStr: string): string {
+    if (!dateStr) return ''
+
     const date = new Date(dateStr);
     const now = new Date();
     if (date.toDateString() === now.toDateString()) return 'امروز';
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
     if (date.toDateString() === yesterday.toDateString()) return 'دیروز';
-    return date.toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    // `toLocaleDateString('fa-IR', ...)` is expensive on weak devices and
+    // `groupedMessages` re-runs on every reactive tick. For non-today/
+    // non-yesterday messages the resulting Persian date string is stable
+    // given the same ISO input, so cache by ISO string.
+    const cached = dateSeparatorLabelCache.get(dateStr)
+    if (cached !== undefined) return cached
+
+    const label = date.toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' });
+    dateSeparatorLabelCache.set(dateStr, label)
+    return label
 }
 
 function isUserOnline(lastSeen: string | null | undefined): boolean {
@@ -1419,6 +1482,8 @@ watch(selectedUserId, (newVal) => {
   // Clear the album wrapper cache when switching chats so cached wrappers
   // from other conversations do not leak into memory over time.
   albumWrapperCache.clear()
+  groupWrapperCache.clear()
+  dateSeparatorLabelCache.clear()
   if (newVal) {
     startStatusPolling(newVal)
     scrollToBottom()
@@ -1561,7 +1626,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
             <p>شروع گفتگو...</p>
           </div>
           
-          <div v-for="group in groupedMessages" :key="group.label" class="message-group" v-auto-animate>
+          <div v-for="group in groupedMessages" :key="group.label" class="message-group" v-auto-animate v-memo="[group, searchQuery, isSelectionMode, activeAlbumSelectionId]">
             <div class="date-separator sticky-date">
               <span @click="scrollToMessage(group.items[0].id)">{{ group.label }}</span>
             </div>
