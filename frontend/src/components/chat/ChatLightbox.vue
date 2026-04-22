@@ -205,31 +205,32 @@ function handleTouchEnd() {
           <div class="lightbox-stage-wrap">
             <div
               class="lightbox-stage"
-              :style="stageTransform"
               @touchstart="handleTouchStart"
               @touchmove="handleTouchMove"
               @touchend="handleTouchEnd"
               @touchcancel="handleTouchEnd"
             >
-              <img
-                v-if="currentItem.type === 'image'"
-                :key="`image-${currentItem.msgId}`"
-                :src="currentItem.url"
-                class="lightbox-media"
-                alt="مدیا"
-                draggable="false"
-                @click.stop
-              />
-              <video
-                v-else
-                :key="`video-${currentItem.msgId}`"
-                :src="currentItem.url"
-                class="lightbox-media"
-                controls
-                autoplay
-                playsinline
-                @click.stop
-              ></video>
+              <div class="lightbox-stage-viewport" :style="stageTransform">
+                <img
+                  v-if="currentItem.type === 'image'"
+                  :key="`image-${currentItem.msgId}`"
+                  :src="currentItem.url"
+                  class="lightbox-media"
+                  alt="مدیا"
+                  draggable="false"
+                  @click.stop
+                />
+                <video
+                  v-else
+                  :key="`video-${currentItem.msgId}`"
+                  :src="currentItem.url"
+                  class="lightbox-media"
+                  controls
+                  autoplay
+                  playsinline
+                  @click.stop
+                ></video>
+              </div>
             </div>
           </div>
 
@@ -361,12 +362,26 @@ function handleTouchEnd() {
   max-width: 100%;
   max-height: 100%;
   padding: 10px;
+  box-sizing: border-box;
   border-radius: 24px;
   overflow: hidden;
   display: grid;
   place-items: center;
   background: rgba(10, 14, 20, 0.72);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+.lightbox-stage-viewport {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  justify-items: center;
+  align-items: center;
+  overflow: hidden;
+  will-change: transform;
 }
 
 .lightbox-media {
