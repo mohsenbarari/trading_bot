@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 
 type LightboxItem = {
   msgId: number
@@ -32,6 +32,8 @@ const gestureStart = ref<{ x: number; y: number } | null>(null)
 const gestureAxis = ref<'horizontal' | 'vertical' | null>(null)
 const dragOffsetX = ref(0)
 const dragOffsetY = ref(0)
+const stripSlotRef = ref<HTMLDivElement | null>(null)
+const thumbRefs = ref<(HTMLButtonElement | null)[]>([])
 
 const currentItem = computed(() => {
   if (!props.lightboxMedia) return null
@@ -61,12 +63,20 @@ const stageTransform = computed(() => {
   }
 })
 
-watch(() => props.lightboxMedia?.currentIndex, () => {
+watch(() => props.lightboxMedia?.currentIndex, (currentIndex, previousIndex) => {
   resetGesture()
+
+  if (currentIndex == null) {
+    return
+  }
+
+  void syncStripWithCurrentItem(previousIndex == null ? 'auto' : 'smooth')
 })
 
 watch(() => props.lightboxMedia?.albumId, () => {
   resetGesture()
+  thumbRefs.value = []
+  void syncStripWithCurrentItem('auto')
 })
 
 function resetGesture() {
@@ -116,6 +126,52 @@ function navigateTo(index: number) {
 function navigateRelative(offset: number) {
   if (!props.lightboxMedia) return
   navigateTo(props.lightboxMedia.currentIndex + offset)
+}
+
+function setThumbRef(element: unknown, index: number) {
+  thumbRefs.value[index] = element instanceof HTMLButtonElement ? element : null
+}
+
+async function syncStripWithCurrentItem(behavior: ScrollBehavior) {
+  await nextTick()
+  centerActiveThumbnail(behavior)
+}
+
+function centerActiveThumbnail(behavior: ScrollBehavior = 'smooth') {
+  if (!hasAlbumStrip.value) return
+
+  const container = stripSlotRef.value
+  const currentIndex = props.lightboxMedia?.currentIndex ?? -1
+  const activeThumb = currentIndex >= 0 ? thumbRefs.value[currentIndex] : null
+
+  if (!container || !activeThumb) return
+
+  const activeCenter = activeThumb.offsetLeft + activeThumb.offsetWidth / 2
+  const nextScrollLeft = activeCenter - container.clientWidth / 2
+  const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth)
+  const clampedScrollLeft = Math.max(0, Math.min(nextScrollLeft, maxScrollLeft))
+
+  container.scrollTo({
+    left: clampedScrollLeft,
+    behavior,
+  })
+}
+
+function getThumbStyle(index: number) {
+  const activeIndex = props.lightboxMedia?.currentIndex ?? 0
+  const distance = Math.min(Math.abs(index - activeIndex), 4)
+  const scales = [1, 0.94, 0.88, 0.83, 0.79]
+  const translateY = [-8, -3, 1, 4, 6]
+  const opacity = [1, 0.86, 0.68, 0.52, 0.38]
+  const brightness = [1.08, 1.01, 0.92, 0.84, 0.76]
+  const saturate = [1.1, 1.02, 0.94, 0.88, 0.82]
+
+  return {
+    opacity: String(opacity[distance]),
+    transform: `translateY(${translateY[distance]}px) scale(${scales[distance]})`,
+    filter: `saturate(${saturate[distance]}) brightness(${brightness[distance]})`,
+    zIndex: String(100 - distance),
+  }
 }
 
 function handleTouchStart(event: TouchEvent) {
@@ -234,16 +290,19 @@ function handleTouchEnd() {
             </div>
           </div>
 
-          <div class="lightbox-strip-slot" @click.stop>
+          <div ref="stripSlotRef" class="lightbox-strip-slot" @click.stop>
             <div v-if="hasAlbumStrip" class="lightbox-strip">
               <button
                 v-for="(item, index) in lightboxMedia.items"
                 :key="item.msgId"
+                :ref="(element) => setThumbRef(element, index)"
                 class="lightbox-thumb"
                 :class="{ active: index === lightboxMedia.currentIndex }"
+                :style="getThumbStyle(index)"
+                :aria-current="index === lightboxMedia.currentIndex ? 'true' : 'false'"
                 @click.stop="navigateTo(index)"
               >
-                <img :src="item.url || item.thumbnail" alt="thumbnail" class="lightbox-thumb-image" />
+                <img :src="item.thumbnail || item.url" alt="thumbnail" class="lightbox-thumb-image" />
                 <span v-if="item.type === 'video'" class="thumb-video-badge">
                   <svg viewBox="0 0 24 24" width="12" height="12" fill="white"><path d="M8 5v14l11-7z" /></svg>
                 </span>
@@ -398,6 +457,7 @@ function handleTouchEnd() {
 }
 
 .lightbox-strip-slot {
+  position: relative;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -405,8 +465,42 @@ function handleTouchEnd() {
   display: flex;
   align-items: flex-end;
   justify-content: center;
+  padding: 10px 18px 4px;
+  box-sizing: border-box;
   overflow-x: auto;
   overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-snap-type: x proximity;
+  scroll-behavior: smooth;
+}
+
+.lightbox-strip-slot::-webkit-scrollbar {
+  display: none;
+}
+
+.lightbox-strip-slot::before,
+.lightbox-strip-slot::after {
+  content: '';
+  position: sticky;
+  top: 0;
+  bottom: 0;
+  width: 30px;
+  flex: none;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.lightbox-strip-slot::before {
+  left: 0;
+  margin-right: -30px;
+  background: linear-gradient(90deg, rgba(7, 10, 16, 0.82), rgba(7, 10, 16, 0));
+}
+
+.lightbox-strip-slot::after {
+  right: 0;
+  margin-left: -30px;
+  background: linear-gradient(270deg, rgba(7, 10, 16, 0.82), rgba(7, 10, 16, 0));
 }
 
 .lightbox-strip {
@@ -419,9 +513,12 @@ function handleTouchEnd() {
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 8px 4px 0;
+  gap: 12px;
+  padding: 12px 8px 2px;
   box-sizing: border-box;
+  border-radius: 28px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 10px 26px rgba(0, 0, 0, 0.22);
 }
 
 .lightbox-thumb {
@@ -436,14 +533,14 @@ function handleTouchEnd() {
   cursor: pointer;
   background: rgba(255, 255, 255, 0.08);
   opacity: 0.68;
-  transform: scale(0.96);
-  transition: opacity 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  scroll-snap-align: center;
+  transform-origin: center bottom;
+  transition: opacity 0.28s ease, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.28s ease, filter 0.28s ease;
 }
 
 .lightbox-thumb.active {
   opacity: 1;
-  transform: scale(1);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 16px 28px rgba(0, 0, 0, 0.34);
 }
 
 .lightbox-thumb-image {
@@ -451,6 +548,24 @@ function handleTouchEnd() {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.lightbox-thumb::after {
+  content: '';
+  position: absolute;
+  inset: auto 12px 8px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  transform: scaleX(0.2);
+  transform-origin: center;
+  opacity: 0;
+  transition: transform 0.28s ease, opacity 0.28s ease;
+}
+
+.lightbox-thumb.active::after {
+  opacity: 1;
+  transform: scaleX(1);
 }
 
 .thumb-video-badge {
@@ -510,12 +625,18 @@ function handleTouchEnd() {
   .lightbox-strip-slot {
     width: 100%;
     min-height: 80px;
+    padding-inline: 12px;
   }
 
   .lightbox-thumb {
     width: 64px;
     height: 64px;
     border-radius: 16px;
+  }
+
+  .lightbox-strip {
+    gap: 10px;
+    padding: 10px 6px 2px;
   }
 }
 </style>
