@@ -10,6 +10,7 @@ import { useWebSocket } from './composables/useWebSocket'
 import { useNotificationStore } from './stores/notifications'
 import { requestNotificationPermission, showBrowserNotification } from './utils/browserNotifications'
 import { unlockAudioContext } from './utils/audio'
+import { initChatUploadBackground } from './services/chatUploadBackground'
 
 
 const route = useRoute()
@@ -20,6 +21,15 @@ const notificationStore = useNotificationStore()
 onMounted(() => {
   // راه‌اندازی تایمر انقضای توکن — ریدایرکت خودکار به لاگین
   setupExpiryTimer()
+
+  // Initialize the background chat upload service. This restores any
+  // pending uploads saved to IndexedDB from a previous session and resumes
+  // them in the background — so media sends continue across page reloads
+  // and in-app navigation away from the messenger.
+  void initChatUploadBackground({
+    apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
+    getAuthToken: () => localStorage.getItem('auth_token'),
+  })
 
   const ensureSessionValidation = async () => {
     const refreshToken = localStorage.getItem('refresh_token')
