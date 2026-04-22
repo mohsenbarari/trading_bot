@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import type { CSSProperties } from 'vue'
 
 type LightboxItem = {
   msgId: number
@@ -32,8 +33,6 @@ const gestureStart = ref<{ x: number; y: number } | null>(null)
 const gestureAxis = ref<'horizontal' | 'vertical' | null>(null)
 const dragOffsetX = ref(0)
 const dragOffsetY = ref(0)
-const stripSlotRef = ref<HTMLDivElement | null>(null)
-const thumbRefs = ref<(HTMLButtonElement | null)[]>([])
 
 const currentItem = computed(() => {
   if (!props.lightboxMedia) return null
@@ -51,32 +50,24 @@ const canDeleteCurrentItem = computed(() => {
   return Number.isFinite(createdAt) && (Date.now() - createdAt) <= 48 * 60 * 60 * 1000
 })
 
-const stageTransform = computed(() => {
+const sceneTransform = computed(() => {
   const verticalProgress = Math.min(Math.abs(dragOffsetY.value) / 240, 1)
   const scale = gestureAxis.value === 'vertical'
     ? Math.max(0.88, 1 - verticalProgress * 0.12)
     : 1
 
   return {
-    transform: `translate3d(${dragOffsetX.value}px, ${dragOffsetY.value}px, 0) scale(${scale})`,
-    transition: gestureStart.value ? 'none' : 'transform 0.22s ease'
+    transform: `translate3d(0, ${dragOffsetY.value}px, 0) scale(${scale})`,
+    transition: gestureStart.value && gestureAxis.value === 'vertical' ? 'none' : 'transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)'
   }
 })
 
-watch(() => props.lightboxMedia?.currentIndex, (currentIndex, previousIndex) => {
+watch(() => props.lightboxMedia?.currentIndex, () => {
   resetGesture()
-
-  if (currentIndex == null) {
-    return
-  }
-
-  void syncStripWithCurrentItem(previousIndex == null ? 'auto' : 'smooth')
 })
 
 watch(() => props.lightboxMedia?.albumId, () => {
   resetGesture()
-  thumbRefs.value = []
-  void syncStripWithCurrentItem('auto')
 })
 
 function resetGesture() {
@@ -128,49 +119,70 @@ function navigateRelative(offset: number) {
   navigateTo(props.lightboxMedia.currentIndex + offset)
 }
 
-function setThumbRef(element: unknown, index: number) {
-  thumbRefs.value[index] = element instanceof HTMLButtonElement ? element : null
+function getHorizontalDragRatio() {
+  if (gestureAxis.value !== 'horizontal') return 0
+  return Math.max(-1, Math.min(1, dragOffsetX.value / 220))
 }
 
-async function syncStripWithCurrentItem(behavior: ScrollBehavior) {
-  await nextTick()
-  centerActiveThumbnail(behavior)
-}
-
-function centerActiveThumbnail(behavior: ScrollBehavior = 'smooth') {
-  if (!hasAlbumStrip.value) return
-
-  const container = stripSlotRef.value
-  const currentIndex = props.lightboxMedia?.currentIndex ?? -1
-  const activeThumb = currentIndex >= 0 ? thumbRefs.value[currentIndex] : null
-
-  if (!container || !activeThumb) return
-
-  const activeCenter = activeThumb.offsetLeft + activeThumb.offsetWidth / 2
-  const nextScrollLeft = activeCenter - container.clientWidth / 2
-  const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth)
-  const clampedScrollLeft = Math.max(0, Math.min(nextScrollLeft, maxScrollLeft))
-
-  container.scrollTo({
-    left: clampedScrollLeft,
-    behavior,
-  })
-}
-
-function getThumbStyle(index: number) {
+function shouldRenderStageItem(index: number) {
   const activeIndex = props.lightboxMedia?.currentIndex ?? 0
-  const distance = Math.min(Math.abs(index - activeIndex), 4)
-  const scales = [1, 0.94, 0.88, 0.83, 0.79]
-  const translateY = [-8, -3, 1, 4, 6]
-  const opacity = [1, 0.86, 0.68, 0.52, 0.38]
-  const brightness = [1.08, 1.01, 0.92, 0.84, 0.76]
-  const saturate = [1.1, 1.02, 0.94, 0.88, 0.82]
+  return Math.abs(index - activeIndex) <= 1
+}
+
+function getStageItemStyle(index: number): CSSProperties {
+  const activeIndex = props.lightboxMedia?.currentIndex ?? 0
+  const dragRatio = getHorizontalDragRatio()
+  const compositeOffset = index - activeIndex - dragRatio
+  const distance = Math.abs(compositeOffset)
+
+  const opacity = Math.max(0, 1 - distance * 0.42)
+  const scale = Math.max(0.78, 1 - distance * 0.12)
+  const rotateY = compositeOffset * -26
+  const translateX = compositeOffset * 74
+  const translateZ = Math.round(Math.max(-220, 90 - distance * 160))
+  const blur = Math.min(distance * 1.4, 4)
 
   return {
-    opacity: String(opacity[distance]),
-    transform: `translateY(${translateY[distance]}px) scale(${scales[distance]})`,
-    filter: `saturate(${saturate[distance]}) brightness(${brightness[distance]})`,
-    zIndex: String(100 - distance),
+    opacity: String(opacity),
+    transform: `translate3d(${translateX}%, 0, ${translateZ}px) rotateY(${rotateY}deg) scale(${scale})`,
+    filter: `blur(${blur}px) saturate(${Math.max(0.82, 1.06 - distance * 0.16)})`,
+    zIndex: String(200 - Math.round(distance * 100)),
+    pointerEvents: distance < 0.35 ? 'auto' : 'none',
+  }
+}
+
+function getThumbStyle(index: number): CSSProperties {
+  const activeIndex = props.lightboxMedia?.currentIndex ?? 0
+  const dragRatio = getHorizontalDragRatio()
+  const compositeOffset = index - activeIndex - dragRatio * 0.9
+  const distance = Math.abs(compositeOffset)
+
+  if (distance > 4.25) {
+    return {
+      opacity: '0',
+      transform: `translate3d(${compositeOffset * 88}px, 18px, 0) scale(0.72) rotateY(${compositeOffset * -20}deg)`,
+      filter: 'blur(6px) saturate(0.7)',
+      zIndex: '0',
+      pointerEvents: 'none',
+    }
+  }
+
+  const scale = Math.max(0.72, 1 - distance * 0.14)
+  const translateY = Math.min(distance * 8, 16)
+  const rotateY = compositeOffset * -24
+  const opacity = Math.max(0.22, 1 - distance * 0.22)
+  const brightness = Math.max(0.72, 1.08 - distance * 0.12)
+  const saturate = Math.max(0.78, 1.12 - distance * 0.12)
+  const shadowLift = Math.max(0, 14 - distance * 4)
+
+  return {
+    opacity: String(opacity),
+    transform: `translate3d(${compositeOffset * 88}px, ${translateY}px, 0) scale(${scale}) rotateY(${rotateY}deg)`,
+    filter: `saturate(${saturate}) brightness(${brightness})`,
+    zIndex: String(100 - Math.round(distance * 10)),
+    boxShadow: distance < 0.45
+      ? '0 0 0 2px rgba(255, 255, 255, 0.92), 0 20px 34px rgba(0, 0, 0, 0.34)'
+      : `0 ${shadowLift}px ${Math.max(16, shadowLift * 2)}px rgba(0, 0, 0, 0.18)`,
   }
 }
 
@@ -266,36 +278,45 @@ function handleTouchEnd() {
               @touchend="handleTouchEnd"
               @touchcancel="handleTouchEnd"
             >
-              <div class="lightbox-stage-viewport" :style="stageTransform">
-                <img
-                  v-if="currentItem.type === 'image'"
-                  :key="`image-${currentItem.msgId}`"
-                  :src="currentItem.url"
-                  class="lightbox-media"
-                  alt="مدیا"
-                  draggable="false"
-                  @click.stop
-                />
-                <video
-                  v-else
-                  :key="`video-${currentItem.msgId}`"
-                  :src="currentItem.url"
-                  class="lightbox-media"
-                  controls
-                  autoplay
-                  playsinline
-                  @click.stop
-                ></video>
+              <div class="lightbox-stage-scene" :style="sceneTransform">
+                <div class="lightbox-stage-track">
+                  <div
+                    v-for="(item, index) in lightboxMedia.items"
+                    v-show="shouldRenderStageItem(index)"
+                    :key="item.msgId"
+                    class="lightbox-stage-card"
+                    :class="{ active: index === lightboxMedia.currentIndex }"
+                    :style="getStageItemStyle(index)"
+                  >
+                    <img
+                      v-if="item.type === 'image'"
+                      :src="item.url"
+                      class="lightbox-media"
+                      alt="مدیا"
+                      draggable="false"
+                      @click.stop
+                    />
+                    <video
+                      v-else
+                      :src="item.url"
+                      class="lightbox-media"
+                      :controls="index === lightboxMedia.currentIndex"
+                      :autoplay="index === lightboxMedia.currentIndex"
+                      :muted="index !== lightboxMedia.currentIndex"
+                      playsinline
+                      @click.stop
+                    ></video>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          <div ref="stripSlotRef" class="lightbox-strip-slot" @click.stop>
+          <div class="lightbox-strip-slot" @click.stop>
             <div v-if="hasAlbumStrip" class="lightbox-strip">
               <button
                 v-for="(item, index) in lightboxMedia.items"
                 :key="item.msgId"
-                :ref="(element) => setThumbRef(element, index)"
                 class="lightbox-thumb"
                 :class="{ active: index === lightboxMedia.currentIndex }"
                 :style="getThumbStyle(index)"
@@ -431,17 +452,37 @@ function handleTouchEnd() {
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
 }
 
-.lightbox-stage-viewport {
+.lightbox-stage-scene {
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
-  display: grid;
-  place-items: center;
-  justify-items: center;
-  align-items: center;
+  position: relative;
   overflow: hidden;
   will-change: transform;
+  perspective: 1800px;
+}
+
+.lightbox-stage-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+}
+
+.lightbox-stage-card {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  box-sizing: border-box;
+  transform-origin: center center;
+  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.28s ease, filter 0.28s ease;
+}
+
+.lightbox-stage-card.active {
+  transition-duration: 0.34s;
 }
 
 .lightbox-media {
@@ -454,6 +495,8 @@ function handleTouchEnd() {
   object-position: center center;
   background: transparent;
   margin: auto;
+  border-radius: 18px;
+  box-shadow: 0 22px 40px rgba(0, 0, 0, 0.24);
 }
 
 .lightbox-strip-slot {
@@ -462,70 +505,54 @@ function handleTouchEnd() {
   max-width: 100%;
   min-width: 0;
   min-height: 92px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 10px 18px 4px;
+  display: grid;
+  place-items: center;
+  padding: 10px 18px 8px;
   box-sizing: border-box;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  scroll-snap-type: x proximity;
-  scroll-behavior: smooth;
-}
-
-.lightbox-strip-slot::-webkit-scrollbar {
-  display: none;
+  overflow: hidden;
 }
 
 .lightbox-strip-slot::before,
 .lightbox-strip-slot::after {
   content: '';
-  position: sticky;
+  position: absolute;
   top: 0;
   bottom: 0;
-  width: 30px;
-  flex: none;
+  width: 56px;
   pointer-events: none;
   z-index: 3;
 }
 
 .lightbox-strip-slot::before {
   left: 0;
-  margin-right: -30px;
   background: linear-gradient(90deg, rgba(7, 10, 16, 0.82), rgba(7, 10, 16, 0));
 }
 
 .lightbox-strip-slot::after {
   right: 0;
-  margin-left: -30px;
   background: linear-gradient(270deg, rgba(7, 10, 16, 0.82), rgba(7, 10, 16, 0));
 }
 
 .lightbox-strip {
-  width: max-content;
-  min-width: 100%;
-  max-width: none;
-  flex: none;
-  display: flex;
-  direction: ltr;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 12px 8px 2px;
+  --thumb-size: 72px;
+  position: relative;
+  width: min(100%, 520px);
+  height: calc(var(--thumb-size) + 24px);
   box-sizing: border-box;
   border-radius: 28px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 10px 26px rgba(0, 0, 0, 0.22);
+  perspective: 1200px;
+  overflow: hidden;
 }
 
 .lightbox-thumb {
   position: relative;
-  width: 72px;
-  height: 72px;
-  flex: none;
+  width: var(--thumb-size);
+  height: var(--thumb-size);
+  position: absolute;
+  left: calc(50% - (var(--thumb-size) / 2));
+  top: calc(50% - (var(--thumb-size) / 2));
   border: none;
   border-radius: 18px;
   overflow: hidden;
@@ -533,14 +560,13 @@ function handleTouchEnd() {
   cursor: pointer;
   background: rgba(255, 255, 255, 0.08);
   opacity: 0.68;
-  scroll-snap-align: center;
-  transform-origin: center bottom;
-  transition: opacity 0.28s ease, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.28s ease, filter 0.28s ease;
+  transform-origin: center center;
+  transform-style: preserve-3d;
+  transition: opacity 0.32s ease, transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.32s ease, filter 0.32s ease;
 }
 
 .lightbox-thumb.active {
   opacity: 1;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 16px 28px rgba(0, 0, 0, 0.34);
 }
 
 .lightbox-thumb-image {
@@ -629,14 +655,12 @@ function handleTouchEnd() {
   }
 
   .lightbox-thumb {
-    width: 64px;
-    height: 64px;
     border-radius: 16px;
   }
 
   .lightbox-strip {
-    gap: 10px;
-    padding: 10px 6px 2px;
+    --thumb-size: 64px;
+    width: min(100%, 420px);
   }
 }
 </style>
