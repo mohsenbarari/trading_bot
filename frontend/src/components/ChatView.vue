@@ -177,11 +177,14 @@ const mediaLogic = useChatMedia({
 const wsLogic = useChatWebSocket({
   selectedUserId,
   messageInput,
+  messages,
+  conversations,
   apiFetch: messagesLogic.apiFetch,
   loadConversations: messagesLogic.loadConversations,
   loadMessages: messagesLogic.loadMessages,
   scrollToBottom,
-  markAsRead: messagesLogic.markAsRead
+  markAsRead: messagesLogic.markAsRead,
+  isUserAtBottom
 })
 
 const {
@@ -559,13 +562,44 @@ const groupedMessages = computed(() => {
 
   // Group only messages that were explicitly sent in the same album batch.
   groups.forEach(group => {
-    const collapsedItems: any[] = []
-    const consumedAlbumIds = new Set<string>()
+    // Single-pass bucketing: compute album meta for every message and
+    // bucket eligible media messages by (senderId + albumId) so we avoid
+    // a nested filter for each album-seed message (previously O(n*k)).
     const albumMetaByMessageId = new Map<number, { albumId: string | null, albumIndex: number }>()
+    const albumBuckets = new Map<string, any[]>()
 
     group.items.forEach(msg => {
-      albumMetaByMessageId.set(msg.id, getAlbumMeta(msg))
+      const meta = getAlbumMeta(msg)
+      albumMetaByMessageId.set(msg.id, meta)
+
+      if (!meta.albumId) return
+      const isMedia = msg.message_type === 'image' || msg.message_type === 'video'
+      if (!isMedia || msg.reply_to_message || msg.is_error) return
+
+      const bucketKey = `${msg.sender_id}::${meta.albumId}`
+      const bucket = albumBuckets.get(bucketKey)
+      if (bucket) {
+        bucket.push(msg)
+      } else {
+        albumBuckets.set(bucketKey, [msg])
+      }
     })
+
+    // Sort each bucket by album_index / created_at / id.
+    albumBuckets.forEach((bucket) => {
+      bucket.sort((left, right) => {
+        const leftMeta = albumMetaByMessageId.get(left.id)
+        const rightMeta = albumMetaByMessageId.get(right.id)
+        const byIndex = (leftMeta?.albumIndex ?? Number.MAX_SAFE_INTEGER) - (rightMeta?.albumIndex ?? Number.MAX_SAFE_INTEGER)
+        if (byIndex !== 0) return byIndex
+        const byCreatedAt = new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+        if (byCreatedAt !== 0) return byCreatedAt
+        return left.id - right.id
+      })
+    })
+
+    const collapsedItems: any[] = []
+    const consumedAlbumKeys = new Set<string>()
 
     group.items.forEach(msg => {
       const isMedia = msg.message_type === 'image' || msg.message_type === 'video'
@@ -574,42 +608,20 @@ const groupedMessages = computed(() => {
         return
       }
 
-      const albumMeta = albumMetaByMessageId.get(msg.id)
-      if (!albumMeta?.albumId) {
+      const meta = albumMetaByMessageId.get(msg.id)
+      if (!meta?.albumId) {
         collapsedItems.push(msg)
         return
       }
 
-      if (consumedAlbumIds.has(albumMeta.albumId)) {
-        return
-      }
+      const bucketKey = `${msg.sender_id}::${meta.albumId}`
+      if (consumedAlbumKeys.has(bucketKey)) return
+      consumedAlbumKeys.add(bucketKey)
 
-      consumedAlbumIds.add(albumMeta.albumId)
-
-      const albumMessages = group.items
-        .filter(candidate => {
-          if (candidate.sender_id !== msg.sender_id) return false
-          if (candidate.reply_to_message) return false
-          if (candidate.is_error) return false
-          if (candidate.message_type !== 'image' && candidate.message_type !== 'video') return false
-
-          return albumMetaByMessageId.get(candidate.id)?.albumId === albumMeta.albumId
-        })
-        .sort((left, right) => {
-          const leftMeta = albumMetaByMessageId.get(left.id)
-          const rightMeta = albumMetaByMessageId.get(right.id)
-          const byIndex = (leftMeta?.albumIndex ?? Number.MAX_SAFE_INTEGER) - (rightMeta?.albumIndex ?? Number.MAX_SAFE_INTEGER)
-          if (byIndex !== 0) return byIndex
-
-          const byCreatedAt = new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
-          if (byCreatedAt !== 0) return byCreatedAt
-
-          return left.id - right.id
-        })
-
+      const bucket = albumBuckets.get(bucketKey) ?? [msg]
       collapsedItems.push(
-        albumMessages.length > 1
-          ? { type: 'album', id: `album_${albumMeta.albumId}`, sender_id: msg.sender_id, messages: albumMessages }
+        bucket.length > 1
+          ? { type: 'album', id: `album_${meta.albumId}`, sender_id: msg.sender_id, messages: bucket }
           : msg
       )
     })
