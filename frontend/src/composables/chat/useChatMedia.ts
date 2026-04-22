@@ -5,6 +5,8 @@ import { primeMediaPreprocessTelemetry, recordMediaPreprocessTelemetry } from '.
 
 const CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const CHAT_MEDIA_MAX_UPLOAD_LABEL = '50MB'
+const CHAT_MEDIA_PREVIEW_MAX_EDGE = 56
+const CHAT_MEDIA_PREVIEW_QUALITY = 0.58
 const HEIC_MIME_TYPES = new Set([
     'image/heic',
     'image/heic-sequence',
@@ -222,8 +224,8 @@ async function preprocessImageOnMainThread(
     file: File | Blob,
     maxWidthOrHeight = 1920,
     quality = 0.85,
-    thumbnailMaxWidthOrHeight = 20,
-    thumbnailQuality = 0.5,
+    thumbnailMaxWidthOrHeight = CHAT_MEDIA_PREVIEW_MAX_EDGE,
+    thumbnailQuality = CHAT_MEDIA_PREVIEW_QUALITY,
 ) {
     const decoded = await decodeImageSource(file)
 
@@ -357,7 +359,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 async function generateImageThumbnailDataUrl(file: Blob): Promise<string> {
-    const thumb = await nativeImageCompress(file, 20, 0.5)
+    const thumb = await nativeImageCompress(file, CHAT_MEDIA_PREVIEW_MAX_EDGE, CHAT_MEDIA_PREVIEW_QUALITY)
     return await blobToDataUrl(thumb.blob)
 }
 
@@ -1052,7 +1054,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     const sourceWidth = video.videoWidth || width || 1
                     const sourceHeight = video.videoHeight || height || 1
                     const canvas = document.createElement('canvas')
-                    const targetSize = 20
+                    const targetSize = CHAT_MEDIA_PREVIEW_MAX_EDGE
                     const scale = Math.min(targetSize / sourceWidth, targetSize / sourceHeight)
                     canvas.width = Math.max(1, Math.round(sourceWidth * scale))
                     canvas.height = Math.max(1, Math.round(sourceHeight * scale))
@@ -1064,7 +1066,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
                     finish({
-                        thumbnailDataUrl: canvas.toDataURL('image/jpeg', 0.5),
+                        thumbnailDataUrl: canvas.toDataURL('image/jpeg', CHAT_MEDIA_PREVIEW_QUALITY),
                         width,
                         height,
                     })
