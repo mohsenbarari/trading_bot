@@ -34,7 +34,7 @@
               </button>
             </div>
 
-            <button class="camera-icon-btn" @click="toggleFacingMode" :disabled="isRecording || isCameraStarting" title="تغییر دوربین">
+            <button class="camera-icon-btn" @click="toggleFacingMode" :disabled="isRecording || isCameraStarting || isUsingNativeCameraFallback" title="تغییر دوربین">
               <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M17 1l4 4-4 4"></path>
                 <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
@@ -55,6 +55,11 @@
 
             <div v-if="isCameraStarting" class="camera-status-overlay">
               در حال آماده‌سازی دوربین...
+            </div>
+
+            <div v-else-if="isUsingNativeCameraFallback" class="camera-status-overlay native">
+              <div>{{ nativeCameraFallbackTitle }}</div>
+              <div class="camera-fallback-hint">{{ nativeCameraFallbackHint }}</div>
             </div>
 
             <div v-else-if="cameraError" class="camera-status-overlay error">
@@ -115,7 +120,8 @@
         <div class="sheet-content">
           <!-- Gallery Tab -->
           <div v-if="activeTab === 'gallery'" class="tab-panel gallery-panel">
-            <input ref="cameraInput" type="file" accept="image/*,video/*" capture="environment" style="display:none" @change="onGalleryFile" />
+            <input ref="cameraPhotoInput" type="file" accept="image/*" capture="environment" style="display:none" @change="onGalleryFile" />
+            <input ref="cameraVideoInput" type="file" accept="video/*" capture="environment" style="display:none" @change="onGalleryFile" />
             <input ref="galleryInput" type="file" accept="image/*,video/*" multiple style="display:none" @change="onGalleryFile" />
 
             <button class="action-card" @click="openCameraCapture()">
@@ -219,7 +225,8 @@ const emit = defineEmits<{
 }>()
 
 const activeTab = ref<'gallery' | 'file' | 'location'>('gallery')
-const cameraInput = ref<HTMLInputElement | null>(null)
+const cameraPhotoInput = ref<HTMLInputElement | null>(null)
+const cameraVideoInput = ref<HTMLInputElement | null>(null)
 const galleryInput = ref<HTMLInputElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const sheetRef = ref<HTMLElement | null>(null)
@@ -229,12 +236,13 @@ const cameraPreviewRef = ref<HTMLVideoElement | null>(null)
 const showCameraCapture = ref(false)
 const cameraMode = ref<'photo' | 'video'>('photo')
 const activeFacingMode = ref<'environment' | 'user'>('environment')
+const cameraCaptureMode = ref<'inline' | 'native'>('inline')
 const isCameraStarting = ref(false)
 const cameraError = ref('')
 const isRecording = ref(false)
 const recordingSeconds = ref(0)
 
-let cameraStream: MediaStream | null = null
+const cameraStream = ref<MediaStream | null>(null)
 let mediaRecorder: MediaRecorder | null = null
 let recordedChunks: BlobPart[] = []
 let recordingTimer: number | null = null
@@ -245,7 +253,21 @@ const selectedLatLng = ref<{ lat: number; lng: number }>({ lat: 35.6892, lng: 51
 
 const tileUrl = ref('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
 
-const isCameraReady = computed(() => Boolean(cameraStream) && !isCameraStarting.value && !cameraError.value)
+const isUsingNativeCameraFallback = computed(() => cameraCaptureMode.value === 'native')
+const nativeCameraFallbackTitle = computed(() => (
+  cameraMode.value === 'photo'
+    ? 'پیش نمایش زنده دوربین در این مرورگر در دسترس نیست.'
+    : 'پیش نمایش زنده فیلم برداری در این مرورگر در دسترس نیست.'
+))
+const nativeCameraFallbackHint = computed(() => (
+  cameraMode.value === 'photo'
+    ? 'با دکمه پایین، دوربین سیستم برای گرفتن عکس باز می شود.'
+    : 'با دکمه پایین، دوربین سیستم برای ضبط ویدئو باز می شود.'
+))
+const isCameraReady = computed(() => (
+  isUsingNativeCameraFallback.value
+  || (Boolean(cameraStream.value) && !isCameraStarting.value && !cameraError.value)
+))
 const formattedRecordingTime = computed(() => {
   const mins = Math.floor(recordingSeconds.value / 60)
   const secs = recordingSeconds.value % 60
@@ -280,8 +302,8 @@ function stopCameraTracks() {
     }
   }
 
-  cameraStream?.getTracks().forEach((track) => track.stop())
-  cameraStream = null
+  cameraStream.value?.getTracks().forEach((track) => track.stop())
+  cameraStream.value = null
 }
 
 function cleanupCamera(discardRecording = true) {
@@ -303,9 +325,33 @@ function cleanupCamera(discardRecording = true) {
   recordingSeconds.value = 0
   stopRecordingTimer()
   stopCameraTracks()
+  cameraCaptureMode.value = 'inline'
   cameraError.value = ''
   isCameraStarting.value = false
   showCameraCapture.value = false
+}
+
+function supportsInlineCameraPreview() {
+  return typeof window !== 'undefined'
+    && window.isSecureContext
+    && !!navigator.mediaDevices?.getUserMedia
+}
+
+function openNativeCameraCapture(mode: 'photo' | 'video' = cameraMode.value) {
+  if (mode === 'video') {
+    cameraVideoInput.value?.click()
+    return
+  }
+
+  cameraPhotoInput.value?.click()
+}
+
+function enableNativeCameraFallback() {
+  stopCameraTracks()
+  cameraCaptureMode.value = 'native'
+  cameraError.value = ''
+  isCameraStarting.value = false
+  showCameraCapture.value = true
 }
 
 async function attachCameraStream(stream: MediaStream) {
@@ -335,11 +381,12 @@ async function requestCameraStream(includeAudio: boolean) {
 }
 
 async function startCameraStream() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    cameraInput.value?.click()
+  if (!supportsInlineCameraPreview()) {
+    enableNativeCameraFallback()
     return
   }
 
+  cameraCaptureMode.value = 'inline'
   isCameraStarting.value = true
   cameraError.value = ''
   stopCameraTracks()
@@ -355,13 +402,12 @@ async function startCameraStream() {
       stream = await requestCameraStream(false)
     }
 
-    cameraStream = stream
+    cameraStream.value = stream
     showCameraCapture.value = true
     await attachCameraStream(stream)
   } catch (error) {
     console.error('Camera start error:', error)
-    cameraError.value = 'امکان دسترسی به دوربین وجود ندارد. لطفا دسترسی مرورگر را بررسی کنید.'
-    showCameraCapture.value = true
+    enableNativeCameraFallback()
   } finally {
     isCameraStarting.value = false
   }
@@ -388,7 +434,7 @@ async function emitCapturedMedia(file: File) {
 
 async function capturePhoto() {
   const preview = cameraPreviewRef.value
-  if (!preview || !cameraStream) return
+  if (!preview || !cameraStream.value) return
 
   const width = Math.max(1, preview.videoWidth || 1080)
   const height = Math.max(1, preview.videoHeight || 1920)
@@ -414,7 +460,7 @@ async function capturePhoto() {
 }
 
 function startVideoRecording() {
-  if (!cameraStream) return
+  if (!cameraStream.value) return
   if (typeof MediaRecorder === 'undefined') {
     alert('مرورگر شما از فیلم‌برداری پشتیبانی نمی‌کند.')
     return
@@ -425,8 +471,8 @@ function startVideoRecording() {
 
   try {
     mediaRecorder = mimeType
-      ? new MediaRecorder(cameraStream, { mimeType })
-      : new MediaRecorder(cameraStream)
+      ? new MediaRecorder(cameraStream.value, { mimeType })
+      : new MediaRecorder(cameraStream.value)
   } catch (error) {
     console.error('MediaRecorder init failed:', error)
     alert('مرورگر شما از فیلم‌برداری پشتیبانی نمی‌کند.')
@@ -466,6 +512,11 @@ function stopVideoRecording() {
 }
 
 function handlePrimaryCameraAction() {
+  if (isUsingNativeCameraFallback.value) {
+    openNativeCameraCapture(cameraMode.value)
+    return
+  }
+
   if (!isCameraReady.value) return
 
   if (cameraMode.value === 'photo') {
@@ -482,14 +533,15 @@ function handlePrimaryCameraAction() {
 }
 
 function openCameraCapture() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    cameraInput.value?.click()
-    return
-  }
-
   cameraMode.value = 'photo'
   activeFacingMode.value = 'environment'
   showCameraCapture.value = true
+
+  if (!supportsInlineCameraPreview()) {
+    enableNativeCameraFallback()
+    return
+  }
+
   void startCameraStream()
 }
 
@@ -497,13 +549,13 @@ async function setCameraMode(mode: 'photo' | 'video') {
   if (cameraMode.value === mode || isRecording.value) return
   cameraMode.value = mode
 
-  if (showCameraCapture.value) {
+  if (showCameraCapture.value && !isUsingNativeCameraFallback.value) {
     await startCameraStream()
   }
 }
 
 async function toggleFacingMode() {
-  if (isRecording.value) return
+  if (isRecording.value || isUsingNativeCameraFallback.value) return
   activeFacingMode.value = activeFacingMode.value === 'environment' ? 'user' : 'environment'
 
   if (showCameraCapture.value) {
@@ -778,6 +830,17 @@ onBeforeUnmount(() => {
 
 .camera-status-overlay.error {
   background: rgba(15, 15, 15, 0.82);
+}
+
+.camera-status-overlay.native {
+  background: linear-gradient(180deg, rgba(10, 10, 10, 0.7), rgba(10, 10, 10, 0.88));
+}
+
+.camera-fallback-hint {
+  max-width: 320px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .camera-error-btn {
