@@ -360,8 +360,8 @@ const layout = computed(() => buildLayout(props.items))
 }
 
 .album-media-preview {
-  filter: blur(4px) saturate(1.04) brightness(0.98);
-  transform: scale(1.03);
+  filter: saturate(1.02) contrast(1.03) brightness(0.99);
+  transform: scale(1.01);
 }
 
 .album-media-fallback {

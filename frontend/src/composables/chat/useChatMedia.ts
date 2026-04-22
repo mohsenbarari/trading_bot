@@ -5,8 +5,8 @@ import { primeMediaPreprocessTelemetry, recordMediaPreprocessTelemetry } from '.
 
 const CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const CHAT_MEDIA_MAX_UPLOAD_LABEL = '50MB'
-const CHAT_MEDIA_PREVIEW_MAX_EDGE = 56
-const CHAT_MEDIA_PREVIEW_QUALITY = 0.58
+const CHAT_MEDIA_PREVIEW_MAX_EDGE = 96
+const CHAT_MEDIA_PREVIEW_QUALITY = 0.68
 const HEIC_MIME_TYPES = new Set([
     'image/heic',
     'image/heic-sequence',
