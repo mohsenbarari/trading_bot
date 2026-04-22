@@ -17,6 +17,7 @@ type ForwardTargetCandidate = ChatForwardTarget & {
 }
 
 const USER_FETCH_LIMIT = 5000
+const MAX_FORWARD_TARGETS = 10
 
 const props = defineProps<{
   showForwardModal: boolean
@@ -25,14 +26,17 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'forward-to', target: ChatForwardTarget): void
+  (e: 'forward-to', targets: ChatForwardTarget[]): void
 }>()
 
 const searchQuery = ref('')
 const isLoading = ref(false)
 const loadError = ref('')
 const allUsers = ref<ForwardUser[]>([])
+const selectedTargets = ref<Map<string, ChatForwardTarget>>(new Map())
+const limitFlash = ref(false)
 let fetchSequence = 0
+let limitFlashTimer: ReturnType<typeof setTimeout> | null = null
 
 function normalizeSearchValue(value: string | null | undefined) {
   return (value || '').trim().toLowerCase()
@@ -68,12 +72,20 @@ async function loadForwardUsers() {
 watch(() => props.showForwardModal, (visible) => {
   if (visible) {
     searchQuery.value = ''
+    selectedTargets.value = new Map()
+    limitFlash.value = false
     void loadForwardUsers()
     return
   }
 
   searchQuery.value = ''
   loadError.value = ''
+  selectedTargets.value = new Map()
+  limitFlash.value = false
+  if (limitFlashTimer) {
+    clearTimeout(limitFlashTimer)
+    limitFlashTimer = null
+  }
 })
 
 const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
@@ -131,13 +143,52 @@ const filteredTargets = computed(() => {
 const recentTargets = computed(() => filteredTargets.value.filter(target => target.isConversation))
 const otherTargets = computed(() => filteredTargets.value.filter(target => !target.isConversation))
 
-function emitForwardTarget(target: ForwardTargetCandidate) {
-  emit('forward-to', {
-    kind: target.kind,
-    id: target.id,
-    title: target.title,
-    subtitle: target.subtitle,
-  })
+const selectedCount = computed(() => selectedTargets.value.size)
+const canAddMore = computed(() => selectedCount.value < MAX_FORWARD_TARGETS)
+const selectedList = computed(() => Array.from(selectedTargets.value.values()))
+
+function isTargetSelected(target: ForwardTargetCandidate) {
+  return selectedTargets.value.has(target.key)
+}
+
+function flashLimit() {
+  limitFlash.value = true
+  if (limitFlashTimer) clearTimeout(limitFlashTimer)
+  limitFlashTimer = setTimeout(() => {
+    limitFlash.value = false
+    limitFlashTimer = null
+  }, 900)
+}
+
+function toggleTarget(target: ForwardTargetCandidate) {
+  const next = new Map(selectedTargets.value)
+  if (next.has(target.key)) {
+    next.delete(target.key)
+  } else {
+    if (next.size >= MAX_FORWARD_TARGETS) {
+      flashLimit()
+      return
+    }
+    next.set(target.key, {
+      kind: target.kind,
+      id: target.id,
+      title: target.title,
+      subtitle: target.subtitle,
+    })
+  }
+  selectedTargets.value = next
+}
+
+function removeSelected(key: string) {
+  if (!selectedTargets.value.has(key)) return
+  const next = new Map(selectedTargets.value)
+  next.delete(key)
+  selectedTargets.value = next
+}
+
+function confirmForward() {
+  if (selectedList.value.length === 0) return
+  emit('forward-to', selectedList.value)
 }
 </script>
 
@@ -149,9 +200,26 @@ function emitForwardTarget(target: ForwardTargetCandidate) {
           <div class="forward-modal-header">
             <div class="header-copy">
               <h3>هدایت پیام</h3>
-              <p>گفتگوهای اخیر اول نمایش داده می‌شوند و بعد بقیه کاربران</p>
+              <p>
+                تا ۱۰ گفتگو/کاربر را انتخاب کنید
+                <span v-if="selectedCount > 0" class="header-count" :class="{ 'is-flash': limitFlash }">
+                  ({{ selectedCount }}/{{ MAX_FORWARD_TARGETS }})
+                </span>
+              </p>
             </div>
             <button class="close-btn" @click="emit('close')">✕</button>
+          </div>
+
+          <div v-if="selectedList.length > 0" class="forward-modal-chips">
+            <button
+              v-for="target in selectedList"
+              :key="target.kind + '-' + target.id"
+              class="selected-chip"
+              @click="removeSelected(target.kind + '-' + target.id)"
+            >
+              <span class="chip-title">{{ target.title }}</span>
+              <span class="chip-remove">✕</span>
+            </button>
           </div>
 
           <div class="forward-modal-search">
@@ -182,8 +250,14 @@ function emitForwardTarget(target: ForwardTargetCandidate) {
                   v-for="target in recentTargets"
                   :key="target.key"
                   class="forward-target-item"
-                  @click="emitForwardTarget(target)"
+                  :class="{ 'is-selected': isTargetSelected(target), 'is-disabled': !canAddMore && !isTargetSelected(target) }"
+                  @click="toggleTarget(target)"
                 >
+                  <div class="select-indicator" :class="{ checked: isTargetSelected(target) }">
+                    <svg v-if="isTargetSelected(target)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  </div>
                   <div class="target-avatar conversation">
                     {{ getAvatarInitial(target.title) }}
                   </div>
@@ -203,8 +277,14 @@ function emitForwardTarget(target: ForwardTargetCandidate) {
                   v-for="target in otherTargets"
                   :key="target.key"
                   class="forward-target-item"
-                  @click="emitForwardTarget(target)"
+                  :class="{ 'is-selected': isTargetSelected(target), 'is-disabled': !canAddMore && !isTargetSelected(target) }"
+                  @click="toggleTarget(target)"
                 >
+                  <div class="select-indicator" :class="{ checked: isTargetSelected(target) }">
+                    <svg v-if="isTargetSelected(target)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  </div>
                   <div class="target-avatar">
                     {{ getAvatarInitial(target.title) }}
                   </div>
@@ -215,6 +295,20 @@ function emitForwardTarget(target: ForwardTargetCandidate) {
                 </button>
               </div>
             </template>
+          </div>
+
+          <div class="forward-modal-footer">
+            <button
+              class="forward-send-btn"
+              :disabled="selectedCount === 0"
+              @click="confirmForward"
+            >
+              <span>هدایت به {{ selectedCount > 0 ? selectedCount : '' }} {{ selectedCount > 0 ? 'مقصد' : 'مقصد' }}</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            </button>
           </div>
         </div>
       </div>
@@ -356,6 +450,128 @@ function emitForwardTarget(target: ForwardTargetCandidate) {
 
 .forward-target-item:hover {
   background: #f8fafc;
+}
+
+.forward-target-item.is-selected {
+  background: #ecfdf5;
+}
+
+.forward-target-item.is-disabled {
+  opacity: 0.45;
+}
+
+.select-indicator {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: 50%;
+  border: 2px solid #d1d5db;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.select-indicator.checked {
+  background: #10b981;
+  border-color: #10b981;
+  transform: scale(1.05);
+}
+
+.select-indicator svg {
+  width: 14px;
+  height: 14px;
+}
+
+.forward-modal-chips {
+  padding: 10px 14px 0;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.selected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #10b981;
+  background: #ecfdf5;
+  color: #065f46;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 200px;
+}
+
+.selected-chip .chip-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selected-chip .chip-remove {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.header-count {
+  color: #065f46;
+  font-weight: 700;
+  margin-right: 4px;
+  transition: color 0.2s ease;
+}
+
+.header-count.is-flash {
+  color: #dc2626;
+  animation: limit-shake 0.4s ease;
+}
+
+@keyframes limit-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+.forward-modal-footer {
+  padding: 12px 16px;
+  border-top: 1px solid #f1f5f9;
+  background: #ffffff;
+}
+
+.forward-send-btn {
+  width: 100%;
+  height: 48px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #0f766e, #10b981);
+  color: white;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: opacity 0.15s ease, transform 0.08s ease;
+}
+
+.forward-send-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.forward-send-btn:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+.forward-send-btn svg {
+  width: 18px;
+  height: 18px;
+  transform: scaleX(-1); /* point toward right in RTL */
 }
 
 .target-avatar {

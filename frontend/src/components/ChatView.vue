@@ -1135,38 +1135,53 @@ function closeForwardModal() {
   showForwardModal.value = false
 }
 
-async function forwardSelectedMessages(target: ChatForwardTarget) {
-  if (target.kind !== 'user') {
-    alert('هدایت پیام به گروه به زودی اضافه می‌شود')
+async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardTarget[]) {
+  const targetList = Array.isArray(targets) ? targets : [targets]
+  const userTargets = targetList.filter(t => t.kind === 'user')
+  const hasNonUser = targetList.length !== userTargets.length
+
+  if (userTargets.length === 0) {
+    if (hasNonUser) alert('هدایت پیام به گروه به زودی اضافه می‌شود')
     return
   }
 
-  const targetUserId = target.id
   const preparedBatch = prepareForwardBatch(selectedMessages.value)
   if (preparedBatch.length === 0) return
 
   isSending.value = true
   try {
-    const failedMessageIds: number[] = []
+    let anySuccess = false
+    const failedTargetTitles: string[] = []
 
-    for (const item of preparedBatch) {
-      try {
-        await messagesLogic.apiFetch('/chat/send', {
-          method: 'POST',
-          body: JSON.stringify({
-            receiver_id: targetUserId,
-            content: item.content,
-            message_type: item.message.message_type,
-            forwarded_from_id: item.forwardedFromId,
+    for (const target of userTargets) {
+      const targetUserId = target.id
+      let targetFailures = 0
+
+      for (const item of preparedBatch) {
+        try {
+          await messagesLogic.apiFetch('/chat/send', {
+            method: 'POST',
+            body: JSON.stringify({
+              receiver_id: targetUserId,
+              content: item.content,
+              message_type: item.message.message_type,
+              forwarded_from_id: item.forwardedFromId,
+            })
           })
-        })
-      } catch (forwardError) {
-        console.error('Failed to forward message:', item.message.id, forwardError)
-        failedMessageIds.push(item.message.id)
+        } catch (forwardError) {
+          console.error('Failed to forward message:', item.message.id, 'to', targetUserId, forwardError)
+          targetFailures++
+        }
+      }
+
+      if (targetFailures === preparedBatch.length) {
+        failedTargetTitles.push(target.title)
+      } else {
+        anySuccess = true
       }
     }
 
-    if (failedMessageIds.length === preparedBatch.length) {
+    if (!anySuccess) {
       alert('خطا در هدایت پیام‌ها')
       return
     }
@@ -1174,21 +1189,29 @@ async function forwardSelectedMessages(target: ChatForwardTarget) {
     selectedMessages.value = []
     showForwardModal.value = false
 
-    if (failedMessageIds.length > 0) {
-      alert('بخشی از پیام‌ها هدایت نشدند. دوباره تلاش کنید.')
+    if (failedTargetTitles.length > 0) {
+      alert(`بخشی از پیام‌ها برای این مقاصد هدایت نشدند: ${failedTargetTitles.join('، ')}`)
+    } else if (hasNonUser) {
+      alert('هدایت پیام به گروه به زودی اضافه می‌شود')
     }
-    
-    await loadConversations()
-    const targetConversation = conversations.value.find(c => c.other_user_id === targetUserId)
-    const targetName = targetConversation?.other_user_name || target.title
 
-    if (selectedUserId.value !== targetUserId) {
-      selectedUserId.value = targetUserId
-      selectedUserName.value = targetName
-      await loadMessages(targetUserId)
-    } else {
-      selectedUserName.value = targetName
-      await loadMessages(targetUserId, true)
+    await loadConversations()
+
+    // If only one target, open that chat (previous UX). For multi-target, stay on current chat.
+    if (userTargets.length === 1) {
+      const only = userTargets[0]!
+      const targetUserId = only.id
+      const targetConversation = conversations.value.find(c => c.other_user_id === targetUserId)
+      const targetName = targetConversation?.other_user_name || only.title
+
+      if (selectedUserId.value !== targetUserId) {
+        selectedUserId.value = targetUserId
+        selectedUserName.value = targetName
+        await loadMessages(targetUserId)
+      } else {
+        selectedUserName.value = targetName
+        await loadMessages(targetUserId, true)
+      }
     }
   } finally {
     isSending.value = false
