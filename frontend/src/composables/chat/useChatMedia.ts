@@ -357,6 +357,17 @@ type UploadJob = {
     cleanupAbort?: () => void
 }
 
+type DevicePerformanceTier = 'weak' | 'mid' | 'strong'
+
+type MediaClientCapability = {
+    tier: DevicePerformanceTier
+    cpuCount: number
+    deviceMemory: number
+    effectiveType: string
+    saveData: boolean
+    hasWorkerPreprocess: boolean
+}
+
 function blobToDataUrl(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader()
@@ -408,70 +419,128 @@ export function useChatMedia(options: UseChatMediaOptions) {
     let hydrationPumpScheduled = false
     let imageDbPromise: Promise<IDBDatabase> | null = null
 
-    const MAX_CONCURRENT_HYDRATIONS = 1
+    function getMediaClientCapability(): MediaClientCapability {
+        if (typeof navigator === 'undefined') {
+            return {
+                tier: 'weak',
+                cpuCount: 1,
+                deviceMemory: 0,
+                effectiveType: '',
+                saveData: false,
+                hasWorkerPreprocess: false,
+            }
+        }
+
+        const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection
+        const saveData = Boolean(connection?.saveData)
+        const effectiveType = connection?.effectiveType || ''
+        const cpuCount = navigator.hardwareConcurrency || 4
+        const deviceMemory = typeof (navigator as Navigator & { deviceMemory?: number }).deviceMemory === 'number'
+            ? (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 0
+            : 0
+        const hasWorkerPreprocess = canUseImagePreprocessWorker()
+
+        const slowConnection = saveData || effectiveType === 'slow-2g' || effectiveType === '2g'
+        const constrainedDevice = (deviceMemory > 0 && deviceMemory <= 2) || cpuCount <= 4
+
+        if (slowConnection || constrainedDevice) {
+            return {
+                tier: 'weak',
+                cpuCount,
+                deviceMemory,
+                effectiveType,
+                saveData,
+                hasWorkerPreprocess,
+            }
+        }
+
+        const strongCpu = cpuCount >= 8
+        const strongMemory = deviceMemory === 0 ? cpuCount >= 10 : deviceMemory >= 6
+        const fastConnection = !effectiveType || effectiveType === '4g' || effectiveType === '5g'
+
+        return {
+            tier: strongCpu && strongMemory && fastConnection && hasWorkerPreprocess ? 'strong' : 'mid',
+            cpuCount,
+            deviceMemory,
+            effectiveType,
+            saveData,
+            hasWorkerPreprocess,
+        }
+    }
+
+    const clientCapability = getMediaClientCapability()
+
+    function getAdaptiveHydrationLimit(capability: MediaClientCapability) {
+        if (capability.tier === 'strong') return 3
+        if (capability.tier === 'mid') return 2
+        return 1
+    }
+
+    const maxConcurrentHydrations = getAdaptiveHydrationLimit(clientCapability)
 
     primeMediaPreprocessTelemetry()
 
     function getAdaptivePreprocessLimit(albumSize: number, mediaType: 'image' | 'video' | 'voice') {
-        if (typeof navigator === 'undefined') return 1
+        const capability = clientCapability
 
-        const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection
-        const saveData = Boolean(connection?.saveData)
-        const effectiveType = connection?.effectiveType || ''
-        const cpuCount = navigator.hardwareConcurrency || 4
-        const deviceMemory = typeof (navigator as Navigator & { deviceMemory?: number }).deviceMemory === 'number'
-            ? (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 0
-            : 0
-
-        if (mediaType === 'voice') return 3
-        if (saveData || effectiveType === 'slow-2g' || effectiveType === '2g') return 1
-        if (deviceMemory > 0 && deviceMemory <= 2) return 1
-        if (cpuCount <= 4) return 1
-
-        // Some weaker Android devices misreport memory/network capability.
-        // Serialize large albums to avoid overlapping heavy media work.
-        if (albumSize >= 6) return 1
-
-        const recommended = getRecommendedImagePreprocessParallelism()
-        if (albumSize >= 5) return Math.max(1, Math.min(recommended, 2))
-        if (mediaType === 'video') return 1
-        return Math.max(1, Math.min(recommended + 1, 3))
-    }
-
-    function getAdaptiveUploadLimit(albumSize: number, mediaType: 'image' | 'video' | 'voice') {
-        if (typeof navigator === 'undefined') {
-            return albumSize > 1 ? 2 : 3
+        if (mediaType === 'voice') {
+            if (capability.tier === 'strong') return 4
+            if (capability.tier === 'mid') return 3
+            return 2
         }
 
-        const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection
-        const saveData = Boolean(connection?.saveData)
-        const effectiveType = connection?.effectiveType || ''
-        const cpuCount = navigator.hardwareConcurrency || 4
-        const deviceMemory = typeof (navigator as Navigator & { deviceMemory?: number }).deviceMemory === 'number'
-            ? (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 0
-            : 0
+        if (capability.tier === 'weak') return 1
 
-        if (saveData || effectiveType === 'slow-2g' || effectiveType === '2g') return 1
-        if (mediaType === 'voice') return cpuCount <= 4 ? 1 : 2
-
-        if (albumSize >= 6) return 1
-
-        const weakDevice = (deviceMemory > 0 && deviceMemory <= 2) || cpuCount <= 4
-        const midDevice = weakDevice || effectiveType === '3g' || (deviceMemory > 0 && deviceMemory <= 4) || cpuCount <= 6
-
-        if (mediaType === 'video') {
-            return midDevice ? 1 : 2
+        if (albumSize >= 8) {
+            return capability.tier === 'strong' ? 2 : 1
         }
 
         if (albumSize >= 6) {
-            return midDevice ? 1 : 2
+            return capability.tier === 'strong' ? 2 : 1
+        }
+
+        const recommended = getRecommendedImagePreprocessParallelism()
+        if (mediaType === 'video') {
+            return capability.tier === 'strong' ? 2 : 1
+        }
+
+        if (albumSize >= 4) {
+            return capability.tier === 'strong'
+                ? Math.max(1, Math.min(recommended + 1, 3))
+                : Math.max(1, Math.min(recommended, 2))
+        }
+
+        return capability.tier === 'strong'
+            ? Math.max(1, Math.min(recommended + 1, 4))
+            : Math.max(1, Math.min(recommended + 1, 3))
+    }
+
+    function getAdaptiveUploadLimit(albumSize: number, mediaType: 'image' | 'video' | 'voice') {
+        const capability = clientCapability
+
+        if (mediaType === 'voice') {
+            return capability.tier === 'strong' ? 2 : 1
+        }
+
+        if (capability.tier === 'weak') return 1
+
+        if (albumSize >= 8) {
+            return capability.tier === 'strong' ? 2 : 1
+        }
+
+        if (albumSize >= 6) {
+            return capability.tier === 'strong' ? 2 : 1
+        }
+
+        if (mediaType === 'video') {
+            return capability.tier === 'strong' ? 2 : 1
         }
 
         if (albumSize >= 2) {
-            return weakDevice ? 1 : 2
+            return capability.tier === 'strong' ? 3 : 2
         }
 
-        return weakDevice ? 1 : 3
+        return capability.tier === 'strong' ? 3 : 2
     }
 
     function launchPreprocessJob(job: PreprocessJob) {
@@ -835,7 +904,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
     function pumpHydrationQueue() {
         hydrationPumpScheduled = false
 
-        while (activeHydrationCount < MAX_CONCURRENT_HYDRATIONS && hydrationQueue.length > 0) {
+        while (activeHydrationCount < maxConcurrentHydrations && hydrationQueue.length > 0) {
             const nextItem = hydrationQueue.shift()
             if (!nextItem) {
                 return

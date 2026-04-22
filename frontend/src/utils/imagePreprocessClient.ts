@@ -57,7 +57,9 @@ export function getRecommendedImagePreprocessParallelism() {
     : 0
 
   if (memory > 0 && memory <= 2) return 1
-  if (cpuCount >= 8) return 2
+  if (cpuCount >= 10 && (memory === 0 || memory >= 6)) return 3
+  if (cpuCount >= 8 && (memory === 0 || memory >= 4)) return 3
+  if (cpuCount >= 6) return 2
   if (cpuCount >= 4) return 2
   return 1
 }
