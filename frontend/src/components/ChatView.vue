@@ -256,7 +256,14 @@ const sortedConversations = computed(() => {
   return [...conversations.value].sort((a, b) => {
     if (!a.last_message_at) return 1
     if (!b.last_message_at) return -1
-    return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
+    // Lexicographic compare on ISO-8601 strings matches chronological
+    // order for same-timezone suffix strings (the backend emits consistent
+    // `YYYY-MM-DDTHH:MM:SS[.ffffff]` values). This avoids constructing
+    // two `Date` objects in the comparator on every WS-triggered re-sort,
+    // which is O(n log n) object churn on busy chats.
+    if (b.last_message_at > a.last_message_at) return 1
+    if (b.last_message_at < a.last_message_at) return -1
+    return 0
   })
 })
 
@@ -1620,7 +1627,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
           <ChatSkeleton :count="8" />
         </div>
         
-        <div v-else class="messages-container" ref="messagesContainer" @scroll="handleScroll">
+        <div v-else class="messages-container" ref="messagesContainer" @scroll.passive="handleScroll">
           <div v-if="messages.length === 0" class="empty-state">
             <span>💬</span>
             <p>شروع گفتگو...</p>
