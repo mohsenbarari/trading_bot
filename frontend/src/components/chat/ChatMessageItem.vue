@@ -657,9 +657,16 @@ const albumLayoutItems = computed(() => {
       }
     })()
 
+    const fileId = getFileId(message.content)
+    const cachedMediaUrl = fileId ? props.imageCache[fileId] : ''
+    const resolvedMediaUrl = message.local_blob_url || cachedMediaUrl || ''
+    const previewUrl = parsedContent.thumbnail || ''
+
     return {
       msg: message,
-      url: message.local_blob_url || props.imageCache[getFileId(message.content)] || parsedContent.thumbnail,
+      url: resolvedMediaUrl || previewUrl,
+      previewUrl,
+      hasResolvedMedia: Boolean(resolvedMediaUrl),
       type: message.message_type,
       width: parsedContent.width,
       height: parsedContent.height

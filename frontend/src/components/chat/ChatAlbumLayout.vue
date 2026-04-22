@@ -8,6 +8,8 @@ import { computed } from 'vue'
 type AlbumItem = {
   msg: any
   url: string
+  previewUrl?: string
+  hasResolvedMedia?: boolean
   type: 'image' | 'video'
   width?: number
   height?: number
@@ -244,19 +246,31 @@ const layout = computed(() => buildLayout(props.items))
       >
         <img
           v-if="cell.item.type === 'image'"
-          :src="cell.item.url"
+          :src="cell.item.hasResolvedMedia ? cell.item.url : (cell.item.previewUrl || cell.item.url)"
           :data-media-msg-id="cell.item.msg.id"
           loading="lazy"
+          decoding="async"
           class="album-media msg-media-content"
+          :class="{ 'album-media-preview': !cell.item.hasResolvedMedia }"
         />
         <video
-          v-else
+          v-else-if="cell.item.hasResolvedMedia"
           :src="cell.item.url"
           class="album-media"
           muted
           loop
           playsinline
         ></video>
+        <img
+          v-else-if="cell.item.previewUrl || cell.item.url"
+          :src="cell.item.previewUrl || cell.item.url"
+          :data-media-msg-id="cell.item.msg.id"
+          loading="lazy"
+          decoding="async"
+          class="album-media album-media-preview"
+          alt="video preview"
+        />
+        <div v-else class="album-media album-media-fallback"></div>
         <div v-if="cell.item.type === 'video'" class="album-video-badge">
           <svg viewBox="0 0 24 24" width="12" height="12" fill="white"><path d="M8 5v14l11-7z"/></svg>
         </div>
@@ -343,6 +357,17 @@ const layout = computed(() => buildLayout(props.items))
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.album-media-preview {
+  filter: blur(12px) saturate(1.08);
+  transform: scale(1.08);
+}
+
+.album-media-fallback {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.08)),
+    rgba(0, 0, 0, 0.08);
 }
 
 .album-video-badge {
