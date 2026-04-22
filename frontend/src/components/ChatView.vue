@@ -15,7 +15,7 @@ import AttachmentMenu from './chat/AttachmentMenu.vue'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
-import type { Conversation, Message, StickerPack } from '../types/chat'
+import type { ChatForwardTarget, Conversation, Message, StickerPack } from '../types/chat'
 import { useChatMedia } from '../composables/chat/useChatMedia'
 import { useChatWebSocket } from '../composables/chat/useChatWebSocket'
 import { useChatMessages } from '../composables/chat/useChatMessages'
@@ -973,7 +973,13 @@ function closeForwardModal() {
   showForwardModal.value = false
 }
 
-async function forwardSelectedMessages(targetUserId: number) {
+async function forwardSelectedMessages(target: ChatForwardTarget) {
+  if (target.kind !== 'user') {
+    alert('هدایت پیام به گروه به زودی اضافه می‌شود')
+    return
+  }
+
+  const targetUserId = target.id
   const preparedBatch = prepareForwardBatch(selectedMessages.value)
   if (preparedBatch.length === 0) return
 
@@ -1010,15 +1016,17 @@ async function forwardSelectedMessages(targetUserId: number) {
       alert('بخشی از پیام‌ها هدایت نشدند. دوباره تلاش کنید.')
     }
     
+    await loadConversations()
+    const targetConversation = conversations.value.find(c => c.other_user_id === targetUserId)
+    const targetName = targetConversation?.other_user_name || target.title
+
     if (selectedUserId.value !== targetUserId) {
-        const conv = conversations.value.find(c => c.other_user_id === targetUserId)
-        if (conv) {
-             selectedUserId.value = targetUserId
-             selectedUserName.value = conv.other_user_name
-             loadMessages(targetUserId)
-        }
+      selectedUserId.value = targetUserId
+      selectedUserName.value = targetName
+      await loadMessages(targetUserId)
     } else {
-        loadMessages(targetUserId, true)
+      selectedUserName.value = targetName
+      await loadMessages(targetUserId, true)
     }
   } finally {
     isSending.value = false

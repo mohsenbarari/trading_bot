@@ -41,3 +41,10 @@ export interface StickerPack {
     name: string
     stickers: string[]
 }
+
+export interface ChatForwardTarget {
+    kind: 'user' | 'group'
+    id: number
+    title: string
+    subtitle?: string | null
+}
