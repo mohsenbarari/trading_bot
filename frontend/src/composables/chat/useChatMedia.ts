@@ -349,6 +349,14 @@ type PreprocessJob = {
     reject: (reason?: unknown) => void
 }
 
+type UploadJob = {
+    limit: number
+    run: () => Promise<unknown>
+    resolve: (value: unknown) => void
+    reject: (reason?: unknown) => void
+    cleanupAbort?: () => void
+}
+
 function blobToDataUrl(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader()
@@ -382,9 +390,11 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
     let activeUploadsCount = 0
     let activePreprocessCount = 0
+    let activeNetworkUploadCount = 0
     const uploadControllers = new Map<number, { abort: () => void }>()
     const albumBatches = new Map<string, PendingAlbumBatch>()
     const preprocessQueue: PreprocessJob[] = []
+    const networkUploadQueue: UploadJob[] = []
     const pendingMediaLoads = new Map<string, Promise<string | null>>()
     const pendingHydrationKeys = new Set<string>()
     const hydrationQueue: Array<{
@@ -422,6 +432,40 @@ export function useChatMedia(options: UseChatMediaOptions) {
         if (albumSize >= 5) return Math.max(1, Math.min(recommended, 2))
         if (mediaType === 'video') return 1
         return Math.max(1, Math.min(recommended + 1, 3))
+    }
+
+    function getAdaptiveUploadLimit(albumSize: number, mediaType: 'image' | 'video' | 'voice') {
+        if (typeof navigator === 'undefined') {
+            return albumSize > 1 ? 2 : 3
+        }
+
+        const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection
+        const saveData = Boolean(connection?.saveData)
+        const effectiveType = connection?.effectiveType || ''
+        const cpuCount = navigator.hardwareConcurrency || 4
+        const deviceMemory = typeof (navigator as Navigator & { deviceMemory?: number }).deviceMemory === 'number'
+            ? (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 0
+            : 0
+
+        if (saveData || effectiveType === 'slow-2g' || effectiveType === '2g') return 1
+        if (mediaType === 'voice') return cpuCount <= 4 ? 1 : 2
+
+        const weakDevice = (deviceMemory > 0 && deviceMemory <= 2) || cpuCount <= 4
+        const midDevice = weakDevice || effectiveType === '3g' || (deviceMemory > 0 && deviceMemory <= 4) || cpuCount <= 6
+
+        if (mediaType === 'video') {
+            return midDevice ? 1 : 2
+        }
+
+        if (albumSize >= 6) {
+            return midDevice ? 1 : 2
+        }
+
+        if (albumSize >= 2) {
+            return weakDevice ? 1 : 2
+        }
+
+        return weakDevice ? 1 : 3
     }
 
     function launchPreprocessJob(job: PreprocessJob) {
@@ -470,6 +514,76 @@ export function useChatMedia(options: UseChatMediaOptions) {
             }
 
             preprocessQueue.push(job)
+        })
+    }
+
+    function launchUploadJob(job: UploadJob) {
+        activeNetworkUploadCount += 1
+        job.cleanupAbort?.()
+        void job.run()
+            .then((value) => job.resolve(value))
+            .catch((reason) => job.reject(reason))
+            .finally(() => {
+                activeNetworkUploadCount = Math.max(0, activeNetworkUploadCount - 1)
+                pumpUploadQueue()
+            })
+    }
+
+    function pumpUploadQueue() {
+        while (networkUploadQueue.length > 0) {
+            const nextIndex = networkUploadQueue.findIndex(job => activeNetworkUploadCount < job.limit)
+            if (nextIndex === -1) {
+                return
+            }
+
+            const [nextJob] = networkUploadQueue.splice(nextIndex, 1)
+            if (!nextJob) {
+                return
+            }
+
+            launchUploadJob(nextJob)
+        }
+    }
+
+    function runAdaptiveUploadTask<T>(
+        limit: number,
+        run: () => Promise<T>,
+        signal?: AbortSignal,
+    ): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            const normalizedLimit = Math.max(1, limit)
+
+            if (signal?.aborted) {
+                reject(new Error('UploadCancelled'))
+                return
+            }
+
+            const job: UploadJob = {
+                limit: normalizedLimit,
+                run: () => run() as Promise<unknown>,
+                resolve: (value) => resolve(value as T),
+                reject,
+            }
+
+            if (signal) {
+                const handleAbort = () => {
+                    const queuedIndex = networkUploadQueue.indexOf(job)
+                    if (queuedIndex !== -1) {
+                        networkUploadQueue.splice(queuedIndex, 1)
+                    }
+                    reject(new Error('UploadCancelled'))
+                }
+
+                signal.addEventListener('abort', handleAbort, { once: true })
+                job.cleanupAbort = () => signal.removeEventListener('abort', handleAbort)
+            }
+
+            if (activeNetworkUploadCount < normalizedLimit) {
+                launchUploadJob(job)
+                return
+            }
+
+            networkUploadQueue.push(job)
         })
     }
 
@@ -1160,6 +1274,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const normalizedAlbumSize = normalizedAlbumId ? Math.max(albumSize ?? 0, 1) : 0
         const preprocessBatchSize = normalizedAlbumSize || 1
         const preprocessLimit = getAdaptivePreprocessLimit(preprocessBatchSize, msgType)
+        const uploadLimit = getAdaptiveUploadLimit(preprocessBatchSize, msgType)
         
         if (!selectedUserId.value) return
 
@@ -1504,74 +1619,81 @@ export function useChatMedia(options: UseChatMediaOptions) {
             formData.append('file', uploadFile, sourceFile.name)
             formData.append('thumbnail', thumbBase64)
 
-            step = 'xhr_upload'
-            const data = await new Promise<any>((resolve, reject) => {
-                const xhr = new XMLHttpRequest()
-                uploadControllers.set(optimisticId, {
-                    abort: () => {
-                        const target = getOptimisticTarget();
-                        if (target) target.is_error = false; // to prevent error UI
-                        xhr.abort();
-                        const index = messages.value.findIndex(m => m.id === optimisticId);
-                        if (index !== -1) messages.value.splice(index, 1);
-                        markAlbumItemState(normalizedAlbumId, optimisticId, 'cancelled')
-                        reject(new Error('UploadCancelled'))
-                    }
-                });
-                xhr.open('POST', `${apiBaseUrl}/api/chat/upload-media`)
-                xhr.setRequestHeader('Authorization', `Bearer ${localStorage.getItem('auth_token') || jwtToken}`)
-
-                xhr.upload.onprogress = (e) => {
-                    if (e.lengthComputable) {
-                        const target = getOptimisticTarget();
-                        target.upload_progress = Math.round((e.loaded / e.total) * 100)
-                        target.upload_loaded = e.loaded
-                        target.upload_total = e.total
-                    }
+            step = 'wait_upload_slot'
+            const data = await runAdaptiveUploadTask(uploadLimit, () => {
+                if (processingAbortController.signal.aborted || isCancelledLocally) {
+                    throw new Error('UploadCancelled')
                 }
 
-                xhr.onload = () => {
-                    if (xhr.status === 401) {
-                        reject(new Error("نشست شما منقضی شده است. لطفاً صفحه را رفرش کنید."))
-                        return
-                    }
-                    if (xhr.status === 413) {
-                        reject(new Error(buildUploadTooLargeMessage(uploadFile.size)))
-                        return
-                    }
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        try {
-                            resolve(JSON.parse(xhr.responseText))
-                        } catch (err) {
-                            reject(new Error("Invalid JSON response"))
+                step = 'xhr_upload'
+                return new Promise<any>((resolve, reject) => {
+                    const xhr = new XMLHttpRequest()
+                    uploadControllers.set(optimisticId, {
+                        abort: () => {
+                            const target = getOptimisticTarget();
+                            if (target) target.is_error = false; // to prevent error UI
+                            xhr.abort();
+                            const index = messages.value.findIndex(m => m.id === optimisticId);
+                            if (index !== -1) messages.value.splice(index, 1);
+                            markAlbumItemState(normalizedAlbumId, optimisticId, 'cancelled')
+                            reject(new Error('UploadCancelled'))
                         }
-                    } else {
-                        try {
-                            const parsed = JSON.parse(xhr.responseText)
-                            if (parsed.detail) {
-                                reject(new Error(`مشکل سرور (${xhr.status}): ${parsed.detail}`))
-                                return
+                    });
+                    xhr.open('POST', `${apiBaseUrl}/api/chat/upload-media`)
+                    xhr.setRequestHeader('Authorization', `Bearer ${localStorage.getItem('auth_token') || jwtToken}`)
+
+                    xhr.upload.onprogress = (e) => {
+                        if (e.lengthComputable) {
+                            const target = getOptimisticTarget();
+                            target.upload_progress = Math.round((e.loaded / e.total) * 100)
+                            target.upload_loaded = e.loaded
+                            target.upload_total = e.total
+                        }
+                    }
+
+                    xhr.onload = () => {
+                        if (xhr.status === 401) {
+                            reject(new Error("نشست شما منقضی شده است. لطفاً صفحه را رفرش کنید."))
+                            return
+                        }
+                        if (xhr.status === 413) {
+                            reject(new Error(buildUploadTooLargeMessage(uploadFile.size)))
+                            return
+                        }
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            try {
+                                resolve(JSON.parse(xhr.responseText))
+                            } catch (err) {
+                                reject(new Error("Invalid JSON response"))
                             }
-                        } catch (e) { }
-                        
-                        let safeResponse = xhr.responseText.substring(0, 100);
-                        if (safeResponse.toLowerCase().includes('<html')) {
-                            safeResponse = "خطای سرور یا عدم اتصال"; // Sanitize HTML
+                        } else {
+                            try {
+                                const parsed = JSON.parse(xhr.responseText)
+                                if (parsed.detail) {
+                                    reject(new Error(`مشکل سرور (${xhr.status}): ${parsed.detail}`))
+                                    return
+                                }
+                            } catch (e) { }
+
+                            let safeResponse = xhr.responseText.substring(0, 100);
+                            if (safeResponse.toLowerCase().includes('<html')) {
+                                safeResponse = "خطای سرور یا عدم اتصال"; // Sanitize HTML
+                            }
+                            reject(new Error(`مشکل سرور (${xhr.status}): ${safeResponse}`))
                         }
-                        reject(new Error(`مشکل سرور (${xhr.status}): ${safeResponse}`))
                     }
-                }
-                xhr.onerror = () => reject(new Error("Network Error"))
-                xhr.onabort = () => {
-                uploadControllers.delete(optimisticId)
-            }
-            
-            xhr.onloadend = () => {
-                uploadControllers.delete(optimisticId)
-            }
-            
-            xhr.send(formData)
-            })
+                    xhr.onerror = () => reject(new Error("Network Error"))
+                    xhr.onabort = () => {
+                        uploadControllers.delete(optimisticId)
+                    }
+
+                    xhr.onloadend = () => {
+                        uploadControllers.delete(optimisticId)
+                    }
+
+                    xhr.send(formData)
+                })
+            }, processingAbortController.signal)
             uploadControllers.delete(optimisticId);
 
             step = 'prepare_json'
