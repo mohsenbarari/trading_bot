@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import { useWebSocket } from '../composables/useWebSocket'
+import { useTradingSort } from '../composables/useTradingSort'
 import { apiFetchJson } from '../utils/auth'
 
 const { connect: wsConnect, on: wsOn, off: wsOff } = useWebSocket()
@@ -86,10 +87,15 @@ const tradingSettings = ref<TradingSettings>({
 })
 
 // Filter & Sort
-const filterType = ref<'all' | 'buy' | 'sell'>('all')
-const sortCommodity = ref('')
-const sortDirection = ref<'none' | 'asc' | 'desc'>('none')
-const showSortPanel = ref(false)
+const {
+  filterType,
+  sortCommodity,
+  sortDirection,
+  showSortPanel,
+  filteredOffers,
+  toggleSort,
+  clearSort,
+} = useTradingSort(offers)
 
 // Create Wizard State
 const showCreateWizard = ref(false)
@@ -178,52 +184,6 @@ function getCardTimerStyle(offer: Offer): Record<string, string> {
     '--timer-glow-strong': hsla(c, Math.min(glowOpacity * 1.8, 0.6)),
     '--timer-glow-subtle': hsla(c, 0.15)
   }
-}
-
-// Computed
-const filteredOffers = computed(() => {
-  let result = offers.value
-  
-  // Filter by type
-  if (filterType.value !== 'all') {
-    result = result.filter(o => o.offer_type === filterType.value)
-  }
-  
-  // Sort by price for selected commodity
-  if (sortCommodity.value && sortDirection.value !== 'none') {
-    const commodity = sortCommodity.value
-    const dir = sortDirection.value
-    result = [...result].sort((a, b) => {
-      const aMatch = a.commodity_name === commodity
-      const bMatch = b.commodity_name === commodity
-      // Non-matching commodities go to end
-      if (aMatch && !bMatch) return -1
-      if (!aMatch && bMatch) return 1
-      if (!aMatch && !bMatch) return 0
-      // Both match: sort by price
-      return dir === 'asc' ? a.price - b.price : b.price - a.price
-    })
-  }
-  
-  return result
-})
-
-function toggleSort(commodity: string) {
-  if (sortCommodity.value === commodity) {
-    // Cycle: none -> asc -> desc -> none
-    if (sortDirection.value === 'none') sortDirection.value = 'asc'
-    else if (sortDirection.value === 'asc') sortDirection.value = 'desc'
-    else { sortDirection.value = 'none'; sortCommodity.value = '' }
-  } else {
-    sortCommodity.value = commodity
-    sortDirection.value = 'asc'
-  }
-}
-
-function clearSort() {
-  sortCommodity.value = ''
-  sortDirection.value = 'none'
-  showSortPanel.value = false
 }
 
 const randomPlaceholder = computed(() => {
