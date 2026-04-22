@@ -1148,54 +1148,94 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
   const preparedBatch = prepareForwardBatch(selectedMessages.value)
   if (preparedBatch.length === 0) return
 
+  // Close modal and clear selection immediately so the UI unblocks.
+  // Sending happens in parallel in the background.
+  selectedMessages.value = []
+  showForwardModal.value = false
+
+  // Build flat (target, item) send tasks so we can parallelize across
+  // both targets and items, not sequentially per-target then per-item.
+  type ForwardTask = {
+    target: ChatForwardTarget
+    item: (typeof preparedBatch)[number]
+  }
+  const tasks: ForwardTask[] = []
+  for (const target of userTargets) {
+    for (const item of preparedBatch) {
+      tasks.push({ target, item })
+    }
+  }
+
+  const failuresByTarget = new Map<number, number>()
+  const titleByTarget = new Map<number, string>()
+  const totalByTarget = new Map<number, number>()
+  userTargets.forEach(t => {
+    titleByTarget.set(t.id, t.title)
+    totalByTarget.set(t.id, preparedBatch.length)
+  })
+
+  // Adaptive concurrency: keep weak devices safe, boost on capable devices.
+  // Each task is a single lightweight POST (no file upload), so we can push
+  // higher than upload concurrency. Cap relative to task count.
+  const navAny = navigator as any
+  const hwCores = typeof navAny?.hardwareConcurrency === 'number' ? navAny.hardwareConcurrency : 4
+  const memGb = typeof navAny?.deviceMemory === 'number' ? navAny.deviceMemory : 4
+  const baseConcurrency = hwCores >= 8 && memGb >= 4 ? 8
+    : hwCores >= 4 ? 6
+    : 3
+  const concurrency = Math.max(2, Math.min(baseConcurrency, tasks.length))
+
   isSending.value = true
-  try {
-    let anySuccess = false
-    const failedTargetTitles: string[] = []
-
-    for (const target of userTargets) {
-      const targetUserId = target.id
-      let targetFailures = 0
-
-      for (const item of preparedBatch) {
-        try {
-          await messagesLogic.apiFetch('/chat/send', {
-            method: 'POST',
-            body: JSON.stringify({
-              receiver_id: targetUserId,
-              content: item.content,
-              message_type: item.message.message_type,
-              forwarded_from_id: item.forwardedFromId,
-            })
+  const runWorker = async () => {
+    while (true) {
+      const task = tasks.shift()
+      if (!task) return
+      try {
+        await messagesLogic.apiFetch('/chat/send', {
+          method: 'POST',
+          body: JSON.stringify({
+            receiver_id: task.target.id,
+            content: task.item.content,
+            message_type: task.item.message.message_type,
+            forwarded_from_id: task.item.forwardedFromId,
           })
-        } catch (forwardError) {
-          console.error('Failed to forward message:', item.message.id, 'to', targetUserId, forwardError)
-          targetFailures++
-        }
+        })
+      } catch (forwardError) {
+        console.error('Failed to forward message:', task.item.message.id, 'to', task.target.id, forwardError)
+        failuresByTarget.set(task.target.id, (failuresByTarget.get(task.target.id) ?? 0) + 1)
       }
+    }
+  }
 
-      if (targetFailures === preparedBatch.length) {
-        failedTargetTitles.push(target.title)
+  try {
+    const workers = Array.from({ length: concurrency }, () => runWorker())
+    await Promise.all(workers)
+
+    const fullyFailedTargets: string[] = []
+    let anySuccess = false
+    userTargets.forEach(t => {
+      const failed = failuresByTarget.get(t.id) ?? 0
+      const total = totalByTarget.get(t.id) ?? 0
+      if (failed >= total) {
+        fullyFailedTargets.push(titleByTarget.get(t.id) ?? String(t.id))
       } else {
         anySuccess = true
       }
-    }
+    })
 
     if (!anySuccess) {
       alert('خطا در هدایت پیام‌ها')
       return
     }
 
-    selectedMessages.value = []
-    showForwardModal.value = false
-
-    if (failedTargetTitles.length > 0) {
-      alert(`بخشی از پیام‌ها برای این مقاصد هدایت نشدند: ${failedTargetTitles.join('، ')}`)
+    if (fullyFailedTargets.length > 0) {
+      alert(`بخشی از پیام‌ها برای این مقاصد هدایت نشدند: ${fullyFailedTargets.join('، ')}`)
     } else if (hasNonUser) {
       alert('هدایت پیام به گروه به زودی اضافه می‌شود')
     }
 
-    await loadConversations()
+    // Fire conversation refresh in background; don't block UI.
+    void loadConversations()
 
     // If only one target, open that chat (previous UX). For multi-target, stay on current chat.
     if (userTargets.length === 1) {
@@ -1207,10 +1247,10 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
       if (selectedUserId.value !== targetUserId) {
         selectedUserId.value = targetUserId
         selectedUserName.value = targetName
-        await loadMessages(targetUserId)
+        void loadMessages(targetUserId)
       } else {
         selectedUserName.value = targetName
-        await loadMessages(targetUserId, true)
+        void loadMessages(targetUserId, true)
       }
     }
   } finally {
