@@ -428,6 +428,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
         if (deviceMemory > 0 && deviceMemory <= 2) return 1
         if (cpuCount <= 4) return 1
 
+        // Some weaker Android devices misreport memory/network capability.
+        // Serialize large albums to avoid overlapping heavy media work.
+        if (albumSize >= 6) return 1
+
         const recommended = getRecommendedImagePreprocessParallelism()
         if (albumSize >= 5) return Math.max(1, Math.min(recommended, 2))
         if (mediaType === 'video') return 1
@@ -449,6 +453,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
         if (saveData || effectiveType === 'slow-2g' || effectiveType === '2g') return 1
         if (mediaType === 'voice') return cpuCount <= 4 ? 1 : 2
+
+        if (albumSize >= 6) return 1
 
         const weakDevice = (deviceMemory > 0 && deviceMemory <= 2) || cpuCount <= 4
         const midDevice = weakDevice || effectiveType === '3g' || (deviceMemory > 0 && deviceMemory <= 4) || cpuCount <= 6
