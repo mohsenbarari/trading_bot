@@ -58,7 +58,15 @@ export function useChatScroll(options: UseChatScrollOptions) {
         setTimeout(doScroll, 300)
     }
 
-    function handleScroll() {
+    // rAF-throttled scroll handler. On weak devices the native scroll
+    // event fires many times per frame; without throttling each event
+    // triggers reactive writes to `isUserAtBottom`/`showScrollButton`
+    // which causes layout work on every tick. Coalescing to one read
+    // per animation frame keeps the scroll path jank-free while still
+    // updating within ~16ms of the latest position.
+    let scrollRafPending = false
+    function runScrollUpdate() {
+        scrollRafPending = false
         const el = messagesContainer.value
         if (!el) return
 
@@ -66,13 +74,24 @@ export function useChatScroll(options: UseChatScrollOptions) {
         const distance = el.scrollHeight - el.scrollTop - el.clientHeight
         const atBottom = distance < threshold
 
-        isUserAtBottom.value = atBottom
-        showScrollButton.value = !atBottom
+        if (isUserAtBottom.value !== atBottom) {
+            isUserAtBottom.value = atBottom
+        }
+        const shouldShow = !atBottom
+        if (showScrollButton.value !== shouldShow) {
+            showScrollButton.value = shouldShow
+        }
 
         if (atBottom && unreadNewMessagesCount.value > 0) {
             markAsRead()
             unreadNewMessagesCount.value = 0
         }
+    }
+
+    function handleScroll() {
+        if (scrollRafPending) return
+        scrollRafPending = true
+        requestAnimationFrame(runScrollUpdate)
     }
 
     function scrollToUnreadOrBottom() {
