@@ -536,6 +536,12 @@ function hydrateRenderedMedia(item: any) {
   }
 }
 
+// Stable album wrapper cache: returns the same { type: 'album', ... } object
+// across re-runs of `groupedMessages` when the album's composition did not
+// actually change. This avoids re-rendering every album `<ChatMessageItem>`
+// on each new incoming WebSocket message.
+const albumWrapperCache = new Map<string, { signature: string, wrapper: any }>()
+
 const groupedMessages = computed(() => {
   const groups: { label: string, items: any[] }[] = []
   if (messages.value.length === 0) return groups;
@@ -558,9 +564,7 @@ const groupedMessages = computed(() => {
           currentGroup.push(msg)
       }
   }
-  groups.push({ label: currentLabel, items: currentGroup })
-
-  // Group only messages that were explicitly sent in the same album batch.
+  groups.push({ label: currentLabel, items: currentGroup })  // Group only messages that were explicitly sent in the same album batch.
   groups.forEach(group => {
     // Single-pass bucketing: compute album meta for every message and
     // bucket eligible media messages by (senderId + albumId) so we avoid
@@ -619,11 +623,20 @@ const groupedMessages = computed(() => {
       consumedAlbumKeys.add(bucketKey)
 
       const bucket = albumBuckets.get(bucketKey) ?? [msg]
-      collapsedItems.push(
-        bucket.length > 1
-          ? { type: 'album', id: `album_${meta.albumId}`, sender_id: msg.sender_id, messages: bucket }
-          : msg
-      )
+      if (bucket.length > 1) {
+        const signature = bucket.map(m => `${m.id}:${(m as any).is_deleted ? 1 : 0}:${(m as any).content?.length ?? 0}`).join('|')
+        const cacheKey = `${msg.sender_id}::${meta.albumId}`
+        const cached = albumWrapperCache.get(cacheKey)
+        if (cached && cached.signature === signature) {
+          collapsedItems.push(cached.wrapper)
+        } else {
+          const wrapper = { type: 'album', id: `album_${meta.albumId}`, sender_id: msg.sender_id, messages: bucket }
+          albumWrapperCache.set(cacheKey, { signature, wrapper })
+          collapsedItems.push(wrapper)
+        }
+      } else {
+        collapsedItems.push(msg)
+      }
     })
 
     group.items = collapsedItems
@@ -1403,6 +1416,9 @@ const handleTouchEnd = (e: TouchEvent, msg: Message) => {
 }
 
 watch(selectedUserId, (newVal) => {
+  // Clear the album wrapper cache when switching chats so cached wrappers
+  // from other conversations do not leak into memory over time.
+  albumWrapperCache.clear()
   if (newVal) {
     startStatusPolling(newVal)
     scrollToBottom()
