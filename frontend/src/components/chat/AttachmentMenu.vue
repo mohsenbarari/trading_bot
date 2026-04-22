@@ -1,5 +1,8 @@
 <template>
   <teleport to="body">
+    <input v-if="modelValue" ref="cameraPhotoInput" type="file" accept="image/*" capture="environment" style="display:none" @change="onNativeCameraFile" />
+    <input v-if="modelValue" ref="cameraVideoInput" type="file" accept="video/*" capture="environment" style="display:none" @change="onNativeCameraFile" />
+
     <!-- Backdrop -->
     <transition name="fade">
       <div v-if="modelValue && !showCameraCapture" class="attachment-backdrop" @click="close"></div>
@@ -172,8 +175,6 @@
         <div class="sheet-content">
           <!-- Gallery Tab -->
           <div v-if="activeTab === 'gallery'" class="tab-panel gallery-panel">
-            <input ref="cameraPhotoInput" type="file" accept="image/*" capture="environment" style="display:none" @change="onNativeCameraFile" />
-            <input ref="cameraVideoInput" type="file" accept="video/*" capture="environment" style="display:none" @change="onNativeCameraFile" />
             <input ref="galleryInput" type="file" accept="image/*,video/*" multiple style="display:none" @change="onGalleryFile" />
 
             <button class="action-card" @click="openCameraCapture()">
