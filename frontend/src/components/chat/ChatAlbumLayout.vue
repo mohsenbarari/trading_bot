@@ -317,6 +317,7 @@ const layout = computed(() => buildLayout(props.items))
 
 .album-row {
   display: flex;
+  direction: ltr;
   gap: 2px;
 }
 
