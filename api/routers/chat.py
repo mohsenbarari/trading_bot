@@ -747,21 +747,29 @@ async def upload_chat_media(
     
     file_path = os.path.join(upload_dir, f"{file_uuid}.{ext}")
 
-    # EXIF transpose for images: rotate pixels to match EXIF orientation, then strip the tag
+    # EXIF transpose for images: rotate pixels to match EXIF orientation, then strip the tag.
+    # CPU-bound Pillow work runs in a thread pool to avoid blocking the uvicorn event loop,
+    # which otherwise stalls unrelated /api/chat/* requests (messages, conversations, poll)
+    # while media uploads are being processed.
     img_width = None
     img_height = None
     if mime.startswith("image/") and mime != "image/gif":
-        try:
+        def _exif_transpose_sync(raw: bytes, mime_type: str):
             from PIL import Image as PILImage, ImageOps
-            import io
-            pil_img = PILImage.open(io.BytesIO(contents))
+            import io as _io
+            pil_img = PILImage.open(_io.BytesIO(raw))
             pil_img = ImageOps.exif_transpose(pil_img)
-            img_width, img_height = pil_img.size
-            # Re-encode to strip EXIF and persist the correct orientation
-            buf = io.BytesIO()
-            fmt = "JPEG" if mime in ("image/jpeg", "image/jpg") else ("PNG" if mime == "image/png" else "WEBP")
+            w, h = pil_img.size
+            buf = _io.BytesIO()
+            fmt = "JPEG" if mime_type in ("image/jpeg", "image/jpg") else ("PNG" if mime_type == "image/png" else "WEBP")
             pil_img.save(buf, format=fmt, quality=90)
-            contents = buf.getvalue()
+            return buf.getvalue(), w, h
+
+        try:
+            new_contents, img_width, img_height = await asyncio.to_thread(
+                _exif_transpose_sync, contents, mime
+            )
+            contents = new_contents
             size = len(contents)
         except Exception as e:
             logger.warning(f"Pillow EXIF transpose failed, saving original: {e}")
