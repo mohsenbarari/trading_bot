@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watchEffect, onUnmounted, watch } from 'vue';
+import { ref, computed, watchEffect, onUnmounted, watch, toRef } from 'vue';
 import moment from 'moment-jalaali';
 import DatePicker from 'vue3-persian-datetime-picker';
 import { apiFetch } from '../utils/auth';
+import { useUserProfileTiming } from '../composables/useUserProfileTiming';
 
 const props = defineProps<{
   user: any;
@@ -12,6 +13,13 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits(['navigate']);
+
+const {
+  countdownRestriction,
+  countdownLimitation,
+  parseJalaliToIranISO,
+  toEnglishDigits,
+} = useUserProfileTiming(toRef(props, 'user'));
 
 const isEditingRole = ref(false);
 const showSettings = ref(false);
@@ -206,83 +214,6 @@ const restrictionText = computed(() => {
   return `⛔ تا ${props.user.trading_restricted_until_jalali}`;
 });
 
-// --- Countdown Timer Logic ---
-const countdownRestriction = ref('');
-const countdownLimitation = ref('');
-let countdownInterval: ReturnType<typeof setInterval> | null = null;
-
-function formatCountdown(seconds: number): string {
-  if (seconds <= 0) return 'منقضی شده';
-  
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-  
-  if (days > 0) {
-    return `${days} روز ${hours} ساعت ${minutes} دقیقه`;
-  } else if (hours > 0) {
-    return `${hours} ساعت ${minutes} دقیقه ${secs} ثانیه`;
-  } else if (minutes > 0) {
-    return `${minutes} دقیقه ${secs} ثانیه`;
-  } else {
-    return `${secs} ثانیه`;
-  }
-}
-
-function updateCountdowns() {
-  const now = moment.utc();
-  
-  // Restriction countdown
-  if (props.user.trading_restricted_until) {
-    const restrictionTime = moment.utc(props.user.trading_restricted_until);
-    if (restrictionTime.isValid() && restrictionTime.year() <= 2100) {
-      const diffSeconds = restrictionTime.diff(now, 'seconds');
-      countdownRestriction.value = formatCountdown(diffSeconds);
-    } else if (restrictionTime.year() > 2100) {
-      countdownRestriction.value = 'دائمی';
-    } else {
-      countdownRestriction.value = '';
-    }
-  } else {
-    countdownRestriction.value = '';
-  }
-  
-  // Limitation countdown
-  if (props.user.limitations_expire_at) {
-    const limitTime = moment.utc(props.user.limitations_expire_at);
-    if (limitTime.isValid()) {
-      const diffSeconds = limitTime.diff(now, 'seconds');
-      countdownLimitation.value = formatCountdown(diffSeconds);
-    } else {
-      countdownLimitation.value = '';
-    }
-  } else {
-    countdownLimitation.value = '';
-  }
-}
-
-// Start countdown interval on component mount
-watchEffect(() => {
-  // Clear existing interval
-  if (countdownInterval) {
-    clearInterval(countdownInterval);
-    countdownInterval = null;
-  }
-  
-  // Only start if there's something to count
-  if (props.user.trading_restricted_until || props.user.limitations_expire_at) {
-    updateCountdowns();
-    countdownInterval = setInterval(updateCountdowns, 1000);
-  }
-});
-
-onUnmounted(() => {
-  if (countdownInterval) {
-    clearInterval(countdownInterval);
-  }
-});
-
 async function saveRole() {
   if (!props.jwtToken) return;
   isLoading.value = true;
@@ -356,23 +287,6 @@ async function blockUser(minutes: number) {
     isLoading.value = false;
   }
 }
-
-const toEnglishDigits = (str: string) => {
-  if (!str) return str;
-  return str.replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString());
-};
-
-// Helper to interpret Jalali input as Iran Standard Time (+03:30)
-const parseJalaliToIranISO = (jalaliStr: string) => {
-    const normalize = toEnglishDigits(jalaliStr);
-    // Parse as Jalaali, then FORCE the offset to +03:30 (Iran Standard Time)
-    // We use utcOffset(210, true) -> 210 mins = 3h 30m. 
-    // The 'true' flag keeps the local time (HH:mm) and adjusts the underlying UTC.
-    const m = moment(normalize, 'jYYYY/jMM/jDD HH:mm');
-    if (!m.isValid()) return null;
-    m.utcOffset(210, true);
-    return m.toISOString(); // Returns equivalent UTC time
-};
 
 async function blockUserCustom() {
     if (!customDate.value) {
