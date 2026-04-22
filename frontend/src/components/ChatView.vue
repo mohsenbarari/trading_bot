@@ -1568,6 +1568,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 
             <template v-for="(item, index) in group.items" :key="item.id">
               <ChatMessageItem
+                v-memo="[item, searchQuery, isSelectionMode, isAlbumInDownloadSelection(item)]"
                 :msg="item.type === 'album' ? item.messages[0] : item"
                 :isAlbum="item.type === 'album'"
                 :albumItems="item.type === 'album' ? item.messages : []"
