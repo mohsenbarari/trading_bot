@@ -17,6 +17,16 @@
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>
           <span style="flex:1;">{{ isAlbumSelection ? 'هدایت آلبوم' : 'هدایت پیام' }}</span>
         </div>
+        <template v-if="isAlbumSelection">
+            <div class="menu-item" v-ripple @click="$emit('save-album')" role="menuitem">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span style="flex:1;">دانلود آلبوم</span>
+            </div>
+        </template>
         <template v-if="menuState.message?.message_type === 'text'">
             <div class="menu-item" v-ripple @click="$emit('copy')" role="menuitem">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -82,6 +92,7 @@ const emit = defineEmits<{
   (e: 'delete'): void
   (e: 'close'): void
   (e: 'save-media'): void
+  (e: 'save-album'): void
 }>()
 
 // Smart positioning: keep menu within viewport bounds

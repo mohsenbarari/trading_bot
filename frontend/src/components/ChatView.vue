@@ -48,7 +48,12 @@ const messages = ref<Message[]>([])
 
 // Selection State
 const selectedMessages = ref<number[]>([])
+const selectionModePurpose = ref<'default' | 'album-download'>('default')
+const activeAlbumSelectionId = ref<string | null>(null)
 const isSelectionMode = computed(() => selectedMessages.value.length > 0)
+const isAlbumDownloadSelectionMode = computed(() => {
+  return isSelectionMode.value && selectionModePurpose.value === 'album-download' && Boolean(activeAlbumSelectionId.value)
+})
 const longPressTimer = ref<any>(null)
 
 // Search State
@@ -272,6 +277,11 @@ function normalizeMessageIds(messageIds: number[]) {
   return normalized
 }
 
+function resetSelectionContext() {
+  selectionModePurpose.value = 'default'
+  activeAlbumSelectionId.value = null
+}
+
 const canEdit = computed(() => {
   const msg = contextMenu.value.message
   if (!msg) return false
@@ -366,7 +376,7 @@ function getContextMenuMessageIds(msg: Message) {
 }
 
 function openForwardModalForIds(messageIds: number[]) {
-  const normalized = sortMessageIdsByChatOrder(messageIds)
+    const normalized = sortMessageIdsByChatOrder(messageIds)
   if (normalized.length === 0) return
 
   selectedMessages.value = normalized
@@ -393,6 +403,9 @@ function toggleSelectionBatch(messageIds: number[]) {
   const allSelected = normalized.every(messageId => selectedMessages.value.includes(messageId))
   if (allSelected) {
     selectedMessages.value = selectedMessages.value.filter(messageId => !normalized.includes(messageId))
+    if (selectedMessages.value.length === 0) {
+      resetSelectionContext()
+    }
     return
   }
 
@@ -751,10 +764,41 @@ const toggleSelection = (msgId: number) => {
         selectedMessages.value.push(msgId)
     } else {
         selectedMessages.value.splice(index, 1)
+        if (selectedMessages.value.length === 0) {
+          resetSelectionContext()
+        }
     }
 }
 
+function startAlbumDownloadSelection(msg: Message, messageIds: number[]) {
+  const albumId = getAlbumMeta(msg).albumId
+  const normalized = sortMessageIdsByChatOrder(messageIds)
+  if (!albumId || normalized.length === 0) return
+
+  activeAlbumSelectionId.value = albumId
+  selectionModePurpose.value = 'album-download'
+  selectedMessages.value = normalized
+}
+
+function isAlbumInDownloadSelection(item: any) {
+  if (!isAlbumDownloadSelectionMode.value || item?.type !== 'album' || !Array.isArray(item.messages) || item.messages.length === 0) {
+    return false
+  }
+
+  return getAlbumMeta(item.messages[0]).albumId === activeAlbumSelectionId.value
+}
+
+function handleAlbumDownloadItemToggle(msg: Message) {
+  if (!isAlbumDownloadSelectionMode.value) return
+  if (getAlbumMeta(msg).albumId !== activeAlbumSelectionId.value) return
+  toggleSelection(msg.id)
+}
+
 function handleGroupedItemSelection(item: any) {
+  if (isAlbumDownloadSelectionMode.value) {
+    return
+  }
+
   if (item?.type === 'album' && Array.isArray(item.messages)) {
     toggleSelectionBatch(item.messages.map((message: Message) => message.id))
     return
@@ -767,6 +811,7 @@ function handleGroupedItemSelection(item: any) {
 
 const clearSelection = () => {
     selectedMessages.value = []
+  resetSelectionContext()
 }
 
 const selectConversation = (conv: Conversation) => {
@@ -802,6 +847,8 @@ const handleNewChatSearch = (userId: number, userName: string) => {
 }
 
 const showContextMenu = (event: Event, msg: Message) => {
+  if (isAlbumDownloadSelectionMode.value) return
+
   let clientX = 0, clientY = 0;
   if (event instanceof MouseEvent) {
     event.preventDefault();
@@ -840,6 +887,11 @@ const closeContextMenu = () => {
 };
 
 const handleMessageClick = (event: Event, msg: Message) => {
+    if (isAlbumDownloadSelectionMode.value) {
+      event.preventDefault()
+      return
+    }
+
     if (isSelectionMode.value) {
       event.preventDefault()
       toggleSelection(msg.id)
@@ -912,6 +964,102 @@ const handleSaveMedia = () => {
   }
   closeContextMenu();
 };
+
+const getMediaFileId = (msg: Message) => {
+  try {
+    const parsed = JSON.parse(msg.content)
+    return typeof parsed?.file_id === 'string' && parsed.file_id ? parsed.file_id : null
+  } catch {
+    return null
+  }
+}
+
+const buildMediaDownloadUrl = (fileId: string) => {
+  const token = props.jwtToken ? encodeURIComponent(props.jwtToken) : ''
+  return `${props.apiBaseUrl}/api/chat/files/${encodeURIComponent(fileId)}?token=${token}`
+}
+
+const triggerBrowserDownload = (url: string, fileName: string) => {
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  anchor.style.display = 'none'
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+}
+
+const buildMediaDownloadFileName = (msg: Message, index = 0, totalCount = 1) => {
+  const fileId = getMediaFileId(msg) || `media_${msg.id}`
+  const extension = msg.message_type === 'video' ? 'mp4' : 'jpg'
+  return totalCount > 1
+    ? `${String(index + 1).padStart(2, '0')}_${fileId}.${extension}`
+    : `${fileId}.${extension}`
+}
+
+async function saveMessageMediaToDevice(msg: Message, index = 0, totalCount = 1) {
+  if (msg.message_type !== 'image' && msg.message_type !== 'video') return
+
+  const fileId = getMediaFileId(msg)
+  if (!fileId) return
+
+  const fileName = buildMediaDownloadFileName(msg, index, totalCount)
+  const cachedUrl = imageCache.value[fileId] || msg.local_blob_url
+  if (cachedUrl) {
+    triggerBrowserDownload(cachedUrl, fileName)
+    return
+  }
+
+  const downloadUrl = buildMediaDownloadUrl(fileId)
+
+  try {
+    const response = await fetch(downloadUrl)
+    if (!response.ok) throw new Error(`Download failed with status ${response.status}`)
+
+    const blob = await response.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    triggerBrowserDownload(objectUrl, fileName)
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+  } catch (error) {
+    console.error('Album media download failed, falling back to direct URL:', error)
+    triggerBrowserDownload(downloadUrl, fileName)
+  }
+}
+
+function handleSaveAlbum() {
+  const msg = contextMenu.value.message
+  const messageIds = normalizeMessageIds(contextMenu.value.messageIds)
+  if (!msg || messageIds.length <= 1) {
+    closeContextMenu()
+    return
+  }
+
+  startAlbumDownloadSelection(msg, messageIds)
+  closeContextMenu()
+}
+
+async function handleDownloadSelectedAlbumMessages() {
+  const orderedMessages = sortMessageIdsByChatOrder(selectedMessages.value)
+    .map((messageId) => messages.value.find(message => message.id === messageId))
+    .filter((message): message is Message => {
+      return Boolean(message) && (message!.message_type === 'image' || message!.message_type === 'video')
+    })
+
+  if (orderedMessages.length === 0) {
+    clearSelection()
+    return
+  }
+
+  for (const [index, message] of orderedMessages.entries()) {
+    await saveMessageMediaToDevice(message, index, orderedMessages.length)
+
+    if (index < orderedMessages.length - 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 140))
+    }
+  }
+
+  clearSelection()
+}
 
 const handleDeleteSelected = async () => {
   if (selectedMessages.value.length === 0) return
@@ -1295,6 +1443,8 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
                 :msg="item.type === 'album' ? item.messages[0] : item"
                 :isAlbum="item.type === 'album'"
                 :albumItems="item.type === 'album' ? item.messages : []"
+                :isAlbumDownloadMode="isAlbumInDownloadSelection(item)"
+                :selectedAlbumDownloadMessageIds="selectedMessages"
                 :currentUserId="props.currentUserId"
                 :selectedUserName="selectedUserName"
                 :selectedMessages="selectedMessages"
@@ -1313,6 +1463,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
                 @reply-album-item="handleAlbumReplyItem"
                 @forward-album-item="handleAlbumForwardItem"
                 @delete-album-item="handleAlbumDeleteItem"
+                @toggle-album-download-item="handleAlbumDownloadItemToggle"
                 :on-load="() => hydrateRenderedMedia(item)"
               />
             </template>
@@ -1342,6 +1493,27 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         @prev="prevSearchResult"
         @toggle-list="handleToggleInChatList"
       />
+
+      <div v-else-if="selectedUserId && isAlbumDownloadSelectionMode" class="album-download-selection-bar">
+        <button class="selection-action-btn" @click="clearSelection">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+          <span>انصراف</span>
+        </button>
+        <div class="album-download-selection-summary">
+          {{ selectedMessages.length }} مدیا برای دانلود انتخاب شده
+        </div>
+        <button class="selection-action-btn primary" @click="handleDownloadSelectedAlbumMessages">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>دانلود</span>
+        </button>
+      </div>
 
       <!-- Input Area -->
       <ChatInputBar
@@ -1398,6 +1570,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @delete="handleDeleteMessage"
       @close="closeContextMenu"
       @save-media="handleSaveMedia"
+      @save-album="handleSaveAlbum"
     />
 
     <!-- Lightbox Overlay -->
@@ -2569,6 +2742,35 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 
 .selection-action-btn svg {
   margin-bottom: 2px;
+}
+
+.selection-action-btn.primary {
+  color: #3390ec;
+}
+
+.selection-action-btn.primary:hover {
+  background: rgba(51, 144, 236, 0.1);
+  color: #1d6fc2;
+}
+
+.album-download-selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.98);
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  min-height: 60px;
+}
+
+.album-download-selection-summary {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
 }
 
 /* Telegram-Style Media UI */

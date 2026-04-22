@@ -42,6 +42,8 @@ const MAX_ROW_HEIGHT = 196
 const props = defineProps<{
   items: AlbumItem[]
   currentUserId: number | null
+  isDownloadSelectionMode?: boolean
+  selectedDownloadMessageIds?: number[]
 }>()
 
 const emit = defineEmits<{
@@ -51,9 +53,11 @@ const emit = defineEmits<{
   (e: 'reply-item', msg: any): void
   (e: 'forward-item', msg: any): void
   (e: 'delete-item', msg: any): void
+  (e: 'toggle-download-item', msg: any): void
 }>()
 
 const hasActiveUpload = computed(() => props.items.some(item => Boolean(item.msg?.is_sending)))
+const selectedDownloadMessageIdsSet = computed(() => new Set(props.selectedDownloadMessageIds || []))
 
 function formatBytes(bytes: number, decimals = 1) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
@@ -66,7 +70,17 @@ function formatBytes(bytes: number, decimals = 1) {
 
 function handleCellClick(msg: any) {
   if (msg?.is_sending) return
+
+  if (props.isDownloadSelectionMode) {
+    emit('toggle-download-item', msg)
+    return
+  }
+
   emit('media-click', msg)
+}
+
+function isItemSelected(msgId: number) {
+  return selectedDownloadMessageIdsSet.value.has(msgId)
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -241,8 +255,13 @@ const layout = computed(() => buildLayout(props.items))
         :key="cell.item.msg.id"
         :id="`album-item-${cell.item.msg.id}`"
         class="album-item"
+        :class="{
+          'download-selection-mode': props.isDownloadSelectionMode,
+          'download-selected': props.isDownloadSelectionMode && isItemSelected(cell.item.msg.id),
+          'download-unselected': props.isDownloadSelectionMode && !isItemSelected(cell.item.msg.id)
+        }"
         :style="{ width: `${cell.width}px`, height: `${cell.height}px` }"
-        @click="handleCellClick(cell.item.msg)"
+        @click.stop="handleCellClick(cell.item.msg)"
       >
         <img
           v-if="cell.item.type === 'image'"
@@ -273,6 +292,13 @@ const layout = computed(() => buildLayout(props.items))
         <div v-else class="album-media album-media-fallback"></div>
         <div v-if="cell.item.type === 'video'" class="album-video-badge">
           <svg viewBox="0 0 24 24" width="12" height="12" fill="white"><path d="M8 5v14l11-7z"/></svg>
+        </div>
+        <div v-if="props.isDownloadSelectionMode" class="album-selection-indicator">
+          <span class="album-selection-circle" :class="{ selected: isItemSelected(cell.item.msg.id) }">
+            <svg v-if="isItemSelected(cell.item.msg.id)" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          </span>
         </div>
         <div
           v-if="cell.item.msg.is_sending"
@@ -326,6 +352,27 @@ const layout = computed(() => buildLayout(props.items))
   overflow: hidden;
   flex: none;
   background: rgba(0, 0, 0, 0.06);
+}
+
+.album-item.download-selection-mode {
+  cursor: pointer;
+}
+
+.album-item.download-selection-mode::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 10, 18, 0.14);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.album-item.download-selected::before {
+  background: rgba(77, 163, 255, 0.18);
+}
+
+.album-item.download-unselected::before {
+  background: rgba(5, 10, 18, 0.34);
 }
 
 .album-item.highlight-message::after {
@@ -382,6 +429,32 @@ const layout = computed(() => buildLayout(props.items))
   align-items: center;
   gap: 2px;
   backdrop-filter: blur(8px);
+}
+
+.album-selection-indicator {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.album-selection-circle {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  background: rgba(0, 0, 0, 0.24);
+  color: white;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+}
+
+.album-selection-circle.selected {
+  background: #3390ec;
+  border-color: #ffffff;
 }
 
 .album-upload-overlay {
