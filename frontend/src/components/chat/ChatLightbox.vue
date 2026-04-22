@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import type { CSSProperties } from 'vue'
 
 type LightboxItem = {
@@ -31,8 +31,15 @@ const emit = defineEmits<{
 
 const gestureStart = ref<{ x: number; y: number } | null>(null)
 const gestureAxis = ref<'horizontal' | 'vertical' | null>(null)
+const gestureSurface = ref<'stage' | 'strip' | null>(null)
 const dragOffsetX = ref(0)
 const dragOffsetY = ref(0)
+const suppressThumbClick = ref(false)
+let suppressThumbClickTimer: number | null = null
+
+const isAlbumMenuOpen = ref(false)
+const isAlbumDownloadSheetOpen = ref(false)
+const albumDownloadSelection = ref<number[]>([])
 
 const currentItem = computed(() => {
   if (!props.lightboxMedia) return null
@@ -50,6 +57,8 @@ const canDeleteCurrentItem = computed(() => {
   return Number.isFinite(createdAt) && (Date.now() - createdAt) <= 48 * 60 * 60 * 1000
 })
 
+const selectedAlbumDownloadCount = computed(() => albumDownloadSelection.value.length)
+
 const sceneTransform = computed(() => {
   const verticalProgress = Math.min(Math.abs(dragOffsetY.value) / 240, 1)
   const scale = gestureAxis.value === 'vertical'
@@ -63,32 +72,132 @@ const sceneTransform = computed(() => {
 })
 
 watch(() => props.lightboxMedia?.currentIndex, () => {
+  isAlbumMenuOpen.value = false
   resetGesture()
 })
 
 watch(() => props.lightboxMedia?.albumId, () => {
+  isAlbumMenuOpen.value = false
+  isAlbumDownloadSheetOpen.value = false
+  albumDownloadSelection.value = []
   resetGesture()
+})
+
+onUnmounted(() => {
+  if (suppressThumbClickTimer !== null) {
+    window.clearTimeout(suppressThumbClickTimer)
+    suppressThumbClickTimer = null
+  }
 })
 
 function resetGesture() {
   gestureStart.value = null
   gestureAxis.value = null
+  gestureSurface.value = null
   dragOffsetX.value = 0
   dragOffsetY.value = 0
+}
+
+function suppressNextThumbClick() {
+  suppressThumbClick.value = true
+
+  if (suppressThumbClickTimer !== null) {
+    window.clearTimeout(suppressThumbClickTimer)
+  }
+
+  suppressThumbClickTimer = window.setTimeout(() => {
+    suppressThumbClick.value = false
+    suppressThumbClickTimer = null
+  }, 240)
 }
 
 function handleSaveMedia() {
   const item = currentItem.value
   if (!item) return
 
+  downloadLightboxItem(item, props.lightboxMedia?.currentIndex ?? 0)
+}
+
+function buildDownloadFileName(item: LightboxItem, index: number) {
+  const fallbackExt = item.type === 'video' ? 'mp4' : 'jpg'
+  const prefix = String(index + 1).padStart(2, '0')
+  return `${prefix}_${item.fileId || `media_${Date.now()}_${index + 1}`}.${fallbackExt}`
+}
+
+function downloadLightboxItem(item: LightboxItem, index: number) {
   const a = document.createElement('a')
   a.href = item.url
-  const fallbackExt = item.type === 'video' ? 'mp4' : 'jpg'
-  a.download = `${item.fileId || `media_${Date.now()}`}.${fallbackExt}`
+  a.download = buildDownloadFileName(item, index)
   a.style.display = 'none'
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
+}
+
+function toggleAlbumMenu() {
+  if (!hasAlbumStrip.value) return
+  isAlbumMenuOpen.value = !isAlbumMenuOpen.value
+}
+
+function openAlbumDownloadSheet() {
+  if (!props.lightboxMedia || !hasAlbumStrip.value) return
+
+  albumDownloadSelection.value = props.lightboxMedia.items.map((item) => item.msgId)
+  isAlbumMenuOpen.value = false
+  isAlbumDownloadSheetOpen.value = true
+}
+
+function closeAlbumDownloadSheet() {
+  isAlbumDownloadSheetOpen.value = false
+}
+
+function handleOverlayClick() {
+  if (isAlbumDownloadSheetOpen.value) {
+    closeAlbumDownloadSheet()
+    return
+  }
+
+  if (isAlbumMenuOpen.value) {
+    isAlbumMenuOpen.value = false
+    return
+  }
+
+  emit('close')
+}
+
+function setAlbumDownloadSelection(selectAll: boolean) {
+  if (!props.lightboxMedia) return
+  albumDownloadSelection.value = selectAll
+    ? props.lightboxMedia.items.map((item) => item.msgId)
+    : []
+}
+
+function isAlbumDownloadSelected(msgId: number) {
+  return albumDownloadSelection.value.includes(msgId)
+}
+
+function toggleAlbumDownloadSelection(msgId: number) {
+  if (isAlbumDownloadSelected(msgId)) {
+    albumDownloadSelection.value = albumDownloadSelection.value.filter((id) => id !== msgId)
+    return
+  }
+
+  albumDownloadSelection.value = [...albumDownloadSelection.value, msgId]
+}
+
+function handleAlbumDownloadConfirm() {
+  if (!props.lightboxMedia) return
+
+  const selectedItems = props.lightboxMedia.items.filter((item) => albumDownloadSelection.value.includes(item.msgId))
+  if (!selectedItems.length) return
+
+  selectedItems.forEach((item, index) => {
+    window.setTimeout(() => {
+      downloadLightboxItem(item, index)
+    }, index * 120)
+  })
+
+  closeAlbumDownloadSheet()
 }
 
 function emitForCurrent(action: 'reply' | 'forward' | 'delete') {
@@ -117,6 +226,15 @@ function navigateTo(index: number) {
 function navigateRelative(offset: number) {
   if (!props.lightboxMedia) return
   navigateTo(props.lightboxMedia.currentIndex + offset)
+}
+
+function handleThumbClick(index: number) {
+  if (suppressThumbClick.value) {
+    suppressThumbClick.value = false
+    return
+  }
+
+  navigateTo(index)
 }
 
 function getHorizontalDragRatio() {
@@ -186,15 +304,17 @@ function getThumbStyle(index: number): CSSProperties {
   }
 }
 
-function handleTouchStart(event: TouchEvent) {
+function handleTouchStart(event: TouchEvent, surface: 'stage' | 'strip' = 'stage') {
   if (event.touches.length !== 1) return
   const touch = event.touches[0]
   if (!touch) return
 
   gestureStart.value = { x: touch.clientX, y: touch.clientY }
+  gestureSurface.value = surface
   gestureAxis.value = null
   dragOffsetX.value = 0
   dragOffsetY.value = 0
+  suppressThumbClick.value = false
 }
 
 function handleTouchMove(event: TouchEvent) {
@@ -204,17 +324,28 @@ function handleTouchMove(event: TouchEvent) {
 
   const dx = touch.clientX - start.x
   const dy = touch.clientY - start.y
+  const surface = gestureSurface.value || 'stage'
 
   if (!gestureAxis.value) {
     if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
-    gestureAxis.value = Math.abs(dx) >= Math.abs(dy) ? 'horizontal' : 'vertical'
+
+    if (surface === 'strip') {
+      if (Math.abs(dx) <= Math.abs(dy)) return
+      gestureAxis.value = 'horizontal'
+    } else {
+      gestureAxis.value = Math.abs(dx) >= Math.abs(dy) ? 'horizontal' : 'vertical'
+    }
   }
 
   if (gestureAxis.value === 'horizontal') {
     if ((props.lightboxMedia?.items.length || 0) <= 1) return
     dragOffsetX.value = dx
     dragOffsetY.value = 0
+    if (surface === 'strip' && Math.abs(dx) > 12 && !suppressThumbClick.value) {
+      suppressNextThumbClick()
+    }
   } else {
+    if (surface === 'strip') return
     dragOffsetY.value = dy
     dragOffsetX.value = 0
   }
@@ -226,13 +357,15 @@ function handleTouchEnd() {
     return
   }
 
+  const surface = gestureSurface.value
+
   if (gestureAxis.value === 'horizontal') {
     if (dragOffsetX.value > 60) {
       navigateRelative(-1)
     } else if (dragOffsetX.value < -60) {
       navigateRelative(1)
     }
-  } else if (gestureAxis.value === 'vertical' && Math.abs(dragOffsetY.value) > 90) {
+  } else if (surface === 'stage' && gestureAxis.value === 'vertical' && Math.abs(dragOffsetY.value) > 90) {
     emit('close')
   }
 
@@ -243,7 +376,7 @@ function handleTouchEnd() {
 <template>
   <Teleport to="body">
     <Transition name="lightbox">
-      <div v-if="lightboxMedia && currentItem" class="lightbox-overlay" @click="emit('close')">
+      <div v-if="lightboxMedia && currentItem" class="lightbox-overlay" @click="handleOverlayClick">
         <div class="lightbox-shell">
           <div class="lightbox-toolbar" @click.stop>
             <div class="lightbox-counter" v-if="lightboxMedia.items.length > 1">
@@ -261,9 +394,19 @@ function handleTouchEnd() {
               <button v-if="canDeleteCurrentItem" class="lightbox-btn danger" @click.stop="emitForCurrent('delete')" title="حذف">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
               </button>
-              <button class="lightbox-btn" @click.stop="handleSaveMedia" title="ذخیره">
+              <button class="lightbox-btn" @click.stop="handleSaveMedia" :title="hasAlbumStrip ? 'ذخیره مدیای جاری' : 'ذخیره'">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
               </button>
+              <div v-if="hasAlbumStrip" class="lightbox-menu-wrap">
+                <button class="lightbox-btn" :class="{ active: isAlbumMenuOpen }" @click.stop="toggleAlbumMenu" title="منوی آلبوم">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="5" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="12" cy="19" r="1.8" /></svg>
+                </button>
+                <div v-if="isAlbumMenuOpen" class="lightbox-menu-panel" @click.stop>
+                  <button class="lightbox-menu-item" @click.stop="openAlbumDownloadSheet">
+                    دانلود آلبوم
+                  </button>
+                </div>
+              </div>
               <button class="lightbox-btn close" @click.stop="emit('close')" title="بستن">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
               </button>
@@ -273,7 +416,7 @@ function handleTouchEnd() {
           <div class="lightbox-stage-wrap">
             <div
               class="lightbox-stage"
-              @touchstart="handleTouchStart"
+              @touchstart="handleTouchStart($event, 'stage')"
               @touchmove="handleTouchMove"
               @touchend="handleTouchEnd"
               @touchcancel="handleTouchEnd"
@@ -313,7 +456,14 @@ function handleTouchEnd() {
           </div>
 
           <div class="lightbox-strip-slot" @click.stop>
-            <div v-if="hasAlbumStrip" class="lightbox-strip">
+            <div
+              v-if="hasAlbumStrip"
+              class="lightbox-strip"
+              @touchstart="handleTouchStart($event, 'strip')"
+              @touchmove="handleTouchMove"
+              @touchend="handleTouchEnd"
+              @touchcancel="handleTouchEnd"
+            >
               <button
                 v-for="(item, index) in lightboxMedia.items"
                 :key="item.msgId"
@@ -321,13 +471,62 @@ function handleTouchEnd() {
                 :class="{ active: index === lightboxMedia.currentIndex }"
                 :style="getThumbStyle(index)"
                 :aria-current="index === lightboxMedia.currentIndex ? 'true' : 'false'"
-                @click.stop="navigateTo(index)"
+                @click.stop="handleThumbClick(index)"
               >
                 <img :src="item.thumbnail || item.url" alt="thumbnail" class="lightbox-thumb-image" />
                 <span v-if="item.type === 'video'" class="thumb-video-badge">
                   <svg viewBox="0 0 24 24" width="12" height="12" fill="white"><path d="M8 5v14l11-7z" /></svg>
                 </span>
               </button>
+            </div>
+          </div>
+
+          <div v-if="lightboxMedia && isAlbumDownloadSheetOpen" class="album-download-backdrop" @click.stop="closeAlbumDownloadSheet">
+            <div class="album-download-sheet" @click.stop>
+              <div class="album-download-header">
+                <div>
+                  <div class="album-download-title">دانلود آلبوم</div>
+                  <div class="album-download-subtitle">{{ selectedAlbumDownloadCount }} از {{ lightboxMedia.items.length }} مدیا انتخاب شده</div>
+                </div>
+                <button class="album-download-close" @click.stop="closeAlbumDownloadSheet" title="بستن">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+              </div>
+
+              <div class="album-download-toolbar">
+                <button class="album-download-chip" @click.stop="setAlbumDownloadSelection(true)">انتخاب همه</button>
+                <button class="album-download-chip" @click.stop="setAlbumDownloadSelection(false)">برداشتن همه</button>
+              </div>
+
+              <div class="album-download-list">
+                <label
+                  v-for="(item, index) in lightboxMedia.items"
+                  :key="`${item.msgId}-download`"
+                  class="album-download-item"
+                >
+                  <input
+                    class="album-download-checkbox"
+                    type="checkbox"
+                    :checked="isAlbumDownloadSelected(item.msgId)"
+                    @change="toggleAlbumDownloadSelection(item.msgId)"
+                  />
+                  <span class="album-download-thumb-wrap">
+                    <img :src="item.thumbnail || item.url" alt="thumbnail" class="album-download-thumb" />
+                    <span v-if="item.type === 'video'" class="album-download-kind">ویدئو</span>
+                  </span>
+                  <span class="album-download-meta">
+                    <span class="album-download-name">{{ item.type === 'video' ? `ویدئو ${index + 1}` : `تصویر ${index + 1}` }}</span>
+                    <span class="album-download-current">{{ index === lightboxMedia.currentIndex ? 'در حال نمایش' : `آیتم ${index + 1}` }}</span>
+                  </span>
+                </label>
+              </div>
+
+              <div class="album-download-footer">
+                <button class="album-download-secondary" @click.stop="closeAlbumDownloadSheet">انصراف</button>
+                <button class="album-download-primary" :disabled="selectedAlbumDownloadCount === 0" @click.stop="handleAlbumDownloadConfirm">
+                  دانلود {{ selectedAlbumDownloadCount > 0 ? `(${selectedAlbumDownloadCount})` : '' }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -417,12 +616,50 @@ function handleTouchEnd() {
   transform: scale(0.95);
 }
 
+.lightbox-btn.active {
+  background: rgba(255, 255, 255, 0.24);
+}
+
 .lightbox-btn.close {
   background: rgba(255, 255, 255, 0.18);
 }
 
 .lightbox-btn.danger {
   background: rgba(185, 28, 28, 0.32);
+}
+
+.lightbox-menu-wrap {
+  position: relative;
+}
+
+.lightbox-menu-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  inset-inline-end: 0;
+  min-width: 152px;
+  padding: 8px;
+  border-radius: 18px;
+  background: rgba(12, 17, 24, 0.94);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 5;
+}
+
+.lightbox-menu-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: white;
+  border-radius: 12px;
+  padding: 10px 12px;
+  text-align: right;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.lightbox-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .lightbox-stage-wrap {
@@ -608,6 +845,178 @@ function handleTouchEnd() {
   backdrop-filter: blur(8px);
 }
 
+.album-download-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 9, 14, 0.42);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 20px;
+  z-index: 10001;
+}
+
+.album-download-sheet {
+  width: min(100%, 560px);
+  max-height: min(76vh, 720px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 14px;
+  background: rgba(10, 14, 20, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 28px;
+  padding: 18px;
+  box-shadow: 0 28px 52px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(22px);
+}
+
+.album-download-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.album-download-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.album-download-subtitle {
+  margin-top: 6px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.album-download-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.album-download-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.album-download-chip {
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  padding: 9px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.album-download-list {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-inline-end: 4px;
+}
+
+.album-download-item {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+}
+
+.album-download-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: #59b4ff;
+}
+
+.album-download-thumb-wrap {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.album-download-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.album-download-kind {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.56);
+  font-size: 10px;
+}
+
+.album-download-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.album-download-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.album-download-current {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.64);
+}
+
+.album-download-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.album-download-secondary,
+.album-download-primary {
+  border: none;
+  border-radius: 16px;
+  padding: 12px 18px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.album-download-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+}
+
+.album-download-primary {
+  background: linear-gradient(135deg, #4ea8ff, #6bc7ff);
+  color: #081019;
+}
+
+.album-download-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .lightbox-enter-active,
 .lightbox-leave-active {
   transition: opacity 0.22s ease;
@@ -648,6 +1057,10 @@ function handleTouchEnd() {
     border-radius: 18px;
   }
 
+  .lightbox-menu-panel {
+    inset-inline-end: -4px;
+  }
+
   .lightbox-strip-slot {
     width: 100%;
     min-height: 80px;
@@ -661,6 +1074,22 @@ function handleTouchEnd() {
   .lightbox-strip {
     --thumb-size: 64px;
     width: min(100%, 420px);
+  }
+
+  .album-download-backdrop {
+    padding: 10px;
+  }
+
+  .album-download-sheet {
+    width: 100%;
+    max-height: min(82vh, 720px);
+    border-radius: 24px;
+    padding: 16px;
+  }
+
+  .album-download-item {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    padding: 10px;
   }
 }
 </style>
