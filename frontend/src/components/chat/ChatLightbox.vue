@@ -272,6 +272,7 @@ function handleTouchEnd() {
 .lightbox-shell {
   width: min(92vw, 920px);
   max-width: 100%;
+  min-width: 0;
   height: min(100%, 920px);
   max-height: 100%;
   overflow: hidden;
@@ -397,22 +398,30 @@ function handleTouchEnd() {
 }
 
 .lightbox-strip-slot {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 92px;
   display: flex;
   align-items: flex-end;
   justify-content: center;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .lightbox-strip {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  flex: none;
   display: flex;
   direction: ltr;
   flex-direction: row;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  overflow-x: auto;
   padding: 8px 4px 0;
+  box-sizing: border-box;
 }
 
 .lightbox-thumb {
@@ -499,6 +508,7 @@ function handleTouchEnd() {
   }
 
   .lightbox-strip-slot {
+    width: 100%;
     min-height: 80px;
   }
 
