@@ -2,6 +2,10 @@ import { ref, type Ref, nextTick } from 'vue'
 import { apiFetchJson } from '../../utils/auth'
 import type { Conversation, Message, StickerPack } from '../../types/chat'
 import { useNotificationStore } from '../../stores/notifications'
+import {
+    getPendingForUser as backgroundGetPendingForUser,
+    buildOptimisticMessageFromUpload,
+} from '../../services/chatUploadBackground'
 
 export interface UseChatMessagesOptions {
     apiBaseUrl: string
@@ -133,8 +137,18 @@ export function useChatMessages(options: UseChatMessagesOptions) {
 
             const loadedMessages = await apiFetch(url)
 
+            // Append any pending background-service uploads for this user
+            // (both currently uploading + those resumed from IndexedDB after
+            // a page reload) so the optimistic messages are visible on mount.
+            const pendingOptimistic = backgroundGetPendingForUser(userId).map(
+                buildOptimisticMessageFromUpload
+            )
+
             if (aroundId) {
                 messages.value = loadedMessages
+                // Don't inject pending around a reply anchor — `around_id`
+                // loads a slice, not the full tail, so pending items don't
+                // belong inside that slice's timeline range.
                 isLoadingMessages.value = false
                 return
             }
@@ -146,7 +160,15 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 const oldLength = messages.value.length
 
                 const tempParams = messages.value.filter(m => m.id < 0)
-                messages.value = [...loadedMessages, ...tempParams]
+                // Merge tempParams with pending — dedupe by id.
+                const seen = new Set<number>()
+                const combinedTemp: Message[] = []
+                for (const m of [...tempParams, ...pendingOptimistic]) {
+                    if (seen.has(m.id)) continue
+                    seen.add(m.id)
+                    combinedTemp.push(m)
+                }
+                messages.value = [...loadedMessages, ...combinedTemp]
 
                 if (isNewMessage) {
                     if (lastNewMsg.sender_id !== currentUserId) {
@@ -166,7 +188,9 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                     }
                 }
             } else {
-                messages.value = loadedMessages
+                messages.value = pendingOptimistic.length > 0
+                    ? [...loadedMessages, ...pendingOptimistic]
+                    : loadedMessages
                 unreadNewMessagesCount.value = 0
                 isLoadingMessages.value = false
                 await nextTick()

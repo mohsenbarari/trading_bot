@@ -1,7 +1,15 @@
-import { ref, type Ref, nextTick } from 'vue'
+import { ref, type Ref, nextTick, onUnmounted } from 'vue'
 import type { Message } from '../../types/chat'
 import { canUseImagePreprocessWorker, getRecommendedImagePreprocessParallelism, processImageInWorker } from '../../utils/imagePreprocessClient'
 import { primeMediaPreprocessTelemetry, recordMediaPreprocessTelemetry } from '../../utils/chatMediaTelemetry'
+import {
+    submitUpload as backgroundSubmitUpload,
+    cancelUpload as backgroundCancelUpload,
+    subscribeToUploads as backgroundSubscribeToUploads,
+    getPendingForUser as backgroundGetPendingForUser,
+    buildOptimisticMessageFromUpload,
+    type UploadEvent,
+} from '../../services/chatUploadBackground'
 
 const CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const CHAT_MEDIA_MAX_UPLOAD_LABEL = '50MB'
@@ -396,14 +404,20 @@ export function useChatMedia(options: UseChatMediaOptions) {
         error,
         isUploading,
         scrollToBottom,
-        sendMediaMessage
+        // sendMediaMessage is accepted for backward compatibility with callers
+        // but is no longer used here — the background upload service performs
+        // the final /api/chat/send call internally so uploads complete across
+        // ChatView unmount.
     } = options
+    void options.sendMediaMessage
 
     let activeUploadsCount = 0
     let activePreprocessCount = 0
     let activeNetworkUploadCount = 0
-    const uploadControllers = new Map<number, { abort: () => void }>()
-    const albumBatches = new Map<string, PendingAlbumBatch>()
+    // Local preprocessing-phase abort controllers. Once the service takes
+    // ownership (submitUpload), cancellation is delegated to the service so
+    // that uploads continue across ChatView unmount.
+    const preprocessingAborts = new Map<number, () => void>()
     const preprocessQueue: PreprocessJob[] = []
     const networkUploadQueue: UploadJob[] = []
     const pendingMediaLoads = new Map<string, Promise<string | null>>()
@@ -718,133 +732,26 @@ export function useChatMedia(options: UseChatMediaOptions) {
         }
     }
 
-    function ensureAlbumBatch(albumId: string, expectedCount: number) {
-        const existing = albumBatches.get(albumId)
-        if (existing) {
-            existing.expectedCount = Math.max(existing.expectedCount, expectedCount)
-            return existing
-        }
-
-        const created: PendingAlbumBatch = {
-            expectedCount,
-            items: new Map(),
-            flushPromise: null
-        }
-        albumBatches.set(albumId, created)
-        return created
-    }
-
-    function updateAlbumBatchItem(albumId: string, optimisticId: number, updates: Partial<PendingAlbumItem>) {
-        const batch = albumBatches.get(albumId)
-        if (!batch) return
-
-        const existing = batch.items.get(optimisticId)
-        if (!existing) return
-
-        batch.items.set(optimisticId, { ...existing, ...updates })
-    }
-
-    function cleanupAlbumBatchIfSettled(albumId: string) {
-        const batch = albumBatches.get(albumId)
-        if (!batch) return
-
-        const allSettled = Array.from(batch.items.values()).every(item =>
-            item.status === 'sent' || item.status === 'cancelled' || item.status === 'failed'
-        )
-
-        if (allSettled && batch.items.size >= batch.expectedCount) {
-            albumBatches.delete(albumId)
-        }
-    }
-
-    async function flushAlbumBatchIfReady(albumId: string) {
-        const batch = albumBatches.get(albumId)
-        if (!batch) return
-
-        if (batch.flushPromise) {
-            await batch.flushPromise
-            return
-        }
-
-        if (batch.items.size < batch.expectedCount) {
-            return
-        }
-
-        const hasPendingUploads = Array.from(batch.items.values()).some(item =>
-            item.status === 'uploading' || item.status === 'sending'
-        )
-        if (hasPendingUploads) {
-            return
-        }
-
-        const itemsToSend = Array.from(batch.items.values())
-            .filter(item => item.status === 'uploaded' && item.content)
-            .sort((left, right) => left.albumIndex - right.albumIndex)
-
-        if (itemsToSend.length === 0) {
-            cleanupAlbumBatchIfSettled(albumId)
-            return
-        }
-
-        batch.flushPromise = (async () => {
-            for (const queuedItem of itemsToSend) {
-                const currentItem = batch.items.get(queuedItem.optimisticId)
-                if (!currentItem || currentItem.status !== 'uploaded' || !currentItem.content) {
-                    continue
-                }
-
-                updateAlbumBatchItem(albumId, queuedItem.optimisticId, { status: 'sending' })
-                const result = await sendMediaMessage(
-                    currentItem.type,
-                    currentItem.content,
-                    currentItem.localBlobUrl,
-                    currentItem.optimisticId
-                )
-
-                if (result) {
-                    updateAlbumBatchItem(albumId, queuedItem.optimisticId, { status: 'sent' })
-                } else {
-                    updateAlbumBatchItem(albumId, queuedItem.optimisticId, { status: 'failed' })
-                    const failedMessage = messages.value.find(message => message.id === queuedItem.optimisticId)
-                    if (failedMessage) {
-                        failedMessage.is_error = true
-                        failedMessage.is_sending = false
-                    }
-                }
-            }
-        })()
-
-        try {
-            await batch.flushPromise
-        } finally {
-            batch.flushPromise = null
-            cleanupAlbumBatchIfSettled(albumId)
-        }
-    }
-
-    function markAlbumItemState(albumId: string | null | undefined, optimisticId: number, status: 'cancelled' | 'failed') {
-        if (!albumId) return
-
-        updateAlbumBatchItem(albumId, optimisticId, { status })
-        void flushAlbumBatchIfReady(albumId)
-    }
-
     function cancelUpload(id: number) {
-        const controller = uploadControllers.get(id);
-        if (controller) {
-            controller.abort();
-            uploadControllers.delete(id);
-            // Counter decremented in finally block of handleMediaUploadWrapper
-        } else {
-            // Forcible cleanup if clicked before XHR starts or after XHR finished but stuck in IndexedDB step
-            const index = messages.value.findIndex(m => m.id === id);
-            const msg = messages.value[index];
-            if (msg && msg.is_sending) {
-                const albumId = getAlbumIdFromMessage(msg)
-                markAlbumItemState(albumId, id, 'cancelled')
-                msg.is_error = true; // prevents 'finally' from removing a non-error message if it shouldn't, though splice removes it anyway
-                messages.value.splice(index, 1);
-            }
+        // First, trigger any preprocessing abort that may be running inside
+        // this composable. The upload pipeline's catch block will splice the
+        // optimistic message from `messages.value` when the abort propagates.
+        const preAbort = preprocessingAborts.get(id)
+        if (preAbort) {
+            preAbort()
+            preprocessingAborts.delete(id)
+        }
+
+        // Delegate to the background service for any already-submitted upload.
+        // If the id is not yet tracked by the service this is a safe no-op.
+        backgroundCancelUpload(id)
+
+        // Fallback UI cleanup: if the message somehow outlives both paths
+        // (e.g. stale state after reload) splice it immediately.
+        const index = messages.value.findIndex(m => m.id === id)
+        const msg = messages.value[index]
+        if (msg && msg.is_sending && !msg.is_error) {
+            messages.value.splice(index, 1)
         }
     }
 
@@ -1349,9 +1256,16 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const normalizedAlbumSize = normalizedAlbumId ? Math.max(albumSize ?? 0, 1) : 0
         const preprocessBatchSize = normalizedAlbumSize || 1
         const preprocessLimit = getAdaptivePreprocessLimit(preprocessBatchSize, msgType)
-        const uploadLimit = getAdaptiveUploadLimit(preprocessBatchSize, msgType)
-        
+        // NOTE: uploadLimit previously gated XHR uploads in this composable.
+        // Background service now owns the upload concurrency; kept here only
+        // so the adaptive helper reference stays exercised.
+        void getAdaptiveUploadLimit(preprocessBatchSize, msgType)
+
         if (!selectedUserId.value) return
+        // Capture the receiver id at submit time. After this point we never
+        // read `selectedUserId.value` again for this upload — the user may
+        // navigate away, and the upload must still land on the correct chat.
+        const capturedReceiverId = selectedUserId.value
 
         if ((isVideo || isAudio) && file.size > CHAT_MEDIA_MAX_UPLOAD_BYTES) {
             const tooLargeMessage = buildUploadTooLargeMessage(file.size)
@@ -1373,7 +1287,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const optimisticMsg: Message = {
             id: optimisticId,
             sender_id: currentUserId,
-            receiver_id: selectedUserId.value,
+            receiver_id: capturedReceiverId,
             content: JSON.stringify(initialContent),
             message_type: msgType,
             is_read: true,
@@ -1385,29 +1299,16 @@ export function useChatMedia(options: UseChatMediaOptions) {
             created_at: new Date().toISOString()
         }
 
-        if (normalizedAlbumId) {
-            const batch = ensureAlbumBatch(normalizedAlbumId, normalizedAlbumSize)
-            batch.items.set(optimisticId, {
-                optimisticId,
-                albumIndex: normalizedAlbumIndex,
-                type: msgType === 'video' ? 'video' : 'image',
-                status: 'uploading'
-            })
-        }
-
         messages.value.push(optimisticMsg)
 
         let isCancelledLocally = false;
-        uploadControllers.set(optimisticId, {
-            abort: () => {
-                isCancelledLocally = true;
-                processingAbortController.abort();
-                const index = messages.value.findIndex(m => m.id === optimisticId);
-                if (index !== -1) messages.value.splice(index, 1);
-                markAlbumItemState(normalizedAlbumId, optimisticId, 'cancelled')
-                uploadControllers.delete(optimisticId);
-            }
-        });
+        preprocessingAborts.set(optimisticId, () => {
+            isCancelledLocally = true
+            processingAbortController.abort()
+            const index = messages.value.findIndex(m => m.id === optimisticId)
+            if (index !== -1) messages.value.splice(index, 1)
+            preprocessingAborts.delete(optimisticId)
+        })
 
         const getOptimisticTarget = () => messages.value.find(m => m.id === optimisticId) || optimisticMsg;
 
@@ -1690,148 +1591,177 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 throw new Error(buildUploadTooLargeMessage(uploadFile.size))
             }
 
-            const formData = new FormData()
-            formData.append('file', uploadFile, sourceFile.name)
-            formData.append('thumbnail', thumbBase64)
-
-            step = 'wait_upload_slot'
-            const data = await runAdaptiveUploadTask(uploadLimit, () => {
-                if (processingAbortController.signal.aborted || isCancelledLocally) {
-                    throw new Error('UploadCancelled')
-                }
-
-                step = 'xhr_upload'
-                return new Promise<any>((resolve, reject) => {
-                    const xhr = new XMLHttpRequest()
-                    uploadControllers.set(optimisticId, {
-                        abort: () => {
-                            const target = getOptimisticTarget();
-                            if (target) target.is_error = false; // to prevent error UI
-                            xhr.abort();
-                            const index = messages.value.findIndex(m => m.id === optimisticId);
-                            if (index !== -1) messages.value.splice(index, 1);
-                            markAlbumItemState(normalizedAlbumId, optimisticId, 'cancelled')
-                            reject(new Error('UploadCancelled'))
-                        }
-                    });
-                    xhr.open('POST', `${apiBaseUrl}/api/chat/upload-media`)
-                    xhr.setRequestHeader('Authorization', `Bearer ${localStorage.getItem('auth_token') || jwtToken}`)
-
-                    xhr.upload.onprogress = (e) => {
-                        if (e.lengthComputable) {
-                            const target = getOptimisticTarget();
-                            target.upload_progress = Math.round((e.loaded / e.total) * 100)
-                            target.upload_loaded = e.loaded
-                            target.upload_total = e.total
-                        }
-                    }
-
-                    xhr.onload = () => {
-                        if (xhr.status === 401) {
-                            reject(new Error("نشست شما منقضی شده است. لطفاً صفحه را رفرش کنید."))
-                            return
-                        }
-                        if (xhr.status === 413) {
-                            reject(new Error(buildUploadTooLargeMessage(uploadFile.size)))
-                            return
-                        }
-                        if (xhr.status >= 200 && xhr.status < 300) {
-                            try {
-                                resolve(JSON.parse(xhr.responseText))
-                            } catch (err) {
-                                reject(new Error("Invalid JSON response"))
-                            }
-                        } else {
-                            try {
-                                const parsed = JSON.parse(xhr.responseText)
-                                if (parsed.detail) {
-                                    reject(new Error(`مشکل سرور (${xhr.status}): ${parsed.detail}`))
-                                    return
-                                }
-                            } catch (e) { }
-
-                            let safeResponse = xhr.responseText.substring(0, 100);
-                            if (safeResponse.toLowerCase().includes('<html')) {
-                                safeResponse = "خطای سرور یا عدم اتصال"; // Sanitize HTML
-                            }
-                            reject(new Error(`مشکل سرور (${xhr.status}): ${safeResponse}`))
-                        }
-                    }
-                    xhr.onerror = () => reject(new Error("Network Error"))
-                    xhr.onabort = () => {
-                        uploadControllers.delete(optimisticId)
-                    }
-
-                    xhr.onloadend = () => {
-                        uploadControllers.delete(optimisticId)
-                    }
-
-                    xhr.send(formData)
-                })
-            }, processingAbortController.signal)
-            uploadControllers.delete(optimisticId);
-
-            step = 'prepare_json'
-            // Prefer server-returned dimensions (EXIF-transposed) over local ones
-            if (data.width && data.height) {
-                finalWidth = data.width;
-                finalHeight = data.height;
+            if (processingAbortController.signal.aborted || isCancelledLocally) {
+                throw new Error('UploadCancelled')
             }
-            const contentObj: any = appendAlbumMetadata({
-                file_id: data.file_id,
-                thumbnail: data.thumbnail
-            }, msgType, normalizedAlbumId, normalizedAlbumIndex)
-            if (finalWidth && finalHeight) {
-                contentObj.width = finalWidth;
-                contentObj.height = finalHeight;
-            }
-            if ((file as any).durationMs !== undefined) {
-                contentObj.durationMs = (file as any).durationMs
-            }
-            const messageContent = JSON.stringify(contentObj)
 
-            step = 'save_local_cache'
-            await saveToDB(data.file_id, uploadFile)
+            step = 'submit_to_service'
+            // Hand off ownership of the upload to the module-level background
+            // service. The service:
+            //   - persists the pending upload (including the preprocessed
+            //     Blob) to IndexedDB so it survives page reload
+            //   - runs the XHR to /api/chat/upload-media with progress events
+            //   - posts /api/chat/send using the *captured* receiver id
+            //     (which cannot be invalidated by the user navigating away)
+            //   - orchestrates album batching so siblings are sent together
+            //
+            // From this point on, cancellation must go through the service
+            // (see `cancelUpload` above which delegates via backgroundCancelUpload).
+            preprocessingAborts.delete(optimisticId)
             const finalLocalUrl = getOptimisticTarget()?.local_blob_url || localUrl
-            if (!isAudio) {
-                // we probably don't need a Blob URL in the image cache for voice, but it's safe to store
-                setCachedMediaUrl(data.file_id, finalLocalUrl)
-            } else {
-                setCachedMediaUrl(data.file_id, finalLocalUrl)
-            }
+            await backgroundSubmitUpload({
+                optimisticId,
+                userId: capturedReceiverId,
+                senderId: currentUserId,
+                msgType,
+                file: uploadFile,
+                fileName: sourceFile.name,
+                thumbnail: thumbBase64,
+                width: finalWidth,
+                height: finalHeight,
+                durationMs: (file as any).durationMs,
+                albumId: normalizedAlbumId ?? null,
+                albumIndex: normalizedAlbumIndex,
+                albumSize: normalizedAlbumSize || 1,
+                localBlobUrl: finalLocalUrl,
+            })
 
-            const targetAfterUpload = getOptimisticTarget()
-            if (targetAfterUpload) {
-                targetAfterUpload.upload_progress = 100
-                targetAfterUpload.upload_loaded = targetAfterUpload.upload_total || file.size
-                targetAfterUpload.upload_total = targetAfterUpload.upload_total || file.size
-            }
-
-            if (normalizedAlbumId && (msgType === 'image' || msgType === 'video')) {
-                updateAlbumBatchItem(normalizedAlbumId, optimisticId, {
-                    content: messageContent,
-                    localBlobUrl: finalLocalUrl,
-                    status: 'uploaded'
-                })
-                void flushAlbumBatchIfReady(normalizedAlbumId)
-            } else {
-                step = 'send_ws_message'
-                await sendMediaMessage(msgType, messageContent, finalLocalUrl, optimisticId)
-            }
-
+            // Seed the local image cache with the preprocessed blob so the
+            // current UI does not need to re-download the file after the
+            // service's 'sent' event replaces the optimistic message.
+            // NOTE: we don't yet know the server-assigned file_id here; the
+            // 'uploaded' event from the service will fill that in via the
+            // subscription handler below.
         } catch (e: any) {
             if (e.message === 'UploadCancelled') {
                 console.log('Upload was cancelled explicitly.');
+                preprocessingAborts.delete(optimisticId)
                 return; // Early return to avoid error UI
             }
             console.error(`Upload error at step [${step}]:`, e);
             const errString = e && e.message ? e.message : JSON.stringify(e);
-            alert(`خطا در آپلود: ` + errString);
+            error.value = `خطا در پردازش: ` + errString;
             optimisticMsg.is_error = true;
-            markAlbumItemState(normalizedAlbumId, optimisticId, 'failed')
+            optimisticMsg.is_sending = false;
+            preprocessingAborts.delete(optimisticId)
         } finally {
             activeUploadsCount--
             isUploading.value = activeUploadsCount > 0
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Background upload service — subscription bridge
+    //
+    // The background service continues XHR uploads and /api/chat/send calls
+    // across ChatView unmount. This composable's job here is to reflect the
+    // service's events back into the currently rendered `messages.value` for
+    // the selected conversation.
+    // -------------------------------------------------------------------------
+
+    function applyUploadEventToMessages(event: UploadEvent) {
+        // Only update the visible message list when the event targets the
+        // conversation the user is actually looking at. Any other pending
+        // upload continues in the background and will be grafted back onto
+        // the messages list next time the user opens that conversation (via
+        // `adoptPendingUploadsForUser`).
+        if (event.userId !== selectedUserId.value) return
+
+        const msgs = messages.value
+        const index = msgs.findIndex(m => m.id === event.optimisticId)
+
+        switch (event.type) {
+            case 'added': {
+                if (index === -1) {
+                    msgs.push(event.message)
+                }
+                break
+            }
+            case 'progress': {
+                const m = index !== -1 ? msgs[index] : undefined
+                if (m) {
+                    m.upload_progress = event.progress
+                    m.upload_loaded = event.uploadedBytes
+                    m.upload_total = event.totalBytes
+                }
+                break
+            }
+            case 'uploaded': {
+                const m = index !== -1 ? msgs[index] : undefined
+                if (m) {
+                    m.upload_progress = 100
+                    // Upgrade the optimistic message content to include the
+                    // server-returned file_id + final dimensions so renderers
+                    // that key off `payload.file_id` start to work even before
+                    // /chat/send completes.
+                    m.content = event.content
+                }
+                break
+            }
+            case 'sent': {
+                const server = event.serverMessage
+                const hydrated: Message = event.localBlobUrl
+                    ? { ...server, local_blob_url: event.localBlobUrl }
+                    : server
+
+                if (index !== -1) {
+                    msgs[index] = hydrated
+                } else {
+                    msgs.push(hydrated)
+                }
+
+                // Seed the media cache so the newly-sent message renders
+                // instantly from the local blob instead of re-fetching.
+                try {
+                    const payload = JSON.parse(server.content || '{}')
+                    if (payload.file_id && event.localBlobUrl) {
+                        setCachedMediaUrl(payload.file_id, event.localBlobUrl)
+                    }
+                } catch {
+                    // non-JSON content — ignore
+                }
+                break
+            }
+            case 'error': {
+                const m = index !== -1 ? msgs[index] : undefined
+                if (m) {
+                    m.is_error = true
+                    m.is_sending = false
+                }
+                break
+            }
+            case 'cancelled': {
+                if (index !== -1) {
+                    msgs.splice(index, 1)
+                }
+                break
+            }
+        }
+    }
+
+    const unsubscribeFromUploadService = backgroundSubscribeToUploads(applyUploadEventToMessages)
+    onUnmounted(() => {
+        try {
+            unsubscribeFromUploadService()
+        } catch {
+            /* ignore */
+        }
+    })
+
+    /**
+     * Graft any pending background uploads for the given user into the
+     * current `messages.value`. Called by `useChatMessages.loadMessages`
+     * after server messages have been loaded, so the user sees any
+     * in-flight or resumed uploads even after navigating away and back.
+     */
+    function adoptPendingUploadsForUser(userId: number) {
+        const pending = backgroundGetPendingForUser(userId)
+        if (pending.length === 0) return
+
+        const existingIds = new Set(messages.value.map(m => m.id))
+        for (const upload of pending) {
+            if (existingIds.has(upload.id)) continue
+            messages.value.push(buildOptimisticMessageFromUpload(upload))
         }
     }
 
@@ -1845,6 +1775,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         handleMediaClick,
         setLightboxIndex,
         closeLightbox,
-        handleMediaUploadWrapper
+        handleMediaUploadWrapper,
+        adoptPendingUploadsForUser,
     }
 }
