@@ -71,19 +71,71 @@
               <span class="recording-dot"></span>
               {{ formattedRecordingTime }}
             </div>
+
+            <div v-if="hasCapturedMediaQueue" class="camera-captured-strip">
+              <button
+                v-for="item in capturedCameraMedia"
+                :key="item.id"
+                type="button"
+                class="camera-captured-item"
+                :title="item.type === 'video' ? 'حذف ویدئو' : 'حذف عکس'"
+                @click="removeCapturedMedia(item.id)"
+              >
+                <img
+                  v-if="item.type === 'photo'"
+                  :src="item.previewUrl"
+                  alt="پیش نمایش عکس"
+                  class="camera-captured-thumb"
+                />
+                <div v-else class="camera-captured-video-wrap">
+                  <video :src="item.previewUrl" class="camera-captured-thumb" muted loop playsinline autoplay></video>
+                  <span class="camera-captured-video-badge">ویدئو</span>
+                </div>
+                <span class="camera-captured-remove">×</span>
+              </button>
+            </div>
           </div>
 
           <div class="camera-control-bar">
-            <button
-              class="camera-shutter-btn"
-              :class="{ recording: isRecording, video: cameraMode === 'video' }"
-              :disabled="!isCameraReady"
-              @click="handlePrimaryCameraAction"
-            >
-              <span class="camera-shutter-core"></span>
-            </button>
-            <div class="camera-capture-label">
-              {{ cameraMode === 'photo' ? 'ثبت عکس' : (isRecording ? 'توقف ضبط' : 'شروع ضبط ویدئو') }}
+            <div class="camera-control-row">
+              <button
+                type="button"
+                class="camera-queue-action camera-clear-btn"
+                :disabled="!hasCapturedMediaQueue || isRecording"
+                @click="clearCapturedMediaQueue"
+              >
+                پاک کردن
+              </button>
+
+              <button
+                class="camera-shutter-btn"
+                :class="{ recording: isRecording, video: cameraMode === 'video' }"
+                :disabled="!isCameraReady"
+                @click="handlePrimaryCameraAction"
+              >
+                <span class="camera-shutter-core"></span>
+              </button>
+
+              <button
+                type="button"
+                class="camera-queue-action camera-send-btn"
+                :disabled="!canSendCapturedMedia"
+                @click="sendCapturedMediaQueue"
+              >
+                <span v-if="hasCapturedMediaQueue" class="camera-send-count">{{ capturedMediaCount }}</span>
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </div>
+            <div class="camera-capture-meta">
+              <div class="camera-capture-label">
+                {{ cameraMode === 'photo' ? 'ثبت عکس' : (isRecording ? 'توقف ضبط' : 'شروع ضبط ویدئو') }}
+              </div>
+              <div v-if="hasCapturedMediaQueue" class="camera-capture-queue-label">
+                {{ capturedMediaQueueLabel }}
+              </div>
             </div>
           </div>
         </div>
@@ -120,8 +172,8 @@
         <div class="sheet-content">
           <!-- Gallery Tab -->
           <div v-if="activeTab === 'gallery'" class="tab-panel gallery-panel">
-            <input ref="cameraPhotoInput" type="file" accept="image/*" capture="environment" style="display:none" @change="onGalleryFile" />
-            <input ref="cameraVideoInput" type="file" accept="video/*" capture="environment" style="display:none" @change="onGalleryFile" />
+            <input ref="cameraPhotoInput" type="file" accept="image/*" capture="environment" style="display:none" @change="onNativeCameraFile" />
+            <input ref="cameraVideoInput" type="file" accept="video/*" capture="environment" style="display:none" @change="onNativeCameraFile" />
             <input ref="galleryInput" type="file" accept="image/*,video/*" multiple style="display:none" @change="onGalleryFile" />
 
             <button class="action-card" @click="openCameraCapture()">
@@ -213,6 +265,13 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import 'leaflet/dist/leaflet.css'
 import { LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
 
+type CapturedCameraMediaItem = {
+  id: string
+  file: File
+  previewUrl: string
+  type: 'photo' | 'video'
+}
+
 const props = defineProps<{
   modelValue: boolean
 }>()
@@ -241,6 +300,7 @@ const isCameraStarting = ref(false)
 const cameraError = ref('')
 const isRecording = ref(false)
 const recordingSeconds = ref(0)
+const capturedCameraMedia = ref<CapturedCameraMediaItem[]>([])
 
 const cameraStream = ref<MediaStream | null>(null)
 let mediaRecorder: MediaRecorder | null = null
@@ -264,6 +324,13 @@ const nativeCameraFallbackHint = computed(() => (
     ? 'با دکمه پایین، دوربین سیستم برای گرفتن عکس باز می شود.'
     : 'با دکمه پایین، دوربین سیستم برای ضبط ویدئو باز می شود.'
 ))
+const capturedMediaCount = computed(() => capturedCameraMedia.value.length)
+const hasCapturedMediaQueue = computed(() => capturedMediaCount.value > 0)
+const canSendCapturedMedia = computed(() => hasCapturedMediaQueue.value && !isRecording.value)
+const capturedMediaQueueLabel = computed(() => {
+  const count = capturedMediaCount.value
+  return count === 1 ? '۱ مورد آماده ارسال' : `${count} مورد آماده ارسال`
+})
 const isCameraReady = computed(() => (
   isUsingNativeCameraFallback.value
   || (Boolean(cameraStream.value) && !isCameraStarting.value && !cameraError.value)
@@ -292,6 +359,40 @@ function stopRecordingTimer() {
   }
 }
 
+function createCapturedMediaId() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `camera_capture_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function revokeCapturedMediaPreview(url?: string) {
+  if (url?.startsWith('blob:')) {
+    URL.revokeObjectURL(url)
+  }
+}
+
+function removeCapturedMedia(itemId: string) {
+  const index = capturedCameraMedia.value.findIndex((item) => item.id === itemId)
+  if (index === -1) return
+
+  const [removedItem] = capturedCameraMedia.value.splice(index, 1)
+  revokeCapturedMediaPreview(removedItem?.previewUrl)
+}
+
+function clearCapturedMediaQueue() {
+  capturedCameraMedia.value.forEach((item) => revokeCapturedMediaPreview(item.previewUrl))
+  capturedCameraMedia.value = []
+}
+
+function queueCapturedMedia(file: File) {
+  const mediaType = file.type.startsWith('video/') ? 'video' : 'photo'
+  capturedCameraMedia.value.push({
+    id: createCapturedMediaId(),
+    file,
+    previewUrl: URL.createObjectURL(file),
+    type: mediaType,
+  })
+}
+
 function stopCameraTracks() {
   if (cameraPreviewRef.value) {
     try {
@@ -306,7 +407,7 @@ function stopCameraTracks() {
   cameraStream.value = null
 }
 
-function cleanupCamera(discardRecording = true) {
+function cleanupCamera(discardRecording = true, clearCapturedMedia = true) {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.onstop = null
     try {
@@ -329,6 +430,10 @@ function cleanupCamera(discardRecording = true) {
   cameraError.value = ''
   isCameraStarting.value = false
   showCameraCapture.value = false
+
+  if (clearCapturedMedia) {
+    clearCapturedMediaQueue()
+  }
 }
 
 function supportsInlineCameraPreview() {
@@ -413,6 +518,11 @@ async function startCameraStream() {
   }
 }
 
+function createCameraAlbumId() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `camera_album_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
 function getSupportedVideoMimeType() {
   if (typeof MediaRecorder === 'undefined') return ''
 
@@ -426,10 +536,30 @@ function getSupportedVideoMimeType() {
   return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || ''
 }
 
-async function emitCapturedMedia(file: File) {
-  cleanupCamera(true)
+async function sendCapturedMediaQueue() {
+  if (!hasCapturedMediaQueue.value) return
+
+  const queuedItems = capturedCameraMedia.value.map((item) => ({
+    file: item.file,
+    type: item.type,
+  }))
+  const albumId = queuedItems.length > 1 ? createCameraAlbumId() : null
+
+  cleanupCamera(true, true)
   emit('update:modelValue', false)
-  emit('select-media', file)
+
+  await new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame !== 'function') {
+      setTimeout(resolve, 0)
+      return
+    }
+
+    requestAnimationFrame(() => resolve())
+  })
+
+  queuedItems.forEach((item, index) => {
+    emit('select-media', item.file, albumId, index, queuedItems.length)
+  })
 }
 
 async function capturePhoto() {
@@ -456,7 +586,7 @@ async function capturePhoto() {
   }
 
   const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' })
-  await emitCapturedMedia(file)
+  queueCapturedMedia(file)
 }
 
 function startVideoRecording() {
@@ -491,7 +621,7 @@ function startVideoRecording() {
 
     const extension = blob.type.includes('mp4') ? 'mp4' : 'webm'
     const file = new File([blob], `camera_${Date.now()}.${extension}`, { type: blob.type || 'video/webm' })
-    await emitCapturedMedia(file)
+    queueCapturedMedia(file)
   }
 
   mediaRecorder.start(200)
@@ -565,6 +695,17 @@ async function toggleFacingMode() {
 
 function closeCameraCapture() {
   cleanupCamera(true)
+}
+
+function onNativeCameraFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!input.files?.length) return
+
+  Array.from(input.files).forEach((file) => {
+    queueCapturedMedia(file)
+  })
+
+  input.value = ''
 }
 
 function onTouchStart(e: TouchEvent) {
@@ -870,6 +1011,84 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(8px);
 }
 
+.camera-captured-strip {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  z-index: 2;
+}
+
+.camera-captured-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.camera-captured-item {
+  position: relative;
+  width: 68px;
+  min-width: 68px;
+  height: 92px;
+  border: none;
+  border-radius: 18px;
+  overflow: hidden;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.38);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.camera-captured-thumb,
+.camera-captured-video-wrap {
+  width: 100%;
+  height: 100%;
+}
+
+.camera-captured-thumb {
+  object-fit: cover;
+  display: block;
+}
+
+.camera-captured-video-wrap {
+  position: relative;
+}
+
+.camera-captured-video-wrap .camera-captured-thumb {
+  width: 100%;
+  height: 100%;
+}
+
+.camera-captured-video-badge {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 8px;
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.68);
+  color: white;
+}
+
+.camera-captured-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.62);
+  color: white;
+  font-size: 16px;
+  line-height: 1;
+}
+
 .recording-dot {
   width: 10px;
   height: 10px;
@@ -885,6 +1104,49 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
   background: linear-gradient(to top, rgba(0, 0, 0, 0.76), rgba(0, 0, 0, 0.36));
+}
+
+.camera-control-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.camera-queue-action {
+  height: 48px;
+  border: none;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: white;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 16px;
+}
+
+.camera-queue-action:disabled {
+  opacity: 0.38;
+}
+
+.camera-clear-btn {
+  justify-self: start;
+}
+
+.camera-send-btn {
+  justify-self: end;
+  min-width: 56px;
+  padding-inline: 14px;
+  background: linear-gradient(135deg, #28b463, #1e8f4e);
+}
+
+.camera-send-count {
+  min-width: 18px;
+  text-align: center;
 }
 
 .camera-shutter-btn {
@@ -934,6 +1196,19 @@ onBeforeUnmount(() => {
   color: rgba(255, 255, 255, 0.84);
   font-size: 13px;
   font-weight: 500;
+}
+
+.camera-capture-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.camera-capture-queue-label {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .attachment-sheet {
@@ -1167,6 +1442,15 @@ onBeforeUnmount(() => {
 
   .camera-control-bar {
     padding: 14px 14px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .camera-control-row {
+    gap: 10px;
+  }
+
+  .camera-queue-action {
+    font-size: 12px;
+    padding-inline: 12px;
   }
 
   .camera-shutter-btn {
