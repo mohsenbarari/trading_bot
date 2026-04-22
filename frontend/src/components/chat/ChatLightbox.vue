@@ -132,7 +132,7 @@ function shouldRenderStageItem(index: number) {
 function getStageItemStyle(index: number): CSSProperties {
   const activeIndex = props.lightboxMedia?.currentIndex ?? 0
   const dragRatio = getHorizontalDragRatio()
-  const compositeOffset = index - activeIndex - dragRatio
+  const compositeOffset = index - activeIndex + dragRatio
   const distance = Math.abs(compositeOffset)
 
   const opacity = Math.max(0, 1 - distance * 0.42)
@@ -154,7 +154,7 @@ function getStageItemStyle(index: number): CSSProperties {
 function getThumbStyle(index: number): CSSProperties {
   const activeIndex = props.lightboxMedia?.currentIndex ?? 0
   const dragRatio = getHorizontalDragRatio()
-  const compositeOffset = index - activeIndex - dragRatio * 0.9
+  const compositeOffset = index - activeIndex + dragRatio * 0.9
   const distance = Math.abs(compositeOffset)
 
   if (distance > 4.25) {
