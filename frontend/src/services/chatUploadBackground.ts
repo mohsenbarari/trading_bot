@@ -66,6 +66,7 @@ export interface PendingUpload {
     errorMessage?: string
     createdAt: string // ISO timestamp
     localBlobUrl?: string // UI-only, not persisted
+    retryCount?: number // number of transient retries attempted
 }
 
 export interface SubmitUploadParams {
@@ -140,6 +141,72 @@ const xhrControllers = new Map<number, XMLHttpRequest>()
 const abortFlags = new Set<number>()
 const albumBatches = new Map<string, AlbumBatchState>()
 const subscribers = new Set<UploadEventHandler>()
+
+// -----------------------------------------------------------------------------
+// Concurrency gate
+//
+// Browsers cap concurrent HTTP requests per-origin at ~6. If we fire an XHR
+// per media item (e.g. a 15-image album), those XHRs saturate the connection
+// pool and block ALL other `/api/*` traffic — `/api/chat/send`, `/api/chat/poll`,
+// `/api/offers`, `/api/commodities`, etc. This is what made the rest of the app
+// feel slow while an album was uploading.
+//
+// We intentionally cap concurrent upload-media requests to a small number so
+// unrelated API calls (including text-message sends to OTHER conversations)
+// always have connection slots available. Extra uploads sit in `uploadQueue`
+// and drain FIFO as slots free up.
+// -----------------------------------------------------------------------------
+
+const MAX_CONCURRENT_UPLOADS = 2
+const MAX_UPLOAD_RETRIES = 3 // initial attempt + 3 retries
+let activeUploadCount = 0
+const uploadQueue: PendingUpload[] = []
+
+function enqueueUpload(upload: PendingUpload): void {
+    // Avoid duplicates: if the upload is already queued or in-flight, ignore.
+    if (uploadQueue.some((u) => u.id === upload.id)) return
+    if (xhrControllers.has(upload.id)) return
+    uploadQueue.push(upload)
+    pumpUploadQueue()
+}
+
+function pumpUploadQueue(): void {
+    while (activeUploadCount < MAX_CONCURRENT_UPLOADS && uploadQueue.length > 0) {
+        const next = uploadQueue.shift()
+        if (!next) break
+        if (abortFlags.has(next.id)) continue
+        if (!pendingUploads.has(next.id)) continue
+        activeUploadCount++
+        void runUploadWithGate(next)
+    }
+}
+
+async function runUploadWithGate(upload: PendingUpload): Promise<void> {
+    try {
+        await runUpload(upload)
+    } finally {
+        activeUploadCount = Math.max(0, activeUploadCount - 1)
+        pumpUploadQueue()
+    }
+}
+
+function isTransientUploadError(error: unknown): boolean {
+    const msg = error instanceof Error ? error.message : String(error)
+    if (!msg) return false
+    // Treat browser-level network failures and common 5xx/timeout-ish server
+    // errors as retryable. 4xx (except timeouts) are surfaced as hard failures.
+    if (/network error/i.test(msg)) return true
+    if (/\b(502|503|504|520|521|522|524|408)\b/.test(msg)) return true
+    if (/خطای سرور \((5\d\d|408)\)/.test(msg)) return true
+    return false
+}
+
+function computeRetryDelayMs(attempt: number): number {
+    // Exponential backoff with jitter: ~1s, 2s, 4s (+/- 250ms)
+    const base = 1000 * Math.pow(2, Math.max(0, attempt))
+    const jitter = Math.floor(Math.random() * 500) - 250
+    return Math.max(500, base + jitter)
+}
 
 // -----------------------------------------------------------------------------
 // IndexedDB
@@ -513,6 +580,28 @@ async function runUpload(upload: PendingUpload): Promise<void> {
             if (upload.albumId) cleanupAlbumBatchIfSettled(upload.albumId)
             return
         }
+        // Auto-retry transient network / 5xx errors with exponential backoff
+        // before giving up. This prevents single flaky-network hiccups during
+        // large album uploads from showing up as "failed" media bubbles.
+        if (isTransientUploadError(error) && (upload.retryCount ?? 0) < MAX_UPLOAD_RETRIES) {
+            const attempt = (upload.retryCount ?? 0) + 1
+            upload.retryCount = attempt
+            upload.phase = 'queued'
+            upload.progress = 0
+            upload.uploadedBytes = 0
+            await idbPut(upload)
+            const delay = computeRetryDelayMs(attempt - 1)
+            console.warn(
+                `[uploadService] transient upload error (attempt ${attempt}/${MAX_UPLOAD_RETRIES}), retrying in ${delay}ms:`,
+                error,
+            )
+            setTimeout(() => {
+                if (abortFlags.has(upload.id)) return
+                if (!pendingUploads.has(upload.id)) return
+                enqueueUpload(upload)
+            }, delay)
+            return
+        }
         await markFailed(upload, error instanceof Error ? error.message : String(error))
     }
 }
@@ -643,7 +732,7 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
                     }
                 } else {
                     // queued / uploading — restart the upload
-                    void runUpload(upload)
+                    enqueueUpload(upload)
                 }
             }
         } catch (e) {
@@ -699,8 +788,11 @@ export async function submitUpload(params: SubmitUploadParams): Promise<void> {
         message: buildOptimisticMessageFromUpload(upload),
     })
 
-    // Fire and forget; promise chain is owned by the service
-    void runUpload(upload)
+    // Fire and forget; promise chain is owned by the service.
+    // The concurrency gate ensures we never swamp the browser's per-origin
+    // connection pool, so unrelated API calls (including text-message sends
+    // to other conversations) keep working while large albums upload.
+    enqueueUpload(upload)
 }
 
 export function cancelUpload(id: number): void {
@@ -746,6 +838,8 @@ export function retryFailedUpload(id: number): void {
     if (!upload) return
     if (upload.phase !== 'failed') return
     abortFlags.delete(id)
+    upload.retryCount = 0
+    upload.errorMessage = undefined
 
     if (upload.fileId) {
         // upload-media already succeeded; re-send only
@@ -755,7 +849,7 @@ export function retryFailedUpload(id: number): void {
             void sendOne(upload)
         }
     } else {
-        void runUpload(upload)
+        enqueueUpload(upload)
     }
 }
 
