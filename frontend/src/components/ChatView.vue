@@ -502,7 +502,11 @@ function hydrateRenderedMedia(item: any) {
   if (item?.type === 'album') {
     const albumMessages = Array.isArray(item.messages) ? item.messages : []
     albumMessages.forEach((message: Message) => {
-      scheduleMediaHydration(message.content, message.message_type)
+      scheduleMediaHydration(message.content, message.message_type, {
+        // Keep the broader no-auto-download policy, but allow visible album images
+        // to hydrate to their real file so received albums stop staying semi-blurry.
+        allowNetwork: message.message_type === 'image'
+      })
     })
     return
   }

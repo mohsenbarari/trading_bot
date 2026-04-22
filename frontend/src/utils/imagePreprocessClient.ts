@@ -114,8 +114,8 @@ function dispatchNext(slot: WorkerSlot) {
       file: nextJob.file,
       maxWidthOrHeight: 1920,
       quality: 0.85,
-      thumbnailMaxWidthOrHeight: 96,
-      thumbnailQuality: 0.68,
+      thumbnailMaxWidthOrHeight: 64,
+      thumbnailQuality: 0.58,
     })
     return
   }

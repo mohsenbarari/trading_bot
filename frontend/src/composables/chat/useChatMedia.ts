@@ -5,8 +5,8 @@ import { primeMediaPreprocessTelemetry, recordMediaPreprocessTelemetry } from '.
 
 const CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const CHAT_MEDIA_MAX_UPLOAD_LABEL = '50MB'
-const CHAT_MEDIA_PREVIEW_MAX_EDGE = 96
-const CHAT_MEDIA_PREVIEW_QUALITY = 0.68
+const CHAT_MEDIA_PERSISTED_THUMBNAIL_MAX_EDGE = 64
+const CHAT_MEDIA_PERSISTED_THUMBNAIL_QUALITY = 0.58
 const HEIC_MIME_TYPES = new Set([
     'image/heic',
     'image/heic-sequence',
@@ -224,8 +224,8 @@ async function preprocessImageOnMainThread(
     file: File | Blob,
     maxWidthOrHeight = 1920,
     quality = 0.85,
-    thumbnailMaxWidthOrHeight = CHAT_MEDIA_PREVIEW_MAX_EDGE,
-    thumbnailQuality = CHAT_MEDIA_PREVIEW_QUALITY,
+    thumbnailMaxWidthOrHeight = CHAT_MEDIA_PERSISTED_THUMBNAIL_MAX_EDGE,
+    thumbnailQuality = CHAT_MEDIA_PERSISTED_THUMBNAIL_QUALITY,
 ) {
     const decoded = await decodeImageSource(file)
 
@@ -359,8 +359,12 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 async function generateImageThumbnailDataUrl(file: Blob): Promise<string> {
-    const thumb = await nativeImageCompress(file, CHAT_MEDIA_PREVIEW_MAX_EDGE, CHAT_MEDIA_PREVIEW_QUALITY)
+    const thumb = await nativeImageCompress(file, CHAT_MEDIA_PERSISTED_THUMBNAIL_MAX_EDGE, CHAT_MEDIA_PERSISTED_THUMBNAIL_QUALITY)
     return await blobToDataUrl(thumb.blob)
+}
+
+type MediaHydrationOptions = {
+    allowNetwork?: boolean
 }
 
 export function useChatMedia(options: UseChatMediaOptions) {
@@ -382,8 +386,14 @@ export function useChatMedia(options: UseChatMediaOptions) {
     const albumBatches = new Map<string, PendingAlbumBatch>()
     const preprocessQueue: PreprocessJob[] = []
     const pendingMediaLoads = new Map<string, Promise<string | null>>()
-    const pendingHydrationIds = new Set<string>()
-    const hydrationQueue: Array<{ fileId: string; content: string; type?: string }> = []
+    const pendingHydrationKeys = new Set<string>()
+    const hydrationQueue: Array<{
+        fileId: string
+        content: string
+        type?: string
+        allowNetwork: boolean
+        queueKey: string
+    }> = []
     let activeHydrationCount = 0
     let hydrationPumpScheduled = false
     let imageDbPromise: Promise<IDBDatabase> | null = null
@@ -698,6 +708,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
         imageCache.value[fileId] = objectUrl
     }
 
+    function buildMediaLoadKey(fileId: string, allowNetwork: boolean) {
+        return `${fileId}:${allowNetwork ? 'network' : 'cache'}`
+    }
+
     function pumpHydrationQueue() {
         hydrationPumpScheduled = false
 
@@ -708,7 +722,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             }
 
             if (imageCache.value[nextItem.fileId]) {
-                pendingHydrationIds.delete(nextItem.fileId)
+                pendingHydrationKeys.delete(nextItem.queueKey)
                 continue
             }
 
@@ -719,10 +733,12 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     try {
                         await waitForNextPaint()
                         if (!imageCache.value[nextItem.fileId]) {
-                            await loadImageForMessage(nextItem.content, nextItem.type)
+                            await loadImageForMessage(nextItem.content, nextItem.type, {
+                                allowNetwork: nextItem.allowNetwork,
+                            })
                         }
                     } finally {
-                        pendingHydrationIds.delete(nextItem.fileId)
+                        pendingHydrationKeys.delete(nextItem.queueKey)
                         activeHydrationCount = Math.max(0, activeHydrationCount - 1)
                         if (hydrationQueue.length > 0) {
                             scheduleHydrationPump()
@@ -742,18 +758,21 @@ export function useChatMedia(options: UseChatMediaOptions) {
         scheduleIdleTask(() => pumpHydrationQueue())
     }
 
-    function scheduleMediaHydration(content: string, type?: string) {
+    function scheduleMediaHydration(content: string, type?: string, options: MediaHydrationOptions = {}) {
         const fileId = getFileId(content)
         if (!fileId) {
             return
         }
 
-        if (imageCache.value[fileId] || pendingMediaLoads.has(fileId) || pendingHydrationIds.has(fileId)) {
+        const allowNetwork = Boolean(options.allowNetwork && type === 'image')
+        const queueKey = buildMediaLoadKey(fileId, allowNetwork)
+
+        if (imageCache.value[fileId] || pendingMediaLoads.has(queueKey) || pendingHydrationKeys.has(queueKey)) {
             return
         }
 
-        pendingHydrationIds.add(fileId)
-        hydrationQueue.push({ fileId, content, type })
+        pendingHydrationKeys.add(queueKey)
+        hydrationQueue.push({ fileId, content, type, allowNetwork, queueKey })
         scheduleHydrationPump()
     }
 
@@ -786,12 +805,15 @@ export function useChatMedia(options: UseChatMediaOptions) {
         } catch { /* ignore */ }
     }
 
-    async function loadImageForMessage(content: string, type?: string): Promise<string | null> {
+    async function loadImageForMessage(content: string, type?: string, options: MediaHydrationOptions = {}): Promise<string | null> {
         const fileId = getFileId(content)
         if (!fileId) return null
         if (imageCache.value[fileId]) return imageCache.value[fileId] || null
 
-        const pendingLoad = pendingMediaLoads.get(fileId)
+        const allowNetwork = Boolean(options.allowNetwork && type === 'image')
+        const loadKey = buildMediaLoadKey(fileId, allowNetwork)
+
+        const pendingLoad = pendingMediaLoads.get(loadKey)
         if (pendingLoad) {
             return pendingLoad
         }
@@ -804,7 +826,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 return objectUrl
             }
 
-            if (type !== 'voice' && type !== 'sticker') {
+            if (!allowNetwork && type !== 'voice' && type !== 'sticker') {
                 return null
             }
 
@@ -821,12 +843,12 @@ export function useChatMedia(options: UseChatMediaOptions) {
             }
         })()
 
-        pendingMediaLoads.set(fileId, loadPromise)
+        pendingMediaLoads.set(loadKey, loadPromise)
 
         try {
             return await loadPromise
         } finally {
-            pendingMediaLoads.delete(fileId)
+            pendingMediaLoads.delete(loadKey)
         }
     }
 
@@ -1054,7 +1076,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     const sourceWidth = video.videoWidth || width || 1
                     const sourceHeight = video.videoHeight || height || 1
                     const canvas = document.createElement('canvas')
-                    const targetSize = CHAT_MEDIA_PREVIEW_MAX_EDGE
+                    const targetSize = CHAT_MEDIA_PERSISTED_THUMBNAIL_MAX_EDGE
                     const scale = Math.min(targetSize / sourceWidth, targetSize / sourceHeight)
                     canvas.width = Math.max(1, Math.round(sourceWidth * scale))
                     canvas.height = Math.max(1, Math.round(sourceHeight * scale))
@@ -1066,7 +1088,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
                     finish({
-                        thumbnailDataUrl: canvas.toDataURL('image/jpeg', CHAT_MEDIA_PREVIEW_QUALITY),
+                        thumbnailDataUrl: canvas.toDataURL('image/jpeg', CHAT_MEDIA_PERSISTED_THUMBNAIL_QUALITY),
                         width,
                         height,
                     })
