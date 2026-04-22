@@ -722,8 +722,9 @@ async def upload_chat_media(
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
     
     # بررسی محتوای واقعی فایل با استفاده از Magic bytes
+    # CPU-bound libmagic probe is offloaded to a thread to avoid blocking the event loop
     contents = await file.read()
-    mime = magic.from_buffer(contents, mime=True)
+    mime = await asyncio.to_thread(lambda: magic.from_buffer(contents, mime=True))
     
     # allow magic to return "video/webm" for "audio/webm" files
     if mime == 'video/webm' and base_content_type == 'audio/webm':
