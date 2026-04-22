@@ -87,12 +87,15 @@
         <ChatAlbumLayout
           :items="albumLayoutItems"
           :currentUserId="currentUserId"
+          :isDownloadSelectionMode="props.isAlbumDownloadMode"
+          :selectedDownloadMessageIds="props.selectedAlbumDownloadMessageIds"
           @media-click="$emit('media-click', $event)"
           @download="$emit('download', $event)"
           @cancel-send="$emit('cancel-send', $event)"
           @reply-item="$emit('reply-album-item', $event)"
           @forward-item="$emit('forward-album-item', $event)"
           @delete-item="$emit('delete-album-item', $event)"
+          @toggle-download-item="$emit('toggle-album-download-item', $event)"
         />
       </template>
 
@@ -300,6 +303,8 @@ const props = defineProps<{
   onLoad?: () => void
   isAlbum?: boolean
   albumItems?: any[]
+  isAlbumDownloadMode?: boolean
+  selectedAlbumDownloadMessageIds?: number[]
 }>()
 
 const emit = defineEmits<{
@@ -315,6 +320,7 @@ const emit = defineEmits<{
   (e: 'reply-album-item', msg: any): void
   (e: 'forward-album-item', msg: any): void
   (e: 'delete-album-item', msg: any): void
+  (e: 'toggle-album-download-item', msg: any): void
 }>()
 
 const audioStore = useAudioStore()
