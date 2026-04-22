@@ -48,12 +48,16 @@ const messages = ref<Message[]>([])
 
 // Selection State
 const selectedMessages = ref<number[]>([])
-const selectionModePurpose = ref<'default' | 'album-download'>('default')
+const selectionModePurpose = ref<'default' | 'album-download' | 'album-forward'>('default')
 const activeAlbumSelectionId = ref<string | null>(null)
 const isSelectionMode = computed(() => selectedMessages.value.length > 0)
 const isAlbumDownloadSelectionMode = computed(() => {
   return isSelectionMode.value && selectionModePurpose.value === 'album-download' && Boolean(activeAlbumSelectionId.value)
 })
+const isAlbumForwardSelectionMode = computed(() => {
+  return isSelectionMode.value && selectionModePurpose.value === 'album-forward' && Boolean(activeAlbumSelectionId.value)
+})
+const isAlbumActionSelectionMode = computed(() => isAlbumDownloadSelectionMode.value || isAlbumForwardSelectionMode.value)
 const longPressTimer = ref<any>(null)
 
 // Search State
@@ -780,8 +784,18 @@ function startAlbumDownloadSelection(msg: Message, messageIds: number[]) {
   selectedMessages.value = normalized
 }
 
+function startAlbumForwardSelection(msg: Message, messageIds: number[]) {
+  const albumId = getAlbumMeta(msg).albumId
+  const normalized = sortMessageIdsByChatOrder(messageIds)
+  if (!albumId || normalized.length === 0) return
+
+  activeAlbumSelectionId.value = albumId
+  selectionModePurpose.value = 'album-forward'
+  selectedMessages.value = normalized
+}
+
 function isAlbumInDownloadSelection(item: any) {
-  if (!isAlbumDownloadSelectionMode.value || item?.type !== 'album' || !Array.isArray(item.messages) || item.messages.length === 0) {
+  if (!isAlbumActionSelectionMode.value || item?.type !== 'album' || !Array.isArray(item.messages) || item.messages.length === 0) {
     return false
   }
 
@@ -789,13 +803,13 @@ function isAlbumInDownloadSelection(item: any) {
 }
 
 function handleAlbumDownloadItemToggle(msg: Message) {
-  if (!isAlbumDownloadSelectionMode.value) return
+  if (!isAlbumActionSelectionMode.value) return
   if (getAlbumMeta(msg).albumId !== activeAlbumSelectionId.value) return
   toggleSelection(msg.id)
 }
 
 function handleGroupedItemSelection(item: any) {
-  if (isAlbumDownloadSelectionMode.value) {
+  if (isAlbumActionSelectionMode.value) {
     return
   }
 
@@ -847,7 +861,7 @@ const handleNewChatSearch = (userId: number, userName: string) => {
 }
 
 const showContextMenu = (event: Event, msg: Message) => {
-  if (isAlbumDownloadSelectionMode.value) return
+  if (isAlbumActionSelectionMode.value) return
 
   let clientX = 0, clientY = 0;
   if (event instanceof MouseEvent) {
@@ -887,7 +901,7 @@ const closeContextMenu = () => {
 };
 
 const handleMessageClick = (event: Event, msg: Message) => {
-    if (isAlbumDownloadSelectionMode.value) {
+    if (isAlbumActionSelectionMode.value) {
       event.preventDefault()
       return
     }
@@ -1189,8 +1203,31 @@ const handleReplyMessage = () => {
 }
 
 const handleForwardMessage = () => {
+  const msg = contextMenu.value.message
+  const messageIds = normalizeMessageIds(contextMenu.value.messageIds)
+
+  if (msg && messageIds.length > 1) {
+    startAlbumForwardSelection(msg, messageIds)
+    closeContextMenu()
+    return
+  }
+
   openForwardModalForIds(contextMenu.value.messageIds)
   closeContextMenu()
+}
+
+function handleForwardSelectedAlbumMessages() {
+  const orderedIds = sortMessageIdsByChatOrder(selectedMessages.value)
+  if (orderedIds.length === 0) {
+    clearSelection()
+    return
+  }
+
+  // Reset purpose before opening modal so the forward modal isn't considered a selection mode.
+  selectionModePurpose.value = 'default'
+  activeAlbumSelectionId.value = null
+  selectedMessages.value = orderedIds
+  showForwardModal.value = true
 }
 
 function handleAlbumReplyItem(msg: Message) {
@@ -1512,6 +1549,26 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
           <span>دانلود</span>
+        </button>
+      </div>
+
+      <div v-else-if="selectedUserId && isAlbumForwardSelectionMode" class="album-download-selection-bar">
+        <button class="selection-action-btn" @click="clearSelection">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+          <span>انصراف</span>
+        </button>
+        <div class="album-download-selection-summary">
+          {{ selectedMessages.length }} مدیا برای هدایت انتخاب شده
+        </div>
+        <button class="selection-action-btn primary" :disabled="selectedMessages.length === 0" @click="handleForwardSelectedAlbumMessages">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 14 20 9 15 4"></polyline>
+            <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
+          </svg>
+          <span>هدایت</span>
         </button>
       </div>
 
