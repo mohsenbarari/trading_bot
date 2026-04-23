@@ -159,6 +159,14 @@ const subscribers = new Set<UploadEventHandler>()
 
 const MAX_CONCURRENT_UPLOADS = 2
 const MAX_UPLOAD_RETRIES = 3 // initial attempt + 3 retries
+// Hard cap on a single XHR upload. Protects against half-dead connections
+// where bytes are uploaded (progress hits 100%) but the response never
+// arrives — without this the XHR hangs forever, `phase='uploading'` is
+// never cleared, and `flushAlbumBatchIfReady` blocks on `hasStillUploading`
+// for the entire album — preventing ANY of the album's `/chat/send` calls
+// from ever firing. Reproduced in the field: 13-image album never sent
+// even after several hours despite all progress circles showing complete.
+const XHR_UPLOAD_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes per file
 let activeUploadCount = 0
 const uploadQueue: PendingUpload[] = []
 
@@ -187,6 +195,19 @@ async function runUploadWithGate(upload: PendingUpload): Promise<void> {
     } finally {
         activeUploadCount = Math.max(0, activeUploadCount - 1)
         pumpUploadQueue()
+        // Safety net: when everything has drained (no active uploads AND no
+        // queued uploads), force-check every album batch for stalled items.
+        // This recovers from two edge cases that would otherwise leave an
+        // album permanently stuck with no `/chat/send` dispatches:
+        //   (1) A preprocessing error silently dropped one of the N files
+        //       before `submitUpload` was called, so `optimisticIds.size`
+        //       stays < `expectedCount` forever.
+        //   (2) A sibling album's flush loop was racing and every previous
+        //       flush check hit `hasStillUploading` true before the last
+        //       `runUpload` settled.
+        if (activeUploadCount === 0 && uploadQueue.length === 0) {
+            void forceFlushStalledAlbums()
+        }
     }
 }
 
@@ -405,6 +426,49 @@ async function flushAlbumBatchIfReady(albumId: string) {
     }
 }
 
+// Safety net invoked whenever the upload pipeline fully drains. Guarantees
+// that any album whose items are all in a terminal-ish phase gets its
+// pending `/chat/send` dispatches fired, even if the last `runUpload` did
+// not reach the per-item flush path (e.g. due to a dropped preprocessing
+// step reducing the actual submitted count below the expected count).
+async function forceFlushStalledAlbums(): Promise<void> {
+    if (activeUploadCount > 0 || uploadQueue.length > 0) return
+
+    // Snapshot album ids — flushAlbumBatchIfReady may mutate albumBatches
+    // (via cleanupAlbumBatchIfSettled on completion).
+    const albumIds = Array.from(albumBatches.keys())
+    for (const albumId of albumIds) {
+        const batch = albumBatches.get(albumId)
+        if (!batch || batch.flushing) continue
+
+        // If preprocessing silently dropped one or more items, the batch
+        // will never reach its original expectedCount. Recompute it from
+        // the actual submitted count so the flush gate can pass.
+        if (batch.optimisticIds.size > 0 && batch.optimisticIds.size < batch.expectedCount) {
+            console.warn(
+                `[uploadService] album ${albumId} was gathering ${batch.expectedCount} ` +
+                    `items but only ${batch.optimisticIds.size} were submitted. ` +
+                    `Adjusting expectedCount so the album can flush.`,
+            )
+            batch.expectedCount = batch.optimisticIds.size
+        }
+
+        await flushAlbumBatchIfReady(albumId)
+    }
+}
+
+// Periodic watchdog: forces a safety flush every 30s to catch album
+// batches that ended up stuck despite the drain-triggered force flush
+// (e.g. the tab was throttled during the last `runUploadWithGate` finally,
+// or an XHR got stuck without firing `onerror`/`ontimeout`).
+let stalledAlbumsWatchdog: ReturnType<typeof setInterval> | null = null
+function ensureStalledAlbumsWatchdog(): void {
+    if (stalledAlbumsWatchdog) return
+    stalledAlbumsWatchdog = setInterval(() => {
+        void forceFlushStalledAlbums()
+    }, 30_000)
+}
+
 // -----------------------------------------------------------------------------
 // Content payload construction
 // -----------------------------------------------------------------------------
@@ -484,6 +548,7 @@ async function runUpload(upload: PendingUpload): Promise<void> {
             formData.append('thumbnail', upload.thumbnail)
 
             xhr.open('POST', `${config!.apiBaseUrl}/api/chat/upload-media`)
+            xhr.timeout = XHR_UPLOAD_TIMEOUT_MS
             const token = config!.getAuthToken()
             if (token) {
                 xhr.setRequestHeader('Authorization', `Bearer ${token}`)
@@ -539,6 +604,11 @@ async function runUpload(upload: PendingUpload): Promise<void> {
             xhr.onabort = () => {
                 xhrControllers.delete(upload.id)
                 reject(new Error('UploadCancelled'))
+            }
+            xhr.ontimeout = () => {
+                xhrControllers.delete(upload.id)
+                // Treat as transient so the retry path kicks in.
+                reject(new Error('Network Error (timeout)'))
             }
             xhr.send(formData)
         })
@@ -684,6 +754,7 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
         return resumePromise || Promise.resolve()
     }
     initialized = true
+    ensureStalledAlbumsWatchdog()
 
     resumePromise = (async () => {
         try {
