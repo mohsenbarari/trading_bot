@@ -283,6 +283,20 @@ import type { Message } from '../../types/chat'
 import ChatAlbumLayout from './ChatAlbumLayout.vue'
 import { observeVisibility } from '../../utils/sharedVisibilityObserver'
 
+const messageTimeFormatter = new Intl.DateTimeFormat('fa-IR', {
+  hour: '2-digit',
+  minute: '2-digit'
+})
+
+function parseMessageContent(content: string): Record<string, any> | null {
+  if (!content) return null
+  try {
+    const parsed = JSON.parse(content)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
 
 const formatBytes = (bytes: number, decimals = 2) => {
   if (!+bytes) return "0 Bytes"
@@ -331,10 +345,12 @@ const isSent = computed(() => props.msg.sender_id === props.currentUserId)
 const isSending = computed(() => props.msg.id < 0 || props.msg.is_sending)
 const isError = computed(() => props.msg.is_error)
 const isSelected = computed(() => props.selectedMessages.includes(props.msg.id))
+const parsedContent = computed(() => parseMessageContent(props.msg.content))
+const mediaFileId = computed(() => getFileId(props.msg.content, parsedContent.value))
 
-const isCached = computed(() => !!props.imageCache[getFileId(props.msg.content)])
-const cachedUrl = computed(() => props.imageCache[getFileId(props.msg.content)])
-const thumbnail = computed(() => getImageThumbnail(props.msg.content))
+const cachedUrl = computed(() => props.imageCache[mediaFileId.value] || '')
+const isCached = computed(() => Boolean(cachedUrl.value))
+const thumbnail = computed(() => getImageThumbnail(props.msg.content, parsedContent.value))
 const formattedTime = computed(() => formatTime(props.msg.created_at))
 const audioUrl = computed(() => cachedUrl.value || props.msg.local_blob_url)
 
@@ -354,16 +370,12 @@ const mediaStyle = computed(() => {
       return style
     }
 
-    try {
-      const content = JSON.parse(props.msg.content)
-      if (content.width && content.height) {
-        const ratio = content.width / content.height
-        const clampedRatio = Math.max(0.6, Math.min(ratio, 2.5))
-        style.aspectRatio = `${clampedRatio}`
-      } else {
-        style.minHeight = '200px'
-      }
-    } catch {
+    const content = parsedContent.value
+    if (content?.width && content?.height) {
+      const ratio = content.width / content.height
+      const clampedRatio = Math.max(0.6, Math.min(ratio, 2.5))
+      style.aspectRatio = `${clampedRatio}`
+    } else {
       style.minHeight = '200px'
     }
   }
@@ -372,14 +384,7 @@ const mediaStyle = computed(() => {
 
 // Location parsing
 const locationData = computed(() => {
-  if (props.msg.message_type === 'location' && props.msg.content) {
-    try {
-      return JSON.parse(props.msg.content)
-    } catch {
-      return null
-    }
-  }
-  return null
+  return props.msg.message_type === 'location' ? parsedContent.value : null
 })
 
 const mapSnapshotUrl = computed(() => {
@@ -393,10 +398,7 @@ const mapSnapshotUrl = computed(() => {
 
 // Document computed properties
 const docParsed = computed(() => {
-  if (props.msg.message_type === 'document' && props.msg.content) {
-    try { return JSON.parse(props.msg.content) } catch { return null }
-  }
-  return null
+  return props.msg.message_type === 'document' ? parsedContent.value : null
 })
 const docFileName = computed(() => docParsed.value?.file_name || 'فایل')
 const docFileSize = computed(() => {
@@ -470,13 +472,8 @@ function setupDeferredMediaHydration() {
 onMounted(() => {
   setupDeferredMediaHydration()
 
-  if (props.msg.message_type === 'voice' && props.msg.content) {
-    try {
-      const p = JSON.parse(props.msg.content)
-      if (p.durationMs) {
-        voiceDuration.value = p.durationMs / 1000
-      }
-    } catch { }
+  if (props.msg.message_type === 'voice' && parsedContent.value?.durationMs) {
+    voiceDuration.value = parsedContent.value.durationMs / 1000
   }
 })
 
@@ -647,18 +644,11 @@ const highlightedContent = computed(() => {
 
 const albumLayoutItems = computed(() => {
   return (props.albumItems || []).map((message: any) => {
-    const parsedContent = (() => {
-      try {
-        return JSON.parse(message.content)
-      } catch {
-        return {}
-      }
-    })()
-
-    const fileId = getFileId(message.content)
+    const parsedItemContent = parseMessageContent(message.content)
+    const fileId = getFileId(message.content, parsedItemContent)
     const cachedMediaUrl = fileId ? props.imageCache[fileId] : ''
     const resolvedMediaUrl = message.local_blob_url || cachedMediaUrl || ''
-    const previewUrl = parsedContent.thumbnail || ''
+    const previewUrl = parsedItemContent?.thumbnail || ''
 
     return {
       msg: message,
@@ -666,8 +656,8 @@ const albumLayoutItems = computed(() => {
       previewUrl,
       hasResolvedMedia: Boolean(resolvedMediaUrl),
       type: message.message_type,
-      width: parsedContent.width,
-      height: parsedContent.height
+      width: parsedItemContent?.width,
+      height: parsedItemContent?.height
     }
   })
 })
@@ -858,36 +848,29 @@ function getIconStyle() {
 // --- Formatting Helpers ---
 function formatTime(dateString: string) {
   if (!dateString) return ''
-  const date = new Date(dateString)
-  return new Intl.DateTimeFormat('fa-IR', {
-    hour: '2-digit', minute: '2-digit'
-  }).format(date)
+  return messageTimeFormatter.format(new Date(dateString))
 }
 
-function getFileId(content: string) {
+function getFileId(content: string, parsedContent?: Record<string, any> | null) {
   if (!content) return ''
-  try {
-     const data = JSON.parse(content)
-     return data.file_id || ''
-  } catch {
-      return content.split('::')[0] || ''
+  if (typeof parsedContent?.file_id === 'string') {
+    return parsedContent.file_id
   }
+  return content.split('::')[0] || ''
 }
 
-function getImageThumbnail(content: string) {
+function getImageThumbnail(content: string, parsedContent?: Record<string, any> | null) {
   if (!content) return ''
-  try {
-      const data = JSON.parse(content)
-      return data.thumbnail || ''
-  } catch {
-      const parts = content.split('::')
-      const base64Data = parts[1]
-      if (base64Data) {
-          if (base64Data.startsWith('data:image')) return base64Data
-          return `data:image/jpeg;base64,${base64Data}`
-      }
-      return ''
+  if (typeof parsedContent?.thumbnail === 'string') {
+    return parsedContent.thumbnail
   }
+  const parts = content.split('::')
+  const base64Data = parts[1]
+  if (base64Data) {
+    if (base64Data.startsWith('data:image')) return base64Data
+    return `data:image/jpeg;base64,${base64Data}`
+  }
+  return ''
 }
 </script>
 

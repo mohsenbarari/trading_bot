@@ -84,6 +84,12 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         }, 400)
     }
 
+    function getConversationPreviewContent(data: any) {
+        if (data?.is_deleted) return 'پیام حذف شد'
+        if (data?.message_type !== 'text') return null
+        return typeof data?.content === 'string' ? data.content : null
+    }
+
     function handleNewMessageEvent(data: any) {
         const senderId = data.sender_id;
 
@@ -117,19 +123,24 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         // Patch conversation list entry in-place so the preview/unread
         // update is instant, and still schedule a debounced reload as
         // a convergence safety net.
+        let shouldReloadConversations = arrivingSender === null
         if (arrivingSender !== null) {
             const conv = conversations.value.find((c: any) => c && c.other_user_id === arrivingSender)
             if (conv) {
                 if (data?.created_at) conv.last_message_at = data.created_at
-                if (data?.content !== undefined) conv.last_message_preview = data.content
                 if (data?.message_type) conv.last_message_type = data.message_type
+                conv.last_message_content = getConversationPreviewContent(data)
                 if (!(currentSelected !== null && arrivingSender === currentSelected)) {
                     conv.unread_count = (conv.unread_count || 0) + 1
                 }
+            } else {
+                shouldReloadConversations = true
             }
         }
 
-        scheduleConversationsReload();
+        if (shouldReloadConversations) {
+            scheduleConversationsReload()
+        }
     }
 
     function handleReadEvent(data: any) {

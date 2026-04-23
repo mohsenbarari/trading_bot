@@ -2,7 +2,7 @@
 """
 مدل پیام‌ها برای سیستم چت
 """
-from sqlalchemy import Column, Integer, String, BigInteger, Enum, Boolean, DateTime, Text, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, BigInteger, Enum, Boolean, DateTime, Text, ForeignKey, JSON, Index, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -38,6 +38,23 @@ class Message(Base):
     # Edit/Delete flags
     is_deleted = Column(Boolean, nullable=False, default=False)
     edit_history = Column(JSON, nullable=False, default=list)
+
+    __table_args__ = (
+        Index(
+            "ix_messages_conversation_window_active",
+            sender_id,
+            receiver_id,
+            created_at,
+            id,
+            postgresql_where=text("is_deleted = false"),
+        ),
+        Index(
+            "ix_messages_unread_by_receiver_sender",
+            receiver_id,
+            sender_id,
+            postgresql_where=text("is_read = false"),
+        ),
+    )
     
     # روابط
     sender = relationship("User", foreign_keys=[sender_id], backref="sent_messages")
