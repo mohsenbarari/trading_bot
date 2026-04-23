@@ -66,7 +66,8 @@ export interface PendingUpload {
     errorMessage?: string
     createdAt: string // ISO timestamp
     localBlobUrl?: string // UI-only, not persisted
-    retryCount?: number // number of transient retries attempted
+    retryCount?: number // number of transient retries attempted (upload-media)
+    sendRetryCount?: number // number of transient retries attempted (/chat/send)
 }
 
 export interface SubmitUploadParams {
@@ -217,10 +218,22 @@ function isTransientUploadError(error: unknown): boolean {
     // Treat browser-level network failures and common 5xx/timeout-ish server
     // errors as retryable. 4xx (except timeouts) are surfaced as hard failures.
     if (/network error/i.test(msg)) return true
+    // fetch() throws `TypeError: Failed to fetch` (Chromium/Safari/Firefox)
+    // or `NetworkError when attempting to fetch resource` (Firefox) on
+    // transient connectivity hiccups. These occur when the browser's
+    // per-origin pool is saturated (lots of concurrent XHR uploads) and a
+    // fetch() call races into a closed keep-alive socket.
+    if (/failed to fetch/i.test(msg)) return true
+    if (/networkerror/i.test(msg)) return true
+    if (/load failed/i.test(msg)) return true // Safari
+    if (/connection was lost/i.test(msg)) return true
     if (/\b(502|503|504|520|521|522|524|408)\b/.test(msg)) return true
     if (/خطای سرور \((5\d\d|408)\)/.test(msg)) return true
+    if (/خطای ارسال \((5\d\d|408)\)/.test(msg)) return true
     return false
 }
+
+const MAX_SEND_RETRIES = 3
 
 function computeRetryDelayMs(attempt: number): number {
     // Exponential backoff with jitter: ~1s, 2s, 4s (+/- 250ms)
@@ -726,6 +739,33 @@ async function sendOne(upload: PendingUpload): Promise<void> {
         await idbDelete(upload.id)
         if (upload.albumId) cleanupAlbumBatchIfSettled(upload.albumId)
     } catch (error) {
+        // Retry transient /chat/send failures before giving up. Without this,
+        // a single flaky fetch() (e.g. browser per-origin pool saturated by
+        // 30+ concurrent album uploads across multiple chats) becomes a
+        // permanent "failed" media bubble even though the upload itself
+        // succeeded and the server is healthy.
+        if (
+            isTransientUploadError(error) &&
+            (upload.sendRetryCount ?? 0) < MAX_SEND_RETRIES &&
+            !abortFlags.has(upload.id)
+        ) {
+            const attempt = (upload.sendRetryCount ?? 0) + 1
+            upload.sendRetryCount = attempt
+            // Revert to `uploaded` so a watchdog pass treats it as ready-to-send.
+            upload.phase = 'uploaded'
+            await idbPut(upload)
+            const delay = computeRetryDelayMs(attempt - 1)
+            console.warn(
+                `[uploadService] transient /chat/send error (attempt ${attempt}/${MAX_SEND_RETRIES}), retrying in ${delay}ms:`,
+                error,
+            )
+            setTimeout(() => {
+                if (abortFlags.has(upload.id)) return
+                if (!pendingUploads.has(upload.id)) return
+                void sendOne(upload)
+            }, delay)
+            return
+        }
         await markFailed(upload, error instanceof Error ? error.message : String(error))
     }
 }
