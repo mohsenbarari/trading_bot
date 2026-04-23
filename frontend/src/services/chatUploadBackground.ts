@@ -233,13 +233,22 @@ function isTransientUploadError(error: unknown): boolean {
     return false
 }
 
-const MAX_SEND_RETRIES = 3
+const MAX_SEND_RETRIES = 10
 
 function computeRetryDelayMs(attempt: number): number {
     // Exponential backoff with jitter: ~1s, 2s, 4s (+/- 250ms)
     const base = 1000 * Math.pow(2, Math.max(0, attempt))
     const jitter = Math.floor(Math.random() * 500) - 250
     return Math.max(500, base + jitter)
+}
+
+function computeSendRetryDelayMs(attempt: number): number {
+    // /chat/send retries are cheap (tiny JSON POST) and the upload blob is
+    // already on the server, so be generous. Exponential up to 15s with
+    // jitter: ~1s, 2s, 4s, 8s, then 15s ceiling.
+    const base = Math.min(1000 * Math.pow(2, Math.max(0, attempt)), 15000)
+    const jitter = Math.floor(Math.random() * 1000) - 500
+    return Math.max(750, base + jitter)
 }
 
 // -----------------------------------------------------------------------------
@@ -754,7 +763,7 @@ async function sendOne(upload: PendingUpload): Promise<void> {
             // Revert to `uploaded` so a watchdog pass treats it as ready-to-send.
             upload.phase = 'uploaded'
             await idbPut(upload)
-            const delay = computeRetryDelayMs(attempt - 1)
+            const delay = computeSendRetryDelayMs(attempt - 1)
             console.warn(
                 `[uploadService] transient /chat/send error (attempt ${attempt}/${MAX_SEND_RETRIES}), retrying in ${delay}ms:`,
                 error,
