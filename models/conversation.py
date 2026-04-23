@@ -2,7 +2,7 @@
 """
 مدل مکالمه‌ها برای سیستم چت
 """
-from sqlalchemy import Column, Integer, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, DateTime, ForeignKey, UniqueConstraint, Index, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -41,4 +41,24 @@ class Conversation(Base):
     # یکتایی: هر جفت کاربر فقط یک مکالمه دارند
     __table_args__ = (
         UniqueConstraint('user1_id', 'user2_id', name='uq_conversation_users'),
+        Index(
+            'ix_conversations_user1_last_message_at_compound',
+            user1_id,
+            last_message_at,
+        ),
+        Index(
+            'ix_conversations_user2_last_message_at_compound',
+            user2_id,
+            last_message_at,
+        ),
+        Index(
+            'ix_conversations_user1_unread_positive',
+            user1_id,
+            postgresql_where=text('unread_count_user1 > 0'),
+        ),
+        Index(
+            'ix_conversations_user2_unread_positive',
+            user2_id,
+            postgresql_where=text('unread_count_user2 > 0'),
+        ),
     )
