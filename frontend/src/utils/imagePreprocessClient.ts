@@ -34,11 +34,24 @@ type WorkerSlot = {
   worker: Worker
   busy: boolean
   currentJob: PendingJob | null
+  timeoutId: ReturnType<typeof setTimeout> | null
 }
 
 const queuedJobs: PendingJob[] = []
 const activeAbortCleanups = new Map<string, () => void>()
 const workerSlots: WorkerSlot[] = []
+
+// Mobile browsers (notably Safari on iOS and Chrome on low-RAM Android) can
+// silently kill a Web Worker when its OffscreenCanvas memory footprint grows
+// during a large album preprocess. When this happens, neither `onmessage` nor
+// `onerror` fires — the slot stays `busy=true` forever and the entire pool
+// (plus the composable-level `activePreprocessCount` gate) locks up, leaving
+// the user watching a "preparing..." spinner that never advances.
+//
+// To guarantee the pool keeps draining, we arm a hard per-job timeout. If a
+// job doesn't post back within the window, we treat the worker as dead and
+// recycle the slot.
+const WORKER_JOB_TIMEOUT_MS = 60_000
 
 export function canUseImagePreprocessWorker() {
   return (
@@ -80,6 +93,39 @@ function cleanupActiveJob(jobId: string) {
   }
 }
 
+function clearSlotTimeout(slot: WorkerSlot) {
+  if (slot.timeoutId !== null) {
+    clearTimeout(slot.timeoutId)
+    slot.timeoutId = null
+  }
+}
+
+function armSlotTimeout(slot: WorkerSlot, job: PendingJob) {
+  clearSlotTimeout(slot)
+  slot.timeoutId = setTimeout(() => {
+    // Worker is presumed dead (mobile OOM kill). Recycle the slot.
+    const stuckJob = slot.currentJob
+    try {
+      slot.worker.terminate()
+    } catch {
+      /* ignore */
+    }
+    slot.worker = createWorkerInstance()
+    attachWorkerHandlers(slot)
+    slot.busy = false
+    slot.currentJob = null
+    slot.timeoutId = null
+    if (stuckJob) {
+      cleanupActiveJob(stuckJob.id)
+      stuckJob.reject(new Error('Image preprocessing timed out (worker may have been killed).'))
+    } else {
+      // Defensive — shouldn't happen.
+      void job
+    }
+    dispatchNext(slot)
+  }, WORKER_JOB_TIMEOUT_MS)
+}
+
 function dispatchNext(slot: WorkerSlot) {
   while (queuedJobs.length > 0) {
     const nextJob = queuedJobs.shift()
@@ -94,8 +140,10 @@ function dispatchNext(slot: WorkerSlot) {
 
     slot.busy = true
     slot.currentJob = nextJob
+    armSlotTimeout(slot, nextJob)
 
     const handleAbort = () => {
+      clearSlotTimeout(slot)
       slot.worker.terminate()
       slot.worker = createWorkerInstance()
       attachWorkerHandlers(slot)
@@ -136,6 +184,7 @@ function attachWorkerHandlers(slot: WorkerSlot) {
       return
     }
 
+    clearSlotTimeout(slot)
     cleanupActiveJob(job.id)
 
     if (!response.ok) {
@@ -155,6 +204,7 @@ function attachWorkerHandlers(slot: WorkerSlot) {
   }
 
   slot.worker.onerror = (event) => {
+    clearSlotTimeout(slot)
     const job = slot.currentJob
     if (job) {
       cleanupActiveJob(job.id)
@@ -185,6 +235,7 @@ function ensureWorkerPool() {
       worker: createWorkerInstance(),
       busy: false,
       currentJob: null,
+      timeoutId: null,
     }
     attachWorkerHandlers(slot)
     workerSlots.push(slot)

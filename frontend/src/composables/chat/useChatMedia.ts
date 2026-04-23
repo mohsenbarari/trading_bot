@@ -559,11 +559,38 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
     function launchPreprocessJob(job: PreprocessJob) {
         activePreprocessCount += 1
+        // Hard cap per job: if a preprocess step hangs (e.g. a mobile Worker
+        // got OOM-killed and neither `onmessage` nor `onerror` fires, or an
+        // off-main-thread createImageBitmap never settles), the composable's
+        // `activePreprocessCount` would never decrement and every subsequent
+        // album item would sit forever in `preprocessQueue`. This is what
+        // the user saw as "preparing" locking up for large albums. The
+        // worker client has its own 60s internal timeout that will reject
+        // the underlying promise; this outer guard is defense-in-depth for
+        // any other path (main-thread fallback, video metadata probe, etc.).
+        let settled = false
+        let timeoutId: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+            if (settled) return
+            settled = true
+            activePreprocessCount = Math.max(0, activePreprocessCount - 1)
+            job.reject(new Error('Preprocessing step timed out'))
+            pumpPreprocessQueue()
+        }, 90_000)
         void job.run()
-            .then((value) => job.resolve(value))
-            .catch((reason) => job.reject(reason))
-            .finally(() => {
+            .then((value) => {
+                if (settled) return
+                settled = true
+                if (timeoutId !== null) { clearTimeout(timeoutId); timeoutId = null }
                 activePreprocessCount = Math.max(0, activePreprocessCount - 1)
+                job.resolve(value)
+                pumpPreprocessQueue()
+            })
+            .catch((reason) => {
+                if (settled) return
+                settled = true
+                if (timeoutId !== null) { clearTimeout(timeoutId); timeoutId = null }
+                activePreprocessCount = Math.max(0, activePreprocessCount - 1)
+                job.reject(reason)
                 pumpPreprocessQueue()
             })
     }
