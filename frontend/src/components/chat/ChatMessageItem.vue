@@ -281,6 +281,7 @@ import { useAudioStore } from '../../stores/audio'
 import WaveSurfer from 'wavesurfer.js'
 import type { Message } from '../../types/chat'
 import ChatAlbumLayout from './ChatAlbumLayout.vue'
+import { observeVisibility } from '../../utils/sharedVisibilityObserver'
 
 
 const formatBytes = (bytes: number, decimals = 2) => {
@@ -420,7 +421,7 @@ const docIconClass = computed(() => {
 const messageBubbleRef = ref<HTMLElement | null>(null)
 const waveformRef = ref<HTMLElement | null>(null)
 let wavesurfer: any = null
-let visibilityObserver: IntersectionObserver | null = null
+let unobserveVisibility: (() => void) | null = null
 const hasTriggeredDeferredLoad = ref(false)
 const isPlaying = ref(false)
 const voiceDuration = ref(0)
@@ -435,9 +436,9 @@ const shouldDeferMediaHydration = computed(() => {
 })
 
 function cleanupVisibilityObserver() {
-  if (visibilityObserver) {
-    visibilityObserver.disconnect()
-    visibilityObserver = null
+  if (unobserveVisibility) {
+    unobserveVisibility()
+    unobserveVisibility = null
   }
 }
 
@@ -457,22 +458,13 @@ function setupDeferredMediaHydration() {
     return
   }
 
-  if (typeof IntersectionObserver === 'undefined') {
-    window.setTimeout(() => triggerDeferredLoad(), 0)
-    return
-  }
-
-  visibilityObserver = new IntersectionObserver((entries) => {
-    const isVisible = entries.some(entry => entry.isIntersecting || entry.intersectionRatio > 0)
-    if (isVisible) {
-      triggerDeferredLoad()
-    }
-  }, {
-    threshold: 0.01,
-    rootMargin: '900px 0px 900px 0px'
+  // Shared singleton observer (see utils/sharedVisibilityObserver.ts).
+  // Replaces the previous per-component IntersectionObserver so a chat
+  // with many media messages only maintains one intersection pipeline
+  // instead of N.
+  unobserveVisibility = observeVisibility(target, () => {
+    triggerDeferredLoad()
   })
-
-  visibilityObserver.observe(target)
 }
 
 onMounted(() => {
