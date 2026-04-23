@@ -104,7 +104,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
 
     function getMessageSnapshot(userId: number) {
         const snapshot = messageSnapshotCache.get(userId)
-        if (snapshot === undefined) {
+        if (snapshot === undefined || snapshot.length === 0) {
             return null
         }
 

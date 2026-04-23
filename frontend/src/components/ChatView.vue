@@ -1493,7 +1493,6 @@ watch(selectedUserId, (newVal) => {
   dateSeparatorLabelCache.clear()
   if (newVal) {
     startStatusPolling(newVal)
-    scrollToBottom()
   } else {
     stopStatusPolling()
   }
