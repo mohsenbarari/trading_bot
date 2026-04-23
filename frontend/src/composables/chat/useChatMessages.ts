@@ -1,4 +1,4 @@
-import { ref, type Ref, nextTick } from 'vue'
+import { watch, type Ref, nextTick } from 'vue'
 import { apiFetchJson } from '../../utils/auth'
 import type { Conversation, Message, StickerPack } from '../../types/chat'
 import { useNotificationStore } from '../../stores/notifications'
@@ -66,6 +66,88 @@ export function useChatMessages(options: UseChatMessagesOptions) {
 
     const notificationStore = useNotificationStore()
     const textSendControllers = new Map<number, AbortController>()
+    const messageSnapshotCache = new Map<number, Message[]>()
+    const MAX_CACHED_CHAT_SNAPSHOTS = 12
+    let latestLoadRequestId = 0
+
+    function cloneMessage(message: Message): Message {
+        return {
+            ...message,
+            reply_to_message: message.reply_to_message
+                ? { ...message.reply_to_message }
+                : undefined
+        }
+    }
+
+    function trimMessageSnapshot(messagesList: Message[]) {
+        return messagesList
+            .filter(message => message.id > 0)
+            .map(cloneMessage)
+    }
+
+    function storeMessageSnapshot(userId: number, messagesList: Message[]) {
+        const snapshot = trimMessageSnapshot(messagesList)
+
+        if (messageSnapshotCache.has(userId)) {
+            messageSnapshotCache.delete(userId)
+        }
+
+        messageSnapshotCache.set(userId, snapshot)
+
+        if (messageSnapshotCache.size > MAX_CACHED_CHAT_SNAPSHOTS) {
+            const oldestKey = messageSnapshotCache.keys().next().value
+            if (typeof oldestKey === 'number') {
+                messageSnapshotCache.delete(oldestKey)
+            }
+        }
+    }
+
+    function getMessageSnapshot(userId: number) {
+        const snapshot = messageSnapshotCache.get(userId)
+        if (snapshot === undefined) {
+            return null
+        }
+
+        // Refresh insertion order so the map acts like a tiny LRU cache.
+        messageSnapshotCache.delete(userId)
+        messageSnapshotCache.set(userId, snapshot)
+        return snapshot.map(cloneMessage)
+    }
+
+    function getPendingOptimisticMessages(userId: number) {
+        return backgroundGetPendingForUser(userId).map(buildOptimisticMessageFromUpload)
+    }
+
+    function mergeOptimisticMessages(baseMessages: Message[], optimisticMessages: Message[]) {
+        if (optimisticMessages.length === 0) {
+            return baseMessages
+        }
+
+        const merged = [...baseMessages]
+        const seen = new Set<number>(baseMessages.map(message => message.id))
+
+        for (const message of optimisticMessages) {
+            if (seen.has(message.id)) continue
+            seen.add(message.id)
+            merged.push(cloneMessage(message))
+        }
+
+        return merged
+    }
+
+    function isActiveLoadRequest(requestId: number, userId: number) {
+        return requestId === latestLoadRequestId && selectedUserId.value === userId
+    }
+
+    function isLatestLoadRequest(requestId: number) {
+        return requestId === latestLoadRequestId
+    }
+
+    watch(selectedUserId, (nextUserId, previousUserId) => {
+        if (typeof previousUserId === 'number' && previousUserId !== nextUserId) {
+            storeMessageSnapshot(previousUserId, messages.value)
+        }
+    })
 
     function cancelTextMessage(id: number) {
         const controller = textSendControllers.get(id);
@@ -126,49 +208,68 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     }
 
     async function loadMessages(userId: number, silent = false, aroundId?: number) {
-        if (!silent) isLoadingMessages.value = true
+        const requestId = ++latestLoadRequestId
+        let effectiveSilent = silent
+
+        if (!effectiveSilent) isLoadingMessages.value = true
+
         try {
             let url = `/chat/messages/${userId}?limit=200&_t=${Date.now()}`
 
             if (aroundId) {
                 url = `/chat/messages/${userId}?limit=50&around_id=${aroundId}&_t=${Date.now()}`
-                if (!silent) messages.value = []
+                if (!effectiveSilent) messages.value = []
+            } else if (!effectiveSilent) {
+                const cachedMessages = getMessageSnapshot(userId)
+                if (cachedMessages) {
+                    messages.value = mergeOptimisticMessages(cachedMessages, getPendingOptimisticMessages(userId))
+                    unreadNewMessagesCount.value = 0
+                    isLoadingMessages.value = false
+                    await nextTick()
+                    if (selectedUserId.value === userId) {
+                        scrollToUnreadOrBottom()
+                        void markAsRead()
+                    }
+                    // Keep refreshing from the server, but do it without
+                    // showing the skeleton again.
+                    effectiveSilent = true
+                }
             }
 
             const loadedMessages = await apiFetch(url)
+            if (!isActiveLoadRequest(requestId, userId)) {
+                return
+            }
 
             // Append any pending background-service uploads for this user
             // (both currently uploading + those resumed from IndexedDB after
             // a page reload) so the optimistic messages are visible on mount.
-            const pendingOptimistic = backgroundGetPendingForUser(userId).map(
-                buildOptimisticMessageFromUpload
-            )
+            const pendingOptimistic = getPendingOptimisticMessages(userId)
 
             if (aroundId) {
                 messages.value = loadedMessages
                 // Don't inject pending around a reply anchor — `around_id`
                 // loads a slice, not the full tail, so pending items don't
                 // belong inside that slice's timeline range.
-                isLoadingMessages.value = false
+                if (isLatestLoadRequest(requestId)) {
+                    isLoadingMessages.value = false
+                }
                 return
             }
 
-            if (silent) {
+            storeMessageSnapshot(userId, loadedMessages)
+
+            if (effectiveSilent) {
                 const lastOldMsg = messages.value[messages.value.length - 1]
                 const lastNewMsg = loadedMessages[loadedMessages.length - 1]
                 const isNewMessage = lastNewMsg && (!lastOldMsg || lastNewMsg.id !== lastOldMsg.id)
                 const oldLength = messages.value.length
 
                 const tempParams = messages.value.filter(m => m.id < 0)
-                // Merge tempParams with pending — dedupe by id.
-                const seen = new Set<number>()
-                const combinedTemp: Message[] = []
-                for (const m of [...tempParams, ...pendingOptimistic]) {
-                    if (seen.has(m.id)) continue
-                    seen.add(m.id)
-                    combinedTemp.push(m)
-                }
-                messages.value = [...loadedMessages, ...combinedTemp]
+                messages.value = mergeOptimisticMessages(
+                    loadedMessages,
+                    mergeOptimisticMessages(tempParams, pendingOptimistic)
+                )
 
                 if (isNewMessage) {
                     if (lastNewMsg.sender_id !== currentUserId) {
@@ -188,20 +289,22 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                     }
                 }
             } else {
-                messages.value = pendingOptimistic.length > 0
-                    ? [...loadedMessages, ...pendingOptimistic]
-                    : loadedMessages
+                messages.value = mergeOptimisticMessages(loadedMessages, pendingOptimistic)
                 unreadNewMessagesCount.value = 0
-                isLoadingMessages.value = false
+                if (isLatestLoadRequest(requestId)) {
+                    isLoadingMessages.value = false
+                }
                 await nextTick()
                 scrollToUnreadOrBottom()
-                markAsRead()
+                void markAsRead()
             }
         } catch (e: any) {
-            if (!silent) error.value = e.message
-            if (!silent) isLoadingMessages.value = false
+            if (!effectiveSilent && isActiveLoadRequest(requestId, userId)) error.value = e.message
+            if (!effectiveSilent && isLatestLoadRequest(requestId)) isLoadingMessages.value = false
         } finally {
-            if (!silent && isLoadingMessages.value) isLoadingMessages.value = false
+            if (!effectiveSilent && isLatestLoadRequest(requestId) && isLoadingMessages.value) {
+                isLoadingMessages.value = false
+            }
         }
     }
 
