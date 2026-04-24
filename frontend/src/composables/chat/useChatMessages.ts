@@ -3,6 +3,11 @@ import { apiFetchJson } from '../../utils/auth'
 import type { Conversation, Message } from '../../types/chat'
 import { useNotificationStore } from '../../stores/notifications'
 import {
+    countEmojiStickerOccurrences,
+    isEmojiStickerOnlyMessage,
+    MAX_STICKERS_PER_MESSAGE,
+} from '../../utils/emojiStickerCatalog'
+import {
     getPendingForUser as backgroundGetPendingForUser,
     buildOptimisticMessageFromUpload,
 } from '../../services/chatUploadBackground'
@@ -459,6 +464,13 @@ export function useChatMessages(options: UseChatMessagesOptions) {
 
         if (!selectedUserId.value) return;
         const content = messageInput.value;
+        const stickerCount = countEmojiStickerOccurrences(content)
+        if (stickerCount > MAX_STICKERS_PER_MESSAGE) {
+            alert(`حداکثر ${MAX_STICKERS_PER_MESSAGE} استیکر در هر پیام مجاز است.`)
+            return
+        }
+
+        const messageType: Message['message_type'] = isEmojiStickerOnlyMessage(content) ? 'sticker' : 'text'
         const replyTo = replyingToMessage.value;
 
         const tempId = -Date.now();
@@ -467,7 +479,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             sender_id: currentUserId,
             receiver_id: selectedUserId.value,
             content: content,
-            message_type: 'text',
+            message_type: messageType,
             is_read: false,
             created_at: new Date().toISOString(),
             is_sending: true,
@@ -495,7 +507,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             const body: Record<string, any> = {
                 receiver_id: selectedUserId.value,
                 content: content,
-                message_type: 'text'
+                message_type: messageType
             };
             if (replyTo) body.reply_to_message_id = replyTo.id;
 
@@ -515,7 +527,11 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 messages.value[idx] = serverMsg;
             }
 
-            nextTick(() => focusMessageInput());
+            nextTick(() => {
+                if (!showStickerPicker.value) {
+                    focusMessageInput()
+                }
+            });
         } catch (err: any) {
             textSendControllers.delete(tempId);
             if (err.name === 'AbortError') return;

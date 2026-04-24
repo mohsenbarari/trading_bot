@@ -1,5 +1,5 @@
 <template>
-  <div class="input-area">
+  <div class="input-area" :class="{ 'picker-open': isStickerPickerOpen }">
     <!-- Edit Banner -->
     <div v-if="editingMessage" class="reply-banner edit-banner">
         <div class="reply-banner-icon edit-banner-icon">
@@ -161,11 +161,41 @@
         :placeholder="editingMessage ? 'ویرایش پیام...' : 'پیام...'"
         @input="handleInput"
         @keydown.enter="handleEnter"
+        @focus="handleTextareaFocus"
+        @click="captureSelection"
+        @keyup="captureSelection"
+        @select="captureSelection"
       ></textarea>
 
       <!-- Emoji/Sticker Toggle -->
-      <button v-if="!isRecording" class="emoji-btn" v-ripple @click="toggleStickerPicker">
-        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button
+        v-if="!isRecording"
+        class="emoji-btn"
+        :class="{ 'is-active': isStickerPickerOpen }"
+        v-ripple
+        :aria-label="isStickerPickerOpen ? 'بازگشت به کیبورد' : 'باز کردن پنل استیکر'"
+        @click="toggleStickerPicker"
+      >
+        <svg
+          v-if="isStickerPickerOpen"
+          viewBox="0 0 24 24"
+          width="26"
+          height="26"
+          fill="none"
+          stroke="#3390ec"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <rect x="2" y="5" width="20" height="14" rx="2"></rect>
+          <path d="M6 9h.01"></path>
+          <path d="M10 9h.01"></path>
+          <path d="M14 9h.01"></path>
+          <path d="M18 9h.01"></path>
+          <path d="M6 13h8"></path>
+          <path d="M16 13h2"></path>
+        </svg>
+        <svg v-else viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"></circle>
           <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
           <line x1="9" y1="9" x2="9.01" y2="9"></line>
@@ -176,8 +206,12 @@
     <EmojiStickerPicker
       :open="isStickerPickerOpen"
       :currentUserId="currentUserId"
+      :currentStickerCount="stickerCount"
+      :maxStickerCount="MAX_STICKERS_PER_MESSAGE"
+      :closeOnSelect="false"
       @update:open="setStickerPickerOpen"
-      @select="sendSticker"
+      @insert="insertSticker"
+      @backspace="deleteComposerBackward"
     />
   </div>
 </template>
@@ -185,6 +219,11 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
 import { AudioRecorder } from '../../utils/audioRecorder'
+import {
+  countEmojiStickerOccurrences,
+  MAX_STICKERS_PER_MESSAGE,
+  splitTextGraphemes,
+} from '../../utils/emojiStickerCatalog'
 import EmojiStickerPicker from './EmojiStickerPicker.vue'
 
 const props = defineProps<{
@@ -213,13 +252,14 @@ const emit = defineEmits<{
   (e: 'forward-selected'): void
   (e: 'toggle-attachment'): void
   (e: 'send-text', content: string): void
-  (e: 'send-sticker', sticker: string): void
   (e: 'send-voice', blob: Blob, durationMs: number): void
   (e: 'typing'): void
   (e: 'update:stickerPickerOpen', value: boolean): void
 }>()
 
 const messageInputRef = ref<HTMLTextAreaElement | null>(null)
+const composerSelectionStart = ref(0)
+const composerSelectionEnd = ref(0)
 
 const messageInput = computed({
   get: () => props.modelValue ?? '',
@@ -228,6 +268,7 @@ const messageInput = computed({
 
 const canSubmit = computed(() => Boolean(messageInput.value.trim()))
 const isStickerPickerOpen = computed(() => Boolean(props.stickerPickerOpen))
+const stickerCount = computed(() => countEmojiStickerOccurrences(messageInput.value))
 
 const summarizeMessage = (message: any | null) => {
   if (!message) return ''
@@ -252,6 +293,38 @@ const summarizeMessage = (message: any | null) => {
 const replyBannerText = computed(() => summarizeMessage(props.replyingToMessage))
 const editingBannerText = computed(() => summarizeMessage(props.editingMessage))
 
+function clampSelectionToLength(value: string) {
+  composerSelectionStart.value = Math.min(composerSelectionStart.value, value.length)
+  composerSelectionEnd.value = Math.min(composerSelectionEnd.value, value.length)
+}
+
+function captureSelection() {
+  const el = messageInputRef.value
+  if (!el) {
+    clampSelectionToLength(messageInput.value)
+    return
+  }
+
+  composerSelectionStart.value = el.selectionStart ?? messageInput.value.length
+  composerSelectionEnd.value = el.selectionEnd ?? composerSelectionStart.value
+  clampSelectionToLength(messageInput.value)
+}
+
+function getComposerSelection() {
+  if (document.activeElement === messageInputRef.value) {
+    captureSelection()
+  }
+
+  return {
+    start: composerSelectionStart.value,
+    end: composerSelectionEnd.value,
+  }
+}
+
+function blurInput() {
+  messageInputRef.value?.blur()
+}
+
 const resizeTextarea = () => {
   const el = messageInputRef.value
   if (!el) return
@@ -261,6 +334,7 @@ const resizeTextarea = () => {
 
 const handleInput = () => {
   resizeTextarea()
+  captureSelection()
   emit('typing')
 }
 
@@ -269,10 +343,20 @@ function focusInput(options?: { cursorToEnd?: boolean }) {
     const el = messageInputRef.value
     if (!el) return
     el.focus()
+
+    let selectionStart = composerSelectionStart.value
+    let selectionEnd = composerSelectionEnd.value
+
     if (options?.cursorToEnd) {
-      const cursorPosition = el.value.length
-      el.setSelectionRange(cursorPosition, cursorPosition)
+      selectionStart = el.value.length
+      selectionEnd = el.value.length
     }
+
+    selectionStart = Math.min(selectionStart, el.value.length)
+    selectionEnd = Math.min(selectionEnd, el.value.length)
+    el.setSelectionRange(selectionStart, selectionEnd)
+    composerSelectionStart.value = selectionStart
+    composerSelectionEnd.value = selectionEnd
   })
 }
 
@@ -281,8 +365,11 @@ defineExpose({
   adjustTextareaHeight: resizeTextarea
 })
 
-watch(() => props.modelValue, () => {
-  nextTick(() => resizeTextarea())
+watch(() => props.modelValue, (value) => {
+  nextTick(() => {
+    clampSelectionToLength(value ?? '')
+    resizeTextarea()
+  })
 })
 
 watch(() => props.editingMessage, (message) => {
@@ -303,12 +390,78 @@ function setStickerPickerOpen(nextValue: boolean) {
 
 function toggleStickerPicker() {
   if (props.isDeleted) return
-  setStickerPickerOpen(!isStickerPickerOpen.value)
+
+  if (isStickerPickerOpen.value) {
+    setStickerPickerOpen(false)
+    focusInput()
+    return
+  }
+
+  captureSelection()
+  setStickerPickerOpen(true)
+  blurInput()
 }
 
 function handleToggleAttachment() {
   setStickerPickerOpen(false)
   emit('toggle-attachment')
+}
+
+function handleTextareaFocus() {
+  captureSelection()
+  if (isStickerPickerOpen.value) {
+    setStickerPickerOpen(false)
+  }
+}
+
+function applyComposerValue(nextValue: string, nextSelectionStart: number, nextSelectionEnd = nextSelectionStart) {
+  const shouldRestoreSelection = document.activeElement === messageInputRef.value
+  messageInput.value = nextValue
+  composerSelectionStart.value = nextSelectionStart
+  composerSelectionEnd.value = nextSelectionEnd
+  emit('typing')
+
+  nextTick(() => {
+    resizeTextarea()
+    const el = messageInputRef.value
+    if (!el || !shouldRestoreSelection) return
+
+    const selectionStart = Math.min(composerSelectionStart.value, el.value.length)
+    const selectionEnd = Math.min(composerSelectionEnd.value, el.value.length)
+    el.setSelectionRange(selectionStart, selectionEnd)
+  })
+}
+
+function insertSticker(sticker: string) {
+  const { start, end } = getComposerSelection()
+  const nextValue = `${messageInput.value.slice(0, start)}${sticker}${messageInput.value.slice(end)}`
+
+  if (countEmojiStickerOccurrences(nextValue) > MAX_STICKERS_PER_MESSAGE) {
+    alert(`حداکثر ${MAX_STICKERS_PER_MESSAGE} استیکر در هر پیام مجاز است.`)
+    return
+  }
+
+  applyComposerValue(nextValue, start + sticker.length)
+}
+
+function deleteComposerBackward() {
+  const { start, end } = getComposerSelection()
+  if (start === 0 && end === 0) return
+
+  if (end > start) {
+    const nextValue = `${messageInput.value.slice(0, start)}${messageInput.value.slice(end)}`
+    applyComposerValue(nextValue, start)
+    return
+  }
+
+  const prefix = messageInput.value.slice(0, start)
+  const suffix = messageInput.value.slice(end)
+  const graphemes = splitTextGraphemes(prefix)
+  if (graphemes.length === 0) return
+
+  graphemes.pop()
+  const nextPrefix = graphemes.join('')
+  applyComposerValue(`${nextPrefix}${suffix}`, nextPrefix.length)
 }
 
 // Voice Recording State
@@ -373,20 +526,21 @@ const handleEnter = (e: KeyboardEvent) => {
 const sendMessage = () => {
   const content = messageInput.value.trim()
   if (!content) return
+
+  if (countEmojiStickerOccurrences(content) > MAX_STICKERS_PER_MESSAGE) {
+    alert(`حداکثر ${MAX_STICKERS_PER_MESSAGE} استیکر در هر پیام مجاز است.`)
+    return
+  }
   
   emit('send-text', content)
   messageInput.value = ''
-  setStickerPickerOpen(false)
+  composerSelectionStart.value = 0
+  composerSelectionEnd.value = 0
   
   // reset height
   nextTick(() => {
     if (messageInputRef.value) messageInputRef.value.style.height = 'auto'
   })
-}
-
-const sendSticker = (sticker: string) => {
-  emit('send-sticker', sticker)
-  setStickerPickerOpen(false)
 }
 </script>
 
@@ -445,6 +599,10 @@ const sendSticker = (sticker: string) => {
   z-index: 60;
 }
 
+.input-area.picker-open {
+  padding-bottom: 0;
+}
+
 .input-container {
   width: 100%;
   gap: 8px;
@@ -490,6 +648,7 @@ const sendSticker = (sticker: string) => {
 }
 .emoji-btn svg, .attach-btn svg, .voice-btn svg, .cancel-voice-btn svg { width: 28px; height: 28px; }
 .emoji-btn { margin-left: 4px; }
+.emoji-btn.is-active svg { stroke: #3390ec; }
 .attach-btn, .voice-btn { margin-right: 4px; }
 .cancel-voice-btn { margin-left: 4px; }
 
