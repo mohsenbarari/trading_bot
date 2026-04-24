@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, onUnmounted, nextTick } from 'vue'
-import ConversationSkeleton from './chat/ConversationSkeleton.vue'
-import ChatSkeleton from './chat/ChatSkeleton.vue'
+import MessengerLoadingScreen from './chat/MessengerLoadingScreen.vue'
 import ChatAlbumLayout from './chat/ChatAlbumLayout.vue'
 import ChatHeader from './chat/ChatHeader.vue'
 import ChatInputBar from './chat/ChatInputBar.vue'
@@ -162,6 +161,28 @@ const messagesLogic = useChatMessages({
   }
 })
 
+const {
+  apiFetch,
+  loadConversations,
+  loadMessages,
+  loadOlderMessages,
+  markAsRead,
+  sendMessage,
+  sendMediaMessage,
+  cancelTextMessage,
+  cancelEdit,
+  handleReply,
+  cancelReply,
+  startPolling,
+  stopPolling,
+  startStatusPolling,
+  stopStatusPolling,
+  loadStickers,
+  sendSticker,
+  hasOlderMessages,
+  isLoadingOlderMessages
+} = messagesLogic
+
 const mediaLogic = useChatMedia({
   apiBaseUrl: props.apiBaseUrl,
   jwtToken: props.jwtToken,
@@ -171,7 +192,7 @@ const mediaLogic = useChatMedia({
   error,
   isUploading,
   scrollToBottom,
-  sendMediaMessage: messagesLogic.sendMediaMessage
+  sendMediaMessage
 })
 
 const wsLogic = useChatWebSocket({
@@ -179,11 +200,11 @@ const wsLogic = useChatWebSocket({
   messageInput,
   messages,
   conversations,
-  apiFetch: messagesLogic.apiFetch,
-  loadConversations: messagesLogic.loadConversations,
-  loadMessages: messagesLogic.loadMessages,
+  apiFetch,
+  loadConversations,
+  loadMessages,
   scrollToBottom,
-  markAsRead: messagesLogic.markAsRead,
+  markAsRead,
   isUserAtBottom
 })
 
@@ -223,29 +244,40 @@ function closeLocationModal() {
 }
 
 const {
-  loadConversations,
-  loadMessages,
-  markAsRead,
-  sendMessage,
-  sendMediaMessage,
-  cancelTextMessage,
-  cancelEdit,
-  handleReply,
-  cancelReply,
-  startPolling,
-  stopPolling,
-  startStatusPolling,
-  stopStatusPolling,
-  loadStickers,
-  sendSticker
-} = messagesLogic
-
-const {
   typingUsers,
   isTyping,
   handleTypingWrapper,
   sendTypingSignal
 } = wsLogic
+
+const LOAD_OLDER_TRIGGER_PX = 96
+
+const handleMessagesScroll = async () => {
+  handleScroll()
+
+  const container = messagesContainer.value
+  const userId = selectedUserId.value
+
+  if (!container || !userId || isLoadingMessages.value || isLoadingOlderMessages.value || !hasOlderMessages.value) {
+    return
+  }
+
+  if (container.scrollTop > LOAD_OLDER_TRIGGER_PX) {
+    return
+  }
+
+  const previousHeight = container.scrollHeight
+  const previousTop = container.scrollTop
+  const loadedCount = await loadOlderMessages(userId)
+
+  if (loadedCount <= 0) {
+    return
+  }
+
+  await nextTick()
+  const newHeight = container.scrollHeight
+  container.scrollTop = previousTop + (newHeight - previousHeight)
+}
 
 const isSelectedUserDeleted = computed(() => {
   const conv = conversations.value.find(c => c.other_user_id === selectedUserId.value)
@@ -1578,7 +1610,11 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 
     <!-- Loading -->
     <div v-if="isLoading" class="loading-state">
-      <ConversationSkeleton :count="6" />
+      <MessengerLoadingScreen
+        mode="list"
+        title="در حال آماده‌سازی پیام‌رسان"
+        subtitle="گفتگوها و وضعیت‌ها در حال همگام‌سازی هستند."
+      />
     </div>
 
     <!-- Error -->
@@ -1623,10 +1659,19 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       
       <div v-else class="chat-content">
         <div v-if="isLoadingMessages" class="loading-state">
-          <ChatSkeleton :count="8" />
+          <MessengerLoadingScreen
+            mode="chat"
+            title="در حال باز کردن گفتگو"
+            subtitle="آخرین پیام‌ها با یک بارگذاری سبک و سریع آماده می‌شوند."
+          />
         </div>
         
-        <div v-else class="messages-container" ref="messagesContainer" @scroll.passive="handleScroll">
+        <div v-else class="messages-container" ref="messagesContainer" @scroll.passive="handleMessagesScroll">
+          <div v-if="isLoadingOlderMessages" class="history-loading-indicator">
+            <span class="history-loading-dot"></span>
+            <span>در حال بارگذاری پیام‌های قبلی...</span>
+          </div>
+
           <div v-if="messages.length === 0" class="empty-state">
             <span>💬</span>
             <p>شروع گفتگو...</p>
@@ -2087,6 +2132,43 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.history-loading-indicator {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #5f6d79;
+  font-size: 12px;
+  box-shadow: 0 8px 18px rgba(26, 41, 53, 0.08);
+  position: sticky;
+  top: 8px;
+  z-index: 8;
+}
+
+.history-loading-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f59e0b, #3390ec);
+  animation: history-loading-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes history-loading-pulse {
+  0%,
+  100% {
+    transform: scale(0.8);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .message-group {

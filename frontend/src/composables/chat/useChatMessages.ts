@@ -1,4 +1,4 @@
-import { watch, type Ref, nextTick } from 'vue'
+import { ref, watch, type Ref, nextTick } from 'vue'
 import { apiFetchJson } from '../../utils/auth'
 import type { Conversation, Message, StickerPack } from '../../types/chat'
 import { useNotificationStore } from '../../stores/notifications'
@@ -68,6 +68,11 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     const textSendControllers = new Map<number, AbortController>()
     const messageSnapshotCache = new Map<number, Message[]>()
     const MAX_CACHED_CHAT_SNAPSHOTS = 12
+    const INITIAL_CHAT_OPEN_LIMIT = 48
+    const SEARCH_CONTEXT_LIMIT = 50
+    const OLDER_MESSAGES_PAGE_LIMIT = 60
+    const hasOlderMessages = ref(true)
+    const isLoadingOlderMessages = ref(false)
     let latestLoadRequestId = 0
 
     function cloneMessage(message: Message): Message {
@@ -133,6 +138,21 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         }
 
         return merged
+    }
+
+    function mergeServerTailIntoExistingMessages(existingMessages: Message[], latestMessages: Message[]) {
+        const persistedById = new Map<number, Message>()
+
+        for (const message of existingMessages) {
+            if (message.id <= 0) continue
+            persistedById.set(message.id, cloneMessage(message))
+        }
+
+        for (const message of latestMessages) {
+            persistedById.set(message.id, cloneMessage(message))
+        }
+
+        return Array.from(persistedById.values()).sort((left, right) => left.id - right.id)
     }
 
     function isActiveLoadRequest(requestId: number, userId: number) {
@@ -214,10 +234,14 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         if (!effectiveSilent) isLoadingMessages.value = true
 
         try {
-            let url = `/chat/messages/${userId}?limit=200&_t=${Date.now()}`
+            let url = `/chat/messages/${userId}?limit=${INITIAL_CHAT_OPEN_LIMIT}&_t=${Date.now()}`
+
+            if (!aroundId && !silent) {
+                hasOlderMessages.value = true
+            }
 
             if (aroundId) {
-                url = `/chat/messages/${userId}?limit=50&around_id=${aroundId}&_t=${Date.now()}`
+                url = `/chat/messages/${userId}?limit=${SEARCH_CONTEXT_LIMIT}&around_id=${aroundId}&_t=${Date.now()}`
                 if (!effectiveSilent) messages.value = []
             } else if (!effectiveSilent) {
                 const cachedMessages = getMessageSnapshot(userId)
@@ -248,6 +272,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
 
             if (aroundId) {
                 messages.value = loadedMessages
+                hasOlderMessages.value = true
                 // Don't inject pending around a reply anchor — `around_id`
                 // loads a slice, not the full tail, so pending items don't
                 // belong inside that slice's timeline range.
@@ -258,6 +283,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             }
 
             storeMessageSnapshot(userId, loadedMessages)
+            hasOlderMessages.value = loadedMessages.length >= INITIAL_CHAT_OPEN_LIMIT
 
             if (effectiveSilent) {
                 const lastOldMsg = messages.value[messages.value.length - 1]
@@ -267,7 +293,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
 
                 const tempParams = messages.value.filter(m => m.id < 0)
                 messages.value = mergeOptimisticMessages(
-                    loadedMessages,
+                    mergeServerTailIntoExistingMessages(messages.value, loadedMessages),
                     mergeOptimisticMessages(tempParams, pendingOptimistic)
                 )
 
@@ -305,6 +331,50 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             if (!effectiveSilent && isLatestLoadRequest(requestId) && isLoadingMessages.value) {
                 isLoadingMessages.value = false
             }
+        }
+    }
+
+    async function loadOlderMessages(userId: number) {
+        if (isLoadingMessages.value || isLoadingOlderMessages.value || !hasOlderMessages.value) {
+            return 0
+        }
+
+        const oldestLoadedMessage = messages.value.find(message => message.id > 0)
+        if (!oldestLoadedMessage) {
+            hasOlderMessages.value = false
+            return 0
+        }
+
+        isLoadingOlderMessages.value = true
+
+        try {
+            const olderMessages = await apiFetch(
+                `/chat/messages/${userId}?limit=${OLDER_MESSAGES_PAGE_LIMIT}&before_id=${oldestLoadedMessage.id}&_t=${Date.now()}`
+            )
+
+            if (selectedUserId.value !== userId) {
+                return 0
+            }
+
+            if (!Array.isArray(olderMessages) || olderMessages.length === 0) {
+                hasOlderMessages.value = false
+                return 0
+            }
+
+            const loadedIds = new Set(messages.value.map(message => message.id))
+            const uniqueOlderMessages = olderMessages.filter(message => !loadedIds.has(message.id))
+
+            if (uniqueOlderMessages.length === 0) {
+                hasOlderMessages.value = olderMessages.length >= OLDER_MESSAGES_PAGE_LIMIT
+                return 0
+            }
+
+            messages.value = [...uniqueOlderMessages, ...messages.value]
+            storeMessageSnapshot(userId, messages.value)
+            hasOlderMessages.value = olderMessages.length >= OLDER_MESSAGES_PAGE_LIMIT
+            return uniqueOlderMessages.length
+        } finally {
+            isLoadingOlderMessages.value = false
         }
     }
 
@@ -547,9 +617,12 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         apiFetch,
         loadConversations,
         loadMessages,
+        loadOlderMessages,
         markAsRead,
         sendMessage,
         sendMediaMessage,
+        hasOlderMessages,
+        isLoadingOlderMessages,
         cancelEdit,
         handleReply,
         cancelReply,
