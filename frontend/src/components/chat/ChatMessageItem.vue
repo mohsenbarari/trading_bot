@@ -14,7 +14,8 @@
       :class="{ 
           'sent-side': isSent, 
           'received-side': !isSent,
-          'visible': Math.abs(touchStartX - touchCurrentX) > 20
+          'visible': swipeVisualProgress > 0.08,
+          'armed': isSwipeReplyArmed
       }"
     >
       <div class="reply-icon-wrapper" :style="getIconStyle()">
@@ -39,7 +40,8 @@
       }"
       @touchstart="handleTouchStart($event)"
       @touchmove="handleTouchMove($event)"
-      @touchend="handleTouchEnd($event)"
+      @touchend="handleTouchEnd()"
+      @touchcancel="handleTouchCancel()"
       :style="getSwipeStyle()"
     >
       <!-- Forwarded Banner -->
@@ -792,13 +794,27 @@ const albumLayoutItems = computed(() => {
 })
 
 // --- Touch & Swipe State ---
-const SWIPE_THRESHOLD = 100
+const SWIPE_AXIS_LOCK_DISTANCE = 14
+const SWIPE_ACTIVATION_DISTANCE = 12
+const SWIPE_DIRECTION_BIAS = 1.35
+const SWIPE_TRIGGER_DISTANCE = 72
+const SWIPE_MAX_TRANSLATE = 72
+const SWIPE_RESISTANCE = 0.52
 const touchStartX = ref(0)
+const touchStartY = ref(0)
 const touchCurrentX = ref(0)
-const isSwiping = ref(false)
+const touchCurrentY = ref(0)
+const isTouchTracking = ref(false)
+const swipeAxis = ref<'horizontal' | 'vertical' | null>(null)
+const swipeOffsetX = ref(0)
 const longPressTimer = ref<number | null>(null)
 const contextTouchStart = ref<{ x: number; y: number } | null>(null)
 const suppressContextClickUntil = ref(0)
+
+const isSwiping = computed(() => Math.abs(swipeOffsetX.value) > 0)
+const swipeDistance = computed(() => Math.abs(swipeOffsetX.value))
+const swipeVisualProgress = computed(() => Math.min(swipeDistance.value / SWIPE_TRIGGER_DISTANCE, 1))
+const isSwipeReplyArmed = computed(() => swipeAxis.value === 'horizontal' && swipeDistance.value >= SWIPE_TRIGGER_DISTANCE)
 
 const INTERACTIVE_CONTEXT_TARGET_SELECTOR = [
   '[data-context-ignore]',
@@ -903,74 +919,126 @@ const handleWrapperContextMenu = (e: MouseEvent) => {
   emit('context-menu', e, props.msg)
 }
 
-const handleTouchStart = (e: TouchEvent) => {
-  if (props.isSelectionMode) return
-  if (e.touches.length > 0) {
-    const touch = e.touches[0]
-    if (touch) {
-      touchStartX.value = touch.clientX
-      touchCurrentX.value = touch.clientX
-      isSwiping.value = true
-    }
+function resetSwipeState() {
+  isTouchTracking.value = false
+  swipeAxis.value = null
+  touchStartX.value = 0
+  touchStartY.value = 0
+  touchCurrentX.value = 0
+  touchCurrentY.value = 0
+  swipeOffsetX.value = 0
+}
+
+function getSwipeOffset(rawDeltaX: number) {
+  if (isSent.value) {
+    if (rawDeltaX >= 0) return 0
+    return -Math.min(SWIPE_MAX_TRANSLATE, Math.abs(rawDeltaX) * SWIPE_RESISTANCE)
   }
+
+  if (rawDeltaX <= 0) return 0
+  return Math.min(SWIPE_MAX_TRANSLATE, rawDeltaX * SWIPE_RESISTANCE)
+}
+
+const handleTouchStart = (e: TouchEvent) => {
+  if (props.isSelectionMode || shouldIgnoreContextMenuTarget(e.target) || e.touches.length !== 1) return
+
+  const touch = e.touches[0]
+  if (!touch) return
+
+  touchStartX.value = touch.clientX
+  touchStartY.value = touch.clientY
+  touchCurrentX.value = touch.clientX
+  touchCurrentY.value = touch.clientY
+  isTouchTracking.value = true
+  swipeAxis.value = null
+  swipeOffsetX.value = 0
 }
 
 const handleTouchMove = (e: TouchEvent) => {
-  if (!isSwiping.value) return
-  if (e.touches.length > 0) {
-    const touch = e.touches[0]
-    if (touch) {
-      touchCurrentX.value = touch.clientX
+  if (!isTouchTracking.value || e.touches.length !== 1) return
+
+  const touch = e.touches[0]
+  if (!touch) return
+
+  touchCurrentX.value = touch.clientX
+  touchCurrentY.value = touch.clientY
+
+  const deltaX = touchCurrentX.value - touchStartX.value
+  const deltaY = touchCurrentY.value - touchStartY.value
+  const absDeltaX = Math.abs(deltaX)
+  const absDeltaY = Math.abs(deltaY)
+
+  if (!swipeAxis.value) {
+    if (absDeltaX < SWIPE_AXIS_LOCK_DISTANCE && absDeltaY < SWIPE_AXIS_LOCK_DISTANCE) {
+      return
     }
+
+    swipeAxis.value = absDeltaX > absDeltaY * SWIPE_DIRECTION_BIAS ? 'horizontal' : 'vertical'
   }
+
+  if (swipeAxis.value !== 'horizontal') {
+    swipeOffsetX.value = 0
+    return
+  }
+
+  clearLongPressTimer()
+
+  const nextOffset = getSwipeOffset(deltaX)
+  if (Math.abs(nextOffset) < SWIPE_ACTIVATION_DISTANCE) {
+    swipeOffsetX.value = 0
+    return
+  }
+
+  swipeOffsetX.value = nextOffset
 }
 
-const handleTouchEnd = (e: TouchEvent) => {
-  if (!isSwiping.value) return
-  
-  const diff = touchStartX.value - touchCurrentX.value
-  const isValidSwipe = isSent.value ? (diff > SWIPE_THRESHOLD) : (diff < -SWIPE_THRESHOLD)
+const handleTouchEnd = () => {
+  if (!isTouchTracking.value) return
+
+  const rawDeltaX = touchCurrentX.value - touchStartX.value
+  const isValidSwipe = swipeAxis.value === 'horizontal' && (isSent.value
+    ? rawDeltaX <= -SWIPE_TRIGGER_DISTANCE
+    : rawDeltaX >= SWIPE_TRIGGER_DISTANCE)
 
   if (isValidSwipe) {
     emit('swipe-reply', props.msg)
   }
-  
-  // Reset
-  isSwiping.value = false
-  touchStartX.value = 0
-  touchCurrentX.value = 0
+
+  resetSwipeState()
+}
+
+const handleTouchCancel = () => {
+  if (!isTouchTracking.value) return
+  resetSwipeState()
 }
 
 function getSwipeStyle() {
-  if (!isSwiping.value) return {}
-  const diff = touchStartX.value - touchCurrentX.value
+  if (!swipeOffsetX.value && !isTouchTracking.value) {
+    return {}
+  }
 
-  if (isSent.value) {
-    if (diff <= 0) return {}
-    const translateX = Math.min(diff, 100)
-    return {
-      transform: `translateX(-${translateX}px)`,
-      transition: translateX === 0 ? 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)' : 'none'
-    }
-  } else {
-    if (diff >= 0) return {}
-    const translateX = Math.min(Math.abs(diff), 100)
-    return {
-      transform: `translateX(${translateX}px)`,
-      transition: translateX === 0 ? 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)' : 'none'
-    }
+  return {
+    transform: `translate3d(${swipeOffsetX.value}px, 0, 0)`,
+    transition: isTouchTracking.value && swipeAxis.value === 'horizontal'
+      ? 'none'
+      : 'transform 0.26s cubic-bezier(0.22, 1, 0.36, 1)'
   }
 }
 
 function getIconStyle() {
-  if (!isSwiping.value) return { opacity: 0, transform: 'scale(0.5)' }
-  const diff = Math.abs(touchStartX.value - touchCurrentX.value)
-  if (diff < 20) return { opacity: 0, transform: 'scale(0.5)' }
-  const progress = Math.min((diff - 20) / 60, 1)
+  if (!isSwiping.value) {
+    return { opacity: 0, transform: 'scale(0.7)' }
+  }
+
+  const progress = swipeVisualProgress.value
+  if (progress <= 0) {
+    return { opacity: 0, transform: 'scale(0.7)' }
+  }
+
   return {
-      opacity: progress,
-      transform: `scale(${0.5 + (0.5 * progress)})`,
-      transition: diff === 0 ? 'all 0.4s easeOutBounce' : 'none'
+      opacity: Math.min(1, 0.2 + progress * 0.8),
+      transform: `scale(${0.78 + (0.22 * progress)})`,
+      transition: isTouchTracking.value ? 'none' : 'all 0.2s ease'
   }
 }
 
@@ -1009,10 +1077,17 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 .swipe-reply-icon {
   position: absolute; top: 50%; transform: translateY(-50%); display: flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; border-radius: 50%; background: rgba(0,0,0,0.05); color: #8e8e93; z-index: 1;
-  opacity: 0; transition: opacity 0.2s;
+  width: 40px; height: 40px; border-radius: 50%; background: rgba(255, 255, 255, 0.78); color: #7c8793; z-index: 1;
+  opacity: 0; transition: opacity 0.18s ease, transform 0.18s ease;
+  box-shadow: 0 10px 24px rgba(39, 59, 74, 0.12);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
 }
 .swipe-reply-icon.visible { opacity: 1; }
+.swipe-reply-icon.armed {
+  color: #3390ec;
+  box-shadow: 0 12px 28px rgba(51, 144, 236, 0.22);
+}
 .reply-icon-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .swipe-reply-icon.sent-side { right: 12px; }
 .swipe-reply-icon.received-side { left: 16px; }
@@ -1021,8 +1096,9 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   max-width: 92%; padding: 8px 12px; border-radius: 12px; position: relative; font-size: 15px; line-height: 1.5;
   white-space: pre-wrap; word-wrap: break-word; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   animation: slideIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  will-change: transform;
   -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+  touch-action: pan-y;
 }
 @keyframes slideIn {
   from { opacity: 0; transform: translateY(20px) scale(0.95); }
