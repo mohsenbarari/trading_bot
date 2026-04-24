@@ -312,8 +312,16 @@ type CameraZoomCapability = {
   step: number
 }
 
+type MediaTrackCapabilitiesWithZoom = MediaTrackCapabilities & {
+  zoom?: {
+    min?: number
+    max?: number
+    step?: number
+  }
+}
+
 type ZoomCapableTrack = MediaStreamTrack & {
-  getCapabilities?: () => { zoom?: { min?: number; max?: number; step?: number } }
+  getCapabilities?: () => MediaTrackCapabilities
   getSettings?: () => MediaTrackSettings & { zoom?: number }
 }
 
@@ -458,7 +466,8 @@ async function syncCameraZoomCapability(track: ZoomCapableTrack | null = getActi
     return
   }
 
-  const zoomRange = track.getCapabilities()?.zoom
+  const capabilities = track.getCapabilities() as MediaTrackCapabilitiesWithZoom
+  const zoomRange = capabilities.zoom
   const min = Number(zoomRange?.min)
   const max = Number(zoomRange?.max)
 
