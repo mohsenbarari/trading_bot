@@ -132,7 +132,8 @@ deploy_iran() {
 
     # 2d. Rebuild Docker containers on Iran
     echo "🐳 Rebuilding Docker on Iran..."
-    ssh_iran "cd $IRAN_PROJECT_DIR && docker compose -f docker-compose.iran.yml down && docker compose -f docker-compose.iran.yml up -d --build"
+    echo "⏳ Waiting for Iran services to become ready..."
+    ssh_iran "cd $IRAN_PROJECT_DIR && docker compose -f docker-compose.iran.yml down && docker compose -f docker-compose.iran.yml up -d --build --wait --wait-timeout 180"
 
     echo "✅ Iran deployment complete!"
     ssh_iran "cd $IRAN_PROJECT_DIR && docker compose -f docker-compose.iran.yml ps"
@@ -146,7 +147,8 @@ deploy_foreign() {
 
     cd "$PROJECT_DIR"
     docker compose down
-    docker compose up -d --build
+    echo "⏳ Waiting for foreign services to become ready..."
+    docker compose up -d --build --wait --wait-timeout 180
 
     echo "✅ Foreign deployment complete!"
     docker compose ps
