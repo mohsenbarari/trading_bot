@@ -1,6 +1,6 @@
 <template>
   <transition name="picker-slide">
-    <section v-show="open" class="emoji-sticker-picker">
+    <section v-show="open" class="emoji-sticker-picker" :style="pickerStyle">
       <div class="picker-handle" aria-hidden="true"></div>
 
       <header class="picker-header">
@@ -101,10 +101,12 @@ const props = withDefaults(defineProps<{
   currentStickerCount?: number
   maxStickerCount?: number
   closeOnSelect?: boolean
+  panelHeight?: number | null
 }>(), {
   currentStickerCount: 0,
   maxStickerCount: 24,
   closeOnSelect: true,
+  panelHeight: null,
 })
 
 const emit = defineEmits<{
@@ -131,6 +133,15 @@ const activeCategory = computed<EmojiStickerCategory>(() => {
 })
 
 const isLimitReached = computed(() => props.currentStickerCount >= props.maxStickerCount)
+const pickerStyle = computed(() => {
+  if (!props.panelHeight || !Number.isFinite(props.panelHeight)) {
+    return undefined
+  }
+
+  return {
+    height: `${props.panelHeight}px`,
+  }
+})
 
 function setSectionRef(categoryId: string, element: HTMLElement | null) {
   if (element) {
@@ -235,7 +246,7 @@ watch(() => props.currentUserId, () => {
 
 .emoji-sticker-picker {
   position: relative;
-  margin: 8px -12px 0;
+  margin: 0 -12px 0;
   display: flex;
   flex-direction: column;
   height: min(336px, 44vh);
