@@ -22,7 +22,6 @@ export interface UseChatMessagesOptions {
     isViewingReply: Ref<boolean>
     targetUserStatus: Ref<string>
     messageInput: Ref<string>
-    messageInputRef: Ref<HTMLTextAreaElement | null>
     editingMessage: Ref<Message | null>
     replyingToMessage: Ref<Message | null>
     swipedMessageId: Ref<number | null>
@@ -32,6 +31,7 @@ export interface UseChatMessagesOptions {
     scrollToBottom: () => void
     scrollToUnreadOrBottom: () => void
     forceScrollToBottom: () => void
+    focusMessageInput: (options?: { cursorToEnd?: boolean }) => void
     adjustTextareaHeight: () => void
 }
 
@@ -51,7 +51,6 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         isViewingReply,
         targetUserStatus,
         messageInput,
-        messageInputRef,
         editingMessage,
         replyingToMessage,
         swipedMessageId,
@@ -61,6 +60,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         scrollToBottom,
         scrollToUnreadOrBottom,
         forceScrollToBottom,
+        focusMessageInput,
         adjustTextareaHeight
     } = options
 
@@ -517,7 +517,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 messages.value[idx] = serverMsg;
             }
 
-            nextTick(() => messageInputRef.value?.focus());
+            nextTick(() => focusMessageInput());
         } catch (err: any) {
             textSendControllers.delete(tempId);
             if (err.name === 'AbortError') return;
@@ -540,7 +540,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     const handleReply = (msg: Message) => {
         replyingToMessage.value = msg
         nextTick(() => {
-            messageInputRef.value?.focus()
+            focusMessageInput()
         })
     }
 

@@ -81,8 +81,11 @@ const contextMenu = ref<{ visible: boolean; x: number; y: number; message: Messa
 // Input
 const messageInput = ref('')
 const isSending = ref(false)
-const messageInputRef = ref<HTMLTextAreaElement | null>(null)
 const editingMessage = ref<Message | null>(null)
+const chatInputBarRef = ref<{
+  focusInput: (options?: { cursorToEnd?: boolean }) => void
+  adjustTextareaHeight: () => void
+} | null>(null)
 
 // Stickers
 const stickerPacks = ref<StickerPack[]>([])
@@ -143,7 +146,6 @@ const messagesLogic = useChatMessages({
   isViewingReply,
   targetUserStatus,
   messageInput,
-  messageInputRef,
   editingMessage,
   replyingToMessage,
   swipedMessageId,
@@ -153,11 +155,11 @@ const messagesLogic = useChatMessages({
   scrollToBottom,
   scrollToUnreadOrBottom,
   forceScrollToBottom,
+  focusMessageInput: (options?: { cursorToEnd?: boolean }) => {
+    chatInputBarRef.value?.focusInput(options)
+  },
   adjustTextareaHeight: () => {
-    const el = messageInputRef.value
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+    chatInputBarRef.value?.adjustTextareaHeight()
   }
 })
 
@@ -1044,16 +1046,16 @@ const handleMessageClick = (event: Event, msg: Message) => {
 const handleEditMessage = () => {
   const msg = contextMenu.value.message;
   if (!msg) return;
+  replyingToMessage.value = null;
+  if (isMobile.value) {
+    swipedMessageId.value = null;
+  }
   editingMessage.value = msg;
   messageInput.value = msg.content;
   closeContextMenu();
   nextTick(() => {
-    messageInputRef.value?.focus();
-    const el = messageInputRef.value
-    if (el) {
-       el.style.height = 'auto'
-       el.style.height = Math.min(el.scrollHeight, 200) + 'px'
-    }
+    chatInputBarRef.value?.adjustTextareaHeight();
+    chatInputBarRef.value?.focusInput({ cursorToEnd: true });
   });
 };
 
@@ -1782,7 +1784,10 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 
       <!-- Input Area -->
       <ChatInputBar
+        ref="chatInputBarRef"
         v-else-if="selectedUserId && !isSelectionMode"
+        v-model="messageInput"
+        :editingMessage="editingMessage"
         :isSelectionMode="isSelectionMode"
         :replyingToMessage="replyingToMessage"
         :selectedUserName="selectedUserName"
@@ -1794,6 +1799,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         :isDeleted="isSelectedUserDeleted"
         :selectedMessages="selectedMessages"
         :isUploading="isUploading"
+        @cancel-edit="cancelEdit"
         @cancel-reply="cancelReply"
         @delete-selected="handleDeleteSelected"
         @reply-selected="handleReplySelected"

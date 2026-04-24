@@ -1,7 +1,26 @@
 <template>
   <div class="input-area">
+    <!-- Edit Banner -->
+    <div v-if="editingMessage" class="reply-banner edit-banner">
+        <div class="reply-banner-icon edit-banner-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"></path>
+            <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
+          </svg>
+        </div>
+        <div class="reply-banner-content">
+            <span class="reply-banner-author">ویرایش پیام</span>
+            <span class="reply-banner-text">{{ editingBannerText }}</span>
+        </div>
+        <button class="close-reply" v-ripple @click="$emit('cancel-edit')">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+    </div>
+
     <!-- Reply Banner -->
-    <div v-if="replyingToMessage" class="reply-banner">
+    <div v-else-if="replyingToMessage" class="reply-banner">
         <div class="reply-banner-icon">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#3390ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="9 14 4 9 9 4"></polyline>
@@ -10,9 +29,7 @@
         </div>
         <div class="reply-banner-content">
             <span class="reply-banner-author">{{ replyingToMessage.sender_id === currentUserId ? 'شما' : selectedUserName }}</span>
-            <span class="reply-banner-text">
-                {{ replyingToMessage.message_type === 'text' ? replyingToMessage.content : (replyingToMessage.message_type === 'image' ? '🖼️ تصویر' : (replyingToMessage.message_type === 'video' ? '📹 ویدیو' : (replyingToMessage.message_type === 'location' ? '📍 موقعیت' : '😊 استیکر'))) }}
-            </span>
+            <span class="reply-banner-text">{{ replyBannerText }}</span>
         </div>
         <button class="close-reply" v-ripple @click="$emit('cancel-reply')">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -94,7 +111,7 @@
       </template>
 
       <!-- Left side buttons (Only if not recording) -->
-      <template v-if="!messageInput.trim() && !isRecording">
+      <template v-if="!messageInput.trim() && !isRecording && !editingMessage">
         <button 
           v-ripple 
           class="voice-btn"
@@ -119,13 +136,17 @@
       <button 
         v-else-if="!isRecording"
         v-ripple
-        class="send-btn-inline" 
+        class="send-btn-inline"
+        :class="{ 'edit-mode': !!editingMessage }"
         @click="sendMessage" 
         @mousedown.prevent
         @touchstart.prevent="sendMessage"
-        :disabled="isSending"
+        :disabled="isSending || !canSubmit"
       >
-        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#3390ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(45deg); margin-left: -4px;">
+        <svg v-if="editingMessage" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#3390ec" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+        <svg v-else viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#3390ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(45deg); margin-left: -4px;">
           <line x1="22" y1="2" x2="11" y2="13"></line>
           <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
         </svg>
@@ -137,8 +158,8 @@
         ref="messageInputRef"
         v-model="messageInput"
         rows="1"
-        placeholder="پیام..."
-        @input="adjustTextareaHeight"
+        :placeholder="editingMessage ? 'ویرایش پیام...' : 'پیام...'"
+        @input="handleInput"
         @keydown.enter="handleEnter"
       ></textarea>
 
@@ -175,10 +196,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { AudioRecorder } from '../../utils/audioRecorder'
 
 const props = defineProps<{
+  modelValue: string
+  editingMessage: any | null
   replyingToMessage: any | null
   currentUserId: number | null
   selectedUserName: string
@@ -192,6 +215,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  (e: 'update:modelValue', value: string): void
+  (e: 'cancel-edit'): void
   (e: 'cancel-reply'): void
   (e: 'delete-selected'): void
   (e: 'reply-selected'): void
@@ -204,21 +229,81 @@ const emit = defineEmits<{
   (e: 'typing'): void
 }>()
 
-const messageInput = ref('')
 const messageInputRef = ref<HTMLTextAreaElement | null>(null)
 const showStickerPicker = ref(false)
+
+const messageInput = computed({
+  get: () => props.modelValue ?? '',
+  set: (value: string) => emit('update:modelValue', value)
+})
+
+const canSubmit = computed(() => Boolean(messageInput.value.trim()))
 
 const stickerPacks = [
   { id: 1, name: 'Emoji Icons', stickers: ['😊', '😂', '👍', '❤️', '🔥', '🎉', '🌟', '💔', '😎', '🙏'] }
 ]
 
-const adjustTextareaHeight = () => {
+const summarizeMessage = (message: any | null) => {
+  if (!message) return ''
+  switch (message.message_type) {
+    case 'text':
+      return message.content
+    case 'image':
+      return '🖼️ تصویر'
+    case 'video':
+      return '📹 ویدیو'
+    case 'location':
+      return '📍 موقعیت'
+    case 'voice':
+      return '🎤 پیام صوتی'
+    case 'document':
+      return '📎 فایل'
+    default:
+      return '😊 استیکر'
+  }
+}
+
+const replyBannerText = computed(() => summarizeMessage(props.replyingToMessage))
+const editingBannerText = computed(() => summarizeMessage(props.editingMessage))
+
+const resizeTextarea = () => {
   const el = messageInputRef.value
   if (!el) return
   el.style.height = '1px'
   el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+}
+
+const handleInput = () => {
+  resizeTextarea()
   emit('typing')
 }
+
+function focusInput(options?: { cursorToEnd?: boolean }) {
+  nextTick(() => {
+    const el = messageInputRef.value
+    if (!el) return
+    el.focus()
+    if (options?.cursorToEnd) {
+      const cursorPosition = el.value.length
+      el.setSelectionRange(cursorPosition, cursorPosition)
+    }
+  })
+}
+
+defineExpose({
+  focusInput,
+  adjustTextareaHeight: resizeTextarea
+})
+
+watch(() => props.modelValue, () => {
+  nextTick(() => resizeTextarea())
+})
+
+watch(() => props.editingMessage, (message) => {
+  if (message) {
+    showStickerPicker.value = false
+  }
+})
 
 // Voice Recording State
 const isRecording = ref(false)
@@ -399,6 +484,7 @@ const sendSticker = (sticker: string) => {
   align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; margin-right: 4px;
 }
 .send-btn-inline svg { width: 28px; height: 28px; }
+.send-btn-inline.edit-mode svg { width: 24px; height: 24px; }
 .send-btn-inline:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Sticker Picker */
@@ -429,6 +515,7 @@ const sendSticker = (sticker: string) => {
 .reply-banner-content { flex: 1; display: flex; flex-direction: column; border-right: 2px solid #3390ec; padding-right: 8px; justify-content: center; overflow: hidden; }
 .reply-banner-author { font-size: 14px; font-weight: 500; color: #3390ec; line-height: 1.2; margin-bottom: 2px; }
 .reply-banner-text { font-size: 13px; color: #8e8e93; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.edit-banner-icon { color: #3390ec; }
 .close-reply { background: none; border: none; color: #8E8E93; cursor: pointer; padding: 4px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background 0.2s; }
 .close-reply:hover { background: rgba(0, 0, 0, 0.05); color: #000; }
 
