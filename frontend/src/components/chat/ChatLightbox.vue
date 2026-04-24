@@ -400,31 +400,42 @@ function handleTouchEnd() {
             <div v-else class="lightbox-counter placeholder"></div>
 
             <div class="lightbox-actions">
-              <button class="lightbox-btn" @click.stop="emitForCurrent('reply')" title="پاسخ">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>
-              </button>
-              <button class="lightbox-btn" @click.stop="emitForCurrent('forward')" title="هدایت">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>
-              </button>
-              <button v-if="canDeleteCurrentItem" class="lightbox-btn danger" @click.stop="emitForCurrent('delete')" title="حذف">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-              </button>
-              <button class="lightbox-btn" @click.stop="handleSaveMedia" :title="hasAlbumStrip ? 'ذخیره مدیای جاری' : 'ذخیره'">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-              </button>
-              <div v-if="hasAlbumStrip" class="lightbox-menu-wrap">
-                <button class="lightbox-btn" :class="{ active: isAlbumMenuOpen }" @click.stop="toggleAlbumMenu" title="منوی آلبوم">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="5" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="12" cy="19" r="1.8" /></svg>
+              <div class="lightbox-action-group lightbox-action-group-primary">
+                <button class="lightbox-btn lightbox-btn-labeled lightbox-btn-emphasis" @click.stop="emitForCurrent('reply')" title="پاسخ">
+                  <span class="lightbox-btn-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>
+                  </span>
+                  <span class="lightbox-btn-label">پاسخ</span>
                 </button>
-                <div v-if="isAlbumMenuOpen" class="lightbox-menu-panel" @click.stop>
-                  <button class="lightbox-menu-item" @click.stop="openAlbumDownloadSheet">
-                    دانلود آلبوم
-                  </button>
-                </div>
+                <button class="lightbox-btn lightbox-btn-labeled lightbox-btn-emphasis" @click.stop="emitForCurrent('forward')" title="هدایت">
+                  <span class="lightbox-btn-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>
+                  </span>
+                  <span class="lightbox-btn-label">هدایت</span>
+                </button>
               </div>
-              <button class="lightbox-btn close" @click.stop="emit('close')" title="بستن">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-              </button>
+
+              <div class="lightbox-action-group lightbox-action-group-utility">
+                <button v-if="canDeleteCurrentItem" class="lightbox-btn danger" @click.stop="emitForCurrent('delete')" title="حذف">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                </button>
+                <button class="lightbox-btn" @click.stop="handleSaveMedia" :title="hasAlbumStrip ? 'ذخیره مدیای جاری' : 'ذخیره'">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                </button>
+                <div v-if="hasAlbumStrip" class="lightbox-menu-wrap">
+                  <button class="lightbox-btn" :class="{ active: isAlbumMenuOpen }" @click.stop="toggleAlbumMenu" title="منوی آلبوم">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="5" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="12" cy="19" r="1.8" /></svg>
+                  </button>
+                  <div v-if="isAlbumMenuOpen" class="lightbox-menu-panel" @click.stop>
+                    <button class="lightbox-menu-item" @click.stop="openAlbumDownloadSheet">
+                      دانلود آلبوم
+                    </button>
+                  </div>
+                </div>
+                <button class="lightbox-btn close" @click.stop="emit('close')" title="بستن">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -605,7 +616,21 @@ function handleTouchEnd() {
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
+  gap: 12px;
+}
+
+.lightbox-action-group {
+  display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+.lightbox-action-group-primary {
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
 }
 
 .lightbox-btn {
@@ -621,6 +646,31 @@ function handleTouchEnd() {
   justify-content: center;
   transition: background 0.18s ease, transform 0.18s ease;
   backdrop-filter: blur(12px);
+}
+
+.lightbox-btn-labeled {
+  width: auto;
+  min-width: 94px;
+  padding-inline: 14px;
+  border-radius: 999px;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.lightbox-btn-emphasis {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.lightbox-btn-label {
+  white-space: nowrap;
+}
+
+.lightbox-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .lightbox-btn:hover {
@@ -1058,12 +1108,29 @@ function handleTouchEnd() {
   }
 
   .lightbox-actions {
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .lightbox-action-group {
+    flex-wrap: wrap;
+  }
+
+  .lightbox-action-group-primary {
     gap: 6px;
+    padding: 4px;
   }
 
   .lightbox-btn {
     width: 40px;
     height: 40px;
+  }
+
+  .lightbox-btn-labeled {
+    min-width: 82px;
+    padding-inline: 12px;
+    font-size: 12px;
   }
 
   .lightbox-stage {
