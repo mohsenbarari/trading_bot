@@ -116,13 +116,13 @@
             </div>
 
             <div v-if="hasCapturedMediaQueue" class="camera-captured-strip">
-              <button
+              <div
                 v-for="item in capturedCameraMedia"
                 :key="item.id"
-                type="button"
                 class="camera-captured-item"
-                :title="item.type === 'video' ? 'حذف ویدئو' : 'حذف عکس'"
-                @click="removeCapturedMedia(item.id)"
+                :class="{ editable: item.type === 'photo' }"
+                :title="item.type === 'photo' ? 'ویرایش عکس' : 'پیش‌نمایش ویدئو'"
+                @click="item.type === 'photo' ? editCapturedMedia(item.id) : undefined"
               >
                 <img
                   v-if="item.type === 'photo'"
@@ -134,8 +134,13 @@
                   <video :src="item.previewUrl" class="camera-captured-thumb" muted loop playsinline autoplay></video>
                   <span class="camera-captured-video-badge">ویدئو</span>
                 </div>
-                <span class="camera-captured-remove">×</span>
-              </button>
+                <button
+                  type="button"
+                  class="camera-captured-remove"
+                  aria-label="حذف"
+                  @click.stop="removeCapturedMedia(item.id)"
+                >×</button>
+              </div>
             </div>
           </div>
 
@@ -309,6 +314,24 @@
       @cancel="onEditorCancel"
     />
   </teleport>
+
+  <!-- Phase B: Multi-image gallery preview + per-item edit -->
+  <GalleryPreviewModal
+    v-if="multiPreviewFiles"
+    :files="multiPreviewFiles"
+    @confirm="onMultiPreviewConfirm"
+    @cancel="onMultiPreviewCancel"
+  />
+
+  <!-- Phase B: Per-item editor for camera queue photos -->
+  <teleport to="body">
+    <ImageEditorModal
+      v-if="cameraEditingItem"
+      :file="cameraEditingItem.file"
+      @confirm="onCameraEditConfirm"
+      @cancel="onCameraEditCancel"
+    />
+  </teleport>
 </template>
 
 <script setup lang="ts">
@@ -320,6 +343,7 @@ import { LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
 // downloaded when the user actually edits an image. Keeps the main Messenger
 // bundle lean for users who never edit.
 const ImageEditorModal = defineAsyncComponent(() => import('./ImageEditorModal.vue'))
+const GalleryPreviewModal = defineAsyncComponent(() => import('./GalleryPreviewModal.vue'))
 
 type CameraZoomCapability = {
   min: number
@@ -367,8 +391,17 @@ const fileInput = ref<HTMLInputElement | null>(null)
 // Phase A image editor state.
 // editingFile: holds the single image currently in the editor (null when
 // editor is closed). We only route through the editor for single-image
-// gallery picks — multi-image albums bypass the editor in Phase A.
+// gallery picks.
 const editingFile = ref<File | null>(null)
+
+// Phase B state.
+// multiPreviewFiles: holds the multi-image gallery pick while the user
+// reviews/edits/removes items before dispatch. Null = preview closed.
+const multiPreviewFiles = ref<File[] | null>(null)
+
+// cameraEditingItemId: id of the camera-queue photo currently in the
+// per-item editor. Null = editor closed.
+const cameraEditingItemId = ref<string | null>(null)
 const sheetRef = ref<HTMLElement | null>(null)
 const mapRef = ref<any>(null)
 const cameraPreviewRef = ref<HTMLVideoElement | null>(null)
@@ -1002,24 +1035,76 @@ async function onGalleryFile(e: Event) {
     return
   }
 
-  const albumId = files.length > 1
-    ? (globalThis.crypto?.randomUUID?.() ?? `album_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`)
-    : null
+  // Phase B: multi-file gallery picks go through the preview sheet so the
+  // user can edit, remove, or reorder before the album is dispatched.
+  if (files.length > 1) {
+    close()
+    await new Promise<void>((resolve) => setTimeout(resolve, 180))
+    multiPreviewFiles.value = files
+    return
+  }
 
+  // Single non-image pick (video or HEIC) → emit directly.
   close()
-
   await new Promise<void>((resolve) => {
     if (typeof requestAnimationFrame !== 'function') {
       setTimeout(resolve, 0)
       return
     }
-
     requestAnimationFrame(() => resolve())
   })
-
   files.forEach((file, index) => {
-    emit('select-media', file, albumId, index, files.length)
+    emit('select-media', file, null, index, files.length)
   })
+}
+
+function onMultiPreviewConfirm(finalFiles: File[]) {
+  multiPreviewFiles.value = null
+  if (!finalFiles.length) return
+  const albumId = finalFiles.length > 1
+    ? (globalThis.crypto?.randomUUID?.() ?? `album_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`)
+    : null
+  finalFiles.forEach((file, index) => {
+    emit('select-media', file, albumId, index, finalFiles.length)
+  })
+}
+
+function onMultiPreviewCancel() {
+  multiPreviewFiles.value = null
+}
+
+// --- Camera queue per-item edit (Phase B) ---
+
+const cameraEditingItem = computed(() => {
+  const id = cameraEditingItemId.value
+  if (!id) return null
+  return capturedCameraMedia.value.find((it) => it.id === id) ?? null
+})
+
+function editCapturedMedia(itemId: string) {
+  const item = capturedCameraMedia.value.find((it) => it.id === itemId)
+  if (!item || item.type !== 'photo') return
+  cameraEditingItemId.value = itemId
+}
+
+function onCameraEditConfirm(editedFile: File) {
+  const id = cameraEditingItemId.value
+  cameraEditingItemId.value = null
+  if (!id) return
+  const idx = capturedCameraMedia.value.findIndex((it) => it.id === id)
+  if (idx < 0) return
+  const old = capturedCameraMedia.value[idx]
+  if (!old) return
+  revokeCapturedMediaPreview(old.previewUrl)
+  capturedCameraMedia.value[idx] = {
+    ...old,
+    file: editedFile,
+    previewUrl: URL.createObjectURL(editedFile),
+  }
+}
+
+function onCameraEditCancel() {
+  cameraEditingItemId.value = null
 }
 
 function onEditorConfirm(editedFile: File) {
@@ -1377,7 +1462,13 @@ onBeforeUnmount(() => {
   color: white;
   font-size: 16px;
   line-height: 1;
+  border: none;
+  cursor: pointer;
+  padding: 0;
 }
+.camera-captured-remove:active { background: rgba(0, 0, 0, 0.85); }
+
+.camera-captured-item.editable { cursor: pointer; }
 
 .recording-dot {
   width: 10px;
