@@ -176,15 +176,9 @@ const {
   stopPolling,
   startStatusPolling,
   stopStatusPolling,
-  sendSticker,
   hasOlderMessages,
   isLoadingOlderMessages
 } = messagesLogic
-
-const stickerPickerInset = computed(() => {
-  if (!showStickerPicker.value) return '0px'
-  return isMobile.value ? '344px' : '368px'
-})
 
 const mediaLogic = useChatMedia({
   apiBaseUrl: props.apiBaseUrl,
@@ -1825,7 +1819,6 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         @forward-selected="openForwardModal"
         @toggle-attachment="handleToggleAttachment"
         @send-text="(text: string) => { messageInput = text; sendMessage(); }"
-        @send-sticker="sendSticker"
         @send-voice="handleSendVoice"
         @typing="handleTypingWrapper"
       />
@@ -2141,9 +2134,6 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
   overflow: hidden;
   min-height: 0;
   position: relative;
-  /* Space for Slide-up sticker picker when open */
-  padding-bottom: v-bind(stickerPickerInset);
-  transition: padding-bottom 0.3s cubic-bezier(0.2, 0, 0, 1);
   /* No padding-top - messages will scroll UNDER the glass header */
 }
 

@@ -118,6 +118,58 @@ const fallbackEmojiEntries = orderedEmojiList
   .map((emoji) => EMOJI_ENTRY_BY_CHAR.get(emoji))
   .filter((entry): entry is EmojiStickerEntry => Boolean(entry))
 
+type GraphemeSegment = {
+  segment: string
+}
+
+type GraphemeSegmenterLike = {
+  segment: (input: string) => Iterable<GraphemeSegment>
+}
+
+const intlWithSegmenter = globalThis.Intl as typeof Intl & {
+  Segmenter?: new (
+    locales?: string | string[],
+    options?: { granularity?: 'grapheme' | 'word' | 'sentence' }
+  ) => GraphemeSegmenterLike
+}
+
+const graphemeSegmenter: GraphemeSegmenterLike | null = intlWithSegmenter?.Segmenter
+  ? new intlWithSegmenter.Segmenter(undefined, { granularity: 'grapheme' })
+  : null
+
+export const MAX_STICKERS_PER_MESSAGE = 24
+
+export function splitTextGraphemes(text: string) {
+  if (!text) return []
+
+  if (graphemeSegmenter) {
+    return Array.from(graphemeSegmenter.segment(text), (entry: GraphemeSegment) => entry.segment)
+  }
+
+  return Array.from(text)
+}
+
+export function countEmojiStickerOccurrences(text: string) {
+  let count = 0
+
+  for (const segment of splitTextGraphemes(text)) {
+    if (EMOJI_ENTRY_BY_CHAR.has(segment)) {
+      count += 1
+    }
+  }
+
+  return count
+}
+
+export function isEmojiStickerOnlyMessage(text: string) {
+  const meaningfulSegments = splitTextGraphemes(text).filter((segment) => segment.trim().length > 0)
+  if (meaningfulSegments.length === 0) {
+    return false
+  }
+
+  return meaningfulSegments.every((segment) => EMOJI_ENTRY_BY_CHAR.has(segment))
+}
+
 function getUsageStorageKey(userId: number | null) {
   return `${USAGE_STORAGE_PREFIX}:${userId ?? 'guest'}`
 }
