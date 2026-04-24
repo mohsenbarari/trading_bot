@@ -458,6 +458,14 @@ const sendSticker = (sticker: string) => {
   font-size: 16px; color: #000000; resize: none; overflow-y: auto;
   min-height: 24px; line-height: 24px; max-height: 200px; font-family: inherit; direction: rtl; text-align: right;
 }
+.input-container textarea::selection {
+  background: rgba(51, 144, 236, 0.28);
+  color: #000000;
+}
+.input-container textarea::-moz-selection {
+  background: rgba(51, 144, 236, 0.28);
+  color: #000000;
+}
 .input-container textarea::placeholder { color: #8E8E93; }
 
 .disabled-banner {
