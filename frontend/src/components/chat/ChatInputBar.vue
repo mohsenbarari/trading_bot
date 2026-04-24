@@ -209,6 +209,7 @@
       :currentStickerCount="stickerCount"
       :maxStickerCount="MAX_STICKERS_PER_MESSAGE"
       :closeOnSelect="false"
+      :panelHeight="stickerPickerHeight"
       @update:open="setStickerPickerOpen"
       @insert="insertSticker"
       @backspace="deleteComposerBackward"
@@ -217,7 +218,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
 import { AudioRecorder } from '../../utils/audioRecorder'
 import {
   countEmojiStickerOccurrences,
@@ -260,6 +261,21 @@ const emit = defineEmits<{
 const messageInputRef = ref<HTMLTextAreaElement | null>(null)
 const composerSelectionStart = ref(0)
 const composerSelectionEnd = ref(0)
+const DEFAULT_PICKER_HEIGHT = 336
+const MIN_PICKER_HEIGHT = 260
+const MAX_PICKER_HEIGHT = 420
+const KEYBOARD_OPEN_THRESHOLD = 120
+const KEYBOARD_CLOSE_THRESHOLD = 24
+const keyboardHeight = ref(0)
+const lastKnownKeyboardHeight = ref(0)
+const viewportBaseHeight = ref(0)
+const pendingPickerOpenAfterKeyboardClose = ref(false)
+let pendingPickerOpenTimer: number | null = null
+
+type VisualViewportWithEvents = VisualViewport & {
+  addEventListener: (type: 'resize' | 'scroll', listener: EventListenerOrEventListenerObject) => void
+  removeEventListener: (type: 'resize' | 'scroll', listener: EventListenerOrEventListenerObject) => void
+}
 
 const messageInput = computed({
   get: () => props.modelValue ?? '',
@@ -269,6 +285,21 @@ const messageInput = computed({
 const canSubmit = computed(() => Boolean(messageInput.value.trim()))
 const isStickerPickerOpen = computed(() => Boolean(props.stickerPickerOpen))
 const stickerCount = computed(() => countEmojiStickerOccurrences(messageInput.value))
+const stickerPickerHeight = computed(() => {
+  const measuredHeight = keyboardHeight.value > 0 ? keyboardHeight.value : lastKnownKeyboardHeight.value
+  if (measuredHeight > 0) {
+    return Math.min(Math.max(measuredHeight, MIN_PICKER_HEIGHT), MAX_PICKER_HEIGHT)
+  }
+
+  const viewportHeight = typeof window !== 'undefined'
+    ? (window.visualViewport?.height ?? window.innerHeight)
+    : DEFAULT_PICKER_HEIGHT
+
+  return Math.min(
+    Math.max(Math.round(viewportHeight * 0.42), MIN_PICKER_HEIGHT),
+    DEFAULT_PICKER_HEIGHT,
+  )
+})
 
 const summarizeMessage = (message: any | null) => {
   if (!message) return ''
@@ -325,6 +356,48 @@ function blurInput() {
   messageInputRef.value?.blur()
 }
 
+function clearPendingPickerTimer() {
+  if (pendingPickerOpenTimer !== null) {
+    window.clearTimeout(pendingPickerOpenTimer)
+    pendingPickerOpenTimer = null
+  }
+}
+
+function getVisualViewport() {
+  if (typeof window === 'undefined') return null
+  return (window.visualViewport ?? null) as VisualViewportWithEvents | null
+}
+
+function openStickerPickerAfterKeyboardClose() {
+  clearPendingPickerTimer()
+  pendingPickerOpenAfterKeyboardClose.value = false
+  setStickerPickerOpen(true)
+}
+
+function updateKeyboardMetrics() {
+  if (typeof window === 'undefined') return
+
+  const visualViewport = getVisualViewport()
+  const currentViewportHeight = visualViewport?.height ?? window.innerHeight
+  const offsetTop = visualViewport?.offsetTop ?? 0
+  const fullHeightCandidate = currentViewportHeight + offsetTop
+
+  if (fullHeightCandidate > viewportBaseHeight.value) {
+    viewportBaseHeight.value = fullHeightCandidate
+  }
+
+  const nextKeyboardHeight = Math.max(0, Math.round(viewportBaseHeight.value - fullHeightCandidate))
+  keyboardHeight.value = nextKeyboardHeight
+
+  if (nextKeyboardHeight >= KEYBOARD_OPEN_THRESHOLD) {
+    lastKnownKeyboardHeight.value = nextKeyboardHeight
+  }
+
+  if (pendingPickerOpenAfterKeyboardClose.value && nextKeyboardHeight <= KEYBOARD_CLOSE_THRESHOLD) {
+    openStickerPickerAfterKeyboardClose()
+  }
+}
+
 const resizeTextarea = () => {
   const el = messageInputRef.value
   if (!el) return
@@ -374,14 +447,24 @@ watch(() => props.modelValue, (value) => {
 
 watch(() => props.editingMessage, (message) => {
   if (message) {
+    pendingPickerOpenAfterKeyboardClose.value = false
+    clearPendingPickerTimer()
     emit('update:stickerPickerOpen', false)
   }
 })
 
 watch(() => props.isSelectionMode, (isSelectionEnabled) => {
   if (isSelectionEnabled) {
+    pendingPickerOpenAfterKeyboardClose.value = false
+    clearPendingPickerTimer()
     emit('update:stickerPickerOpen', false)
   }
+})
+
+watch(() => props.stickerPickerOpen, (isOpen) => {
+  if (isOpen) return
+  pendingPickerOpenAfterKeyboardClose.value = false
+  clearPendingPickerTimer()
 })
 
 function setStickerPickerOpen(nextValue: boolean) {
@@ -392,14 +475,30 @@ function toggleStickerPicker() {
   if (props.isDeleted) return
 
   if (isStickerPickerOpen.value) {
+    pendingPickerOpenAfterKeyboardClose.value = false
+    clearPendingPickerTimer()
     setStickerPickerOpen(false)
     focusInput()
     return
   }
 
   captureSelection()
+  const keyboardLooksOpen = document.activeElement === messageInputRef.value || keyboardHeight.value >= KEYBOARD_OPEN_THRESHOLD
+
+  if (keyboardLooksOpen) {
+    pendingPickerOpenAfterKeyboardClose.value = true
+    clearPendingPickerTimer()
+    blurInput()
+    pendingPickerOpenTimer = window.setTimeout(() => {
+      updateKeyboardMetrics()
+      if (pendingPickerOpenAfterKeyboardClose.value && keyboardHeight.value <= KEYBOARD_CLOSE_THRESHOLD) {
+        openStickerPickerAfterKeyboardClose()
+      }
+    }, 220)
+    return
+  }
+
   setStickerPickerOpen(true)
-  blurInput()
 }
 
 function handleToggleAttachment() {
@@ -409,10 +508,38 @@ function handleToggleAttachment() {
 
 function handleTextareaFocus() {
   captureSelection()
+  pendingPickerOpenAfterKeyboardClose.value = false
+  clearPendingPickerTimer()
   if (isStickerPickerOpen.value) {
     setStickerPickerOpen(false)
   }
 }
+
+onMounted(() => {
+  if (typeof window === 'undefined') return
+
+  const visualViewport = getVisualViewport()
+  viewportBaseHeight.value = visualViewport
+    ? visualViewport.height + visualViewport.offsetTop
+    : window.innerHeight
+
+  updateKeyboardMetrics()
+
+  visualViewport?.addEventListener('resize', updateKeyboardMetrics)
+  visualViewport?.addEventListener('scroll', updateKeyboardMetrics)
+  window.addEventListener('resize', updateKeyboardMetrics)
+})
+
+onBeforeUnmount(() => {
+  if (typeof window === 'undefined') return
+
+  clearPendingPickerTimer()
+
+  const visualViewport = getVisualViewport()
+  visualViewport?.removeEventListener('resize', updateKeyboardMetrics)
+  visualViewport?.removeEventListener('scroll', updateKeyboardMetrics)
+  window.removeEventListener('resize', updateKeyboardMetrics)
+})
 
 function applyComposerValue(nextValue: string, nextSelectionStart: number, nextSelectionEnd = nextSelectionStart) {
   const shouldRestoreSelection = document.activeElement === messageInputRef.value
