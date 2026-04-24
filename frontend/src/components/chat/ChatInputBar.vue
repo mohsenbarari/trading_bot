@@ -125,7 +125,7 @@
           </svg>
         </button>
 
-        <button v-ripple class="attach-btn" @click="$emit('toggle-attachment')">
+        <button v-ripple class="attach-btn" @click="handleToggleAttachment">
           <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
           </svg>
@@ -164,7 +164,7 @@
       ></textarea>
 
       <!-- Emoji/Sticker Toggle -->
-      <button v-if="!isRecording" class="emoji-btn" v-ripple @click="showStickerPicker = !showStickerPicker">
+      <button v-if="!isRecording" class="emoji-btn" v-ripple @click="toggleStickerPicker">
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"></circle>
           <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
@@ -175,29 +175,18 @@
     </div>
   </div>
 
-  <!-- Sticker Picker (Slide-up) -->
-  <transition name="slide-up">
-    <div v-show="showStickerPicker" class="sticker-picker">
-      <div v-for="pack in stickerPacks" :key="pack.id" class="sticker-pack">
-        <div class="pack-name">{{ pack.name }}</div>
-        <div class="stickers-grid">
-          <button 
-            v-for="sticker in pack.stickers" 
-            :key="sticker"
-            class="sticker-item"
-            @click="sendSticker(sticker)"
-          >
-            {{ sticker }}
-          </button>
-        </div>
-      </div>
-    </div>
-  </transition>
+  <EmojiStickerPicker
+    :open="isStickerPickerOpen"
+    :currentUserId="currentUserId"
+    @update:open="setStickerPickerOpen"
+    @select="sendSticker"
+  />
 </template>
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
 import { AudioRecorder } from '../../utils/audioRecorder'
+import EmojiStickerPicker from './EmojiStickerPicker.vue'
 
 const props = defineProps<{
   modelValue: string
@@ -212,6 +201,7 @@ const props = defineProps<{
   isUploading: boolean
   isSending: boolean
   isDeleted?: boolean
+  stickerPickerOpen?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -227,10 +217,10 @@ const emit = defineEmits<{
   (e: 'send-sticker', sticker: string): void
   (e: 'send-voice', blob: Blob, durationMs: number): void
   (e: 'typing'): void
+  (e: 'update:stickerPickerOpen', value: boolean): void
 }>()
 
 const messageInputRef = ref<HTMLTextAreaElement | null>(null)
-const showStickerPicker = ref(false)
 
 const messageInput = computed({
   get: () => props.modelValue ?? '',
@@ -238,10 +228,7 @@ const messageInput = computed({
 })
 
 const canSubmit = computed(() => Boolean(messageInput.value.trim()))
-
-const stickerPacks = [
-  { id: 1, name: 'Emoji Icons', stickers: ['😊', '😂', '👍', '❤️', '🔥', '🎉', '🌟', '💔', '😎', '🙏'] }
-]
+const isStickerPickerOpen = computed(() => Boolean(props.stickerPickerOpen))
 
 const summarizeMessage = (message: any | null) => {
   if (!message) return ''
@@ -301,9 +288,29 @@ watch(() => props.modelValue, () => {
 
 watch(() => props.editingMessage, (message) => {
   if (message) {
-    showStickerPicker.value = false
+    emit('update:stickerPickerOpen', false)
   }
 })
+
+watch(() => props.isSelectionMode, (isSelectionEnabled) => {
+  if (isSelectionEnabled) {
+    emit('update:stickerPickerOpen', false)
+  }
+})
+
+function setStickerPickerOpen(nextValue: boolean) {
+  emit('update:stickerPickerOpen', nextValue)
+}
+
+function toggleStickerPicker() {
+  if (props.isDeleted) return
+  setStickerPickerOpen(!isStickerPickerOpen.value)
+}
+
+function handleToggleAttachment() {
+  setStickerPickerOpen(false)
+  emit('toggle-attachment')
+}
 
 // Voice Recording State
 const isRecording = ref(false)
@@ -370,7 +377,7 @@ const sendMessage = () => {
   
   emit('send-text', content)
   messageInput.value = ''
-  showStickerPicker.value = false
+  setStickerPickerOpen(false)
   
   // reset height
   nextTick(() => {
@@ -380,7 +387,7 @@ const sendMessage = () => {
 
 const sendSticker = (sticker: string) => {
   emit('send-sticker', sticker)
-  showStickerPicker.value = false
+  setStickerPickerOpen(false)
 }
 </script>
 
@@ -494,23 +501,6 @@ const sendSticker = (sticker: string) => {
 .send-btn-inline svg { width: 28px; height: 28px; }
 .send-btn-inline.edit-mode svg { width: 24px; height: 24px; }
 .send-btn-inline:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* Sticker Picker */
-.slide-up-enter-active, .slide-up-leave-active { transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1), opacity 0.3s; }
-.slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); opacity: 0; }
-.sticker-picker {
-  background: #f4f4f5; border-top: 1px solid rgba(0,0,0,0.05); padding: 16px 12px;
-  max-height: 250px; overflow-y: auto; position: absolute; bottom: 0; left: 0; right: 0;
-  z-index: 50; transform: translateY(0);
-}
-.sticker-pack { margin-bottom: 12px; }
-.pack-name { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
-.stickers-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
-.sticker-item {
-  background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px;
-  padding: 8px; font-size: 20px; cursor: pointer; transition: transform 0.2s;
-}
-.sticker-item:hover { transform: scale(1.1); }
 
 /* Reply Banner */
 .reply-banner {

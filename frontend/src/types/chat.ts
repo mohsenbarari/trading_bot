@@ -36,12 +36,6 @@ export interface Message {
     }
 }
 
-export interface StickerPack {
-    id: string
-    name: string
-    stickers: string[]
-}
-
 export interface ChatForwardTarget {
     kind: 'user' | 'group'
     id: number
