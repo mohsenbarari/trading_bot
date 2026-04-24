@@ -80,8 +80,10 @@ const categories = computed<EmojiStickerCategory[]>(() => {
   return [buildFrequentEmojiCategory(props.currentUserId), ...TELEGRAM_EMOJI_CATEGORIES]
 })
 
-const activeCategory = computed(() => {
-  return categories.value.find((category) => category.id === activeCategoryId.value) ?? categories.value[0]
+const activeCategory = computed<EmojiStickerCategory>(() => {
+  return categories.value.find((category) => category.id === activeCategoryId.value)
+    ?? categories.value[0]
+    ?? buildFrequentEmojiCategory(props.currentUserId)
 })
 
 function resetScrollPosition() {
