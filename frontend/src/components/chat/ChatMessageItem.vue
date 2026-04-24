@@ -1467,14 +1467,17 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   flex-grow: 1;
   gap: 6px;
   justify-content: center;
+  min-width: 0;
 }
 .voice-waveform {
   width: 100%;
+  max-width: 100%;
   min-height: 30px;
   border-radius: 12px;
   cursor: default;
   position: relative;
   padding: 4px 0;
+  overflow: hidden;
 }
 .voice-waveform.is-interactive {
   cursor: pointer;
@@ -1483,14 +1486,17 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .voice-wave-bars {
   display: flex;
   align-items: flex-end;
-  gap: 3px;
+  gap: 2px;
   width: 100%;
+  max-width: 100%;
   height: 22px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .voice-wave-bar {
   flex: 1 1 0;
-  min-width: 3px;
+  min-width: 0;
   border-radius: 999px;
   background: linear-gradient(180deg, var(--voice-track-top), var(--voice-track-bottom));
   opacity: 0.96;
