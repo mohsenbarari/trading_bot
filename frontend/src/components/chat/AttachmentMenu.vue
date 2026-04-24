@@ -299,12 +299,27 @@
       </div>
     </transition>
   </teleport>
+
+  <!-- Phase A: Image editor modal for single-image gallery picks -->
+  <teleport to="body">
+    <ImageEditorModal
+      v-if="editingFile"
+      :file="editingFile"
+      @confirm="onEditorConfirm"
+      @cancel="onEditorCancel"
+    />
+  </teleport>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import 'leaflet/dist/leaflet.css'
 import { LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
+
+// Lazy-load the image editor so Cropper.js (~40KB) and its CSS are only
+// downloaded when the user actually edits an image. Keeps the main Messenger
+// bundle lean for users who never edit.
+const ImageEditorModal = defineAsyncComponent(() => import('./ImageEditorModal.vue'))
 
 type CameraZoomCapability = {
   min: number
@@ -348,6 +363,12 @@ const cameraPhotoInput = ref<HTMLInputElement | null>(null)
 const cameraVideoInput = ref<HTMLInputElement | null>(null)
 const galleryInput = ref<HTMLInputElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
+
+// Phase A image editor state.
+// editingFile: holds the single image currently in the editor (null when
+// editor is closed). We only route through the editor for single-image
+// gallery picks — multi-image albums bypass the editor in Phase A.
+const editingFile = ref<File | null>(null)
 const sheetRef = ref<HTMLElement | null>(null)
 const mapRef = ref<any>(null)
 const cameraPreviewRef = ref<HTMLVideoElement | null>(null)
@@ -946,16 +967,45 @@ watch(() => activeTab.value, (val) => {
 
 // Gallery file handler.
 // Do not pre-compress here: useChatMedia.ts performs the EXIF-safe pipeline.
+//
+// Phase A routing:
+//   - Single image pick (and not HEIC) → open the crop editor. User can
+//     confirm edited output, send unedited, or cancel entirely.
+//   - Multi-image album OR video included → bypass editor (Phase B will add
+//     a preview grid with per-item pencil button).
 async function onGalleryFile(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files?.length) return
 
   const files = Array.from(input.files)
+  input.value = ''
+
+  // Phase A: single-image editing fast-path.
+  const onlyOne = files.length === 1
+  const onlyFile = files[0]
+  const isImage = onlyOne && !!onlyFile && onlyFile.type.startsWith('image/')
+  // HEIC needs to go through useChatMedia's normalize step first; we don't
+  // try to render it inside Cropper directly.
+  const isHeic =
+    onlyOne &&
+    !!onlyFile &&
+    (onlyFile.type === 'image/heic' ||
+      onlyFile.type === 'image/heif' ||
+      /\.(heic|heif)$/i.test(onlyFile.name))
+
+  if (onlyOne && isImage && !isHeic && onlyFile) {
+    close()
+    // Wait for sheet close animation before mounting editor to avoid a
+    // visible overlap flash.
+    await new Promise<void>((resolve) => setTimeout(resolve, 180))
+    editingFile.value = onlyFile
+    return
+  }
+
   const albumId = files.length > 1
     ? (globalThis.crypto?.randomUUID?.() ?? `album_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`)
     : null
 
-  input.value = ''
   close()
 
   await new Promise<void>((resolve) => {
@@ -970,6 +1020,18 @@ async function onGalleryFile(e: Event) {
   files.forEach((file, index) => {
     emit('select-media', file, albumId, index, files.length)
   })
+}
+
+function onEditorConfirm(editedFile: File) {
+  // Single-image edited path: emit with no albumId so useChatMedia dispatches
+  // it as a standalone message.
+  editingFile.value = null
+  emit('select-media', editedFile, null, 0, 1)
+}
+
+function onEditorCancel() {
+  // User dismissed the editor entirely → do not send anything.
+  editingFile.value = null
 }
 
 // File handler (no compression)
