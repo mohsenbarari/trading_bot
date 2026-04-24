@@ -34,8 +34,28 @@ const gestureAxis = ref<'horizontal' | 'vertical' | null>(null)
 const gestureSurface = ref<'stage' | 'strip' | null>(null)
 const dragOffsetX = ref(0)
 const dragOffsetY = ref(0)
+const stageSceneRef = ref<HTMLElement | null>(null)
 const suppressThumbClick = ref(false)
 let suppressThumbClickTimer: number | null = null
+
+const mediaZoomScale = ref(1)
+const mediaZoomX = ref(0)
+const mediaZoomY = ref(0)
+const mediaGestureMode = ref<'pan' | 'pinch' | null>(null)
+const imagePanStartX = ref(0)
+const imagePanStartY = ref(0)
+const pinchStartDistance = ref(0)
+const pinchStartScale = ref(1)
+const pinchStartCenterX = ref(0)
+const pinchStartCenterY = ref(0)
+const pinchStartOffsetX = ref(0)
+const pinchStartOffsetY = ref(0)
+let lastStageTap: { time: number; x: number; y: number } | null = null
+
+const MAX_MEDIA_ZOOM = 4
+const DOUBLE_TAP_ZOOM_SCALE = 2.4
+const DOUBLE_TAP_MAX_DELAY = 280
+const DOUBLE_TAP_MAX_DISTANCE = 24
 
 const isAlbumMenuOpen = ref(false)
 const isAlbumDownloadSheetOpen = ref(false)
@@ -45,6 +65,9 @@ const currentItem = computed(() => {
   if (!props.lightboxMedia) return null
   return props.lightboxMedia.items[props.lightboxMedia.currentIndex] || null
 })
+
+const isCurrentItemZoomable = computed(() => currentItem.value?.type === 'image')
+const isCurrentImageZoomed = computed(() => isCurrentItemZoomable.value && mediaZoomScale.value > 1.01)
 
 const hasAlbumStrip = computed(() => {
   return Boolean(props.lightboxMedia?.albumId) && (props.lightboxMedia?.items.length || 0) > 1
@@ -58,6 +81,10 @@ const canDeleteCurrentItem = computed(() => {
 })
 
 const selectedAlbumDownloadCount = computed(() => albumDownloadSelection.value.length)
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
 
 const sceneTransform = computed(() => {
   const verticalProgress = Math.min(Math.abs(dragOffsetY.value) / 240, 1)
@@ -73,6 +100,7 @@ const sceneTransform = computed(() => {
 
 watch(() => props.lightboxMedia?.currentIndex, () => {
   isAlbumMenuOpen.value = false
+  resetMediaZoom()
   resetGesture()
 })
 
@@ -80,6 +108,7 @@ watch(() => props.lightboxMedia?.albumId, () => {
   isAlbumMenuOpen.value = false
   isAlbumDownloadSheetOpen.value = false
   albumDownloadSelection.value = []
+  resetMediaZoom()
   resetGesture()
 })
 
@@ -96,6 +125,112 @@ function resetGesture() {
   gestureSurface.value = null
   dragOffsetX.value = 0
   dragOffsetY.value = 0
+  mediaGestureMode.value = null
+  imagePanStartX.value = mediaZoomX.value
+  imagePanStartY.value = mediaZoomY.value
+  pinchStartDistance.value = 0
+  pinchStartScale.value = mediaZoomScale.value
+  pinchStartCenterX.value = 0
+  pinchStartCenterY.value = 0
+  pinchStartOffsetX.value = mediaZoomX.value
+  pinchStartOffsetY.value = mediaZoomY.value
+}
+
+function resetMediaZoom() {
+  mediaZoomScale.value = 1
+  mediaZoomX.value = 0
+  mediaZoomY.value = 0
+  lastStageTap = null
+}
+
+function getTouchDistance(touches: TouchList) {
+  if (touches.length < 2) return 0
+  const first = touches[0]
+  const second = touches[1]
+  if (!first || !second) return 0
+  return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY)
+}
+
+function getTouchCenter(touches: TouchList) {
+  if (touches.length < 2) return null
+  const first = touches[0]
+  const second = touches[1]
+  if (!first || !second) return null
+
+  return {
+    x: (first.clientX + second.clientX) / 2,
+    y: (first.clientY + second.clientY) / 2,
+  }
+}
+
+function getActiveMediaMetrics() {
+  const mediaEl = stageSceneRef.value?.querySelector('.lightbox-stage-card.active .lightbox-media') as HTMLElement | null
+  const stageEl = stageSceneRef.value
+
+  if (!mediaEl || !stageEl) return null
+
+  const mediaRect = mediaEl.getBoundingClientRect()
+
+  return {
+    mediaWidth: mediaEl.clientWidth || mediaRect.width,
+    mediaHeight: mediaEl.clientHeight || mediaRect.height,
+    mediaRect,
+    stageWidth: stageEl.clientWidth,
+    stageHeight: stageEl.clientHeight,
+  }
+}
+
+function clampMediaOffset(nextX: number, nextY: number, nextScale = mediaZoomScale.value) {
+  if (!isCurrentItemZoomable.value || nextScale <= 1) {
+    return { x: 0, y: 0 }
+  }
+
+  const metrics = getActiveMediaMetrics()
+  if (!metrics) {
+    return { x: nextX, y: nextY }
+  }
+
+  const maxX = Math.max(0, (metrics.mediaWidth * nextScale - metrics.stageWidth) / 2)
+  const maxY = Math.max(0, (metrics.mediaHeight * nextScale - metrics.stageHeight) / 2)
+
+  return {
+    x: clampNumber(nextX, -maxX, maxX),
+    y: clampNumber(nextY, -maxY, maxY),
+  }
+}
+
+function applyMediaZoom(nextScale: number, nextX: number, nextY: number) {
+  const normalizedScale = clampNumber(nextScale, 1, MAX_MEDIA_ZOOM)
+  if (normalizedScale <= 1.01) {
+    resetMediaZoom()
+    return
+  }
+
+  const clamped = clampMediaOffset(nextX, nextY, normalizedScale)
+  mediaZoomScale.value = normalizedScale
+  mediaZoomX.value = clamped.x
+  mediaZoomY.value = clamped.y
+}
+
+function toggleCurrentImageZoom(clientX: number, clientY: number) {
+  if (!isCurrentItemZoomable.value) return
+
+  if (isCurrentImageZoomed.value) {
+    resetMediaZoom()
+    return
+  }
+
+  const metrics = getActiveMediaMetrics()
+  if (!metrics) {
+    applyMediaZoom(DOUBLE_TAP_ZOOM_SCALE, 0, 0)
+    return
+  }
+
+  const centerX = metrics.mediaRect.left + metrics.mediaRect.width / 2
+  const centerY = metrics.mediaRect.top + metrics.mediaRect.height / 2
+  const offsetX = -(clientX - centerX) * (DOUBLE_TAP_ZOOM_SCALE - 1)
+  const offsetY = -(clientY - centerY) * (DOUBLE_TAP_ZOOM_SCALE - 1)
+  applyMediaZoom(DOUBLE_TAP_ZOOM_SCALE, offsetX, offsetY)
 }
 
 function suppressNextThumbClick() {
@@ -319,10 +454,60 @@ function getThumbStyle(index: number): CSSProperties {
   }
 }
 
+function getActiveMediaStyle(item: LightboxItem, index: number): CSSProperties {
+  if (item.type !== 'image' || index !== (props.lightboxMedia?.currentIndex ?? -1)) {
+    return {}
+  }
+
+  return {
+    transform: `translate3d(${mediaZoomX.value}px, ${mediaZoomY.value}px, 0) scale(${mediaZoomScale.value})`,
+    transition: mediaGestureMode.value ? 'none' : 'transform 0.24s cubic-bezier(0.22, 1, 0.36, 1)',
+  }
+}
+
+function handleMediaDoubleClick(event: MouseEvent, item: LightboxItem, index: number) {
+  if (item.type !== 'image' || index !== (props.lightboxMedia?.currentIndex ?? -1)) return
+  toggleCurrentImageZoom(event.clientX, event.clientY)
+}
+
 function handleTouchStart(event: TouchEvent, surface: 'stage' | 'strip' = 'stage') {
+  if (surface === 'stage' && isCurrentItemZoomable.value && event.touches.length === 2) {
+    const distance = getTouchDistance(event.touches)
+    const center = getTouchCenter(event.touches)
+    if (!distance || !center) return
+
+    gestureStart.value = null
+    gestureAxis.value = null
+    gestureSurface.value = surface
+    dragOffsetX.value = 0
+    dragOffsetY.value = 0
+    mediaGestureMode.value = 'pinch'
+    pinchStartDistance.value = distance
+    pinchStartScale.value = mediaZoomScale.value
+    pinchStartCenterX.value = center.x
+    pinchStartCenterY.value = center.y
+    pinchStartOffsetX.value = mediaZoomX.value
+    pinchStartOffsetY.value = mediaZoomY.value
+    suppressThumbClick.value = false
+    return
+  }
+
   if (event.touches.length !== 1) return
   const touch = event.touches[0]
   if (!touch) return
+
+  if (surface === 'stage' && isCurrentImageZoomed.value) {
+    gestureStart.value = { x: touch.clientX, y: touch.clientY }
+    gestureSurface.value = surface
+    gestureAxis.value = null
+    dragOffsetX.value = 0
+    dragOffsetY.value = 0
+    mediaGestureMode.value = 'pan'
+    imagePanStartX.value = mediaZoomX.value
+    imagePanStartY.value = mediaZoomY.value
+    suppressThumbClick.value = false
+    return
+  }
 
   gestureStart.value = { x: touch.clientX, y: touch.clientY }
   gestureSurface.value = surface
@@ -333,6 +518,36 @@ function handleTouchStart(event: TouchEvent, surface: 'stage' | 'strip' = 'stage
 }
 
 function handleTouchMove(event: TouchEvent) {
+  if (mediaGestureMode.value === 'pinch') {
+    if (!isCurrentItemZoomable.value || event.touches.length < 2 || !pinchStartDistance.value) return
+    const distance = getTouchDistance(event.touches)
+    const center = getTouchCenter(event.touches)
+    if (!distance || !center) return
+    if (event.cancelable) {
+      event.preventDefault()
+    }
+
+    const nextScale = pinchStartScale.value * (distance / pinchStartDistance.value)
+    const nextX = pinchStartOffsetX.value + (center.x - pinchStartCenterX.value)
+    const nextY = pinchStartOffsetY.value + (center.y - pinchStartCenterY.value)
+    applyMediaZoom(nextScale, nextX, nextY)
+    return
+  }
+
+  if (mediaGestureMode.value === 'pan') {
+    const touch = event.touches[0]
+    const start = gestureStart.value
+    if (!touch || !start || !isCurrentImageZoomed.value) return
+    if (event.cancelable) {
+      event.preventDefault()
+    }
+
+    const dx = touch.clientX - start.x
+    const dy = touch.clientY - start.y
+    applyMediaZoom(mediaZoomScale.value, imagePanStartX.value + dx, imagePanStartY.value + dy)
+    return
+  }
+
   const touch = event.touches[0]
   const start = gestureStart.value
   if (!touch || !start) return
@@ -366,13 +581,71 @@ function handleTouchMove(event: TouchEvent) {
   }
 }
 
-function handleTouchEnd() {
+function handleTouchEnd(event: TouchEvent) {
+  if (mediaGestureMode.value === 'pinch') {
+    if (event.touches.length === 1 && isCurrentImageZoomed.value) {
+      const touch = event.touches[0]
+      if (touch) {
+        gestureStart.value = { x: touch.clientX, y: touch.clientY }
+        gestureSurface.value = 'stage'
+        gestureAxis.value = null
+        dragOffsetX.value = 0
+        dragOffsetY.value = 0
+        mediaGestureMode.value = 'pan'
+        imagePanStartX.value = mediaZoomX.value
+        imagePanStartY.value = mediaZoomY.value
+        pinchStartDistance.value = 0
+        pinchStartScale.value = mediaZoomScale.value
+        return
+      }
+    }
+
+    if (mediaZoomScale.value <= 1.01) {
+      resetMediaZoom()
+    }
+    resetGesture()
+    return
+  }
+
+  if (mediaGestureMode.value === 'pan') {
+    if (mediaZoomScale.value <= 1.01) {
+      resetMediaZoom()
+    }
+    resetGesture()
+    return
+  }
+
   if (!props.lightboxMedia || !gestureStart.value) {
     resetGesture()
     return
   }
 
   const surface = gestureSurface.value
+
+  if (surface === 'stage' && !gestureAxis.value && isCurrentItemZoomable.value && event.changedTouches.length === 1) {
+    const touch = event.changedTouches[0]
+    if (touch) {
+      const now = Date.now()
+      if (
+        lastStageTap
+        && (now - lastStageTap.time) <= DOUBLE_TAP_MAX_DELAY
+        && Math.hypot(lastStageTap.x - touch.clientX, lastStageTap.y - touch.clientY) <= DOUBLE_TAP_MAX_DISTANCE
+      ) {
+        lastStageTap = null
+        toggleCurrentImageZoom(touch.clientX, touch.clientY)
+        resetGesture()
+        return
+      }
+
+      lastStageTap = {
+        time: now,
+        x: touch.clientX,
+        y: touch.clientY,
+      }
+    }
+  } else if (gestureAxis.value) {
+    lastStageTap = null
+  }
 
   if (gestureAxis.value === 'horizontal') {
     if (dragOffsetX.value > 60) {
@@ -444,10 +717,10 @@ function handleTouchEnd() {
               class="lightbox-stage"
               @touchstart="handleTouchStart($event, 'stage')"
               @touchmove="handleTouchMove"
-              @touchend="handleTouchEnd"
-              @touchcancel="handleTouchEnd"
+              @touchend="handleTouchEnd($event)"
+              @touchcancel="handleTouchEnd($event)"
             >
-              <div class="lightbox-stage-scene" :style="sceneTransform">
+              <div ref="stageSceneRef" class="lightbox-stage-scene" :style="sceneTransform">
                 <div class="lightbox-stage-track">
                   <div
                     v-for="(item, index) in lightboxMedia.items"
@@ -460,10 +733,12 @@ function handleTouchEnd() {
                     <img
                       v-if="item.type === 'image'"
                       :src="item.url"
-                      class="lightbox-media"
+                      :class="['lightbox-media', { 'is-zoomable': true, 'is-zoomed': index === lightboxMedia.currentIndex && isCurrentImageZoomed }]"
+                      :style="getActiveMediaStyle(item, index)"
                       alt="مدیا"
                       draggable="false"
                       @click.stop
+                      @dblclick.stop="handleMediaDoubleClick($event, item, index)"
                     />
                     <video
                       v-else
@@ -487,8 +762,8 @@ function handleTouchEnd() {
               class="lightbox-strip"
               @touchstart="handleTouchStart($event, 'strip')"
               @touchmove="handleTouchMove"
-              @touchend="handleTouchEnd"
-              @touchcancel="handleTouchEnd"
+              @touchend="handleTouchEnd($event)"
+              @touchcancel="handleTouchEnd($event)"
             >
               <button
                 v-for="(item, index) in lightboxMedia.items"
@@ -811,6 +1086,22 @@ function handleTouchEnd() {
   margin: auto;
   border-radius: 18px;
   box-shadow: 0 22px 40px rgba(0, 0, 0, 0.24);
+}
+
+.lightbox-media.is-zoomable {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  cursor: zoom-in;
+  will-change: transform;
+}
+
+.lightbox-media.is-zoomed {
+  cursor: grab;
+}
+
+.lightbox-media.is-zoomed:active {
+  cursor: grabbing;
 }
 
 .lightbox-strip-slot {
