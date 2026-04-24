@@ -842,6 +842,20 @@ const INTERACTIVE_CONTEXT_TARGET_SELECTOR = [
   'img'
 ].join(', ')
 
+const SWIPE_IGNORE_TARGET_SELECTOR = [
+  '[data-swipe-ignore]',
+  '[data-context-ignore]',
+  '.reply-context',
+  '.cancel-text-btn',
+  '.cancelable-overlay',
+  '.msg-voice-uploading',
+  'input',
+  'textarea',
+  'select',
+  'label',
+  'a'
+].join(', ')
+
 function clearLongPressTimer() {
   if (longPressTimer.value) {
     clearTimeout(longPressTimer.value)
@@ -853,6 +867,12 @@ function shouldIgnoreContextMenuTarget(target: EventTarget | null) {
   const element = target instanceof Element ? target : null
   if (!element) return false
   return Boolean(element.closest(INTERACTIVE_CONTEXT_TARGET_SELECTOR))
+}
+
+function shouldIgnoreSwipeTarget(target: EventTarget | null) {
+  const element = target instanceof Element ? target : null
+  if (!element) return false
+  return Boolean(element.closest(SWIPE_IGNORE_TARGET_SELECTOR))
 }
 
 const handleWrapperClick = (e: MouseEvent) => {
@@ -940,7 +960,7 @@ function getSwipeOffset(rawDeltaX: number) {
 }
 
 const handleTouchStart = (e: TouchEvent) => {
-  if (props.isSelectionMode || shouldIgnoreContextMenuTarget(e.target) || e.touches.length !== 1) return
+  if (props.isSelectionMode || shouldIgnoreSwipeTarget(e.target) || e.touches.length !== 1) return
 
   const touch = e.touches[0]
   if (!touch) return
