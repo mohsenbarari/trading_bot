@@ -592,8 +592,16 @@ function handleTouchEnd() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 12px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.lightbox-toolbar::-webkit-scrollbar {
+  display: none;
 }
 
 .lightbox-counter {
@@ -615,14 +623,18 @@ function handleTouchEnd() {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 12px;
+  flex: 0 0 auto;
+  min-width: max-content;
 }
 
 .lightbox-action-group {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
 }
 
 .lightbox-action-group-primary {
@@ -1104,17 +1116,19 @@ function handleTouchEnd() {
   }
 
   .lightbox-toolbar {
-    align-items: flex-start;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
   }
 
   .lightbox-actions {
-    width: 100%;
-    justify-content: space-between;
+    width: auto;
+    justify-content: flex-start;
     gap: 8px;
   }
 
   .lightbox-action-group {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
   }
 
   .lightbox-action-group-primary {
