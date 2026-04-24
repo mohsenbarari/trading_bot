@@ -79,6 +79,12 @@ function handleCellClick(msg: any) {
   emit('media-click', msg)
 }
 
+function shouldShowInlineDownload(item: AlbumItem) {
+  if (props.isDownloadSelectionMode) return false
+  if (item.msg?.is_sending) return false
+  return item.type === 'video'
+}
+
 function isItemSelected(msgId: number) {
   return selectedDownloadMessageIdsSet.value.has(msgId)
 }
@@ -293,6 +299,20 @@ const layout = computed(() => buildLayout(props.items))
         <div v-if="cell.item.type === 'video'" class="album-video-badge">
           <svg viewBox="0 0 24 24" width="12" height="12" fill="white"><path d="M8 5v14l11-7z"/></svg>
         </div>
+        <button
+          v-if="shouldShowInlineDownload(cell.item)"
+          class="album-download-btn"
+          type="button"
+          title="دانلود ویدئو"
+          data-context-ignore
+          @click.stop="emit('download', cell.item.msg)"
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </button>
         <div v-if="props.isDownloadSelectionMode" class="album-selection-indicator">
           <span class="album-selection-circle" :class="{ selected: isItemSelected(cell.item.msg.id) }">
             <svg v-if="isItemSelected(cell.item.msg.id)" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
@@ -429,6 +449,29 @@ const layout = computed(() => buildLayout(props.items))
   align-items: center;
   gap: 2px;
   backdrop-filter: blur(8px);
+}
+
+.album-download-btn {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.56);
+  color: #fff;
+  cursor: pointer;
+  z-index: 3;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+
+.album-download-btn:hover {
+  background: rgba(0, 0, 0, 0.7);
 }
 
 .album-selection-indicator {
