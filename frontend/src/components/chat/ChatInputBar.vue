@@ -173,14 +173,13 @@
         </svg>
       </button>
     </div>
+    <EmojiStickerPicker
+      :open="isStickerPickerOpen"
+      :currentUserId="currentUserId"
+      @update:open="setStickerPickerOpen"
+      @select="sendSticker"
+    />
   </div>
-
-  <EmojiStickerPicker
-    :open="isStickerPickerOpen"
-    :currentUserId="currentUserId"
-    @update:open="setStickerPickerOpen"
-    @select="sendSticker"
-  />
 </template>
 
 <script setup lang="ts">
