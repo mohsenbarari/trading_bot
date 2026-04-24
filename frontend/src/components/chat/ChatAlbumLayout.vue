@@ -82,7 +82,19 @@ function handleCellClick(msg: any) {
 function shouldShowInlineDownload(item: AlbumItem) {
   if (props.isDownloadSelectionMode) return false
   if (item.msg?.is_sending) return false
-  return item.type === 'video'
+  return item.type === 'video' && !item.hasResolvedMedia && !item.msg?.is_downloading
+}
+
+function shouldShowDownloadProgress(item: AlbumItem) {
+  if (props.isDownloadSelectionMode) return false
+  if (item.msg?.is_sending) return false
+  return item.type === 'video' && Boolean(item.msg?.is_downloading)
+}
+
+function shouldShowCenteredPlay(item: AlbumItem) {
+  if (props.isDownloadSelectionMode) return false
+  if (item.msg?.is_sending) return false
+  return item.type === 'video' && Boolean(item.hasResolvedMedia)
 }
 
 function isItemSelected(msgId: number) {
@@ -296,8 +308,8 @@ const layout = computed(() => buildLayout(props.items))
           alt="video preview"
         />
         <div v-else class="album-media album-media-fallback"></div>
-        <div v-if="cell.item.type === 'video'" class="album-video-badge">
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="white"><path d="M8 5v14l11-7z"/></svg>
+        <div v-if="shouldShowCenteredPlay(cell.item)" class="album-video-center-indicator" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M8 5v14l11-7z"/></svg>
         </div>
         <button
           v-if="shouldShowInlineDownload(cell.item)"
@@ -305,6 +317,7 @@ const layout = computed(() => buildLayout(props.items))
           type="button"
           title="دانلود ویدئو"
           data-context-ignore
+          data-swipe-ignore
           @click.stop="emit('download', cell.item.msg)"
         >
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -313,6 +326,27 @@ const layout = computed(() => buildLayout(props.items))
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
         </button>
+        <div
+          v-if="shouldShowDownloadProgress(cell.item)"
+          class="album-download-progress-overlay"
+          data-context-ignore
+          data-swipe-ignore
+          @click.stop
+        >
+          <div class="album-download-progress-shell">
+            <svg class="album-download-progress-ring" viewBox="0 0 36 36">
+              <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
+              <circle
+                class="ring-fg"
+                cx="18"
+                cy="18"
+                r="16"
+                :stroke-dasharray="`${cell.item.msg.download_progress || 0}, 100`"
+              ></circle>
+            </svg>
+            <span class="album-download-progress-text">{{ cell.item.msg.download_progress || 0 }}%</span>
+          </div>
+        </div>
         <div v-if="props.isDownloadSelectionMode" class="album-selection-indicator">
           <span class="album-selection-circle" :class="{ selected: isItemSelected(cell.item.msg.id) }">
             <svg v-if="isItemSelected(cell.item.msg.id)" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
@@ -438,40 +472,84 @@ const layout = computed(() => buildLayout(props.items))
     rgba(0, 0, 0, 0.08);
 }
 
-.album-video-badge {
-  position: absolute;
-  bottom: 6px;
-  left: 6px;
-  background: rgba(0, 0, 0, 0.56);
-  border-radius: 999px;
-  padding: 3px 7px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  backdrop-filter: blur(8px);
-}
-
 .album-download-btn {
   position: absolute;
-  top: 8px;
-  left: 8px;
-  width: 30px;
-  height: 30px;
+  inset: 0;
   border: none;
-  border-radius: 999px;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.56);
+  background: rgba(0, 0, 0, 0.28);
   color: #fff;
   cursor: pointer;
   z-index: 3;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(4px);
 }
 
 .album-download-btn:hover {
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.36);
+}
+
+.album-download-btn svg,
+.album-video-center-indicator svg {
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.32));
+}
+
+.album-video-center-indicator,
+.album-download-progress-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.album-video-center-indicator::before {
+  content: '';
+  position: absolute;
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(6px);
+}
+
+.album-video-center-indicator svg {
+  position: relative;
+  z-index: 1;
+  transform: translateX(1px);
+}
+
+.album-download-progress-overlay {
+  background: rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(4px);
+}
+
+.album-download-progress-shell {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.album-download-progress-ring {
+  position: absolute;
+  inset: 0;
+  width: 58px;
+  height: 58px;
+}
+
+.album-download-progress-text {
+  position: relative;
+  z-index: 1;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
 .album-selection-indicator {
