@@ -1,6 +1,6 @@
 import { ref, watch, type Ref, nextTick } from 'vue'
 import { apiFetchJson } from '../../utils/auth'
-import type { Conversation, Message, StickerPack } from '../../types/chat'
+import type { Conversation, Message } from '../../types/chat'
 import { useNotificationStore } from '../../stores/notifications'
 import {
     getPendingForUser as backgroundGetPendingForUser,
@@ -26,7 +26,6 @@ export interface UseChatMessagesOptions {
     replyingToMessage: Ref<Message | null>
     swipedMessageId: Ref<number | null>
     isMobile: Ref<boolean>
-    stickerPacks: Ref<StickerPack[]>
     showStickerPicker: Ref<boolean>
     scrollToBottom: () => void
     scrollToUnreadOrBottom: () => void
@@ -55,7 +54,6 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         replyingToMessage,
         swipedMessageId,
         isMobile,
-        stickerPacks,
         showStickerPicker,
         scrollToBottom,
         scrollToUnreadOrBottom,
@@ -600,14 +598,6 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         }
     }
 
-    async function loadStickers() {
-        try {
-            stickerPacks.value = await apiFetch('/chat/stickers')
-        } catch (e) {
-            console.warn('Failed to load stickers')
-        }
-    }
-
     function sendSticker(stickerId: string) {
         sendMediaMessage('sticker', stickerId)
     }
@@ -630,7 +620,6 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         stopPolling,
         startStatusPolling,
         stopStatusPolling,
-        loadStickers,
         sendSticker
     }
 }

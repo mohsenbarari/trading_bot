@@ -14,7 +14,7 @@ import AttachmentMenu from './chat/AttachmentMenu.vue'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
-import type { ChatForwardTarget, Conversation, Message, StickerPack } from '../types/chat'
+import type { ChatForwardTarget, Conversation, Message } from '../types/chat'
 import { useChatMedia } from '../composables/chat/useChatMedia'
 import { useChatWebSocket } from '../composables/chat/useChatWebSocket'
 import { useChatMessages } from '../composables/chat/useChatMessages'
@@ -87,8 +87,6 @@ const chatInputBarRef = ref<{
   adjustTextareaHeight: () => void
 } | null>(null)
 
-// Stickers
-const stickerPacks = ref<StickerPack[]>([])
 const showStickerPicker = ref(false)
 const isUploading = ref(false)
 
@@ -150,7 +148,6 @@ const messagesLogic = useChatMessages({
   replyingToMessage,
   swipedMessageId,
   isMobile,
-  stickerPacks,
   showStickerPicker,
   scrollToBottom,
   scrollToUnreadOrBottom,
@@ -179,11 +176,15 @@ const {
   stopPolling,
   startStatusPolling,
   stopStatusPolling,
-  loadStickers,
   sendSticker,
   hasOlderMessages,
   isLoadingOlderMessages
 } = messagesLogic
+
+const stickerPickerInset = computed(() => {
+  if (!showStickerPicker.value) return '0px'
+  return isMobile.value ? '344px' : '368px'
+})
 
 const mediaLogic = useChatMedia({
   apiBaseUrl: props.apiBaseUrl,
@@ -1535,7 +1536,6 @@ watch(selectedUserId, (newVal) => {
 onMounted(async () => {
   isLoading.value = true
   await loadConversations()
-  await loadStickers()
   isLoading.value = false
   
   if (props.targetUserId && props.targetUserName) {
@@ -1566,6 +1566,23 @@ watch(() => props.targetUserId, (newId) => {
     })
   }
 })
+
+watch(isSelectionMode, (isEnabled) => {
+  if (isEnabled) {
+    showStickerPicker.value = false
+  }
+})
+
+watch(showAttachmentMenu, (isOpen) => {
+  if (isOpen) {
+    showStickerPicker.value = false
+  }
+})
+
+function handleToggleAttachment() {
+  showStickerPicker.value = false
+  showAttachmentMenu.value = !showAttachmentMenu.value
+}
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateIsMobile)
@@ -1787,6 +1804,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         ref="chatInputBarRef"
         v-else-if="selectedUserId && !isSelectionMode"
         v-model="messageInput"
+        v-model:stickerPickerOpen="showStickerPicker"
         :editingMessage="editingMessage"
         :isSelectionMode="isSelectionMode"
         :replyingToMessage="replyingToMessage"
@@ -1805,7 +1823,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         @reply-selected="handleReplySelected"
         @copy-selected="handleCopySelected"
         @forward-selected="openForwardModal"
-        @toggle-attachment="showAttachmentMenu = !showAttachmentMenu"
+        @toggle-attachment="handleToggleAttachment"
         @send-text="(text: string) => { messageInput = text; sendMessage(); }"
         @send-sticker="sendSticker"
         @send-voice="handleSendVoice"
@@ -2124,7 +2142,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
   min-height: 0;
   position: relative;
   /* Space for Slide-up sticker picker when open */
-  padding-bottom: v-bind('showStickerPicker ? "250px" : "0px"');
+  padding-bottom: v-bind(stickerPickerInset);
   transition: padding-bottom 0.3s cubic-bezier(0.2, 0, 0, 1);
   /* No padding-top - messages will scroll UNDER the glass header */
 }
