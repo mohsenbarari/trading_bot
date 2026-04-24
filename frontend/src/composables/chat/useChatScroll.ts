@@ -112,7 +112,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     }
 
     const scrollToMessage = (msgId: number) => {
-        const el = document.getElementById(`album-item-${msgId}`) || document.getElementById(`msg-${msgId}`)
+        const el = document.getElementById(`msg-${msgId}`) || document.getElementById(`album-item-${msgId}`)
         const container = messagesContainer.value
 
         if (el && container) {
