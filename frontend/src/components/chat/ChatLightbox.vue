@@ -237,6 +237,21 @@ function handleThumbClick(index: number) {
   navigateTo(index)
 }
 
+function getStripThumbSrc(item: LightboxItem, index: number) {
+  if (item.type === 'video') {
+    return item.thumbnail || item.url
+  }
+
+  const activeIndex = props.lightboxMedia?.currentIndex ?? 0
+  const distance = Math.abs(index - activeIndex)
+
+  if (distance <= 4) {
+    return item.url || item.thumbnail
+  }
+
+  return item.thumbnail || item.url
+}
+
 function getHorizontalDragRatio() {
   if (gestureAxis.value !== 'horizontal') return 0
   return Math.max(-1, Math.min(1, dragOffsetX.value / 220))
@@ -473,7 +488,7 @@ function handleTouchEnd() {
                 :aria-current="index === lightboxMedia.currentIndex ? 'true' : 'false'"
                 @click.stop="handleThumbClick(index)"
               >
-                <img :src="item.thumbnail || item.url" alt="thumbnail" class="lightbox-thumb-image" />
+                <img :src="getStripThumbSrc(item, index)" alt="thumbnail" class="lightbox-thumb-image" />
                 <span v-if="item.type === 'video'" class="thumb-video-badge">
                   <svg viewBox="0 0 24 24" width="12" height="12" fill="white"><path d="M8 5v14l11-7z" /></svg>
                 </span>
