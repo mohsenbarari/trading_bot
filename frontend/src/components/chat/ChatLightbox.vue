@@ -910,16 +910,28 @@ function handleTouchEnd() {
 
 .thumb-video-badge {
   position: absolute;
-  left: 8px;
-  bottom: 8px;
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  pointer-events: none;
+}
+
+.thumb-video-badge::before {
+  content: '';
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
   background: rgba(0, 0, 0, 0.56);
   backdrop-filter: blur(8px);
+}
+
+.thumb-video-badge svg {
+  position: relative;
+  z-index: 1;
+  transform: translateX(1px);
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.28));
 }
 
 .album-download-backdrop {
