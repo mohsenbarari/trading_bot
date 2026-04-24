@@ -166,8 +166,8 @@
       
       <!-- Voice Message -->
       <template v-else-if="msg.message_type === 'voice'">
-        <div class="msg-voice">
-          <button class="voice-play-btn" @click.stop="toggleVoice">
+        <div class="msg-voice" :class="{ 'is-sent': isSent, 'is-loading': isVoiceLoading, 'is-error': isVoiceErrored }">
+          <button class="voice-play-btn" :class="{ 'is-active': isPlaying }" @click.stop="toggleVoice">
             <svg v-if="!isPlaying" viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
               <path d="M8 5v14l11-7z"/>
             </svg>
@@ -177,10 +177,27 @@
           </button>
           
           <div class="voice-body" style="min-width: 0; flex: 1;">
-            <div class="voice-waveform" ref="waveformRef" @click.prevent style="width: 100%; height: 24px; position: relative; overflow: hidden; display: block;">
-              <!-- WaveSurfer will inject canvas here -->
+            <div
+              ref="waveformRef"
+              class="voice-waveform"
+              :class="{ 'is-interactive': Boolean(audioUrl) }"
+              @click.stop="handleVoiceWaveformClick"
+            >
+              <div class="voice-wave-bars" aria-hidden="true">
+                <span
+                  v-for="(barHeight, index) in voiceWaveBars"
+                  :key="`${msg.id}-${index}`"
+                  class="voice-wave-bar"
+                  :class="{ 'is-played': index < playedVoiceBarCount }"
+                  :style="{ height: `${barHeight}%` }"
+                />
+              </div>
             </div>
-            <div class="voice-time">{{ formattedVoiceTime }}</div>
+            <div class="voice-meta-row">
+              <div class="voice-time">{{ formattedVoiceTime }}</div>
+              <div v-if="isVoiceLoading" class="voice-state-dot is-loading" aria-hidden="true"></div>
+              <div v-else-if="isVoiceErrored" class="voice-state-dot is-error" aria-hidden="true"></div>
+            </div>
           </div>
           
           <div v-if="msg.is_sending && msg.upload_progress !== undefined" class="msg-voice-uploading" @click.stop="$emit('cancel-send', msg)">
@@ -276,9 +293,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAudioStore } from '../../stores/audio'
-import WaveSurfer from 'wavesurfer.js'
 import type { Message } from '../../types/chat'
 import ChatAlbumLayout from './ChatAlbumLayout.vue'
 import { observeVisibility } from '../../utils/sharedVisibilityObserver'
@@ -352,7 +368,18 @@ const cachedUrl = computed(() => props.imageCache[mediaFileId.value] || '')
 const isCached = computed(() => Boolean(cachedUrl.value))
 const thumbnail = computed(() => getImageThumbnail(props.msg.content, parsedContent.value))
 const formattedTime = computed(() => formatTime(props.msg.created_at))
-const audioUrl = computed(() => cachedUrl.value || props.msg.local_blob_url)
+const audioUrl = computed(() => {
+  if (cachedUrl.value) return cachedUrl.value
+  if (props.msg.local_blob_url) return props.msg.local_blob_url
+
+  if (props.msg.message_type !== 'voice' || !mediaFileId.value) {
+    return ''
+  }
+
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+  const token = localStorage.getItem('auth_token') || ''
+  return token ? `${baseUrl}/api/chat/files/${mediaFileId.value}?token=${token}` : ''
+})
 
 const mediaStyle = computed(() => {
   const style: any = {
@@ -422,12 +449,151 @@ const docIconClass = computed(() => {
 // Voice State
 const messageBubbleRef = ref<HTMLElement | null>(null)
 const waveformRef = ref<HTMLElement | null>(null)
-let wavesurfer: any = null
+let voiceAudioElement: HTMLAudioElement | null = null
 let unobserveVisibility: (() => void) | null = null
 const hasTriggeredDeferredLoad = ref(false)
 const isPlaying = ref(false)
+const isVoiceLoading = ref(false)
+const isVoiceErrored = ref(false)
 const voiceDuration = ref(0)
 const voiceCurrentTime = ref(0)
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function buildVoiceWaveBars(seedSource: string, count = 40) {
+  let seed = 0
+  for (let index = 0; index < seedSource.length; index += 1) {
+    seed = ((seed * 31) + seedSource.charCodeAt(index)) >>> 0
+  }
+  if (!seed) seed = 0x9e3779b9
+
+  const bars: number[] = []
+  let previous = 0.45
+
+  for (let index = 0; index < count; index += 1) {
+    seed = (seed * 1664525 + 1013904223) >>> 0
+    const random = seed / 0xffffffff
+    const envelope = 0.42 + Math.sin((index / Math.max(1, count - 1)) * Math.PI) * 0.26
+    const jitter = (random - 0.5) * 0.35
+    const next = clampNumber((previous * 0.42) + ((envelope + jitter) * 0.58), 0.15, 1)
+    bars.push(Math.round((0.22 + next * 0.78) * 100))
+    previous = next
+  }
+
+  return bars
+}
+
+function normalizeComparableUrl(url: string) {
+  try {
+    return new URL(url, window.location.href).href
+  } catch {
+    return url
+  }
+}
+
+function teardownVoiceAudio() {
+  if (!voiceAudioElement) return
+
+  voiceAudioElement.pause()
+  voiceAudioElement.removeEventListener('loadedmetadata', handleVoiceLoadedMetadata)
+  voiceAudioElement.removeEventListener('timeupdate', handleVoiceTimeUpdate)
+  voiceAudioElement.removeEventListener('waiting', handleVoiceWaiting)
+  voiceAudioElement.removeEventListener('canplay', handleVoiceCanPlay)
+  voiceAudioElement.removeEventListener('play', handleVoicePlay)
+  voiceAudioElement.removeEventListener('pause', handleVoicePause)
+  voiceAudioElement.removeEventListener('ended', handleVoiceEnded)
+  voiceAudioElement.removeEventListener('error', handleVoiceError)
+  voiceAudioElement.src = ''
+  voiceAudioElement.load()
+  voiceAudioElement = null
+}
+
+function handleVoiceLoadedMetadata() {
+  if (!voiceAudioElement) return
+  if (Number.isFinite(voiceAudioElement.duration) && voiceAudioElement.duration > 0) {
+    voiceDuration.value = voiceAudioElement.duration
+  }
+  isVoiceLoading.value = false
+  isVoiceErrored.value = false
+}
+
+function handleVoiceTimeUpdate() {
+  if (!voiceAudioElement) return
+  voiceCurrentTime.value = voiceAudioElement.currentTime || 0
+  if (Number.isFinite(voiceAudioElement.duration) && voiceAudioElement.duration > 0) {
+    voiceDuration.value = voiceAudioElement.duration
+  }
+}
+
+function handleVoiceWaiting() {
+  if (isPlaying.value) {
+    isVoiceLoading.value = true
+  }
+}
+
+function handleVoiceCanPlay() {
+  isVoiceLoading.value = false
+}
+
+function handleVoicePlay() {
+  isPlaying.value = true
+  isVoiceLoading.value = false
+  isVoiceErrored.value = false
+}
+
+function handleVoicePause() {
+  isPlaying.value = false
+  isVoiceLoading.value = false
+}
+
+function handleVoiceEnded() {
+  isPlaying.value = false
+  isVoiceLoading.value = false
+  voiceCurrentTime.value = 0
+  if (voiceAudioElement) {
+    voiceAudioElement.currentTime = 0
+  }
+  if (audioStore.currentPlayingId === props.msg.id) {
+    audioStore.setCurrentPlaying(null)
+  }
+}
+
+function handleVoiceError() {
+  isPlaying.value = false
+  isVoiceLoading.value = false
+  isVoiceErrored.value = true
+  if (audioStore.currentPlayingId === props.msg.id) {
+    audioStore.setCurrentPlaying(null)
+  }
+}
+
+function ensureVoiceAudio() {
+  if (props.msg.message_type !== 'voice' || !audioUrl.value) {
+    return null
+  }
+
+  const nextUrl = normalizeComparableUrl(audioUrl.value)
+  if (voiceAudioElement && normalizeComparableUrl(voiceAudioElement.src) === nextUrl) {
+    return voiceAudioElement
+  }
+
+  teardownVoiceAudio()
+
+  const audio = new Audio(audioUrl.value)
+  audio.preload = 'metadata'
+  audio.addEventListener('loadedmetadata', handleVoiceLoadedMetadata)
+  audio.addEventListener('timeupdate', handleVoiceTimeUpdate)
+  audio.addEventListener('waiting', handleVoiceWaiting)
+  audio.addEventListener('canplay', handleVoiceCanPlay)
+  audio.addEventListener('play', handleVoicePlay)
+  audio.addEventListener('pause', handleVoicePause)
+  audio.addEventListener('ended', handleVoiceEnded)
+  audio.addEventListener('error', handleVoiceError)
+  voiceAudioElement = audio
+  return audio
+}
 
 const shouldDeferMediaHydration = computed(() => {
   return Boolean(props.onLoad) && (
@@ -477,124 +643,38 @@ onMounted(() => {
   }
 })
 
-const initWaveSurfer = () => {
-  if (!audioUrl.value || props.msg.message_type !== 'voice') return
-  nextTick(() => {
-    if (wavesurfer) {
-      wavesurfer.destroy()
-    }
-    if (!waveformRef.value) return
-    
-    wavesurfer = WaveSurfer.create({
-      container: waveformRef.value,
-      waveColor: isSent.value ? 'rgba(74, 144, 226, 0.4)' : 'rgba(0, 0, 0, 0.15)',
-      progressColor: isSent.value ? '#3390ec' : 'var(--primary-color, #4A90E2)',
-      cursorWidth: 0,
-      barWidth: 2,
-      barGap: 1.5,
-      barRadius: 2,
-      height: 24,
-      barAlign: 'bottom',
-      normalize: true,
-      url: audioUrl.value,
-      renderFunction: (channels, ctx) => {
-        const { width, height } = ctx.canvas;
-        const barWidth = 2;
-        const barGap = 2;
-        const barCount = Math.floor(width / (barWidth + barGap));
-        const channelData = channels[0];
-        if (!channelData) {
-          ctx.fillStyle = isSent.value ? 'rgba(74, 144, 226, 0.4)' : 'rgba(0,0,0,0.15)';
-          ctx.fillRect(0, height - 2, width, 2);
-          return;
-        }
-        const step = Math.floor(channelData.length / barCount);
-        const activeIndex = Math.floor(wavesurfer.getCurrentTime() / wavesurfer.getDuration() * barCount || 0);
+watch(audioUrl, (newUrl, oldUrl) => {
+  if (props.msg.message_type !== 'voice' || newUrl === oldUrl) return
 
-        ctx.clearRect(0, 0, width, height);
-
-        for (let i = 0; i < barCount; i++) {
-          let sum = 0;
-          for (let j = 0; j < step; j++) {
-            sum += Math.abs(channelData[i * step + j] || 0);
-          }
-          const avg = sum / step;
-          const barHeight = Math.max(2, avg * height * 1.5);
-          
-          ctx.fillStyle = i <= activeIndex ? (isSent.value ? '#3390ec' : '#4A90E2') : (isSent.value ? 'rgba(74, 144, 226, 0.4)' : 'rgba(0,0,0,0.15)');
-          
-          // Draw bar from bottom
-          const x = i * (barWidth + barGap);
-          const y = height - barHeight;
-          
-          // Rounded rect
-          const radius = 2;
-          ctx.beginPath();
-          ctx.moveTo(x + radius, y);
-          ctx.lineTo(x + barWidth - radius, y);
-          ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
-          ctx.lineTo(x + barWidth, height);
-          ctx.lineTo(x, height);
-          ctx.lineTo(x, y + radius);
-          ctx.quadraticCurveTo(x, y, x + radius, y);
-          ctx.closePath();
-          ctx.fill();
-        }
-      }
-    })
-
-    wavesurfer.on('ready', () => {
-      const d = wavesurfer.getDuration()
-      if (d && !isNaN(d) && d !== Infinity) {
-        voiceDuration.value = d
-      }
-    })
-
-    wavesurfer.on('audioprocess', () => {
-      voiceCurrentTime.value = wavesurfer.getCurrentTime()
-    })
-    
-    wavesurfer.on('seeking', () => {
-      voiceCurrentTime.value = wavesurfer.getCurrentTime()
-    })
-
-    wavesurfer.on('finish', () => {
-      isPlaying.value = false
-      voiceCurrentTime.value = 0
-      if (audioStore.currentPlayingId === props.msg.id) {
-        audioStore.setCurrentPlaying(null)
-      }
-    })
-
-    wavesurfer.on('play', () => {
-      isPlaying.value = true
-    })
-
-    wavesurfer.on('pause', () => {
-      isPlaying.value = false
-    })
-  })
-}
-
-watch(audioUrl, initWaveSurfer)
-
-// Make sure to init on mounted if url is already present
-onMounted(() => {
-  if (audioUrl.value) {
-    initWaveSurfer()
-  }
+  teardownVoiceAudio()
+  isPlaying.value = false
+  isVoiceLoading.value = false
+  isVoiceErrored.value = false
+  voiceCurrentTime.value = 0
 })
 
 onUnmounted(() => {
   cleanupVisibilityObserver()
-  if (wavesurfer) {
-    wavesurfer.destroy()
-    wavesurfer = null
-  }
+  teardownVoiceAudio()
+})
+
+const voiceWaveBars = computed(() => {
+  if (props.msg.message_type !== 'voice') return []
+  return buildVoiceWaveBars(`${mediaFileId.value}:${Math.round(voiceDuration.value || 0)}:${props.msg.id}`)
+})
+
+const voiceProgress = computed(() => {
+  if (!voiceDuration.value) return 0
+  return clampNumber(voiceCurrentTime.value / voiceDuration.value, 0, 1)
+})
+
+const playedVoiceBarCount = computed(() => {
+  return Math.round(voiceWaveBars.value.length * voiceProgress.value)
 })
 
 const formattedVoiceTime = computed(() => {
-  const time = isPlaying.value ? voiceCurrentTime.value : (voiceDuration.value || 0)
+  const hasPlaybackPosition = voiceCurrentTime.value > 0 && voiceCurrentTime.value < (voiceDuration.value || Infinity)
+  const time = hasPlaybackPosition ? voiceCurrentTime.value : (voiceDuration.value || 0)
   const mins = Math.floor(time / 60)
   const secs = Math.floor(time % 60)
   return `${mins}:${secs.toString().padStart(2, '0')}`
@@ -602,20 +682,69 @@ const formattedVoiceTime = computed(() => {
 
 // Stop playing if global state changes to another message
 watch(() => audioStore.currentPlayingId, (newId) => {
-  if (newId !== props.msg.id && isPlaying.value && wavesurfer) {
-    wavesurfer.pause()
+  if (newId !== props.msg.id && isPlaying.value && voiceAudioElement) {
+    voiceAudioElement.pause()
   }
 })
 
-const toggleVoice = () => {
-  if (!wavesurfer) return
+const toggleVoice = async () => {
   if (isPlaying.value) {
-    wavesurfer.pause()
+    voiceAudioElement?.pause()
     audioStore.setCurrentPlaying(null)
   } else {
-    // Set this message as currently playing (will stop others via watch)
+    const audio = ensureVoiceAudio()
+    if (!audio) return
+
+    if (voiceDuration.value > 0 && voiceCurrentTime.value >= voiceDuration.value - 0.05) {
+      audio.currentTime = 0
+      voiceCurrentTime.value = 0
+    }
+
+    isVoiceLoading.value = true
+    isVoiceErrored.value = false
     audioStore.setCurrentPlaying(props.msg.id)
-    wavesurfer.play()
+    try {
+      await audio.play()
+    } catch (error) {
+      isVoiceLoading.value = false
+      isVoiceErrored.value = true
+      isPlaying.value = false
+      audioStore.setCurrentPlaying(null)
+      console.warn('Voice playback failed:', error)
+    }
+  }
+}
+
+function handleVoiceWaveformClick(event: MouseEvent) {
+  if (!waveformRef.value || !audioUrl.value) {
+    void toggleVoice()
+    return
+  }
+
+  const rect = waveformRef.value.getBoundingClientRect()
+  if (!rect.width) return
+
+  const nextRatio = clampNumber((event.clientX - rect.left) / rect.width, 0, 1)
+  const audio = ensureVoiceAudio()
+  if (!audio || !voiceDuration.value) {
+    void toggleVoice()
+    return
+  }
+
+  const nextTime = nextRatio * voiceDuration.value
+  if (audio.readyState >= 1) {
+    audio.currentTime = nextTime
+  } else {
+    audio.addEventListener('loadedmetadata', () => {
+      if (voiceAudioElement) {
+        voiceAudioElement.currentTime = nextTime
+      }
+    }, { once: true })
+  }
+  voiceCurrentTime.value = nextTime
+
+  if (!isPlaying.value) {
+    void toggleVoice()
   }
 }
 
@@ -1200,26 +1329,55 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 
 <style scoped>
 .msg-voice {
+  --voice-accent: #4A90E2;
+  --voice-accent-top: #8fc0ff;
+  --voice-track-bottom: rgba(15, 23, 42, 0.15);
+  --voice-track-top: rgba(255, 255, 255, 0.76);
   display: flex;
   align-items: center;
   gap: 12px;
-  background: rgba(0,0,0,0.05);
-  border-radius: 8px;
-  padding: 10px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.42), transparent 55%),
+    linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0.04));
+  border: 1px solid rgba(255,255,255,0.28);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
+  border-radius: 16px;
+  padding: 10px 12px;
   width: 250px;
   direction: ltr; /* Force LTR for audio player */
+}
+.msg-voice.is-sent {
+  --voice-accent: #3390ec;
+  --voice-accent-top: #9fd0ff;
+  --voice-track-bottom: rgba(51, 144, 236, 0.2);
+  --voice-track-top: rgba(255, 255, 255, 0.62);
 }
 .voice-play-btn {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: var(--primary-color, #4A90E2);
+  border: none;
+  background: linear-gradient(180deg, var(--voice-accent-top), var(--voice-accent));
   color: white;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
+  box-shadow: 0 10px 24px rgba(32, 92, 160, 0.22);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+.voice-play-btn:hover {
+  transform: translateY(-1px);
+}
+.voice-play-btn.is-active {
+  box-shadow: 0 12px 28px rgba(32, 92, 160, 0.3);
+}
+.msg-voice.is-loading .voice-play-btn {
+  filter: saturate(0.92);
+}
+.msg-voice.is-error .voice-play-btn {
+  background: linear-gradient(180deg, #ff9b9b, #ea5455);
 }
 .voice-play-btn svg {
   width: 24px;
@@ -1231,23 +1389,97 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   display: flex;
   flex-direction: column;
   flex-grow: 1;
-  gap: 8px;
+  gap: 6px;
   justify-content: center;
 }
 .voice-waveform {
   width: 100%;
-  height: 24px;
-  border-radius: 2px;
-  cursor: pointer;
+  min-height: 30px;
+  border-radius: 12px;
+  cursor: default;
   position: relative;
+  padding: 4px 0;
 }
-.voice-progress-fill {
-  display: none;
+.voice-waveform.is-interactive {
+  cursor: pointer;
+}
+
+.voice-wave-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  width: 100%;
+  height: 22px;
+}
+
+.voice-wave-bar {
+  flex: 1 1 0;
+  min-width: 3px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--voice-track-top), var(--voice-track-bottom));
+  opacity: 0.96;
+  transition: background 0.16s ease, opacity 0.16s ease, transform 0.16s ease;
+}
+
+.voice-wave-bar.is-played {
+  background: linear-gradient(180deg, var(--voice-accent-top), var(--voice-accent));
+  opacity: 1;
+}
+
+.msg-voice.is-loading .voice-wave-bar {
+  animation: voice-bar-pulse 1.4s ease-in-out infinite;
+}
+
+.voice-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.voice-state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.voice-state-dot.is-loading {
+  background: var(--voice-accent);
+  box-shadow: 0 0 0 0 rgba(74, 144, 226, 0.35);
+  animation: voice-dot-pulse 1.3s ease-in-out infinite;
+}
+
+.voice-state-dot.is-error {
+  background: #ea5455;
+  box-shadow: 0 0 0 4px rgba(234, 84, 85, 0.14);
 }
 
 .voice-time {
   font-size: 0.75rem;
   color: #666;
   line-height: 1;
+}
+
+@keyframes voice-bar-pulse {
+  0%, 100% {
+    opacity: 0.76;
+    transform: scaleY(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleY(1.04);
+  }
+}
+
+@keyframes voice-dot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(74, 144, 226, 0.35);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(74, 144, 226, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(74, 144, 226, 0);
+  }
 }
 </style>
