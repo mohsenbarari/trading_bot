@@ -75,6 +75,46 @@
               {{ formattedRecordingTime }}
             </div>
 
+            <div v-if="hasCameraZoomControl" class="camera-zoom-panel">
+              <button
+                type="button"
+                class="camera-zoom-btn"
+                :disabled="!canZoomOut"
+                @click="nudgeCameraZoom(-1)"
+                title="کاهش زوم"
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+
+              <div class="camera-zoom-slider-wrap">
+                <div class="camera-zoom-label">{{ cameraZoomDisplay }}</div>
+                <input
+                  class="camera-zoom-slider"
+                  type="range"
+                  :min="cameraZoomCapability?.min ?? 1"
+                  :max="cameraZoomCapability?.max ?? 1"
+                  :step="cameraZoomCapability?.step ?? 0.1"
+                  :value="cameraZoomValue"
+                  @input="handleCameraZoomInput"
+                />
+              </div>
+
+              <button
+                type="button"
+                class="camera-zoom-btn"
+                :disabled="!canZoomIn"
+                @click="nudgeCameraZoom(1)"
+                title="افزایش زوم"
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+            </div>
+
             <div v-if="hasCapturedMediaQueue" class="camera-captured-strip">
               <button
                 v-for="item in capturedCameraMedia"
@@ -266,6 +306,17 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import 'leaflet/dist/leaflet.css'
 import { LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
 
+type CameraZoomCapability = {
+  min: number
+  max: number
+  step: number
+}
+
+type ZoomCapableTrack = MediaStreamTrack & {
+  getCapabilities?: () => { zoom?: { min?: number; max?: number; step?: number } }
+  getSettings?: () => MediaTrackSettings & { zoom?: number }
+}
+
 type CapturedCameraMediaItem = {
   id: string
   file: File
@@ -302,6 +353,8 @@ const cameraError = ref('')
 const isRecording = ref(false)
 const recordingSeconds = ref(0)
 const capturedCameraMedia = ref<CapturedCameraMediaItem[]>([])
+const cameraZoomCapability = ref<CameraZoomCapability | null>(null)
+const cameraZoomValue = ref(1)
 
 const cameraStream = ref<MediaStream | null>(null)
 let mediaRecorder: MediaRecorder | null = null
@@ -332,6 +385,19 @@ const capturedMediaQueueLabel = computed(() => {
   const count = capturedMediaCount.value
   return count === 1 ? '۱ مورد آماده ارسال' : `${count} مورد آماده ارسال`
 })
+const hasCameraZoomControl = computed(() => {
+  if (isUsingNativeCameraFallback.value) return false
+  const capability = cameraZoomCapability.value
+  return Boolean(capability && capability.max > capability.min + 0.001)
+})
+const canZoomOut = computed(() => {
+  const capability = cameraZoomCapability.value
+  return Boolean(capability && cameraZoomValue.value > capability.min + 0.001)
+})
+const canZoomIn = computed(() => {
+  const capability = cameraZoomCapability.value
+  return Boolean(capability && cameraZoomValue.value < capability.max - 0.001)
+})
 const isCameraReady = computed(() => (
   isUsingNativeCameraFallback.value
   || (Boolean(cameraStream.value) && !isCameraStarting.value && !cameraError.value)
@@ -340,6 +406,12 @@ const formattedRecordingTime = computed(() => {
   const mins = Math.floor(recordingSeconds.value / 60)
   const secs = recordingSeconds.value % 60
   return `${mins}:${secs.toString().padStart(2, '0')}`
+})
+const cameraZoomDisplay = computed(() => {
+  const normalizedZoom = cameraZoomValue.value >= 10
+    ? cameraZoomValue.value.toFixed(0)
+    : cameraZoomValue.value.toFixed(1)
+  return `${normalizedZoom}x`
 })
 
 const tabs = [
@@ -358,6 +430,96 @@ function stopRecordingTimer() {
     window.clearInterval(recordingTimer)
     recordingTimer = null
   }
+}
+
+function resetCameraZoomState() {
+  cameraZoomCapability.value = null
+  cameraZoomValue.value = 1
+}
+
+function getActiveCameraVideoTrack(): ZoomCapableTrack | null {
+  return (cameraStream.value?.getVideoTracks?.()[0] as ZoomCapableTrack | undefined) ?? null
+}
+
+function clampCameraZoom(value: number, capability: CameraZoomCapability) {
+  const bounded = Math.min(capability.max, Math.max(capability.min, value))
+  const steps = Math.round((bounded - capability.min) / capability.step)
+  return Number((capability.min + (steps * capability.step)).toFixed(2))
+}
+
+function getCameraZoomNudgeStep(capability: CameraZoomCapability) {
+  const coarseStep = Number(((capability.max - capability.min) / 8).toFixed(2))
+  return Math.max(capability.step, coarseStep)
+}
+
+async function syncCameraZoomCapability(track: ZoomCapableTrack | null = getActiveCameraVideoTrack()) {
+  if (!track || typeof track.getCapabilities !== 'function') {
+    resetCameraZoomState()
+    return
+  }
+
+  const zoomRange = track.getCapabilities()?.zoom
+  const min = Number(zoomRange?.min)
+  const max = Number(zoomRange?.max)
+
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+    resetCameraZoomState()
+    return
+  }
+
+  const rawStep = Number(zoomRange?.step)
+  const capability = {
+    min,
+    max,
+    step: Number.isFinite(rawStep) && rawStep > 0 ? rawStep : 0.1,
+  }
+
+  cameraZoomCapability.value = capability
+
+  const settingsZoom = Number(track.getSettings?.()?.zoom)
+  cameraZoomValue.value = clampCameraZoom(Number.isFinite(settingsZoom) ? settingsZoom : capability.min, capability)
+}
+
+async function applyCameraZoom(nextValue: number) {
+  const track = getActiveCameraVideoTrack()
+  const capability = cameraZoomCapability.value
+
+  if (!track || !capability || typeof track.applyConstraints !== 'function') return
+
+  const zoom = clampCameraZoom(nextValue, capability)
+  cameraZoomValue.value = zoom
+
+  try {
+    await track.applyConstraints({
+      advanced: [{ zoom } as any],
+    })
+
+    const appliedZoom = Number(track.getSettings?.()?.zoom)
+    if (Number.isFinite(appliedZoom)) {
+      cameraZoomValue.value = clampCameraZoom(appliedZoom, capability)
+    }
+  } catch (error) {
+    console.warn('Camera zoom apply failed:', error)
+    await syncCameraZoomCapability(track)
+  }
+}
+
+function handleCameraZoomInput(event: Event) {
+  const target = event.target as HTMLInputElement | null
+  if (!target) return
+
+  const nextValue = Number(target.value)
+  if (!Number.isFinite(nextValue)) return
+
+  void applyCameraZoom(nextValue)
+}
+
+function nudgeCameraZoom(direction: -1 | 1) {
+  const capability = cameraZoomCapability.value
+  if (!capability) return
+
+  const delta = getCameraZoomNudgeStep(capability) * direction
+  void applyCameraZoom(cameraZoomValue.value + delta)
 }
 
 function createCapturedMediaId() {
@@ -406,6 +568,7 @@ function stopCameraTracks() {
 
   cameraStream.value?.getTracks().forEach((track) => track.stop())
   cameraStream.value = null
+  resetCameraZoomState()
 }
 
 function cleanupCamera(discardRecording = true, clearCapturedMedia = true) {
@@ -511,6 +674,7 @@ async function startCameraStream() {
     cameraStream.value = stream
     showCameraCapture.value = true
     await attachCameraStream(stream)
+    await syncCameraZoomCapability(getActiveCameraVideoTrack())
   } catch (error) {
     console.error('Camera start error:', error)
     enableNativeCameraFallback()
@@ -1012,6 +1176,60 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(8px);
 }
 
+.camera-zoom-panel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.48);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(10px);
+  z-index: 2;
+}
+
+.camera-zoom-slider-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 126px;
+}
+
+.camera-zoom-label {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.camera-zoom-slider {
+  width: 100%;
+  accent-color: #39a0ff;
+}
+
+.camera-zoom-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  background: rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+}
+
+.camera-zoom-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
 .camera-captured-strip {
   position: absolute;
   left: 12px;
@@ -1435,6 +1653,19 @@ onBeforeUnmount(() => {
 @media (max-width: 640px) {
   .camera-topbar {
     padding: 10px 10px 0;
+  }
+
+  .camera-zoom-panel {
+    top: 12px;
+    right: 12px;
+    left: 12px;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .camera-zoom-slider-wrap {
+    min-width: 0;
+    flex: 1;
   }
 
   .camera-mode-btn {
