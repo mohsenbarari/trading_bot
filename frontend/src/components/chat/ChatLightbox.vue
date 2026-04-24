@@ -66,8 +66,13 @@ const currentItem = computed(() => {
   return props.lightboxMedia.items[props.lightboxMedia.currentIndex] || null
 })
 
-const isCurrentItemZoomable = computed(() => currentItem.value?.type === 'image')
-const isCurrentImageZoomed = computed(() => isCurrentItemZoomable.value && mediaZoomScale.value > 1.01)
+function isZoomableLightboxItem(item: LightboxItem | null | undefined) {
+  return item?.type === 'image' || item?.type === 'video'
+}
+
+const isCurrentMediaZoomable = computed(() => isZoomableLightboxItem(currentItem.value))
+const isCurrentImageItem = computed(() => currentItem.value?.type === 'image')
+const isCurrentMediaZoomed = computed(() => isCurrentMediaZoomable.value && mediaZoomScale.value > 1.01)
 
 const hasAlbumStrip = computed(() => {
   return Boolean(props.lightboxMedia?.albumId) && (props.lightboxMedia?.items.length || 0) > 1
@@ -181,7 +186,7 @@ function getActiveMediaMetrics() {
 }
 
 function clampMediaOffset(nextX: number, nextY: number, nextScale = mediaZoomScale.value) {
-  if (!isCurrentItemZoomable.value || nextScale <= 1) {
+  if (!isCurrentMediaZoomable.value || nextScale <= 1) {
     return { x: 0, y: 0 }
   }
 
@@ -212,10 +217,10 @@ function applyMediaZoom(nextScale: number, nextX: number, nextY: number) {
   mediaZoomY.value = clamped.y
 }
 
-function toggleCurrentImageZoom(clientX: number, clientY: number) {
-  if (!isCurrentItemZoomable.value) return
+function toggleCurrentMediaZoom(clientX: number, clientY: number) {
+  if (!isCurrentMediaZoomable.value) return
 
-  if (isCurrentImageZoomed.value) {
+  if (isCurrentMediaZoomed.value) {
     resetMediaZoom()
     return
   }
@@ -455,7 +460,7 @@ function getThumbStyle(index: number): CSSProperties {
 }
 
 function getActiveMediaStyle(item: LightboxItem, index: number): CSSProperties {
-  if (item.type !== 'image' || index !== (props.lightboxMedia?.currentIndex ?? -1)) {
+  if (!isZoomableLightboxItem(item) || index !== (props.lightboxMedia?.currentIndex ?? -1)) {
     return {}
   }
 
@@ -467,11 +472,11 @@ function getActiveMediaStyle(item: LightboxItem, index: number): CSSProperties {
 
 function handleMediaDoubleClick(event: MouseEvent, item: LightboxItem, index: number) {
   if (item.type !== 'image' || index !== (props.lightboxMedia?.currentIndex ?? -1)) return
-  toggleCurrentImageZoom(event.clientX, event.clientY)
+  toggleCurrentMediaZoom(event.clientX, event.clientY)
 }
 
 function handleTouchStart(event: TouchEvent, surface: 'stage' | 'strip' = 'stage') {
-  if (surface === 'stage' && isCurrentItemZoomable.value && event.touches.length === 2) {
+  if (surface === 'stage' && isCurrentMediaZoomable.value && event.touches.length === 2) {
     const distance = getTouchDistance(event.touches)
     const center = getTouchCenter(event.touches)
     if (!distance || !center) return
@@ -496,7 +501,7 @@ function handleTouchStart(event: TouchEvent, surface: 'stage' | 'strip' = 'stage
   const touch = event.touches[0]
   if (!touch) return
 
-  if (surface === 'stage' && isCurrentImageZoomed.value) {
+  if (surface === 'stage' && isCurrentMediaZoomed.value) {
     gestureStart.value = { x: touch.clientX, y: touch.clientY }
     gestureSurface.value = surface
     gestureAxis.value = null
@@ -519,7 +524,7 @@ function handleTouchStart(event: TouchEvent, surface: 'stage' | 'strip' = 'stage
 
 function handleTouchMove(event: TouchEvent) {
   if (mediaGestureMode.value === 'pinch') {
-    if (!isCurrentItemZoomable.value || event.touches.length < 2 || !pinchStartDistance.value) return
+    if (!isCurrentMediaZoomable.value || event.touches.length < 2 || !pinchStartDistance.value) return
     const distance = getTouchDistance(event.touches)
     const center = getTouchCenter(event.touches)
     if (!distance || !center) return
@@ -537,7 +542,7 @@ function handleTouchMove(event: TouchEvent) {
   if (mediaGestureMode.value === 'pan') {
     const touch = event.touches[0]
     const start = gestureStart.value
-    if (!touch || !start || !isCurrentImageZoomed.value) return
+    if (!touch || !start || !isCurrentMediaZoomed.value) return
     if (event.cancelable) {
       event.preventDefault()
     }
@@ -583,7 +588,7 @@ function handleTouchMove(event: TouchEvent) {
 
 function handleTouchEnd(event: TouchEvent) {
   if (mediaGestureMode.value === 'pinch') {
-    if (event.touches.length === 1 && isCurrentImageZoomed.value) {
+    if (event.touches.length === 1 && isCurrentMediaZoomed.value) {
       const touch = event.touches[0]
       if (touch) {
         gestureStart.value = { x: touch.clientX, y: touch.clientY }
@@ -622,7 +627,7 @@ function handleTouchEnd(event: TouchEvent) {
 
   const surface = gestureSurface.value
 
-  if (surface === 'stage' && !gestureAxis.value && isCurrentItemZoomable.value && event.changedTouches.length === 1) {
+  if (surface === 'stage' && !gestureAxis.value && isCurrentImageItem.value && event.changedTouches.length === 1) {
     const touch = event.changedTouches[0]
     if (touch) {
       const now = Date.now()
@@ -632,7 +637,7 @@ function handleTouchEnd(event: TouchEvent) {
         && Math.hypot(lastStageTap.x - touch.clientX, lastStageTap.y - touch.clientY) <= DOUBLE_TAP_MAX_DISTANCE
       ) {
         lastStageTap = null
-        toggleCurrentImageZoom(touch.clientX, touch.clientY)
+        toggleCurrentMediaZoom(touch.clientX, touch.clientY)
         resetGesture()
         return
       }
@@ -733,7 +738,7 @@ function handleTouchEnd(event: TouchEvent) {
                     <img
                       v-if="item.type === 'image'"
                       :src="item.url"
-                      :class="['lightbox-media', { 'is-zoomable': true, 'is-zoomed': index === lightboxMedia.currentIndex && isCurrentImageZoomed }]"
+                      :class="['lightbox-media', { 'is-zoomable': index === lightboxMedia.currentIndex, 'is-zoomed': index === lightboxMedia.currentIndex && isCurrentMediaZoomed }]"
                       :style="getActiveMediaStyle(item, index)"
                       alt="مدیا"
                       draggable="false"
@@ -743,8 +748,9 @@ function handleTouchEnd(event: TouchEvent) {
                     <video
                       v-else
                       :src="item.url"
-                      class="lightbox-media"
-                      :controls="index === lightboxMedia.currentIndex"
+                      :class="['lightbox-media', { 'is-zoomable': index === lightboxMedia.currentIndex, 'is-zoomed': index === lightboxMedia.currentIndex && isCurrentMediaZoomed }]"
+                      :style="getActiveMediaStyle(item, index)"
+                      :controls="index === lightboxMedia.currentIndex && !isCurrentMediaZoomed"
                       :autoplay="index === lightboxMedia.currentIndex"
                       :muted="index !== lightboxMedia.currentIndex"
                       playsinline
