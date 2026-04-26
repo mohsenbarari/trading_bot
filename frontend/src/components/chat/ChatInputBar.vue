@@ -161,6 +161,8 @@
         :placeholder="editingMessage ? 'ویرایش پیام...' : 'پیام...'"
         @input="handleInput"
         @keydown.enter="handleEnter"
+        @mousedown="prepareTextareaFocus"
+        @touchstart="prepareTextareaFocus"
         @focus="handleTextareaFocus"
         @click="captureSelection"
         @keyup="captureSelection"
@@ -307,6 +309,7 @@ const lockedComposerInsetHeight = ref(0)
 const pendingKeyboardReturn = ref(false)
 const disablePickerTransition = ref(false)
 let pendingPickerOpenTimer: number | null = null
+let pendingTextareaFocusScrollSnapshot: ScrollSnapshotEntry[] | null = null
 
 type VisualViewportWithEvents = VisualViewport & {
   addEventListener: (type: 'resize' | 'scroll', listener: EventListenerOrEventListenerObject) => void
@@ -317,6 +320,12 @@ type ViewportMetrics = {
   fullHeightCandidate: number
   layoutViewportHeight: number
   width: number
+}
+
+type ScrollSnapshotEntry = {
+  target: Window | HTMLElement
+  top: number
+  left: number
 }
 
 type ChatInputDebugState = {
@@ -459,7 +468,83 @@ function getComposerSelection() {
 }
 
 function blurInput() {
-  messageInputRef.value?.blur()
+  const el = messageInputRef.value
+  if (!el) return
+
+  preserveComposerScrollPosition(() => {
+    el.blur()
+  })
+}
+
+function isScrollableElement(element: HTMLElement) {
+  const style = window.getComputedStyle(element)
+  const overflowY = style.overflowY
+  const overflowX = style.overflowX
+  const canScrollY = /(auto|scroll|overlay)/.test(overflowY) && element.scrollHeight > element.clientHeight + 1
+  const canScrollX = /(auto|scroll|overlay)/.test(overflowX) && element.scrollWidth > element.clientWidth + 1
+  return canScrollY || canScrollX
+}
+
+function captureComposerScrollSnapshot() {
+  if (typeof window === 'undefined') return [] as ScrollSnapshotEntry[]
+
+  const snapshot: ScrollSnapshotEntry[] = [
+    { target: window, top: window.scrollY, left: window.scrollX },
+  ]
+
+  let current = messageInputRef.value?.parentElement ?? null
+  while (current) {
+    if (isScrollableElement(current)) {
+      snapshot.push({
+        target: current,
+        top: current.scrollTop,
+        left: current.scrollLeft,
+      })
+    }
+    current = current.parentElement
+  }
+
+  return snapshot
+}
+
+function restoreComposerScrollSnapshot(snapshot: ScrollSnapshotEntry[] | null) {
+  if (!snapshot || snapshot.length === 0 || typeof window === 'undefined') return
+
+  for (const entry of snapshot) {
+    if (entry.target === window) {
+      window.scrollTo(entry.left, entry.top)
+      continue
+    }
+
+    const elementTarget = entry.target as HTMLElement
+    elementTarget.scrollTop = entry.top
+    elementTarget.scrollLeft = entry.left
+  }
+}
+
+function scheduleComposerScrollRestore(snapshot: ScrollSnapshotEntry[] | null, frames = 12) {
+  if (!snapshot || snapshot.length === 0 || typeof window === 'undefined') return
+
+  let remainingFrames = frames
+  const restoreFrame = () => {
+    restoreComposerScrollSnapshot(snapshot)
+    remainingFrames -= 1
+    if (remainingFrames > 0) {
+      window.requestAnimationFrame(restoreFrame)
+    }
+  }
+
+  window.requestAnimationFrame(restoreFrame)
+}
+
+function preserveComposerScrollPosition(action: () => void, frames = 12) {
+  const snapshot = captureComposerScrollSnapshot()
+  action()
+  scheduleComposerScrollRestore(snapshot, frames)
+}
+
+function prepareTextareaFocus() {
+  pendingTextareaFocusScrollSnapshot = captureComposerScrollSnapshot()
 }
 
 function clearPendingPickerTimer() {
@@ -701,10 +786,15 @@ const handleInput = () => {
 }
 
 function focusInput(options?: { cursorToEnd?: boolean }) {
+  const scrollSnapshot = captureComposerScrollSnapshot()
   nextTick(() => {
     const el = messageInputRef.value
     if (!el) return
-    el.focus()
+    try {
+      el.focus({ preventScroll: true })
+    } catch {
+      el.focus()
+    }
 
     let selectionStart = composerSelectionStart.value
     let selectionEnd = composerSelectionEnd.value
@@ -719,6 +809,7 @@ function focusInput(options?: { cursorToEnd?: boolean }) {
     el.setSelectionRange(selectionStart, selectionEnd)
     composerSelectionStart.value = selectionStart
     composerSelectionEnd.value = selectionEnd
+    scheduleComposerScrollRestore(scrollSnapshot)
   })
 }
 
@@ -844,6 +935,8 @@ function handleToggleAttachment() {
 }
 
 function handleTextareaFocus() {
+  const scrollSnapshot = pendingTextareaFocusScrollSnapshot
+  pendingTextareaFocusScrollSnapshot = null
   captureSelection()
   pendingPickerOpenAfterKeyboardClose.value = false
   clearPendingPickerTimer()
@@ -853,6 +946,7 @@ function handleTextareaFocus() {
     disablePickerTransition.value = true
     setStickerPickerOpen(false)
   }
+  scheduleComposerScrollRestore(scrollSnapshot)
   captureDebugState('textarea-focus')
 }
 
