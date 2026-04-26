@@ -393,9 +393,9 @@ const stickerPickerHeight = computed(() => {
   )
 })
 const pickerTransitionSpacerHeight = computed(() => {
-  if (isStickerPickerOpen.value) return 0
+  if (isStickerPickerOpen.value || pendingKeyboardReturn.value) return 0
 
-  if ((pendingPickerOpenAfterKeyboardClose.value || pendingKeyboardReturn.value) && lockedComposerInsetHeight.value > 0) {
+  if (pendingPickerOpenAfterKeyboardClose.value && lockedComposerInsetHeight.value > 0) {
     return Math.max(
       lockedComposerInsetHeight.value - Math.min(keyboardHeight.value, lockedComposerInsetHeight.value),
       0,
@@ -651,10 +651,11 @@ function updateKeyboardMetrics() {
 
   if (nextKeyboardHeight >= KEYBOARD_OPEN_THRESHOLD) {
     lastKnownKeyboardHeight.value = nextKeyboardHeight
-    if (pendingKeyboardReturn.value && lockedComposerInsetHeight.value > 0) {
-      if (nextKeyboardHeight >= Math.max(lockedComposerInsetHeight.value - KEYBOARD_CLOSE_THRESHOLD, KEYBOARD_OPEN_THRESHOLD)) {
-        pendingKeyboardReturn.value = false
-        lockedComposerInsetHeight.value = 0
+    if (pendingKeyboardReturn.value) {
+      pendingKeyboardReturn.value = false
+      lockedComposerInsetHeight.value = 0
+      if (isStickerPickerOpen.value) {
+        setStickerPickerOpen(false)
       }
     } else {
       pendingKeyboardReturn.value = false
@@ -835,7 +836,6 @@ function handleTextareaFocus() {
   if (isStickerPickerOpen.value) {
     lockComposerInsetHeight(stickerPickerHeight.value)
     pendingKeyboardReturn.value = true
-    setStickerPickerOpen(false)
   }
   captureDebugState('textarea-focus')
 }
