@@ -2,6 +2,7 @@ type MediaPreprocessPath =
   | 'image_worker'
   | 'image_main_thread'
   | 'image_legacy_fallback'
+  | 'image_edited_passthrough'
   | 'video_preview'
   | 'video_metadata_fallback'
   | 'voice_passthrough'

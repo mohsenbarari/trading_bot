@@ -39,13 +39,8 @@ const emit = defineEmits<{
   (e: 'confirm', file: File): void
 }>()
 
-// Output cap: align with the chat upload pipeline target (1920px) so we
-// don't double-encode huge intermediate JPEGs only to have them downsized
-// again by the worker preprocess pass. 4096-wide outputs were causing
-// intermittent <img> decode failures on the second edit (mobile memory
-// pressure) and worker OOMs that killed individual album uploads.
-const MAX_OUTPUT_DIMENSION = 1920
 const OUTPUT_JPEG_QUALITY = 0.9
+const CHAT_EDITED_IMAGE_FLAG = '__chatEditedImage'
 const imgRef = ref<HTMLImageElement | null>(null)
 const sourceUrl = ref<string>(URL.createObjectURL(props.file))
 const aspectRatio = ref<number | undefined>(undefined)
@@ -98,6 +93,18 @@ function revokeBlobUrl(url: string | null | undefined) {
   if (url && url.startsWith('blob:')) {
     URL.revokeObjectURL(url)
   }
+}
+
+function markEditedImage(file: File) {
+  try {
+    Object.defineProperty(file, CHAT_EDITED_IMAGE_FLAG, {
+      value: true,
+      configurable: true,
+    })
+  } catch {
+    ;(file as File & Record<string, unknown>)[CHAT_EDITED_IMAGE_FLAG] = true
+  }
+  return file
 }
 
 onMounted(async () => {
@@ -185,9 +192,8 @@ async function buildRotatedSourceUrl(imageEl: HTMLImageElement, delta: number): 
   const sourceHeight = imageEl.naturalHeight || imageEl.height
   if (!sourceWidth || !sourceHeight) return null
 
-  const scale = Math.min(1, MAX_OUTPUT_DIMENSION / Math.max(sourceWidth, sourceHeight))
-  const drawWidth = Math.max(1, Math.round(sourceWidth * scale))
-  const drawHeight = Math.max(1, Math.round(sourceHeight * scale))
+  const drawWidth = Math.max(1, Math.round(sourceWidth))
+  const drawHeight = Math.max(1, Math.round(sourceHeight))
   const swapAxes = turn === 90 || turn === 270
 
   const canvas = document.createElement('canvas')
@@ -298,14 +304,7 @@ async function switchMode(target: Mode) {
 async function beginAnnotate(): Promise<boolean> {
   let baseCanvas: HTMLCanvasElement | null = null
   try {
-    // Match the chat upload target so fabric never has to render a
-    // multi-thousand-pixel canvas just to have it downsampled again.
-    baseCanvas = cropperInstance?.getCroppedCanvas?.({
-      maxWidth: MAX_OUTPUT_DIMENSION,
-      maxHeight: MAX_OUTPUT_DIMENSION,
-      imageSmoothingEnabled: true,
-      imageSmoothingQuality: 'high',
-    }) ?? null
+    baseCanvas = cropperInstance?.getCroppedCanvas?.() ?? null
   } catch { /* ignore */ }
 
   if (!baseCanvas) return false
@@ -569,12 +568,7 @@ async function confirm() {
       const baseW = (fabricCanvas as any).__baseW ?? fabricCanvas.getWidth()
       const dispW = fabricCanvas.getWidth()
       const rawMultiplier = dispW > 0 ? baseW / dispW : 1
-      // Clamp the multiplier so the exported canvas never exceeds the
-      // pipeline target. This also caps total memory used during JPEG
-      // encoding which is critical on mobile when several album items
-      // are edited in succession.
-      const cappedOutputW = Math.min(baseW, MAX_OUTPUT_DIMENSION)
-      const multiplier = dispW > 0 ? cappedOutputW / dispW : Math.min(1, rawMultiplier)
+      const multiplier = Number.isFinite(rawMultiplier) && rawMultiplier > 0 ? rawMultiplier : 1
 
       const dataUrl: string = fabricCanvas.toDataURL({
         format: 'jpeg',
@@ -590,19 +584,14 @@ async function confirm() {
 
       const originalName = props.file.name || 'image.jpg'
       const stem = originalName.replace(/\.[^.]+$/, '')
-      const edited = new File([fabricBlob], `${stem}_edited.jpg`, {
+      const edited = markEditedImage(new File([fabricBlob], `${stem}_edited.jpg`, {
         type: 'image/jpeg',
         lastModified: Date.now(),
-      })
+      }))
       emit('confirm', edited)
       return
     } else {
-      outCanvas = cropperInstance?.getCroppedCanvas?.({
-        maxWidth: MAX_OUTPUT_DIMENSION,
-        maxHeight: MAX_OUTPUT_DIMENSION,
-        imageSmoothingEnabled: true,
-        imageSmoothingQuality: 'high',
-      }) ?? null
+      outCanvas = cropperInstance?.getCroppedCanvas?.() ?? null
     }
 
     if (!outCanvas) {
@@ -625,10 +614,10 @@ async function confirm() {
 
     const originalName = props.file.name || 'image.jpg'
     const stem = originalName.replace(/\.[^.]+$/, '')
-    const edited = new File([blob], `${stem}_edited.jpg`, {
+    const edited = markEditedImage(new File([blob], `${stem}_edited.jpg`, {
       type: 'image/jpeg',
       lastModified: Date.now(),
-    })
+    }))
     emit('confirm', edited)
   } finally {
     isProcessing.value = false
