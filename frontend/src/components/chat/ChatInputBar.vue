@@ -222,6 +222,29 @@
       :style="{ height: `${pickerTransitionSpacerHeight}px` }"
       aria-hidden="true"
     ></div>
+    <div v-if="isChatDebugEnabled" class="chat-debug-panel">
+      <div class="chat-debug-grid">
+        <div class="chat-debug-entry">event={{ debugState.lastEvent }}</div>
+        <div class="chat-debug-entry">focus={{ debugState.hasFocus ? 1 : 0 }}</div>
+        <div class="chat-debug-entry">vv={{ debugState.visualViewportHeight }}</div>
+        <div class="chat-debug-entry">offset={{ debugState.visualViewportOffsetTop }}</div>
+        <div class="chat-debug-entry">inner={{ debugState.innerHeight }}</div>
+        <div class="chat-debug-entry">doc={{ debugState.documentHeight }}</div>
+        <div class="chat-debug-entry">base={{ debugState.viewportBaseHeight }}</div>
+        <div class="chat-debug-entry">keyboard={{ debugState.keyboardHeight }}</div>
+        <div class="chat-debug-entry">last={{ debugState.lastKnownKeyboardHeight }}</div>
+        <div class="chat-debug-entry">locked={{ debugState.lockedComposerInsetHeight }}</div>
+        <div class="chat-debug-entry">panel={{ debugState.panelHeight }}</div>
+        <div class="chat-debug-entry">spacer={{ debugState.spacerHeight }}</div>
+        <div class="chat-debug-entry">open={{ debugState.isPickerOpen ? 1 : 0 }}</div>
+        <div class="chat-debug-entry">waitOpen={{ debugState.pendingPickerOpen ? 1 : 0 }}</div>
+        <div class="chat-debug-entry">waitKb={{ debugState.pendingKeyboardReturn ? 1 : 0 }}</div>
+        <div class="chat-debug-entry">width={{ debugState.visualViewportWidth }}</div>
+      </div>
+      <div v-if="debugTrail.length > 0" class="chat-debug-trail">
+        <div v-for="entry in debugTrail" :key="entry" class="chat-debug-trail-item">{{ entry }}</div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -293,6 +316,53 @@ type ViewportMetrics = {
   layoutViewportHeight: number
   width: number
 }
+
+type ChatInputDebugState = {
+  lastEvent: string
+  hasFocus: boolean
+  visualViewportHeight: number
+  visualViewportWidth: number
+  visualViewportOffsetTop: number
+  innerHeight: number
+  documentHeight: number
+  viewportBaseHeight: number
+  keyboardHeight: number
+  lastKnownKeyboardHeight: number
+  lockedComposerInsetHeight: number
+  panelHeight: number
+  spacerHeight: number
+  isPickerOpen: boolean
+  pendingPickerOpen: boolean
+  pendingKeyboardReturn: boolean
+}
+
+type ChatInputDebugWindow = Window & {
+  __chatInputDebug?: {
+    getSnapshot: () => ChatInputDebugState
+    getTrail: () => string[]
+  }
+}
+
+const isChatDebugEnabled = ref(false)
+const debugTrail = ref<string[]>([])
+const debugState = ref<ChatInputDebugState>({
+  lastEvent: 'idle',
+  hasFocus: false,
+  visualViewportHeight: 0,
+  visualViewportWidth: 0,
+  visualViewportOffsetTop: 0,
+  innerHeight: 0,
+  documentHeight: 0,
+  viewportBaseHeight: 0,
+  keyboardHeight: 0,
+  lastKnownKeyboardHeight: 0,
+  lockedComposerInsetHeight: 0,
+  panelHeight: 0,
+  spacerHeight: 0,
+  isPickerOpen: false,
+  pendingPickerOpen: false,
+  pendingKeyboardReturn: false,
+})
 
 const messageInput = computed({
   get: () => props.modelValue ?? '',
@@ -397,6 +467,76 @@ function clearPendingPickerTimer() {
   }
 }
 
+function resolveChatDebugEnabled() {
+  if (typeof window === 'undefined') return false
+
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const flag = params.get('chatDebug')
+
+    if (flag === '1') {
+      window.localStorage.setItem('chat_keyboard_debug', '1')
+      return true
+    }
+
+    if (flag === '0') {
+      window.localStorage.removeItem('chat_keyboard_debug')
+      return false
+    }
+
+    return window.localStorage.getItem('chat_keyboard_debug') === '1'
+  } catch {
+    return false
+  }
+}
+
+function captureDebugState(eventName: string, persistEvent = true) {
+  if (!isChatDebugEnabled.value || typeof window === 'undefined') return
+
+  const visualViewport = getVisualViewport()
+  const nextState: ChatInputDebugState = {
+    lastEvent: eventName,
+    hasFocus: hasComposerFocus(),
+    visualViewportHeight: Math.round(visualViewport?.height ?? 0),
+    visualViewportWidth: Math.round(visualViewport?.width ?? 0),
+    visualViewportOffsetTop: Math.round(visualViewport?.offsetTop ?? 0),
+    innerHeight: Math.round(window.innerHeight),
+    documentHeight: Math.round(document.documentElement?.clientHeight ?? 0),
+    viewportBaseHeight: Math.round(viewportBaseHeight.value),
+    keyboardHeight: Math.round(keyboardHeight.value),
+    lastKnownKeyboardHeight: Math.round(lastKnownKeyboardHeight.value),
+    lockedComposerInsetHeight: Math.round(lockedComposerInsetHeight.value),
+    panelHeight: Math.round(stickerPickerHeight.value),
+    spacerHeight: Math.round(pickerTransitionSpacerHeight.value),
+    isPickerOpen: isStickerPickerOpen.value,
+    pendingPickerOpen: pendingPickerOpenAfterKeyboardClose.value,
+    pendingKeyboardReturn: pendingKeyboardReturn.value,
+  }
+
+  debugState.value = nextState
+
+  if (!persistEvent) return
+
+  const timestamp = new Date().toLocaleTimeString('fa-IR', { hour12: false })
+  const compactEntry = `${timestamp} ${eventName} vv=${nextState.visualViewportHeight} kb=${nextState.keyboardHeight} panel=${nextState.panelHeight} spacer=${nextState.spacerHeight} open=${nextState.isPickerOpen ? 1 : 0} focus=${nextState.hasFocus ? 1 : 0}`
+  debugTrail.value = [compactEntry, ...debugTrail.value].slice(0, 10)
+}
+
+function syncDebugWindowHandle() {
+  if (typeof window === 'undefined') return
+
+  const debugWindow = window as ChatInputDebugWindow
+  if (!isChatDebugEnabled.value) {
+    delete debugWindow.__chatInputDebug
+    return
+  }
+
+  debugWindow.__chatInputDebug = {
+    getSnapshot: () => ({ ...debugState.value }),
+    getTrail: () => [...debugTrail.value],
+  }
+}
+
 function getVisualViewport() {
   if (typeof window === 'undefined') return null
   return (window.visualViewport ?? null) as VisualViewportWithEvents | null
@@ -481,6 +621,7 @@ function openStickerPickerAfterKeyboardClose() {
   pendingPickerOpenAfterKeyboardClose.value = false
   pendingKeyboardReturn.value = false
   setStickerPickerOpen(true)
+  captureDebugState('picker-open-after-close')
 }
 
 function updateKeyboardMetrics() {
@@ -531,7 +672,10 @@ function updateKeyboardMetrics() {
 
   if (pendingPickerOpenAfterKeyboardClose.value && nextKeyboardHeight <= KEYBOARD_CLOSE_THRESHOLD) {
     openStickerPickerAfterKeyboardClose()
+    return
   }
+
+  captureDebugState('viewport', false)
 }
 
 const resizeTextarea = () => {
@@ -588,6 +732,7 @@ watch(() => props.editingMessage, (message) => {
     lockedComposerInsetHeight.value = 0
     clearPendingPickerTimer()
     emit('update:stickerPickerOpen', false)
+    captureDebugState('editing-open')
   }
 })
 
@@ -598,12 +743,14 @@ watch(() => props.isSelectionMode, (isSelectionEnabled) => {
     lockedComposerInsetHeight.value = 0
     clearPendingPickerTimer()
     emit('update:stickerPickerOpen', false)
+    captureDebugState('selection-open')
   }
 })
 
 watch(() => props.stickerPickerOpen, (isOpen) => {
   if (isOpen) {
     pendingKeyboardReturn.value = false
+    captureDebugState('picker-open')
     return
   }
   pendingPickerOpenAfterKeyboardClose.value = false
@@ -611,6 +758,7 @@ watch(() => props.stickerPickerOpen, (isOpen) => {
   if (!pendingKeyboardReturn.value) {
     lockedComposerInsetHeight.value = 0
   }
+  captureDebugState('picker-close')
 })
 
 function setStickerPickerOpen(nextValue: boolean) {
@@ -620,12 +768,15 @@ function setStickerPickerOpen(nextValue: boolean) {
 function toggleStickerPicker() {
   if (props.isDeleted) return
 
+  captureDebugState('emoji-toggle')
+
   if (isStickerPickerOpen.value) {
     pendingPickerOpenAfterKeyboardClose.value = false
     clearPendingPickerTimer()
     lockComposerInsetHeight(stickerPickerHeight.value)
     pendingKeyboardReturn.value = true
     focusInput()
+    captureDebugState('keyboard-return-requested')
     return
   }
 
@@ -644,15 +795,19 @@ function toggleStickerPicker() {
         openStickerPickerAfterKeyboardClose()
       }
     }, 220)
+    captureDebugState('picker-open-requested')
     return
   }
 
   lockComposerInsetHeight(lastKnownKeyboardHeight.value)
   setStickerPickerOpen(true)
+  captureDebugState('picker-open-direct')
 }
 
 function prepareStickerToggle() {
   if (props.isDeleted) return
+
+  captureDebugState('emoji-press')
 
   if (isStickerPickerOpen.value) {
     lockComposerInsetHeight(stickerPickerHeight.value)
@@ -670,6 +825,7 @@ function handleToggleAttachment() {
   lockedComposerInsetHeight.value = 0
   setStickerPickerOpen(false)
   emit('toggle-attachment')
+  captureDebugState('attachment-open')
 }
 
 function handleTextareaFocus() {
@@ -681,16 +837,21 @@ function handleTextareaFocus() {
     pendingKeyboardReturn.value = true
     setStickerPickerOpen(false)
   }
+  captureDebugState('textarea-focus')
 }
 
 onMounted(() => {
   if (typeof window === 'undefined') return
+
+  isChatDebugEnabled.value = resolveChatDebugEnabled()
+  syncDebugWindowHandle()
 
   syncViewportBaseHeight(getViewportMetrics(), { force: true })
 
   const visualViewport = getVisualViewport()
 
   updateKeyboardMetrics()
+  captureDebugState('mounted')
 
   visualViewport?.addEventListener('resize', updateKeyboardMetrics)
   visualViewport?.addEventListener('scroll', updateKeyboardMetrics)
@@ -701,6 +862,7 @@ onBeforeUnmount(() => {
   if (typeof window === 'undefined') return
 
   clearPendingPickerTimer()
+  syncDebugWindowHandle()
 
   const visualViewport = getVisualViewport()
   visualViewport?.removeEventListener('resize', updateKeyboardMetrics)
@@ -903,6 +1065,49 @@ const sendMessage = () => {
     radial-gradient(circle at top right, rgba(51, 144, 236, 0.12), transparent 34%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 251, 0.98));
   border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.chat-debug-panel {
+  margin: 8px -12px 0;
+  padding: 10px 12px 12px;
+  background: rgba(15, 23, 42, 0.96);
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  direction: ltr;
+  text-align: left;
+}
+
+.chat-debug-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 10px;
+}
+
+.chat-debug-entry {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-debug-trail {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 96px;
+  overflow: auto;
+}
+
+.chat-debug-trail-item {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: rgba(226, 232, 240, 0.86);
 }
 
 .input-container {
