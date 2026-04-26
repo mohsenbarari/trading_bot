@@ -68,6 +68,13 @@ const fabricStageRef = ref<HTMLDivElement | null>(null)
 let fabricCanvas: any = null
 let fabricLib: any = null
 
+// Text mode is one-shot per tab activation: each click on the «متن» tab
+// allows creating exactly one new text. After it's placed, further taps on
+// empty space just deselect (the user must re-tap the tab to add another).
+// This matches the user's request and prevents stray duplicate texts when
+// dragging existing ones.
+const pendingTextCreation = ref(false)
+
 const PALETTE = ['#ffffff', '#000000', '#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#0a84ff']
 const brushColor = ref<string>('#ff3b30')
 const BRUSH_SIZES = [4, 8, 14]
@@ -148,7 +155,6 @@ function resetCrop() {
 }
 
 async function switchMode(target: Mode) {
-  if (mode.value === target) return
   if (target === 'crop' && annotateStarted.value) return
 
   if (target === 'draw' || target === 'text') {
@@ -156,11 +162,29 @@ async function switchMode(target: Mode) {
       const ok = await beginAnnotate()
       if (!ok) return
     }
+    // Each activation of the «متن» tab arms a single text creation.
+    // Re-tapping the tab while in text mode arms it again so the user
+    // can place additional texts deliberately.
+    if (target === 'text') {
+      pendingTextCreation.value = true
+      // Make sure no IText is in editing state so the next tap creates
+      // a new one instead of typing into an existing one.
+      try {
+        fabricCanvas?.getObjects?.().forEach((o: any) => {
+          if (o?.isEditing) o.exitEditing?.()
+        })
+        fabricCanvas?.discardActiveObject?.()
+        fabricCanvas?.requestRenderAll?.()
+      } catch { /* ignore */ }
+    } else {
+      pendingTextCreation.value = false
+    }
     mode.value = target
     applyToolForMode()
     return
   }
 
+  pendingTextCreation.value = false
   mode.value = target
 }
 
@@ -245,11 +269,17 @@ function applyToolForMode() {
 
   if (mode.value === 'draw') {
     fabricCanvas.isDrawingMode = true
+    fabricCanvas.selection = false
     const brush = fabricCanvas.freeDrawingBrush
     if (brush) {
       brush.color = brushColor.value
       brush.width = brushSize.value
     }
+  } else if (mode.value === 'text') {
+    fabricCanvas.isDrawingMode = false
+    // Allow selecting/moving existing IText objects with the finger.
+    fabricCanvas.selection = false
+    fabricCanvas.skipTargetFind = false
   } else {
     fabricCanvas.isDrawingMode = false
   }
@@ -277,17 +307,21 @@ function pickBrushSize(s: number) {
 function onCanvasMouseDown(opts: any) {
   if (!fabricCanvas || !fabricLib || mode.value !== 'text') return
 
-  // Single-tap on an existing IText should enter edit mode immediately
-  // (mobile users won't reliably double-tap).
+  // Tap on an existing IText: select it so the user can drag to move
+  // (default fabric behavior). Editing the text is reserved for
+  // double-tap (mouse:dblclick) so it doesn't clash with drag.
   if (opts.target) {
-    const target = opts.target
-    if (target?.type === 'i-text' || target?.isType?.('i-text')) {
-      try {
-        fabricCanvas.setActiveObject(target)
-        target.enterEditing?.()
-        fabricCanvas.requestRenderAll()
-      } catch { /* ignore */ }
-    }
+    return
+  }
+
+  // Empty-space tap. Only create a new text if the «متن» tab armed it
+  // (one-shot per tab activation).
+  if (!pendingTextCreation.value) {
+    // Just deselect on empty taps when not armed.
+    try {
+      fabricCanvas.discardActiveObject()
+      fabricCanvas.requestRenderAll()
+    } catch { /* ignore */ }
     return
   }
 
@@ -296,8 +330,6 @@ function onCanvasMouseDown(opts: any) {
   const text = new fabricLib.IText('متن', {
     left: pointer.x,
     top: pointer.y,
-    // Center the text on the tap point — feels much more like Telegram
-    // than having the bounding-box top-left snap to the finger.
     originX: 'center',
     originY: 'center',
     fontSize: 32,
@@ -310,12 +342,33 @@ function onCanvasMouseDown(opts: any) {
     cornerColor: '#3390ec',
     borderColor: '#3390ec',
     editable: true,
+    // Default movement/scaling is on; explicit for clarity.
+    lockMovementX: false,
+    lockMovementY: false,
+    hasControls: true,
+    hasBorders: true,
   })
   fabricCanvas.add(text)
   fabricCanvas.setActiveObject(text)
   text.enterEditing()
   text.selectAll()
   fabricCanvas.requestRenderAll()
+  // Consume the one-shot. User must re-tap the «متن» tab to add another.
+  pendingTextCreation.value = false
+}
+
+function onCanvasDoubleClick(opts: any) {
+  // Double-tap on an existing IText enters edit mode in any annotate mode.
+  if (!fabricCanvas || !fabricLib) return
+  const target = opts?.target
+  if (!target) return
+  if (target.type === 'i-text' || target.isType?.('i-text')) {
+    try {
+      fabricCanvas.setActiveObject(target)
+      target.enterEditing?.()
+      fabricCanvas.requestRenderAll()
+    } catch { /* ignore */ }
+  }
 }
 
 function pickTextColor(c: string) {
@@ -350,7 +403,10 @@ function undo() {
 function bindFabricEvents() {
   if (!fabricCanvas) return
   fabricCanvas.on('mouse:down', onCanvasMouseDown)
+  fabricCanvas.on('mouse:dblclick', onCanvasDoubleClick)
   fabricCanvas.on('before:path:created', pushUndoSnapshot)
+  // Snapshot when an IText is moved/scaled/rotated so undo covers it.
+  fabricCanvas.on('object:modified', pushUndoSnapshot)
 }
 
 async function confirm() {
@@ -568,11 +624,11 @@ function cancel() {
       </button>
       <button
         class="mode-tab"
-        :class="{ active: mode === 'text' }"
+        :class="{ active: mode === 'text', armed: mode === 'text' && pendingTextCreation }"
         @click="switchMode('text')"
       >
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
-        متن
+        {{ mode === 'text' && pendingTextCreation ? 'برای افزودن متن ضربه بزنید' : 'متن' }}
       </button>
     </div>
 
@@ -637,9 +693,63 @@ function cancel() {
   overflow: hidden;
   padding: 8px;
   position: relative;
+  /* Keep all touch interactions inside cropper/fabric — no browser pan/zoom. */
+  touch-action: none;
 }
 
-.stage :deep(.cropper-container) { direction: ltr; }
+.stage :deep(.cropper-container) {
+  direction: ltr;
+  /*
+    Cropper.js needs the touch event stream to itself; if any ancestor lets
+    the browser pan/zoom, dragging the handles becomes flaky on mobile and
+    needs several attempts before it registers.
+  */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/*
+  The cropper handles default to ~5px wide which is far too small for a
+  finger. Enlarge their hit area without visually growing the dot itself
+  by extending an invisible padded overlay via ::before.
+*/
+.stage :deep(.cropper-point),
+.stage :deep(.cropper-line) {
+  touch-action: none;
+}
+.stage :deep(.cropper-point) {
+  width: 8px;
+  height: 8px;
+  background-color: #3390ec;
+  opacity: 1;
+}
+.stage :deep(.cropper-point::before) {
+  content: '';
+  position: absolute;
+  inset: -14px;
+  /* Transparent but interactive: gives ~36px finger target. */
+  background: transparent;
+}
+.stage :deep(.cropper-line) {
+  /* Edge lines also need a generous touch zone. */
+  background-color: #3390ec;
+  opacity: 0.5;
+}
+.stage :deep(.cropper-line.line-n),
+.stage :deep(.cropper-line.line-s) {
+  height: 3px;
+}
+.stage :deep(.cropper-line.line-e),
+.stage :deep(.cropper-line.line-w) {
+  width: 3px;
+}
+.stage :deep(.cropper-line::before) {
+  content: '';
+  position: absolute;
+  inset: -12px;
+  background: transparent;
+}
 
 .stage-error {
   position: absolute;
@@ -771,6 +881,15 @@ function cancel() {
 .mode-tab.active {
   background: rgba(51, 144, 236, 0.18);
   color: #fff;
+}
+.mode-tab.armed {
+  background: #3390ec;
+  color: #fff;
+  animation: tab-pulse 1.4s ease-in-out infinite;
+}
+@keyframes tab-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(51, 144, 236, 0.55); }
+  50% { box-shadow: 0 0 0 6px rgba(51, 144, 236, 0); }
 }
 .mode-tab.disabled,
 .mode-tab:disabled {
