@@ -185,9 +185,16 @@ function cancelAll() {
         </button>
       </div>
 
-      <!-- Per-item editor -->
+      <!-- Per-item editor.
+           :key forces a clean remount whenever the user picks a different
+           item, so the editor's blob URL, Cropper instance, and any fabric
+           state from the previous item are fully torn down before the new
+           file is loaded. Without this, Vue would reuse the same component
+           instance and the cached `sourceUrl` ref would still point at the
+           previous file. -->
       <ImageEditorModal
         v-if="editingItem"
+        :key="editingItem.id"
         :file="editingItem.file"
         @confirm="onEditorConfirm"
         @cancel="onEditorCancel"

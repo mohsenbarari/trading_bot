@@ -39,7 +39,13 @@ const emit = defineEmits<{
   (e: 'confirm', file: File): void
 }>()
 
-// --- Crop state ---
+// Output cap: align with the chat upload pipeline target (1920px) so we
+// don't double-encode huge intermediate JPEGs only to have them downsized
+// again by the worker preprocess pass. 4096-wide outputs were causing
+// intermittent <img> decode failures on the second edit (mobile memory
+// pressure) and worker OOMs that killed individual album uploads.
+const MAX_OUTPUT_DIMENSION = 1920
+const OUTPUT_JPEG_QUALITY = 0.9
 const imgRef = ref<HTMLImageElement | null>(null)
 const sourceUrl = ref<string>(URL.createObjectURL(props.file))
 const aspectRatio = ref<number | undefined>(undefined)
@@ -194,11 +200,11 @@ async function switchMode(target: Mode) {
 async function beginAnnotate(): Promise<boolean> {
   let baseCanvas: HTMLCanvasElement | null = null
   try {
-    // Match the crop-only path's quality ceiling so users don't lose
-    // resolution just because they decided to draw or add text.
+    // Match the chat upload target so fabric never has to render a
+    // multi-thousand-pixel canvas just to have it downsampled again.
     baseCanvas = cropperInstance?.getCroppedCanvas?.({
-      maxWidth: 4096,
-      maxHeight: 4096,
+      maxWidth: MAX_OUTPUT_DIMENSION,
+      maxHeight: MAX_OUTPUT_DIMENSION,
       imageSmoothingEnabled: true,
       imageSmoothingQuality: 'high',
     }) ?? null
@@ -464,14 +470,17 @@ async function confirm() {
 
       const baseW = (fabricCanvas as any).__baseW ?? fabricCanvas.getWidth()
       const dispW = fabricCanvas.getWidth()
-      const multiplier = dispW > 0 ? baseW / dispW : 1
+      const rawMultiplier = dispW > 0 ? baseW / dispW : 1
+      // Clamp the multiplier so the exported canvas never exceeds the
+      // pipeline target. This also caps total memory used during JPEG
+      // encoding which is critical on mobile when several album items
+      // are edited in succession.
+      const cappedOutputW = Math.min(baseW, MAX_OUTPUT_DIMENSION)
+      const multiplier = dispW > 0 ? cappedOutputW / dispW : Math.min(1, rawMultiplier)
 
-      // Export fabric canvas directly as a JPEG blob. Going through
-      // dataUrl → <img> → canvas → toBlob('jpeg') would re-encode the
-      // image a second time and lose quality for no reason.
       const dataUrl: string = fabricCanvas.toDataURL({
         format: 'jpeg',
-        quality: 0.92,
+        quality: OUTPUT_JPEG_QUALITY,
         multiplier,
       })
 
@@ -491,8 +500,8 @@ async function confirm() {
       return
     } else {
       outCanvas = cropperInstance?.getCroppedCanvas?.({
-        maxWidth: 4096,
-        maxHeight: 4096,
+        maxWidth: MAX_OUTPUT_DIMENSION,
+        maxHeight: MAX_OUTPUT_DIMENSION,
         imageSmoothingEnabled: true,
         imageSmoothingQuality: 'high',
       }) ?? null
@@ -505,7 +514,7 @@ async function confirm() {
 
     const blob: Blob | null = await new Promise((resolve) => {
       try {
-        outCanvas!.toBlob((b) => resolve(b), 'image/jpeg', 0.92)
+        outCanvas!.toBlob((b) => resolve(b), 'image/jpeg', OUTPUT_JPEG_QUALITY)
       } catch {
         resolve(null)
       }
