@@ -110,10 +110,9 @@ function initCropper() {
   try {
     cropperInstance = new CropperCtor(imgRef.value, {
       viewMode: 1,
-      // Inset the initial crop box from the image edges so the corner/edge
-      // handles are clearly inside the visible area and easy to grab on the
-      // first try (full-edge handles were getting clipped against the stage).
-      autoCropArea: 0.85,
+      // Keep the crop box pinned to the image edges; handle accessibility is
+      // solved by expanding the touch targets instead of shrinking coverage.
+      autoCropArea: 1,
       dragMode: 'move',
       background: false,
       movable: true,
@@ -156,8 +155,30 @@ function applyAspect(value: number | undefined) {
   aspectRatio.value = value
   try { cropperInstance?.setAspectRatio?.(value ?? NaN) } catch { /* ignore */ }
 }
+
+function getCurrentRotation(): number {
+  const rawRotation = Number(
+    cropperInstance?.getData?.(true)?.rotate
+      ?? cropperInstance?.getImageData?.().rotate
+      ?? 0,
+  )
+  return Number.isFinite(rawRotation) ? rawRotation : 0
+}
+
 function rotate(delta: number) {
-  try { cropperInstance?.rotate?.(delta) } catch { /* ignore */ }
+  if (!cropperInstance) return
+  try {
+    const nextRotation = getCurrentRotation() + delta
+    // Rebuild Cropper's transform state from a clean baseline after each
+    // quarter turn. This prevents stale canvas/crop-box geometry from the
+    // previous orientation from leaking into the next one.
+    cropperInstance.reset?.()
+    cropperInstance.rotateTo?.(nextRotation)
+    cropperInstance.crop?.()
+    cropperInstance.setAspectRatio?.(aspectRatio.value ?? NaN)
+  } catch {
+    try { cropperInstance.rotate?.(delta) } catch { /* ignore */ }
+  }
 }
 function resetCrop() {
   try { cropperInstance?.reset?.() } catch { /* ignore */ }
@@ -738,7 +759,7 @@ function cancel() {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  padding: 8px;
+  padding: 16px;
   position: relative;
   /* Keep all touch interactions inside cropper/fabric — no browser pan/zoom. */
   touch-action: none;
@@ -754,6 +775,11 @@ function cancel() {
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
+}
+
+.stage :deep(.cropper-crop-box),
+.stage :deep(.cropper-view-box) {
+  overflow: visible;
 }
 
 /*
@@ -774,8 +800,8 @@ function cancel() {
 .stage :deep(.cropper-point::before) {
   content: '';
   position: absolute;
-  inset: -14px;
-  /* Transparent but interactive: gives ~36px finger target. */
+  inset: -18px;
+  /* Transparent but interactive: gives ~44px finger target. */
   background: transparent;
 }
 .stage :deep(.cropper-line) {
@@ -794,7 +820,7 @@ function cancel() {
 .stage :deep(.cropper-line::before) {
   content: '';
   position: absolute;
-  inset: -12px;
+  inset: -16px;
   background: transparent;
 }
 
