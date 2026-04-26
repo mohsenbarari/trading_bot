@@ -212,6 +212,7 @@
       :maxStickerCount="MAX_STICKERS_PER_MESSAGE"
       :closeOnSelect="false"
       :panelHeight="stickerPickerHeight"
+      :disableTransition="disablePickerTransition"
       @update:open="setStickerPickerOpen"
       @insert="insertSticker"
       @backspace="deleteComposerBackward"
@@ -304,6 +305,7 @@ const viewportBaseWidth = ref(0)
 const pendingPickerOpenAfterKeyboardClose = ref(false)
 const lockedComposerInsetHeight = ref(0)
 const pendingKeyboardReturn = ref(false)
+const disablePickerTransition = ref(false)
 let pendingPickerOpenTimer: number | null = null
 
 type VisualViewportWithEvents = VisualViewport & {
@@ -393,9 +395,9 @@ const stickerPickerHeight = computed(() => {
   )
 })
 const pickerTransitionSpacerHeight = computed(() => {
-  if (isStickerPickerOpen.value || pendingKeyboardReturn.value) return 0
+  if (lockedComposerInsetHeight.value <= 0 || isStickerPickerOpen.value) return 0
 
-  if (pendingPickerOpenAfterKeyboardClose.value && lockedComposerInsetHeight.value > 0) {
+  if (pendingPickerOpenAfterKeyboardClose.value || pendingKeyboardReturn.value) {
     return Math.max(
       lockedComposerInsetHeight.value - Math.min(keyboardHeight.value, lockedComposerInsetHeight.value),
       0,
@@ -621,7 +623,10 @@ function openStickerPickerAfterKeyboardClose() {
   pendingPickerOpenAfterKeyboardClose.value = false
   pendingKeyboardReturn.value = false
   setStickerPickerOpen(true)
-  captureDebugState('picker-open-after-close')
+  nextTick(() => {
+    disablePickerTransition.value = false
+    captureDebugState('picker-open-after-close')
+  })
 }
 
 function updateKeyboardMetrics() {
@@ -654,6 +659,7 @@ function updateKeyboardMetrics() {
     if (pendingKeyboardReturn.value) {
       pendingKeyboardReturn.value = false
       lockedComposerInsetHeight.value = 0
+      disablePickerTransition.value = false
       if (isStickerPickerOpen.value) {
         setStickerPickerOpen(false)
       }
@@ -758,6 +764,7 @@ watch(() => props.stickerPickerOpen, (isOpen) => {
   clearPendingPickerTimer()
   if (!pendingKeyboardReturn.value) {
     lockedComposerInsetHeight.value = 0
+    disablePickerTransition.value = false
   }
   captureDebugState('picker-close')
 })
@@ -776,6 +783,8 @@ function toggleStickerPicker() {
     clearPendingPickerTimer()
     lockComposerInsetHeight(stickerPickerHeight.value)
     pendingKeyboardReturn.value = true
+    disablePickerTransition.value = true
+    setStickerPickerOpen(false)
     focusInput()
     captureDebugState('keyboard-return-requested')
     return
@@ -788,6 +797,7 @@ function toggleStickerPicker() {
     lockComposerInsetHeight()
     pendingPickerOpenAfterKeyboardClose.value = true
     pendingKeyboardReturn.value = false
+    disablePickerTransition.value = true
     clearPendingPickerTimer()
     blurInput()
     pendingPickerOpenTimer = window.setTimeout(() => {
@@ -801,6 +811,7 @@ function toggleStickerPicker() {
   }
 
   lockComposerInsetHeight(lastKnownKeyboardHeight.value)
+  disablePickerTransition.value = false
   setStickerPickerOpen(true)
   captureDebugState('picker-open-direct')
 }
@@ -824,6 +835,7 @@ function prepareStickerToggle() {
 function handleToggleAttachment() {
   pendingKeyboardReturn.value = false
   lockedComposerInsetHeight.value = 0
+  disablePickerTransition.value = false
   setStickerPickerOpen(false)
   emit('toggle-attachment')
   captureDebugState('attachment-open')
@@ -836,6 +848,8 @@ function handleTextareaFocus() {
   if (isStickerPickerOpen.value) {
     lockComposerInsetHeight(stickerPickerHeight.value)
     pendingKeyboardReturn.value = true
+    disablePickerTransition.value = true
+    setStickerPickerOpen(false)
   }
   captureDebugState('textarea-focus')
 }
