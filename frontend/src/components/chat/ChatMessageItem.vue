@@ -370,6 +370,26 @@ const cachedUrl = computed(() => props.imageCache[mediaFileId.value] || '')
 const isCached = computed(() => Boolean(cachedUrl.value))
 const thumbnail = computed(() => getImageThumbnail(props.msg.content, parsedContent.value))
 const formattedTime = computed(() => formatTime(props.msg.created_at))
+const SINGLE_MEDIA_MAX_WIDTH = 320
+const SINGLE_MEDIA_MAX_HEIGHT = 420
+
+function getBoundedSingleMediaBox(width: number, height: number) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null
+  }
+
+  const scale = Math.min(
+    SINGLE_MEDIA_MAX_WIDTH / width,
+    SINGLE_MEDIA_MAX_HEIGHT / height,
+    1,
+  )
+
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  }
+}
+
 const audioUrl = computed(() => {
   if (cachedUrl.value) return cachedUrl.value
   if (props.msg.local_blob_url) return props.msg.local_blob_url
@@ -387,7 +407,11 @@ const mediaStyle = computed(() => {
   const style: any = {
     cursor: 'pointer',
     position: 'relative',
-    backgroundSize: 'cover',
+    maxWidth: '100%',
+    backgroundSize: 'contain',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
+    backgroundColor: 'rgba(8, 14, 20, 0.92)',
   }
   if (thumbnail.value) {
     style.backgroundImage = `url(${thumbnail.value})`
@@ -401,9 +425,13 @@ const mediaStyle = computed(() => {
 
     const content = parsedContent.value
     if (content?.width && content?.height) {
-      const ratio = content.width / content.height
-      const clampedRatio = Math.max(0.6, Math.min(ratio, 2.5))
-      style.aspectRatio = `${clampedRatio}`
+      const boundedBox = getBoundedSingleMediaBox(Number(content.width), Number(content.height))
+      if (boundedBox) {
+        style.width = `${boundedBox.width}px`
+        style.aspectRatio = `${content.width} / ${content.height}`
+      } else {
+        style.minHeight = '200px'
+      }
     } else {
       style.minHeight = '200px'
     }
