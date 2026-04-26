@@ -55,6 +55,9 @@ const ratioOptions: { label: string; value: number | undefined }[] = [
 ]
 
 let cropperInstance: any = null
+let CropperCtor: any = null
+const imgLoaded = ref(false)
+const loadError = ref<string | null>(null)
 
 // --- Annotate state ---
 type Mode = 'crop' | 'draw' | 'text'
@@ -77,23 +80,55 @@ const canUndo = computed(() => undoStack.value.length > 0)
 const isProcessing = ref(false)
 
 onMounted(async () => {
-  const CropperModule = await import('cropperjs')
-  const Cropper = CropperModule.default
-  if (!imgRef.value) return
-
-  cropperInstance = new Cropper(imgRef.value, {
-    viewMode: 1,
-    autoCropArea: 1,
-    dragMode: 'move',
-    background: false,
-    movable: true,
-    zoomable: true,
-    scalable: false,
-    rotatable: true,
-    restore: false,
-    aspectRatio: aspectRatio.value,
-  })
+  // Pre-load the Cropper class so it's ready when the <img> finishes loading.
+  try {
+    const CropperModule = await import('cropperjs')
+    CropperCtor = (CropperModule as any).default ?? CropperModule
+  } catch (e) {
+    loadError.value = 'بارگذاری ویرایشگر ناموفق بود'
+    return
+  }
+  // If the image already loaded before the chunk arrived, init now.
+  if (imgLoaded.value) initCropper()
 })
+
+function initCropper() {
+  if (cropperInstance || !CropperCtor || !imgRef.value) return
+  try {
+    cropperInstance = new CropperCtor(imgRef.value, {
+      viewMode: 1,
+      autoCropArea: 1,
+      dragMode: 'move',
+      background: false,
+      movable: true,
+      zoomable: true,
+      scalable: false,
+      rotatable: true,
+      restore: false,
+      // EXIF rotation is already handled server-side (Pillow exif_transpose)
+      // and client-side (createImageBitmap imageOrientation) before the file
+      // ever reaches this editor. Cropper's own checkOrientation does an
+      // extra XHR on the blob URL that can fail silently on some mobile
+      // browsers and leaves the editor non-functional. Disabling it.
+      checkOrientation: false,
+      checkCrossOrigin: false,
+      aspectRatio: aspectRatio.value,
+    })
+  } catch {
+    loadError.value = 'باز کردن تصویر در ویرایشگر ناموفق بود'
+  }
+}
+
+function onImgLoad() {
+  imgLoaded.value = true
+  loadError.value = null
+  initCropper()
+}
+
+function onImgError() {
+  imgLoaded.value = false
+  loadError.value = 'این فرمت تصویر پشتیبانی نمی‌شود'
+}
 
 onBeforeUnmount(() => {
   try { cropperInstance?.destroy?.() } catch { /* ignore */ }
@@ -412,9 +447,14 @@ function cancel() {
         v-show="!annotateStarted"
         ref="imgRef"
         :src="sourceUrl"
-        alt="editing"
-        style="max-width: 100%;"
+        alt=""
+        style="max-width: 100%; max-height: 100%; display: block;"
+        @load="onImgLoad"
+        @error="onImgError"
       />
+      <div v-if="loadError && !annotateStarted" class="stage-error">
+        {{ loadError }}
+      </div>
       <canvas
         v-show="annotateStarted"
         ref="fabricCanvasRef"
@@ -564,6 +604,19 @@ function cancel() {
 }
 
 .stage :deep(.cropper-container) { direction: ltr; }
+
+.stage-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 14px;
+  text-align: center;
+  padding: 24px;
+  pointer-events: none;
+}
 
 .ratios,
 .palette {
