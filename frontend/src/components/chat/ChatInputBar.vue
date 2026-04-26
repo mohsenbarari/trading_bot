@@ -655,7 +655,7 @@ function updateKeyboardMetrics() {
   keyboardHeight.value = nextKeyboardHeight
 
   if (nextKeyboardHeight >= KEYBOARD_OPEN_THRESHOLD) {
-    lastKnownKeyboardHeight.value = nextKeyboardHeight
+    lastKnownKeyboardHeight.value = Math.max(lastKnownKeyboardHeight.value, nextKeyboardHeight)
     if (pendingKeyboardReturn.value) {
       pendingKeyboardReturn.value = false
       lockedComposerInsetHeight.value = 0
@@ -675,6 +675,8 @@ function updateKeyboardMetrics() {
     && !hasComposerFocus()
   ) {
     lockedComposerInsetHeight.value = 0
+    lastKnownKeyboardHeight.value = 0
+    disablePickerTransition.value = false
   }
 
   if (pendingPickerOpenAfterKeyboardClose.value && nextKeyboardHeight <= KEYBOARD_CLOSE_THRESHOLD) {
