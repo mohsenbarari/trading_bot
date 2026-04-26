@@ -262,8 +262,8 @@ const messageInputRef = ref<HTMLTextAreaElement | null>(null)
 const composerSelectionStart = ref(0)
 const composerSelectionEnd = ref(0)
 const DEFAULT_PICKER_HEIGHT = 336
-const MIN_PICKER_HEIGHT = 260
-const MAX_PICKER_HEIGHT = 420
+const MIN_PICKER_FALLBACK_HEIGHT = 260
+const MAX_PICKER_FALLBACK_HEIGHT = 420
 const KEYBOARD_OPEN_THRESHOLD = 120
 const KEYBOARD_CLOSE_THRESHOLD = 24
 const keyboardHeight = ref(0)
@@ -288,7 +288,7 @@ const stickerCount = computed(() => countEmojiStickerOccurrences(messageInput.va
 const stickerPickerHeight = computed(() => {
   const measuredHeight = keyboardHeight.value > 0 ? keyboardHeight.value : lastKnownKeyboardHeight.value
   if (measuredHeight > 0) {
-    return Math.min(Math.max(measuredHeight, MIN_PICKER_HEIGHT), MAX_PICKER_HEIGHT)
+    return measuredHeight
   }
 
   const viewportHeight = typeof window !== 'undefined'
@@ -296,7 +296,8 @@ const stickerPickerHeight = computed(() => {
     : DEFAULT_PICKER_HEIGHT
 
   return Math.min(
-    Math.max(Math.round(viewportHeight * 0.42), MIN_PICKER_HEIGHT),
+    Math.max(Math.round(viewportHeight * 0.42), MIN_PICKER_FALLBACK_HEIGHT),
+    MAX_PICKER_FALLBACK_HEIGHT,
     DEFAULT_PICKER_HEIGHT,
   )
 })
@@ -477,7 +478,6 @@ function toggleStickerPicker() {
   if (isStickerPickerOpen.value) {
     pendingPickerOpenAfterKeyboardClose.value = false
     clearPendingPickerTimer()
-    setStickerPickerOpen(false)
     focusInput()
     return
   }

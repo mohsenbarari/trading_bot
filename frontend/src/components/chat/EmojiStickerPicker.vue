@@ -4,21 +4,20 @@
       <div class="picker-handle" aria-hidden="true"></div>
 
       <header class="picker-header">
-        <div class="picker-title-group">
-          <div class="picker-title">استیکرها و ایموجی‌ها</div>
-          <div class="picker-subtitle" :class="{ 'limit-reached': isLimitReached }">
-            {{ activeCategory.label }}
-            <span class="picker-subtitle-separator">•</span>
+        <div class="picker-title">استیکرها و ایموجی‌ها</div>
+
+        <div class="picker-header-actions">
+          <div class="picker-count-badge" :class="{ 'limit-reached': isLimitReached }">
             {{ currentStickerCount }} / {{ maxStickerCount }}
           </div>
-        </div>
 
-        <button class="picker-close" type="button" @click="setOpen(false)" aria-label="بستن پنل ایموجی">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+          <button class="picker-close" type="button" @click="setOpen(false)" aria-label="بستن پنل ایموجی">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
       </header>
 
       <div ref="scrollContainerRef" class="picker-grid-scroll" @scroll.passive="handleScroll">
@@ -124,12 +123,6 @@ const sectionRefs = new Map<string, HTMLElement>()
 const categories = computed<EmojiStickerCategory[]>(() => {
   void usageVersion.value
   return [buildFrequentEmojiCategory(props.currentUserId), ...TELEGRAM_EMOJI_CATEGORIES]
-})
-
-const activeCategory = computed<EmojiStickerCategory>(() => {
-  return categories.value.find((category) => category.id === activeCategoryId.value)
-    ?? categories.value[0]
-    ?? buildFrequentEmojiCategory(props.currentUserId)
 })
 
 const isLimitReached = computed(() => props.currentStickerCount >= props.maxStickerCount)
@@ -264,7 +257,7 @@ watch(() => props.currentUserId, () => {
 .picker-handle {
   width: 44px;
   height: 5px;
-  margin: 10px auto 4px;
+  margin: 8px auto 2px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.12);
 }
@@ -274,31 +267,37 @@ watch(() => props.currentUserId, () => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 14px 10px;
+  padding: 0 12px 6px;
 }
 
-.picker-title-group {
-  min-width: 0;
+.picker-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .picker-title {
-  font-size: 14px;
+  min-width: 0;
+  font-size: 13px;
   font-weight: 700;
   color: #0f172a;
 }
 
-.picker-subtitle {
-  margin-top: 2px;
+.picker-count-badge {
+  min-width: 56px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
   font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
   color: #64748b;
+  text-align: center;
 }
 
-.picker-subtitle.limit-reached {
+.picker-count-badge.limit-reached {
   color: #dc2626;
-}
-
-.picker-subtitle-separator {
-  padding: 0 4px;
 }
 
 .picker-close {
@@ -316,25 +315,20 @@ watch(() => props.currentUserId, () => {
 .picker-grid-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 0 10px 12px;
+  padding: 0 10px 10px;
   scroll-behavior: smooth;
   overscroll-behavior: contain;
 }
 
 .picker-section + .picker-section {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .picker-section-header {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 8px 10px;
-  background: linear-gradient(180deg, rgba(244, 247, 251, 0.98), rgba(244, 247, 251, 0.88));
-  backdrop-filter: blur(10px);
+  padding: 4px 8px 8px;
 }
 
 .picker-section-icon {
@@ -343,14 +337,14 @@ watch(() => props.currentUserId, () => {
 }
 
 .picker-section-label {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: #334155;
 }
 
 .picker-section-count {
   margin-right: auto;
-  font-size: 11px;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
   color: #94a3b8;
 }
@@ -388,7 +382,7 @@ watch(() => props.currentUserId, () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
   border-top: 1px solid rgba(148, 163, 184, 0.16);
   background: rgba(255, 255, 255, 0.82);
 }
