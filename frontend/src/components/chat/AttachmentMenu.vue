@@ -309,6 +309,7 @@
   <teleport to="body">
     <ImageEditorModal
       v-if="editingFile"
+      :key="singleEditorKey"
       :file="editingFile"
       @confirm="onEditorConfirm"
       @cancel="onEditorCancel"
@@ -327,6 +328,7 @@
   <teleport to="body">
     <ImageEditorModal
       v-if="cameraEditingItem"
+      :key="cameraEditingItem.id"
       :file="cameraEditingItem.file"
       @confirm="onCameraEditConfirm"
       @cancel="onCameraEditCancel"
@@ -393,6 +395,10 @@ const fileInput = ref<HTMLInputElement | null>(null)
 // editor is closed). We only route through the editor for single-image
 // gallery picks.
 const editingFile = ref<File | null>(null)
+// Bumped each time we open the single-image editor so Vue remounts the
+// component cleanly between sessions (prevents stale Cropper/blob state
+// when the user opens the editor multiple times in the same sheet visit).
+const singleEditorKey = ref<number>(0)
 
 // Phase B state.
 // multiPreviewFiles: holds the multi-image gallery pick while the user
@@ -1031,6 +1037,7 @@ async function onGalleryFile(e: Event) {
     // Wait for sheet close animation before mounting editor to avoid a
     // visible overlap flash.
     await new Promise<void>((resolve) => setTimeout(resolve, 180))
+    singleEditorKey.value += 1
     editingFile.value = onlyFile
     return
   }
