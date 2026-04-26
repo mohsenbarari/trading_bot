@@ -15,6 +15,7 @@ const CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const CHAT_MEDIA_MAX_UPLOAD_LABEL = '50MB'
 const CHAT_MEDIA_PERSISTED_THUMBNAIL_MAX_EDGE = 64
 const CHAT_MEDIA_PERSISTED_THUMBNAIL_QUALITY = 0.58
+const CHAT_EDITED_IMAGE_FLAG = '__chatEditedImage'
 const HEIC_MIME_TYPES = new Set([
     'image/heic',
     'image/heic-sequence',
@@ -49,6 +50,13 @@ function buildConvertedImageName(fileName: string) {
     }
 
     return fileName.replace(/\.(heic|heif)$/i, '.jpg')
+}
+
+function isEditedImageUploadFile(file: File) {
+    return Boolean(
+        (file as File & Record<string, unknown>)[CHAT_EDITED_IMAGE_FLAG] === true
+        || /_edited\.(jpe?g|png|webp)$/i.test(file.name || '')
+    )
 }
 
 async function normalizeImageUploadFile(file: File): Promise<File> {
@@ -226,6 +234,19 @@ function htmlCanvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<B
             reject(new Error('Canvas toBlob failed'))
         }, 'image/jpeg', quality)
     })
+}
+
+async function readImageDimensions(file: File | Blob) {
+    const decoded = await decodeImageSource(file)
+
+    try {
+        return {
+            width: decoded.width,
+            height: decoded.height,
+        }
+    } finally {
+        decoded.cleanup()
+    }
 }
 
 async function preprocessImageOnMainThread(
@@ -705,7 +726,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
     function trackPreprocessEvent(payload: {
         mediaType: 'image' | 'video' | 'voice'
-        path: 'image_worker' | 'image_main_thread' | 'image_legacy_fallback' | 'video_preview' | 'video_metadata_fallback' | 'voice_passthrough'
+        path: 'image_worker' | 'image_main_thread' | 'image_legacy_fallback' | 'image_edited_passthrough' | 'video_preview' | 'video_metadata_fallback' | 'voice_passthrough'
         status: 'success' | 'failed' | 'cancelled'
         startedAt: number
         batchSize: number
@@ -1432,104 +1453,146 @@ export function useChatMedia(options: UseChatMediaOptions) {
             } else {
                 if (isCancelledLocally) throw new Error('UploadCancelled');
 
-                const imageFastPathStartedAt = performance.now()
-                let imagePath: 'image_worker' | 'image_main_thread' = canUseImagePreprocessWorker()
-                    ? 'image_worker'
-                    : 'image_main_thread'
+                if (isEditedImageUploadFile(sourceFile)) {
+                    step = 'edited_image_passthrough'
+                    const editedImageStartedAt = performance.now()
 
-                try {
-                    if (canUseImagePreprocessWorker()) {
-                        step = 'worker_preprocess'
-                        const processed = await runAdaptivePreprocessTask(preprocessLimit, () =>
-                            processImageInWorker(sourceFile, processingAbortController.signal)
-                        )
-
-                        uploadFile = processed.blob
-                        finalWidth = processed.width
-                        finalHeight = processed.height
-                        thumbBase64 = processed.thumbnailDataUrl
-                    } else {
-                        step = 'main_thread_preprocess'
-                        await waitForNextPaint()
-                        const processed = await runAdaptivePreprocessTask(preprocessLimit, () =>
-                            preprocessImageOnMainThread(sourceFile)
-                        )
-
-                        uploadFile = processed.blob
-                        finalWidth = processed.width
-                        finalHeight = processed.height
-                        thumbBase64 = processed.thumbnailDataUrl
-                    }
-
-                    trackPreprocessEvent({
-                        mediaType: 'image',
-                        path: imagePath,
-                        status: 'success',
-                        startedAt: imageFastPathStartedAt,
-                        batchSize: preprocessBatchSize,
-                        schedulerLimit: preprocessLimit,
-                        usedWorker: imagePath === 'image_worker',
-                        width: finalWidth,
-                        height: finalHeight,
-                    })
-                } catch (workerWarn) {
-                    trackPreprocessEvent({
-                        mediaType: 'image',
-                        path: imagePath,
-                        status: isCancelledLocally ? 'cancelled' : 'failed',
-                        startedAt: imageFastPathStartedAt,
-                        batchSize: preprocessBatchSize,
-                        schedulerLimit: preprocessLimit,
-                        usedWorker: imagePath === 'image_worker',
-                        fallbackReason: imagePath === 'image_worker' ? 'worker_failed' : 'main_thread_failed',
-                        errorMessage: workerWarn instanceof Error ? workerWarn.message : String(workerWarn),
-                    })
-                    if (isCancelledLocally) throw new Error('UploadCancelled');
-
-                    console.warn("Image preprocessing fast path failed, using legacy fallback:", workerWarn)
-
-                    step = 'compress_main'
-                    const imageFallbackStartedAt = performance.now()
                     try {
-                        const compressed = await runAdaptivePreprocessTask(preprocessLimit, () =>
-                            nativeImageCompress(sourceFile, 1920, 0.85)
+                        const dimensions = await runAdaptivePreprocessTask(preprocessLimit, () =>
+                            readImageDimensions(sourceFile)
                         )
-                        uploadFile = compressed.blob;
-                        finalWidth = compressed.width;
-                        finalHeight = compressed.height;
-                    } catch (warn) {
-                        console.warn("Image compression failed, using original:", warn)
-                        try {
-                            const original = await nativeImageCompress(sourceFile, 9999, 1.0);
-                            finalWidth = original.width;
-                            finalHeight = original.height;
-                        } catch (error) {
-                            console.warn("Original image dimension fallback failed:", error)
-                        }
-                    }
-
-                    if (isCancelledLocally) throw new Error('UploadCancelled');
-                    step = 'compress_thumb'
-                    try {
+                        finalWidth = dimensions.width
+                        finalHeight = dimensions.height
                         thumbBase64 = await runAdaptivePreprocessTask(preprocessLimit, () =>
-                            generateImageThumbnailDataUrl(uploadFile)
+                            generateImageThumbnailDataUrl(sourceFile)
                         )
-                    } catch (warn) {
-                        console.warn("Image thumbnail generation failed:", warn)
-                    }
+                        uploadFile = sourceFile
 
-                    trackPreprocessEvent({
-                        mediaType: 'image',
-                        path: 'image_legacy_fallback',
-                        status: 'success',
-                        startedAt: imageFallbackStartedAt,
-                        batchSize: preprocessBatchSize,
-                        schedulerLimit: preprocessLimit,
-                        usedWorker: false,
-                        fallbackReason: imagePath === 'image_worker' ? 'worker_failed' : 'main_thread_failed',
-                        width: finalWidth,
-                        height: finalHeight,
-                    })
+                        trackPreprocessEvent({
+                            mediaType: 'image',
+                            path: 'image_edited_passthrough',
+                            status: 'success',
+                            startedAt: editedImageStartedAt,
+                            batchSize: preprocessBatchSize,
+                            schedulerLimit: preprocessLimit,
+                            usedWorker: false,
+                            width: finalWidth,
+                            height: finalHeight,
+                        })
+                    } catch (editedWarn) {
+                        trackPreprocessEvent({
+                            mediaType: 'image',
+                            path: 'image_edited_passthrough',
+                            status: isCancelledLocally ? 'cancelled' : 'failed',
+                            startedAt: editedImageStartedAt,
+                            batchSize: preprocessBatchSize,
+                            schedulerLimit: preprocessLimit,
+                            usedWorker: false,
+                            errorMessage: editedWarn instanceof Error ? editedWarn.message : String(editedWarn),
+                        })
+                        if (isCancelledLocally) throw new Error('UploadCancelled')
+                        throw editedWarn
+                    }
+                } else {
+                    const imageFastPathStartedAt = performance.now()
+                    let imagePath: 'image_worker' | 'image_main_thread' = canUseImagePreprocessWorker()
+                        ? 'image_worker'
+                        : 'image_main_thread'
+
+                    try {
+                        if (canUseImagePreprocessWorker()) {
+                            step = 'worker_preprocess'
+                            const processed = await runAdaptivePreprocessTask(preprocessLimit, () =>
+                                processImageInWorker(sourceFile, processingAbortController.signal)
+                            )
+
+                            uploadFile = processed.blob
+                            finalWidth = processed.width
+                            finalHeight = processed.height
+                            thumbBase64 = processed.thumbnailDataUrl
+                        } else {
+                            step = 'main_thread_preprocess'
+                            await waitForNextPaint()
+                            const processed = await runAdaptivePreprocessTask(preprocessLimit, () =>
+                                preprocessImageOnMainThread(sourceFile)
+                            )
+
+                            uploadFile = processed.blob
+                            finalWidth = processed.width
+                            finalHeight = processed.height
+                            thumbBase64 = processed.thumbnailDataUrl
+                        }
+
+                        trackPreprocessEvent({
+                            mediaType: 'image',
+                            path: imagePath,
+                            status: 'success',
+                            startedAt: imageFastPathStartedAt,
+                            batchSize: preprocessBatchSize,
+                            schedulerLimit: preprocessLimit,
+                            usedWorker: imagePath === 'image_worker',
+                            width: finalWidth,
+                            height: finalHeight,
+                        })
+                    } catch (workerWarn) {
+                        trackPreprocessEvent({
+                            mediaType: 'image',
+                            path: imagePath,
+                            status: isCancelledLocally ? 'cancelled' : 'failed',
+                            startedAt: imageFastPathStartedAt,
+                            batchSize: preprocessBatchSize,
+                            schedulerLimit: preprocessLimit,
+                            usedWorker: imagePath === 'image_worker',
+                            fallbackReason: imagePath === 'image_worker' ? 'worker_failed' : 'main_thread_failed',
+                            errorMessage: workerWarn instanceof Error ? workerWarn.message : String(workerWarn),
+                        })
+                        if (isCancelledLocally) throw new Error('UploadCancelled');
+
+                        console.warn("Image preprocessing fast path failed, using legacy fallback:", workerWarn)
+
+                        step = 'compress_main'
+                        const imageFallbackStartedAt = performance.now()
+                        try {
+                            const compressed = await runAdaptivePreprocessTask(preprocessLimit, () =>
+                                nativeImageCompress(sourceFile, 1920, 0.85)
+                            )
+                            uploadFile = compressed.blob;
+                            finalWidth = compressed.width;
+                            finalHeight = compressed.height;
+                        } catch (warn) {
+                            console.warn("Image compression failed, using original:", warn)
+                            try {
+                                const original = await nativeImageCompress(sourceFile, 9999, 1.0);
+                                finalWidth = original.width;
+                                finalHeight = original.height;
+                            } catch (error) {
+                                console.warn("Original image dimension fallback failed:", error)
+                            }
+                        }
+
+                        if (isCancelledLocally) throw new Error('UploadCancelled');
+                        step = 'compress_thumb'
+                        try {
+                            thumbBase64 = await runAdaptivePreprocessTask(preprocessLimit, () =>
+                                generateImageThumbnailDataUrl(uploadFile)
+                            )
+                        } catch (warn) {
+                            console.warn("Image thumbnail generation failed:", warn)
+                        }
+
+                        trackPreprocessEvent({
+                            mediaType: 'image',
+                            path: 'image_legacy_fallback',
+                            status: 'success',
+                            startedAt: imageFallbackStartedAt,
+                            batchSize: preprocessBatchSize,
+                            schedulerLimit: preprocessLimit,
+                            usedWorker: false,
+                            fallbackReason: imagePath === 'image_worker' ? 'worker_failed' : 'main_thread_failed',
+                            width: finalWidth,
+                            height: finalHeight,
+                        })
+                    }
                 }
 
                 if (isCancelledLocally) throw new Error('UploadCancelled');
