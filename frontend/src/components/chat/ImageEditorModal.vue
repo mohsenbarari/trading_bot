@@ -167,9 +167,11 @@ async function switchMode(target: Mode) {
 async function beginAnnotate(): Promise<boolean> {
   let baseCanvas: HTMLCanvasElement | null = null
   try {
+    // Match the crop-only path's quality ceiling so users don't lose
+    // resolution just because they decided to draw or add text.
     baseCanvas = cropperInstance?.getCroppedCanvas?.({
-      maxWidth: 2048,
-      maxHeight: 2048,
+      maxWidth: 4096,
+      maxHeight: 4096,
       imageSmoothingEnabled: true,
       imageSmoothingQuality: 'high',
     }) ?? null
@@ -274,12 +276,30 @@ function pickBrushSize(s: number) {
 
 function onCanvasMouseDown(opts: any) {
   if (!fabricCanvas || !fabricLib || mode.value !== 'text') return
-  if (opts.target) return
+
+  // Single-tap on an existing IText should enter edit mode immediately
+  // (mobile users won't reliably double-tap).
+  if (opts.target) {
+    const target = opts.target
+    if (target?.type === 'i-text' || target?.isType?.('i-text')) {
+      try {
+        fabricCanvas.setActiveObject(target)
+        target.enterEditing?.()
+        fabricCanvas.requestRenderAll()
+      } catch { /* ignore */ }
+    }
+    return
+  }
+
   const pointer = fabricCanvas.getPointer(opts.e)
   pushUndoSnapshot()
   const text = new fabricLib.IText('متن', {
     left: pointer.x,
     top: pointer.y,
+    // Center the text on the tap point — feels much more like Telegram
+    // than having the bounding-box top-left snap to the finger.
+    originX: 'center',
+    originY: 'center',
     fontSize: 32,
     fill: textColor.value,
     fontFamily: 'Vazirmatn, Tahoma, sans-serif',
@@ -352,13 +372,29 @@ async function confirm() {
       const dispW = fabricCanvas.getWidth()
       const multiplier = dispW > 0 ? baseW / dispW : 1
 
+      // Export fabric canvas directly as a JPEG blob. Going through
+      // dataUrl → <img> → canvas → toBlob('jpeg') would re-encode the
+      // image a second time and lose quality for no reason.
       const dataUrl: string = fabricCanvas.toDataURL({
         format: 'jpeg',
         quality: 0.92,
         multiplier,
       })
 
-      outCanvas = await dataUrlToCanvas(dataUrl)
+      const fabricBlob = await dataUrlToBlob(dataUrl)
+      if (!fabricBlob) {
+        emit('confirm', props.file)
+        return
+      }
+
+      const originalName = props.file.name || 'image.jpg'
+      const stem = originalName.replace(/\.[^.]+$/, '')
+      const edited = new File([fabricBlob], `${stem}_edited.jpg`, {
+        type: 'image/jpeg',
+        lastModified: Date.now(),
+      })
+      emit('confirm', edited)
+      return
     } else {
       outCanvas = cropperInstance?.getCroppedCanvas?.({
         maxWidth: 4096,
@@ -398,19 +434,15 @@ async function confirm() {
   }
 }
 
-async function dataUrlToCanvas(dataUrl: string): Promise<HTMLCanvasElement> {
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const i = new Image()
-    i.onload = () => resolve(i)
-    i.onerror = reject
-    i.src = dataUrl
-  })
-  const c = document.createElement('canvas')
-  c.width = img.naturalWidth
-  c.height = img.naturalHeight
-  const ctx = c.getContext('2d')
-  if (ctx) ctx.drawImage(img, 0, 0)
-  return c
+async function dataUrlToBlob(dataUrl: string): Promise<Blob | null> {
+  // Avoid going through <img>+<canvas> re-encode. fetch() handles data:
+  // URLs natively in all modern browsers including iOS Safari.
+  try {
+    const res = await fetch(dataUrl)
+    return await res.blob()
+  } catch {
+    return null
+  }
 }
 
 function sendUnedited() {
@@ -547,7 +579,11 @@ function cancel() {
     <!-- Action row -->
     <div class="actions">
       <button class="action-secondary" @click="sendUnedited">ارسال بدون ویرایش</button>
-      <button class="action-primary" @click="confirm" :disabled="isProcessing">
+      <button
+        class="action-primary"
+        @click="confirm"
+        :disabled="isProcessing || (!annotateStarted && (!imgLoaded || !!loadError))"
+      >
         {{ isProcessing ? 'در حال پردازش...' : 'تایید و ارسال' }}
       </button>
     </div>

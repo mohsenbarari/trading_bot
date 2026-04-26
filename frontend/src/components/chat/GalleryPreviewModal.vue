@@ -145,14 +145,19 @@ function cancelAll() {
               class="gp-media"
               draggable="false"
             />
+            <!--
+              Show video preview as a paused first-frame instead of autoplay.
+              Autoplaying many videos at once in the preview grid can hang or
+              crash weak phones (each <video> spins up a hardware decoder).
+              `preload="metadata"` is enough for the first frame.
+            -->
             <video
               v-else
               :src="item.previewUrl"
               class="gp-media"
               muted
-              loop
               playsinline
-              autoplay
+              preload="metadata"
             ></video>
 
             <span v-if="item.isVideo" class="gp-video-badge">ویدئو</span>
