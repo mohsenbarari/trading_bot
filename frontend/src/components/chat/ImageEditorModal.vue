@@ -104,7 +104,10 @@ function initCropper() {
   try {
     cropperInstance = new CropperCtor(imgRef.value, {
       viewMode: 1,
-      autoCropArea: 1,
+      // Inset the initial crop box from the image edges so the corner/edge
+      // handles are clearly inside the visible area and easy to grab on the
+      // first try (full-edge handles were getting clipped against the stage).
+      autoCropArea: 0.85,
       dragMode: 'move',
       background: false,
       movable: true,
@@ -338,23 +341,61 @@ function onCanvasMouseDown(opts: any) {
     fontWeight: 'bold',
     stroke: 'rgba(0,0,0,0.45)',
     strokeWidth: 1,
-    padding: 6,
+    padding: 12,
+    // Visible, finger-friendly corner/rotation controls.
     cornerColor: '#3390ec',
+    cornerStrokeColor: '#ffffff',
+    cornerSize: 22,
+    cornerStyle: 'circle',
+    transparentCorners: false,
     borderColor: '#3390ec',
-    editable: true,
-    // Default movement/scaling is on; explicit for clarity.
+    borderScaleFactor: 2,
+    borderDashArray: [6, 4],
+    rotatingPointOffset: 36,
+    // editable=false by default so a single tap selects + drags instead of
+    // entering text-editing. Double-tap flips it to true via
+    // onCanvasDoubleClick. This matches Telegram's behavior and removes the
+    // two extra taps that were previously needed before each drag.
+    editable: false,
     lockMovementX: false,
     lockMovementY: false,
     hasControls: true,
     hasBorders: true,
+    hasRotatingPoint: true,
   })
   fabricCanvas.add(text)
   fabricCanvas.setActiveObject(text)
-  text.enterEditing()
-  text.selectAll()
   fabricCanvas.requestRenderAll()
+  // Open the keyboard once on creation so the user can immediately type.
+  // After they finish (tap elsewhere), editable goes back to false so
+  // future single-taps drag instead of editing.
+  beginEditingText(text)
   // Consume the one-shot. User must re-tap the «متن» tab to add another.
   pendingTextCreation.value = false
+}
+
+function beginEditingText(text: any) {
+  if (!text) return
+  try {
+    text.set({ editable: true })
+    text.enterEditing()
+    text.selectAll?.()
+    fabricCanvas?.requestRenderAll?.()
+    // Once the user taps away and editing exits, lock editable back to
+    // false so future single-taps drag the text instead of focusing it.
+    text.off?.('editing:exited')
+    text.on?.('editing:exited', () => {
+      try { text.set({ editable: false }) } catch { /* ignore */ }
+      // If the user left the placeholder text empty, remove the object.
+      const trimmed = (text.text ?? '').trim()
+      if (!trimmed) {
+        try {
+          fabricCanvas?.remove(text)
+          fabricCanvas?.requestRenderAll?.()
+        } catch { /* ignore */ }
+      }
+    })
+  } catch { /* ignore */ }
 }
 
 function onCanvasDoubleClick(opts: any) {
@@ -363,11 +404,8 @@ function onCanvasDoubleClick(opts: any) {
   const target = opts?.target
   if (!target) return
   if (target.type === 'i-text' || target.isType?.('i-text')) {
-    try {
-      fabricCanvas.setActiveObject(target)
-      target.enterEditing?.()
-      fabricCanvas.requestRenderAll()
-    } catch { /* ignore */ }
+    fabricCanvas.setActiveObject(target)
+    beginEditingText(target)
   }
 }
 
