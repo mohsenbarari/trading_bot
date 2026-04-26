@@ -277,6 +277,7 @@ const KEYBOARD_CLOSE_THRESHOLD = 24
 const keyboardHeight = ref(0)
 const lastKnownKeyboardHeight = ref(0)
 const viewportBaseHeight = ref(0)
+const viewportBaseWidth = ref(0)
 const pendingPickerOpenAfterKeyboardClose = ref(false)
 const lockedComposerInsetHeight = ref(0)
 const pendingKeyboardReturn = ref(false)
@@ -285,6 +286,12 @@ let pendingPickerOpenTimer: number | null = null
 type VisualViewportWithEvents = VisualViewport & {
   addEventListener: (type: 'resize' | 'scroll', listener: EventListenerOrEventListenerObject) => void
   removeEventListener: (type: 'resize' | 'scroll', listener: EventListenerOrEventListenerObject) => void
+}
+
+type ViewportMetrics = {
+  fullHeightCandidate: number
+  layoutViewportHeight: number
+  width: number
 }
 
 const messageInput = computed({
@@ -395,6 +402,47 @@ function getVisualViewport() {
   return (window.visualViewport ?? null) as VisualViewportWithEvents | null
 }
 
+function getViewportMetrics(): ViewportMetrics {
+  if (typeof window === 'undefined') {
+    return {
+      fullHeightCandidate: 0,
+      layoutViewportHeight: 0,
+      width: 0,
+    }
+  }
+
+  const visualViewport = getVisualViewport()
+  const currentViewportHeight = visualViewport?.height ?? window.innerHeight
+  const offsetTop = visualViewport?.offsetTop ?? 0
+
+  return {
+    fullHeightCandidate: currentViewportHeight + offsetTop,
+    layoutViewportHeight: Math.max(window.innerHeight, document.documentElement?.clientHeight ?? 0),
+    width: Math.round(visualViewport?.width ?? window.innerWidth),
+  }
+}
+
+function getViewportBaselineHeight(metrics: ViewportMetrics) {
+  return Math.max(viewportBaseHeight.value, metrics.layoutViewportHeight)
+}
+
+function syncViewportBaseHeight(metrics: ViewportMetrics, options?: { force?: boolean; preserveLarger?: boolean }) {
+  const candidate = Math.max(metrics.fullHeightCandidate, metrics.layoutViewportHeight)
+  const widthChanged = viewportBaseWidth.value > 0
+    && Math.abs(metrics.width - viewportBaseWidth.value) >= 80
+
+  if (options?.force || viewportBaseHeight.value <= 0 || widthChanged) {
+    viewportBaseHeight.value = candidate
+  } else if (options?.preserveLarger) {
+    viewportBaseHeight.value = Math.max(viewportBaseHeight.value, candidate)
+  } else {
+    viewportBaseHeight.value = candidate
+  }
+
+  viewportBaseWidth.value = metrics.width
+  return viewportBaseHeight.value
+}
+
 function hasComposerFocus() {
   return document.activeElement === messageInputRef.value
 }
@@ -411,13 +459,10 @@ function getMeasuredKeyboardInset() {
     return Math.max(keyboardHeight.value, lastKnownKeyboardHeight.value)
   }
 
-  const visualViewport = getVisualViewport()
-  const currentViewportHeight = visualViewport?.height ?? window.innerHeight
-  const offsetTop = visualViewport?.offsetTop ?? 0
-  const fullHeightCandidate = currentViewportHeight + offsetTop
+  const metrics = getViewportMetrics()
   const inferredHeight = Math.max(
     0,
-    Math.round((viewportBaseHeight.value || fullHeightCandidate) - fullHeightCandidate),
+    Math.round(getViewportBaselineHeight(metrics) - metrics.fullHeightCandidate),
   )
 
   return Math.max(keyboardHeight.value, inferredHeight, lastKnownKeyboardHeight.value)
@@ -441,16 +486,26 @@ function openStickerPickerAfterKeyboardClose() {
 function updateKeyboardMetrics() {
   if (typeof window === 'undefined') return
 
-  const visualViewport = getVisualViewport()
-  const currentViewportHeight = visualViewport?.height ?? window.innerHeight
-  const offsetTop = visualViewport?.offsetTop ?? 0
-  const fullHeightCandidate = currentViewportHeight + offsetTop
+  const metrics = getViewportMetrics()
+  const predictedKeyboardHeight = Math.max(
+    0,
+    Math.round(getViewportBaselineHeight(metrics) - metrics.fullHeightCandidate),
+  )
+  const canRefreshViewportBase = shouldRefreshViewportBaseHeight()
+    && predictedKeyboardHeight < KEYBOARD_OPEN_THRESHOLD
 
-  if (viewportBaseHeight.value <= 0 || shouldRefreshViewportBaseHeight()) {
-    viewportBaseHeight.value = fullHeightCandidate
+  if (viewportBaseHeight.value <= 0) {
+    syncViewportBaseHeight(metrics, { force: true })
+  } else if (canRefreshViewportBase) {
+    syncViewportBaseHeight(metrics)
+  } else {
+    syncViewportBaseHeight(metrics, { preserveLarger: true })
   }
 
-  const nextKeyboardHeight = Math.max(0, Math.round((viewportBaseHeight.value || fullHeightCandidate) - fullHeightCandidate))
+  const nextKeyboardHeight = Math.max(
+    0,
+    Math.round(getViewportBaselineHeight(metrics) - metrics.fullHeightCandidate),
+  )
   keyboardHeight.value = nextKeyboardHeight
 
   if (nextKeyboardHeight >= KEYBOARD_OPEN_THRESHOLD) {
@@ -631,10 +686,9 @@ function handleTextareaFocus() {
 onMounted(() => {
   if (typeof window === 'undefined') return
 
+  syncViewportBaseHeight(getViewportMetrics(), { force: true })
+
   const visualViewport = getVisualViewport()
-  viewportBaseHeight.value = visualViewport
-    ? visualViewport.height + visualViewport.offsetTop
-    : window.innerHeight
 
   updateKeyboardMetrics()
 
