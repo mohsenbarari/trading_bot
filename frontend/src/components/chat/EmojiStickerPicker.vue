@@ -1,5 +1,5 @@
 <template>
-  <transition name="picker-slide">
+  <transition name="picker-slide" :css="!disableTransition">
     <section v-show="open" class="emoji-sticker-picker" :style="pickerStyle">
       <div ref="scrollContainerRef" class="picker-grid-scroll" @scroll.passive="handleScroll">
         <header class="picker-scroll-header">
@@ -93,11 +93,13 @@ const props = withDefaults(defineProps<{
   maxStickerCount?: number
   closeOnSelect?: boolean
   panelHeight?: number | null
+  disableTransition?: boolean
 }>(), {
   currentStickerCount: 0,
   maxStickerCount: 24,
   closeOnSelect: true,
   panelHeight: null,
+  disableTransition: false,
 })
 
 const emit = defineEmits<{
