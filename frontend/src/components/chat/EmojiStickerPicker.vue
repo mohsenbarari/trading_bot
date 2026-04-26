@@ -1,26 +1,24 @@
 <template>
   <transition name="picker-slide">
     <section v-show="open" class="emoji-sticker-picker" :style="pickerStyle">
-      <div class="picker-handle" aria-hidden="true"></div>
-
-      <header class="picker-header">
-        <div class="picker-title">استیکرها و ایموجی‌ها</div>
-
-        <div class="picker-header-actions">
-          <div class="picker-count-badge" :class="{ 'limit-reached': isLimitReached }">
-            {{ currentStickerCount }} / {{ maxStickerCount }}
-          </div>
-
-          <button class="picker-close" type="button" @click="setOpen(false)" aria-label="بستن پنل ایموجی">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
-        </div>
-      </header>
-
       <div ref="scrollContainerRef" class="picker-grid-scroll" @scroll.passive="handleScroll">
+        <header class="picker-scroll-header">
+          <div class="picker-title">استیکرها و ایموجی‌ها</div>
+
+          <div class="picker-header-actions">
+            <div class="picker-count-badge" :class="{ 'limit-reached': isLimitReached }">
+              {{ currentStickerCount }} / {{ maxStickerCount }}
+            </div>
+
+            <button class="picker-close" type="button" @click="setOpen(false)" aria-label="بستن پنل ایموجی">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </header>
+
         <section
           v-for="category in categories"
           :key="category.id"
@@ -237,6 +235,7 @@ watch(() => props.currentUserId, () => {
   display: flex;
   flex-direction: column;
   height: min(336px, 44vh);
+  min-height: 0;
   overflow: hidden;
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 24px 24px 0 0;
@@ -248,42 +247,34 @@ watch(() => props.currentUserId, () => {
   z-index: 1;
 }
 
-.picker-handle {
-  width: 44px;
-  height: 5px;
-  margin: 8px auto 2px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.12);
-}
-
-.picker-header {
+.picker-scroll-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 0 12px 6px;
+  gap: 10px;
+  padding: 8px 10px 6px;
 }
 
 .picker-header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 .picker-title {
   min-width: 0;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: #0f172a;
 }
 
 .picker-count-badge {
-  min-width: 56px;
-  padding: 6px 10px;
+  min-width: 52px;
+  padding: 5px 9px;
   border-radius: 999px;
   background: rgba(148, 163, 184, 0.12);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   line-height: 1;
   color: #64748b;
@@ -295,8 +286,8 @@ watch(() => props.currentUserId, () => {
 }
 
 .picker-close {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border: none;
   border-radius: 50%;
   background: rgba(148, 163, 184, 0.12);
@@ -309,13 +300,13 @@ watch(() => props.currentUserId, () => {
 .picker-grid-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 10px 10px;
+  padding: 0 10px 10px;
   scroll-behavior: smooth;
   overscroll-behavior: contain;
 }
 
 .picker-section + .picker-section {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .picker-grid {
@@ -351,14 +342,14 @@ watch(() => props.currentUserId, () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  padding: 7px 10px calc(7px + env(safe-area-inset-bottom));
   border-top: 1px solid rgba(148, 163, 184, 0.16);
   background: rgba(255, 255, 255, 0.82);
 }
 
 .picker-backspace {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border: none;
   border-radius: 14px;
   background: rgba(148, 163, 184, 0.12);
@@ -386,7 +377,7 @@ watch(() => props.currentUserId, () => {
 }
 
 .picker-tab {
-  height: 38px;
+  height: 34px;
   border: none;
   border-radius: 14px;
   background: transparent;
