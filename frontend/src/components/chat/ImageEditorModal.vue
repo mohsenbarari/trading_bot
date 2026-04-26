@@ -91,6 +91,14 @@ const undoStack = ref<string[]>([])
 const canUndo = computed(() => undoStack.value.length > 0)
 
 const isProcessing = ref(false)
+const isTransformingImage = ref(false)
+let pendingSourceUrlToRevoke: string | null = null
+
+function revokeBlobUrl(url: string | null | undefined) {
+  if (url && url.startsWith('blob:')) {
+    URL.revokeObjectURL(url)
+  }
+}
 
 onMounted(async () => {
   // Pre-load the Cropper class so it's ready when the <img> finishes loading.
@@ -137,6 +145,8 @@ function initCropper() {
 function onImgLoad() {
   imgLoaded.value = true
   loadError.value = null
+  revokeBlobUrl(pendingSourceUrlToRevoke)
+  pendingSourceUrlToRevoke = null
   initCropper()
 }
 
@@ -148,7 +158,9 @@ function onImgError() {
 onBeforeUnmount(() => {
   try { cropperInstance?.destroy?.() } catch { /* ignore */ }
   try { fabricCanvas?.dispose?.() } catch { /* ignore */ }
-  if (sourceUrl.value.startsWith('blob:')) URL.revokeObjectURL(sourceUrl.value)
+  revokeBlobUrl(pendingSourceUrlToRevoke)
+  pendingSourceUrlToRevoke = null
+  revokeBlobUrl(sourceUrl.value)
 })
 
 function applyAspect(value: number | undefined) {
@@ -156,28 +168,93 @@ function applyAspect(value: number | undefined) {
   try { cropperInstance?.setAspectRatio?.(value ?? NaN) } catch { /* ignore */ }
 }
 
-function getCurrentRotation(): number {
-  const rawRotation = Number(
-    cropperInstance?.getData?.(true)?.rotate
-      ?? cropperInstance?.getImageData?.().rotate
-      ?? 0,
-  )
-  return Number.isFinite(rawRotation) ? rawRotation : 0
+function normalizeQuarterTurn(delta: number): 0 | 90 | 180 | 270 {
+  const snapped = Math.round(delta / 90) * 90
+  const normalized = ((snapped % 360) + 360) % 360
+  if (normalized === 90 || normalized === 180 || normalized === 270) {
+    return normalized
+  }
+  return 0
 }
 
-function rotate(delta: number) {
-  if (!cropperInstance) return
+async function buildRotatedSourceUrl(imageEl: HTMLImageElement, delta: number): Promise<string | null> {
+  const turn = normalizeQuarterTurn(delta)
+  if (!turn) return null
+
+  const sourceWidth = imageEl.naturalWidth || imageEl.width
+  const sourceHeight = imageEl.naturalHeight || imageEl.height
+  if (!sourceWidth || !sourceHeight) return null
+
+  const scale = Math.min(1, MAX_OUTPUT_DIMENSION / Math.max(sourceWidth, sourceHeight))
+  const drawWidth = Math.max(1, Math.round(sourceWidth * scale))
+  const drawHeight = Math.max(1, Math.round(sourceHeight * scale))
+  const swapAxes = turn === 90 || turn === 270
+
+  const canvas = document.createElement('canvas')
+  canvas.width = swapAxes ? drawHeight : drawWidth
+  canvas.height = swapAxes ? drawWidth : drawHeight
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+
+  switch (turn) {
+    case 90:
+      ctx.translate(canvas.width, 0)
+      ctx.rotate(Math.PI / 2)
+      break
+    case 180:
+      ctx.translate(canvas.width, canvas.height)
+      ctx.rotate(Math.PI)
+      break
+    case 270:
+      ctx.translate(0, canvas.height)
+      ctx.rotate(-Math.PI / 2)
+      break
+  }
+
+  ctx.drawImage(imageEl, 0, 0, drawWidth, drawHeight)
+
+  const blob = await new Promise<Blob | null>((resolve) => {
+    try {
+      canvas.toBlob((out) => resolve(out), 'image/jpeg', 0.95)
+    } catch {
+      resolve(null)
+    }
+  })
+
+  return blob ? URL.createObjectURL(blob) : null
+}
+
+async function rotate(delta: number) {
+  if (!cropperInstance || !imgRef.value || isTransformingImage.value) return
+  isTransformingImage.value = true
   try {
-    const nextRotation = getCurrentRotation() + delta
-    // Rebuild Cropper's transform state from a clean baseline after each
-    // quarter turn. This prevents stale canvas/crop-box geometry from the
-    // previous orientation from leaking into the next one.
-    cropperInstance.reset?.()
-    cropperInstance.rotateTo?.(nextRotation)
-    cropperInstance.crop?.()
-    cropperInstance.setAspectRatio?.(aspectRatio.value ?? NaN)
+    const nextUrl = await buildRotatedSourceUrl(imgRef.value, delta)
+    if (!nextUrl) throw new Error('rotate-source-failed')
+
+    const previousUrl = sourceUrl.value
+    try { cropperInstance.destroy?.() } catch { /* ignore */ }
+    cropperInstance = null
+    imgLoaded.value = false
+    loadError.value = null
+    sourceUrl.value = nextUrl
+
+    if (previousUrl !== nextUrl) {
+      revokeBlobUrl(pendingSourceUrlToRevoke)
+      pendingSourceUrlToRevoke = previousUrl
+    }
+
+    await nextTick()
   } catch {
-    try { cropperInstance.rotate?.(delta) } catch { /* ignore */ }
+    try {
+      cropperInstance?.rotate?.(delta)
+      cropperInstance?.setAspectRatio?.(aspectRatio.value ?? NaN)
+    } catch { /* ignore */ }
+  } finally {
+    isTransformingImage.value = false
   }
 }
 function resetCrop() {
