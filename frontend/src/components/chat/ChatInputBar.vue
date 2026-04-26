@@ -174,6 +174,8 @@
         :class="{ 'is-active': isStickerPickerOpen }"
         v-ripple
         :aria-label="isStickerPickerOpen ? 'بازگشت به کیبورد' : 'باز کردن پنل استیکر'"
+        @mousedown.prevent="prepareStickerToggle"
+        @touchstart="prepareStickerToggle"
         @click="toggleStickerPicker"
       >
         <svg
@@ -592,6 +594,20 @@ function toggleStickerPicker() {
 
   lockComposerInsetHeight(lastKnownKeyboardHeight.value)
   setStickerPickerOpen(true)
+}
+
+function prepareStickerToggle() {
+  if (props.isDeleted) return
+
+  if (isStickerPickerOpen.value) {
+    lockComposerInsetHeight(stickerPickerHeight.value)
+    return
+  }
+
+  if (document.activeElement === messageInputRef.value || keyboardHeight.value >= KEYBOARD_OPEN_THRESHOLD) {
+    captureSelection()
+    lockComposerInsetHeight()
+  }
 }
 
 function handleToggleAttachment() {
