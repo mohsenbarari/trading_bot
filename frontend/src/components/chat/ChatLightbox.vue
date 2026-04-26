@@ -408,6 +408,19 @@ function getStageItemStyle(index: number): CSSProperties {
   const compositeOffset = index - activeIndex + dragRatio
   const distance = Math.abs(compositeOffset)
 
+  // Keep the active media flat at rest. Pushing the current card toward the
+  // camera with translateZ() makes extreme crops look artificially zoomed and
+  // can clip edges inside the constrained stage viewport.
+  if (index === activeIndex && Math.abs(dragRatio) < 0.001) {
+    return {
+      opacity: '1',
+      transform: 'translate3d(0, 0, 0) rotateY(0deg) scale(1)',
+      filter: 'none',
+      zIndex: '200',
+      pointerEvents: 'auto',
+    }
+  }
+
   const opacity = Math.max(0, 1 - distance * 0.42)
   const scale = Math.max(0.78, 1 - distance * 0.12)
   const rotateY = compositeOffset * -26
