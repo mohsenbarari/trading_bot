@@ -477,6 +477,10 @@ function getActiveMediaStyle(item: LightboxItem, index: number): CSSProperties {
     return {}
   }
 
+  if (!isCurrentMediaZoomed.value && Math.abs(mediaZoomX.value) < 0.01 && Math.abs(mediaZoomY.value) < 0.01) {
+    return {}
+  }
+
   return {
     transform: `translate3d(${mediaZoomX.value}px, ${mediaZoomY.value}px, 0) scale(${mediaZoomScale.value})`,
     transition: mediaGestureMode.value ? 'none' : 'transform 0.24s cubic-bezier(0.22, 1, 0.36, 1)',
