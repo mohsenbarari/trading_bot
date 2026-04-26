@@ -276,7 +276,7 @@ const keyboardHeight = ref(0)
 const lastKnownKeyboardHeight = ref(0)
 const viewportBaseHeight = ref(0)
 const pendingPickerOpenAfterKeyboardClose = ref(false)
-const pendingKeyboardSpacerHeight = ref(0)
+const lockedComposerInsetHeight = ref(0)
 const pendingKeyboardReturn = ref(false)
 let pendingPickerOpenTimer: number | null = null
 
@@ -294,7 +294,11 @@ const canSubmit = computed(() => Boolean(messageInput.value.trim()))
 const isStickerPickerOpen = computed(() => Boolean(props.stickerPickerOpen))
 const stickerCount = computed(() => countEmojiStickerOccurrences(messageInput.value))
 const stickerPickerHeight = computed(() => {
-  const measuredHeight = keyboardHeight.value > 0 ? keyboardHeight.value : lastKnownKeyboardHeight.value
+  if (lockedComposerInsetHeight.value > 0) {
+    return lockedComposerInsetHeight.value
+  }
+
+  const measuredHeight = getMeasuredKeyboardInset()
   if (measuredHeight > 0) {
     return measuredHeight
   }
@@ -312,11 +316,14 @@ const stickerPickerHeight = computed(() => {
 const pickerTransitionSpacerHeight = computed(() => {
   if (isStickerPickerOpen.value) return 0
 
-  if (pendingPickerOpenAfterKeyboardClose.value && lastKnownKeyboardHeight.value > 0) {
-    return lastKnownKeyboardHeight.value
+  if ((pendingPickerOpenAfterKeyboardClose.value || pendingKeyboardReturn.value) && lockedComposerInsetHeight.value > 0) {
+    return Math.max(
+      lockedComposerInsetHeight.value - Math.min(keyboardHeight.value, lockedComposerInsetHeight.value),
+      0,
+    )
   }
 
-  return pendingKeyboardSpacerHeight.value > 0 ? pendingKeyboardSpacerHeight.value : 0
+  return 0
 })
 
 const summarizeMessage = (message: any | null) => {
@@ -397,11 +404,35 @@ function shouldRefreshViewportBaseHeight() {
     && !hasComposerFocus()
 }
 
+function getMeasuredKeyboardInset() {
+  if (typeof window === 'undefined') {
+    return Math.max(keyboardHeight.value, lastKnownKeyboardHeight.value)
+  }
+
+  const visualViewport = getVisualViewport()
+  const currentViewportHeight = visualViewport?.height ?? window.innerHeight
+  const offsetTop = visualViewport?.offsetTop ?? 0
+  const fullHeightCandidate = currentViewportHeight + offsetTop
+  const inferredHeight = Math.max(
+    0,
+    Math.round((viewportBaseHeight.value || fullHeightCandidate) - fullHeightCandidate),
+  )
+
+  return Math.max(keyboardHeight.value, inferredHeight, lastKnownKeyboardHeight.value)
+}
+
+function lockComposerInsetHeight(preferredHeight = 0) {
+  const nextHeight = preferredHeight > 0 ? preferredHeight : getMeasuredKeyboardInset()
+  if (nextHeight > 0) {
+    lockedComposerInsetHeight.value = nextHeight
+  }
+  return nextHeight
+}
+
 function openStickerPickerAfterKeyboardClose() {
   clearPendingPickerTimer()
   pendingPickerOpenAfterKeyboardClose.value = false
   pendingKeyboardReturn.value = false
-  pendingKeyboardSpacerHeight.value = 0
   setStickerPickerOpen(true)
 }
 
@@ -422,8 +453,23 @@ function updateKeyboardMetrics() {
 
   if (nextKeyboardHeight >= KEYBOARD_OPEN_THRESHOLD) {
     lastKnownKeyboardHeight.value = nextKeyboardHeight
-    pendingKeyboardSpacerHeight.value = 0
-    pendingKeyboardReturn.value = false
+    if (pendingKeyboardReturn.value && lockedComposerInsetHeight.value > 0) {
+      if (nextKeyboardHeight >= Math.max(lockedComposerInsetHeight.value - KEYBOARD_CLOSE_THRESHOLD, KEYBOARD_OPEN_THRESHOLD)) {
+        pendingKeyboardReturn.value = false
+        lockedComposerInsetHeight.value = 0
+      }
+    } else {
+      pendingKeyboardReturn.value = false
+      lockedComposerInsetHeight.value = 0
+    }
+  } else if (
+    nextKeyboardHeight <= KEYBOARD_CLOSE_THRESHOLD
+    && !isStickerPickerOpen.value
+    && !pendingPickerOpenAfterKeyboardClose.value
+    && !pendingKeyboardReturn.value
+    && !hasComposerFocus()
+  ) {
+    lockedComposerInsetHeight.value = 0
   }
 
   if (pendingPickerOpenAfterKeyboardClose.value && nextKeyboardHeight <= KEYBOARD_CLOSE_THRESHOLD) {
@@ -482,6 +528,7 @@ watch(() => props.editingMessage, (message) => {
   if (message) {
     pendingPickerOpenAfterKeyboardClose.value = false
     pendingKeyboardReturn.value = false
+    lockedComposerInsetHeight.value = 0
     clearPendingPickerTimer()
     emit('update:stickerPickerOpen', false)
   }
@@ -491,6 +538,7 @@ watch(() => props.isSelectionMode, (isSelectionEnabled) => {
   if (isSelectionEnabled) {
     pendingPickerOpenAfterKeyboardClose.value = false
     pendingKeyboardReturn.value = false
+    lockedComposerInsetHeight.value = 0
     clearPendingPickerTimer()
     emit('update:stickerPickerOpen', false)
   }
@@ -498,12 +546,14 @@ watch(() => props.isSelectionMode, (isSelectionEnabled) => {
 
 watch(() => props.stickerPickerOpen, (isOpen) => {
   if (isOpen) {
-    pendingKeyboardSpacerHeight.value = 0
     pendingKeyboardReturn.value = false
     return
   }
   pendingPickerOpenAfterKeyboardClose.value = false
   clearPendingPickerTimer()
+  if (!pendingKeyboardReturn.value) {
+    lockedComposerInsetHeight.value = 0
+  }
 })
 
 function setStickerPickerOpen(nextValue: boolean) {
@@ -516,10 +566,8 @@ function toggleStickerPicker() {
   if (isStickerPickerOpen.value) {
     pendingPickerOpenAfterKeyboardClose.value = false
     clearPendingPickerTimer()
+    lockComposerInsetHeight(stickerPickerHeight.value)
     pendingKeyboardReturn.value = true
-    pendingKeyboardSpacerHeight.value = lastKnownKeyboardHeight.value > 0
-      ? stickerPickerHeight.value
-      : 0
     focusInput()
     return
   }
@@ -528,6 +576,7 @@ function toggleStickerPicker() {
   const keyboardLooksOpen = document.activeElement === messageInputRef.value || keyboardHeight.value >= KEYBOARD_OPEN_THRESHOLD
 
   if (keyboardLooksOpen) {
+    lockComposerInsetHeight()
     pendingPickerOpenAfterKeyboardClose.value = true
     pendingKeyboardReturn.value = false
     clearPendingPickerTimer()
@@ -541,12 +590,13 @@ function toggleStickerPicker() {
     return
   }
 
+  lockComposerInsetHeight(lastKnownKeyboardHeight.value)
   setStickerPickerOpen(true)
 }
 
 function handleToggleAttachment() {
   pendingKeyboardReturn.value = false
-  pendingKeyboardSpacerHeight.value = 0
+  lockedComposerInsetHeight.value = 0
   setStickerPickerOpen(false)
   emit('toggle-attachment')
 }
@@ -556,6 +606,7 @@ function handleTextareaFocus() {
   pendingPickerOpenAfterKeyboardClose.value = false
   clearPendingPickerTimer()
   if (isStickerPickerOpen.value) {
+    lockComposerInsetHeight(stickerPickerHeight.value)
     pendingKeyboardReturn.value = true
     setStickerPickerOpen(false)
   }
