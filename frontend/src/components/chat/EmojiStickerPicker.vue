@@ -28,12 +28,6 @@
           class="picker-section"
           :data-category-id="category.id"
         >
-          <div class="picker-section-header">
-            <span class="picker-section-icon">{{ category.icon }}</span>
-            <span class="picker-section-label">{{ category.label }}</span>
-            <span class="picker-section-count">{{ category.emojis.length }}</span>
-          </div>
-
           <div class="picker-grid" role="list">
             <button
               v-for="entry in category.emojis"
@@ -315,38 +309,13 @@ watch(() => props.currentUserId, () => {
 .picker-grid-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 0 10px 10px;
+  padding: 4px 10px 10px;
   scroll-behavior: smooth;
   overscroll-behavior: contain;
 }
 
 .picker-section + .picker-section {
-  margin-top: 8px;
-}
-
-.picker-section-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px 8px;
-}
-
-.picker-section-icon {
-  font-size: 16px;
-  line-height: 1;
-}
-
-.picker-section-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: #334155;
-}
-
-.picker-section-count {
-  margin-right: auto;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  color: #94a3b8;
+  margin-top: 10px;
 }
 
 .picker-grid {

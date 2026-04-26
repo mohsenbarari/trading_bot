@@ -214,6 +214,12 @@
       @insert="insertSticker"
       @backspace="deleteComposerBackward"
     />
+    <div
+      v-if="pickerTransitionSpacerHeight > 0"
+      class="picker-transition-spacer"
+      :style="{ height: `${pickerTransitionSpacerHeight}px` }"
+      aria-hidden="true"
+    ></div>
   </div>
 </template>
 
@@ -270,6 +276,7 @@ const keyboardHeight = ref(0)
 const lastKnownKeyboardHeight = ref(0)
 const viewportBaseHeight = ref(0)
 const pendingPickerOpenAfterKeyboardClose = ref(false)
+const pendingKeyboardSpacerHeight = ref(0)
 let pendingPickerOpenTimer: number | null = null
 
 type VisualViewportWithEvents = VisualViewport & {
@@ -300,6 +307,15 @@ const stickerPickerHeight = computed(() => {
     MAX_PICKER_FALLBACK_HEIGHT,
     DEFAULT_PICKER_HEIGHT,
   )
+})
+const pickerTransitionSpacerHeight = computed(() => {
+  if (isStickerPickerOpen.value) return 0
+
+  if (pendingPickerOpenAfterKeyboardClose.value && lastKnownKeyboardHeight.value > 0) {
+    return lastKnownKeyboardHeight.value
+  }
+
+  return pendingKeyboardSpacerHeight.value > 0 ? pendingKeyboardSpacerHeight.value : 0
 })
 
 const summarizeMessage = (message: any | null) => {
@@ -372,6 +388,7 @@ function getVisualViewport() {
 function openStickerPickerAfterKeyboardClose() {
   clearPendingPickerTimer()
   pendingPickerOpenAfterKeyboardClose.value = false
+  pendingKeyboardSpacerHeight.value = 0
   setStickerPickerOpen(true)
 }
 
@@ -392,6 +409,7 @@ function updateKeyboardMetrics() {
 
   if (nextKeyboardHeight >= KEYBOARD_OPEN_THRESHOLD) {
     lastKnownKeyboardHeight.value = nextKeyboardHeight
+    pendingKeyboardSpacerHeight.value = 0
   }
 
   if (pendingPickerOpenAfterKeyboardClose.value && nextKeyboardHeight <= KEYBOARD_CLOSE_THRESHOLD) {
@@ -463,7 +481,10 @@ watch(() => props.isSelectionMode, (isSelectionEnabled) => {
 })
 
 watch(() => props.stickerPickerOpen, (isOpen) => {
-  if (isOpen) return
+  if (isOpen) {
+    pendingKeyboardSpacerHeight.value = 0
+    return
+  }
   pendingPickerOpenAfterKeyboardClose.value = false
   clearPendingPickerTimer()
 })
@@ -478,6 +499,9 @@ function toggleStickerPicker() {
   if (isStickerPickerOpen.value) {
     pendingPickerOpenAfterKeyboardClose.value = false
     clearPendingPickerTimer()
+    pendingKeyboardSpacerHeight.value = lastKnownKeyboardHeight.value > 0
+      ? stickerPickerHeight.value
+      : 0
     focusInput()
     return
   }
@@ -728,6 +752,14 @@ const sendMessage = () => {
 
 .input-area.picker-open {
   padding-bottom: 0;
+}
+
+.picker-transition-spacer {
+  margin: 0 -12px 0;
+  background:
+    radial-gradient(circle at top right, rgba(51, 144, 236, 0.12), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 251, 0.98));
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
 }
 
 .input-container {
