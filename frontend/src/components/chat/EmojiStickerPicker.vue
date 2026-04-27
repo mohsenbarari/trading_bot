@@ -92,7 +92,7 @@ const props = withDefaults(defineProps<{
   currentStickerCount?: number
   maxStickerCount?: number
   closeOnSelect?: boolean
-  panelHeight?: number | null
+  panelHeight?: number | string | null
   disableTransition?: boolean
 }>(), {
   currentStickerCount: 0,
@@ -121,13 +121,16 @@ const categories = computed<EmojiStickerCategory[]>(() => {
 
 const isLimitReached = computed(() => props.currentStickerCount >= props.maxStickerCount)
 const pickerStyle = computed(() => {
-  if (!props.panelHeight || !Number.isFinite(props.panelHeight)) {
-    return undefined
+  const raw = props.panelHeight
+  if (raw == null) return undefined
+  if (typeof raw === 'number') {
+    if (!Number.isFinite(raw)) return undefined
+    return { height: `${raw}px` }
   }
-
-  return {
-    height: `${props.panelHeight}px`,
-  }
+  // CSS expression string (e.g. "max(0px, calc(300px - env(keyboard-inset-height, 0px)))")
+  const expr = String(raw).trim()
+  if (!expr) return undefined
+  return { height: expr }
 })
 
 function setSectionRef(categoryId: string, element: HTMLElement | null) {
