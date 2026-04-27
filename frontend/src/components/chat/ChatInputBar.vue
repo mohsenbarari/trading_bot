@@ -208,7 +208,7 @@
       </button>
     </div>
     <EmojiStickerPicker
-      :open="isStickerPickerOpen"
+      :open="pickerSlotActive"
       :currentUserId="currentUserId"
       :currentStickerCount="stickerCount"
       :maxStickerCount="MAX_STICKERS_PER_MESSAGE"
@@ -308,6 +308,7 @@ const pendingPickerOpenAfterKeyboardClose = ref(false)
 const lockedComposerInsetHeight = ref(0)
 const pendingKeyboardReturn = ref(false)
 const disablePickerTransition = ref(false)
+const keyboardInsetEnvSupported = ref(false)
 let pendingPickerOpenTimer: number | null = null
 let pendingTextareaFocusScrollSnapshot: ScrollSnapshotEntry[] | null = null
 
@@ -383,7 +384,8 @@ const messageInput = computed({
 const canSubmit = computed(() => Boolean(messageInput.value.trim()))
 const isStickerPickerOpen = computed(() => Boolean(props.stickerPickerOpen))
 const stickerCount = computed(() => countEmojiStickerOccurrences(messageInput.value))
-const stickerPickerHeight = computed(() => {
+// Numeric target height for the picker panel (used as the locked keyboard slot size).
+const stickerPickerTargetHeight = computed(() => {
   if (lockedComposerInsetHeight.value > 0) {
     return lockedComposerInsetHeight.value
   }
@@ -403,16 +405,43 @@ const stickerPickerHeight = computed(() => {
     DEFAULT_PICKER_HEIGHT,
   )
 })
-const pickerTransitionSpacerHeight = computed(() => {
-  if (lockedComposerInsetHeight.value <= 0 || isStickerPickerOpen.value) return 0
 
+// Whether the picker should currently occupy the bottom inset slot at all.
+// True when the picker is open OR we are mid-swap with the keyboard.
+const pickerSlotActive = computed(() => {
+  return isStickerPickerOpen.value
+    || pendingPickerOpenAfterKeyboardClose.value
+    || pendingKeyboardReturn.value
+})
+
+// Final CSS height for the picker.
+// On modern Chrome (with interactive-widget=resizes-content), env(keyboard-inset-height)
+// animates SMOOTHLY in lock-step with the keyboard. Subtracting it from the locked target
+// gives a picker that always exactly fills (target - keyboard) — so the input row's Y
+// position stays stable in both swap directions with zero JS frame lag.
+const stickerPickerHeight = computed<number | string>(() => {
+  if (!pickerSlotActive.value) return 0
+  const target = stickerPickerTargetHeight.value
+  if (target <= 0) return 0
+
+  if (keyboardInsetEnvSupported.value) {
+    return `max(0px, calc(${target}px - env(keyboard-inset-height, 0px)))`
+  }
+  // Fallback: use the JS-measured keyboard height. Less smooth but still correct at rest.
+  return Math.max(0, target - keyboardHeight.value)
+})
+
+// The legacy spacer is no longer needed when env() is supported — the picker itself
+// fills the inset slot smoothly. Only kept as a safety net for browsers without env().
+const pickerTransitionSpacerHeight = computed(() => {
+  if (keyboardInsetEnvSupported.value) return 0
+  if (lockedComposerInsetHeight.value <= 0 || isStickerPickerOpen.value) return 0
   if (pendingPickerOpenAfterKeyboardClose.value || pendingKeyboardReturn.value) {
     return Math.max(
       lockedComposerInsetHeight.value - Math.min(keyboardHeight.value, lockedComposerInsetHeight.value),
       0,
     )
   }
-
   return 0
 })
 
@@ -593,7 +622,7 @@ function captureDebugState(eventName: string, persistEvent = true) {
     keyboardHeight: Math.round(keyboardHeight.value),
     lastKnownKeyboardHeight: Math.round(lastKnownKeyboardHeight.value),
     lockedComposerInsetHeight: Math.round(lockedComposerInsetHeight.value),
-    panelHeight: Math.round(stickerPickerHeight.value),
+    panelHeight: Math.round(stickerPickerTargetHeight.value),
     spacerHeight: Math.round(pickerTransitionSpacerHeight.value),
     isPickerOpen: isStickerPickerOpen.value,
     pendingPickerOpen: pendingPickerOpenAfterKeyboardClose.value,
@@ -714,6 +743,16 @@ function openStickerPickerAfterKeyboardClose() {
   })
 }
 
+function finalizeKeyboardReturn() {
+  // Keyboard is fully open and the picker has shrunk to 0 via env(). Now release the slot.
+  pendingKeyboardReturn.value = false
+  lockedComposerInsetHeight.value = 0
+  disablePickerTransition.value = false
+  if (isStickerPickerOpen.value) {
+    setStickerPickerOpen(false)
+  }
+}
+
 function updateKeyboardMetrics() {
   if (typeof window === 'undefined') return
 
@@ -742,12 +781,7 @@ function updateKeyboardMetrics() {
   if (nextKeyboardHeight >= KEYBOARD_OPEN_THRESHOLD) {
     lastKnownKeyboardHeight.value = Math.max(lastKnownKeyboardHeight.value, nextKeyboardHeight)
     if (pendingKeyboardReturn.value) {
-      pendingKeyboardReturn.value = false
-      lockedComposerInsetHeight.value = 0
-      disablePickerTransition.value = false
-      if (isStickerPickerOpen.value) {
-        setStickerPickerOpen(false)
-      }
+      finalizeKeyboardReturn()
     } else {
       pendingKeyboardReturn.value = false
       lockedComposerInsetHeight.value = 0
@@ -872,37 +906,48 @@ function toggleStickerPicker() {
   captureDebugState('emoji-toggle')
 
   if (isStickerPickerOpen.value) {
+    // Picker → Keyboard. Keep picker mounted; env(keyboard-inset-height) will smoothly
+    // shrink it from `target` down to 0 as the keyboard slides up. Once the keyboard is
+    // fully open, updateKeyboardMetrics() calls finalizeKeyboardReturn() which unmounts.
     pendingPickerOpenAfterKeyboardClose.value = false
     clearPendingPickerTimer()
-    lockComposerInsetHeight(stickerPickerHeight.value)
+    lockComposerInsetHeight(stickerPickerTargetHeight.value)
     pendingKeyboardReturn.value = true
     disablePickerTransition.value = true
-    setStickerPickerOpen(false)
+    setStickerPickerOpen(false) // pickerSlotActive stays true via pendingKeyboardReturn
     focusInput()
     captureDebugState('keyboard-return-requested')
     return
   }
 
   captureSelection()
-  const keyboardLooksOpen = document.activeElement === messageInputRef.value || keyboardHeight.value >= KEYBOARD_OPEN_THRESHOLD
+  const keyboardLooksOpen = document.activeElement === messageInputRef.value
+    || keyboardHeight.value >= KEYBOARD_OPEN_THRESHOLD
 
   if (keyboardLooksOpen) {
+    // Keyboard → Picker. Lock the slot at the current keyboard height, mount the picker
+    // immediately (it renders at height 0 because env(keyboard-inset-height) == target),
+    // then blur to start the keyboard close animation. As env() decreases the picker grows
+    // smoothly to fill the slot — zero JS-driven jump.
     lockComposerInsetHeight()
     pendingPickerOpenAfterKeyboardClose.value = true
     pendingKeyboardReturn.value = false
     disablePickerTransition.value = true
     clearPendingPickerTimer()
     blurInput()
+    // Safety net: if for some reason the resize event never fires (extension WebViews,
+    // some embedded browsers), still finalize the open after the typical animation.
     pendingPickerOpenTimer = window.setTimeout(() => {
       updateKeyboardMetrics()
       if (pendingPickerOpenAfterKeyboardClose.value && keyboardHeight.value <= KEYBOARD_CLOSE_THRESHOLD) {
         openStickerPickerAfterKeyboardClose()
       }
-    }, 220)
+    }, 320)
     captureDebugState('picker-open-requested')
     return
   }
 
+  // Direct open with no keyboard — just mount and show.
   lockComposerInsetHeight(lastKnownKeyboardHeight.value)
   disablePickerTransition.value = false
   setStickerPickerOpen(true)
@@ -915,7 +960,7 @@ function prepareStickerToggle() {
   captureDebugState('emoji-press')
 
   if (isStickerPickerOpen.value) {
-    lockComposerInsetHeight(stickerPickerHeight.value)
+    lockComposerInsetHeight(stickerPickerTargetHeight.value)
     return
   }
 
@@ -941,7 +986,8 @@ function handleTextareaFocus() {
   pendingPickerOpenAfterKeyboardClose.value = false
   clearPendingPickerTimer()
   if (isStickerPickerOpen.value) {
-    lockComposerInsetHeight(stickerPickerHeight.value)
+    // Direct focus on textarea while picker is open: same as picker→keyboard swap.
+    lockComposerInsetHeight(stickerPickerTargetHeight.value)
     pendingKeyboardReturn.value = true
     disablePickerTransition.value = true
     setStickerPickerOpen(false)
@@ -955,6 +1001,16 @@ onMounted(() => {
 
   isChatDebugEnabled.value = resolveChatDebugEnabled()
   syncDebugWindowHandle()
+
+  // Detect support for env(keyboard-inset-height). When supported (Chrome 108+ Android,
+  // Edge, etc.), the browser drives picker height smoothly via CSS — no JS frame lag.
+  try {
+    keyboardInsetEnvSupported.value = typeof CSS !== 'undefined'
+      && typeof CSS.supports === 'function'
+      && CSS.supports('height: env(keyboard-inset-height)')
+  } catch {
+    keyboardInsetEnvSupported.value = false
+  }
 
   syncViewportBaseHeight(getViewportMetrics(), { force: true })
 
