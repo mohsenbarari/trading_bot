@@ -219,6 +219,13 @@
       @insert="insertSticker"
       @backspace="deleteComposerBackward"
     />
+    <!--
+      Hidden probe whose height tracks env(keyboard-inset-height) exactly.
+      We measure THIS element via ResizeObserver instead of inferring keyboard height
+      from visualViewport, guaranteeing the picker target matches env() pixel-for-pixel
+      so the panel and the keyboard are always exactly the same height.
+    -->
+    <div ref="keyboardInsetProbeRef" class="keyboard-inset-probe" aria-hidden="true"></div>
     <div
       v-if="pickerTransitionSpacerHeight > 0"
       class="picker-transition-spacer"
@@ -293,6 +300,7 @@ const emit = defineEmits<{
 }>()
 
 const messageInputRef = ref<HTMLTextAreaElement | null>(null)
+const keyboardInsetProbeRef = ref<HTMLElement | null>(null)
 const composerSelectionStart = ref(0)
 const composerSelectionEnd = ref(0)
 const DEFAULT_PICKER_HEIGHT = 336
@@ -302,6 +310,8 @@ const KEYBOARD_OPEN_THRESHOLD = 120
 const KEYBOARD_CLOSE_THRESHOLD = 24
 const keyboardHeight = ref(0)
 const lastKnownKeyboardHeight = ref(0)
+const envKeyboardInset = ref(0)
+const envKeyboardInsetMax = ref(0)
 const viewportBaseHeight = ref(0)
 const viewportBaseWidth = ref(0)
 const pendingPickerOpenAfterKeyboardClose = ref(false)
@@ -311,6 +321,7 @@ const disablePickerTransition = ref(false)
 const keyboardInsetEnvSupported = ref(false)
 let pendingPickerOpenTimer: number | null = null
 let pendingTextareaFocusScrollSnapshot: ScrollSnapshotEntry[] | null = null
+let keyboardInsetResizeObserver: ResizeObserver | null = null
 
 type VisualViewportWithEvents = VisualViewport & {
   addEventListener: (type: 'resize' | 'scroll', listener: EventListenerOrEventListenerObject) => void
@@ -385,9 +396,17 @@ const canSubmit = computed(() => Boolean(messageInput.value.trim()))
 const isStickerPickerOpen = computed(() => Boolean(props.stickerPickerOpen))
 const stickerCount = computed(() => countEmojiStickerOccurrences(messageInput.value))
 // Numeric target height for the picker panel (used as the locked keyboard slot size).
+// Prefers the env(keyboard-inset-height) probe value when available — that is the
+// SAME source the browser will animate into the picker via env(), guaranteeing the
+// picker and keyboard always have IDENTICAL height with zero rounding mismatch.
 const stickerPickerTargetHeight = computed(() => {
   if (lockedComposerInsetHeight.value > 0) {
     return lockedComposerInsetHeight.value
+  }
+
+  // Use the largest env() value seen so far (= the keyboard's full open height) when supported.
+  if (keyboardInsetEnvSupported.value && envKeyboardInsetMax.value > 0) {
+    return envKeyboardInsetMax.value
   }
 
   const measuredHeight = getMeasuredKeyboardInset()
@@ -715,16 +734,38 @@ function getMeasuredKeyboardInset() {
     return Math.max(keyboardHeight.value, lastKnownKeyboardHeight.value)
   }
 
+  // Prefer env(keyboard-inset-height) probe — that's the authoritative value the browser
+  // will animate into the picker, so locking it as the target guarantees pixel-perfect
+  // matching between picker height and keyboard height.
+  if (keyboardInsetEnvSupported.value && envKeyboardInset.value > 0) {
+    return Math.max(envKeyboardInset.value, envKeyboardInsetMax.value)
+  }
+
   const metrics = getViewportMetrics()
   const inferredHeight = Math.max(
     0,
     Math.round(getViewportBaselineHeight(metrics) - metrics.fullHeightCandidate),
   )
 
-  return Math.max(keyboardHeight.value, inferredHeight, lastKnownKeyboardHeight.value)
+  return Math.max(
+    keyboardHeight.value,
+    inferredHeight,
+    lastKnownKeyboardHeight.value,
+    envKeyboardInsetMax.value,
+  )
 }
 
 function lockComposerInsetHeight(preferredHeight = 0) {
+  // When env() is supported, the env probe value is the authoritative source.
+  // Override any caller-provided preferredHeight with it so target == future env exactly.
+  if (keyboardInsetEnvSupported.value) {
+    const envValue = Math.max(envKeyboardInset.value, envKeyboardInsetMax.value)
+    if (envValue > 0) {
+      lockedComposerInsetHeight.value = envValue
+      return envValue
+    }
+  }
+
   const nextHeight = preferredHeight > 0 ? preferredHeight : getMeasuredKeyboardInset()
   if (nextHeight > 0) {
     lockedComposerInsetHeight.value = nextHeight
@@ -1022,6 +1063,29 @@ onMounted(() => {
   visualViewport?.addEventListener('resize', updateKeyboardMetrics)
   visualViewport?.addEventListener('scroll', updateKeyboardMetrics)
   window.addEventListener('resize', updateKeyboardMetrics)
+
+  // Watch the env(keyboard-inset-height) probe element. Its height is the EXACT same
+  // value the browser will subtract from the picker. By measuring it directly we
+  // eliminate the rounding/source mismatch between visualViewport-derived keyboard
+  // height and env() — making the picker pixel-perfect equal to the keyboard.
+  const probe = keyboardInsetProbeRef.value
+  if (probe && typeof ResizeObserver !== 'undefined') {
+    keyboardInsetResizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      const h = Math.round(entry.contentRect.height)
+      envKeyboardInset.value = h
+      if (h > envKeyboardInsetMax.value) envKeyboardInsetMax.value = h
+      // If the probe reports a non-zero env value, env() is genuinely supported on this engine.
+      if (h > 0) keyboardInsetEnvSupported.value = true
+      // Keep lastKnownKeyboardHeight in sync so other code paths see the same source.
+      if (h >= KEYBOARD_OPEN_THRESHOLD) {
+        lastKnownKeyboardHeight.value = Math.max(lastKnownKeyboardHeight.value, h)
+      }
+      captureDebugState('env-probe', false)
+    })
+    keyboardInsetResizeObserver.observe(probe)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -1034,6 +1098,11 @@ onBeforeUnmount(() => {
   visualViewport?.removeEventListener('resize', updateKeyboardMetrics)
   visualViewport?.removeEventListener('scroll', updateKeyboardMetrics)
   window.removeEventListener('resize', updateKeyboardMetrics)
+
+  if (keyboardInsetResizeObserver) {
+    keyboardInsetResizeObserver.disconnect()
+    keyboardInsetResizeObserver = null
+  }
 })
 
 function applyComposerValue(nextValue: string, nextSelectionStart: number, nextSelectionEnd = nextSelectionStart) {
@@ -1231,6 +1300,23 @@ const sendMessage = () => {
     radial-gradient(circle at top right, rgba(51, 144, 236, 0.12), transparent 34%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 251, 0.98));
   border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+/*
+  Hidden probe element. Its height tracks env(keyboard-inset-height) exactly,
+  including the smooth animation while the keyboard slides up/down. We measure
+  this via ResizeObserver and use the value as the authoritative keyboard height.
+  Position fixed off-screen so it cannot affect layout.
+*/
+.keyboard-inset-probe {
+  position: fixed;
+  left: -1px;
+  bottom: 0;
+  width: 1px;
+  height: env(keyboard-inset-height, 0px);
+  pointer-events: none;
+  visibility: hidden;
+  z-index: -1;
 }
 
 .chat-debug-panel {
