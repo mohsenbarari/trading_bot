@@ -515,10 +515,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
     primeMediaPreprocessTelemetry()
 
-    function getAdaptivePreprocessLimit(albumSize: number, mediaType: 'image' | 'video' | 'voice') {
+    function getAdaptivePreprocessLimit(albumSize: number, mediaType: 'image' | 'video' | 'voice' | 'document') {
         const capability = clientCapability
 
-        if (mediaType === 'voice') {
+        if (mediaType === 'voice' || mediaType === 'document') {
             if (capability.tier === 'strong') return 4
             if (capability.tier === 'mid') return 3
             return 2
@@ -550,10 +550,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
             : Math.max(1, Math.min(recommended + 1, 3))
     }
 
-    function getAdaptiveUploadLimit(albumSize: number, mediaType: 'image' | 'video' | 'voice') {
+    function getAdaptiveUploadLimit(albumSize: number, mediaType: 'image' | 'video' | 'voice' | 'document') {
         const capability = clientCapability
 
-        if (mediaType === 'voice') {
+        if (mediaType === 'voice' || mediaType === 'document') {
             return capability.tier === 'strong' ? 2 : 1
         }
 
@@ -726,7 +726,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
     function trackPreprocessEvent(payload: {
         mediaType: 'image' | 'video' | 'voice'
-        path: 'image_worker' | 'image_main_thread' | 'image_legacy_fallback' | 'image_edited_passthrough' | 'video_preview' | 'video_metadata_fallback' | 'voice_passthrough'
+        path: 'image_worker' | 'image_main_thread' | 'image_legacy_fallback' | 'image_edited_passthrough' | 'video_preview' | 'video_metadata_fallback' | 'voice_passthrough' | 'document_passthrough'
         status: 'success' | 'failed' | 'cancelled'
         startedAt: number
         batchSize: number
