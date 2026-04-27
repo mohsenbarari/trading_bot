@@ -221,6 +221,7 @@ const {
   downloadMedia,
   lightboxMedia,
   cancelUpload,
+  cancelDocumentDownload,
   handleMediaClick,
   setLightboxIndex,
   closeLightbox,
@@ -245,6 +246,11 @@ const handleCancelSend = (msg: any) => {
     cancelUpload(msg.id);
   }
 };
+
+const handleCancelDownload = (msg: Message) => {
+  if (msg.message_type !== 'document') return
+  cancelDocumentDownload(msg.id)
+}
 
 function closeLocationModal() {
   selectedLocation.value = null
@@ -1824,6 +1830,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
                 @location-click="handleLocationClick"
                 @download="downloadMedia"
                 @cancel-send="handleCancelSend"
+                @cancel-download="handleCancelDownload"
                 @reply-album-item="handleAlbumReplyItem"
                 @forward-album-item="handleAlbumForwardItem"
                 @delete-album-item="handleAlbumDeleteItem"

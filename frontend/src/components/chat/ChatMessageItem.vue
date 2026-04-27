@@ -240,12 +240,12 @@
       <!-- Document/File Message -->
       <template v-else-if="msg.message_type === 'document'">
         <div class="msg-document" :class="{ 'is-busy': isDocumentBusy }" @click.stop="!isDocumentBusy && $emit('download', msg)">
-          <div v-if="isDocumentBusy" class="doc-icon doc-uploading" @click.stop="msg.is_sending && $emit('cancel-send', msg)">
+          <div v-if="isDocumentBusy" class="doc-icon doc-uploading" @click.stop="handleDocumentBusyClick">
             <svg class="progress-ring-small" viewBox="0 0 36 36" style="width:36px;height:36px;">
               <circle class="ring-bg" cx="18" cy="18" r="16" stroke="rgba(255,255,255,0.3)" stroke-width="3" fill="none"></circle>
               <circle class="ring-fg" cx="18" cy="18" r="16" stroke="#fff" stroke-width="3" fill="none" :stroke-dasharray="`${docTransferProgress}, 100`" transform="rotate(-90 18 18)"></circle>
             </svg>
-            <div class="doc-cancel-icon">{{ msg.is_sending ? '✕' : '↓' }}</div>
+            <div class="doc-cancel-icon">✕</div>
           </div>
           <div v-else class="doc-icon" :class="docIconClass">
             <svg v-if="docExt === 'pdf'" viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h3v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z"/></svg>
@@ -350,6 +350,7 @@ const emit = defineEmits<{
   (e: 'location-click', msg: any): void
   (e: 'download', msg: any): void
   (e: 'cancel-send', msg: any): void
+  (e: 'cancel-download', msg: any): void
   (e: 'reply-album-item', msg: any): void
   (e: 'forward-album-item', msg: any): void
   (e: 'delete-album-item', msg: any): void
@@ -490,6 +491,18 @@ const docTransferProgress = computed(() => {
   if (props.msg.is_downloading) return props.msg.download_progress || 0
   return 0
 })
+
+function handleDocumentBusyClick() {
+  if (props.msg.is_sending) {
+    emit('cancel-send', props.msg)
+    return
+  }
+
+  if (props.msg.is_downloading) {
+    emit('cancel-download', props.msg)
+  }
+}
+
 const docStatusText = computed(() => {
   if (props.msg.is_sending) {
     return `${formatBytes(props.msg.upload_loaded || 0)} / ${formatBytes(props.msg.upload_total || docParsed.value?.size || 0)}`

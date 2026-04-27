@@ -11,6 +11,7 @@ import {
     type UploadEvent,
 } from '../../services/chatUploadBackground'
 import {
+    cancelDocumentDownload as backgroundCancelDocumentDownload,
     getCompletedDocumentDownloadUrl as backgroundGetCompletedDocumentDownloadUrl,
     getPendingDocumentDownloadsForUser as backgroundGetPendingDocumentDownloadsForUser,
     startDocumentDownload as backgroundStartDocumentDownload,
@@ -807,6 +808,17 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const msg = messages.value[index]
         if (msg && msg.is_sending && !msg.is_error) {
             messages.value.splice(index, 1)
+        }
+    }
+
+    function cancelDocumentDownload(messageId: number) {
+        backgroundCancelDocumentDownload(messageId)
+
+        const index = messages.value.findIndex(message => message.id === messageId)
+        const msg = index !== -1 ? messages.value[index] : null
+        if (msg) {
+            msg.is_downloading = false
+            msg.download_progress = 0
         }
     }
 
@@ -2036,6 +2048,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
     return {
         cancelUpload,
+        cancelDocumentDownload,
         imageCache,
         loadImageForMessage,
         scheduleMediaHydration,
