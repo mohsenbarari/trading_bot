@@ -228,12 +228,44 @@ const {
   handleMediaUploadWrapper
 } = mediaLogic
 
-const selectedLocation = ref<{ lat: number, lng: number } | null>(null)
+type NormalizedLocation = {
+  lat: number
+  lng: number
+  snapshot_id?: string | number
+}
+
+function normalizeLocationPayload(raw: unknown): NormalizedLocation | null {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+
+  const candidate = raw as Record<string, unknown>
+  const lat = Number(candidate.lat ?? candidate.latitude)
+  const lng = Number(candidate.lng ?? candidate.longitude)
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null
+  }
+
+  const normalized: NormalizedLocation = { lat, lng }
+  const snapshotId = candidate.snapshot_id
+  if (typeof snapshotId === 'string' || typeof snapshotId === 'number') {
+    normalized.snapshot_id = snapshotId
+  }
+
+  return normalized
+}
+
+const selectedLocation = ref<NormalizedLocation | null>(null)
 
 function handleLocationClick(msg: Message) {
   try {
     const loc = JSON.parse(msg.content)
-    selectedLocation.value = loc
+    const normalized = normalizeLocationPayload(loc)
+    if (!normalized) {
+      throw new Error('Invalid location payload')
+    }
+    selectedLocation.value = normalized
   } catch {
     console.error('Failed to parse location data')
   }
@@ -1337,7 +1369,10 @@ async function handleSendVoice(blob: Blob, durationMs: number) {
 
 async function handleSendLocation(lat: number, lng: number) {
   if (!selectedUserId.value) return
-  const content = JSON.stringify({ latitude: lat, longitude: lng })
+  const normalized = normalizeLocationPayload({ lat, lng })
+  if (!normalized) return
+
+  const content = JSON.stringify(normalized)
   try {
     const newMsg = await messagesLogic.apiFetch('/chat/send', {
       method: 'POST',
