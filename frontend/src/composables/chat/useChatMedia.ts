@@ -14,10 +14,18 @@ import {
     cancelDocumentDownload as backgroundCancelDocumentDownload,
     getCompletedDocumentDownloadUrl as backgroundGetCompletedDocumentDownloadUrl,
     getPendingDocumentDownloadsForUser as backgroundGetPendingDocumentDownloadsForUser,
+    restoreCompletedDocumentDownloadUrl as backgroundRestoreCompletedDocumentDownloadUrl,
     startDocumentDownload as backgroundStartDocumentDownload,
     subscribeToDocumentDownloads as backgroundSubscribeToDocumentDownloads,
     type DocumentDownloadEvent,
 } from '../../services/chatDocumentDownloadBackground'
+import {
+    getCachedAttachmentBlob,
+    persistObjectUrlToAttachmentCache,
+    putCachedAttachmentBlob,
+    restoreCachedAttachmentUrl,
+    setLiveAttachmentUrl,
+} from '../../utils/chatAttachmentCache'
 
 const CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const CHAT_MEDIA_MAX_UPLOAD_LABEL = '50MB'
@@ -450,6 +458,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
     const preprocessQueue: PreprocessJob[] = []
     const networkUploadQueue: UploadJob[] = []
     const pendingMediaLoads = new Map<string, Promise<string | null>>()
+    const pendingDocumentCacheRestores = new Set<string>()
     const pendingHydrationKeys = new Set<string>()
     const hydrationQueue: Array<{
         fileId: string
@@ -460,7 +469,6 @@ export function useChatMedia(options: UseChatMediaOptions) {
     }> = []
     let activeHydrationCount = 0
     let hydrationPumpScheduled = false
-    let imageDbPromise: Promise<IDBDatabase> | null = null
 
     function getMediaClientCapability(): MediaClientCapability {
         if (typeof navigator === 'undefined') {
@@ -824,39 +832,6 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
     // === IndexedDB Image Cache ===
     const imageCache = ref<Record<string, string>>({})
-    const DB_NAME = 'chat_image_cache'
-    const DB_VERSION = 1
-    const STORE_NAME = 'images'
-
-    function openImageDB(): Promise<IDBDatabase> {
-        if (imageDbPromise) {
-            return imageDbPromise
-        }
-
-        imageDbPromise = new Promise((resolve, reject) => {
-            const req = indexedDB.open(DB_NAME, DB_VERSION)
-            req.onupgradeneeded = (e) => {
-                const db = (e.target as IDBOpenDBRequest).result
-                if (!db.objectStoreNames.contains(STORE_NAME)) {
-                    db.createObjectStore(STORE_NAME)
-                }
-            }
-            req.onsuccess = () => {
-                const db = req.result
-                db.onversionchange = () => {
-                    db.close()
-                    imageDbPromise = null
-                }
-                resolve(db)
-            }
-            req.onerror = () => {
-                imageDbPromise = null
-                reject(req.error)
-            }
-        })
-
-        return imageDbPromise
-    }
 
     function setCachedMediaUrl(fileId: string, objectUrl: string) {
         const previousUrl = imageCache.value[fileId]
@@ -864,10 +839,16 @@ export function useChatMedia(options: UseChatMediaOptions) {
             return
         }
 
-        if (previousUrl && previousUrl !== objectUrl && previousUrl.startsWith('blob:')) {
+        if (
+            previousUrl
+            && previousUrl !== objectUrl
+            && previousUrl.startsWith('blob:')
+            && !messages.value.some(message => message.local_blob_url === previousUrl)
+        ) {
             URL.revokeObjectURL(previousUrl)
         }
 
+        setLiveAttachmentUrl(fileId, objectUrl)
         imageCache.value[fileId] = objectUrl
     }
 
@@ -939,35 +920,6 @@ export function useChatMedia(options: UseChatMediaOptions) {
         scheduleHydrationPump()
     }
 
-    async function getFromDB(key: string): Promise<Blob | null> {
-        try {
-            const db = await openImageDB()
-            return new Promise((resolve) => {
-                const tx = db.transaction(STORE_NAME, 'readonly')
-                const req = tx.objectStore(STORE_NAME).get(key)
-                req.onsuccess = () => resolve(req.result ?? null)
-                req.onerror = () => resolve(null)
-            })
-        } catch { return null }
-    }
-
-    async function saveToDB(key: string, blob: Blob): Promise<void> {
-        try {
-            const db = await openImageDB()
-            await new Promise<void>((resolve) => {
-                try {
-                    const tx = db.transaction(STORE_NAME, 'readwrite')
-                    tx.objectStore(STORE_NAME).put(blob, key)
-                    tx.oncomplete = () => resolve()
-                    tx.onerror = () => resolve()
-                } catch (e) {
-                    console.warn('IndexedDB put error, skipping cache:', e)
-                    resolve()
-                }
-            })
-        } catch { /* ignore */ }
-    }
-
     async function loadImageForMessage(content: string, type?: string, options: MediaHydrationOptions = {}): Promise<string | null> {
         const fileId = getFileId(content)
         if (!fileId) return null
@@ -982,7 +934,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         }
 
         const loadPromise = (async () => {
-            const cached = await getFromDB(fileId)
+            const cached = await getCachedAttachmentBlob(fileId)
             if (cached) {
                 const objectUrl = URL.createObjectURL(cached)
                 setCachedMediaUrl(fileId, objectUrl)
@@ -997,7 +949,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 const res = await fetch(`${apiBaseUrl}/api/chat/files/${fileId}?token=${jwtToken}`)
                 if (!res.ok) return null
                 const blob = await res.blob()
-                await saveToDB(fileId, blob)
+                await putCachedAttachmentBlob(fileId, blob)
                 const objectUrl = URL.createObjectURL(blob)
                 setCachedMediaUrl(fileId, objectUrl)
                 return objectUrl
@@ -1046,6 +998,17 @@ export function useChatMedia(options: UseChatMediaOptions) {
         document.body.removeChild(anchor)
     }
 
+    function openAttachmentUrl(url: string) {
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.target = '_blank'
+        anchor.rel = 'noopener noreferrer'
+        anchor.style.display = 'none'
+        document.body.appendChild(anchor)
+        anchor.click()
+        document.body.removeChild(anchor)
+    }
+
     function parseMediaPayload(content: string): Record<string, any> {
         if (!content || !content.startsWith('{')) return {}
         try {
@@ -1061,6 +1024,39 @@ export function useChatMedia(options: UseChatMediaOptions) {
         }
 
         return `${apiBaseUrl}/api/chat/files/${fileId}?token=${jwtToken}`
+    }
+
+    async function restoreDocumentUrlForMessage(message: Message): Promise<string> {
+        const fileId = getFileId(message.content)
+        if (!fileId) return ''
+
+        const existing = message.local_blob_url || imageCache.value[fileId] || backgroundGetCompletedDocumentDownloadUrl(fileId)
+        if (existing) {
+            setCachedMediaUrl(fileId, existing)
+            return existing
+        }
+
+        const restored = await backgroundRestoreCompletedDocumentDownloadUrl(fileId) || await restoreCachedAttachmentUrl(fileId)
+        if (!restored) return ''
+
+        setCachedMediaUrl(fileId, restored)
+        message.local_blob_url = restored
+        return restored
+    }
+
+    function scheduleDocumentCacheRestore(message: Message) {
+        if (message.message_type !== 'document') return
+
+        const fileId = getFileId(message.content)
+        if (!fileId || message.local_blob_url || imageCache.value[fileId] || pendingDocumentCacheRestores.has(fileId)) {
+            return
+        }
+
+        pendingDocumentCacheRestores.add(fileId)
+        void restoreDocumentUrlForMessage(message)
+            .finally(() => {
+                pendingDocumentCacheRestores.delete(fileId)
+            })
     }
 
     function getAlbumIndexFromMessage(msg: Message) {
@@ -1130,10 +1126,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const documentFileName = getDocumentFileName(msg)
 
         if (isDocument) {
-            const completedUrl = targetMsg.local_blob_url || backgroundGetCompletedDocumentDownloadUrl(fileId)
+            const completedUrl = await restoreDocumentUrlForMessage(targetMsg)
             if (completedUrl) {
                 targetMsg.local_blob_url = completedUrl
-                triggerBrowserDownload(completedUrl, documentFileName)
+                openAttachmentUrl(completedUrl)
                 return
             }
 
@@ -1167,11 +1163,12 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 const blob = await res.blob()
                 if (isDocument) {
                     const objectUrl = URL.createObjectURL(blob)
-                    triggerBrowserDownload(objectUrl, documentFileName)
-                    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+                    await putCachedAttachmentBlob(fileId, blob)
+                    setCachedMediaUrl(fileId, objectUrl)
+                    targetMsg.local_blob_url = objectUrl
                     return
                 }
-                await saveToDB(fileId, blob)
+                await putCachedAttachmentBlob(fileId, blob)
                 setCachedMediaUrl(fileId, URL.createObjectURL(blob))
                 return
             }
@@ -1193,11 +1190,12 @@ export function useChatMedia(options: UseChatMediaOptions) {
             const combinedBlob = new Blob(chunks as BlobPart[], { type: contentType })
             if (isDocument) {
                 const objectUrl = URL.createObjectURL(combinedBlob)
-                triggerBrowserDownload(objectUrl, documentFileName)
-                window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+                await putCachedAttachmentBlob(fileId, combinedBlob)
+                setCachedMediaUrl(fileId, objectUrl)
+                targetMsg.local_blob_url = objectUrl
                 return
             }
-            await saveToDB(fileId, combinedBlob)
+            await putCachedAttachmentBlob(fileId, combinedBlob)
             setCachedMediaUrl(fileId, URL.createObjectURL(combinedBlob))
         } catch (e) {
             console.error('Download failed:', e)
@@ -1926,6 +1924,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                     const payload = JSON.parse(server.content || '{}')
                     if (payload.file_id && event.localBlobUrl) {
                         setCachedMediaUrl(payload.file_id, event.localBlobUrl)
+                        void persistObjectUrlToAttachmentCache(payload.file_id, event.localBlobUrl)
                     }
                 } catch {
                     // non-JSON content — ignore
@@ -1976,6 +1975,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 target.is_downloading = false
                 target.download_progress = 100
                 target.local_blob_url = event.objectUrl
+                setCachedMediaUrl(event.fileId, event.objectUrl)
                 break
             }
             case 'error':
@@ -2021,7 +2021,11 @@ export function useChatMedia(options: UseChatMediaOptions) {
             const completedUrl = backgroundGetCompletedDocumentDownloadUrl(fileId)
             if (completedUrl) {
                 message.local_blob_url = completedUrl
+                setCachedMediaUrl(fileId, completedUrl)
+                continue
             }
+
+            scheduleDocumentCacheRestore(message)
         }
     }
 
