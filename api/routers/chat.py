@@ -723,7 +723,12 @@ async def upload_chat_media(
     allowed_types = [
         "image/jpeg", "image/png", "image/gif", "image/webp",
         "video/mp4", "video/webm", "video/quicktime", "video/x-matroska", "application/mp4", "video/x-m4v", "video/3gpp", "video/quicktime", "application/octet-stream",
-        "audio/mp4", "audio/webm", "audio/ogg", "audio/mpeg", "audio/aac", "audio/x-m4a", "audio/wav", "audio/x-wav"
+        "audio/mp4", "audio/webm", "audio/ogg", "audio/mpeg", "audio/aac", "audio/x-m4a", "audio/wav", "audio/x-wav",
+        "application/pdf", "text/plain", "text/csv", "application/json", "application/xml", "text/xml", "application/rtf",
+        "application/zip", "application/x-zip-compressed", "application/x-rar-compressed", "application/vnd.rar", "application/x-7z-compressed",
+        "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     ]
     
     base_content_type = file.content_type.split(";")[0].strip()
@@ -804,7 +809,10 @@ async def upload_chat_media(
     # برگرداندن شناسه، تامنیل و ابعاد تصویر
     result = {
         "file_id": chat_file.id,
-        "thumbnail": chat_file.thumbnail
+        "thumbnail": chat_file.thumbnail,
+        "file_name": chat_file.file_name,
+        "mime_type": chat_file.mime_type,
+        "size": chat_file.size,
     }
     if img_width and img_height:
         result["width"] = img_width

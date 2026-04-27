@@ -246,7 +246,7 @@
 
           <!-- File Tab -->
           <div v-if="activeTab === 'file'" class="tab-panel file-panel">
-            <input ref="fileInput" type="file" accept="*" style="display:none" @change="onFileSelected" />
+            <input ref="fileInput" type="file" accept="*" multiple style="display:none" @change="onFileSelected" />
 
             <button class="action-card" @click="fileInput?.click()">
               <div class="action-icon file-icon">

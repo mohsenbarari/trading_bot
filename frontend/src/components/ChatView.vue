@@ -1908,7 +1908,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       <AttachmentMenu
         v-model="showAttachmentMenu"
         @select-media="handleMediaUploadWrapper"
-        @select-file="handleMediaUploadWrapper"
+        @select-file="(file) => handleMediaUploadWrapper(file, null, 0, 1, { sendAsDocument: true })"
         @select-location="handleSendLocation"
       />
 

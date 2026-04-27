@@ -32,7 +32,7 @@ import type { Message } from '../types/chat'
 // Types
 // -----------------------------------------------------------------------------
 
-export type UploadMsgType = 'image' | 'video' | 'voice'
+export type UploadMsgType = 'image' | 'video' | 'voice' | 'document'
 
 export type UploadPhase =
     | 'queued'
@@ -50,6 +50,7 @@ export interface PendingUpload {
     msgType: UploadMsgType
     file: Blob // preprocessed blob — IndexedDB can store Blobs/Files
     fileName: string
+    mimeType: string
     thumbnail: string // base64 data URL
     width: number
     height: number
@@ -77,6 +78,7 @@ export interface SubmitUploadParams {
     msgType: UploadMsgType
     file: Blob
     fileName: string
+    mimeType: string
     thumbnail: string
     width: number
     height: number
@@ -504,20 +506,28 @@ function buildContent(upload: PendingUpload, phase: 'preview' | 'final'): string
         payload.placeholder = true
     }
 
-    payload.thumbnail =
-        phase === 'final' ? upload.serverThumbnail || upload.thumbnail : upload.thumbnail
+    if (upload.msgType !== 'document' && upload.thumbnail) {
+        payload.thumbnail =
+            phase === 'final' ? upload.serverThumbnail || upload.thumbnail : upload.thumbnail
+    }
 
-    if (upload.width && upload.height) {
+    if (upload.msgType === 'document') {
+        payload.file_name = upload.fileName
+        payload.mime_type = upload.mimeType || 'application/octet-stream'
+        payload.size = upload.file.size
+    }
+
+    if (upload.msgType !== 'document' && upload.width && upload.height) {
         payload.width = upload.width
         payload.height = upload.height
     }
 
-    if (upload.albumId) {
+    if (upload.msgType !== 'document' && upload.albumId) {
         payload.album_id = upload.albumId
         payload.album_index = upload.albumIndex
     }
 
-    if (typeof upload.durationMs === 'number') {
+    if (upload.msgType !== 'document' && typeof upload.durationMs === 'number') {
         payload.durationMs = upload.durationMs
     }
 
@@ -567,7 +577,9 @@ async function runUpload(upload: PendingUpload): Promise<void> {
 
             const formData = new FormData()
             formData.append('file', upload.file, upload.fileName)
-            formData.append('thumbnail', upload.thumbnail)
+            if (upload.thumbnail) {
+                formData.append('thumbnail', upload.thumbnail)
+            }
 
             xhr.open('POST', `${config!.apiBaseUrl}/api/chat/upload-media`)
             xhr.timeout = XHR_UPLOAD_TIMEOUT_MS
@@ -638,6 +650,12 @@ async function runUpload(upload: PendingUpload): Promise<void> {
         if (abortFlags.has(upload.id)) return
 
         upload.fileId = data.file_id
+        upload.fileName = typeof data.file_name === 'string' && data.file_name.trim()
+            ? data.file_name.trim()
+            : upload.fileName
+        upload.mimeType = typeof data.mime_type === 'string' && data.mime_type.trim()
+            ? data.mime_type.trim()
+            : upload.mimeType
         upload.serverThumbnail = data.thumbnail
         if (typeof data.width === 'number' && typeof data.height === 'number') {
             upload.width = data.width
@@ -875,6 +893,7 @@ export async function submitUpload(params: SubmitUploadParams): Promise<void> {
         msgType: params.msgType,
         file: params.file,
         fileName: params.fileName,
+        mimeType: params.mimeType,
         thumbnail: params.thumbnail,
         width: params.width,
         height: params.height,
