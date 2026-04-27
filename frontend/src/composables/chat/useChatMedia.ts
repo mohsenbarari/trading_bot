@@ -756,7 +756,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
     function appendAlbumMetadata(
         content: Record<string, unknown>,
-        msgType: 'image' | 'video' | 'voice',
+        msgType: 'image' | 'video' | 'voice' | 'document',
         albumId?: string | null,
         albumIndex?: number
     ) {
@@ -1010,6 +1010,23 @@ export function useChatMedia(options: UseChatMediaOptions) {
         try { return JSON.parse(content).file_id ?? '' } catch { return '' }
     }
 
+    function getDocumentFileName(msg: Message): string {
+        const payload = parseMediaPayload(msg.content)
+        const fileName = typeof payload.file_name === 'string' ? payload.file_name.trim() : ''
+        return fileName || `file_${msg.id}`
+    }
+
+    function triggerBrowserDownload(url: string, fileName: string) {
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.download = fileName
+        anchor.rel = 'noopener'
+        anchor.style.display = 'none'
+        document.body.appendChild(anchor)
+        anchor.click()
+        document.body.removeChild(anchor)
+    }
+
     function parseMediaPayload(content: string): Record<string, any> {
         if (!content || !content.startsWith('{')) return {}
         try {
@@ -1090,6 +1107,14 @@ export function useChatMedia(options: UseChatMediaOptions) {
         if (!fileId) return
 
         const targetMsg = messages.value.find(m => m.id === msg.id) || msg
+        const isDocument = msg.message_type === 'document'
+        const documentFileName = getDocumentFileName(msg)
+
+        if (isDocument && targetMsg.local_blob_url) {
+            triggerBrowserDownload(targetMsg.local_blob_url, documentFileName)
+            return
+        }
+
         targetMsg.is_downloading = true
         targetMsg.download_progress = 0
 
@@ -1103,6 +1128,12 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
             if (!total || !res.body) {
                 const blob = await res.blob()
+                if (isDocument) {
+                    const objectUrl = URL.createObjectURL(blob)
+                    triggerBrowserDownload(objectUrl, documentFileName)
+                    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+                    return
+                }
                 await saveToDB(fileId, blob)
                 setCachedMediaUrl(fileId, URL.createObjectURL(blob))
                 return
@@ -1123,6 +1154,12 @@ export function useChatMedia(options: UseChatMediaOptions) {
             }
 
             const combinedBlob = new Blob(chunks as BlobPart[], { type: contentType })
+            if (isDocument) {
+                const objectUrl = URL.createObjectURL(combinedBlob)
+                triggerBrowserDownload(objectUrl, documentFileName)
+                window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+                return
+            }
             await saveToDB(fileId, combinedBlob)
             setCachedMediaUrl(fileId, URL.createObjectURL(combinedBlob))
         } catch (e) {
@@ -1289,17 +1326,25 @@ export function useChatMedia(options: UseChatMediaOptions) {
         })
     }
 
-    async function handleMediaUploadWrapper(file: File, albumId?: string | null, albumIndex?: number, albumSize?: number) {
+    async function handleMediaUploadWrapper(
+        file: File,
+        albumId?: string | null,
+        albumIndex?: number,
+        albumSize?: number,
+        options: { sendAsDocument?: boolean } = {}
+    ) {
         if (!file) return
 
+        const sendAsDocument = options.sendAsDocument === true
         const isVideo = file.type.startsWith('video/')
         const isAudio = file.type.startsWith('audio/')
         
-        let msgType: 'video' | 'image' | 'voice' = 'image'
-        if (isVideo) msgType = 'video'
+        let msgType: 'video' | 'image' | 'voice' | 'document' = 'image'
+        if (sendAsDocument) msgType = 'document'
+        else if (isVideo) msgType = 'video'
         else if (isAudio) msgType = 'voice'
 
-        const normalizedAlbumId = (msgType === 'image' || msgType === 'video') ? albumId : null
+        const normalizedAlbumId = (!sendAsDocument && (msgType === 'image' || msgType === 'video')) ? albumId : null
         const normalizedAlbumIndex = typeof albumIndex === 'number' ? albumIndex : 0
         const normalizedAlbumSize = normalizedAlbumId ? Math.max(albumSize ?? 0, 1) : 0
         const preprocessBatchSize = normalizedAlbumSize || 1
@@ -1315,7 +1360,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         // navigate away, and the upload must still land on the correct chat.
         const capturedReceiverId = selectedUserId.value
 
-        if ((isVideo || isAudio) && file.size > CHAT_MEDIA_MAX_UPLOAD_BYTES) {
+        if ((isVideo || isAudio || sendAsDocument) && file.size > CHAT_MEDIA_MAX_UPLOAD_BYTES) {
             const tooLargeMessage = buildUploadTooLargeMessage(file.size)
             alert(tooLargeMessage)
             return
@@ -1325,13 +1370,28 @@ export function useChatMedia(options: UseChatMediaOptions) {
         isUploading.value = activeUploadsCount > 0
         let step = 'start'
         const processingAbortController = new AbortController()
+        const documentPayload = {
+            file_name: file.name || 'file',
+            mime_type: file.type || 'application/octet-stream',
+            size: file.size,
+        }
 
         const optimisticId = createOptimisticUploadId()
         const localUrl = URL.createObjectURL(file)
-        const initialContent = appendAlbumMetadata({
-            placeholder: true,
-            durationMs: (file as any).durationMs,
-        }, msgType, normalizedAlbumId, normalizedAlbumIndex)
+        const initialContent = appendAlbumMetadata(
+            sendAsDocument
+                ? {
+                    placeholder: true,
+                    ...documentPayload,
+                }
+                : {
+                    placeholder: true,
+                    durationMs: (file as any).durationMs,
+                },
+            msgType,
+            normalizedAlbumId,
+            normalizedAlbumIndex,
+        )
         const optimisticMsg: Message = {
             id: optimisticId,
             sender_id: currentUserId,
@@ -1366,7 +1426,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
         try {
             let sourceFile = file
-            if (!isVideo && !isAudio) {
+            if (!sendAsDocument && !isVideo && !isAudio) {
                 step = 'normalize_heic'
                 sourceFile = await normalizeImageUploadFile(file)
 
@@ -1389,7 +1449,18 @@ export function useChatMedia(options: UseChatMediaOptions) {
             let finalWidth = 0;
             let finalHeight = 0;
 
-            if (isVideo) {
+            if (sendAsDocument) {
+                step = 'document_passthrough'
+                trackPreprocessEvent({
+                    mediaType: isVideo ? 'video' : isAudio ? 'voice' : 'image',
+                    path: 'document_passthrough',
+                    status: 'success',
+                    startedAt: performance.now(),
+                    batchSize: preprocessBatchSize,
+                    schedulerLimit: preprocessLimit,
+                    usedWorker: false,
+                })
+            } else if (isVideo) {
                 step = 'video_preprocess'
                 const videoPreviewStartedAt = performance.now()
                 try {
@@ -1668,8 +1739,19 @@ export function useChatMedia(options: UseChatMediaOptions) {
             }
 
             const targetMsg = getOptimisticTarget();
-            const optimisticContent: any = appendAlbumMetadata({ thumbnail: thumbBase64 }, msgType, normalizedAlbumId, normalizedAlbumIndex);
-            if (finalWidth && finalHeight) {
+            const optimisticContent: any = appendAlbumMetadata(
+                sendAsDocument
+                    ? {
+                        ...documentPayload,
+                    }
+                    : {
+                        thumbnail: thumbBase64,
+                    },
+                msgType,
+                normalizedAlbumId,
+                normalizedAlbumIndex,
+            );
+            if (!sendAsDocument && finalWidth && finalHeight) {
                 optimisticContent.width = finalWidth;
                 optimisticContent.height = finalHeight;
             }
@@ -1706,6 +1788,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 msgType,
                 file: uploadFile,
                 fileName: sourceFile.name,
+                mimeType: sourceFile.type || 'application/octet-stream',
                 thumbnail: thumbBase64,
                 width: finalWidth,
                 height: finalHeight,
