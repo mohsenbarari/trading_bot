@@ -91,11 +91,27 @@ function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
-const sceneTransform = computed(() => {
+const has3DSiblings = computed(() => (props.lightboxMedia?.items.length ?? 0) > 1)
+const isStage3DActive = computed(() => {
+  if (!has3DSiblings.value) return false
+  if (gestureSurface.value !== 'stage') return false
+  if (gestureAxis.value !== 'horizontal') return false
+  return Math.abs(dragOffsetX.value) > 0.5
+})
+
+const sceneTransform = computed<CSSProperties>(() => {
   const verticalProgress = Math.min(Math.abs(dragOffsetY.value) / 240, 1)
   const scale = gestureAxis.value === 'vertical'
     ? Math.max(0.88, 1 - verticalProgress * 0.12)
     : 1
+
+  // Avoid emitting any inline transform when the scene is at rest. A no-op
+  // translate3d(0,0,0) scale(1) still creates an extra GPU compositing layer
+  // on top of `perspective`, which can make the active media render as if
+  // zoomed into a corner on some browsers/devices.
+  if (Math.abs(dragOffsetY.value) < 0.5 && scale === 1) {
+    return {}
+  }
 
   return {
     transform: `translate3d(0, ${dragOffsetY.value}px, 0) scale(${scale})`,
@@ -408,13 +424,15 @@ function getStageItemStyle(index: number): CSSProperties {
   const compositeOffset = index - activeIndex + dragRatio
   const distance = Math.abs(compositeOffset)
 
-  // Keep the active media flat at rest. Pushing the current card toward the
-  // camera with translateZ() makes extreme crops look artificially zoomed and
-  // can clip edges inside the constrained stage viewport.
+  // Keep the active media completely flat at rest. We intentionally do NOT
+  // emit a transform here: any inline 3D transform (even an identity one)
+  // pulls the active card into the parent's `perspective: 1800px /
+  // preserve-3d` 3D rendering context and on some browsers ends up rendering
+  // the contained <img> as a zoomed-in slice of itself. Leaving transform
+  // unset lets the card render as a normal 2D layer.
   if (index === activeIndex && Math.abs(dragRatio) < 0.001) {
     return {
       opacity: '1',
-      transform: 'translate3d(0, 0, 0) rotateY(0deg) scale(1)',
       filter: 'none',
       zIndex: '200',
       pointerEvents: 'auto',
@@ -742,8 +760,13 @@ function handleTouchEnd(event: TouchEvent) {
               @touchend="handleTouchEnd($event)"
               @touchcancel="handleTouchEnd($event)"
             >
-              <div ref="stageSceneRef" class="lightbox-stage-scene" :style="sceneTransform">
-                <div class="lightbox-stage-track">
+              <div
+                ref="stageSceneRef"
+                class="lightbox-stage-scene"
+                :class="{ 'is-3d-active': isStage3DActive }"
+                :style="sceneTransform"
+              >
+                <div class="lightbox-stage-track" :class="{ 'is-3d-active': isStage3DActive }">
                   <div
                     v-for="(item, index) in lightboxMedia.items"
                     v-show="shouldRenderStageItem(index)"
@@ -1072,6 +1095,9 @@ function handleTouchEnd(event: TouchEvent) {
   position: relative;
   overflow: hidden;
   will-change: transform;
+}
+
+.lightbox-stage-scene.is-3d-active {
   perspective: 1800px;
 }
 
@@ -1079,6 +1105,9 @@ function handleTouchEnd(event: TouchEvent) {
   position: relative;
   width: 100%;
   height: 100%;
+}
+
+.lightbox-stage-track.is-3d-active {
   transform-style: preserve-3d;
 }
 
