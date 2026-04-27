@@ -326,7 +326,7 @@
                 تلاش مجدد
               </button>
             </div>
-            <button class="send-location-btn" :disabled="!selectedLatLng || isLocating" @click="sendLocation">
+            <button class="send-location-btn" :disabled="!canSendLocation" @click="sendLocation">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
                 <circle cx="12" cy="10" r="3"/>
@@ -471,9 +471,12 @@ const detectedLocationAccuracyM = ref<number | null>(null)
 const isLocating = ref(false)
 const locationStatusMessage = ref('')
 const locationStatusTone = ref<'info' | 'error'>('info')
+const hasManualLocationSelection = ref(false)
 let locationWatchId: number | null = null
+let isProgrammaticMapMove = false
 
 const DESIRED_LOCATION_ACCURACY_METERS = 120
+const MAX_ACCEPTABLE_AUTO_LOCATION_ACCURACY_METERS = 120
 
 const tileUrl = ref('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
 
@@ -491,6 +494,18 @@ const nativeCameraFallbackHint = computed(() => (
 const capturedMediaCount = computed(() => capturedCameraMedia.value.length)
 const hasCapturedMediaQueue = computed(() => capturedMediaCount.value > 0)
 const canSendCapturedMedia = computed(() => hasCapturedMediaQueue.value && !isRecording.value)
+const canSendLocation = computed(() => {
+  if (isLocating.value || !selectedLatLng.value) {
+    return false
+  }
+
+  if (hasManualLocationSelection.value) {
+    return true
+  }
+
+  return detectedLocationAccuracyM.value !== null
+    && detectedLocationAccuracyM.value <= MAX_ACCEPTABLE_AUTO_LOCATION_ACCURACY_METERS
+})
 const capturedMediaQueueLabel = computed(() => {
   const count = capturedMediaCount.value
   return count === 1 ? '۱ مورد آماده ارسال' : `${count} مورد آماده ارسال`
@@ -1185,7 +1200,14 @@ function onMapMoveEnd() {
   const map = mapRef.value?.leafletObject
   if (map) {
     const center = map.getCenter()
+    if (isProgrammaticMapMove) {
+      isProgrammaticMapMove = false
+      return
+    }
+
     selectedLatLng.value = { lat: center.lat, lng: center.lng }
+    hasManualLocationSelection.value = true
+    clearLocationStatus()
   }
 }
 
@@ -1226,7 +1248,7 @@ function updateResolvedLocationStatus(position: GeolocationPosition) {
     return
   }
 
-  setLocationStatus(`موقعیت تقریبی شما پیدا شد. دقت فعلی حدود ${accuracyLabel} است.`, 'info')
+  setLocationStatus(`موقعیت خودکار هنوز دقیق نیست و دقت فعلی حدود ${accuracyLabel} است. GPS دقیق دستگاه را روشن کنید یا پین را دستی روی نقطه درست تنظیم کنید.`, 'error')
 }
 
 function applyDetectedLocation(position: GeolocationPosition) {
@@ -1238,10 +1260,12 @@ function applyDetectedLocation(position: GeolocationPosition) {
   selectedLatLng.value = { lat, lng }
   detectedLocationLatLng.value = [lat, lng]
   detectedLocationAccuracyM.value = accuracy
+  hasManualLocationSelection.value = false
 
   const map = mapRef.value?.leafletObject
   if (map) {
     const targetZoom = accuracy <= 60 ? 18 : accuracy <= 150 ? 17 : accuracy <= 400 ? 16 : 15
+    isProgrammaticMapMove = true
     map.setView([lat, lng], targetZoom)
   }
 }
@@ -1369,40 +1393,34 @@ async function getGeolocationPermissionState() {
 
 function getLocationErrorMessage(error: GeolocationPositionError | null) {
   if (!error) {
-    return 'امکان دریافت مکان شما وجود ندارد. لطفا دوباره تلاش کنید.'
+    return 'امکان دریافت موقعیت شما وجود ندارد. GPS دستگاه را بررسی کنید یا پین را دستی روی نقشه تنظیم کنید.'
   }
 
   if (error.code === error.PERMISSION_DENIED) {
-    return 'دسترسی به موقعیت مکانی مسدود است. مجوز Location را برای این سایت دوباره فعال کنید.'
+    return 'دسترسی به موقعیت مکانی مسدود است. مجوز Location را برای این سایت دوباره فعال کنید یا پین را دستی روی نقشه تنظیم کنید.'
   }
 
   if (error.code === error.TIMEOUT) {
-    return 'زمان دریافت موقعیت شما به پایان رسید. اینترنت یا GPS دستگاه را بررسی کنید و دوباره تلاش کنید.'
+    return 'موقعیت شما در زمان مناسب پیدا نشد. GPS یا اینترنت را بررسی کنید یا پین را دستی روی نقشه تنظیم کنید.'
   }
 
   if (error.code === error.POSITION_UNAVAILABLE) {
-    return 'مرورگر نتوانست موقعیت دقیق شما را پیدا کند. GPS یا سرویس مکان‌یابی دستگاه را روشن کنید.'
+    return 'مرورگر نتوانست موقعیت دقیق شما را پیدا کند. GPS دقیق دستگاه را روشن کنید یا پین را دستی روی نقشه تنظیم کنید.'
   }
 
-  return 'امکان دریافت مکان شما وجود ندارد. لطفا دوباره تلاش کنید.'
+  return 'امکان دریافت موقعیت شما وجود ندارد. GPS دستگاه را بررسی کنید یا پین را دستی روی نقشه تنظیم کنید.'
 }
 
 async function goToMyLocation(silent = false) {
   if (!navigator.geolocation) {
     const message = 'مرورگر شما از مکان‌یابی پشتیبانی نمی‌کند.'
     setLocationStatus(message, 'error')
-    if (silent !== true) {
-      alert(message)
-    }
     return
   }
 
   if (typeof window !== 'undefined' && !window.isSecureContext) {
     const message = 'برای دریافت موقعیت خودکار، این صفحه باید روی HTTPS یا localhost باز شود.'
     setLocationStatus(message, 'error')
-    if (silent !== true) {
-      alert(message)
-    }
     return
   }
 
@@ -1508,9 +1526,6 @@ async function goToMyLocation(silent = false) {
     const message = getLocationErrorMessage(geoError)
     console.error('Geolocation error:', geoError)
     setLocationStatus(message, 'error')
-    if (silent !== true) {
-      alert(message)
-    }
   } finally {
     clearLocationWatch()
     isLocating.value = false
@@ -1521,7 +1536,12 @@ function sendLocation() {
   if (!selectedLatLng.value) {
     const message = 'ابتدا موقعیت خود را پیدا کنید یا نقشه را روی نقطه دلخواه جابه‌جا کنید.'
     setLocationStatus(message, 'error')
-    alert(message)
+    return
+  }
+
+  if (!canSendLocation.value) {
+    const message = 'تا وقتی موقعیت خودکار دقیق نشود، ابتدا پین را دستی روی نقطه درست تنظیم کنید.'
+    setLocationStatus(message, 'error')
     return
   }
 
