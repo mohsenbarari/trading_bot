@@ -29,15 +29,17 @@ const fileExtension = computed(() => {
   return parts.length > 1 ? parts.pop() || '' : ''
 })
 
-function inferEffectiveMimeType(rawMimeType: string, extension: string) {
-  const normalizedMime = (rawMimeType || '').trim().toLowerCase()
-  const normalizedExt = (extension || '').trim().toLowerCase()
+const TEXT_PREVIEW_EXTENSIONS = new Set([
+  'txt', 'log', 'md', 'json', 'xml', 'csv', 'js', 'mjs', 'cjs',
+  'ts', 'tsx', 'jsx', 'html', 'css', 'py', 'yml', 'yaml', 'ini', 'conf', 'sh',
+])
 
-  if (normalizedMime && normalizedMime !== 'application/octet-stream') {
-    return normalizedMime
-  }
+const BINARY_DOCUMENT_EXTENSIONS = new Set([
+  'pdf', 'xls', 'xlsx', 'doc', 'docx', 'ppt', 'pptx', 'zip', 'rar', '7z', 'odt', 'ods', 'odp',
+])
 
-  switch (normalizedExt) {
+function inferMimeFromExtension(extension: string) {
+  switch ((extension || '').trim().toLowerCase()) {
     case 'pdf':
       return 'application/pdf'
     case 'txt':
@@ -75,9 +77,52 @@ function inferEffectiveMimeType(rawMimeType: string, extension: string) {
       return 'application/vnd.ms-excel'
     case 'xlsx':
       return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    case 'doc':
+      return 'application/msword'
+    case 'docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    case 'ppt':
+      return 'application/vnd.ms-powerpoint'
+    case 'pptx':
+      return 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    case 'zip':
+      return 'application/zip'
+    case 'rar':
+      return 'application/vnd.rar'
+    case '7z':
+      return 'application/x-7z-compressed'
     default:
-      return normalizedMime || 'application/octet-stream'
+      return ''
   }
+}
+
+function isTextLikeMime(mimeTypeValue: string) {
+  const normalized = (mimeTypeValue || '').trim().toLowerCase()
+  return normalized === 'text/plain'
+    || normalized === 'text/csv'
+    || normalized === 'text/markdown'
+    || normalized === 'application/json'
+    || normalized === 'application/xml'
+    || normalized === 'text/xml'
+    || normalized === 'application/javascript'
+    || normalized === 'text/javascript'
+    || normalized === 'application/x-javascript'
+}
+
+function inferEffectiveMimeType(rawMimeType: string, extension: string) {
+  const normalizedMime = (rawMimeType || '').trim().toLowerCase()
+  const normalizedExt = (extension || '').trim().toLowerCase()
+  const inferredFromExtension = inferMimeFromExtension(normalizedExt)
+
+  if (BINARY_DOCUMENT_EXTENSIONS.has(normalizedExt) && isTextLikeMime(normalizedMime) && inferredFromExtension) {
+    return inferredFromExtension
+  }
+
+  if (normalizedMime && normalizedMime !== 'application/octet-stream') {
+    return normalizedMime
+  }
+
+  return inferredFromExtension || normalizedMime || 'application/octet-stream'
 }
 
 const effectiveMimeType = computed(() => inferEffectiveMimeType(mimeType.value, fileExtension.value))
@@ -87,10 +132,12 @@ const isVideo = computed(() => effectiveMimeType.value.startsWith('video/'))
 const isAudio = computed(() => effectiveMimeType.value.startsWith('audio/'))
 const isPdf = computed(() => effectiveMimeType.value === 'application/pdf')
 const isText = computed(() => {
-  return effectiveMimeType.value.startsWith('text/')
-    || effectiveMimeType.value.includes('json')
-    || effectiveMimeType.value.includes('xml')
-    || effectiveMimeType.value.includes('javascript')
+  if (BINARY_DOCUMENT_EXTENSIONS.has(fileExtension.value)) {
+    return false
+  }
+
+  return TEXT_PREVIEW_EXTENSIONS.has(fileExtension.value)
+    || isTextLikeMime(effectiveMimeType.value)
   })
 const canPreviewInline = computed(() => {
   return isImage.value || isVideo.value || isAudio.value || isPdf.value || isText.value
