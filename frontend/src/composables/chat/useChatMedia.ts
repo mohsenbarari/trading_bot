@@ -1,5 +1,6 @@
 import { ref, type Ref, nextTick, onUnmounted, watch } from 'vue'
 import type { Message } from '../../types/chat'
+import router from '../../router'
 import { canUseImagePreprocessWorker, getRecommendedImagePreprocessParallelism, processImageInWorker } from '../../utils/imagePreprocessClient'
 import { primeMediaPreprocessTelemetry, recordMediaPreprocessTelemetry } from '../../utils/chatMediaTelemetry'
 import {
@@ -998,15 +999,17 @@ export function useChatMedia(options: UseChatMediaOptions) {
         document.body.removeChild(anchor)
     }
 
-    function openAttachmentUrl(url: string) {
-        const anchor = document.createElement('a')
-        anchor.href = url
-        anchor.target = '_blank'
-        anchor.rel = 'noopener noreferrer'
-        anchor.style.display = 'none'
-        document.body.appendChild(anchor)
-        anchor.click()
-        document.body.removeChild(anchor)
+    function openDocumentViewer(fileId: string, mimeType: string, fileName: string) {
+        if (!fileId) return
+
+        void router.push({
+            name: 'attachment-view',
+            query: {
+                file_id: fileId,
+                mime_type: mimeType || 'application/octet-stream',
+                file_name: fileName || `file_${fileId}`,
+            },
+        })
     }
 
     function parseMediaPayload(content: string): Record<string, any> {
@@ -1129,7 +1132,11 @@ export function useChatMedia(options: UseChatMediaOptions) {
             const completedUrl = await restoreDocumentUrlForMessage(targetMsg)
             if (completedUrl) {
                 targetMsg.local_blob_url = completedUrl
-                openAttachmentUrl(completedUrl)
+                openDocumentViewer(
+                    fileId,
+                    parseMediaPayload(msg.content).mime_type || 'application/octet-stream',
+                    documentFileName,
+                )
                 return
             }
 
