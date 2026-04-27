@@ -30627,141 +30627,6 @@ COPY seed_fake_data.py .
 COPY --from=builder /mini_app_dist /app/mini_app_dist
 </file>
 
-<file path="LOCAL_ASSISTANT_CONTEXT.md">
-# Local Assistant Context
-
-## Purpose
-This document is a curated, high-signal context file for a local AI assistant.
-It is intended to replace workflow-heavy agent instructions in packaging flows such as Repomix.
-
-Use this file when the assistant should answer questions about the product's implemented behavior, user flows, and source-of-truth code locations.
-
-## Product Summary
-Gold/Coin Trading Bot is a Persian-first trading platform with three main surfaces:
-- FastAPI backend for auth, trading, chat, notifications, and admin APIs
-- aiogram Telegram bot for onboarding, invitations, trading, admin tasks, and user controls
-- Vue 3 + TypeScript PWA frontend for market activity, messenger, profile, and admin tools
-
-## Main User Flows
-
-### Authentication and Registration
-- OTP-based authentication is the default login path.
-- Web users can register through invitation-based onboarding.
-- Sessions support primary/secondary device approval flows.
-- Suspended sessions can be revived through OTP-based re-authentication instead of immediate hard logout.
-
-Source of truth:
-- `api/routers/auth.py`
-- `api/routers/sessions.py`
-- `core/services/session_service.py`
-- `frontend/src/views/LoginView.vue`
-- `frontend/src/views/SetupPassword.vue`
-
-### Invitations
-- Invitations are created by admins and can be looked up by short code or token.
-- Invitation links are used in both bot and web onboarding.
-
-Source of truth:
-- `api/routers/invitations.py`
-- `bot/handlers/admin.py`
-- `frontend/src/components/CreateInvitationView.vue`
-
-### Trading and Offers
-- Users create buy/sell offers for commodities with quantity, price, and optional lot sizing.
-- Trades execute against existing offers and use locking/versioning protections.
-- Offer parsing and channel publishing behavior lives in backend and bot code, not only UI.
-
-Source of truth:
-- `api/routers/offers.py`
-- `api/routers/trades.py`
-- `core/services/trade_service.py`
-- `bot/handlers/trade_create.py`
-- `bot/handlers/trade_execute.py`
-- `frontend/src/views/MarketView.vue`
-- `frontend/src/components/TradingView.vue`
-
-### Messenger and Media
-- Chat supports text, image, video, voice, sticker, document, forwarded, reply, and location-oriented flows.
-- Media upload/download behavior is performance-sensitive and intentionally optimized for weak devices.
-- Album behavior is explicit-batch-based, not naive grouping by adjacency.
-- The frontend messenger is modular: state stays in `ChatView.vue` and logic is split across composables and subcomponents.
-
-Source of truth:
-- `api/routers/chat.py`
-- `frontend/src/components/ChatView.vue`
-- `frontend/src/components/chat/`
-- `frontend/src/composables/chat/`
-- `frontend/src/services/chatUploadBackground.ts`
-
-### User Blocks and Limits
-- Blocking is a real domain concept with API and bot management flows.
-- User limits and restrictions are distinct from blocks and are stored on the user model/settings.
-
-Source of truth:
-- `api/routers/blocks.py`
-- `core/services/block_service.py`
-- `bot/handlers/block_manage.py`
-- `models/user.py`
-
-### Notifications and Realtime
-- The system uses WebSocket and SSE patterns backed by Redis pub/sub.
-- Notifications exist both as persisted records and as realtime events.
-
-Source of truth:
-- `api/routers/notifications.py`
-- `api/routers/realtime.py`
-- `core/notifications.py`
-- `frontend/src/stores/notifications.ts`
-- `frontend/src/components/AppToasts.vue`
-
-## Core Domain Entities
-- `users`: account identity, role, trading limits, soft-delete state, block permissions
-- `invitations`: invitation tokens and short codes
-- `offers`: buy/sell offers with optimistic locking and remaining quantity
-- `trades`: executed responses to offers
-- `messages`: chat messages with edit/delete history and media semantics
-- `conversations`: per-user unread counters and last-message pointers
-- `notifications`: persistent user notifications
-- `user_blocks`: directional block relationships
-- `chat_files`: uploaded media metadata and storage pointers
-- `trading_settings`: dynamic runtime configuration
-
-## Roles
-- `WATCH`
-- `STANDARD`
-- `POLICE`
-- `MIDDLE_MANAGER`
-- `SUPER_ADMIN`
-
-Role semantics are implemented in backend permission checks and admin tooling, not only in frontend labels.
-
-## High-Signal Behavioral Rules
-- Soft delete matters: user deletion is intentionally non-destructive and preserves trade history.
-- `apiBaseUrl = ''` on the frontend is valid same-origin behavior and must not be treated as a missing config.
-- Persian/Jalali presentation is expected in user-facing experiences even when UTC storage is used internally.
-- Chat/media behavior is intentionally optimized for mobile reliability; apparent complexity in messenger code often exists to preserve UX on weak devices.
-- Session behavior is multi-device aware; approval, refresh, and suspension logic are all part of the implemented product behavior.
-
-## Retrieval Priorities for a Local Assistant
-When answering product questions, prioritize these sources in order:
-1. Backend routers and services for real business behavior
-2. Frontend views/components for visible user flows
-3. Bot handlers for Telegram-specific behavior
-4. Models and schemas for data shape confirmation
-5. Long historical change logs only when behavior changed recently and source code alone is ambiguous
-
-## What This File Intentionally Excludes
-- Agent tool instructions
-- Commit/deploy workflow rules
-- Multi-assistant coordination rules
-- Long historical change logs
-- Temporary operational details that do not help answer product questions
-- Sensitive development-only values
-
-## Packaging Guidance
-For local-assistant corpora, include this file and exclude `.github/copilot-instructions.md` unless the assistant is specifically meant to help developers operate the repository itself.
-</file>
-
 <file path="main.py">
 import logging
 from pathlib import Path
@@ -36945,38 +36810,6 @@ onMounted(() => {
 </style>
 </file>
 
-<file path="frontend/index.html">
-<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
-  
-  <!-- PWA Essential Meta Tags -->
-  <meta name="theme-color" content="#ffffff">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="Gold">
-  <meta name="application-name" content="Gold">
-  
-  <link rel="icon" href="/favicon.ico">
-  <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png">
-  <link rel="icon" type="image/png" sizes="512x512" href="/pwa-512x512.png">
-  <link rel="apple-touch-icon" href="/pwa-192x192.png">
-  
-  <title>پنل کاربری</title>
-  <script async src="https://telegram.org/js/telegram-web-app.js"></script>
-</head>
-
-<body>
-  <div id="app"></div>
-  <script type="module" src="/src/main.ts"></script>
-</body>
-</html>
-</file>
-
 <file path="migrations/versions/c4b9f6d2a1e0_add_chat_performance_indexes.py">
 """add chat performance indexes
 
@@ -37211,46 +37044,6 @@ DEV_TOOLS.md
 
 uploads/
 map_data/
-</file>
-
-<file path=".repomixignore">
-/src/
-/tests/
-.github/copilot-instructions.md
-
-# VCS and environment directories
-.git/
-.venv/
-venv/
-node_modules/
-__pycache__/
-
-# Generated/build artifacts
-mini_app_dist/
-frontend/dist/
-
-# Large/binary assets and caches
-map_data/
-pip_packages/
-tmp/
-*.mbtiles
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.webp
-*.svg
-*.mp4
-*.mov
-*.mp3
-*.wav
-*.ogg
-*.woff
-*.woff2
-*.ttf
-*.eot
-*.pdf
-*.zip
 </file>
 
 <file path="deploy.sh">
@@ -37592,6 +37385,450 @@ volumes:
   postgres_data:
   redis_data:
   uploads_data:
+</file>
+
+<file path="LOCAL_ASSISTANT_CONTEXT.md">
+# Local Assistant Context
+
+## Purpose
+This file is a curated, product-grounded context layer for a local AI assistant.
+It gives the assistant a high-signal map of the repository before it reads the full packed corpus.
+
+Use this file when the assistant should answer questions about:
+- what the product does
+- how the implemented user flows work
+- where the source of truth lives in code
+- which behaviors are intentional and must not be misread as bugs
+
+This file is intentionally more precise than a generic project overview and intentionally much smaller than the full repository pack.
+
+## What The Product Is
+Gold/Coin Trading Bot is a Persian-first trading system with three first-class surfaces:
+- FastAPI backend for auth, invitations, users, commodities, offers, trades, chat, notifications, realtime, blocks, sync, and settings
+- aiogram Telegram bot for onboarding, trading, admin operations, and user controls
+- Vue 3 + TypeScript PWA for dashboard, market activity, messenger, profile, notifications, admin, and web registration
+
+Primary entry points:
+- `main.py`
+- `run_bot.py`
+- `frontend/src/main.ts`
+- `frontend/src/router/index.ts`
+
+## Frontend Surface Map
+The current web/PWA routes are:
+- `/` -> authenticated dashboard
+- `/setup-password` -> authenticated forced password setup flow
+- `/login` -> login and OTP entry
+- `/market` -> authenticated trading surface
+- `/chat` -> authenticated messenger
+- `/profile` -> authenticated profile and session management
+- `/admin` -> authenticated admin area, admin-only
+- `/i/:code` -> invitation landing page
+- `/register` -> web registration flow
+- `/notifications` -> authenticated notification history
+
+Source of truth:
+- `frontend/src/router/index.ts`
+
+Important frontend routing behavior:
+- `authGuard` is the gatekeeper for authenticated routes.
+- The router hard-reloads the page on chunk-load failures so stale PWA bundles can self-recover after deploys.
+
+## Backend API Map
+The backend mounts these routers under the `/api` prefix:
+- `/api/auth`
+- `/api/invitations`
+- `/api/commodities`
+- `/api/users`
+- `/api/notifications`
+- `/api/trading-settings`
+- `/api/offers`
+- `/api/trades`
+- `/api/realtime`
+- `/api/users-public`
+- `/api/chat`
+- `/api/blocks`
+- `/api/sync`
+- `/api/sessions`
+- `/api/config` (public config endpoint)
+
+Source of truth:
+- `main.py`
+
+`/api/config` returns non-sensitive public settings such as `bot_username` and `frontend_url`.
+
+## Major User Flows
+
+### Authentication And Session Lifecycle
+Authentication is OTP-first, not password-first.
+
+Implemented auth paths include:
+- `POST /api/auth/request-otp`
+- `POST /api/auth/resend-otp-sms`
+- `POST /api/auth/verify-otp`
+- `POST /api/auth/webapp-login`
+- `POST /api/auth/refresh`
+- `GET /api/auth/me`
+- `POST /api/auth/register-otp-request`
+- `POST /api/auth/register-otp-verify`
+- `POST /api/auth/register-complete`
+- `POST /api/auth/setup-password`
+
+Implemented session-management paths include:
+- `GET /api/sessions/login-requests/pending`
+- `POST /api/sessions/login-requests/{request_id}/approve`
+- `POST /api/sessions/login-requests/{request_id}/reject`
+- `GET /api/sessions/login-requests/{request_id}/status`
+- `GET /api/sessions/active`
+- `DELETE /api/sessions/{session_id}`
+- `POST /api/sessions/logout-all`
+
+Behavioral rules:
+- web registration is invitation-based
+- OTP values are stored in Redis and must be deleted after successful verification
+- refresh tokens are materially longer-lived than access tokens
+- session logic supports primary and secondary devices
+- pending login approvals are meaningful only for the primary device
+- session suspension exists as a soft re-authentication path rather than forcing immediate hard logout under stale-session conditions
+
+Source of truth:
+- `api/routers/auth.py`
+- `api/routers/sessions.py`
+- `core/services/session_service.py`
+- `core/session_expiry.py`
+- `frontend/src/views/LoginView.vue`
+- `frontend/src/views/SetupPassword.vue`
+- `frontend/src/views/ProfileView.vue`
+
+Do not treat developer-only login shortcuts as end-user product features.
+
+### Invitations And Onboarding
+Invitations are admin-created onboarding credentials.
+
+Implemented invitation paths include:
+- `POST /api/invitations/`
+- `GET /api/invitations/lookup/{short_code}`
+- `GET /api/invitations/validate/{token}`
+
+Behavioral rules:
+- invitations are tied to account name, mobile number, and role
+- active invitations can be reused instead of creating duplicates
+- short codes exist for compact landing links
+- SMS payload length matters, so shorter landing links are preferred operationally
+
+Source of truth:
+- `api/routers/invitations.py`
+- `bot/handlers/admin.py`
+- `bot/handlers/start.py`
+- `frontend/src/components/CreateInvitationView.vue`
+- `frontend/src/views/InviteLanding.vue`
+- `frontend/src/views/WebRegister.vue`
+
+### Trading, Offers, And Execution
+Trading is built around user-created offers and explicit trade execution against those offers.
+
+Implemented offer paths include:
+- `POST /api/offers/`
+- `GET /api/offers/`
+- `GET /api/offers/my`
+- `DELETE /api/offers/{offer_id}`
+- `POST /api/offers/parse`
+
+Implemented trade paths include:
+- `POST /api/trades/`
+- `GET /api/trades/my`
+- `GET /api/trades/with/{user_id}`
+
+Behavioral rules:
+- offers are buy/sell records, not informal chat messages
+- offers support quantity, price, notes, and optional lot-size structure
+- offer parsing exists as a backend capability, not just a frontend convenience
+- executing a trade is stateful and protected by locking/versioning logic
+- expiring an offer is owner-restricted and can also update Telegram channel controls
+- current trading settings influence offer validation and expiry behavior
+
+Source of truth:
+- `api/routers/offers.py`
+- `api/routers/trades.py`
+- `core/services/trade_service.py`
+- `core/trading_settings.py`
+- `bot/handlers/trade_create.py`
+- `bot/handlers/trade_execute.py`
+- `bot/handlers/trade_manage.py`
+- `frontend/src/views/MarketView.vue`
+- `frontend/src/components/TradingView.vue`
+- `frontend/src/components/OffersList.vue`
+
+### Commodities And Trading Settings
+Commodities are centrally managed and can have aliases.
+
+Implemented commodity paths include:
+- `GET /api/commodities/`
+- `GET /api/commodities/{commodity_id}`
+- `POST /api/commodities/`
+- `PUT /api/commodities/{commodity_id}`
+- `DELETE /api/commodities/{commodity_id}`
+
+Implemented trading-settings paths include:
+- `GET /api/trading-settings/`
+- `PUT /api/trading-settings/`
+- `POST /api/trading-settings/reset`
+
+Behavioral rules:
+- deleting a commodity with active offers is intentionally blocked
+- settings are dynamic runtime configuration, not just static constants
+- commodity reads are cache-backed
+
+Source of truth:
+- `api/routers/commodities.py`
+- `api/routers/trading_settings.py`
+- `core/trading_settings.py`
+- `bot/handlers/admin_commodities.py`
+- `frontend/src/components/CommodityManager.vue`
+- `frontend/src/components/TradingSettings.vue`
+
+### Messenger And Media
+Messenger is a core product surface, not a simple auxiliary chat.
+
+Implemented chat paths include:
+- `GET /api/chat/conversations`
+- `GET /api/chat/search`
+- `GET /api/chat/messages/{user_id}`
+- `POST /api/chat/typing`
+- `POST /api/chat/send`
+- `PUT /api/chat/messages/{message_id}`
+- `DELETE /api/chat/messages/{message_id}`
+- `POST /api/chat/read/{user_id}`
+- `GET /api/chat/poll`
+- `GET /api/chat/stickers`
+- `POST /api/chat/upload-media`
+- `GET /api/chat/files/{file_id}`
+
+Implemented public-user discovery paths used by chat include:
+- `GET /api/users-public/search`
+- `GET /api/users-public/{user_id}`
+
+Behavioral rules:
+- chat supports text, image, video, voice, sticker, document, forwarded, reply, and location-oriented flows
+- message history supports `before_id` pagination and `around_id` context loading
+- editing and deleting messages are time-limited product behaviors
+- uploaded media is stored as chat files and served through authenticated file endpoints
+- media is intentionally not auto-downloaded on load; previews and later hydration are part of the design
+- frontend downloads/uploads are designed around real progress reporting, cancellation, weak-device resilience, and background continuation
+- albums are explicit batch constructs driven by `album_id` and `album_index`, not by grouping adjacent images
+- messenger state orchestration lives in `ChatView.vue`; UI and gestures are delegated to subcomponents and composables
+
+Source of truth:
+- `api/routers/chat.py`
+- `api/routers/users_public.py`
+- `models/message.py`
+- `models/chat_file.py`
+- `frontend/src/components/ChatView.vue`
+- `frontend/src/components/chat/`
+- `frontend/src/composables/chat/`
+- `frontend/src/services/chatUploadBackground.ts`
+- `frontend/src/views/MessengerView.vue`
+
+Chat/media precision notes that matter for grounding:
+- keep one authoritative EXIF-safe image pipeline in `frontend/src/composables/chat/useChatMedia.ts`
+- edited images from `ImageEditorModal.vue` are intentional final assets and should not be reinterpreted as needing another resize pipeline
+- album grouping must use metadata, not adjacency
+- uncached media/lightbox behavior often depends on authenticated file URLs rather than tiny embedded thumbnails
+- no-auto-download is intentional, not an incomplete implementation
+
+Reference notes:
+- `/memories/repo/chat-media-pipeline.md`
+- `/memories/repo/chat-upload-gotchas.md`
+- `/memories/repo/chat-album-grouping.md`
+
+### User Blocks, Restrictions, And Admin Limits
+Blocking and admin restrictions are different concepts.
+
+Implemented block paths include:
+- `GET /api/blocks/status`
+- `GET /api/blocks/`
+- `POST /api/blocks/{user_id}`
+- `DELETE /api/blocks/{user_id}`
+- `GET /api/blocks/check/{user_id}`
+- `GET /api/blocks/search`
+- `GET /api/blocks/is-blocked-by/{user_id}`
+
+Implemented admin-user management paths include user CRUD and limitation updates under `/api/users`.
+
+Behavioral rules:
+- a user may or may not have permission to block others
+- block capacity is bounded by `max_blocked_users`
+- trading restrictions and usage limitations are admin-controlled user state, distinct from peer blocking
+- soft deletion is the deletion strategy for users
+- deleted users are intentionally excluded from normal active-user listings by default
+
+Source of truth:
+- `api/routers/blocks.py`
+- `core/services/block_service.py`
+- `api/routers/users.py`
+- `models/user.py`
+- `models/user_block.py`
+- `bot/handlers/block_manage.py`
+- `bot/handlers/admin_users.py`
+- `frontend/src/components/UserProfile.vue`
+- `frontend/src/components/UserManager.vue`
+
+### Notifications And Realtime
+Notifications are both persisted history and realtime delivery.
+
+Implemented notification paths include:
+- `GET /api/notifications/unread-count`
+- `GET /api/notifications/unread`
+- `GET /api/notifications/`
+- `PATCH /api/notifications/{notification_id}/read`
+- `POST /api/notifications/mark-all-read`
+- `DELETE /api/notifications/{notification_id}`
+- `GET /api/notifications/stream`
+
+Implemented realtime path includes:
+- `WS /api/realtime/ws?token=<jwt>`
+
+Behavioral rules:
+- realtime uses Redis pub/sub under the hood
+- notification payloads and generic event payloads are sanitized before broadcast
+- frontend unread chat badge logic is chat-count oriented, not raw unread-message-count oriented
+- notification history and live toasts are separate but connected concerns
+
+Source of truth:
+- `api/routers/notifications.py`
+- `api/routers/realtime.py`
+- `core/notifications.py`
+- `frontend/src/stores/notifications.ts`
+- `frontend/src/components/AppToasts.vue`
+- `frontend/src/views/NotificationsView.vue`
+
+### Sync And Cross-Server Replication
+Sync exists as a system behavior, but it is mainly operational rather than end-user-facing.
+
+Implemented sync behaviors include:
+- signed receive endpoint
+- dependency-ordered application of table changes
+- fallback merge behavior for some natural-key conflicts
+- deferred retry behavior for FK ordering problems
+
+Source of truth:
+- `api/routers/sync.py`
+- `core/events.py`
+- `core/sync_push.py`
+- `core/sync_worker.py`
+- `models/change_log.py`
+- `models/sync_block.py`
+
+The local assistant should mention sync only when the user is clearly asking about data replication, missing cross-server state, or operational consistency.
+
+## Bot Capability Map
+High-value bot handlers:
+- `bot/handlers/start.py` -> `/start`, invitation token entry, registration FSM, channel trade callbacks
+- `bot/handlers/link_account.py` -> `/link` account linking
+- `bot/handlers/panel.py` -> user/admin panels and trading settings interactions
+- `bot/handlers/trade_create.py` -> offer creation FSM
+- `bot/handlers/trade_execute.py` -> channel-execution entry point
+- `bot/handlers/trade_manage.py` -> offer expiry actions from bot side
+- `bot/handlers/trade_history.py` -> history display and export
+- `bot/handlers/admin.py` -> invitation creation FSM
+- `bot/handlers/admin_commodities.py` -> commodity and alias CRUD
+- `bot/handlers/admin_users.py` -> user management, blocking, limits, roles, delete
+- `bot/handlers/block_manage.py` -> user-facing block management
+
+Use bot handlers as the source of truth for Telegram-specific UX, not for core business rules unless the handler itself computes the rule.
+
+## Core Domain Entities
+High-value entities and what they represent:
+- `users` -> identity, role, address, bot access, soft-delete state, block permissions, trading restrictions, usage limits, counters
+- `invitations` -> onboarding credentials with token, short code, creator, expiration, and role
+- `user_sessions` / `session_login_requests` -> multi-device auth state, primary/secondary device logic, approval flows
+- `offers` -> buy/sell trading intent with quantity, remaining quantity, price, lot sizing, status, and optimistic locking
+- `trades` -> concrete executions against offers, trade numbering, participants, quantity, price, and status
+- `messages` -> chat messages with sender/receiver, forwarded/reply links, deletion/edit history, media payload semantics
+- `conversations` -> per-user thread state, last message, unread counters
+- `notifications` -> persistent user notifications with level and category
+- `user_blocks` -> directional user block edges
+- `chat_files` -> media storage metadata and downloadable payload pointers
+- `commodities` / `commodity_aliases` -> tradeable commodity names and aliases
+- `trading_settings` -> live system constraints and defaults
+- `change_log` / `sync_blocks` -> replication bookkeeping
+
+Primary model files:
+- `models/user.py`
+- `models/session.py`
+- `models/offer.py`
+- `models/trade.py`
+- `models/message.py`
+- `models/conversation.py`
+- `models/notification.py`
+- `models/chat_file.py`
+- `models/commodity.py`
+- `models/trading_setting.py`
+- `models/change_log.py`
+- `models/sync_block.py`
+
+## Roles
+Current user roles:
+- `WATCH`
+- `STANDARD`
+- `POLICE`
+- `MIDDLE_MANAGER`
+- `SUPER_ADMIN`
+
+Role semantics are enforced in backend dependencies and admin tooling, not only by labels shown in UI.
+
+## High-Signal Behavioral Rules
+These are important implementation truths that a local assistant should preserve:
+- soft delete is intentional for users; destructive deletion is not the normal behavior
+- `apiBaseUrl = ''` on the frontend is valid same-origin configuration, not a missing config
+- Persian numerals and Jalali/Iran-time presentation are part of the product behavior
+- notification, session, and media code are more complex than average because the product targets mobile/PWA reliability under weak-device and unstable-network conditions
+- chat uploads/downloads intentionally favor progress-aware flows, resumability, and safe fallback behavior
+- album semantics are batch-driven metadata, not inferred from consecutive media layout
+- message/file behavior depends on authenticated media endpoints and local cache hydration, so tiny thumbnails are often placeholders rather than the final source of truth
+
+## Retrieval Playbook
+When answering a question, use this priority order unless the topic clearly demands otherwise:
+1. router/service code that computes the behavior
+2. model/schema definitions that constrain the shape
+3. frontend or bot code that exposes the behavior to the user
+4. curated repo memory notes for fragile chat/media behavior
+5. historical change logs only if current source code is ambiguous about why something exists
+
+Topic-to-file routing:
+- auth/login/session questions -> `api/routers/auth.py`, `api/routers/sessions.py`, `core/services/session_service.py`, `frontend/src/views/LoginView.vue`, `frontend/src/views/ProfileView.vue`
+- invitation/registration questions -> `api/routers/invitations.py`, `api/routers/auth.py`, `frontend/src/views/InviteLanding.vue`, `frontend/src/views/WebRegister.vue`, `bot/handlers/start.py`
+- offer/trade questions -> `api/routers/offers.py`, `api/routers/trades.py`, `core/services/trade_service.py`, `frontend/src/views/MarketView.vue`, `bot/handlers/trade_create.py`
+- commodity/settings questions -> `api/routers/commodities.py`, `api/routers/trading_settings.py`, `core/trading_settings.py`, admin UI/components
+- chat/media questions -> `api/routers/chat.py`, `frontend/src/components/ChatView.vue`, `frontend/src/composables/chat/`, `frontend/src/components/chat/`, repo memory chat notes
+- blocks/limits/admin questions -> `api/routers/blocks.py`, `api/routers/users.py`, `core/services/block_service.py`, `models/user.py`, admin handlers/components
+- realtime/notification questions -> `api/routers/realtime.py`, `api/routers/notifications.py`, `core/notifications.py`, frontend notification store/components
+- sync questions -> `api/routers/sync.py`, `core/sync_push.py`, `core/sync_worker.py`, `core/events.py`
+
+## Answering Rules For A Local Assistant
+When using this repository as grounding:
+- prefer implemented behavior over assumptions from product naming
+- distinguish user-facing rules from dev-only shortcuts
+- distinguish peer blocking from admin restrictions and trading limits
+- if a behavior spans backend and frontend, prefer backend for truth and frontend for UX details
+- if the code shows a protective or unusual branch, assume it probably exists because of a prior real bug or deployment constraint, not by accident
+- if the answer is uncertain, point to the likely source-of-truth files rather than inventing certainty
+
+## What This File Intentionally Excludes
+This file intentionally does not carry:
+- agent tool instructions
+- commit, push, or deploy workflow rules
+- multi-assistant coordination rules
+- long historical change logs
+- temporary operational details that do not help answer product questions
+- secrets, dev keys, or environment-specific sensitive values
+
+## Packaging Guidance
+For local-assistant corpora:
+- include this file near the top of the corpus
+- include the packed repository output for deep retrieval
+- exclude `.github/copilot-instructions.md` unless the assistant is specifically intended to help developers operate the repository itself
+- treat this file as routing guidance, not as a substitute for source code
 </file>
 
 <file path="frontend/src/components/chat/ChatForwardModal.vue">
@@ -39263,6 +39500,78 @@ export function buildFrequentEmojiCategory(userId: number | null, limit = 56): E
 }
 </file>
 
+<file path="frontend/index.html">
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content">
+  
+  <!-- PWA Essential Meta Tags -->
+  <meta name="theme-color" content="#ffffff">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Gold">
+  <meta name="application-name" content="Gold">
+  
+  <link rel="icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="/pwa-512x512.png">
+  <link rel="apple-touch-icon" href="/pwa-192x192.png">
+  
+  <title>پنل کاربری</title>
+  <script async src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
+</file>
+
+<file path=".repomixignore">
+/src/
+/tests/
+.github/copilot-instructions.md
+
+# VCS and environment directories
+.git/
+.venv/
+venv/
+node_modules/
+__pycache__/
+
+# Generated/build artifacts
+mini_app_dist/
+frontend/dist/
+
+# Large/binary assets and caches
+map_data/
+pip_packages/
+tmp/
+*.mbtiles
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.svg
+*.mp4
+*.mov
+*.mp3
+*.wav
+*.ogg
+*.woff
+*.woff2
+*.ttf
+*.eot
+*.pdf
+*.zip
+</file>
+
 <file path="api/routers/chat.py">
 # trading_bot/api/routers/chat.py
 """
@@ -40542,6 +40851,1876 @@ function cancelAll() {
     "vue-tsc": "^3.1.0"
   }
 }
+</file>
+
+<file path="frontend/src/components/chat/AttachmentMenu.vue">
+<template>
+  <teleport to="body">
+    <input v-if="modelValue" ref="cameraPhotoInput" type="file" accept="image/*" capture="environment" style="display:none" @change="onNativeCameraFile" />
+    <input v-if="modelValue" ref="cameraVideoInput" type="file" accept="video/*" capture="environment" style="display:none" @change="onNativeCameraFile" />
+
+    <!-- Backdrop -->
+    <transition name="fade">
+      <div v-if="modelValue && !showCameraCapture" class="attachment-backdrop" @click="close"></div>
+    </transition>
+
+    <transition name="fade">
+      <div v-if="modelValue && showCameraCapture" class="camera-capture-overlay">
+        <div class="camera-capture-shell">
+          <div class="camera-topbar">
+            <button class="camera-icon-btn" @click="closeCameraCapture" title="بازگشت">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
+
+            <div class="camera-mode-switch">
+              <button
+                class="camera-mode-btn"
+                :class="{ active: cameraMode === 'photo' }"
+                :disabled="isRecording"
+                @click="setCameraMode('photo')"
+              >
+                عکس
+              </button>
+              <button
+                class="camera-mode-btn"
+                :class="{ active: cameraMode === 'video' }"
+                :disabled="isRecording"
+                @click="setCameraMode('video')"
+              >
+                ویدئو
+              </button>
+            </div>
+
+            <button class="camera-icon-btn" @click="toggleFacingMode" :disabled="isRecording || isCameraStarting || isUsingNativeCameraFallback" title="تغییر دوربین">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 1l4 4-4 4"></path>
+                <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+                <path d="M7 23l-4-4 4-4"></path>
+                <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+              </svg>
+            </button>
+          </div>
+
+          <div class="camera-preview-frame">
+            <video
+              ref="cameraPreviewRef"
+              class="camera-preview"
+              autoplay
+              playsinline
+              muted
+            ></video>
+
+            <div v-if="isCameraStarting" class="camera-status-overlay">
+              در حال آماده‌سازی دوربین...
+            </div>
+
+            <div v-else-if="isUsingNativeCameraFallback" class="camera-status-overlay native">
+              <div>{{ nativeCameraFallbackTitle }}</div>
+              <div class="camera-fallback-hint">{{ nativeCameraFallbackHint }}</div>
+            </div>
+
+            <div v-else-if="cameraError" class="camera-status-overlay error">
+              <div>{{ cameraError }}</div>
+              <button class="camera-error-btn" @click="startCameraStream">تلاش مجدد</button>
+            </div>
+
+            <div v-if="isRecording" class="camera-recording-badge">
+              <span class="recording-dot"></span>
+              {{ formattedRecordingTime }}
+            </div>
+
+            <div v-if="hasCameraZoomControl" class="camera-zoom-panel">
+              <button
+                type="button"
+                class="camera-zoom-btn"
+                :disabled="!canZoomOut"
+                @click="nudgeCameraZoom(-1)"
+                title="کاهش زوم"
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+
+              <div class="camera-zoom-slider-wrap">
+                <div class="camera-zoom-label">{{ cameraZoomDisplay }}</div>
+                <input
+                  class="camera-zoom-slider"
+                  type="range"
+                  :min="cameraZoomCapability?.min ?? 1"
+                  :max="cameraZoomCapability?.max ?? 1"
+                  :step="cameraZoomCapability?.step ?? 0.1"
+                  :value="cameraZoomValue"
+                  @input="handleCameraZoomInput"
+                />
+              </div>
+
+              <button
+                type="button"
+                class="camera-zoom-btn"
+                :disabled="!canZoomIn"
+                @click="nudgeCameraZoom(1)"
+                title="افزایش زوم"
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+            </div>
+
+            <div v-if="hasCapturedMediaQueue" class="camera-captured-strip">
+              <div
+                v-for="item in capturedCameraMedia"
+                :key="item.id"
+                class="camera-captured-item"
+                :class="{ editable: item.type === 'photo' }"
+                :title="item.type === 'photo' ? 'ویرایش عکس' : 'پیش‌نمایش ویدئو'"
+                @click="item.type === 'photo' ? editCapturedMedia(item.id) : undefined"
+              >
+                <img
+                  v-if="item.type === 'photo'"
+                  :src="item.previewUrl"
+                  alt="پیش نمایش عکس"
+                  class="camera-captured-thumb"
+                />
+                <div v-else class="camera-captured-video-wrap">
+                  <video :src="item.previewUrl" class="camera-captured-thumb" muted loop playsinline autoplay></video>
+                  <span class="camera-captured-video-badge">ویدئو</span>
+                </div>
+                <button
+                  type="button"
+                  class="camera-captured-remove"
+                  aria-label="حذف"
+                  @click.stop="removeCapturedMedia(item.id)"
+                >×</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="camera-control-bar">
+            <div class="camera-control-row">
+              <button
+                type="button"
+                class="camera-queue-action camera-clear-btn"
+                :disabled="!hasCapturedMediaQueue || isRecording"
+                @click="clearCapturedMediaQueue"
+              >
+                پاک کردن
+              </button>
+
+              <button
+                class="camera-shutter-btn"
+                :class="{ recording: isRecording, video: cameraMode === 'video' }"
+                :disabled="!isCameraReady"
+                @click="handlePrimaryCameraAction"
+              >
+                <span class="camera-shutter-core"></span>
+              </button>
+
+              <button
+                type="button"
+                class="camera-queue-action camera-send-btn"
+                :disabled="!canSendCapturedMedia"
+                @click="sendCapturedMediaQueue"
+              >
+                <span v-if="hasCapturedMediaQueue" class="camera-send-count">{{ capturedMediaCount }}</span>
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </div>
+            <div class="camera-capture-meta">
+              <div class="camera-capture-label">
+                {{ cameraMode === 'photo' ? 'ثبت عکس' : (isRecording ? 'توقف ضبط' : 'شروع ضبط ویدئو') }}
+              </div>
+              <div v-if="hasCapturedMediaQueue" class="camera-capture-queue-label">
+                {{ capturedMediaQueueLabel }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- Bottom Sheet -->
+    <transition name="slide-up">
+      <div
+        v-if="modelValue && !showCameraCapture"
+        ref="sheetRef"
+        :class="['attachment-sheet', { 'full-screen-sheet': activeTab === 'location' }]"
+        @touchstart="onTouchStart"
+        @touchmove="onTouchMove"
+        @touchend="onTouchEnd"
+      >
+        <!-- Drag Handle -->
+        <div class="sheet-handle"><div class="handle-bar"></div></div>
+
+        <!-- Tabs -->
+        <div class="sheet-tabs">
+          <button
+            v-for="tab in tabs"
+            :key="tab.id"
+            :class="['tab-btn', { active: activeTab === tab.id }]"
+            @click="activeTab = tab.id"
+          >
+            <span class="tab-icon" v-html="tab.icon"></span>
+            <span class="tab-label">{{ tab.label }}</span>
+          </button>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="sheet-content">
+          <!-- Gallery Tab -->
+          <div v-if="activeTab === 'gallery'" class="tab-panel gallery-panel">
+            <input ref="galleryInput" type="file" accept="image/*,video/*" multiple style="display:none" @change="onGalleryFile" />
+
+            <button class="action-card" @click="openCameraCapture()">
+              <div class="action-icon camera-icon">
+                <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <circle cx="12" cy="13" r="4"/>
+                </svg>
+              </div>
+              <span class="action-label">دوربین</span>
+            </button>
+
+            <button class="action-card" @click="galleryInput?.click()">
+              <div class="action-icon gallery-icon">
+                <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                  <circle cx="8.5" cy="8.5" r="1.5"/>
+                  <polyline points="21 15 16 10 5 21"/>
+                </svg>
+              </div>
+              <span class="action-label">گالری</span>
+            </button>
+          </div>
+
+          <!-- File Tab -->
+          <div v-if="activeTab === 'file'" class="tab-panel file-panel">
+            <input ref="fileInput" type="file" accept="*" style="display:none" @change="onFileSelected" />
+
+            <button class="action-card" @click="fileInput?.click()">
+              <div class="action-icon file-icon">
+                <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                  <polyline points="10 9 9 9 8 9"/>
+                </svg>
+              </div>
+              <span class="action-label">فایل</span>
+            </button>
+          </div>
+
+          <!-- Location Tab -->
+          <div v-if="activeTab === 'location'" class="tab-panel location-panel">
+            <div class="map-wrapper">
+              <l-map
+                ref="mapRef"
+                :zoom="15"
+                :center="mapCenter"
+                :use-global-leaflet="false"
+                @moveend="onMapMoveEnd"
+                class="location-map"
+              >
+                <l-tile-layer
+                  :url="tileUrl"
+                  attribution="&copy; OpenStreetMap"
+                />
+              </l-map>
+              <!-- Return to my location button -->
+              <button class="my-location-btn" @click="goToMyLocation(false)" title="مکان من">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2v2M12 20v2M2 12h2M20 12h2M12 5a7 7 0 1 0 0 14 7 7 0 0 0 0-14z"/>
+                  <circle cx="12" cy="12" r="2" fill="currentColor"/>
+                </svg>
+              </button>
+              <!-- Fixed center pin -->
+              <div class="center-pin">
+                <svg viewBox="0 0 24 36" width="36" height="48" fill="#E53935">
+                  <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0zm0 18c-3.3 0-6-2.7-6-6s2.7-6 6-6 6 2.7 6 6-2.7 6-6 6z"/>
+                </svg>
+              </div>
+            </div>
+            <button class="send-location-btn" @click="sendLocation">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                <circle cx="12" cy="10" r="3"/>
+              </svg>
+              ارسال موقعیت مکانی
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+  </teleport>
+
+  <!-- Phase A: Image editor modal for single-image gallery picks -->
+  <teleport to="body">
+    <ImageEditorModal
+      v-if="editingFile"
+      :key="singleEditorKey"
+      :file="editingFile"
+      @confirm="onEditorConfirm"
+      @cancel="onEditorCancel"
+    />
+  </teleport>
+
+  <!-- Phase B: Multi-image gallery preview + per-item edit -->
+  <GalleryPreviewModal
+    v-if="multiPreviewFiles"
+    :files="multiPreviewFiles"
+    @confirm="onMultiPreviewConfirm"
+    @cancel="onMultiPreviewCancel"
+  />
+
+  <!-- Phase B: Per-item editor for camera queue photos -->
+  <teleport to="body">
+    <ImageEditorModal
+      v-if="cameraEditingItem"
+      :key="cameraEditingItem.id"
+      :file="cameraEditingItem.file"
+      @confirm="onCameraEditConfirm"
+      @cancel="onCameraEditCancel"
+    />
+  </teleport>
+</template>
+
+<script setup lang="ts">
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import 'leaflet/dist/leaflet.css'
+import { LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
+
+// Lazy-load the image editor so Cropper.js (~40KB) and its CSS are only
+// downloaded when the user actually edits an image. Keeps the main Messenger
+// bundle lean for users who never edit.
+const ImageEditorModal = defineAsyncComponent(() => import('./ImageEditorModal.vue'))
+const GalleryPreviewModal = defineAsyncComponent(() => import('./GalleryPreviewModal.vue'))
+
+type CameraZoomCapability = {
+  min: number
+  max: number
+  step: number
+}
+
+type MediaTrackCapabilitiesWithZoom = MediaTrackCapabilities & {
+  zoom?: {
+    min?: number
+    max?: number
+    step?: number
+  }
+}
+
+type ZoomCapableTrack = MediaStreamTrack & {
+  getCapabilities?: () => MediaTrackCapabilities
+  getSettings?: () => MediaTrackSettings & { zoom?: number }
+}
+
+type CapturedCameraMediaItem = {
+  id: string
+  file: File
+  previewUrl: string
+  type: 'photo' | 'video'
+}
+
+const props = defineProps<{
+  modelValue: boolean
+}>()
+
+const emit = defineEmits<{
+  (e: 'update:modelValue', val: boolean): void
+  (e: 'select-media', file: File, albumId?: string | null, albumIndex?: number, albumSize?: number): void
+  (e: 'select-file', file: File): void
+  (e: 'select-location', lat: number, lng: number): void
+}>()
+
+const activeTab = ref<'gallery' | 'file' | 'location'>('gallery')
+const cameraPhotoInput = ref<HTMLInputElement | null>(null)
+const cameraVideoInput = ref<HTMLInputElement | null>(null)
+const galleryInput = ref<HTMLInputElement | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
+
+// Phase A image editor state.
+// editingFile: holds the single image currently in the editor (null when
+// editor is closed). We only route through the editor for single-image
+// gallery picks.
+const editingFile = ref<File | null>(null)
+// Bumped each time we open the single-image editor so Vue remounts the
+// component cleanly between sessions (prevents stale Cropper/blob state
+// when the user opens the editor multiple times in the same sheet visit).
+const singleEditorKey = ref<number>(0)
+
+// Phase B state.
+// multiPreviewFiles: holds the multi-image gallery pick while the user
+// reviews/edits/removes items before dispatch. Null = preview closed.
+const multiPreviewFiles = ref<File[] | null>(null)
+
+// cameraEditingItemId: id of the camera-queue photo currently in the
+// per-item editor. Null = editor closed.
+const cameraEditingItemId = ref<string | null>(null)
+const sheetRef = ref<HTMLElement | null>(null)
+const mapRef = ref<any>(null)
+const cameraPreviewRef = ref<HTMLVideoElement | null>(null)
+
+const showCameraCapture = ref(false)
+const cameraMode = ref<'photo' | 'video'>('photo')
+const activeFacingMode = ref<'environment' | 'user'>('environment')
+const cameraCaptureMode = ref<'inline' | 'native'>('inline')
+const isCameraStarting = ref(false)
+const cameraError = ref('')
+const isRecording = ref(false)
+const recordingSeconds = ref(0)
+const capturedCameraMedia = ref<CapturedCameraMediaItem[]>([])
+const cameraZoomCapability = ref<CameraZoomCapability | null>(null)
+const cameraZoomValue = ref(1)
+
+const cameraStream = ref<MediaStream | null>(null)
+let mediaRecorder: MediaRecorder | null = null
+let recordedChunks: BlobPart[] = []
+let recordingTimer: number | null = null
+
+// Default: Tehran
+const mapCenter = ref<[number, number]>([35.6892, 51.3890])
+const selectedLatLng = ref<{ lat: number; lng: number }>({ lat: 35.6892, lng: 51.3890 })
+
+const tileUrl = ref('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
+
+const isUsingNativeCameraFallback = computed(() => cameraCaptureMode.value === 'native')
+const nativeCameraFallbackTitle = computed(() => (
+  cameraMode.value === 'photo'
+    ? 'پیش نمایش زنده دوربین در این مرورگر در دسترس نیست.'
+    : 'پیش نمایش زنده فیلم برداری در این مرورگر در دسترس نیست.'
+))
+const nativeCameraFallbackHint = computed(() => (
+  cameraMode.value === 'photo'
+    ? 'با دکمه پایین، دوربین سیستم برای گرفتن عکس باز می شود.'
+    : 'با دکمه پایین، دوربین سیستم برای ضبط ویدئو باز می شود.'
+))
+const capturedMediaCount = computed(() => capturedCameraMedia.value.length)
+const hasCapturedMediaQueue = computed(() => capturedMediaCount.value > 0)
+const canSendCapturedMedia = computed(() => hasCapturedMediaQueue.value && !isRecording.value)
+const capturedMediaQueueLabel = computed(() => {
+  const count = capturedMediaCount.value
+  return count === 1 ? '۱ مورد آماده ارسال' : `${count} مورد آماده ارسال`
+})
+const hasCameraZoomControl = computed(() => {
+  if (isUsingNativeCameraFallback.value) return false
+  const capability = cameraZoomCapability.value
+  return Boolean(capability && capability.max > capability.min + 0.001)
+})
+const canZoomOut = computed(() => {
+  const capability = cameraZoomCapability.value
+  return Boolean(capability && cameraZoomValue.value > capability.min + 0.001)
+})
+const canZoomIn = computed(() => {
+  const capability = cameraZoomCapability.value
+  return Boolean(capability && cameraZoomValue.value < capability.max - 0.001)
+})
+const isCameraReady = computed(() => (
+  isUsingNativeCameraFallback.value
+  || (Boolean(cameraStream.value) && !isCameraStarting.value && !cameraError.value)
+))
+const formattedRecordingTime = computed(() => {
+  const mins = Math.floor(recordingSeconds.value / 60)
+  const secs = recordingSeconds.value % 60
+  return `${mins}:${secs.toString().padStart(2, '0')}`
+})
+const cameraZoomDisplay = computed(() => {
+  const normalizedZoom = cameraZoomValue.value >= 10
+    ? cameraZoomValue.value.toFixed(0)
+    : cameraZoomValue.value.toFixed(1)
+  return `${normalizedZoom}x`
+})
+
+const tabs = [
+  { id: 'gallery' as const, label: 'گالری', icon: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>' },
+  { id: 'file' as const, label: 'فایل', icon: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' },
+  { id: 'location' as const, label: 'موقعیت', icon: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>' },
+]
+
+// Swipe to dismiss
+let startY = 0
+let currentTranslateY = 0
+let isDraggingAllowed = true
+
+function stopRecordingTimer() {
+  if (recordingTimer !== null) {
+    window.clearInterval(recordingTimer)
+    recordingTimer = null
+  }
+}
+
+function resetCameraZoomState() {
+  cameraZoomCapability.value = null
+  cameraZoomValue.value = 1
+}
+
+function getActiveCameraVideoTrack(): ZoomCapableTrack | null {
+  return (cameraStream.value?.getVideoTracks?.()[0] as ZoomCapableTrack | undefined) ?? null
+}
+
+function clampCameraZoom(value: number, capability: CameraZoomCapability) {
+  const bounded = Math.min(capability.max, Math.max(capability.min, value))
+  const steps = Math.round((bounded - capability.min) / capability.step)
+  return Number((capability.min + (steps * capability.step)).toFixed(2))
+}
+
+function getCameraZoomNudgeStep(capability: CameraZoomCapability) {
+  const coarseStep = Number(((capability.max - capability.min) / 8).toFixed(2))
+  return Math.max(capability.step, coarseStep)
+}
+
+async function syncCameraZoomCapability(track: ZoomCapableTrack | null = getActiveCameraVideoTrack()) {
+  if (!track || typeof track.getCapabilities !== 'function') {
+    resetCameraZoomState()
+    return
+  }
+
+  const capabilities = track.getCapabilities() as MediaTrackCapabilitiesWithZoom
+  const zoomRange = capabilities.zoom
+  const min = Number(zoomRange?.min)
+  const max = Number(zoomRange?.max)
+
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+    resetCameraZoomState()
+    return
+  }
+
+  const rawStep = Number(zoomRange?.step)
+  const capability = {
+    min,
+    max,
+    step: Number.isFinite(rawStep) && rawStep > 0 ? rawStep : 0.1,
+  }
+
+  cameraZoomCapability.value = capability
+
+  const settingsZoom = Number(track.getSettings?.()?.zoom)
+  cameraZoomValue.value = clampCameraZoom(Number.isFinite(settingsZoom) ? settingsZoom : capability.min, capability)
+}
+
+async function applyCameraZoom(nextValue: number) {
+  const track = getActiveCameraVideoTrack()
+  const capability = cameraZoomCapability.value
+
+  if (!track || !capability || typeof track.applyConstraints !== 'function') return
+
+  const zoom = clampCameraZoom(nextValue, capability)
+  cameraZoomValue.value = zoom
+
+  try {
+    await track.applyConstraints({
+      advanced: [{ zoom } as any],
+    })
+
+    const appliedZoom = Number(track.getSettings?.()?.zoom)
+    if (Number.isFinite(appliedZoom)) {
+      cameraZoomValue.value = clampCameraZoom(appliedZoom, capability)
+    }
+  } catch (error) {
+    console.warn('Camera zoom apply failed:', error)
+    await syncCameraZoomCapability(track)
+  }
+}
+
+function handleCameraZoomInput(event: Event) {
+  const target = event.target as HTMLInputElement | null
+  if (!target) return
+
+  const nextValue = Number(target.value)
+  if (!Number.isFinite(nextValue)) return
+
+  void applyCameraZoom(nextValue)
+}
+
+function nudgeCameraZoom(direction: -1 | 1) {
+  const capability = cameraZoomCapability.value
+  if (!capability) return
+
+  const delta = getCameraZoomNudgeStep(capability) * direction
+  void applyCameraZoom(cameraZoomValue.value + delta)
+}
+
+function createCapturedMediaId() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `camera_capture_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function revokeCapturedMediaPreview(url?: string) {
+  if (url?.startsWith('blob:')) {
+    URL.revokeObjectURL(url)
+  }
+}
+
+function removeCapturedMedia(itemId: string) {
+  const index = capturedCameraMedia.value.findIndex((item) => item.id === itemId)
+  if (index === -1) return
+
+  const [removedItem] = capturedCameraMedia.value.splice(index, 1)
+  revokeCapturedMediaPreview(removedItem?.previewUrl)
+}
+
+function clearCapturedMediaQueue() {
+  capturedCameraMedia.value.forEach((item) => revokeCapturedMediaPreview(item.previewUrl))
+  capturedCameraMedia.value = []
+}
+
+function queueCapturedMedia(file: File) {
+  const mediaType = file.type.startsWith('video/') ? 'video' : 'photo'
+  capturedCameraMedia.value.push({
+    id: createCapturedMediaId(),
+    file,
+    previewUrl: URL.createObjectURL(file),
+    type: mediaType,
+  })
+}
+
+function stopCameraTracks() {
+  if (cameraPreviewRef.value) {
+    try {
+      cameraPreviewRef.value.pause()
+      cameraPreviewRef.value.srcObject = null
+    } catch {
+      // Ignore preview cleanup failures.
+    }
+  }
+
+  cameraStream.value?.getTracks().forEach((track) => track.stop())
+  cameraStream.value = null
+  resetCameraZoomState()
+}
+
+function cleanupCamera(discardRecording = true, clearCapturedMedia = true) {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.onstop = null
+    try {
+      mediaRecorder.stop()
+    } catch {
+      // Ignore recorder stop failures.
+    }
+  }
+
+  if (discardRecording) {
+    recordedChunks = []
+  }
+
+  mediaRecorder = null
+  isRecording.value = false
+  recordingSeconds.value = 0
+  stopRecordingTimer()
+  stopCameraTracks()
+  cameraCaptureMode.value = 'inline'
+  cameraError.value = ''
+  isCameraStarting.value = false
+  showCameraCapture.value = false
+
+  if (clearCapturedMedia) {
+    clearCapturedMediaQueue()
+  }
+}
+
+function supportsInlineCameraPreview() {
+  return typeof window !== 'undefined'
+    && window.isSecureContext
+    && !!navigator.mediaDevices?.getUserMedia
+}
+
+function openNativeCameraCapture(mode: 'photo' | 'video' = cameraMode.value) {
+  if (mode === 'video') {
+    cameraVideoInput.value?.click()
+    return
+  }
+
+  cameraPhotoInput.value?.click()
+}
+
+function enableNativeCameraFallback() {
+  stopCameraTracks()
+  cameraCaptureMode.value = 'native'
+  cameraError.value = ''
+  isCameraStarting.value = false
+  showCameraCapture.value = true
+}
+
+async function attachCameraStream(stream: MediaStream) {
+  await nextTick()
+  const preview = cameraPreviewRef.value
+  if (!preview) return
+
+  preview.srcObject = stream
+  preview.muted = true
+
+  try {
+    await preview.play()
+  } catch (error) {
+    console.warn('Camera preview play failed:', error)
+  }
+}
+
+async function requestCameraStream(includeAudio: boolean) {
+  return navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: { ideal: activeFacingMode.value },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+    },
+    audio: includeAudio,
+  })
+}
+
+async function startCameraStream() {
+  if (!supportsInlineCameraPreview()) {
+    enableNativeCameraFallback()
+    return
+  }
+
+  cameraCaptureMode.value = 'inline'
+  isCameraStarting.value = true
+  cameraError.value = ''
+  stopCameraTracks()
+
+  try {
+    const wantsAudio = cameraMode.value === 'video'
+    let stream: MediaStream
+
+    try {
+      stream = await requestCameraStream(wantsAudio)
+    } catch (error) {
+      if (!wantsAudio) throw error
+      stream = await requestCameraStream(false)
+    }
+
+    cameraStream.value = stream
+    showCameraCapture.value = true
+    await attachCameraStream(stream)
+    await syncCameraZoomCapability(getActiveCameraVideoTrack())
+  } catch (error) {
+    console.error('Camera start error:', error)
+    enableNativeCameraFallback()
+  } finally {
+    isCameraStarting.value = false
+  }
+}
+
+function createCameraAlbumId() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `camera_album_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function getSupportedVideoMimeType() {
+  if (typeof MediaRecorder === 'undefined') return ''
+
+  const candidates = [
+    'video/mp4;codecs=h264,aac',
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm',
+  ]
+
+  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || ''
+}
+
+async function sendCapturedMediaQueue() {
+  if (!hasCapturedMediaQueue.value) return
+
+  const queuedItems = capturedCameraMedia.value.map((item) => ({
+    file: item.file,
+    type: item.type,
+  }))
+  const albumId = queuedItems.length > 1 ? createCameraAlbumId() : null
+
+  cleanupCamera(true, true)
+  emit('update:modelValue', false)
+
+  await new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame !== 'function') {
+      setTimeout(resolve, 0)
+      return
+    }
+
+    requestAnimationFrame(() => resolve())
+  })
+
+  queuedItems.forEach((item, index) => {
+    emit('select-media', item.file, albumId, index, queuedItems.length)
+  })
+}
+
+async function capturePhoto() {
+  const preview = cameraPreviewRef.value
+  if (!preview || !cameraStream.value) return
+
+  const width = Math.max(1, preview.videoWidth || 1080)
+  const height = Math.max(1, preview.videoHeight || 1920)
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    alert('خطا در ثبت تصویر')
+    return
+  }
+
+  ctx.drawImage(preview, 0, 0, width, height)
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92))
+  if (!blob) {
+    alert('خطا در ثبت تصویر')
+    return
+  }
+
+  const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' })
+  queueCapturedMedia(file)
+}
+
+function startVideoRecording() {
+  if (!cameraStream.value) return
+  if (typeof MediaRecorder === 'undefined') {
+    alert('مرورگر شما از فیلم‌برداری پشتیبانی نمی‌کند.')
+    return
+  }
+
+  recordedChunks = []
+  const mimeType = getSupportedVideoMimeType()
+
+  try {
+    mediaRecorder = mimeType
+      ? new MediaRecorder(cameraStream.value, { mimeType })
+      : new MediaRecorder(cameraStream.value)
+  } catch (error) {
+    console.error('MediaRecorder init failed:', error)
+    alert('مرورگر شما از فیلم‌برداری پشتیبانی نمی‌کند.')
+    return
+  }
+
+  mediaRecorder.ondataavailable = (event) => {
+    if (event.data && event.data.size > 0) {
+      recordedChunks.push(event.data)
+    }
+  }
+
+  mediaRecorder.onstop = async () => {
+    const blob = new Blob(recordedChunks, { type: mediaRecorder?.mimeType || mimeType || 'video/webm' })
+    if (blob.size <= 0) return
+
+    const extension = blob.type.includes('mp4') ? 'mp4' : 'webm'
+    const file = new File([blob], `camera_${Date.now()}.${extension}`, { type: blob.type || 'video/webm' })
+    queueCapturedMedia(file)
+  }
+
+  mediaRecorder.start(200)
+  isRecording.value = true
+  recordingSeconds.value = 0
+  stopRecordingTimer()
+  recordingTimer = window.setInterval(() => {
+    recordingSeconds.value += 1
+  }, 1000)
+}
+
+function stopVideoRecording() {
+  if (!mediaRecorder || mediaRecorder.state === 'inactive') return
+
+  isRecording.value = false
+  stopRecordingTimer()
+  mediaRecorder.stop()
+}
+
+function handlePrimaryCameraAction() {
+  if (isUsingNativeCameraFallback.value) {
+    openNativeCameraCapture(cameraMode.value)
+    return
+  }
+
+  if (!isCameraReady.value) return
+
+  if (cameraMode.value === 'photo') {
+    void capturePhoto()
+    return
+  }
+
+  if (isRecording.value) {
+    stopVideoRecording()
+    return
+  }
+
+  startVideoRecording()
+}
+
+function openCameraCapture() {
+  cameraMode.value = 'photo'
+  activeFacingMode.value = 'environment'
+  showCameraCapture.value = true
+
+  if (!supportsInlineCameraPreview()) {
+    enableNativeCameraFallback()
+    return
+  }
+
+  void startCameraStream()
+}
+
+async function setCameraMode(mode: 'photo' | 'video') {
+  if (cameraMode.value === mode || isRecording.value) return
+  cameraMode.value = mode
+
+  if (showCameraCapture.value && !isUsingNativeCameraFallback.value) {
+    await startCameraStream()
+  }
+}
+
+async function toggleFacingMode() {
+  if (isRecording.value || isUsingNativeCameraFallback.value) return
+  activeFacingMode.value = activeFacingMode.value === 'environment' ? 'user' : 'environment'
+
+  if (showCameraCapture.value) {
+    await startCameraStream()
+  }
+}
+
+function closeCameraCapture() {
+  cleanupCamera(true)
+}
+
+function onNativeCameraFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!input.files?.length) return
+
+  Array.from(input.files).forEach((file) => {
+    queueCapturedMedia(file)
+  })
+
+  input.value = ''
+}
+
+function onTouchStart(e: TouchEvent) {
+  isDraggingAllowed = true
+  const target = e.target as HTMLElement
+  
+  // Prevent drag-to-dismiss if the user is interacting with the map
+  if (target.closest('.map-wrapper')) {
+    isDraggingAllowed = false
+    return
+  }
+
+  const touch = e.touches[0]
+  if (!touch) return
+  startY = touch.clientY
+  currentTranslateY = 0
+}
+
+function onTouchMove(e: TouchEvent) {
+  if (!isDraggingAllowed) return
+  
+  const touch = e.touches[0]
+  if (!touch) return
+  const dy = touch.clientY - startY
+  if (dy > 0) {
+    currentTranslateY = dy
+    if (sheetRef.value) {
+      sheetRef.value.style.transform = `translateY(${dy}px)`
+    }
+  }
+}
+
+function onTouchEnd() {
+  if (!isDraggingAllowed) return
+  
+  if (currentTranslateY > 100) {
+    close()
+  } else if (sheetRef.value) {
+    sheetRef.value.style.transform = ''
+  }
+  currentTranslateY = 0
+}
+
+function close() {
+  cleanupCamera(true)
+  emit('update:modelValue', false)
+}
+
+// Reset tab on open
+watch(() => props.modelValue, (val) => {
+  if (val) activeTab.value = 'gallery'
+  if (!val) cleanupCamera(true)
+})
+
+watch(() => activeTab.value, (val) => {
+  if (val === 'location') {
+    // Optionally trigger map resize to fix leaflet gray rendering
+    setTimeout(() => {
+      mapRef.value?.leafletObject?.invalidateSize()
+      goToMyLocation(true) // Automatically try to fetch location on open
+    }, 300)
+  }
+})
+
+// Gallery file handler.
+// Do not pre-compress here: useChatMedia.ts performs the EXIF-safe pipeline.
+//
+// Phase A routing:
+//   - Single image pick (and not HEIC) → open the crop editor. User can
+//     confirm edited output, send unedited, or cancel entirely.
+//   - Multi-image album OR video included → bypass editor (Phase B will add
+//     a preview grid with per-item pencil button).
+async function onGalleryFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!input.files?.length) return
+
+  const files = Array.from(input.files)
+  input.value = ''
+
+  // Phase A: single-image editing fast-path.
+  const onlyOne = files.length === 1
+  const onlyFile = files[0]
+  const isImage = onlyOne && !!onlyFile && onlyFile.type.startsWith('image/')
+  // HEIC needs to go through useChatMedia's normalize step first; we don't
+  // try to render it inside Cropper directly.
+  const isHeic =
+    onlyOne &&
+    !!onlyFile &&
+    (onlyFile.type === 'image/heic' ||
+      onlyFile.type === 'image/heif' ||
+      /\.(heic|heif)$/i.test(onlyFile.name))
+
+  if (onlyOne && isImage && !isHeic && onlyFile) {
+    close()
+    // Wait for sheet close animation before mounting editor to avoid a
+    // visible overlap flash.
+    await new Promise<void>((resolve) => setTimeout(resolve, 180))
+    singleEditorKey.value += 1
+    editingFile.value = onlyFile
+    return
+  }
+
+  // Phase B: multi-file gallery picks go through the preview sheet so the
+  // user can edit, remove, or reorder before the album is dispatched.
+  if (files.length > 1) {
+    close()
+    await new Promise<void>((resolve) => setTimeout(resolve, 180))
+    multiPreviewFiles.value = files
+    return
+  }
+
+  // Single non-image pick (video or HEIC) → emit directly.
+  close()
+  await new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame !== 'function') {
+      setTimeout(resolve, 0)
+      return
+    }
+    requestAnimationFrame(() => resolve())
+  })
+  files.forEach((file, index) => {
+    emit('select-media', file, null, index, files.length)
+  })
+}
+
+function onMultiPreviewConfirm(finalFiles: File[]) {
+  multiPreviewFiles.value = null
+  if (!finalFiles.length) return
+  const albumId = finalFiles.length > 1
+    ? (globalThis.crypto?.randomUUID?.() ?? `album_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`)
+    : null
+  finalFiles.forEach((file, index) => {
+    emit('select-media', file, albumId, index, finalFiles.length)
+  })
+}
+
+function onMultiPreviewCancel() {
+  multiPreviewFiles.value = null
+}
+
+// --- Camera queue per-item edit (Phase B) ---
+
+const cameraEditingItem = computed(() => {
+  const id = cameraEditingItemId.value
+  if (!id) return null
+  return capturedCameraMedia.value.find((it) => it.id === id) ?? null
+})
+
+function editCapturedMedia(itemId: string) {
+  const item = capturedCameraMedia.value.find((it) => it.id === itemId)
+  if (!item || item.type !== 'photo') return
+  cameraEditingItemId.value = itemId
+}
+
+function onCameraEditConfirm(editedFile: File) {
+  const id = cameraEditingItemId.value
+  cameraEditingItemId.value = null
+  if (!id) return
+  const idx = capturedCameraMedia.value.findIndex((it) => it.id === id)
+  if (idx < 0) return
+  const old = capturedCameraMedia.value[idx]
+  if (!old) return
+  revokeCapturedMediaPreview(old.previewUrl)
+  capturedCameraMedia.value[idx] = {
+    ...old,
+    file: editedFile,
+    previewUrl: URL.createObjectURL(editedFile),
+  }
+}
+
+function onCameraEditCancel() {
+  cameraEditingItemId.value = null
+}
+
+function onEditorConfirm(editedFile: File) {
+  // Single-image edited path: emit with no albumId so useChatMedia dispatches
+  // it as a standalone message.
+  editingFile.value = null
+  emit('select-media', editedFile, null, 0, 1)
+}
+
+function onEditorCancel() {
+  // User dismissed the editor entirely → do not send anything.
+  editingFile.value = null
+}
+
+// File handler (no compression)
+function onFileSelected(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!input.files?.length) return
+
+  for (const file of Array.from(input.files)) {
+    emit('select-file', file)
+  }
+  input.value = ''
+  close()
+}
+
+// Map
+function onMapMoveEnd() {
+  const map = mapRef.value?.leafletObject
+  if (map) {
+    const center = map.getCenter()
+    selectedLatLng.value = { lat: center.lat, lng: center.lng }
+  }
+}
+
+function goToMyLocation(silent = false) {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude
+        const lng = position.coords.longitude
+        mapCenter.value = [lat, lng]
+        selectedLatLng.value = { lat, lng }
+        
+        const map = mapRef.value?.leafletObject
+        if (map) {
+          map.setView([lat, lng], 15)
+        }
+      },
+      (error) => {
+        console.error('Geolocation error:', error)
+        if (silent !== true) {
+          alert('امکان دریافت مکان شما وجود ندارد. لطفا دسترسی مرورگر را بررسی کنید.')
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    )
+  } else {
+    if (silent !== true) {
+      alert('مرورگر شما از مکان‌یابی پشتیبانی نمی‌کند.')
+    }
+  }
+}
+
+function sendLocation() {
+  emit('select-location', selectedLatLng.value.lat, selectedLatLng.value.lng)
+  close()
+}
+
+onBeforeUnmount(() => {
+  cleanupCamera(true)
+})
+</script>
+
+<style scoped>
+.attachment-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 999;
+}
+
+.camera-capture-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  background: #000;
+}
+
+.camera-capture-shell {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  color: #fff;
+}
+
+.camera-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.camera-icon-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  cursor: pointer;
+}
+
+.camera-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.camera-mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.camera-mode-btn {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.camera-mode-btn.active {
+  background: rgba(255, 255, 255, 0.22);
+  color: white;
+}
+
+.camera-mode-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.camera-preview-frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.camera-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #050505;
+}
+
+.camera-status-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 20px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(10px);
+}
+
+.camera-status-overlay.error {
+  background: rgba(15, 15, 15, 0.82);
+}
+
+.camera-status-overlay.native {
+  background: linear-gradient(180deg, rgba(10, 10, 10, 0.7), rgba(10, 10, 10, 0.88));
+}
+
+.camera-fallback-hint {
+  max-width: 320px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.camera-error-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  background: #3390ec;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.camera-recording-badge {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.58);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  backdrop-filter: blur(8px);
+}
+
+.camera-zoom-panel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.48);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(10px);
+  z-index: 2;
+}
+
+.camera-zoom-slider-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 126px;
+}
+
+.camera-zoom-label {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.camera-zoom-slider {
+  width: 100%;
+  accent-color: #39a0ff;
+}
+
+.camera-zoom-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  background: rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+}
+
+.camera-zoom-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.camera-captured-strip {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  z-index: 2;
+}
+
+.camera-captured-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.camera-captured-item {
+  position: relative;
+  width: 68px;
+  min-width: 68px;
+  height: 92px;
+  border: none;
+  border-radius: 18px;
+  overflow: hidden;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.38);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.camera-captured-thumb,
+.camera-captured-video-wrap {
+  width: 100%;
+  height: 100%;
+}
+
+.camera-captured-thumb {
+  object-fit: cover;
+  display: block;
+}
+
+.camera-captured-video-wrap {
+  position: relative;
+}
+
+.camera-captured-video-wrap .camera-captured-thumb {
+  width: 100%;
+  height: 100%;
+}
+
+.camera-captured-video-badge {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 8px;
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.68);
+  color: white;
+}
+
+.camera-captured-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.62);
+  color: white;
+  font-size: 16px;
+  line-height: 1;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.camera-captured-remove:active { background: rgba(0, 0, 0, 0.85); }
+
+.camera-captured-item.editable { cursor: pointer; }
+
+.recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.16);
+}
+
+.camera-control-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.76), rgba(0, 0, 0, 0.36));
+}
+
+.camera-control-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.camera-queue-action {
+  height: 48px;
+  border: none;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: white;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 16px;
+}
+
+.camera-queue-action:disabled {
+  opacity: 0.38;
+}
+
+.camera-clear-btn {
+  justify-self: start;
+}
+
+.camera-send-btn {
+  justify-self: end;
+  min-width: 56px;
+  padding-inline: 14px;
+  background: linear-gradient(135deg, #28b463, #1e8f4e);
+}
+
+.camera-send-count {
+  min-width: 18px;
+  text-align: center;
+}
+
+.camera-shutter-btn {
+  width: 88px;
+  height: 88px;
+  border-radius: 999px;
+  border: 4px solid rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+
+.camera-shutter-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.camera-shutter-btn:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+.camera-shutter-core {
+  width: 68px;
+  height: 68px;
+  border-radius: 999px;
+  background: white;
+  transition: all 0.18s ease;
+}
+
+.camera-shutter-btn.video .camera-shutter-core {
+  width: 54px;
+  height: 54px;
+  background: #ef4444;
+}
+
+.camera-shutter-btn.recording .camera-shutter-core {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+}
+
+.camera-capture-label {
+  min-height: 20px;
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.camera-capture-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.camera-capture-queue-label {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.attachment-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border-radius: 16px 16px 0 0;
+  z-index: 1000;
+  max-height: 75vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s ease-out;
+  will-change: transform, height, max-height, border-radius, top;
+}
+
+.full-screen-sheet {
+  top: 0 !important;
+  max-height: 100% !important;
+  height: 100% !important;
+  border-radius: 0 !important;
+}
+
+.full-screen-sheet .sheet-content {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.full-screen-sheet .location-panel {
+  flex: 1;
+  gap: 0;
+}
+
+.full-screen-sheet .map-wrapper {
+  height: auto;
+  border-radius: 0;
+  border: none;
+  flex: 1;
+}
+
+.full-screen-sheet .send-location-btn {
+  border-radius: 0;
+  padding: 16px 12px;
+  font-size: 16px;
+}
+
+.sheet-handle {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0 4px;
+}
+.handle-bar {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: #d1d5db;
+}
+
+.sheet-tabs {
+  display: flex;
+  border-bottom: 1px solid #f0f0f0;
+  padding: 0 8px;
+}
+.tab-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #9ca3af;
+  font-size: 12px;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+.tab-btn.active {
+  color: #3390ec;
+  border-bottom-color: #3390ec;
+}
+.tab-icon { display: flex; align-items: center; }
+
+.sheet-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  min-height: 200px;
+}
+
+.tab-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+}
+
+.action-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 24px;
+  background: #f9fafb;
+  border: 1px solid #f0f0f0;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 110px;
+}
+.action-card:active {
+  transform: scale(0.95);
+  background: #f3f4f6;
+}
+
+.action-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.camera-icon { background: #e0f2fe; color: #0284c7; }
+.gallery-icon { background: #fce7f3; color: #db2777; }
+.file-icon { background: #ede9fe; color: #7c3aed; }
+
+.action-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+}
+
+/* Location panel */
+.location-panel {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.map-wrapper {
+  position: relative;
+  width: 100%;
+  height: 280px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+}
+
+.location-map {
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+.my-location-btn {
+  position: absolute;
+  bottom: 24px;
+  right: 16px;
+  z-index: 1000;
+  width: 48px;
+  height: 48px;
+  background: white;
+  border: none;
+  border-radius: 50%;
+  border: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #3390ec;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.my-location-btn:active {
+  transform: scale(0.9);
+  background: #f3f4f6;
+}
+
+.center-pin {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -100%);
+  z-index: 1000;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+}
+
+.send-location-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px;
+  background: #3390ec;
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.send-location-btn:active {
+  background: #2563eb;
+}
+
+/* Transitions */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.25s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+
+.slide-up-enter-active { transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1); }
+.slide-up-leave-active { transition: transform 0.25s cubic-bezier(0.4, 0, 1, 1); }
+.slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); }
+
+@media (max-width: 640px) {
+  .camera-topbar {
+    padding: 10px 10px 0;
+  }
+
+  .camera-zoom-panel {
+    top: 12px;
+    right: 12px;
+    left: 12px;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .camera-zoom-slider-wrap {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .camera-mode-btn {
+    padding: 8px 12px;
+  }
+
+  .camera-control-bar {
+    padding: 14px 14px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .camera-control-row {
+    gap: 10px;
+  }
+
+  .camera-queue-action {
+    font-size: 12px;
+    padding-inline: 12px;
+  }
+
+  .camera-shutter-btn {
+    width: 82px;
+    height: 82px;
+  }
+
+  .camera-shutter-core {
+    width: 62px;
+    height: 62px;
+  }
+}
+</style>
 </file>
 
 <file path="frontend/src/services/chatUploadBackground.ts">
@@ -43097,1876 +45276,6 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         sendSticker
     }
 }
-</file>
-
-<file path="frontend/src/components/chat/AttachmentMenu.vue">
-<template>
-  <teleport to="body">
-    <input v-if="modelValue" ref="cameraPhotoInput" type="file" accept="image/*" capture="environment" style="display:none" @change="onNativeCameraFile" />
-    <input v-if="modelValue" ref="cameraVideoInput" type="file" accept="video/*" capture="environment" style="display:none" @change="onNativeCameraFile" />
-
-    <!-- Backdrop -->
-    <transition name="fade">
-      <div v-if="modelValue && !showCameraCapture" class="attachment-backdrop" @click="close"></div>
-    </transition>
-
-    <transition name="fade">
-      <div v-if="modelValue && showCameraCapture" class="camera-capture-overlay">
-        <div class="camera-capture-shell">
-          <div class="camera-topbar">
-            <button class="camera-icon-btn" @click="closeCameraCapture" title="بازگشت">
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="15 18 9 12 15 6"></polyline>
-              </svg>
-            </button>
-
-            <div class="camera-mode-switch">
-              <button
-                class="camera-mode-btn"
-                :class="{ active: cameraMode === 'photo' }"
-                :disabled="isRecording"
-                @click="setCameraMode('photo')"
-              >
-                عکس
-              </button>
-              <button
-                class="camera-mode-btn"
-                :class="{ active: cameraMode === 'video' }"
-                :disabled="isRecording"
-                @click="setCameraMode('video')"
-              >
-                ویدئو
-              </button>
-            </div>
-
-            <button class="camera-icon-btn" @click="toggleFacingMode" :disabled="isRecording || isCameraStarting || isUsingNativeCameraFallback" title="تغییر دوربین">
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M17 1l4 4-4 4"></path>
-                <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
-                <path d="M7 23l-4-4 4-4"></path>
-                <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
-              </svg>
-            </button>
-          </div>
-
-          <div class="camera-preview-frame">
-            <video
-              ref="cameraPreviewRef"
-              class="camera-preview"
-              autoplay
-              playsinline
-              muted
-            ></video>
-
-            <div v-if="isCameraStarting" class="camera-status-overlay">
-              در حال آماده‌سازی دوربین...
-            </div>
-
-            <div v-else-if="isUsingNativeCameraFallback" class="camera-status-overlay native">
-              <div>{{ nativeCameraFallbackTitle }}</div>
-              <div class="camera-fallback-hint">{{ nativeCameraFallbackHint }}</div>
-            </div>
-
-            <div v-else-if="cameraError" class="camera-status-overlay error">
-              <div>{{ cameraError }}</div>
-              <button class="camera-error-btn" @click="startCameraStream">تلاش مجدد</button>
-            </div>
-
-            <div v-if="isRecording" class="camera-recording-badge">
-              <span class="recording-dot"></span>
-              {{ formattedRecordingTime }}
-            </div>
-
-            <div v-if="hasCameraZoomControl" class="camera-zoom-panel">
-              <button
-                type="button"
-                class="camera-zoom-btn"
-                :disabled="!canZoomOut"
-                @click="nudgeCameraZoom(-1)"
-                title="کاهش زوم"
-              >
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-              </button>
-
-              <div class="camera-zoom-slider-wrap">
-                <div class="camera-zoom-label">{{ cameraZoomDisplay }}</div>
-                <input
-                  class="camera-zoom-slider"
-                  type="range"
-                  :min="cameraZoomCapability?.min ?? 1"
-                  :max="cameraZoomCapability?.max ?? 1"
-                  :step="cameraZoomCapability?.step ?? 0.1"
-                  :value="cameraZoomValue"
-                  @input="handleCameraZoomInput"
-                />
-              </div>
-
-              <button
-                type="button"
-                class="camera-zoom-btn"
-                :disabled="!canZoomIn"
-                @click="nudgeCameraZoom(1)"
-                title="افزایش زوم"
-              >
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-              </button>
-            </div>
-
-            <div v-if="hasCapturedMediaQueue" class="camera-captured-strip">
-              <div
-                v-for="item in capturedCameraMedia"
-                :key="item.id"
-                class="camera-captured-item"
-                :class="{ editable: item.type === 'photo' }"
-                :title="item.type === 'photo' ? 'ویرایش عکس' : 'پیش‌نمایش ویدئو'"
-                @click="item.type === 'photo' ? editCapturedMedia(item.id) : undefined"
-              >
-                <img
-                  v-if="item.type === 'photo'"
-                  :src="item.previewUrl"
-                  alt="پیش نمایش عکس"
-                  class="camera-captured-thumb"
-                />
-                <div v-else class="camera-captured-video-wrap">
-                  <video :src="item.previewUrl" class="camera-captured-thumb" muted loop playsinline autoplay></video>
-                  <span class="camera-captured-video-badge">ویدئو</span>
-                </div>
-                <button
-                  type="button"
-                  class="camera-captured-remove"
-                  aria-label="حذف"
-                  @click.stop="removeCapturedMedia(item.id)"
-                >×</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="camera-control-bar">
-            <div class="camera-control-row">
-              <button
-                type="button"
-                class="camera-queue-action camera-clear-btn"
-                :disabled="!hasCapturedMediaQueue || isRecording"
-                @click="clearCapturedMediaQueue"
-              >
-                پاک کردن
-              </button>
-
-              <button
-                class="camera-shutter-btn"
-                :class="{ recording: isRecording, video: cameraMode === 'video' }"
-                :disabled="!isCameraReady"
-                @click="handlePrimaryCameraAction"
-              >
-                <span class="camera-shutter-core"></span>
-              </button>
-
-              <button
-                type="button"
-                class="camera-queue-action camera-send-btn"
-                :disabled="!canSendCapturedMedia"
-                @click="sendCapturedMediaQueue"
-              >
-                <span v-if="hasCapturedMediaQueue" class="camera-send-count">{{ capturedMediaCount }}</span>
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="22" y1="2" x2="11" y2="13"></line>
-                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                </svg>
-              </button>
-            </div>
-            <div class="camera-capture-meta">
-              <div class="camera-capture-label">
-                {{ cameraMode === 'photo' ? 'ثبت عکس' : (isRecording ? 'توقف ضبط' : 'شروع ضبط ویدئو') }}
-              </div>
-              <div v-if="hasCapturedMediaQueue" class="camera-capture-queue-label">
-                {{ capturedMediaQueueLabel }}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- Bottom Sheet -->
-    <transition name="slide-up">
-      <div
-        v-if="modelValue && !showCameraCapture"
-        ref="sheetRef"
-        :class="['attachment-sheet', { 'full-screen-sheet': activeTab === 'location' }]"
-        @touchstart="onTouchStart"
-        @touchmove="onTouchMove"
-        @touchend="onTouchEnd"
-      >
-        <!-- Drag Handle -->
-        <div class="sheet-handle"><div class="handle-bar"></div></div>
-
-        <!-- Tabs -->
-        <div class="sheet-tabs">
-          <button
-            v-for="tab in tabs"
-            :key="tab.id"
-            :class="['tab-btn', { active: activeTab === tab.id }]"
-            @click="activeTab = tab.id"
-          >
-            <span class="tab-icon" v-html="tab.icon"></span>
-            <span class="tab-label">{{ tab.label }}</span>
-          </button>
-        </div>
-
-        <!-- Tab Content -->
-        <div class="sheet-content">
-          <!-- Gallery Tab -->
-          <div v-if="activeTab === 'gallery'" class="tab-panel gallery-panel">
-            <input ref="galleryInput" type="file" accept="image/*,video/*" multiple style="display:none" @change="onGalleryFile" />
-
-            <button class="action-card" @click="openCameraCapture()">
-              <div class="action-icon camera-icon">
-                <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                  <circle cx="12" cy="13" r="4"/>
-                </svg>
-              </div>
-              <span class="action-label">دوربین</span>
-            </button>
-
-            <button class="action-card" @click="galleryInput?.click()">
-              <div class="action-icon gallery-icon">
-                <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                  <circle cx="8.5" cy="8.5" r="1.5"/>
-                  <polyline points="21 15 16 10 5 21"/>
-                </svg>
-              </div>
-              <span class="action-label">گالری</span>
-            </button>
-          </div>
-
-          <!-- File Tab -->
-          <div v-if="activeTab === 'file'" class="tab-panel file-panel">
-            <input ref="fileInput" type="file" accept="*" style="display:none" @change="onFileSelected" />
-
-            <button class="action-card" @click="fileInput?.click()">
-              <div class="action-icon file-icon">
-                <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/>
-                  <line x1="16" y1="13" x2="8" y2="13"/>
-                  <line x1="16" y1="17" x2="8" y2="17"/>
-                  <polyline points="10 9 9 9 8 9"/>
-                </svg>
-              </div>
-              <span class="action-label">فایل</span>
-            </button>
-          </div>
-
-          <!-- Location Tab -->
-          <div v-if="activeTab === 'location'" class="tab-panel location-panel">
-            <div class="map-wrapper">
-              <l-map
-                ref="mapRef"
-                :zoom="15"
-                :center="mapCenter"
-                :use-global-leaflet="false"
-                @moveend="onMapMoveEnd"
-                class="location-map"
-              >
-                <l-tile-layer
-                  :url="tileUrl"
-                  attribution="&copy; OpenStreetMap"
-                />
-              </l-map>
-              <!-- Return to my location button -->
-              <button class="my-location-btn" @click="goToMyLocation(false)" title="مکان من">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 2v2M12 20v2M2 12h2M20 12h2M12 5a7 7 0 1 0 0 14 7 7 0 0 0 0-14z"/>
-                  <circle cx="12" cy="12" r="2" fill="currentColor"/>
-                </svg>
-              </button>
-              <!-- Fixed center pin -->
-              <div class="center-pin">
-                <svg viewBox="0 0 24 36" width="36" height="48" fill="#E53935">
-                  <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0zm0 18c-3.3 0-6-2.7-6-6s2.7-6 6-6 6 2.7 6 6-2.7 6-6 6z"/>
-                </svg>
-              </div>
-            </div>
-            <button class="send-location-btn" @click="sendLocation">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                <circle cx="12" cy="10" r="3"/>
-              </svg>
-              ارسال موقعیت مکانی
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
-  </teleport>
-
-  <!-- Phase A: Image editor modal for single-image gallery picks -->
-  <teleport to="body">
-    <ImageEditorModal
-      v-if="editingFile"
-      :key="singleEditorKey"
-      :file="editingFile"
-      @confirm="onEditorConfirm"
-      @cancel="onEditorCancel"
-    />
-  </teleport>
-
-  <!-- Phase B: Multi-image gallery preview + per-item edit -->
-  <GalleryPreviewModal
-    v-if="multiPreviewFiles"
-    :files="multiPreviewFiles"
-    @confirm="onMultiPreviewConfirm"
-    @cancel="onMultiPreviewCancel"
-  />
-
-  <!-- Phase B: Per-item editor for camera queue photos -->
-  <teleport to="body">
-    <ImageEditorModal
-      v-if="cameraEditingItem"
-      :key="cameraEditingItem.id"
-      :file="cameraEditingItem.file"
-      @confirm="onCameraEditConfirm"
-      @cancel="onCameraEditCancel"
-    />
-  </teleport>
-</template>
-
-<script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import 'leaflet/dist/leaflet.css'
-import { LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
-
-// Lazy-load the image editor so Cropper.js (~40KB) and its CSS are only
-// downloaded when the user actually edits an image. Keeps the main Messenger
-// bundle lean for users who never edit.
-const ImageEditorModal = defineAsyncComponent(() => import('./ImageEditorModal.vue'))
-const GalleryPreviewModal = defineAsyncComponent(() => import('./GalleryPreviewModal.vue'))
-
-type CameraZoomCapability = {
-  min: number
-  max: number
-  step: number
-}
-
-type MediaTrackCapabilitiesWithZoom = MediaTrackCapabilities & {
-  zoom?: {
-    min?: number
-    max?: number
-    step?: number
-  }
-}
-
-type ZoomCapableTrack = MediaStreamTrack & {
-  getCapabilities?: () => MediaTrackCapabilities
-  getSettings?: () => MediaTrackSettings & { zoom?: number }
-}
-
-type CapturedCameraMediaItem = {
-  id: string
-  file: File
-  previewUrl: string
-  type: 'photo' | 'video'
-}
-
-const props = defineProps<{
-  modelValue: boolean
-}>()
-
-const emit = defineEmits<{
-  (e: 'update:modelValue', val: boolean): void
-  (e: 'select-media', file: File, albumId?: string | null, albumIndex?: number, albumSize?: number): void
-  (e: 'select-file', file: File): void
-  (e: 'select-location', lat: number, lng: number): void
-}>()
-
-const activeTab = ref<'gallery' | 'file' | 'location'>('gallery')
-const cameraPhotoInput = ref<HTMLInputElement | null>(null)
-const cameraVideoInput = ref<HTMLInputElement | null>(null)
-const galleryInput = ref<HTMLInputElement | null>(null)
-const fileInput = ref<HTMLInputElement | null>(null)
-
-// Phase A image editor state.
-// editingFile: holds the single image currently in the editor (null when
-// editor is closed). We only route through the editor for single-image
-// gallery picks.
-const editingFile = ref<File | null>(null)
-// Bumped each time we open the single-image editor so Vue remounts the
-// component cleanly between sessions (prevents stale Cropper/blob state
-// when the user opens the editor multiple times in the same sheet visit).
-const singleEditorKey = ref<number>(0)
-
-// Phase B state.
-// multiPreviewFiles: holds the multi-image gallery pick while the user
-// reviews/edits/removes items before dispatch. Null = preview closed.
-const multiPreviewFiles = ref<File[] | null>(null)
-
-// cameraEditingItemId: id of the camera-queue photo currently in the
-// per-item editor. Null = editor closed.
-const cameraEditingItemId = ref<string | null>(null)
-const sheetRef = ref<HTMLElement | null>(null)
-const mapRef = ref<any>(null)
-const cameraPreviewRef = ref<HTMLVideoElement | null>(null)
-
-const showCameraCapture = ref(false)
-const cameraMode = ref<'photo' | 'video'>('photo')
-const activeFacingMode = ref<'environment' | 'user'>('environment')
-const cameraCaptureMode = ref<'inline' | 'native'>('inline')
-const isCameraStarting = ref(false)
-const cameraError = ref('')
-const isRecording = ref(false)
-const recordingSeconds = ref(0)
-const capturedCameraMedia = ref<CapturedCameraMediaItem[]>([])
-const cameraZoomCapability = ref<CameraZoomCapability | null>(null)
-const cameraZoomValue = ref(1)
-
-const cameraStream = ref<MediaStream | null>(null)
-let mediaRecorder: MediaRecorder | null = null
-let recordedChunks: BlobPart[] = []
-let recordingTimer: number | null = null
-
-// Default: Tehran
-const mapCenter = ref<[number, number]>([35.6892, 51.3890])
-const selectedLatLng = ref<{ lat: number; lng: number }>({ lat: 35.6892, lng: 51.3890 })
-
-const tileUrl = ref('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
-
-const isUsingNativeCameraFallback = computed(() => cameraCaptureMode.value === 'native')
-const nativeCameraFallbackTitle = computed(() => (
-  cameraMode.value === 'photo'
-    ? 'پیش نمایش زنده دوربین در این مرورگر در دسترس نیست.'
-    : 'پیش نمایش زنده فیلم برداری در این مرورگر در دسترس نیست.'
-))
-const nativeCameraFallbackHint = computed(() => (
-  cameraMode.value === 'photo'
-    ? 'با دکمه پایین، دوربین سیستم برای گرفتن عکس باز می شود.'
-    : 'با دکمه پایین، دوربین سیستم برای ضبط ویدئو باز می شود.'
-))
-const capturedMediaCount = computed(() => capturedCameraMedia.value.length)
-const hasCapturedMediaQueue = computed(() => capturedMediaCount.value > 0)
-const canSendCapturedMedia = computed(() => hasCapturedMediaQueue.value && !isRecording.value)
-const capturedMediaQueueLabel = computed(() => {
-  const count = capturedMediaCount.value
-  return count === 1 ? '۱ مورد آماده ارسال' : `${count} مورد آماده ارسال`
-})
-const hasCameraZoomControl = computed(() => {
-  if (isUsingNativeCameraFallback.value) return false
-  const capability = cameraZoomCapability.value
-  return Boolean(capability && capability.max > capability.min + 0.001)
-})
-const canZoomOut = computed(() => {
-  const capability = cameraZoomCapability.value
-  return Boolean(capability && cameraZoomValue.value > capability.min + 0.001)
-})
-const canZoomIn = computed(() => {
-  const capability = cameraZoomCapability.value
-  return Boolean(capability && cameraZoomValue.value < capability.max - 0.001)
-})
-const isCameraReady = computed(() => (
-  isUsingNativeCameraFallback.value
-  || (Boolean(cameraStream.value) && !isCameraStarting.value && !cameraError.value)
-))
-const formattedRecordingTime = computed(() => {
-  const mins = Math.floor(recordingSeconds.value / 60)
-  const secs = recordingSeconds.value % 60
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-})
-const cameraZoomDisplay = computed(() => {
-  const normalizedZoom = cameraZoomValue.value >= 10
-    ? cameraZoomValue.value.toFixed(0)
-    : cameraZoomValue.value.toFixed(1)
-  return `${normalizedZoom}x`
-})
-
-const tabs = [
-  { id: 'gallery' as const, label: 'گالری', icon: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>' },
-  { id: 'file' as const, label: 'فایل', icon: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' },
-  { id: 'location' as const, label: 'موقعیت', icon: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>' },
-]
-
-// Swipe to dismiss
-let startY = 0
-let currentTranslateY = 0
-let isDraggingAllowed = true
-
-function stopRecordingTimer() {
-  if (recordingTimer !== null) {
-    window.clearInterval(recordingTimer)
-    recordingTimer = null
-  }
-}
-
-function resetCameraZoomState() {
-  cameraZoomCapability.value = null
-  cameraZoomValue.value = 1
-}
-
-function getActiveCameraVideoTrack(): ZoomCapableTrack | null {
-  return (cameraStream.value?.getVideoTracks?.()[0] as ZoomCapableTrack | undefined) ?? null
-}
-
-function clampCameraZoom(value: number, capability: CameraZoomCapability) {
-  const bounded = Math.min(capability.max, Math.max(capability.min, value))
-  const steps = Math.round((bounded - capability.min) / capability.step)
-  return Number((capability.min + (steps * capability.step)).toFixed(2))
-}
-
-function getCameraZoomNudgeStep(capability: CameraZoomCapability) {
-  const coarseStep = Number(((capability.max - capability.min) / 8).toFixed(2))
-  return Math.max(capability.step, coarseStep)
-}
-
-async function syncCameraZoomCapability(track: ZoomCapableTrack | null = getActiveCameraVideoTrack()) {
-  if (!track || typeof track.getCapabilities !== 'function') {
-    resetCameraZoomState()
-    return
-  }
-
-  const capabilities = track.getCapabilities() as MediaTrackCapabilitiesWithZoom
-  const zoomRange = capabilities.zoom
-  const min = Number(zoomRange?.min)
-  const max = Number(zoomRange?.max)
-
-  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
-    resetCameraZoomState()
-    return
-  }
-
-  const rawStep = Number(zoomRange?.step)
-  const capability = {
-    min,
-    max,
-    step: Number.isFinite(rawStep) && rawStep > 0 ? rawStep : 0.1,
-  }
-
-  cameraZoomCapability.value = capability
-
-  const settingsZoom = Number(track.getSettings?.()?.zoom)
-  cameraZoomValue.value = clampCameraZoom(Number.isFinite(settingsZoom) ? settingsZoom : capability.min, capability)
-}
-
-async function applyCameraZoom(nextValue: number) {
-  const track = getActiveCameraVideoTrack()
-  const capability = cameraZoomCapability.value
-
-  if (!track || !capability || typeof track.applyConstraints !== 'function') return
-
-  const zoom = clampCameraZoom(nextValue, capability)
-  cameraZoomValue.value = zoom
-
-  try {
-    await track.applyConstraints({
-      advanced: [{ zoom } as any],
-    })
-
-    const appliedZoom = Number(track.getSettings?.()?.zoom)
-    if (Number.isFinite(appliedZoom)) {
-      cameraZoomValue.value = clampCameraZoom(appliedZoom, capability)
-    }
-  } catch (error) {
-    console.warn('Camera zoom apply failed:', error)
-    await syncCameraZoomCapability(track)
-  }
-}
-
-function handleCameraZoomInput(event: Event) {
-  const target = event.target as HTMLInputElement | null
-  if (!target) return
-
-  const nextValue = Number(target.value)
-  if (!Number.isFinite(nextValue)) return
-
-  void applyCameraZoom(nextValue)
-}
-
-function nudgeCameraZoom(direction: -1 | 1) {
-  const capability = cameraZoomCapability.value
-  if (!capability) return
-
-  const delta = getCameraZoomNudgeStep(capability) * direction
-  void applyCameraZoom(cameraZoomValue.value + delta)
-}
-
-function createCapturedMediaId() {
-  return globalThis.crypto?.randomUUID?.()
-    ?? `camera_capture_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-}
-
-function revokeCapturedMediaPreview(url?: string) {
-  if (url?.startsWith('blob:')) {
-    URL.revokeObjectURL(url)
-  }
-}
-
-function removeCapturedMedia(itemId: string) {
-  const index = capturedCameraMedia.value.findIndex((item) => item.id === itemId)
-  if (index === -1) return
-
-  const [removedItem] = capturedCameraMedia.value.splice(index, 1)
-  revokeCapturedMediaPreview(removedItem?.previewUrl)
-}
-
-function clearCapturedMediaQueue() {
-  capturedCameraMedia.value.forEach((item) => revokeCapturedMediaPreview(item.previewUrl))
-  capturedCameraMedia.value = []
-}
-
-function queueCapturedMedia(file: File) {
-  const mediaType = file.type.startsWith('video/') ? 'video' : 'photo'
-  capturedCameraMedia.value.push({
-    id: createCapturedMediaId(),
-    file,
-    previewUrl: URL.createObjectURL(file),
-    type: mediaType,
-  })
-}
-
-function stopCameraTracks() {
-  if (cameraPreviewRef.value) {
-    try {
-      cameraPreviewRef.value.pause()
-      cameraPreviewRef.value.srcObject = null
-    } catch {
-      // Ignore preview cleanup failures.
-    }
-  }
-
-  cameraStream.value?.getTracks().forEach((track) => track.stop())
-  cameraStream.value = null
-  resetCameraZoomState()
-}
-
-function cleanupCamera(discardRecording = true, clearCapturedMedia = true) {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.onstop = null
-    try {
-      mediaRecorder.stop()
-    } catch {
-      // Ignore recorder stop failures.
-    }
-  }
-
-  if (discardRecording) {
-    recordedChunks = []
-  }
-
-  mediaRecorder = null
-  isRecording.value = false
-  recordingSeconds.value = 0
-  stopRecordingTimer()
-  stopCameraTracks()
-  cameraCaptureMode.value = 'inline'
-  cameraError.value = ''
-  isCameraStarting.value = false
-  showCameraCapture.value = false
-
-  if (clearCapturedMedia) {
-    clearCapturedMediaQueue()
-  }
-}
-
-function supportsInlineCameraPreview() {
-  return typeof window !== 'undefined'
-    && window.isSecureContext
-    && !!navigator.mediaDevices?.getUserMedia
-}
-
-function openNativeCameraCapture(mode: 'photo' | 'video' = cameraMode.value) {
-  if (mode === 'video') {
-    cameraVideoInput.value?.click()
-    return
-  }
-
-  cameraPhotoInput.value?.click()
-}
-
-function enableNativeCameraFallback() {
-  stopCameraTracks()
-  cameraCaptureMode.value = 'native'
-  cameraError.value = ''
-  isCameraStarting.value = false
-  showCameraCapture.value = true
-}
-
-async function attachCameraStream(stream: MediaStream) {
-  await nextTick()
-  const preview = cameraPreviewRef.value
-  if (!preview) return
-
-  preview.srcObject = stream
-  preview.muted = true
-
-  try {
-    await preview.play()
-  } catch (error) {
-    console.warn('Camera preview play failed:', error)
-  }
-}
-
-async function requestCameraStream(includeAudio: boolean) {
-  return navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: { ideal: activeFacingMode.value },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
-    },
-    audio: includeAudio,
-  })
-}
-
-async function startCameraStream() {
-  if (!supportsInlineCameraPreview()) {
-    enableNativeCameraFallback()
-    return
-  }
-
-  cameraCaptureMode.value = 'inline'
-  isCameraStarting.value = true
-  cameraError.value = ''
-  stopCameraTracks()
-
-  try {
-    const wantsAudio = cameraMode.value === 'video'
-    let stream: MediaStream
-
-    try {
-      stream = await requestCameraStream(wantsAudio)
-    } catch (error) {
-      if (!wantsAudio) throw error
-      stream = await requestCameraStream(false)
-    }
-
-    cameraStream.value = stream
-    showCameraCapture.value = true
-    await attachCameraStream(stream)
-    await syncCameraZoomCapability(getActiveCameraVideoTrack())
-  } catch (error) {
-    console.error('Camera start error:', error)
-    enableNativeCameraFallback()
-  } finally {
-    isCameraStarting.value = false
-  }
-}
-
-function createCameraAlbumId() {
-  return globalThis.crypto?.randomUUID?.()
-    ?? `camera_album_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-}
-
-function getSupportedVideoMimeType() {
-  if (typeof MediaRecorder === 'undefined') return ''
-
-  const candidates = [
-    'video/mp4;codecs=h264,aac',
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm',
-  ]
-
-  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || ''
-}
-
-async function sendCapturedMediaQueue() {
-  if (!hasCapturedMediaQueue.value) return
-
-  const queuedItems = capturedCameraMedia.value.map((item) => ({
-    file: item.file,
-    type: item.type,
-  }))
-  const albumId = queuedItems.length > 1 ? createCameraAlbumId() : null
-
-  cleanupCamera(true, true)
-  emit('update:modelValue', false)
-
-  await new Promise<void>((resolve) => {
-    if (typeof requestAnimationFrame !== 'function') {
-      setTimeout(resolve, 0)
-      return
-    }
-
-    requestAnimationFrame(() => resolve())
-  })
-
-  queuedItems.forEach((item, index) => {
-    emit('select-media', item.file, albumId, index, queuedItems.length)
-  })
-}
-
-async function capturePhoto() {
-  const preview = cameraPreviewRef.value
-  if (!preview || !cameraStream.value) return
-
-  const width = Math.max(1, preview.videoWidth || 1080)
-  const height = Math.max(1, preview.videoHeight || 1920)
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    alert('خطا در ثبت تصویر')
-    return
-  }
-
-  ctx.drawImage(preview, 0, 0, width, height)
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92))
-  if (!blob) {
-    alert('خطا در ثبت تصویر')
-    return
-  }
-
-  const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' })
-  queueCapturedMedia(file)
-}
-
-function startVideoRecording() {
-  if (!cameraStream.value) return
-  if (typeof MediaRecorder === 'undefined') {
-    alert('مرورگر شما از فیلم‌برداری پشتیبانی نمی‌کند.')
-    return
-  }
-
-  recordedChunks = []
-  const mimeType = getSupportedVideoMimeType()
-
-  try {
-    mediaRecorder = mimeType
-      ? new MediaRecorder(cameraStream.value, { mimeType })
-      : new MediaRecorder(cameraStream.value)
-  } catch (error) {
-    console.error('MediaRecorder init failed:', error)
-    alert('مرورگر شما از فیلم‌برداری پشتیبانی نمی‌کند.')
-    return
-  }
-
-  mediaRecorder.ondataavailable = (event) => {
-    if (event.data && event.data.size > 0) {
-      recordedChunks.push(event.data)
-    }
-  }
-
-  mediaRecorder.onstop = async () => {
-    const blob = new Blob(recordedChunks, { type: mediaRecorder?.mimeType || mimeType || 'video/webm' })
-    if (blob.size <= 0) return
-
-    const extension = blob.type.includes('mp4') ? 'mp4' : 'webm'
-    const file = new File([blob], `camera_${Date.now()}.${extension}`, { type: blob.type || 'video/webm' })
-    queueCapturedMedia(file)
-  }
-
-  mediaRecorder.start(200)
-  isRecording.value = true
-  recordingSeconds.value = 0
-  stopRecordingTimer()
-  recordingTimer = window.setInterval(() => {
-    recordingSeconds.value += 1
-  }, 1000)
-}
-
-function stopVideoRecording() {
-  if (!mediaRecorder || mediaRecorder.state === 'inactive') return
-
-  isRecording.value = false
-  stopRecordingTimer()
-  mediaRecorder.stop()
-}
-
-function handlePrimaryCameraAction() {
-  if (isUsingNativeCameraFallback.value) {
-    openNativeCameraCapture(cameraMode.value)
-    return
-  }
-
-  if (!isCameraReady.value) return
-
-  if (cameraMode.value === 'photo') {
-    void capturePhoto()
-    return
-  }
-
-  if (isRecording.value) {
-    stopVideoRecording()
-    return
-  }
-
-  startVideoRecording()
-}
-
-function openCameraCapture() {
-  cameraMode.value = 'photo'
-  activeFacingMode.value = 'environment'
-  showCameraCapture.value = true
-
-  if (!supportsInlineCameraPreview()) {
-    enableNativeCameraFallback()
-    return
-  }
-
-  void startCameraStream()
-}
-
-async function setCameraMode(mode: 'photo' | 'video') {
-  if (cameraMode.value === mode || isRecording.value) return
-  cameraMode.value = mode
-
-  if (showCameraCapture.value && !isUsingNativeCameraFallback.value) {
-    await startCameraStream()
-  }
-}
-
-async function toggleFacingMode() {
-  if (isRecording.value || isUsingNativeCameraFallback.value) return
-  activeFacingMode.value = activeFacingMode.value === 'environment' ? 'user' : 'environment'
-
-  if (showCameraCapture.value) {
-    await startCameraStream()
-  }
-}
-
-function closeCameraCapture() {
-  cleanupCamera(true)
-}
-
-function onNativeCameraFile(e: Event) {
-  const input = e.target as HTMLInputElement
-  if (!input.files?.length) return
-
-  Array.from(input.files).forEach((file) => {
-    queueCapturedMedia(file)
-  })
-
-  input.value = ''
-}
-
-function onTouchStart(e: TouchEvent) {
-  isDraggingAllowed = true
-  const target = e.target as HTMLElement
-  
-  // Prevent drag-to-dismiss if the user is interacting with the map
-  if (target.closest('.map-wrapper')) {
-    isDraggingAllowed = false
-    return
-  }
-
-  const touch = e.touches[0]
-  if (!touch) return
-  startY = touch.clientY
-  currentTranslateY = 0
-}
-
-function onTouchMove(e: TouchEvent) {
-  if (!isDraggingAllowed) return
-  
-  const touch = e.touches[0]
-  if (!touch) return
-  const dy = touch.clientY - startY
-  if (dy > 0) {
-    currentTranslateY = dy
-    if (sheetRef.value) {
-      sheetRef.value.style.transform = `translateY(${dy}px)`
-    }
-  }
-}
-
-function onTouchEnd() {
-  if (!isDraggingAllowed) return
-  
-  if (currentTranslateY > 100) {
-    close()
-  } else if (sheetRef.value) {
-    sheetRef.value.style.transform = ''
-  }
-  currentTranslateY = 0
-}
-
-function close() {
-  cleanupCamera(true)
-  emit('update:modelValue', false)
-}
-
-// Reset tab on open
-watch(() => props.modelValue, (val) => {
-  if (val) activeTab.value = 'gallery'
-  if (!val) cleanupCamera(true)
-})
-
-watch(() => activeTab.value, (val) => {
-  if (val === 'location') {
-    // Optionally trigger map resize to fix leaflet gray rendering
-    setTimeout(() => {
-      mapRef.value?.leafletObject?.invalidateSize()
-      goToMyLocation(true) // Automatically try to fetch location on open
-    }, 300)
-  }
-})
-
-// Gallery file handler.
-// Do not pre-compress here: useChatMedia.ts performs the EXIF-safe pipeline.
-//
-// Phase A routing:
-//   - Single image pick (and not HEIC) → open the crop editor. User can
-//     confirm edited output, send unedited, or cancel entirely.
-//   - Multi-image album OR video included → bypass editor (Phase B will add
-//     a preview grid with per-item pencil button).
-async function onGalleryFile(e: Event) {
-  const input = e.target as HTMLInputElement
-  if (!input.files?.length) return
-
-  const files = Array.from(input.files)
-  input.value = ''
-
-  // Phase A: single-image editing fast-path.
-  const onlyOne = files.length === 1
-  const onlyFile = files[0]
-  const isImage = onlyOne && !!onlyFile && onlyFile.type.startsWith('image/')
-  // HEIC needs to go through useChatMedia's normalize step first; we don't
-  // try to render it inside Cropper directly.
-  const isHeic =
-    onlyOne &&
-    !!onlyFile &&
-    (onlyFile.type === 'image/heic' ||
-      onlyFile.type === 'image/heif' ||
-      /\.(heic|heif)$/i.test(onlyFile.name))
-
-  if (onlyOne && isImage && !isHeic && onlyFile) {
-    close()
-    // Wait for sheet close animation before mounting editor to avoid a
-    // visible overlap flash.
-    await new Promise<void>((resolve) => setTimeout(resolve, 180))
-    singleEditorKey.value += 1
-    editingFile.value = onlyFile
-    return
-  }
-
-  // Phase B: multi-file gallery picks go through the preview sheet so the
-  // user can edit, remove, or reorder before the album is dispatched.
-  if (files.length > 1) {
-    close()
-    await new Promise<void>((resolve) => setTimeout(resolve, 180))
-    multiPreviewFiles.value = files
-    return
-  }
-
-  // Single non-image pick (video or HEIC) → emit directly.
-  close()
-  await new Promise<void>((resolve) => {
-    if (typeof requestAnimationFrame !== 'function') {
-      setTimeout(resolve, 0)
-      return
-    }
-    requestAnimationFrame(() => resolve())
-  })
-  files.forEach((file, index) => {
-    emit('select-media', file, null, index, files.length)
-  })
-}
-
-function onMultiPreviewConfirm(finalFiles: File[]) {
-  multiPreviewFiles.value = null
-  if (!finalFiles.length) return
-  const albumId = finalFiles.length > 1
-    ? (globalThis.crypto?.randomUUID?.() ?? `album_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`)
-    : null
-  finalFiles.forEach((file, index) => {
-    emit('select-media', file, albumId, index, finalFiles.length)
-  })
-}
-
-function onMultiPreviewCancel() {
-  multiPreviewFiles.value = null
-}
-
-// --- Camera queue per-item edit (Phase B) ---
-
-const cameraEditingItem = computed(() => {
-  const id = cameraEditingItemId.value
-  if (!id) return null
-  return capturedCameraMedia.value.find((it) => it.id === id) ?? null
-})
-
-function editCapturedMedia(itemId: string) {
-  const item = capturedCameraMedia.value.find((it) => it.id === itemId)
-  if (!item || item.type !== 'photo') return
-  cameraEditingItemId.value = itemId
-}
-
-function onCameraEditConfirm(editedFile: File) {
-  const id = cameraEditingItemId.value
-  cameraEditingItemId.value = null
-  if (!id) return
-  const idx = capturedCameraMedia.value.findIndex((it) => it.id === id)
-  if (idx < 0) return
-  const old = capturedCameraMedia.value[idx]
-  if (!old) return
-  revokeCapturedMediaPreview(old.previewUrl)
-  capturedCameraMedia.value[idx] = {
-    ...old,
-    file: editedFile,
-    previewUrl: URL.createObjectURL(editedFile),
-  }
-}
-
-function onCameraEditCancel() {
-  cameraEditingItemId.value = null
-}
-
-function onEditorConfirm(editedFile: File) {
-  // Single-image edited path: emit with no albumId so useChatMedia dispatches
-  // it as a standalone message.
-  editingFile.value = null
-  emit('select-media', editedFile, null, 0, 1)
-}
-
-function onEditorCancel() {
-  // User dismissed the editor entirely → do not send anything.
-  editingFile.value = null
-}
-
-// File handler (no compression)
-function onFileSelected(e: Event) {
-  const input = e.target as HTMLInputElement
-  if (!input.files?.length) return
-
-  for (const file of Array.from(input.files)) {
-    emit('select-file', file)
-  }
-  input.value = ''
-  close()
-}
-
-// Map
-function onMapMoveEnd() {
-  const map = mapRef.value?.leafletObject
-  if (map) {
-    const center = map.getCenter()
-    selectedLatLng.value = { lat: center.lat, lng: center.lng }
-  }
-}
-
-function goToMyLocation(silent = false) {
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude
-        const lng = position.coords.longitude
-        mapCenter.value = [lat, lng]
-        selectedLatLng.value = { lat, lng }
-        
-        const map = mapRef.value?.leafletObject
-        if (map) {
-          map.setView([lat, lng], 15)
-        }
-      },
-      (error) => {
-        console.error('Geolocation error:', error)
-        if (silent !== true) {
-          alert('امکان دریافت مکان شما وجود ندارد. لطفا دسترسی مرورگر را بررسی کنید.')
-        }
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    )
-  } else {
-    if (silent !== true) {
-      alert('مرورگر شما از مکان‌یابی پشتیبانی نمی‌کند.')
-    }
-  }
-}
-
-function sendLocation() {
-  emit('select-location', selectedLatLng.value.lat, selectedLatLng.value.lng)
-  close()
-}
-
-onBeforeUnmount(() => {
-  cleanupCamera(true)
-})
-</script>
-
-<style scoped>
-.attachment-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  z-index: 999;
-}
-
-.camera-capture-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1001;
-  background: #000;
-}
-
-.camera-capture-shell {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: #000;
-  color: #fff;
-}
-
-.camera-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-}
-
-.camera-icon-btn {
-  width: 42px;
-  height: 42px;
-  border-radius: 999px;
-  border: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.12);
-  color: white;
-  cursor: pointer;
-}
-
-.camera-icon-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.camera-mode-switch {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.camera-mode-btn {
-  border: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.82);
-  padding: 8px 14px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.camera-mode-btn.active {
-  background: rgba(255, 255, 255, 0.22);
-  color: white;
-}
-
-.camera-mode-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.camera-preview-frame {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.camera-preview {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  background: #050505;
-}
-
-.camera-status-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 20px;
-  text-align: center;
-  background: rgba(0, 0, 0, 0.58);
-  backdrop-filter: blur(10px);
-}
-
-.camera-status-overlay.error {
-  background: rgba(15, 15, 15, 0.82);
-}
-
-.camera-status-overlay.native {
-  background: linear-gradient(180deg, rgba(10, 10, 10, 0.7), rgba(10, 10, 10, 0.88));
-}
-
-.camera-fallback-hint {
-  max-width: 320px;
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.camera-error-btn {
-  border: none;
-  border-radius: 999px;
-  padding: 10px 16px;
-  background: #3390ec;
-  color: white;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.camera-recording-badge {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 999px;
-  padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.58);
-  color: white;
-  font-size: 13px;
-  font-weight: 600;
-  backdrop-filter: blur(8px);
-}
-
-.camera-zoom-panel {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 18px;
-  background: rgba(0, 0, 0, 0.48);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
-  backdrop-filter: blur(10px);
-  z-index: 2;
-}
-
-.camera-zoom-slider-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-  min-width: 126px;
-}
-
-.camera-zoom-label {
-  text-align: center;
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-.camera-zoom-slider {
-  width: 100%;
-  accent-color: #39a0ff;
-}
-
-.camera-zoom-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 999px;
-  border: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  background: rgba(255, 255, 255, 0.14);
-  cursor: pointer;
-}
-
-.camera-zoom-btn:disabled {
-  opacity: 0.38;
-  cursor: default;
-}
-
-.camera-captured-strip {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
-  display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  z-index: 2;
-}
-
-.camera-captured-strip::-webkit-scrollbar {
-  display: none;
-}
-
-.camera-captured-item {
-  position: relative;
-  width: 68px;
-  min-width: 68px;
-  height: 92px;
-  border: none;
-  border-radius: 18px;
-  overflow: hidden;
-  padding: 0;
-  background: rgba(0, 0, 0, 0.38);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
-}
-
-.camera-captured-thumb,
-.camera-captured-video-wrap {
-  width: 100%;
-  height: 100%;
-}
-
-.camera-captured-thumb {
-  object-fit: cover;
-  display: block;
-}
-
-.camera-captured-video-wrap {
-  position: relative;
-}
-
-.camera-captured-video-wrap .camera-captured-thumb {
-  width: 100%;
-  height: 100%;
-}
-
-.camera-captured-video-badge {
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  bottom: 8px;
-  border-radius: 999px;
-  padding: 2px 6px;
-  font-size: 10px;
-  font-weight: 700;
-  background: rgba(0, 0, 0, 0.68);
-  color: white;
-}
-
-.camera-captured-remove {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.62);
-  color: white;
-  font-size: 16px;
-  line-height: 1;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-}
-.camera-captured-remove:active { background: rgba(0, 0, 0, 0.85); }
-
-.camera-captured-item.editable { cursor: pointer; }
-
-.recording-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: #ef4444;
-  box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.16);
-}
-
-.camera-control-bar {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.76), rgba(0, 0, 0, 0.36));
-}
-
-.camera-control-row {
-  width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: center;
-  gap: 16px;
-}
-
-.camera-queue-action {
-  height: 48px;
-  border: none;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: white;
-  background: rgba(255, 255, 255, 0.16);
-  font-size: 13px;
-  font-weight: 700;
-  padding: 0 16px;
-}
-
-.camera-queue-action:disabled {
-  opacity: 0.38;
-}
-
-.camera-clear-btn {
-  justify-self: start;
-}
-
-.camera-send-btn {
-  justify-self: end;
-  min-width: 56px;
-  padding-inline: 14px;
-  background: linear-gradient(135deg, #28b463, #1e8f4e);
-}
-
-.camera-send-count {
-  min-width: 18px;
-  text-align: center;
-}
-
-.camera-shutter-btn {
-  width: 88px;
-  height: 88px;
-  border-radius: 999px;
-  border: 4px solid rgba(255, 255, 255, 0.95);
-  background: rgba(255, 255, 255, 0.18);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: transform 0.18s ease, background 0.18s ease;
-}
-
-.camera-shutter-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.camera-shutter-btn:not(:disabled):active {
-  transform: scale(0.96);
-}
-
-.camera-shutter-core {
-  width: 68px;
-  height: 68px;
-  border-radius: 999px;
-  background: white;
-  transition: all 0.18s ease;
-}
-
-.camera-shutter-btn.video .camera-shutter-core {
-  width: 54px;
-  height: 54px;
-  background: #ef4444;
-}
-
-.camera-shutter-btn.recording .camera-shutter-core {
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-}
-
-.camera-capture-label {
-  min-height: 20px;
-  color: rgba(255, 255, 255, 0.84);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.camera-capture-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-
-.camera-capture-queue-label {
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.attachment-sheet {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: #fff;
-  border-radius: 16px 16px 0 0;
-  z-index: 1000;
-  max-height: 75vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.15);
-  transition: all 0.2s ease-out;
-  will-change: transform, height, max-height, border-radius, top;
-}
-
-.full-screen-sheet {
-  top: 0 !important;
-  max-height: 100% !important;
-  height: 100% !important;
-  border-radius: 0 !important;
-}
-
-.full-screen-sheet .sheet-content {
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.full-screen-sheet .location-panel {
-  flex: 1;
-  gap: 0;
-}
-
-.full-screen-sheet .map-wrapper {
-  height: auto;
-  border-radius: 0;
-  border: none;
-  flex: 1;
-}
-
-.full-screen-sheet .send-location-btn {
-  border-radius: 0;
-  padding: 16px 12px;
-  font-size: 16px;
-}
-
-.sheet-handle {
-  display: flex;
-  justify-content: center;
-  padding: 10px 0 4px;
-}
-.handle-bar {
-  width: 36px;
-  height: 4px;
-  border-radius: 2px;
-  background: #d1d5db;
-}
-
-.sheet-tabs {
-  display: flex;
-  border-bottom: 1px solid #f0f0f0;
-  padding: 0 8px;
-}
-.tab-btn {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 10px 4px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: #9ca3af;
-  font-size: 12px;
-  font-weight: 500;
-  border-bottom: 2px solid transparent;
-  transition: all 0.2s;
-}
-.tab-btn.active {
-  color: #3390ec;
-  border-bottom-color: #3390ec;
-}
-.tab-icon { display: flex; align-items: center; }
-
-.sheet-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  min-height: 200px;
-}
-
-.tab-panel {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  justify-content: center;
-}
-
-.action-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 20px 24px;
-  background: #f9fafb;
-  border: 1px solid #f0f0f0;
-  border-radius: 16px;
-  cursor: pointer;
-  transition: all 0.2s;
-  min-width: 110px;
-}
-.action-card:active {
-  transform: scale(0.95);
-  background: #f3f4f6;
-}
-
-.action-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.camera-icon { background: #e0f2fe; color: #0284c7; }
-.gallery-icon { background: #fce7f3; color: #db2777; }
-.file-icon { background: #ede9fe; color: #7c3aed; }
-
-.action-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: #374151;
-}
-
-/* Location panel */
-.location-panel {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 12px;
-}
-
-.map-wrapper {
-  position: relative;
-  width: 100%;
-  height: 280px;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid #e5e7eb;
-}
-
-.location-map {
-  width: 100%;
-  height: 100%;
-  z-index: 1;
-}
-
-.my-location-btn {
-  position: absolute;
-  bottom: 24px;
-  right: 16px;
-  z-index: 1000;
-  width: 48px;
-  height: 48px;
-  background: white;
-  border: none;
-  border-radius: 50%;
-  border: 1px solid #e5e7eb;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #3390ec;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.my-location-btn:active {
-  transform: scale(0.9);
-  background: #f3f4f6;
-}
-
-.center-pin {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -100%);
-  z-index: 1000;
-  pointer-events: none;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
-}
-
-.send-location-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  padding: 12px;
-  background: #3390ec;
-  color: white;
-  border: none;
-  border-radius: 12px;
-  font-size: 15px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.send-location-btn:active {
-  background: #2563eb;
-}
-
-/* Transitions */
-.fade-enter-active, .fade-leave-active { transition: opacity 0.25s; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
-
-.slide-up-enter-active { transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1); }
-.slide-up-leave-active { transition: transform 0.25s cubic-bezier(0.4, 0, 1, 1); }
-.slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); }
-
-@media (max-width: 640px) {
-  .camera-topbar {
-    padding: 10px 10px 0;
-  }
-
-  .camera-zoom-panel {
-    top: 12px;
-    right: 12px;
-    left: 12px;
-    gap: 8px;
-    padding: 10px;
-  }
-
-  .camera-zoom-slider-wrap {
-    min-width: 0;
-    flex: 1;
-  }
-
-  .camera-mode-btn {
-    padding: 8px 12px;
-  }
-
-  .camera-control-bar {
-    padding: 14px 14px calc(18px + env(safe-area-inset-bottom));
-  }
-
-  .camera-control-row {
-    gap: 10px;
-  }
-
-  .camera-queue-action {
-    font-size: 12px;
-    padding-inline: 12px;
-  }
-
-  .camera-shutter-btn {
-    width: 82px;
-    height: 82px;
-  }
-
-  .camera-shutter-core {
-    width: 62px;
-    height: 62px;
-  }
-}
-</style>
 </file>
 
 <file path="frontend/src/components/chat/ChatMessageItem.vue">
@@ -53492,6 +53801,16 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
   /* Telegram classic light background color */
   background-color: #e4eaef;
   z-index: 100;
+  /*
+    With interactive-widget=overlays-content the layout viewport does NOT shrink
+    when the keyboard opens. Instead we reserve the keyboard slot ourselves via
+    env(keyboard-inset-height). Combined with the picker height formula
+    (target - env), the bottom slot stays at a constant total of `target`
+    pixels throughout the entire keyboard <-> picker swap, so messages-container
+    never resizes and no auto-scroll/jump occurs.
+  */
+  padding-bottom: env(keyboard-inset-height, 0px);
+  box-sizing: border-box;
 }
 
 /* Header - Telegram Style Glass */
@@ -55013,6 +55332,13 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @insert="insertSticker"
       @backspace="deleteComposerBackward"
     />
+    <!--
+      Hidden probe whose height tracks env(keyboard-inset-height) exactly.
+      We measure THIS element via ResizeObserver instead of inferring keyboard height
+      from visualViewport, guaranteeing the picker target matches env() pixel-for-pixel
+      so the panel and the keyboard are always exactly the same height.
+    -->
+    <div ref="keyboardInsetProbeRef" class="keyboard-inset-probe" aria-hidden="true"></div>
     <div
       v-if="pickerTransitionSpacerHeight > 0"
       class="picker-transition-spacer"
@@ -55087,6 +55413,7 @@ const emit = defineEmits<{
 }>()
 
 const messageInputRef = ref<HTMLTextAreaElement | null>(null)
+const keyboardInsetProbeRef = ref<HTMLElement | null>(null)
 const composerSelectionStart = ref(0)
 const composerSelectionEnd = ref(0)
 const DEFAULT_PICKER_HEIGHT = 336
@@ -55096,6 +55423,8 @@ const KEYBOARD_OPEN_THRESHOLD = 120
 const KEYBOARD_CLOSE_THRESHOLD = 24
 const keyboardHeight = ref(0)
 const lastKnownKeyboardHeight = ref(0)
+const envKeyboardInset = ref(0)
+const envKeyboardInsetMax = ref(0)
 const viewportBaseHeight = ref(0)
 const viewportBaseWidth = ref(0)
 const pendingPickerOpenAfterKeyboardClose = ref(false)
@@ -55105,6 +55434,7 @@ const disablePickerTransition = ref(false)
 const keyboardInsetEnvSupported = ref(false)
 let pendingPickerOpenTimer: number | null = null
 let pendingTextareaFocusScrollSnapshot: ScrollSnapshotEntry[] | null = null
+let keyboardInsetResizeObserver: ResizeObserver | null = null
 
 type VisualViewportWithEvents = VisualViewport & {
   addEventListener: (type: 'resize' | 'scroll', listener: EventListenerOrEventListenerObject) => void
@@ -55179,9 +55509,17 @@ const canSubmit = computed(() => Boolean(messageInput.value.trim()))
 const isStickerPickerOpen = computed(() => Boolean(props.stickerPickerOpen))
 const stickerCount = computed(() => countEmojiStickerOccurrences(messageInput.value))
 // Numeric target height for the picker panel (used as the locked keyboard slot size).
+// Prefers the env(keyboard-inset-height) probe value when available — that is the
+// SAME source the browser will animate into the picker via env(), guaranteeing the
+// picker and keyboard always have IDENTICAL height with zero rounding mismatch.
 const stickerPickerTargetHeight = computed(() => {
   if (lockedComposerInsetHeight.value > 0) {
     return lockedComposerInsetHeight.value
+  }
+
+  // Use the largest env() value seen so far (= the keyboard's full open height) when supported.
+  if (keyboardInsetEnvSupported.value && envKeyboardInsetMax.value > 0) {
+    return envKeyboardInsetMax.value
   }
 
   const measuredHeight = getMeasuredKeyboardInset()
@@ -55509,16 +55847,38 @@ function getMeasuredKeyboardInset() {
     return Math.max(keyboardHeight.value, lastKnownKeyboardHeight.value)
   }
 
+  // Prefer env(keyboard-inset-height) probe — that's the authoritative value the browser
+  // will animate into the picker, so locking it as the target guarantees pixel-perfect
+  // matching between picker height and keyboard height.
+  if (keyboardInsetEnvSupported.value && envKeyboardInset.value > 0) {
+    return Math.max(envKeyboardInset.value, envKeyboardInsetMax.value)
+  }
+
   const metrics = getViewportMetrics()
   const inferredHeight = Math.max(
     0,
     Math.round(getViewportBaselineHeight(metrics) - metrics.fullHeightCandidate),
   )
 
-  return Math.max(keyboardHeight.value, inferredHeight, lastKnownKeyboardHeight.value)
+  return Math.max(
+    keyboardHeight.value,
+    inferredHeight,
+    lastKnownKeyboardHeight.value,
+    envKeyboardInsetMax.value,
+  )
 }
 
 function lockComposerInsetHeight(preferredHeight = 0) {
+  // When env() is supported, the env probe value is the authoritative source.
+  // Override any caller-provided preferredHeight with it so target == future env exactly.
+  if (keyboardInsetEnvSupported.value) {
+    const envValue = Math.max(envKeyboardInset.value, envKeyboardInsetMax.value)
+    if (envValue > 0) {
+      lockedComposerInsetHeight.value = envValue
+      return envValue
+    }
+  }
+
   const nextHeight = preferredHeight > 0 ? preferredHeight : getMeasuredKeyboardInset()
   if (nextHeight > 0) {
     lockedComposerInsetHeight.value = nextHeight
@@ -55816,6 +56176,29 @@ onMounted(() => {
   visualViewport?.addEventListener('resize', updateKeyboardMetrics)
   visualViewport?.addEventListener('scroll', updateKeyboardMetrics)
   window.addEventListener('resize', updateKeyboardMetrics)
+
+  // Watch the env(keyboard-inset-height) probe element. Its height is the EXACT same
+  // value the browser will subtract from the picker. By measuring it directly we
+  // eliminate the rounding/source mismatch between visualViewport-derived keyboard
+  // height and env() — making the picker pixel-perfect equal to the keyboard.
+  const probe = keyboardInsetProbeRef.value
+  if (probe && typeof ResizeObserver !== 'undefined') {
+    keyboardInsetResizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      const h = Math.round(entry.contentRect.height)
+      envKeyboardInset.value = h
+      if (h > envKeyboardInsetMax.value) envKeyboardInsetMax.value = h
+      // If the probe reports a non-zero env value, env() is genuinely supported on this engine.
+      if (h > 0) keyboardInsetEnvSupported.value = true
+      // Keep lastKnownKeyboardHeight in sync so other code paths see the same source.
+      if (h >= KEYBOARD_OPEN_THRESHOLD) {
+        lastKnownKeyboardHeight.value = Math.max(lastKnownKeyboardHeight.value, h)
+      }
+      captureDebugState('env-probe', false)
+    })
+    keyboardInsetResizeObserver.observe(probe)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -55828,6 +56211,11 @@ onBeforeUnmount(() => {
   visualViewport?.removeEventListener('resize', updateKeyboardMetrics)
   visualViewport?.removeEventListener('scroll', updateKeyboardMetrics)
   window.removeEventListener('resize', updateKeyboardMetrics)
+
+  if (keyboardInsetResizeObserver) {
+    keyboardInsetResizeObserver.disconnect()
+    keyboardInsetResizeObserver = null
+  }
 })
 
 function applyComposerValue(nextValue: string, nextSelectionStart: number, nextSelectionEnd = nextSelectionStart) {
@@ -56025,6 +56413,23 @@ const sendMessage = () => {
     radial-gradient(circle at top right, rgba(51, 144, 236, 0.12), transparent 34%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 251, 0.98));
   border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+/*
+  Hidden probe element. Its height tracks env(keyboard-inset-height) exactly,
+  including the smooth animation while the keyboard slides up/down. We measure
+  this via ResizeObserver and use the value as the authoritative keyboard height.
+  Position fixed off-screen so it cannot affect layout.
+*/
+.keyboard-inset-probe {
+  position: fixed;
+  left: -1px;
+  bottom: 0;
+  width: 1px;
+  height: env(keyboard-inset-height, 0px);
+  pointer-events: none;
+  visibility: hidden;
+  z-index: -1;
 }
 
 .chat-debug-panel {
