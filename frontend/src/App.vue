@@ -160,7 +160,7 @@ onMounted(() => {
     </div>
 
     <!-- Bottom Navigation (Hidden on Login) -->
-    <BottomNav v-if="route.name !== 'login'" />
+    <BottomNav v-if="route.name !== 'login' && !route.meta.hideBottomNav" />
 
     <!-- Session Approval Modal (always mounted for logged-in users) -->
     <SessionApprovalModal v-if="route.name !== 'login'" />

@@ -60,6 +60,12 @@ const router = createRouter({
       name: 'notifications',
       component: () => import('../views/NotificationsView.vue'),
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/attachment-view',
+      name: 'attachment-view',
+      component: () => import('../views/AttachmentViewerView.vue'),
+      meta: { requiresAuth: true, hideBottomNav: true }
     }
   ]
 })
