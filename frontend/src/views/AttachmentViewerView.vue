@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  getCachedAttachmentBlob,
   getLiveAttachmentUrl,
   putCachedAttachmentBlob,
   restoreCachedAttachmentUrl,
@@ -20,15 +21,74 @@ const fileId = computed(() => typeof route.query.file_id === 'string' ? route.qu
 const mimeType = computed(() => typeof route.query.mime_type === 'string' ? route.query.mime_type : 'application/octet-stream')
 const fileName = computed(() => typeof route.query.file_name === 'string' ? route.query.file_name : 'file')
 
-const isImage = computed(() => mimeType.value.startsWith('image/'))
-const isVideo = computed(() => mimeType.value.startsWith('video/'))
-const isAudio = computed(() => mimeType.value.startsWith('audio/'))
-const isPdf = computed(() => mimeType.value === 'application/pdf')
+const fileExtension = computed(() => {
+  const name = fileName.value.trim().toLowerCase()
+  const parts = name.split('.')
+  return parts.length > 1 ? parts.pop() || '' : ''
+})
+
+function inferEffectiveMimeType(rawMimeType: string, extension: string) {
+  const normalizedMime = (rawMimeType || '').trim().toLowerCase()
+  const normalizedExt = (extension || '').trim().toLowerCase()
+
+  if (normalizedMime && normalizedMime !== 'application/octet-stream') {
+    return normalizedMime
+  }
+
+  switch (normalizedExt) {
+    case 'pdf':
+      return 'application/pdf'
+    case 'txt':
+    case 'log':
+    case 'md':
+      return 'text/plain'
+    case 'json':
+      return 'application/json'
+    case 'xml':
+      return 'application/xml'
+    case 'csv':
+      return 'text/csv'
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg'
+    case 'png':
+      return 'image/png'
+    case 'gif':
+      return 'image/gif'
+    case 'webp':
+      return 'image/webp'
+    case 'mp4':
+      return 'video/mp4'
+    case 'webm':
+      return 'video/webm'
+    case 'mp3':
+      return 'audio/mpeg'
+    case 'wav':
+      return 'audio/wav'
+    case 'ogg':
+      return 'audio/ogg'
+    case 'm4a':
+      return 'audio/mp4'
+    case 'xls':
+      return 'application/vnd.ms-excel'
+    case 'xlsx':
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    default:
+      return normalizedMime || 'application/octet-stream'
+  }
+}
+
+const effectiveMimeType = computed(() => inferEffectiveMimeType(mimeType.value, fileExtension.value))
+
+const isImage = computed(() => effectiveMimeType.value.startsWith('image/'))
+const isVideo = computed(() => effectiveMimeType.value.startsWith('video/'))
+const isAudio = computed(() => effectiveMimeType.value.startsWith('audio/'))
+const isPdf = computed(() => effectiveMimeType.value === 'application/pdf')
 const isText = computed(() => {
-  return mimeType.value.startsWith('text/')
-    || mimeType.value.includes('json')
-    || mimeType.value.includes('xml')
-    || mimeType.value.includes('javascript')
+  return effectiveMimeType.value.startsWith('text/')
+    || effectiveMimeType.value.includes('json')
+    || effectiveMimeType.value.includes('xml')
+    || effectiveMimeType.value.includes('javascript')
   })
 const canPreviewInline = computed(() => {
   return isImage.value || isVideo.value || isAudio.value || isPdf.value || isText.value
@@ -56,7 +116,14 @@ function triggerDownload(url: string, fileNameValue: string) {
 
 function openInBrowser() {
   if (!fileUrl.value) return
-  window.open(fileUrl.value, '_blank', 'noopener,noreferrer')
+  const anchor = document.createElement('a')
+  anchor.href = fileUrl.value
+  anchor.target = '_blank'
+  anchor.rel = 'noopener noreferrer'
+  anchor.style.display = 'none'
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
 }
 
 async function resolveFileUrl() {
@@ -70,7 +137,17 @@ async function resolveFileUrl() {
   textContent.value = ''
 
   try {
-    let nextUrl = getLiveAttachmentUrl(fileId.value) || await restoreCachedAttachmentUrl(fileId.value)
+    let resolvedBlob = await getCachedAttachmentBlob(fileId.value)
+    let nextUrl = getLiveAttachmentUrl(fileId.value)
+
+    if (!nextUrl && resolvedBlob) {
+      nextUrl = URL.createObjectURL(resolvedBlob)
+      setLiveAttachmentUrl(fileId.value, nextUrl)
+    }
+
+    if (!nextUrl) {
+      nextUrl = await restoreCachedAttachmentUrl(fileId.value)
+    }
 
     if (!nextUrl) {
       const token = localStorage.getItem('auth_token') || ''
@@ -80,17 +157,19 @@ async function resolveFileUrl() {
         throw new Error(`File fetch failed (${response.status})`)
       }
 
-      const blob = await response.blob()
-      await putCachedAttachmentBlob(fileId.value, blob)
-      nextUrl = URL.createObjectURL(blob)
+      resolvedBlob = await response.blob()
+      nextUrl = URL.createObjectURL(resolvedBlob)
       setLiveAttachmentUrl(fileId.value, nextUrl)
+      void putCachedAttachmentBlob(fileId.value, resolvedBlob)
     }
 
     fileUrl.value = nextUrl
 
     if (isText.value) {
-      const blob = await fetch(nextUrl).then(res => res.blob())
-      textContent.value = await blob.text()
+      const textBlob = resolvedBlob || await getCachedAttachmentBlob(fileId.value) || await fetch(nextUrl).then(res => res.blob())
+      if (textBlob) {
+        textContent.value = await textBlob.text()
+      }
     }
   } catch (error) {
     console.error('Attachment viewer failed:', error)
@@ -120,7 +199,7 @@ watch([fileId, mimeType], () => {
       </button>
       <div class="title-wrap">
         <h1 class="title">{{ fileName }}</h1>
-        <p class="subtitle">{{ mimeType }}</p>
+        <p class="subtitle">{{ effectiveMimeType }}</p>
       </div>
       <button class="download-btn" :disabled="!fileUrl" @click="fileUrl && triggerDownload(fileUrl, fileName)">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -142,7 +221,16 @@ watch([fileId, mimeType], () => {
 
         <audio v-else-if="isAudio && fileUrl" :src="fileUrl" class="media-audio" controls />
 
-        <iframe v-else-if="isPdf && fileUrl" :src="fileUrl" class="pdf-frame" title="pdf preview"></iframe>
+        <object v-else-if="isPdf && fileUrl" :data="fileUrl" type="application/pdf" class="pdf-frame">
+          <div class="state-card unsupported inline-fallback">
+            <h2>پیش‌نمایش PDF در این مرورگر در دسترس نیست</h2>
+            <p>می‌توانید فایل را در مرورگر باز کنید یا دانلود کنید.</p>
+            <div class="unsupported-actions">
+              <button class="secondary-btn" :disabled="!fileUrl" @click="openInBrowser">باز کردن در مرورگر</button>
+              <button class="primary-btn" :disabled="!fileUrl" @click="fileUrl && triggerDownload(fileUrl, fileName)">دانلود</button>
+            </div>
+          </div>
+        </object>
 
         <pre v-else-if="isText" class="text-preview">{{ textContent }}</pre>
 
