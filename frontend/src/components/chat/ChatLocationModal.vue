@@ -8,24 +8,39 @@ const emit = defineEmits<{
 }>()
 
 const props = defineProps<{
-  location: { lat: number; lng: number } | null
+  location: {
+    lat?: number
+    lng?: number
+    latitude?: number
+    longitude?: number
+  } | null
 }>()
 
-const tileUrl = computed(() => {
-  const isProd = import.meta.env.MODE === 'production'
-  const isIran = window.location.hostname.includes('gold-trade.ir')
-  let baseObj = window.location.hostname
-  let port = ''
-  if (!isProd && !isIran) {
-     port = ':8088'
-     // or check actual API port but 8088 is our tileserver
+const normalizedLocation = computed(() => {
+  if (!props.location) {
+    return null
   }
-  return `http://${baseObj}${port}/styles/basic/{z}/{x}/{y}.png`
+
+  const lat = Number(props.location.lat ?? props.location.latitude)
+  const lng = Number(props.location.lng ?? props.location.longitude)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null
+  }
+
+  return { lat, lng }
 })
 
+const locationKey = computed(() => (
+  normalizedLocation.value
+    ? `${normalizedLocation.value.lat}:${normalizedLocation.value.lng}`
+    : 'location-empty'
+))
+
+const tileUrl = computed(() => 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
+
 function openExternalMap() {
-  if (!props.location) return
-  window.open(`https://www.google.com/maps?q=${props.location.lat},${props.location.lng}`, '_blank')
+  if (!normalizedLocation.value) return
+  window.open(`https://www.google.com/maps?q=${normalizedLocation.value.lat},${normalizedLocation.value.lng}`, '_blank')
 }
 
 </script>
@@ -33,7 +48,7 @@ function openExternalMap() {
 <template>
   <Teleport to="body">
     <Transition name="fade">
-      <div v-if="location" class="location-overlay" @click="emit('close')">
+      <div v-if="normalizedLocation" class="location-overlay" @click="emit('close')">
         <div class="location-content" @click.stop>
           <div class="location-header">
             <span class="location-title" style="flex:1">موقعیت مکانی</span>
@@ -49,8 +64,9 @@ function openExternalMap() {
           </div>
           <div class="map-container">
             <l-map
+              :key="locationKey"
               :zoom="15"
-              :center="[location.lat, location.lng]"
+              :center="[normalizedLocation.lat, normalizedLocation.lng]"
               :use-global-leaflet="false"
               class="location-map"
               :options="{ zoomControl: true }"
