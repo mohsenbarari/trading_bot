@@ -1114,10 +1114,14 @@ function handleTouchEnd(event: TouchEvent) {
 .lightbox-stage-card {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 10px;
   box-sizing: border-box;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
   transform-origin: center center;
   transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.28s ease, filter 0.28s ease;
 }
@@ -1128,14 +1132,22 @@ function handleTouchEnd(event: TouchEvent) {
 
 .lightbox-media {
   display: block;
+  /* width/height auto with max-width/max-height resolved against the flex
+   * container (the stage card) reliably letterboxes the media. We explicitly
+   * set min-width/min-height: 0 so the flex item can shrink below its
+   * intrinsic size when the source image is larger than the stage. Without
+   * this, large or extreme-aspect crops overflow the card and the parent's
+   * overflow:hidden makes only a corner visible ("zoomed corner" bug). */
   width: auto;
   height: auto;
   max-width: 100%;
   max-height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 0 1 auto;
   object-fit: contain;
   object-position: center center;
   background: transparent;
-  margin: auto;
   border-radius: 18px;
   box-shadow: 0 22px 40px rgba(0, 0, 0, 0.24);
 }
