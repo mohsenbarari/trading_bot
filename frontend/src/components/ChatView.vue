@@ -103,6 +103,16 @@ const showForwardModal = ref(false)
 // Attachment Bottom Sheet
 const showAttachmentMenu = ref(false)
 
+type MessagesContainerMetrics = {
+  clientHeight: number
+  scrollHeight: number
+  scrollTop: number
+}
+
+const BOTTOM_LAYOUT_LOCK_THRESHOLD_PX = 96
+let messagesContainerResizeObserver: ResizeObserver | null = null
+let previousMessagesContainerMetrics: MessagesContainerMetrics | null = null
+
 // Status
 const targetUserStatus = ref('آخرین بازدید اخیراً')
 
@@ -249,6 +259,63 @@ const {
 
 const LOAD_OLDER_TRIGGER_PX = 96
 
+function captureMessagesContainerMetrics(container = messagesContainer.value): MessagesContainerMetrics | null {
+  if (!container) return null
+
+  return {
+    clientHeight: container.clientHeight,
+    scrollHeight: container.scrollHeight,
+    scrollTop: container.scrollTop,
+  }
+}
+
+function syncMessagesContainerMetrics(container = messagesContainer.value) {
+  previousMessagesContainerMetrics = captureMessagesContainerMetrics(container)
+}
+
+function handleMessagesContainerResize() {
+  const container = messagesContainer.value
+  if (!container) return
+
+  const previousMetrics = previousMessagesContainerMetrics
+  const nextMetrics = captureMessagesContainerMetrics(container)
+  if (!nextMetrics) return
+
+  if (
+    previousMetrics
+    && previousMetrics.clientHeight > 0
+    && nextMetrics.clientHeight > 0
+    && previousMetrics.clientHeight !== nextMetrics.clientHeight
+  ) {
+    const previousDistanceFromBottom = previousMetrics.scrollHeight - previousMetrics.scrollTop - previousMetrics.clientHeight
+    if (previousDistanceFromBottom <= BOTTOM_LAYOUT_LOCK_THRESHOLD_PX) {
+      const heightDelta = nextMetrics.clientHeight - previousMetrics.clientHeight
+      const adjustedScrollTop = previousMetrics.scrollTop - heightDelta
+      const maxScrollTop = Math.max(0, nextMetrics.scrollHeight - nextMetrics.clientHeight)
+      container.scrollTop = Math.max(0, Math.min(adjustedScrollTop, maxScrollTop))
+      nextMetrics.scrollTop = container.scrollTop
+    }
+  }
+
+  previousMessagesContainerMetrics = nextMetrics
+}
+
+function attachMessagesContainerResizeObserver(container: HTMLElement | null) {
+  messagesContainerResizeObserver?.disconnect()
+  messagesContainerResizeObserver = null
+
+  if (!container || typeof ResizeObserver === 'undefined') {
+    syncMessagesContainerMetrics(container)
+    return
+  }
+
+  syncMessagesContainerMetrics(container)
+  messagesContainerResizeObserver = new ResizeObserver(() => {
+    handleMessagesContainerResize()
+  })
+  messagesContainerResizeObserver.observe(container)
+}
+
 const handleMessagesScroll = async () => {
   handleScroll()
 
@@ -274,6 +341,7 @@ const handleMessagesScroll = async () => {
   await nextTick()
   const newHeight = container.scrollHeight
   container.scrollTop = previousTop + (newHeight - previousHeight)
+  syncMessagesContainerMetrics(container)
 }
 
 const isSelectedUserDeleted = computed(() => {
@@ -1522,9 +1590,17 @@ watch(selectedUserId, (newVal) => {
   dateSeparatorLabelCache.clear()
   if (newVal) {
     startStatusPolling(newVal)
+    nextTick(() => {
+      syncMessagesContainerMetrics()
+    })
   } else {
     stopStatusPolling()
+    previousMessagesContainerMetrics = null
   }
+})
+
+watch(messagesContainer, (container) => {
+  attachMessagesContainerResizeObserver(container)
 })
 
 onMounted(async () => {
@@ -1546,6 +1622,9 @@ onMounted(async () => {
   startPolling()
   updateIsMobile()
   window.addEventListener('resize', updateIsMobile)
+  nextTick(() => {
+    attachMessagesContainerResizeObserver(messagesContainer.value)
+  })
 })
 
 watch(() => props.targetUserId, (newId) => {
@@ -1579,6 +1658,8 @@ function handleToggleAttachment() {
 }
 
 onUnmounted(() => {
+  messagesContainerResizeObserver?.disconnect()
+  messagesContainerResizeObserver = null
   window.removeEventListener('resize', updateIsMobile)
   stopPolling()
   stopStatusPolling()
