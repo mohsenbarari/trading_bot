@@ -1,4 +1,4 @@
-import { ref, type Ref, nextTick, onUnmounted } from 'vue'
+import { ref, type Ref, nextTick, onUnmounted, watch } from 'vue'
 import type { Message } from '../../types/chat'
 import { canUseImagePreprocessWorker, getRecommendedImagePreprocessParallelism, processImageInWorker } from '../../utils/imagePreprocessClient'
 import { primeMediaPreprocessTelemetry, recordMediaPreprocessTelemetry } from '../../utils/chatMediaTelemetry'
@@ -10,6 +10,13 @@ import {
     buildOptimisticMessageFromUpload,
     type UploadEvent,
 } from '../../services/chatUploadBackground'
+import {
+    getCompletedDocumentDownloadUrl as backgroundGetCompletedDocumentDownloadUrl,
+    getPendingDocumentDownloadsForUser as backgroundGetPendingDocumentDownloadsForUser,
+    startDocumentDownload as backgroundStartDocumentDownload,
+    subscribeToDocumentDownloads as backgroundSubscribeToDocumentDownloads,
+    type DocumentDownloadEvent,
+} from '../../services/chatDocumentDownloadBackground'
 
 const CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const CHAT_MEDIA_MAX_UPLOAD_LABEL = '50MB'
@@ -1110,8 +1117,26 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const isDocument = msg.message_type === 'document'
         const documentFileName = getDocumentFileName(msg)
 
-        if (isDocument && targetMsg.local_blob_url) {
-            triggerBrowserDownload(targetMsg.local_blob_url, documentFileName)
+        if (isDocument) {
+            const completedUrl = targetMsg.local_blob_url || backgroundGetCompletedDocumentDownloadUrl(fileId)
+            if (completedUrl) {
+                targetMsg.local_blob_url = completedUrl
+                triggerBrowserDownload(completedUrl, documentFileName)
+                return
+            }
+
+            const targetUserId = selectedUserId.value
+                ?? (msg.sender_id === currentUserId ? msg.receiver_id : msg.sender_id)
+
+            if (!targetUserId) return
+
+            await backgroundStartDocumentDownload({
+                messageId: msg.id,
+                userId: targetUserId,
+                fileId,
+                fileName: documentFileName,
+                mimeType: parseMediaPayload(msg.content).mime_type || 'application/octet-stream',
+            })
             return
         }
 
@@ -1920,6 +1945,77 @@ export function useChatMedia(options: UseChatMediaOptions) {
             /* ignore */
         }
     })
+
+    function applyDocumentDownloadEventToMessages(event: DocumentDownloadEvent) {
+        if (event.userId !== selectedUserId.value) return
+
+        const index = messages.value.findIndex(message => message.id === event.messageId)
+        const target = index !== -1 ? messages.value[index] : undefined
+        if (!target || target.message_type !== 'document') return
+
+        switch (event.type) {
+            case 'added':
+            case 'progress': {
+                target.is_downloading = true
+                target.download_progress = event.progress
+                break
+            }
+            case 'completed': {
+                target.is_downloading = false
+                target.download_progress = 100
+                target.local_blob_url = event.objectUrl
+                break
+            }
+            case 'error':
+            case 'cancelled': {
+                target.is_downloading = false
+                target.download_progress = 0
+                break
+            }
+        }
+    }
+
+    const unsubscribeFromDocumentDownloadService = backgroundSubscribeToDocumentDownloads(applyDocumentDownloadEventToMessages)
+    onUnmounted(() => {
+        try {
+            unsubscribeFromDocumentDownloadService()
+        } catch {
+            /* ignore */
+        }
+    })
+
+    function adoptDocumentDownloadStateForVisibleMessages(userId: number | null) {
+        if (typeof userId !== 'number') return
+
+        const pendingByMessageId = new Map(
+            backgroundGetPendingDocumentDownloadsForUser(userId).map(download => [download.messageId, download])
+        )
+
+        for (const message of messages.value) {
+            if (message.message_type !== 'document') continue
+
+            const pending = pendingByMessageId.get(message.id)
+            if (pending) {
+                message.is_downloading = true
+                message.download_progress = pending.progress
+            } else if (message.is_downloading) {
+                message.is_downloading = false
+                message.download_progress = 0
+            }
+
+            const fileId = getFileId(message.content)
+            if (!fileId) continue
+
+            const completedUrl = backgroundGetCompletedDocumentDownloadUrl(fileId)
+            if (completedUrl) {
+                message.local_blob_url = completedUrl
+            }
+        }
+    }
+
+    watch([selectedUserId, messages], ([userId]) => {
+        adoptDocumentDownloadStateForVisibleMessages(userId)
+    }, { immediate: true })
 
     /**
      * Graft any pending background uploads for the given user into the
