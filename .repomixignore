@@ -1,0 +1,36 @@
+/src/
+/tests/
+
+# VCS and environment directories
+.git/
+.venv/
+venv/
+node_modules/
+__pycache__/
+
+# Generated/build artifacts
+mini_app_dist/
+frontend/dist/
+
+# Large/binary assets and caches
+map_data/
+pip_packages/
+tmp/
+*.mbtiles
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.svg
+*.mp4
+*.mov
+*.mp3
+*.wav
+*.ogg
+*.woff
+*.woff2
+*.ttf
+*.eot
+*.pdf
+*.zip
