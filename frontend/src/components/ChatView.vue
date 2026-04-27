@@ -1976,6 +1976,16 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
   /* Telegram classic light background color */
   background-color: #e4eaef;
   z-index: 100;
+  /*
+    With interactive-widget=overlays-content the layout viewport does NOT shrink
+    when the keyboard opens. Instead we reserve the keyboard slot ourselves via
+    env(keyboard-inset-height). Combined with the picker height formula
+    (target - env), the bottom slot stays at a constant total of `target`
+    pixels throughout the entire keyboard <-> picker swap, so messages-container
+    never resizes and no auto-scroll/jump occurs.
+  */
+  padding-bottom: env(keyboard-inset-height, 0px);
+  box-sizing: border-box;
 }
 
 /* Header - Telegram Style Glass */
