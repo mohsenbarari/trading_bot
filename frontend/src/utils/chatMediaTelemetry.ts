@@ -6,6 +6,7 @@ type MediaPreprocessPath =
   | 'video_preview'
   | 'video_metadata_fallback'
   | 'voice_passthrough'
+  | 'document_passthrough'
 
 type MediaPreprocessStatus = 'success' | 'failed' | 'cancelled'
 
