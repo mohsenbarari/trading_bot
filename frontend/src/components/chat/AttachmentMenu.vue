@@ -292,12 +292,27 @@
                 </svg>
               </div>
             </div>
-            <button class="send-location-btn" @click="sendLocation">
+            <div
+              v-if="locationStatusMessage"
+              class="location-status"
+              :class="{ 'is-error': locationStatusTone === 'error' }"
+            >
+              <span>{{ locationStatusMessage }}</span>
+              <button
+                v-if="locationStatusTone === 'error' && !isLocating"
+                type="button"
+                class="location-status-action"
+                @click="goToMyLocation(false)"
+              >
+                تلاش مجدد
+              </button>
+            </div>
+            <button class="send-location-btn" :disabled="!selectedLatLng || isLocating" @click="sendLocation">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
                 <circle cx="12" cy="10" r="3"/>
               </svg>
-              ارسال موقعیت مکانی
+              {{ isLocating ? 'در حال یافتن موقعیت...' : 'ارسال موقعیت مکانی' }}
             </button>
           </div>
         </div>
@@ -431,7 +446,10 @@ let recordingTimer: number | null = null
 
 // Default: Tehran
 const mapCenter = ref<[number, number]>([35.6892, 51.3890])
-const selectedLatLng = ref<{ lat: number; lng: number }>({ lat: 35.6892, lng: 51.3890 })
+const selectedLatLng = ref<{ lat: number; lng: number } | null>(null)
+const isLocating = ref(false)
+const locationStatusMessage = ref('')
+const locationStatusTone = ref<'info' | 'error'>('info')
 
 const tileUrl = ref('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
 
@@ -1147,36 +1165,119 @@ function onMapMoveEnd() {
   }
 }
 
-function goToMyLocation(silent = false) {
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude
-        const lng = position.coords.longitude
-        mapCenter.value = [lat, lng]
-        selectedLatLng.value = { lat, lng }
-        
-        const map = mapRef.value?.leafletObject
-        if (map) {
-          map.setView([lat, lng], 15)
-        }
-      },
-      (error) => {
-        console.error('Geolocation error:', error)
-        if (silent !== true) {
-          alert('امکان دریافت مکان شما وجود ندارد. لطفا دسترسی مرورگر را بررسی کنید.')
-        }
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    )
-  } else {
+function setLocationStatus(message: string, tone: 'info' | 'error' = 'info') {
+  locationStatusMessage.value = message
+  locationStatusTone.value = tone
+}
+
+function clearLocationStatus() {
+  locationStatusMessage.value = ''
+  locationStatusTone.value = 'info'
+}
+
+function applyDetectedLocation(lat: number, lng: number) {
+  mapCenter.value = [lat, lng]
+  selectedLatLng.value = { lat, lng }
+
+  const map = mapRef.value?.leafletObject
+  if (map) {
+    map.setView([lat, lng], 15)
+  }
+}
+
+function requestCurrentPosition(options: PositionOptions) {
+  return new Promise<GeolocationPosition>((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, options)
+  })
+}
+
+function getLocationErrorMessage(error: GeolocationPositionError | null) {
+  if (!error) {
+    return 'امکان دریافت مکان شما وجود ندارد. لطفا دوباره تلاش کنید.'
+  }
+
+  if (error.code === error.PERMISSION_DENIED) {
+    return 'دسترسی به موقعیت مکانی مسدود است. مجوز Location را برای این سایت دوباره فعال کنید.'
+  }
+
+  if (error.code === error.TIMEOUT) {
+    return 'زمان دریافت موقعیت شما به پایان رسید. اینترنت یا GPS دستگاه را بررسی کنید و دوباره تلاش کنید.'
+  }
+
+  if (error.code === error.POSITION_UNAVAILABLE) {
+    return 'مرورگر نتوانست موقعیت دقیق شما را پیدا کند. GPS یا سرویس مکان‌یابی دستگاه را روشن کنید.'
+  }
+
+  return 'امکان دریافت مکان شما وجود ندارد. لطفا دوباره تلاش کنید.'
+}
+
+async function goToMyLocation(silent = false) {
+  if (!navigator.geolocation) {
+    const message = 'مرورگر شما از مکان‌یابی پشتیبانی نمی‌کند.'
+    setLocationStatus(message, 'error')
     if (silent !== true) {
-      alert('مرورگر شما از مکان‌یابی پشتیبانی نمی‌کند.')
+      alert(message)
     }
+    return
+  }
+
+  if (typeof window !== 'undefined' && !window.isSecureContext) {
+    const message = 'برای دریافت موقعیت خودکار، این صفحه باید روی HTTPS یا localhost باز شود.'
+    setLocationStatus(message, 'error')
+    if (silent !== true) {
+      alert(message)
+    }
+    return
+  }
+
+  isLocating.value = true
+  setLocationStatus('در حال یافتن موقعیت شما...', 'info')
+
+  try {
+    let position: GeolocationPosition
+
+    try {
+      position = await requestCurrentPosition({
+        enableHighAccuracy: false,
+        timeout: 12000,
+        maximumAge: 300000,
+      })
+    } catch (error) {
+      const geoError = error as GeolocationPositionError
+      if (geoError?.code === geoError.PERMISSION_DENIED) {
+        throw geoError
+      }
+
+      position = await requestCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 0,
+      })
+    }
+
+    applyDetectedLocation(position.coords.latitude, position.coords.longitude)
+    clearLocationStatus()
+  } catch (error) {
+    const geoError = error as GeolocationPositionError
+    const message = getLocationErrorMessage(geoError)
+    console.error('Geolocation error:', geoError)
+    setLocationStatus(message, 'error')
+    if (silent !== true) {
+      alert(message)
+    }
+  } finally {
+    isLocating.value = false
   }
 }
 
 function sendLocation() {
+  if (!selectedLatLng.value) {
+    const message = 'ابتدا موقعیت خود را پیدا کنید یا نقشه را روی نقطه دلخواه جابه‌جا کنید.'
+    setLocationStatus(message, 'error')
+    alert(message)
+    return
+  }
+
   emit('select-location', selectedLatLng.value.lat, selectedLatLng.value.lng)
   close()
 }
@@ -1781,6 +1882,36 @@ onBeforeUnmount(() => {
   background: #f3f4f6;
 }
 
+.location-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.location-status.is-error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.location-status-action {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: inherit;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .center-pin {
   position: absolute;
   top: 50%;
@@ -1809,6 +1940,11 @@ onBeforeUnmount(() => {
 }
 .send-location-btn:active {
   background: #2563eb;
+}
+
+.send-location-btn:disabled {
+  background: #93c5fd;
+  cursor: not-allowed;
 }
 
 /* Transitions */
