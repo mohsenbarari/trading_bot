@@ -577,6 +577,9 @@ async def delete_message(
     db: AsyncSession = Depends(get_db)
 ):
     """حذف message (Soft Delete - محدودیت ۴۸ ساعت)"""
+    if message_id <= 0 or message_id > 2147483647:
+        raise HTTPException(status_code=404, detail="Message not found")
+
     msg = await db.get(Message, message_id)
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
