@@ -375,6 +375,26 @@ function isDeletableMessage(msg?: Message | null) {
   return (Date.now() - msgTime) <= 48 * 60 * 60 * 1000
 }
 
+function isPersistedMessageId(messageId: number) {
+  return Number.isInteger(messageId) && messageId > 0
+}
+
+function removeLocalOnlyMessage(msg?: Message | null) {
+  if (!msg) return
+
+  if (msg.message_type === 'text' || msg.message_type === 'sticker') {
+    cancelTextMessage(msg.id)
+    return
+  }
+
+  cancelUpload(msg.id)
+
+  const index = messages.value.findIndex(message => message.id === msg.id)
+  if (index !== -1) {
+    messages.value.splice(index, 1)
+  }
+}
+
 function normalizeMessageIds(messageIds: number[]) {
   const seen = new Set<number>()
   const normalized: number[] = []
@@ -608,6 +628,11 @@ async function deleteMessagesByIds(messageIds: number[], confirmMessage: string)
     for (const msgId of normalized) {
       const msg = messages.value.find(message => message.id === msgId)
       if (!isDeletableMessage(msg)) continue
+
+      if (!isPersistedMessageId(msgId)) {
+        removeLocalOnlyMessage(msg)
+        continue
+      }
 
       await messagesLogic.apiFetch(`/chat/messages/${msgId}`, { method: 'DELETE' })
       const index = messages.value.findIndex(message => message.id === msgId)
