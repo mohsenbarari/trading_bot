@@ -277,6 +277,25 @@
                   :url="tileUrl"
                   attribution="&copy; OpenStreetMap"
                 />
+                <l-circle
+                  v-if="detectedLocationLatLng && detectedLocationAccuracyM"
+                  :lat-lng="detectedLocationLatLng"
+                  :radius="detectedLocationAccuracyM"
+                  :color="'#3390ec'"
+                  :weight="1"
+                  :opacity="0.35"
+                  :fill-color="'#3390ec'"
+                  :fill-opacity="0.14"
+                />
+                <l-circle-marker
+                  v-if="detectedLocationLatLng"
+                  :lat-lng="detectedLocationLatLng"
+                  :radius="9"
+                  :color="'#ffffff'"
+                  :weight="3"
+                  :fill-color="'#2f80ed'"
+                  :fill-opacity="1"
+                />
               </l-map>
               <!-- Return to my location button -->
               <button class="my-location-btn" @click="goToMyLocation(false)" title="مکان من">
@@ -354,7 +373,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import 'leaflet/dist/leaflet.css'
-import { LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
+import { LCircle, LCircleMarker, LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
 
 // Lazy-load the image editor so Cropper.js (~40KB) and its CSS are only
 // downloaded when the user actually edits an image. Keeps the main Messenger
@@ -447,10 +466,14 @@ let recordingTimer: number | null = null
 // Default: Tehran
 const mapCenter = ref<[number, number]>([35.6892, 51.3890])
 const selectedLatLng = ref<{ lat: number; lng: number } | null>(null)
+const detectedLocationLatLng = ref<[number, number] | null>(null)
+const detectedLocationAccuracyM = ref<number | null>(null)
 const isLocating = ref(false)
 const locationStatusMessage = ref('')
 const locationStatusTone = ref<'info' | 'error'>('info')
 let locationWatchId: number | null = null
+
+const DESIRED_LOCATION_ACCURACY_METERS = 120
 
 const tileUrl = ref('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
 
@@ -1176,13 +1199,50 @@ function clearLocationStatus() {
   locationStatusTone.value = 'info'
 }
 
-function applyDetectedLocation(lat: number, lng: number) {
+function formatLocationAccuracy(accuracyM: number) {
+  if (accuracyM >= 1000) {
+    return `${(accuracyM / 1000).toFixed(1)} کیلومتر`
+  }
+
+  return `${Math.round(accuracyM)} متر`
+}
+
+function isAccurateEnough(position: GeolocationPosition) {
+  return Number.isFinite(position.coords.accuracy) && position.coords.accuracy <= DESIRED_LOCATION_ACCURACY_METERS
+}
+
+function getBetterPosition(currentBest: GeolocationPosition | null, candidate: GeolocationPosition) {
+  if (!currentBest) {
+    return candidate
+  }
+
+  return candidate.coords.accuracy < currentBest.coords.accuracy ? candidate : currentBest
+}
+
+function updateResolvedLocationStatus(position: GeolocationPosition) {
+  const accuracyLabel = formatLocationAccuracy(position.coords.accuracy)
+  if (isAccurateEnough(position)) {
+    setLocationStatus(`موقعیت شما پیدا شد. دقت فعلی حدود ${accuracyLabel} است.`, 'info')
+    return
+  }
+
+  setLocationStatus(`موقعیت تقریبی شما پیدا شد. دقت فعلی حدود ${accuracyLabel} است.`, 'info')
+}
+
+function applyDetectedLocation(position: GeolocationPosition) {
+  const lat = position.coords.latitude
+  const lng = position.coords.longitude
+  const accuracy = Math.max(15, Math.round(position.coords.accuracy || 0))
+
   mapCenter.value = [lat, lng]
   selectedLatLng.value = { lat, lng }
+  detectedLocationLatLng.value = [lat, lng]
+  detectedLocationAccuracyM.value = accuracy
 
   const map = mapRef.value?.leafletObject
   if (map) {
-    map.setView([lat, lng], 15)
+    const targetZoom = accuracy <= 60 ? 18 : accuracy <= 150 ? 17 : accuracy <= 400 ? 16 : 15
+    map.setView([lat, lng], targetZoom)
   }
 }
 
@@ -1228,6 +1288,65 @@ function requestWatchPosition(options: PositionOptions, waitMs = 25000) {
         settled = true
         window.clearTimeout(timeoutId)
         clearLocationWatch()
+        reject(error)
+      },
+      options,
+    )
+  })
+}
+
+function requestBestWatchPosition(
+  options: PositionOptions,
+  waitMs = 30000,
+  desiredAccuracyM = DESIRED_LOCATION_ACCURACY_METERS,
+  onProgress?: (position: GeolocationPosition) => void,
+) {
+  return new Promise<GeolocationPosition>((resolve, reject) => {
+    let settled = false
+    let bestPosition: GeolocationPosition | null = null
+
+    const finish = () => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeoutId)
+      clearLocationWatch()
+      if (bestPosition) {
+        resolve(bestPosition)
+        return
+      }
+
+      reject({
+        code: 3,
+        message: 'watchPosition timed out',
+        PERMISSION_DENIED: 1,
+        POSITION_UNAVAILABLE: 2,
+        TIMEOUT: 3,
+      } as GeolocationPositionError)
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      finish()
+    }, waitMs)
+
+    locationWatchId = navigator.geolocation.watchPosition(
+      (position) => {
+        bestPosition = getBetterPosition(bestPosition, position)
+        onProgress?.(bestPosition)
+        if (bestPosition.coords.accuracy <= desiredAccuracyM) {
+          finish()
+        }
+      },
+      (error) => {
+        if (settled) return
+        window.clearTimeout(timeoutId)
+        clearLocationWatch()
+        if (bestPosition) {
+          settled = true
+          resolve(bestPosition)
+          return
+        }
+
+        settled = true
         reject(error)
       },
       options,
@@ -1303,6 +1422,7 @@ async function goToMyLocation(silent = false) {
     }
 
     let position: GeolocationPosition
+    let bestPosition: GeolocationPosition | null = null
 
     try {
       position = await requestCurrentPosition({
@@ -1310,6 +1430,8 @@ async function goToMyLocation(silent = false) {
         timeout: 12000,
         maximumAge: 300000,
       })
+      bestPosition = getBetterPosition(bestPosition, position)
+      applyDetectedLocation(bestPosition)
     } catch (error) {
       const geoError = error as GeolocationPositionError
       if (geoError?.code === geoError.PERMISSION_DENIED) {
@@ -1338,8 +1460,49 @@ async function goToMyLocation(silent = false) {
       }
     }
 
-    applyDetectedLocation(position.coords.latitude, position.coords.longitude)
-    clearLocationStatus()
+    if (!bestPosition) {
+      bestPosition = position
+      applyDetectedLocation(bestPosition)
+    }
+
+    if (!isAccurateEnough(bestPosition)) {
+      try {
+        setLocationStatus('در حال تلاش برای دقیق‌تر کردن موقعیت...', 'info')
+        const precisePosition = await requestCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 18000,
+          maximumAge: 0,
+        })
+        bestPosition = getBetterPosition(bestPosition, precisePosition)
+        applyDetectedLocation(bestPosition)
+      } catch (preciseError) {
+        const preciseGeoError = preciseError as GeolocationPositionError
+        if (preciseGeoError?.code === preciseGeoError.PERMISSION_DENIED) {
+          throw preciseGeoError
+        }
+      }
+    }
+
+    if (!isAccurateEnough(bestPosition)) {
+      setLocationStatus('در انتظار بهبود دقت GPS دستگاه...', 'info')
+      const watchedPosition = await requestBestWatchPosition(
+        {
+          enableHighAccuracy: true,
+          timeout: 30000,
+          maximumAge: 0,
+        },
+        30000,
+        DESIRED_LOCATION_ACCURACY_METERS,
+        (candidate) => {
+          bestPosition = getBetterPosition(bestPosition, candidate)
+          applyDetectedLocation(bestPosition)
+        },
+      )
+      bestPosition = getBetterPosition(bestPosition, watchedPosition)
+      applyDetectedLocation(bestPosition)
+    }
+
+    updateResolvedLocationStatus(bestPosition)
   } catch (error) {
     const geoError = error as GeolocationPositionError
     const message = getLocationErrorMessage(geoError)
