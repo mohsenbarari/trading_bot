@@ -1,5 +1,6 @@
 /src/
 /tests/
+.github/copilot-instructions.md
 
 # VCS and environment directories
 .git/
