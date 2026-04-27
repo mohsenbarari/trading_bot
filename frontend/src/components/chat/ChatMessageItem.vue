@@ -257,7 +257,7 @@
             <div class="doc-name">{{ docDisplayName }}</div>
             <div class="doc-size">{{ docStatusText }}</div>
           </div>
-          <div v-if="!isDocumentBusy" class="doc-download-icon">
+          <div v-if="!isDocumentBusy && !hasResolvedDocumentAsset" class="doc-download-icon">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="7 10 12 15 17 10"></polyline>
@@ -486,6 +486,9 @@ const docIconClass = computed(() => {
   return 'doc-generic'
 })
 const isDocumentBusy = computed(() => Boolean(props.msg.is_sending || props.msg.is_downloading))
+const hasResolvedDocumentAsset = computed(() => {
+  return props.msg.message_type === 'document' && Boolean(props.msg.local_blob_url || cachedUrl.value)
+})
 const docTransferProgress = computed(() => {
   if (props.msg.is_sending) return props.msg.upload_progress || 0
   if (props.msg.is_downloading) return props.msg.download_progress || 0
