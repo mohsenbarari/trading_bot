@@ -11,6 +11,7 @@ import { useNotificationStore } from './stores/notifications'
 import { requestNotificationPermission, showBrowserNotification } from './utils/browserNotifications'
 import { unlockAudioContext } from './utils/audio'
 import { initChatUploadBackground } from './services/chatUploadBackground'
+import { initChatDocumentDownloadBackground } from './services/chatDocumentDownloadBackground'
 
 
 const route = useRoute()
@@ -27,6 +28,11 @@ onMounted(() => {
   // them in the background — so media sends continue across page reloads
   // and in-app navigation away from the messenger.
   void initChatUploadBackground({
+    apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
+    getAuthToken: () => localStorage.getItem('auth_token'),
+  })
+
+  void initChatDocumentDownloadBackground({
     apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
     getAuthToken: () => localStorage.getItem('auth_token'),
   })
