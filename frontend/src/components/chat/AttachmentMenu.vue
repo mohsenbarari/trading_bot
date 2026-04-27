@@ -472,6 +472,7 @@ const isLocating = ref(false)
 const locationStatusMessage = ref('')
 const locationStatusTone = ref<'info' | 'error'>('info')
 const hasManualLocationSelection = ref(false)
+const hasConfirmedAutoLocation = ref(false)
 let locationWatchId: number | null = null
 let isProgrammaticMapMove = false
 
@@ -503,7 +504,8 @@ const canSendLocation = computed(() => {
     return true
   }
 
-  return detectedLocationAccuracyM.value !== null
+  return hasConfirmedAutoLocation.value
+    && detectedLocationAccuracyM.value !== null
     && detectedLocationAccuracyM.value <= MAX_ACCEPTABLE_AUTO_LOCATION_ACCURACY_METERS
 })
 const capturedMediaQueueLabel = computed(() => {
@@ -1270,6 +1272,11 @@ function applyDetectedLocation(position: GeolocationPosition) {
   }
 }
 
+function applyConfirmedAutoLocation(position: GeolocationPosition) {
+  hasConfirmedAutoLocation.value = true
+  applyDetectedLocation(position)
+}
+
 function requestCurrentPosition(options: PositionOptions) {
   return new Promise<GeolocationPosition>((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(resolve, reject, options)
@@ -1425,6 +1432,7 @@ async function goToMyLocation(silent = false) {
   }
 
   isLocating.value = true
+  hasConfirmedAutoLocation.value = false
   setLocationStatus('در حال یافتن موقعیت شما...', 'info')
 
   try {
@@ -1449,7 +1457,7 @@ async function goToMyLocation(silent = false) {
         maximumAge: 300000,
       })
       bestPosition = getBetterPosition(bestPosition, position)
-      applyDetectedLocation(bestPosition)
+      setLocationStatus('موقعیت اولیه پیدا شد. در حال تایید دقت...', 'info')
     } catch (error) {
       const geoError = error as GeolocationPositionError
       if (geoError?.code === geoError.PERMISSION_DENIED) {
@@ -1480,24 +1488,21 @@ async function goToMyLocation(silent = false) {
 
     if (!bestPosition) {
       bestPosition = position
-      applyDetectedLocation(bestPosition)
     }
 
-    if (!isAccurateEnough(bestPosition)) {
-      try {
-        setLocationStatus('در حال تلاش برای دقیق‌تر کردن موقعیت...', 'info')
-        const precisePosition = await requestCurrentPosition({
-          enableHighAccuracy: true,
-          timeout: 18000,
-          maximumAge: 0,
-        })
-        bestPosition = getBetterPosition(bestPosition, precisePosition)
-        applyDetectedLocation(bestPosition)
-      } catch (preciseError) {
-        const preciseGeoError = preciseError as GeolocationPositionError
-        if (preciseGeoError?.code === preciseGeoError.PERMISSION_DENIED) {
-          throw preciseGeoError
-        }
+    try {
+      setLocationStatus('در حال دریافت موقعیت دقیق و تازه...', 'info')
+      const precisePosition = await requestCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 18000,
+        maximumAge: 0,
+      })
+      bestPosition = getBetterPosition(bestPosition, precisePosition)
+      applyConfirmedAutoLocation(bestPosition)
+    } catch (preciseError) {
+      const preciseGeoError = preciseError as GeolocationPositionError
+      if (preciseGeoError?.code === preciseGeoError.PERMISSION_DENIED) {
+        throw preciseGeoError
       }
     }
 
@@ -1513,11 +1518,17 @@ async function goToMyLocation(silent = false) {
         DESIRED_LOCATION_ACCURACY_METERS,
         (candidate) => {
           bestPosition = getBetterPosition(bestPosition, candidate)
-          applyDetectedLocation(bestPosition)
+          applyConfirmedAutoLocation(bestPosition)
         },
       )
       bestPosition = getBetterPosition(bestPosition, watchedPosition)
-      applyDetectedLocation(bestPosition)
+      applyConfirmedAutoLocation(bestPosition)
+    }
+
+    if (!hasConfirmedAutoLocation.value) {
+      const message = 'موقعیت دقیق و تازه از GPS دستگاه دریافت نشد. برای جلوگیری از لوکیشن اشتباه، پین را دستی روی نقطه درست تنظیم کنید.'
+      setLocationStatus(message, 'error')
+      return
     }
 
     updateResolvedLocationStatus(bestPosition)
