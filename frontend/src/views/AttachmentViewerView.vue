@@ -13,9 +13,11 @@ const route = useRoute()
 const router = useRouter()
 
 const fileUrl = ref('')
+const attachmentBlob = ref<Blob | null>(null)
 const textContent = ref('')
 const isLoading = ref(false)
 const errorMessage = ref('')
+const actionMessage = ref('')
 
 const fileId = computed(() => typeof route.query.file_id === 'string' ? route.query.file_id : '')
 const mimeType = computed(() => typeof route.query.mime_type === 'string' ? route.query.mime_type : 'application/octet-stream')
@@ -93,6 +95,9 @@ const isText = computed(() => {
 const canPreviewInline = computed(() => {
   return isImage.value || isVideo.value || isAudio.value || isPdf.value || isText.value
 })
+const supportsSystemShare = computed(() => {
+  return typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+})
 
 function goBack() {
   if (window.history.length > 1) {
@@ -112,6 +117,98 @@ function triggerDownload(url: string, fileNameValue: string) {
   document.body.appendChild(anchor)
   anchor.click()
   document.body.removeChild(anchor)
+}
+
+async function resolveAttachmentBlobForActions() {
+  if (attachmentBlob.value) return attachmentBlob.value
+
+  if (fileId.value) {
+    const cachedBlob = await getCachedAttachmentBlob(fileId.value)
+    if (cachedBlob) {
+      attachmentBlob.value = cachedBlob
+      return cachedBlob
+    }
+  }
+
+  if (fileUrl.value) {
+    try {
+      const blob = await fetch(fileUrl.value).then(res => res.blob())
+      attachmentBlob.value = blob
+      if (fileId.value) {
+        void putCachedAttachmentBlob(fileId.value, blob)
+      }
+      return blob
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (!fileId.value) return null
+
+  try {
+    const token = localStorage.getItem('auth_token') || ''
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+    const response = await fetch(`${baseUrl}/api/chat/files/${encodeURIComponent(fileId.value)}?token=${encodeURIComponent(token)}`)
+    if (!response.ok) return null
+    const blob = await response.blob()
+    attachmentBlob.value = blob
+    void putCachedAttachmentBlob(fileId.value, blob)
+    return blob
+  } catch {
+    return null
+  }
+}
+
+function canShareFile(file: File) {
+  if (typeof navigator === 'undefined' || typeof navigator.share !== 'function') {
+    return false
+  }
+
+  const nav = navigator as Navigator & { canShare?: (data?: ShareData) => boolean }
+  if (typeof nav.canShare === 'function') {
+    try {
+      return nav.canShare({ files: [file] })
+    } catch {
+      return false
+    }
+  }
+
+  return true
+}
+
+async function shareToDeviceApps() {
+  actionMessage.value = ''
+
+  const blob = await resolveAttachmentBlobForActions()
+  if (!blob) {
+    actionMessage.value = 'فایل برای ارسال به برنامه‌های دستگاه در دسترس نیست.'
+    return
+  }
+
+  const shareFile = new File([blob], fileName.value || 'file', {
+    type: effectiveMimeType.value || blob.type || 'application/octet-stream',
+    lastModified: Date.now(),
+  })
+
+  if (!canShareFile(shareFile)) {
+    actionMessage.value = 'مرورگر یا دستگاه شما باز کردن فایل با برنامه‌های دستگاه را از طریق Web Share API پشتیبانی نمی‌کند.'
+    return
+  }
+
+  try {
+    await navigator.share({
+      title: fileName.value,
+      text: fileName.value,
+      files: [shareFile],
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return
+    }
+
+    console.error('Attachment share failed:', error)
+    actionMessage.value = 'ارسال فایل به برنامه‌های دستگاه ناموفق بود.'
+  }
 }
 
 function openInBrowser() {
@@ -134,7 +231,9 @@ async function resolveFileUrl() {
 
   isLoading.value = true
   errorMessage.value = ''
+  actionMessage.value = ''
   textContent.value = ''
+  attachmentBlob.value = null
 
   try {
     let resolvedBlob = await getCachedAttachmentBlob(fileId.value)
@@ -164,10 +263,12 @@ async function resolveFileUrl() {
     }
 
     fileUrl.value = nextUrl
+    attachmentBlob.value = resolvedBlob || null
 
     if (isText.value) {
       const textBlob = resolvedBlob || await getCachedAttachmentBlob(fileId.value) || await fetch(nextUrl).then(res => res.blob())
       if (textBlob) {
+        attachmentBlob.value = textBlob
         textContent.value = await textBlob.text()
       }
     }
@@ -224,11 +325,13 @@ watch([fileId, mimeType], () => {
         <object v-else-if="isPdf && fileUrl" :data="fileUrl" type="application/pdf" class="pdf-frame">
           <div class="state-card unsupported inline-fallback">
             <h2>پیش‌نمایش PDF در این مرورگر در دسترس نیست</h2>
-            <p>می‌توانید فایل را در مرورگر باز کنید یا دانلود کنید.</p>
+            <p>می‌توانید فایل را با برنامه‌های دستگاه باز کنید، در مرورگر باز کنید یا دانلود کنید.</p>
             <div class="unsupported-actions">
+              <button v-if="supportsSystemShare" class="primary-btn" :disabled="!fileUrl" @click="shareToDeviceApps">باز کردن با برنامه‌های دستگاه</button>
               <button class="secondary-btn" :disabled="!fileUrl" @click="openInBrowser">باز کردن در مرورگر</button>
               <button class="primary-btn" :disabled="!fileUrl" @click="fileUrl && triggerDownload(fileUrl, fileName)">دانلود</button>
             </div>
+            <p v-if="actionMessage" class="action-message">{{ actionMessage }}</p>
           </div>
         </object>
 
@@ -242,11 +345,13 @@ watch([fileId, mimeType], () => {
             </svg>
           </div>
           <h2>پیش‌نمایش در مرورگر موجود نیست</h2>
-          <p>فایل داخل حافظه‌ی محلی اپ موجود است. می‌توانید آن را در مرورگر باز کنید یا در صورت نیاز فقط یک‌بار دانلود کنید.</p>
+          <p>فایل داخل حافظه‌ی محلی اپ موجود است. اگر دستگاه و مرورگر پشتیبانی کنند می‌توانید آن را به برنامه‌های مناسب دستگاه بسپارید، وگرنه باز کردن در مرورگر یا دانلود در دسترس است.</p>
           <div class="unsupported-actions">
+            <button v-if="supportsSystemShare" class="primary-btn" :disabled="!fileUrl" @click="shareToDeviceApps">باز کردن با برنامه‌های دستگاه</button>
             <button class="secondary-btn" :disabled="!fileUrl" @click="openInBrowser">باز کردن در مرورگر</button>
-            <button class="primary-btn" :disabled="!fileUrl" @click="fileUrl && triggerDownload(fileUrl, fileName)">دانلود</button>
+            <button class="secondary-btn" :disabled="!fileUrl" @click="fileUrl && triggerDownload(fileUrl, fileName)">دانلود</button>
           </div>
+          <p v-if="actionMessage" class="action-message">{{ actionMessage }}</p>
         </div>
       </template>
     </main>
@@ -357,6 +462,12 @@ watch([fileId, mimeType], () => {
   margin: 0;
   color: #475569;
   line-height: 1.7;
+}
+
+.action-message {
+  margin-top: 0.9rem !important;
+  font-size: 0.82rem;
+  color: #92400e !important;
 }
 
 .unsupported-icon {
