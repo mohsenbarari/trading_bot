@@ -450,6 +450,7 @@ const selectedLatLng = ref<{ lat: number; lng: number } | null>(null)
 const isLocating = ref(false)
 const locationStatusMessage = ref('')
 const locationStatusTone = ref<'info' | 'error'>('info')
+let locationWatchId: number | null = null
 
 const tileUrl = ref('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
 
@@ -1191,6 +1192,62 @@ function requestCurrentPosition(options: PositionOptions) {
   })
 }
 
+function clearLocationWatch() {
+  if (locationWatchId !== null) {
+    navigator.geolocation.clearWatch(locationWatchId)
+    locationWatchId = null
+  }
+}
+
+function requestWatchPosition(options: PositionOptions, waitMs = 25000) {
+  return new Promise<GeolocationPosition>((resolve, reject) => {
+    let settled = false
+    const timeoutId = window.setTimeout(() => {
+      if (settled) return
+      settled = true
+      clearLocationWatch()
+      reject({
+        code: 3,
+        message: 'watchPosition timed out',
+        PERMISSION_DENIED: 1,
+        POSITION_UNAVAILABLE: 2,
+        TIMEOUT: 3,
+      } as GeolocationPositionError)
+    }, waitMs)
+
+    locationWatchId = navigator.geolocation.watchPosition(
+      (position) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timeoutId)
+        clearLocationWatch()
+        resolve(position)
+      },
+      (error) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timeoutId)
+        clearLocationWatch()
+        reject(error)
+      },
+      options,
+    )
+  })
+}
+
+async function getGeolocationPermissionState() {
+  try {
+    if (!('permissions' in navigator) || !navigator.permissions?.query) {
+      return null
+    }
+
+    const status = await navigator.permissions.query({ name: 'geolocation' })
+    return status.state
+  } catch {
+    return null
+  }
+}
+
 function getLocationErrorMessage(error: GeolocationPositionError | null) {
   if (!error) {
     return 'امکان دریافت مکان شما وجود ندارد. لطفا دوباره تلاش کنید.'
@@ -1234,6 +1291,17 @@ async function goToMyLocation(silent = false) {
   setLocationStatus('در حال یافتن موقعیت شما...', 'info')
 
   try {
+    const permissionState = await getGeolocationPermissionState()
+    if (permissionState === 'denied') {
+      throw {
+        code: 1,
+        message: 'Geolocation permission denied by Permissions API',
+        PERMISSION_DENIED: 1,
+        POSITION_UNAVAILABLE: 2,
+        TIMEOUT: 3,
+      } as GeolocationPositionError
+    }
+
     let position: GeolocationPosition
 
     try {
@@ -1248,11 +1316,26 @@ async function goToMyLocation(silent = false) {
         throw geoError
       }
 
-      position = await requestCurrentPosition({
-        enableHighAccuracy: true,
-        timeout: 20000,
-        maximumAge: 0,
-      })
+      try {
+        setLocationStatus('در حال تلاش برای دریافت موقعیت دقیق‌تر...', 'info')
+        position = await requestCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 20000,
+          maximumAge: 0,
+        })
+      } catch (preciseError) {
+        const preciseGeoError = preciseError as GeolocationPositionError
+        if (preciseGeoError?.code === preciseGeoError.PERMISSION_DENIED) {
+          throw preciseGeoError
+        }
+
+        setLocationStatus('در انتظار پاسخ GPS دستگاه...', 'info')
+        position = await requestWatchPosition({
+          enableHighAccuracy: true,
+          timeout: 30000,
+          maximumAge: 0,
+        }, 30000)
+      }
     }
 
     applyDetectedLocation(position.coords.latitude, position.coords.longitude)
@@ -1266,6 +1349,7 @@ async function goToMyLocation(silent = false) {
       alert(message)
     }
   } finally {
+    clearLocationWatch()
     isLocating.value = false
   }
 }
@@ -1283,6 +1367,7 @@ function sendLocation() {
 }
 
 onBeforeUnmount(() => {
+  clearLocationWatch()
   cleanupCamera(true)
 })
 </script>
