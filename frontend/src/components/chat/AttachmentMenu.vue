@@ -464,7 +464,8 @@ let recordedChunks: BlobPart[] = []
 let recordingTimer: number | null = null
 
 // Default: Tehran
-const mapCenter = ref<[number, number]>([35.6892, 51.3890])
+const DEFAULT_LOCATION_CENTER: [number, number] = [35.6892, 51.3890]
+const mapCenter = ref<[number, number]>([...DEFAULT_LOCATION_CENTER])
 const selectedLatLng = ref<{ lat: number; lng: number } | null>(null)
 const detectedLocationLatLng = ref<[number, number] | null>(null)
 const detectedLocationAccuracyM = ref<number | null>(null)
@@ -475,6 +476,7 @@ const hasManualLocationSelection = ref(false)
 const hasConfirmedAutoLocation = ref(false)
 let locationWatchId: number | null = null
 let isProgrammaticMapMove = false
+let activeLocationLookupId = 0
 
 const DESIRED_LOCATION_ACCURACY_METERS = 120
 const MAX_ACCEPTABLE_AUTO_LOCATION_ACCURACY_METERS = 120
@@ -1047,10 +1049,35 @@ function close() {
   emit('update:modelValue', false)
 }
 
+function resetLocationDraft() {
+  activeLocationLookupId += 1
+
+  if (locationWatchId !== null) {
+    navigator.geolocation.clearWatch(locationWatchId)
+    locationWatchId = null
+  }
+
+  isProgrammaticMapMove = false
+  mapCenter.value = [...DEFAULT_LOCATION_CENTER]
+  selectedLatLng.value = null
+  detectedLocationLatLng.value = null
+  detectedLocationAccuracyM.value = null
+  isLocating.value = false
+  hasManualLocationSelection.value = false
+  hasConfirmedAutoLocation.value = false
+  clearLocationStatus()
+}
+
 // Reset tab on open
 watch(() => props.modelValue, (val) => {
-  if (val) activeTab.value = 'gallery'
-  if (!val) cleanupCamera(true)
+  if (val) {
+    activeTab.value = 'gallery'
+    resetLocationDraft()
+  }
+  if (!val) {
+    cleanupCamera(true)
+    resetLocationDraft()
+  }
 })
 
 watch(() => activeTab.value, (val) => {
@@ -1221,6 +1248,10 @@ function setLocationStatus(message: string, tone: 'info' | 'error' = 'info') {
 function clearLocationStatus() {
   locationStatusMessage.value = ''
   locationStatusTone.value = 'info'
+}
+
+function isCurrentLocationLookup(lookupId: number) {
+  return lookupId === activeLocationLookupId && props.modelValue && activeTab.value === 'location'
 }
 
 function formatLocationAccuracy(accuracyM: number) {
@@ -1419,6 +1450,8 @@ function getLocationErrorMessage(error: GeolocationPositionError | null) {
 }
 
 async function goToMyLocation(silent = false) {
+  const lookupId = ++activeLocationLookupId
+
   if (!navigator.geolocation) {
     const message = 'مرورگر شما از مکان‌یابی پشتیبانی نمی‌کند.'
     setLocationStatus(message, 'error')
@@ -1437,6 +1470,8 @@ async function goToMyLocation(silent = false) {
 
   try {
     const permissionState = await getGeolocationPermissionState()
+    if (!isCurrentLocationLookup(lookupId)) return
+
     if (permissionState === 'denied') {
       throw {
         code: 1,
@@ -1456,6 +1491,7 @@ async function goToMyLocation(silent = false) {
         timeout: 12000,
         maximumAge: 300000,
       })
+      if (!isCurrentLocationLookup(lookupId)) return
       bestPosition = getBetterPosition(bestPosition, position)
       setLocationStatus('موقعیت اولیه پیدا شد. در حال تایید دقت...', 'info')
     } catch (error) {
@@ -1471,6 +1507,7 @@ async function goToMyLocation(silent = false) {
           timeout: 20000,
           maximumAge: 0,
         })
+        if (!isCurrentLocationLookup(lookupId)) return
       } catch (preciseError) {
         const preciseGeoError = preciseError as GeolocationPositionError
         if (preciseGeoError?.code === preciseGeoError.PERMISSION_DENIED) {
@@ -1483,6 +1520,7 @@ async function goToMyLocation(silent = false) {
           timeout: 30000,
           maximumAge: 0,
         }, 30000)
+        if (!isCurrentLocationLookup(lookupId)) return
       }
     }
 
@@ -1497,6 +1535,7 @@ async function goToMyLocation(silent = false) {
         timeout: 18000,
         maximumAge: 0,
       })
+      if (!isCurrentLocationLookup(lookupId)) return
       bestPosition = getBetterPosition(bestPosition, precisePosition)
       applyConfirmedAutoLocation(bestPosition)
     } catch (preciseError) {
@@ -1517,10 +1556,12 @@ async function goToMyLocation(silent = false) {
         30000,
         DESIRED_LOCATION_ACCURACY_METERS,
         (candidate) => {
+          if (!isCurrentLocationLookup(lookupId)) return
           bestPosition = getBetterPosition(bestPosition, candidate)
           applyConfirmedAutoLocation(bestPosition)
         },
       )
+      if (!isCurrentLocationLookup(lookupId)) return
       bestPosition = getBetterPosition(bestPosition, watchedPosition)
       applyConfirmedAutoLocation(bestPosition)
     }
@@ -1531,15 +1572,19 @@ async function goToMyLocation(silent = false) {
       return
     }
 
+    if (!isCurrentLocationLookup(lookupId)) return
     updateResolvedLocationStatus(bestPosition)
   } catch (error) {
+    if (!isCurrentLocationLookup(lookupId)) return
     const geoError = error as GeolocationPositionError
     const message = getLocationErrorMessage(geoError)
     console.error('Geolocation error:', geoError)
     setLocationStatus(message, 'error')
   } finally {
-    clearLocationWatch()
-    isLocating.value = false
+    if (isCurrentLocationLookup(lookupId)) {
+      clearLocationWatch()
+      isLocating.value = false
+    }
   }
 }
 
