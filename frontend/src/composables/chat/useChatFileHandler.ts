@@ -131,7 +131,10 @@ function shareBlobSync(entry: CachedFileEntry, fallbackName: string): Promise<bo
         canShare?: (data: ShareData) => boolean
         share?: (data: ShareData) => Promise<void>
     }
-    if (typeof navAny.share !== 'function') return false
+    if (typeof navAny.share !== 'function') {
+        console.info('[chat-file] share API unavailable (no navigator.share)')
+        return false
+    }
     let file: File
     try {
         file = new File(
@@ -139,10 +142,17 @@ function shareBlobSync(entry: CachedFileEntry, fallbackName: string): Promise<bo
             entry.fileName || fallbackName || 'file',
             { type: entry.mimeType || entry.blob.type || 'application/octet-stream' },
         )
-    } catch {
+    } catch (err) {
+        console.warn('[chat-file] File() construction failed', err)
         return false
     }
     const shareData: ShareData = { files: [file] }
+    if (typeof navAny.canShare === 'function') {
+        try {
+            const ok = navAny.canShare(shareData)
+            if (!ok) console.info('[chat-file] canShare returned false; trying share() anyway', file.type)
+        } catch (err) { console.warn('[chat-file] canShare threw', err) }
+    }
     let promise: Promise<void>
     try {
         // Synchronous invocation — must NOT be `await`ed before this line.
@@ -152,7 +162,7 @@ function shareBlobSync(entry: CachedFileEntry, fallbackName: string): Promise<bo
         // activation is missing) instead of rejecting.
         const name = (err as DOMException)?.name
         if (name === 'AbortError') return Promise.resolve(true)
-        console.warn('[useChatFileHandler] share threw sync', err)
+        console.warn('[chat-file] share threw sync', name, err)
         return false
     }
     return promise
@@ -160,7 +170,7 @@ function shareBlobSync(entry: CachedFileEntry, fallbackName: string): Promise<bo
         .catch((err: unknown) => {
             const name = (err as DOMException)?.name
             if (name === 'AbortError') return true
-            console.warn('[useChatFileHandler] share rejected', err)
+            console.warn('[chat-file] share rejected', name, err)
             return false
         })
 }
@@ -198,15 +208,14 @@ function triggerAnchorDownload(blob: Blob, fileName: string) {
 }
 
 
-function showUnsupportedAlert(fileName: string) {
-    // For non-renderable formats on devices/contexts where navigator.share
-    // is unavailable, we deliberately do NOT call window.open(blob:) — Chrome
-    // on Android renders that as a "Save File" dialog for binary mime types,
-    // which the user perceives as a re-download on every tap. Instead show a
-    // localized message pointing them at the explicit Download button.
-    try {
-        window.alert(`فایل «${fileName || 'سند'}» در حافظهٔ دستگاه ذخیره شده است.\n\nمرورگر شما اجازه باز کردن مستقیم این نوع فایل را نمی‌دهد. لطفاً از دکمهٔ ذخیره (پایین فایل) استفاده کنید.`)
-    } catch { /* noop */ }
+function fallbackSaveFromCache(entry: CachedFileEntry, displayName: string) {
+    // When navigator.share is unavailable or rejected for a binary file,
+    // anchor-download from the *cached blob* (no network fetch) is the only
+    // way to deliver the file to the user. Chrome will show its save UI but
+    // the bytes come from IndexedDB, not the server. Showing an alert with
+    // no actionable button leaves the user stranded with no way to access
+    // the file, so we always fall back to a real save action here.
+    triggerAnchorDownload(entry.blob, displayName)
 }
 
 async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode: 'open' | 'share' | 'download' = 'open'): Promise<void> {
@@ -226,22 +235,22 @@ async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode:
         const result = shareBlobSync(entry, displayName)
         if (result === false) {
             // No share API at all (insecure context, desktop, etc.) — for
-            // renderable types open inline; for binary types alert.
+            // renderable types open inline; for binary types save from cache.
             if (isInlineViewable(mimeType, displayName)) {
                 openBlobInTab(entry.blob, displayName)
             } else {
-                showUnsupportedAlert(displayName)
+                fallbackSaveFromCache(entry, displayName)
             }
             return
         }
         const shared = await result
         if (shared) return
         // share() rejected (NotAllowedError / SecurityError). Last-ditch
-        // fallback: only open inline if renderable; otherwise alert.
+        // fallback: only open inline if renderable; otherwise save from cache.
         if (isInlineViewable(mimeType, displayName)) {
             openBlobInTab(entry.blob, displayName)
         } else {
-            showUnsupportedAlert(displayName)
+            fallbackSaveFromCache(entry, displayName)
         }
         return
     }
@@ -258,17 +267,16 @@ async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode:
     }
     // Binary formats (xlsx, heic, docx, txt, zip, ...): SYNCHRONOUSLY invoke
     // share so activation is preserved. If share is unavailable or rejects,
-    // we DO NOT open in a new tab (Chrome would render that as a forced
-    // download for binary mime types). Show a localized alert instead so the
-    // user knows the file is cached and can use the Download button.
+    // fall back to a real save-from-cache action so the user can always
+    // access the file. The save uses the cached blob (zero network).
     const result = shareBlobSync(entry, displayName)
     if (result === false) {
-        showUnsupportedAlert(displayName)
+        fallbackSaveFromCache(entry, displayName)
         return
     }
     const shared = await result
     if (!shared) {
-        showUnsupportedAlert(displayName)
+        fallbackSaveFromCache(entry, displayName)
     }
 }
 
