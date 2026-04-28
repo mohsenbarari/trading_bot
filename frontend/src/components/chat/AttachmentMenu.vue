@@ -1489,11 +1489,12 @@ async function goToMyLocation(silent = false) {
       position = await requestCurrentPosition({
         enableHighAccuracy: false,
         timeout: 12000,
-        maximumAge: 300000,
+        maximumAge: 0,
       })
       if (!isCurrentLocationLookup(lookupId)) return
       bestPosition = getBetterPosition(bestPosition, position)
-      setLocationStatus('موقعیت اولیه پیدا شد. در حال تایید دقت...', 'info')
+      applyDetectedLocation(bestPosition)
+      setLocationStatus('موقعیت اولیه پیدا شد. در حال بهبود دقت...', 'info')
     } catch (error) {
       const geoError = error as GeolocationPositionError
       if (geoError?.code === geoError.PERMISSION_DENIED) {
@@ -1526,6 +1527,13 @@ async function goToMyLocation(silent = false) {
 
     if (!bestPosition) {
       bestPosition = position
+      applyDetectedLocation(bestPosition)
+    }
+
+    if (isAccurateEnough(bestPosition)) {
+      applyConfirmedAutoLocation(bestPosition)
+      updateResolvedLocationStatus(bestPosition)
+      return
     }
 
     try {
@@ -1537,7 +1545,12 @@ async function goToMyLocation(silent = false) {
       })
       if (!isCurrentLocationLookup(lookupId)) return
       bestPosition = getBetterPosition(bestPosition, precisePosition)
-      applyConfirmedAutoLocation(bestPosition)
+      applyDetectedLocation(bestPosition)
+      if (isAccurateEnough(bestPosition)) {
+        applyConfirmedAutoLocation(bestPosition)
+        updateResolvedLocationStatus(bestPosition)
+        return
+      }
     } catch (preciseError) {
       const preciseGeoError = preciseError as GeolocationPositionError
       if (preciseGeoError?.code === preciseGeoError.PERMISSION_DENIED) {
@@ -1547,23 +1560,41 @@ async function goToMyLocation(silent = false) {
 
     if (!isAccurateEnough(bestPosition)) {
       setLocationStatus('در انتظار بهبود دقت GPS دستگاه...', 'info')
-      const watchedPosition = await requestBestWatchPosition(
-        {
-          enableHighAccuracy: true,
-          timeout: 30000,
-          maximumAge: 0,
-        },
-        30000,
-        DESIRED_LOCATION_ACCURACY_METERS,
-        (candidate) => {
-          if (!isCurrentLocationLookup(lookupId)) return
-          bestPosition = getBetterPosition(bestPosition, candidate)
+      try {
+        const watchedPosition = await requestBestWatchPosition(
+          {
+            enableHighAccuracy: true,
+            timeout: 30000,
+            maximumAge: 0,
+          },
+          30000,
+          DESIRED_LOCATION_ACCURACY_METERS,
+          (candidate) => {
+            if (!isCurrentLocationLookup(lookupId)) return
+            bestPosition = getBetterPosition(bestPosition, candidate)
+            applyDetectedLocation(bestPosition)
+            if (isAccurateEnough(bestPosition)) {
+              applyConfirmedAutoLocation(bestPosition)
+            }
+          },
+        )
+        if (!isCurrentLocationLookup(lookupId)) return
+        bestPosition = getBetterPosition(bestPosition, watchedPosition)
+        applyDetectedLocation(bestPosition)
+        if (isAccurateEnough(bestPosition)) {
           applyConfirmedAutoLocation(bestPosition)
-        },
-      )
-      if (!isCurrentLocationLookup(lookupId)) return
-      bestPosition = getBetterPosition(bestPosition, watchedPosition)
-      applyConfirmedAutoLocation(bestPosition)
+        }
+      } catch (watchError) {
+        const watchGeoError = watchError as GeolocationPositionError
+        if (watchGeoError?.code === watchGeoError.PERMISSION_DENIED) {
+          throw watchGeoError
+        }
+      }
+    }
+
+    if (!hasConfirmedAutoLocation.value && bestPosition) {
+      updateResolvedLocationStatus(bestPosition)
+      return
     }
 
     if (!hasConfirmedAutoLocation.value) {
