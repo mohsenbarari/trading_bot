@@ -59,15 +59,53 @@ function navHasShareFiles(): boolean {
     return typeof navAny.share === 'function' && typeof navAny.canShare === 'function'
 }
 
-function isInlineViewable(mimeType: string): boolean {
-    if (!mimeType) return false
-    return (
-        mimeType === 'application/pdf'
-        || mimeType.startsWith('image/')
-        || mimeType.startsWith('video/')
-        || mimeType.startsWith('audio/')
-        || mimeType.startsWith('text/')
-    )
+// Strict whitelist: only mime types Chrome/Safari can actually render in-tab
+// without falling back to a forced download. HEIC, xlsx, docx, zip, etc. are
+// intentionally excluded — sending them to window.open would re-trigger the
+// browser's download manager every time (the bug we're fixing).
+const INLINE_VIEWABLE_EXACT = new Set([
+    'application/pdf',
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'image/svg+xml',
+    'image/avif',
+    'image/bmp',
+    'image/x-icon',
+    'video/mp4',
+    'video/webm',
+    'video/ogg',
+    'audio/mpeg',
+    'audio/mp4',
+    'audio/aac',
+    'audio/wav',
+    'audio/ogg',
+    'audio/webm',
+    'audio/x-m4a',
+    'text/plain',
+    'text/html',
+    'text/css',
+    'text/csv',
+    'text/markdown',
+    'application/json',
+    'application/xml',
+    'text/xml',
+])
+
+function isInlineViewable(mimeType: string, fileName: string): boolean {
+    const mt = (mimeType || '').toLowerCase()
+    if (mt && INLINE_VIEWABLE_EXACT.has(mt)) return true
+    // Some servers send a generic image/* or video/* with a subtype the browser
+    // can't render (e.g. image/heic). Only allow common inline subtypes.
+    const ext = (fileName.split('.').pop() || '').toLowerCase()
+    if (['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif', 'bmp', 'mp4', 'webm', 'ogg', 'mp3', 'wav', 'm4a', 'aac', 'txt', 'json', 'xml', 'md', 'csv', 'html'].includes(ext)) {
+        // Block known browser-unfriendly cases even if extension looks viewable.
+        if (mt.includes('heic') || mt.includes('heif')) return false
+        return true
+    }
+    return false
 }
 
 async function shareBlob(entry: CachedFileEntry, fallbackName: string): Promise<boolean> {
@@ -123,26 +161,40 @@ function triggerAnchorDownload(blob: Blob, fileName: string) {
     }, 4000)
 }
 
-async function presentCachedFile(entry: CachedFileEntry, fileName: string, force: 'auto' | 'share' | 'download' = 'auto'): Promise<void> {
-    if (force === 'download') {
-        triggerAnchorDownload(entry.blob, fileName)
+
+async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode: 'open' | 'share' | 'download' = 'open'): Promise<void> {
+    const displayName = entry.fileName || fileName || 'file'
+    const mimeType = entry.mimeType || entry.blob.type || ''
+
+    if (mode === 'download') {
+        triggerAnchorDownload(entry.blob, displayName)
         return
     }
-    if (force === 'share') {
-        const shared = await shareBlob(entry, fileName)
+
+    if (mode === 'share') {
+        // Share = always share sheet. If unavailable on this device, we still
+        // do NOT trigger an anchor download (would prompt "Download again?");
+        // we open in tab if possible, otherwise no-op gracefully.
+        const shared = await shareBlob(entry, displayName)
         if (shared) return
-        // Fall through to viewer path
+        if (isInlineViewable(mimeType, displayName) && openBlobInTab(entry.blob, displayName)) return
+        // Last resort only if neither share nor inline viewer is available:
+        triggerAnchorDownload(entry.blob, displayName)
+        return
     }
-    // Auto: prefer share sheet on mobile (native "Open With"), then in-tab viewer,
-    // then anchor download as a last resort.
-    if (force === 'auto' && navHasShareFiles()) {
-        const shared = await shareBlob(entry, fileName)
-        if (shared) return
+
+    // mode === 'open' (tap on file)
+    // Priority: in-tab viewer for browser-renderable types, else share sheet
+    // (which on Android exposes "Open With…" via installed apps), and only
+    // anchor download when nothing else is reachable. This keeps "tap to open"
+    // and "tap to share" behaviorally distinct: tap usually shows the file
+    // inline, share always shows the OS share sheet.
+    if (isInlineViewable(mimeType, displayName) && openBlobInTab(entry.blob, displayName)) {
+        return
     }
-    if (isInlineViewable(entry.mimeType || entry.blob.type || '')) {
-        if (openBlobInTab(entry.blob, fileName)) return
-    }
-    triggerAnchorDownload(entry.blob, fileName)
+    const shared = await shareBlob(entry, displayName)
+    if (shared) return
+    triggerAnchorDownload(entry.blob, displayName)
 }
 
 async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: string): Promise<CachedFileEntry> {
@@ -169,12 +221,14 @@ async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: stri
 }
 
 /**
- * Open a chat file. If the file is cached, it opens immediately offline;
- * otherwise it downloads once, caches it, and then opens it.
+ * Open a chat file (tap-to-open intent). If the file is cached, opens it
+ * immediately offline; otherwise downloads once, caches it, and then opens.
  *
- * Default presentation prefers `navigator.share({ files })` on mobile so the
- * OS shows its native "Open With…" sheet instead of forcing a redundant
- * "Download again?" prompt for already-downloaded files.
+ * Presentation prefers an in-tab viewer for browser-renderable types and
+ * falls back to the OS share sheet (which exposes "Open With…" on Android)
+ * for binary formats the browser can't render. Tap-to-open and the share
+ * button are intentionally distinct: tap shows the file, share shows the
+ * share sheet.
  */
 export async function handleFileClick(fileId: string, fileUrl: string, fileName: string): Promise<void> {
     if (!fileId) return
@@ -182,14 +236,14 @@ export async function handleFileClick(fileId: string, fileUrl: string, fileName:
 
     const cached = await readCachedEntry(fileId)
     if (cached) {
-        await presentCachedFile(cached, cached.fileName || fileName, 'auto')
+        await presentCachedFile(cached, cached.fileName || fileName, 'open')
         return
     }
 
     downloadingFiles[fileId] = true
     try {
         const entry = await fetchAndCacheFile(fileId, fileUrl, fileName)
-        await presentCachedFile(entry, entry.fileName, 'auto')
+        await presentCachedFile(entry, entry.fileName, 'open')
     } catch (err) {
         console.error('[useChatFileHandler] file download failed', err)
         throw err
@@ -199,8 +253,7 @@ export async function handleFileClick(fileId: string, fileUrl: string, fileName:
 }
 
 /**
- * Force a real download to disk (last-resort path used by the chat context
- * menu / explicit "download" actions).
+ * Force a real save-to-disk action. Reserved for explicit "download" UI.
  */
 export async function downloadFileToDisk(fileId: string, fileUrl: string, fileName: string): Promise<void> {
     if (!fileId) return
@@ -221,9 +274,8 @@ export async function downloadFileToDisk(fileId: string, fileUrl: string, fileNa
 
 /**
  * Forward the cached file to another app via the Web Share API.
- * If the file is not cached yet, it is fetched first (best-effort) so the
- * share button doesn't silently fail on first click.
- * Returns `true` if the share dialog was reachable.
+ * Always renders the share sheet (never an anchor download) so the user
+ * always sees a different UI from the tap-to-open viewer path.
  */
 export async function shareFile(fileId: string, fileName: string, mimeType: string, fileUrl?: string): Promise<boolean> {
     if (!fileId) return false
@@ -244,30 +296,12 @@ export async function shareFile(fileId: string, fileName: string, mimeType: stri
     }
     if (!entry) return false
 
-    const file = new File(
-        [entry.blob],
-        entry.fileName || fileName || 'file',
-        { type: entry.mimeType || mimeType || 'application/octet-stream' },
-    )
-
-    const navAny = navigator as Navigator & {
-        canShare?: (data: ShareData) => boolean
-        share?: (data: ShareData) => Promise<void>
+    if (mimeType && !entry.mimeType) {
+        entry = { ...entry, mimeType }
     }
 
-    const shareData: ShareData = { files: [file] }
-    try {
-        if (typeof navAny.canShare === 'function' && !navAny.canShare(shareData)) {
-            return false
-        }
-        if (typeof navAny.share !== 'function') return false
-        await navAny.share(shareData)
-        return true
-    } catch (err) {
-        if ((err as DOMException)?.name === 'AbortError') return true
-        console.warn('[useChatFileHandler] share failed', err)
-        return false
-    }
+    await presentCachedFile(entry, entry.fileName || fileName, 'share')
+    return true
 }
 
 /** Returns true if Web Share with files is reachable on this device. */
