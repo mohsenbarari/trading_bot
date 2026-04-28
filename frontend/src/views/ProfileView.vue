@@ -1,7 +1,38 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { User, Phone, Shield, Smartphone, Trash2, Loader2 } from 'lucide-vue-next'
+import { User, Phone, Shield, Smartphone, Trash2, Loader2, HardDrive } from 'lucide-vue-next'
 import { apiFetch, forceLogout } from '../utils/auth'
+import { useChatFileHandler } from '../composables/chat/useChatFileHandler'
+
+const { getCacheSize, clearFileCache } = useChatFileHandler()
+const cacheSize = ref('0.00 MB')
+const cacheBusy = ref(false)
+const cacheFeedback = ref<string | null>(null)
+
+async function refreshCacheSize() {
+  try {
+    cacheSize.value = await getCacheSize()
+  } catch {
+    cacheSize.value = '0.00 MB'
+  }
+}
+
+async function clearCache() {
+  if (cacheBusy.value) return
+  cacheBusy.value = true
+  cacheFeedback.value = null
+  try {
+    await clearFileCache()
+    cacheSize.value = '0.00 MB'
+    cacheFeedback.value = 'حافظه با موفقیت پاک شد.'
+  } catch (err) {
+    console.error(err)
+    cacheFeedback.value = 'پاک‌سازی حافظه ناموفق بود.'
+  } finally {
+    cacheBusy.value = false
+    setTimeout(() => { cacheFeedback.value = null }, 3500)
+  }
+}
 const user = ref<any>(null)
 const loading = ref(true)
 const sessions = ref<any[]>([])
@@ -81,6 +112,7 @@ async function logoutAll() {
 onMounted(() => {
   fetchUser()
   fetchSessions()
+  refreshCacheSize()
 })
 </script>
 
@@ -192,6 +224,32 @@ onMounted(() => {
           >
             خروج از همه نشست‌ها
           </button>
+        </div>
+      </div>
+
+      <!-- Storage Management -->
+      <div class="storage-section">
+        <h3 class="section-title">
+          <HardDrive :size="18" />
+          <span>مدیریت حافظه و داده‌ها</span>
+        </h3>
+
+        <div class="storage-card">
+          <div class="storage-info">
+            <span class="storage-label">فضای اشغال‌شده توسط فایل‌های دانلود‌شده</span>
+            <span class="storage-value" dir="ltr">{{ cacheSize }}</span>
+          </div>
+          <button
+            type="button"
+            class="storage-clear-btn"
+            :disabled="cacheBusy"
+            @click="clearCache"
+          >
+            <Loader2 v-if="cacheBusy" :size="16" class="animate-spin" />
+            <Trash2 v-else :size="16" />
+            <span>حذف فایل‌های دانلود شده</span>
+          </button>
+          <p v-if="cacheFeedback" class="storage-feedback">{{ cacheFeedback }}</p>
         </div>
       </div>
 
@@ -361,6 +419,61 @@ onMounted(() => {
   background: #f9fafb;
   border: 1px solid #f3f4f6;
   border-radius: 0.75rem;
+}
+
+/* Storage Section */
+.storage-section {
+  margin-bottom: 1.5rem;
+}
+.storage-card {
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 0.75rem;
+  padding: 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.storage-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.storage-label {
+  font-size: 0.8rem;
+  color: #4b5563;
+}
+.storage-value {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #111827;
+}
+.storage-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.6rem 0.875rem;
+  border-radius: 0.75rem;
+  border: 1px solid #fecaca;
+  background: #fff5f5;
+  color: #dc2626;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.storage-clear-btn:hover:not(:disabled) { background: #fee2e2; }
+.storage-clear-btn:active:not(:disabled) { transform: scale(0.98); }
+.storage-clear-btn:disabled { opacity: 0.6; cursor: progress; }
+.storage-feedback {
+  font-size: 0.75rem;
+  color: #059669;
+  margin: 0;
+  text-align: center;
 }
 
 /* Logout Button */

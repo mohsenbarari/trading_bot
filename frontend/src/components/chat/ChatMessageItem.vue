@@ -239,7 +239,7 @@
 
       <!-- Document/File Message -->
       <template v-else-if="msg.message_type === 'document'">
-        <div class="msg-document" :class="{ 'is-busy': isDocumentBusy }" @click.stop="!isDocumentBusy && $emit('download', msg)">
+        <div class="msg-document" :class="{ 'is-busy': isDocumentBusy }" @click.stop="handleDocumentOpenClick">
           <div v-if="isDocumentBusy" class="doc-icon doc-uploading" @click.stop="handleDocumentBusyClick">
             <svg class="progress-ring-small" viewBox="0 0 36 36" style="width:36px;height:36px;">
               <circle class="ring-bg" cx="18" cy="18" r="16" stroke="rgba(255,255,255,0.3)" stroke-width="3" fill="none"></circle>
@@ -264,6 +264,21 @@
               <line x1="12" y1="15" x2="12" y2="3"></line>
             </svg>
           </div>
+          <button
+            v-if="showDocumentShare"
+            type="button"
+            class="doc-share-btn"
+            title="اشتراک‌گذاری"
+            @click.stop="handleDocumentShareClick($event)"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="18" cy="5" r="3"></circle>
+              <circle cx="6" cy="12" r="3"></circle>
+              <circle cx="18" cy="19" r="3"></circle>
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+            </svg>
+          </button>
         </div>
       </template>
 
@@ -300,6 +315,15 @@ import { useAudioStore } from '../../stores/audio'
 import type { Message } from '../../types/chat'
 import ChatAlbumLayout from './ChatAlbumLayout.vue'
 import { observeVisibility } from '../../utils/sharedVisibilityObserver'
+import {
+  handleFileClick as cachedFileClick,
+  shareFile as cachedShareFile,
+  canShareFiles,
+  useChatFileHandler,
+} from '../../composables/chat/useChatFileHandler'
+
+const { downloadingFiles: cachedDownloadingFiles } = useChatFileHandler()
+const supportsFileShare = canShareFiles()
 
 const messageTimeFormatter = new Intl.DateTimeFormat('fa-IR', {
   hour: '2-digit',
@@ -485,12 +509,29 @@ const docIconClass = computed(() => {
   if (ext === 'doc' || ext === 'docx') return 'doc-word'
   return 'doc-generic'
 })
-const isDocumentBusy = computed(() => Boolean(props.msg.is_sending || props.msg.is_downloading))
+const docFileId = computed(() => {
+  const value = docParsed.value?.file_id
+  return typeof value === 'string' && value ? value : null
+})
+const docFileUrl = computed(() => {
+  const fileId = docFileId.value
+  if (!fileId) return ''
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+  const token = localStorage.getItem('auth_token') || ''
+  return `${baseUrl}/api/chat/files/${fileId}?token=${token}`
+})
+const isCachedDownloading = computed(() => Boolean(docFileId.value && cachedDownloadingFiles[docFileId.value!]))
+const isDocumentBusy = computed(() => Boolean(
+  props.msg.is_sending || props.msg.is_downloading || isCachedDownloading.value
+))
 const docTransferProgress = computed(() => {
   if (props.msg.is_sending) return props.msg.upload_progress || 0
   if (props.msg.is_downloading) return props.msg.download_progress || 0
+  // Cached fetch path doesn't expose granular progress; show indeterminate-ish 60%.
+  if (isCachedDownloading.value) return 60
   return 0
 })
+const showDocumentShare = computed(() => supportsFileShare && !isDocumentBusy.value && !props.msg.is_sending)
 
 function handleDocumentBusyClick() {
   if (props.msg.is_sending) {
@@ -500,6 +541,36 @@ function handleDocumentBusyClick() {
 
   if (props.msg.is_downloading) {
     emit('cancel-download', props.msg)
+  }
+  // Cached fetches are short-lived and intentionally non-cancellable.
+}
+
+async function handleDocumentOpenClick() {
+  if (isDocumentBusy.value) return
+  const fileId = docFileId.value
+  const url = docFileUrl.value
+  if (!fileId || !url) {
+    // Fallback to legacy emit-based download flow when file_id is missing.
+    emit('download', props.msg)
+    return
+  }
+  try {
+    await cachedFileClick(fileId, url, docFileName.value)
+  } catch {
+    // Fallback to legacy download path on any failure (network, quota, etc.).
+    emit('download', props.msg)
+  }
+}
+
+async function handleDocumentShareClick(event: Event) {
+  event.stopPropagation()
+  const fileId = docFileId.value
+  if (!fileId) return
+  // Web Share must run from a user gesture, so we only share already-cached
+  // files. If not cached yet, surface the cached download flow first.
+  const shared = await cachedShareFile(fileId, docFileName.value, docMimeType.value)
+  if (!shared) {
+    await handleDocumentOpenClick()
   }
 }
 
@@ -1362,6 +1433,23 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   color: #3390ec;
   flex-shrink: 0;
 }
+.doc-share-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: #3390ec;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  margin-inline-start: 4px;
+}
+.doc-share-btn:hover { background-color: rgba(51, 144, 236, 0.12); }
+.doc-share-btn:active { background-color: rgba(51, 144, 236, 0.22); }
 
 .edited-label { font-size: 10px; font-style: italic; opacity: 0.7; margin-right: 4px; }
 
