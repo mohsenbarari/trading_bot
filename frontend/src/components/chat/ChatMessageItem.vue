@@ -320,6 +320,7 @@ import {
   shareFile as cachedShareFile,
   canShareFiles,
   useChatFileHandler,
+  prewarmFileCache,
 } from '../../composables/chat/useChatFileHandler'
 
 const { downloadingFiles: cachedDownloadingFiles } = useChatFileHandler()
@@ -784,6 +785,14 @@ onMounted(() => {
 
   if (props.msg.message_type === 'voice' && parsedContent.value?.durationMs) {
     voiceDuration.value = parsedContent.value.durationMs / 1000
+  }
+
+  // Pre-warm the synchronous file cache for document messages so the user's
+  // first tap can call navigator.share() inside the click handler without
+  // first awaiting an IndexedDB read (which would consume the transient
+  // user-activation token on Android Chrome HTTPS).
+  if (props.msg.message_type === 'document' && docFileId.value) {
+    prewarmFileCache(docFileId.value)
   }
 })
 
