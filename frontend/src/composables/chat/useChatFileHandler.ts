@@ -171,28 +171,33 @@ async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode:
     }
 
     if (mode === 'share') {
-        // Share button = OS share sheet only. Never falls back to anchor
-        // download (which would prompt "Download again?"). If share is
-        // unavailable on the device, we silently no-op rather than re-download.
-        await shareBlob(entry, displayName)
+        // Share button = native share sheet first. If unsupported (insecure
+        // context / desktop / older browser) fall back to opening the blob in
+        // a new tab so the user always sees SOMETHING happen. We never use
+        // anchor download here because that would prompt "Download again?"
+        // on every tap.
+        const shared = await shareBlob(entry, displayName)
+        if (shared) return
+        openBlobInTab(entry.blob, displayName)
         return
     }
 
     // mode === 'open' (tap on file body)
     // For browser-renderable formats (PDF, images, video, audio): open inline
     // via window.open(blob:) — Chrome and Safari render these natively.
-    // For everything else (txt, xlsx, docx, heic, zip, ...): show the OS share
-    // sheet so the user can pick an installed app to open the file. This is
-    // the closest web equivalent to Android's native "Open With..." picker.
-    // We DO NOT fall back to an anchor download in either branch — every tap
-    // on a previously-cached file must be a no-op against storage.
     if (isInlineViewable(mimeType, displayName)) {
         if (openBlobInTab(entry.blob, displayName)) return
-        // window.open was blocked (popup blocker) — try share sheet instead.
         await shareBlob(entry, displayName)
         return
     }
-    await shareBlob(entry, displayName)
+    // For binary formats (txt, xlsx, docx, heic, zip, ...): try the OS share
+    // sheet first (closest web equivalent to Android's "Open With..." picker
+    // on HTTPS), and fall back to window.open(blob:) when share is
+    // unavailable so the user can still get to the file. Anchor download is
+    // never used here.
+    const shared = await shareBlob(entry, displayName)
+    if (shared) return
+    openBlobInTab(entry.blob, displayName)
 }
 
 async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: string): Promise<CachedFileEntry> {
