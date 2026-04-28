@@ -1,10 +1,3 @@
-import {
-    getLiveAttachmentUrl,
-    putCachedAttachmentBlob,
-    restoreCachedAttachmentUrl,
-    setLiveAttachmentUrl,
-} from '../utils/chatAttachmentCache'
-
 export type DocumentDownloadPhase = 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
 
 export interface PendingDocumentDownload {
@@ -91,6 +84,7 @@ let activeDownloadCount = 0
 
 const pendingDownloads = new Map<number, PendingDocumentDownload>()
 const activeControllers = new Map<number, AbortController>()
+const completedDownloadUrls = new Map<string, string>()
 const subscribers = new Set<DocumentDownloadEventHandler>()
 const downloadQueue: PendingDocumentDownload[] = []
 const abortFlags = new Set<number>()
@@ -111,6 +105,17 @@ function buildDownloadUrl(fileId: string) {
     const token = config.getAuthToken()
     const query = token ? `?token=${encodeURIComponent(token)}` : ''
     return `${config.apiBaseUrl}/api/chat/files/${encodeURIComponent(fileId)}${query}`
+}
+
+function triggerBrowserDownload(url: string, fileName: string) {
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = fileName
+    anchor.rel = 'noopener'
+    anchor.style.display = 'none'
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
 }
 
 function isTransientDownloadError(error: unknown) {
@@ -286,8 +291,12 @@ async function runDownload(download: PendingDocumentDownload) {
         if (!response.body || !total) {
             const blob = await response.blob()
             const objectUrl = URL.createObjectURL(blob)
-            await putCachedAttachmentBlob(download.fileId, blob)
-            setLiveAttachmentUrl(download.fileId, objectUrl)
+            const previousUrl = completedDownloadUrls.get(download.fileId)
+            if (previousUrl && previousUrl !== objectUrl) {
+                URL.revokeObjectURL(previousUrl)
+            }
+            completedDownloadUrls.set(download.fileId, objectUrl)
+            triggerBrowserDownload(objectUrl, download.fileName)
             pendingDownloads.delete(download.messageId)
             await idbDelete(download.messageId)
             emit({
@@ -327,8 +336,12 @@ async function runDownload(download: PendingDocumentDownload) {
 
         const blob = new Blob(chunks as BlobPart[], { type: contentType })
         const objectUrl = URL.createObjectURL(blob)
-        await putCachedAttachmentBlob(download.fileId, blob)
-        setLiveAttachmentUrl(download.fileId, objectUrl)
+        const previousUrl = completedDownloadUrls.get(download.fileId)
+        if (previousUrl && previousUrl !== objectUrl) {
+            URL.revokeObjectURL(previousUrl)
+        }
+        completedDownloadUrls.set(download.fileId, objectUrl)
+        triggerBrowserDownload(objectUrl, download.fileName)
         pendingDownloads.delete(download.messageId)
         await idbDelete(download.messageId)
         emit({
@@ -389,11 +402,7 @@ export function getPendingDocumentDownloadsForUser(userId: number): PendingDocum
 }
 
 export function getCompletedDocumentDownloadUrl(fileId: string): string {
-    return getLiveAttachmentUrl(fileId)
-}
-
-export async function restoreCompletedDocumentDownloadUrl(fileId: string): Promise<string> {
-    return await restoreCachedAttachmentUrl(fileId)
+    return completedDownloadUrls.get(fileId) || ''
 }
 
 export function cancelDocumentDownload(messageId: number): void {
@@ -428,8 +437,9 @@ export async function startDocumentDownload(params: StartDocumentDownloadParams)
         return
     }
 
-    const completedUrl = getLiveAttachmentUrl(params.fileId) || await restoreCachedAttachmentUrl(params.fileId)
+    const completedUrl = completedDownloadUrls.get(params.fileId)
     if (completedUrl) {
+        triggerBrowserDownload(completedUrl, params.fileName)
         return
     }
 
