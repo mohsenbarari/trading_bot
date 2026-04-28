@@ -33,6 +33,14 @@ interface CachedFileEntry {
 
 const downloadingFiles = reactive<Record<string, boolean>>({})
 
+// In-memory mirror of recently fetched files, keyed by file_id. We need this
+// because navigator.share() on Android Chrome requires *transient user
+// activation* — awaiting an async IndexedDB read inside the click handler
+// consumes the activation token, after which share() throws NotAllowedError.
+// By keeping a synchronous Map mirror, subsequent taps on a previously-fetched
+// file resolve immediately without breaking the user-activation window.
+const memoryCache = new Map<string, CachedFileEntry>()
+
 function isCachedFileEntry(value: unknown): value is CachedFileEntry {
     return Boolean(
         value
@@ -41,10 +49,20 @@ function isCachedFileEntry(value: unknown): value is CachedFileEntry {
     )
 }
 
+function readMemoryEntry(fileId: string): CachedFileEntry | null {
+    return memoryCache.get(fileId) || null
+}
+
 async function readCachedEntry(fileId: string): Promise<CachedFileEntry | null> {
+    const inMemory = memoryCache.get(fileId)
+    if (inMemory) return inMemory
     try {
         const entry = await fileStore.getItem(fileId)
-        return isCachedFileEntry(entry) ? entry : null
+        if (isCachedFileEntry(entry)) {
+            memoryCache.set(fileId, entry)
+            return entry
+        }
+        return null
     } catch (err) {
         console.warn('[useChatFileHandler] cache read failed', err)
         return null
@@ -220,6 +238,7 @@ async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: stri
         // still hand the freshly fetched blob to the caller.
         console.warn('[useChatFileHandler] cache write failed', err)
     }
+    memoryCache.set(fileId, entry)
     return entry
 }
 
@@ -237,6 +256,22 @@ export async function handleFileClick(fileId: string, fileUrl: string, fileName:
     if (!fileId) return
     if (downloadingFiles[fileId]) return
 
+    // SYNCHRONOUS fast-path: if the file is already in memory, call
+    // presentCachedFile WITHOUT awaiting an IDB read first. This preserves the
+    // browser's transient user-activation token so navigator.share() succeeds
+    // for non-viewable formats on Android Chrome HTTPS.
+    const memEntry = readMemoryEntry(fileId)
+    if (memEntry) {
+        // Don't await before presentCachedFile — share() must be called inside
+        // the user-activation window started by the click event.
+        void presentCachedFile(memEntry, memEntry.fileName || fileName, 'open')
+        return
+    }
+
+    // Not yet in memory: try IDB (still async, but the very first tap on a
+    // fresh page load may consume the activation; that's acceptable because
+    // window.open / share will work on the first interaction in most cases
+    // and subsequent taps hit the synchronous memory cache).
     const cached = await readCachedEntry(fileId)
     if (cached) {
         await presentCachedFile(cached, cached.fileName || fileName, 'open')
@@ -282,10 +317,13 @@ export async function downloadFileToDisk(fileId: string, fileUrl: string, fileNa
  */
 export async function shareFile(fileId: string, fileName: string, mimeType: string, fileUrl?: string): Promise<boolean> {
     if (!fileId) return false
-    // We intentionally do NOT short-circuit on navHasShareFiles() / canShare()
-    // here \u2014 navigator.share() can succeed on devices where canShare({files})
-    // returns false. presentCachedFile('share') will catch any real failure
-    // and silently no-op rather than triggering an anchor download.
+
+    // Synchronous fast-path to preserve transient user activation for share().
+    const memEntry = readMemoryEntry(fileId)
+    if (memEntry) {
+        void presentCachedFile(memEntry, memEntry.fileName || fileName, 'share')
+        return true
+    }
 
     let entry = await readCachedEntry(fileId)
     if (!entry && fileUrl) {
@@ -330,6 +368,7 @@ export function canShareFiles(): boolean {
 export async function clearFileCache(): Promise<void> {
     try {
         await fileStore.clear()
+        memoryCache.clear()
     } catch (err) {
         console.error('[useChatFileHandler] clear cache failed', err)
         throw err
