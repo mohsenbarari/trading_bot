@@ -566,12 +566,13 @@ async function handleDocumentShareClick(event: Event) {
   event.stopPropagation()
   const fileId = docFileId.value
   if (!fileId) return
-  // Web Share must run from a user gesture, so we only share already-cached
-  // files. If not cached yet, surface the cached download flow first.
-  const shared = await cachedShareFile(fileId, docFileName.value, docMimeType.value)
-  if (!shared) {
-    await handleDocumentOpenClick()
-  }
+  // Try Web Share. If unsupported (e.g. cancelled/desktop), fall back to a
+  // browser-tab viewer instead of triggering an anchor download that prompts
+  // the user with the OS "Download again?" dialog.
+  const shared = await cachedShareFile(fileId, docFileName.value, docMimeType.value, docFileUrl.value)
+  if (shared) return
+  // Last-resort: open in new tab via cached blob (no redundant download).
+  await handleDocumentOpenClick()
 }
 
 const docStatusText = computed(() => {

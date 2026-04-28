@@ -51,7 +51,64 @@ async function readCachedEntry(fileId: string): Promise<CachedFileEntry | null> 
     }
 }
 
-function triggerLocalDownload(blob: Blob, fileName: string) {
+function navHasShareFiles(): boolean {
+    const navAny = navigator as Navigator & {
+        canShare?: (data: ShareData) => boolean
+        share?: (data: ShareData) => Promise<void>
+    }
+    return typeof navAny.share === 'function' && typeof navAny.canShare === 'function'
+}
+
+function isInlineViewable(mimeType: string): boolean {
+    if (!mimeType) return false
+    return (
+        mimeType === 'application/pdf'
+        || mimeType.startsWith('image/')
+        || mimeType.startsWith('video/')
+        || mimeType.startsWith('audio/')
+        || mimeType.startsWith('text/')
+    )
+}
+
+async function shareBlob(entry: CachedFileEntry, fallbackName: string): Promise<boolean> {
+    if (!navHasShareFiles()) return false
+    const navAny = navigator as Navigator & {
+        canShare?: (data: ShareData) => boolean
+        share?: (data: ShareData) => Promise<void>
+    }
+    const file = new File(
+        [entry.blob],
+        entry.fileName || fallbackName || 'file',
+        { type: entry.mimeType || entry.blob.type || 'application/octet-stream' },
+    )
+    const shareData: ShareData = { files: [file] }
+    try {
+        if (typeof navAny.canShare === 'function' && !navAny.canShare(shareData)) {
+            return false
+        }
+        if (typeof navAny.share !== 'function') return false
+        await navAny.share(shareData)
+        return true
+    } catch (err) {
+        // AbortError = user closed the share sheet; treat as success-equivalent
+        // so we don't fall back to a duplicate download prompt.
+        if ((err as DOMException)?.name === 'AbortError') return true
+        return false
+    }
+}
+
+function openBlobInTab(blob: Blob, fileName: string): boolean {
+    const objectUrl = URL.createObjectURL(blob)
+    const win = window.open(objectUrl, '_blank', 'noopener,noreferrer')
+    setTimeout(() => {
+        try { URL.revokeObjectURL(objectUrl) } catch { /* noop */ }
+    }, 60_000)
+    if (!win) return false
+    try { win.document && (win.document.title = fileName || 'file') } catch { /* cross-origin no-op */ }
+    return true
+}
+
+function triggerAnchorDownload(blob: Blob, fileName: string) {
     const objectUrl = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = objectUrl
@@ -61,11 +118,31 @@ function triggerLocalDownload(blob: Blob, fileName: string) {
     document.body.appendChild(anchor)
     anchor.click()
     document.body.removeChild(anchor)
-    // Revoke after the click to prevent memory leaks. A small delay keeps the
-    // URL alive long enough for the browser to start the OS-level handoff.
     setTimeout(() => {
         try { URL.revokeObjectURL(objectUrl) } catch { /* noop */ }
     }, 4000)
+}
+
+async function presentCachedFile(entry: CachedFileEntry, fileName: string, force: 'auto' | 'share' | 'download' = 'auto'): Promise<void> {
+    if (force === 'download') {
+        triggerAnchorDownload(entry.blob, fileName)
+        return
+    }
+    if (force === 'share') {
+        const shared = await shareBlob(entry, fileName)
+        if (shared) return
+        // Fall through to viewer path
+    }
+    // Auto: prefer share sheet on mobile (native "Open With"), then in-tab viewer,
+    // then anchor download as a last resort.
+    if (force === 'auto' && navHasShareFiles()) {
+        const shared = await shareBlob(entry, fileName)
+        if (shared) return
+    }
+    if (isInlineViewable(entry.mimeType || entry.blob.type || '')) {
+        if (openBlobInTab(entry.blob, fileName)) return
+    }
+    triggerAnchorDownload(entry.blob, fileName)
 }
 
 async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: string): Promise<CachedFileEntry> {
@@ -94,6 +171,10 @@ async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: stri
 /**
  * Open a chat file. If the file is cached, it opens immediately offline;
  * otherwise it downloads once, caches it, and then opens it.
+ *
+ * Default presentation prefers `navigator.share({ files })` on mobile so the
+ * OS shows its native "Open With…" sheet instead of forcing a redundant
+ * "Download again?" prompt for already-downloaded files.
  */
 export async function handleFileClick(fileId: string, fileUrl: string, fileName: string): Promise<void> {
     if (!fileId) return
@@ -101,14 +182,14 @@ export async function handleFileClick(fileId: string, fileUrl: string, fileName:
 
     const cached = await readCachedEntry(fileId)
     if (cached) {
-        triggerLocalDownload(cached.blob, cached.fileName || fileName)
+        await presentCachedFile(cached, cached.fileName || fileName, 'auto')
         return
     }
 
     downloadingFiles[fileId] = true
     try {
         const entry = await fetchAndCacheFile(fileId, fileUrl, fileName)
-        triggerLocalDownload(entry.blob, entry.fileName)
+        await presentCachedFile(entry, entry.fileName, 'auto')
     } catch (err) {
         console.error('[useChatFileHandler] file download failed', err)
         throw err
@@ -118,19 +199,50 @@ export async function handleFileClick(fileId: string, fileUrl: string, fileName:
 }
 
 /**
- * Forward the cached file to another app via the Web Share API.
- * Returns `true` if the share succeeded, `false` if not supported / cancelled.
+ * Force a real download to disk (last-resort path used by the chat context
+ * menu / explicit "download" actions).
  */
-export async function shareFile(fileId: string, fileName: string, mimeType: string): Promise<boolean> {
+export async function downloadFileToDisk(fileId: string, fileUrl: string, fileName: string): Promise<void> {
+    if (!fileId) return
+    const cached = await readCachedEntry(fileId)
+    if (cached) {
+        await presentCachedFile(cached, cached.fileName || fileName, 'download')
+        return
+    }
+    if (downloadingFiles[fileId]) return
+    downloadingFiles[fileId] = true
+    try {
+        const entry = await fetchAndCacheFile(fileId, fileUrl, fileName)
+        await presentCachedFile(entry, entry.fileName, 'download')
+    } finally {
+        delete downloadingFiles[fileId]
+    }
+}
+
+/**
+ * Forward the cached file to another app via the Web Share API.
+ * If the file is not cached yet, it is fetched first (best-effort) so the
+ * share button doesn't silently fail on first click.
+ * Returns `true` if the share dialog was reachable.
+ */
+export async function shareFile(fileId: string, fileName: string, mimeType: string, fileUrl?: string): Promise<boolean> {
     if (!fileId) return false
+    if (!navHasShareFiles()) return false
 
     let entry = await readCachedEntry(fileId)
-    if (!entry) {
-        // Encourage the caller to click once first; we deliberately do NOT
-        // auto-fetch here because Web Share must be triggered from a user
-        // gesture and a network round-trip can break that contract.
-        return false
+    if (!entry && fileUrl) {
+        if (downloadingFiles[fileId]) return false
+        downloadingFiles[fileId] = true
+        try {
+            entry = await fetchAndCacheFile(fileId, fileUrl, fileName)
+        } catch (err) {
+            console.warn('[useChatFileHandler] share pre-fetch failed', err)
+            return false
+        } finally {
+            delete downloadingFiles[fileId]
+        }
     }
+    if (!entry) return false
 
     const file = new File(
         [entry.blob],
@@ -144,21 +256,15 @@ export async function shareFile(fileId: string, fileName: string, mimeType: stri
     }
 
     const shareData: ShareData = { files: [file] }
-    if (typeof navAny.canShare === 'function' && !navAny.canShare(shareData)) {
-        return false
-    }
-    if (typeof navAny.share !== 'function') {
-        return false
-    }
-
     try {
+        if (typeof navAny.canShare === 'function' && !navAny.canShare(shareData)) {
+            return false
+        }
+        if (typeof navAny.share !== 'function') return false
         await navAny.share(shareData)
         return true
     } catch (err) {
-        // AbortError = user cancelled the share sheet. Treat as non-fatal.
-        if ((err as DOMException)?.name === 'AbortError') {
-            return false
-        }
+        if ((err as DOMException)?.name === 'AbortError') return true
         console.warn('[useChatFileHandler] share failed', err)
         return false
     }
@@ -214,6 +320,7 @@ export async function getCacheSize(): Promise<string> {
 export function useChatFileHandler() {
     return {
         handleFileClick,
+        downloadFileToDisk,
         shareFile,
         canShareFiles,
         clearFileCache,
