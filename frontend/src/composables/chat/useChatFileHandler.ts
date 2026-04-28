@@ -121,33 +121,54 @@ function isInlineViewable(mimeType: string, fileName: string): boolean {
     return INLINE_VIEWABLE_EXTS.has(ext)
 }
 
-async function shareBlob(entry: CachedFileEntry, fallbackName: string): Promise<boolean> {
+function shareBlobSync(entry: CachedFileEntry, fallbackName: string): Promise<boolean> | false {
+    // SYNCHRONOUS-FRIENDLY share invocation. Returns either a Promise that
+    // resolves to true/false, OR the literal value `false` when share isn't
+    // available at all on this device. Crucially, navigator.share(...) is
+    // invoked synchronously in the call-site task so the browser's transient
+    // user-activation token is not consumed by an awaited operation first.
     const navAny = navigator as Navigator & {
         canShare?: (data: ShareData) => boolean
         share?: (data: ShareData) => Promise<void>
     }
     if (typeof navAny.share !== 'function') return false
-    const file = new File(
-        [entry.blob],
-        entry.fileName || fallbackName || 'file',
-        { type: entry.mimeType || entry.blob.type || 'application/octet-stream' },
-    )
-    const shareData: ShareData = { files: [file] }
-    // Note: we intentionally skip the canShare() gate and let navigator.share
-    // throw if it really cannot accept this file. Some Android Chrome versions
-    // return canShare({files}) === false even though share() works fine, and
-    // we'd otherwise wrongly fall back to an anchor download.
+    let file: File
     try {
-        await navAny.share(shareData)
-        return true
-    } catch (err) {
-        // AbortError = user dismissed the share sheet; treat as success so we
-        // don't trigger any further fallback (which would re-download).
-        const name = (err as DOMException)?.name
-        if (name === 'AbortError') return true
-        console.warn('[useChatFileHandler] share failed', err)
+        file = new File(
+            [entry.blob],
+            entry.fileName || fallbackName || 'file',
+            { type: entry.mimeType || entry.blob.type || 'application/octet-stream' },
+        )
+    } catch {
         return false
     }
+    const shareData: ShareData = { files: [file] }
+    let promise: Promise<void>
+    try {
+        // Synchronous invocation — must NOT be `await`ed before this line.
+        promise = navAny.share(shareData)
+    } catch (err) {
+        // Some browsers throw synchronously (e.g. NotAllowedError when
+        // activation is missing) instead of rejecting.
+        const name = (err as DOMException)?.name
+        if (name === 'AbortError') return Promise.resolve(true)
+        console.warn('[useChatFileHandler] share threw sync', err)
+        return false
+    }
+    return promise
+        .then(() => true)
+        .catch((err: unknown) => {
+            const name = (err as DOMException)?.name
+            if (name === 'AbortError') return true
+            console.warn('[useChatFileHandler] share rejected', err)
+            return false
+        })
+}
+
+async function shareBlob(entry: CachedFileEntry, fallbackName: string): Promise<boolean> {
+    const result = shareBlobSync(entry, fallbackName)
+    if (result === false) return false
+    return result
 }
 
 function openBlobInTab(blob: Blob, fileName: string): boolean {
@@ -177,6 +198,17 @@ function triggerAnchorDownload(blob: Blob, fileName: string) {
 }
 
 
+function showUnsupportedAlert(fileName: string) {
+    // For non-renderable formats on devices/contexts where navigator.share
+    // is unavailable, we deliberately do NOT call window.open(blob:) — Chrome
+    // on Android renders that as a "Save File" dialog for binary mime types,
+    // which the user perceives as a re-download on every tap. Instead show a
+    // localized message pointing them at the explicit Download button.
+    try {
+        window.alert(`فایل «${fileName || 'سند'}» در حافظهٔ دستگاه ذخیره شده است.\n\nمرورگر شما اجازه باز کردن مستقیم این نوع فایل را نمی‌دهد. لطفاً از دکمهٔ ذخیره (پایین فایل) استفاده کنید.`)
+    } catch { /* noop */ }
+}
+
 async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode: 'open' | 'share' | 'download' = 'open'): Promise<void> {
     const displayName = entry.fileName || fileName || 'file'
     const mimeType = entry.mimeType || entry.blob.type || ''
@@ -189,33 +221,55 @@ async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode:
     }
 
     if (mode === 'share') {
-        // Share button = native share sheet first. If unsupported (insecure
-        // context / desktop / older browser) fall back to opening the blob in
-        // a new tab so the user always sees SOMETHING happen. We never use
-        // anchor download here because that would prompt "Download again?"
-        // on every tap.
-        const shared = await shareBlob(entry, displayName)
+        // Share button: invoke navigator.share SYNCHRONOUSLY before any await
+        // so the user-activation token is preserved on Android Chrome HTTPS.
+        const result = shareBlobSync(entry, displayName)
+        if (result === false) {
+            // No share API at all (insecure context, desktop, etc.) — for
+            // renderable types open inline; for binary types alert.
+            if (isInlineViewable(mimeType, displayName)) {
+                openBlobInTab(entry.blob, displayName)
+            } else {
+                showUnsupportedAlert(displayName)
+            }
+            return
+        }
+        const shared = await result
         if (shared) return
-        openBlobInTab(entry.blob, displayName)
+        // share() rejected (NotAllowedError / SecurityError). Last-ditch
+        // fallback: only open inline if renderable; otherwise alert.
+        if (isInlineViewable(mimeType, displayName)) {
+            openBlobInTab(entry.blob, displayName)
+        } else {
+            showUnsupportedAlert(displayName)
+        }
         return
     }
 
     // mode === 'open' (tap on file body)
-    // For browser-renderable formats (PDF, images, video, audio): open inline
-    // via window.open(blob:) — Chrome and Safari render these natively.
+    // Renderable formats (PDF, images, video, audio): open inline.
     if (isInlineViewable(mimeType, displayName)) {
         if (openBlobInTab(entry.blob, displayName)) return
-        await shareBlob(entry, displayName)
+        // Popup-blocked → try synchronous share.
+        const result = shareBlobSync(entry, displayName)
+        if (result === false) return
+        await result
         return
     }
-    // For binary formats (txt, xlsx, docx, heic, zip, ...): try the OS share
-    // sheet first (closest web equivalent to Android's "Open With..." picker
-    // on HTTPS), and fall back to window.open(blob:) when share is
-    // unavailable so the user can still get to the file. Anchor download is
-    // never used here.
-    const shared = await shareBlob(entry, displayName)
-    if (shared) return
-    openBlobInTab(entry.blob, displayName)
+    // Binary formats (xlsx, heic, docx, txt, zip, ...): SYNCHRONOUSLY invoke
+    // share so activation is preserved. If share is unavailable or rejects,
+    // we DO NOT open in a new tab (Chrome would render that as a forced
+    // download for binary mime types). Show a localized alert instead so the
+    // user knows the file is cached and can use the Download button.
+    const result = shareBlobSync(entry, displayName)
+    if (result === false) {
+        showUnsupportedAlert(displayName)
+        return
+    }
+    const shared = await result
+    if (!shared) {
+        showUnsupportedAlert(displayName)
+    }
 }
 
 async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: string): Promise<CachedFileEntry> {
@@ -240,6 +294,24 @@ async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: stri
     }
     memoryCache.set(fileId, entry)
     return entry
+}
+
+/**
+ * Pre-warm the synchronous in-memory cache for a file by promoting its
+ * IndexedDB entry. Call this when a document bubble is mounted/visible so
+ * that the user's first tap can call navigator.share() synchronously
+ * without first awaiting an IDB read (which would consume transient user
+ * activation on Android Chrome and cause share() to throw NotAllowedError).
+ */
+export async function prewarmFileCache(fileId: string): Promise<void> {
+    if (!fileId) return
+    if (memoryCache.has(fileId)) return
+    try {
+        const entry = await fileStore.getItem(fileId)
+        if (isCachedFileEntry(entry)) {
+            memoryCache.set(fileId, entry)
+        }
+    } catch { /* noop */ }
 }
 
 /**
