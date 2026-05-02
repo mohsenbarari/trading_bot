@@ -19,6 +19,11 @@ import { useChatMedia } from '../composables/chat/useChatMedia'
 import { useChatWebSocket } from '../composables/chat/useChatWebSocket'
 import { useChatMessages } from '../composables/chat/useChatMessages'
 import { useChatScroll } from '../composables/chat/useChatScroll'
+import {
+  seedFileCache,
+  shareMultipleFiles,
+  shareFile as cachedShareFileGlobal,
+} from '../composables/chat/useChatFileHandler'
 
 // Props
 const props = defineProps<{
@@ -47,7 +52,7 @@ const messages = ref<Message[]>([])
 
 // Selection State
 const selectedMessages = ref<number[]>([])
-const selectionModePurpose = ref<'default' | 'album-download' | 'album-forward'>('default')
+const selectionModePurpose = ref<'default' | 'album-download' | 'album-forward' | 'album-share'>('default')
 const activeAlbumSelectionId = ref<string | null>(null)
 const isSelectionMode = computed(() => selectedMessages.value.length > 0)
 const isAlbumDownloadSelectionMode = computed(() => {
@@ -56,7 +61,10 @@ const isAlbumDownloadSelectionMode = computed(() => {
 const isAlbumForwardSelectionMode = computed(() => {
   return isSelectionMode.value && selectionModePurpose.value === 'album-forward' && Boolean(activeAlbumSelectionId.value)
 })
-const isAlbumActionSelectionMode = computed(() => isAlbumDownloadSelectionMode.value || isAlbumForwardSelectionMode.value)
+const isAlbumShareSelectionMode = computed(() => {
+  return isSelectionMode.value && selectionModePurpose.value === 'album-share' && Boolean(activeAlbumSelectionId.value)
+})
+const isAlbumActionSelectionMode = computed(() => isAlbumDownloadSelectionMode.value || isAlbumForwardSelectionMode.value || isAlbumShareSelectionMode.value)
 const longPressTimer = ref<any>(null)
 
 // Search State
@@ -1049,6 +1057,16 @@ function startAlbumForwardSelection(msg: Message, messageIds: number[]) {
   selectedMessages.value = normalized
 }
 
+function startAlbumShareSelection(msg: Message, messageIds: number[]) {
+  const albumId = getAlbumMeta(msg).albumId
+  const normalized = sortMessageIdsByChatOrder(messageIds)
+  if (!albumId || normalized.length === 0) return
+
+  activeAlbumSelectionId.value = albumId
+  selectionModePurpose.value = 'album-share'
+  selectedMessages.value = normalized
+}
+
 function isAlbumInDownloadSelection(item: any) {
   if (!isAlbumActionSelectionMode.value || item?.type !== 'album' || !Array.isArray(item.messages) || item.messages.length === 0) {
     return false
@@ -1305,6 +1323,140 @@ function handleSaveAlbum() {
 
   startAlbumDownloadSelection(msg, messageIds)
   closeContextMenu()
+}
+
+function inferMediaMime(msg: Message): string {
+  if (msg.message_type === 'image') return 'image/jpeg'
+  if (msg.message_type === 'video') return 'video/mp4'
+  if (msg.message_type === 'voice') return 'audio/webm'
+  if (msg.message_type === 'document') {
+    try {
+      const parsed = JSON.parse(msg.content)
+      if (typeof parsed?.mime_type === 'string' && parsed.mime_type) return parsed.mime_type
+    } catch { /* noop */ }
+    return 'application/octet-stream'
+  }
+  return 'application/octet-stream'
+}
+
+function inferMediaFileName(msg: Message, fileId: string, index = 0): string {
+  try {
+    const parsed = JSON.parse(msg.content)
+    if (typeof parsed?.file_name === 'string' && parsed.file_name.trim()) return parsed.file_name
+  } catch { /* noop */ }
+  const prefix = String(index + 1).padStart(2, '0')
+  if (msg.message_type === 'image') return `${prefix}_${fileId}.jpg`
+  if (msg.message_type === 'video') return `${prefix}_${fileId}.mp4`
+  if (msg.message_type === 'voice') return `${prefix}_${fileId}.webm`
+  return `${prefix}_${fileId}`
+}
+
+async function ensureMessageBlobInFileCache(msg: Message): Promise<string | null> {
+  const fileId = getMediaFileId(msg)
+  if (!fileId) return null
+  // Try local blob URL (imageCache) → fetch as blob without network roundtrip.
+  const localUrl = imageCache.value[fileId] || msg.local_blob_url
+  if (localUrl) {
+    try {
+      const resp = await fetch(localUrl)
+      const blob = await resp.blob()
+      await seedFileCache(fileId, blob, inferMediaFileName(msg, fileId), blob.type || inferMediaMime(msg))
+      return fileId
+    } catch (err) {
+      console.warn('[chat-share] seed from local blob failed', err)
+    }
+  }
+  // Fall back to backend fetch.
+  const downloadUrl = buildMediaDownloadUrl(fileId)
+  try {
+    const resp = await fetch(downloadUrl)
+    if (!resp.ok) return null
+    const blob = await resp.blob()
+    await seedFileCache(fileId, blob, inferMediaFileName(msg, fileId), blob.type || inferMediaMime(msg))
+    return fileId
+  } catch (err) {
+    console.warn('[chat-share] api fetch failed', err)
+    return null
+  }
+}
+
+function showInlineToast(text: string) {
+  const id = 'chat-file-share-toast'
+  const existing = document.getElementById(id)
+  if (existing) { try { existing.remove() } catch { /* noop */ } }
+  const toast = document.createElement('div')
+  toast.id = id
+  toast.textContent = text
+  toast.style.cssText = [
+    'position:fixed', 'left:50%', 'bottom:90px', 'transform:translateX(-50%)',
+    'background:rgba(40,40,40,0.94)', 'color:#fff', 'padding:10px 16px',
+    'border-radius:10px', 'font-size:13px', 'z-index:2147483600',
+    'max-width:88vw', 'text-align:center', 'box-shadow:0 4px 18px rgba(0,0,0,0.25)',
+    'direction:rtl', 'font-family:inherit', 'pointer-events:none',
+    'transition:opacity .25s ease', 'opacity:1',
+  ].join(';')
+  document.body.appendChild(toast)
+  setTimeout(() => { toast.style.opacity = '0' }, 2200)
+  setTimeout(() => { try { toast.remove() } catch { /* noop */ } }, 2600)
+}
+
+async function handleShareMessage() {
+  const msg = contextMenu.value.message
+  closeContextMenu()
+  if (!msg) return
+  const fileId = getMediaFileId(msg)
+  if (!fileId) {
+    showInlineToast('این پیام قابل اشتراک‌گذاری نیست')
+    return
+  }
+  const seeded = await ensureMessageBlobInFileCache(msg)
+  if (!seeded) {
+    showInlineToast('اشتراک‌گذاری این فایل در این مرورگر پشتیبانی نمی‌شود')
+    return
+  }
+  const shared = await cachedShareFileGlobal(
+    fileId,
+    inferMediaFileName(msg, fileId),
+    inferMediaMime(msg),
+    buildMediaDownloadUrl(fileId),
+  )
+  if (!shared) showInlineToast('اشتراک‌گذاری این فایل در این مرورگر پشتیبانی نمی‌شود')
+}
+
+function handleShareAlbum() {
+  const msg = contextMenu.value.message
+  const messageIds = normalizeMessageIds(contextMenu.value.messageIds)
+  if (!msg || messageIds.length <= 1) {
+    closeContextMenu()
+    return
+  }
+  startAlbumShareSelection(msg, messageIds)
+  closeContextMenu()
+}
+
+async function handleShareSelectedAlbumMessages() {
+  const orderedMessages = sortMessageIdsByChatOrder(selectedMessages.value)
+    .map((id) => messages.value.find((m) => m.id === id))
+    .filter((m): m is Message => Boolean(m))
+
+  if (orderedMessages.length === 0) {
+    clearSelection()
+    return
+  }
+
+  const fileIds: string[] = []
+  for (const m of orderedMessages) {
+    const fid = await ensureMessageBlobInFileCache(m)
+    if (fid) fileIds.push(fid)
+  }
+  if (fileIds.length === 0) {
+    showInlineToast('اشتراک‌گذاری این فایل‌ها در این مرورگر پشتیبانی نمی‌شود')
+    clearSelection()
+    return
+  }
+  const ok = await shareMultipleFiles(fileIds)
+  if (!ok) showInlineToast('اشتراک‌گذاری این فایل‌ها در این مرورگر پشتیبانی نمی‌شود')
+  clearSelection()
 }
 
 async function handleDownloadSelectedAlbumMessages() {
@@ -1941,6 +2093,29 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         </button>
       </div>
 
+      <div v-else-if="selectedUserId && isAlbumShareSelectionMode" class="album-download-selection-bar">
+        <button class="selection-action-btn" @click="clearSelection">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+          <span>انصراف</span>
+        </button>
+        <div class="album-download-selection-summary">
+          {{ selectedMessages.length }} مدیا برای اشتراک‌گذاری انتخاب شده
+        </div>
+        <button class="selection-action-btn primary" :disabled="selectedMessages.length === 0" @click="handleShareSelectedAlbumMessages">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="18" cy="5" r="3"></circle>
+            <circle cx="6" cy="12" r="3"></circle>
+            <circle cx="18" cy="19" r="3"></circle>
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+          </svg>
+          <span>اشتراک‌گذاری</span>
+        </button>
+      </div>
+
       <!-- Input Area -->
       <ChatInputBar
         ref="chatInputBarRef"
@@ -2001,6 +2176,8 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @close="closeContextMenu"
       @save-media="handleSaveMedia"
       @save-album="handleSaveAlbum"
+      @share="handleShareMessage"
+      @share-album="handleShareAlbum"
     />
 
     <!-- Lightbox Overlay -->

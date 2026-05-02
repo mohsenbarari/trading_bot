@@ -404,6 +404,37 @@ export async function prewarmFileCache(fileId: string): Promise<void> {
 }
 
 /**
+ * Insert an externally-acquired blob (e.g. an image/video that was already
+ * downloaded by `useChatMedia`'s `imageCache`) into the unified file cache
+ * so subsequent share/download actions can reuse it without a second
+ * network fetch. Safe to call multiple times — already-cached entries win
+ * unless the existing entry has zero size.
+ */
+export async function seedFileCache(fileId: string, blob: Blob, fileName: string, mimeType?: string): Promise<void> {
+    if (!fileId || !blob) return
+    // Don't overwrite a healthy existing entry.
+    const existing = memoryCache.get(fileId)
+    if (existing && existing.blob && existing.blob.size > 0) {
+        cachedFileIds[fileId] = true
+        return
+    }
+    const entry: CachedFileEntry = {
+        blob,
+        fileName: fileName || 'file',
+        mimeType: mimeType || blob.type || 'application/octet-stream',
+        size: blob.size,
+        cachedAt: Date.now(),
+    }
+    memoryCache.set(fileId, entry)
+    cachedFileIds[fileId] = true
+    try {
+        await fileStore.setItem(fileId, entry)
+    } catch (err) {
+        console.warn('[useChatFileHandler] seed cache write failed', err)
+    }
+}
+
+/**
  * Open a chat file (tap-to-open intent). If the file is cached, opens it
  * immediately offline; otherwise downloads once, caches it, and then opens.
  *
@@ -530,6 +561,55 @@ export function canShareFiles(): boolean {
         const probe = new File([new Blob([''], { type: 'text/plain' })], 'probe.txt', { type: 'text/plain' })
         return navAny.canShare({ files: [probe] })
     } catch {
+        return false
+    }
+}
+
+/**
+ * Share multiple cached files at once via the Web Share API. Caller must
+ * ensure each file id is already cached (e.g. via `seedFileCache` or a
+ * prior `shareFile`/`handleFileClick` round-trip). Returns true if the OS
+ * share sheet completed successfully.
+ */
+export async function shareMultipleFiles(fileIds: string[]): Promise<boolean> {
+    if (!fileIds || fileIds.length === 0) return false
+    const navAny = navigator as Navigator & {
+        canShare?: (data: ShareData) => boolean
+        share?: (data: ShareData) => Promise<void>
+    }
+    if (typeof navAny.share !== 'function') return false
+
+    const files: File[] = []
+    for (const id of fileIds) {
+        const entry = readMemoryEntry(id) || await readCachedEntry(id)
+        if (!entry || !entry.blob) continue
+        try {
+            files.push(new File(
+                [entry.blob],
+                entry.fileName || 'file',
+                { type: entry.mimeType || entry.blob.type || 'application/octet-stream' },
+            ))
+        } catch (err) {
+            console.warn('[useChatFileHandler] multi-share File() failed', err)
+        }
+    }
+    if (files.length === 0) return false
+
+    const shareData: ShareData = { files }
+    if (typeof navAny.canShare === 'function') {
+        try {
+            if (!navAny.canShare(shareData)) {
+                console.info('[chat-file] multi-share canShare returned false')
+            }
+        } catch { /* noop */ }
+    }
+    try {
+        await navAny.share(shareData)
+        return true
+    } catch (err) {
+        const name = (err as DOMException)?.name
+        if (name === 'AbortError') return true
+        console.warn('[chat-file] multi-share rejected', name, err)
         return false
     }
 }
