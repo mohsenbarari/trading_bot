@@ -1289,6 +1289,10 @@ const handleWrapperContextMenu = (e: MouseEvent) => {
   e.preventDefault()
   e.stopPropagation()
 
+  if (Date.now() < suppressContextClickUntil.value) {
+    return
+  }
+
   if (shouldIgnoreLongPressContextTarget(e.target)) {
     return
   }

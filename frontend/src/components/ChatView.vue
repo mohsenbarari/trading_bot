@@ -55,6 +55,7 @@ const selectedMessages = ref<number[]>([])
 const selectionModePurpose = ref<'default' | 'album-download' | 'album-forward' | 'album-share'>('default')
 const activeAlbumSelectionId = ref<string | null>(null)
 const isSelectionMode = computed(() => selectedMessages.value.length > 0)
+const selectionMemoKey = computed(() => selectedMessages.value.join('|'))
 const isAlbumDownloadSelectionMode = computed(() => {
   return isSelectionMode.value && selectionModePurpose.value === 'album-download' && Boolean(activeAlbumSelectionId.value)
 })
@@ -66,6 +67,8 @@ const isAlbumShareSelectionMode = computed(() => {
 })
 const isAlbumActionSelectionMode = computed(() => isAlbumDownloadSelectionMode.value || isAlbumForwardSelectionMode.value || isAlbumShareSelectionMode.value)
 const longPressTimer = ref<any>(null)
+const selectionBackStateActive = ref(false)
+let clearingSelectionFromBack = false
 
 // Search State
 const isSearchActive = ref(false)
@@ -1884,6 +1887,22 @@ watch(() => props.targetUserId, (newId) => {
 watch(isSelectionMode, (isEnabled) => {
   if (isEnabled) {
     showStickerPicker.value = false
+    if (!selectionBackStateActive.value) {
+      selectionBackStateActive.value = true
+      pushBackState(() => {
+        clearingSelectionFromBack = true
+        clearSelection()
+        clearingSelectionFromBack = false
+      })
+    }
+    return
+  }
+
+  if (selectionBackStateActive.value) {
+    selectionBackStateActive.value = false
+    if (!clearingSelectionFromBack) {
+      popBackState()
+    }
   }
 })
 
@@ -2012,14 +2031,14 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
             <p>شروع گفتگو...</p>
           </div>
           
-          <div v-for="group in groupedMessages" :key="group.label" class="message-group" v-auto-animate v-memo="[group, searchQuery, isSelectionMode, activeAlbumSelectionId]">
+          <div v-for="group in groupedMessages" :key="group.label" class="message-group" v-auto-animate v-memo="[group, searchQuery, isSelectionMode, activeAlbumSelectionId, selectionMemoKey]">
             <div class="date-separator sticky-date">
               <span @click="scrollToMessage(group.items[0].id)">{{ group.label }}</span>
             </div>
 
             <template v-for="(item, index) in group.items" :key="item.id">
               <ChatMessageItem
-                v-memo="[item, searchQuery, isSelectionMode, isAlbumInDownloadSelection(item)]"
+                v-memo="[item, searchQuery, isSelectionMode, isAlbumInDownloadSelection(item), selectionMemoKey]"
                 :msg="item.type === 'album' ? item.messages[0] : item"
                 :isAlbum="item.type === 'album'"
                 :albumItems="item.type === 'album' ? item.messages : []"
