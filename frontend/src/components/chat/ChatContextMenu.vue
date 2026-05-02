@@ -9,6 +9,18 @@
         role="menu"
         aria-label="Message actions"
       >
+        <div v-if="showReactionRow" class="reaction-row">
+          <button
+            v-for="emoji in availableReactions"
+            :key="emoji"
+            type="button"
+            class="reaction-btn"
+            @click.stop="$emit('react', emoji)"
+          >
+            {{ emoji }}
+          </button>
+        </div>
+        <div v-if="showReactionRow" class="menu-divider"></div>
         <div class="menu-item" v-ripple @click="$emit('reply')" role="menuitem">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>
           <span style="flex:1;">پاسخ</span>
@@ -106,9 +118,11 @@ const props = defineProps<{
   isAlbumSelection: boolean
   canEdit: boolean
   canDelete: boolean
+  availableReactions: string[]
 }>()
 
 const _emit = defineEmits<{
+  (e: 'react', emoji: string): void
   (e: 'reply'): void
   (e: 'forward'): void
   (e: 'copy'): void
@@ -126,10 +140,14 @@ const shareableType = computed(() => {
   return t === 'image' || t === 'video' || t === 'voice' || t === 'document'
 })
 
+const showReactionRow = computed(() => {
+  return Boolean(props.menuState.message && !props.menuState.message?.is_deleted && props.availableReactions.length > 0)
+})
+
 // Smart positioning: keep menu within viewport bounds
 const menuPosition = computed(() => {
-  const menuW = 200
-  const menuH = 250
+  const menuW = 220
+  const menuH = showReactionRow.value ? 312 : 250
   const vw = typeof window !== 'undefined' ? window.innerWidth : 400
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800
   
@@ -208,6 +226,32 @@ const menuPosition = computed(() => {
 
 .menu-item.delete:hover {
   background: rgba(239, 68, 68, 0.06);
+}
+
+.reaction-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px 8px;
+}
+
+.reaction-btn {
+  border: none;
+  background: rgba(15, 23, 42, 0.05);
+  border-radius: 999px;
+  min-width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.reaction-btn:active {
+  transform: scale(0.94);
+  background: rgba(51, 144, 236, 0.14);
 }
 
 .menu-divider {

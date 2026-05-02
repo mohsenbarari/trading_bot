@@ -338,13 +338,33 @@
         </span>
       </div>
     </div>
+
+    <div
+      v-if="groupedReactions.length > 0"
+      class="message-reactions"
+      :class="{ sent: isSent, received: !isSent }"
+    >
+      <button
+        v-for="reaction in groupedReactions"
+        :key="reaction.emoji"
+        type="button"
+        class="reaction-chip"
+        :class="{ 'is-own': reaction.reactedByCurrentUser }"
+        data-context-ignore
+        data-swipe-ignore
+        @click.stop="handleReactionChipClick(reaction.emoji)"
+      >
+        <span class="reaction-emoji">{{ reaction.emoji }}</span>
+        <span class="reaction-count">{{ reaction.count }}</span>
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAudioStore } from '../../stores/audio'
-import type { Message } from '../../types/chat'
+import type { Message, MessageReaction } from '../../types/chat'
 import ChatAlbumLayout from './ChatAlbumLayout.vue'
 import { observeVisibility } from '../../utils/sharedVisibilityObserver'
 import {
@@ -418,6 +438,7 @@ const emit = defineEmits<{
   (e: 'forward-album-item', msg: any): void
   (e: 'delete-album-item', msg: any): void
   (e: 'toggle-album-download-item', msg: any): void
+  (e: 'toggle-reaction', payload: { msg: any, emoji: string }): void
 }>()
 
 const audioStore = useAudioStore()
@@ -427,6 +448,36 @@ const isSent = computed(() => props.msg.sender_id === props.currentUserId)
 const isSending = computed(() => props.msg.id < 0 || props.msg.is_sending)
 const isError = computed(() => props.msg.is_error)
 const isSelected = computed(() => props.selectedMessages.includes(props.msg.id))
+const groupedReactions = computed(() => {
+  if (props.msg.is_deleted || !Array.isArray(props.msg.reactions) || props.msg.reactions.length === 0) {
+    return [] as Array<{ emoji: string, count: number, reactedByCurrentUser: boolean }>
+  }
+
+  const grouped = new Map<string, { emoji: string, count: number, reactedByCurrentUser: boolean }>()
+
+  props.msg.reactions.forEach((reaction: MessageReaction) => {
+    if (!reaction?.emoji || !Number.isFinite(Number(reaction?.user_id))) {
+      return
+    }
+
+    const existing = grouped.get(reaction.emoji)
+    const reactedByCurrentUser = Number(reaction.user_id) === Number(props.currentUserId)
+
+    if (existing) {
+      existing.count += 1
+      existing.reactedByCurrentUser = existing.reactedByCurrentUser || reactedByCurrentUser
+      return
+    }
+
+    grouped.set(reaction.emoji, {
+      emoji: reaction.emoji,
+      count: 1,
+      reactedByCurrentUser,
+    })
+  })
+
+  return Array.from(grouped.values())
+})
 const parsedContent = computed(() => parseMessageContent(props.msg.content))
 const mediaFileId = computed(() => getFileId(props.msg.content, parsedContent.value))
 
@@ -1152,6 +1203,8 @@ const isSwipeReplyArmed = computed(() => swipeAxis.value === 'horizontal' && swi
 
 const CLICK_CONTEXT_IGNORE_TARGET_SELECTOR = [
   '[data-context-ignore]',
+  '.message-reactions',
+  '.reaction-chip',
   '.msg-media-link',
   '.msg-location',
   '.msg-document',
@@ -1227,6 +1280,15 @@ function shouldIgnoreSwipeTarget(target: EventTarget | null) {
   const element = target instanceof Element ? target : null
   if (!element) return false
   return Boolean(element.closest(SWIPE_IGNORE_TARGET_SELECTOR))
+}
+
+function handleReactionChipClick(emoji: string) {
+  if (props.isSelectionMode) {
+    emit('select', props.msg)
+    return
+  }
+
+  emit('toggle-reaction', { msg: props.msg, emoji })
 }
 
 const handleWrapperClick = (e: MouseEvent) => {
@@ -1504,6 +1566,62 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .message-bubble.sent { align-self: flex-start; background: #eeffde; color: #000000; border-radius: 12px 12px 4px 12px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
 .message-bubble.received { align-self: flex-end; background: #FFFFFF; color: #000000; border-radius: 12px 12px 12px 4px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
 .message-bubble p { margin: 0; }
+
+.message-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+  max-width: 92%;
+}
+
+.message-reactions.sent {
+  align-self: flex-start;
+}
+
+.message-reactions.received {
+  align-self: flex-end;
+}
+
+.reaction-chip {
+  border: none;
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #1f2937;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.reaction-chip.is-own {
+  background: rgba(51, 144, 236, 0.14);
+  color: #1d4ed8;
+}
+
+.message-reactions.sent .reaction-chip.is-own {
+  background: rgba(67, 160, 71, 0.16);
+  color: #2f7d32;
+}
+
+.reaction-chip:active {
+  transform: scale(0.96);
+}
+
+.reaction-emoji {
+  font-size: 15px;
+}
+
+.reaction-count {
+  font-weight: 600;
+  font-size: 11px;
+  min-width: 8px;
+  text-align: center;
+}
 
 .msg-time { font-size: 11px; color: rgba(0, 0, 0, 0.4); }
 .message-bubble.received .msg-time { color: #8E8E93; }

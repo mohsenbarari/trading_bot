@@ -14,7 +14,7 @@ import AttachmentMenu from './chat/AttachmentMenu.vue'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
-import type { ChatForwardTarget, Conversation, Message } from '../types/chat'
+import type { ChatForwardTarget, Conversation, Message, MessageReaction } from '../types/chat'
 import { useChatMedia } from '../composables/chat/useChatMedia'
 import { useChatWebSocket } from '../composables/chat/useChatWebSocket'
 import { useChatMessages } from '../composables/chat/useChatMessages'
@@ -90,6 +90,7 @@ const unreadNewMessagesCount = ref(0)
 const showScrollButton = ref(false)
 const isMobile = ref(false)
 const contextMenu = ref<{ visible: boolean; x: number; y: number; message: Message | null; messageIds: number[] }>({ visible: false, x: 0, y: 0, message: null, messageIds: [] })
+const AVAILABLE_MESSAGE_REACTIONS = ['👍', '❤️', '🔥', '👏', '😂', '😮', '😢', '🙏'] as const
 
 // Input
 const messageInput = ref('')
@@ -532,6 +533,58 @@ function normalizeMessageIds(messageIds: number[]) {
   return normalized
 }
 
+function normalizeMessageReactions(rawReactions: unknown): MessageReaction[] {
+  if (!Array.isArray(rawReactions)) {
+    return []
+  }
+
+  return rawReactions
+    .map((reaction) => {
+      if (!reaction || typeof reaction !== 'object') {
+        return null
+      }
+
+      const candidate = reaction as Record<string, unknown>
+      const emoji = typeof candidate.emoji === 'string' ? candidate.emoji : ''
+      const userId = Number(candidate.user_id)
+      if (!emoji || !Number.isFinite(userId)) {
+        return null
+      }
+
+      return {
+        emoji,
+        user_id: userId,
+      }
+    })
+    .filter((reaction): reaction is MessageReaction => Boolean(reaction))
+}
+
+function applyMessageReactionState(messageId: number, reactions: unknown) {
+  const messageIndex = messages.value.findIndex((message) => message.id === messageId)
+  const normalizedReactions = normalizeMessageReactions(reactions)
+
+  if (messageIndex !== -1) {
+    const existingMessage = messages.value[messageIndex]
+    if (!existingMessage) {
+      return
+    }
+
+    messages.value[messageIndex] = {
+      ...existingMessage,
+      reactions: normalizedReactions,
+    }
+  }
+
+  if (contextMenu.value.message?.id === messageId) {
+    contextMenu.value = {
+      ...contextMenu.value,
+      message: contextMenu.value.message
+        ? { ...contextMenu.value.message, reactions: normalizedReactions }
+        : null,
+    }
+  }
+}
+
 function resetSelectionContext() {
   selectionModePurpose.value = 'default'
   activeAlbumSelectionId.value = null
@@ -628,6 +681,23 @@ function getAlbumMessagesForMessage(msg: Message) {
 function getContextMenuMessageIds(msg: Message) {
   const albumMessages = getAlbumMessagesForMessage(msg)
   return normalizeMessageIds(albumMessages.length > 1 ? albumMessages.map(message => message.id) : [msg.id])
+}
+
+async function toggleMessageReaction(msg: Message, emoji: string) {
+  if (!isPersistedMessageId(msg.id)) {
+    return
+  }
+
+  try {
+    const updatedMessage = await apiFetch(`/chat/messages/${msg.id}/reaction`, {
+      method: 'POST',
+      body: JSON.stringify({ emoji }),
+    })
+    applyMessageReactionState(msg.id, updatedMessage?.reactions)
+  } catch (err) {
+    console.error('Failed to toggle message reaction:', err)
+    alert('خطا در ثبت ری‌اکشن')
+  }
 }
 
 function openForwardModalForIds(messageIds: number[]) {
@@ -889,7 +959,7 @@ const groupedMessages = computed(() => {
 
       const bucket = albumBuckets.get(bucketKey) ?? [msg]
       if (bucket.length > 1) {
-        const signature = bucket.map(m => `${m.id}:${(m as any).is_deleted ? 1 : 0}:${(m as any).content?.length ?? 0}`).join('|')
+        const signature = bucket.map(m => `${m.id}:${(m as any).is_deleted ? 1 : 0}:${(m as any).content?.length ?? 0}:${JSON.stringify((m as any).reactions ?? [])}`).join('|')
         const cacheKey = `${msg.sender_id}::${meta.albumId}`
         const cached = albumWrapperCache.get(cacheKey)
         if (cached && cached.signature === signature) {
@@ -1217,6 +1287,8 @@ const handleNewChatSearch = (userId: number, userName: string) => {
 const showContextMenu = (event: Event, msg: Message) => {
   if (isAlbumActionSelectionMode.value) return
 
+  const messageIds = getContextMenuMessageIds(msg)
+
   let clientX = 0, clientY = 0;
   if (event instanceof MouseEvent) {
     event.preventDefault();
@@ -1230,8 +1302,8 @@ const showContextMenu = (event: Event, msg: Message) => {
     }
   }
 
-  const menuWidth = 160;
-  const menuHeight = 150; 
+  const menuWidth = 220;
+  const menuHeight = messageIds.length > 1 ? 320 : 300;
   const padding = 10;
 
   if (clientX + menuWidth > window.innerWidth) clientX = window.innerWidth - menuWidth - padding;
@@ -1246,7 +1318,7 @@ const showContextMenu = (event: Event, msg: Message) => {
     x: clientX,
     y: clientY,
     message: msg,
-    messageIds: getContextMenuMessageIds(msg)
+    messageIds,
   }
 };
 
@@ -1268,6 +1340,19 @@ const handleMessageClick = (event: Event, msg: Message) => {
     }
 
     showContextMenu(event, msg)
+}
+
+const handleMessageReactionToggle = ({ msg, emoji }: { msg: Message, emoji: string }) => {
+  void toggleMessageReaction(msg, emoji)
+}
+
+const handleContextMenuReaction = (emoji: string) => {
+  const msg = contextMenu.value.message
+  closeContextMenu()
+  if (!msg) {
+    return
+  }
+  void toggleMessageReaction(msg, emoji)
 }
 
 const handleMediaInteraction = (msg: Message) => {
@@ -2190,6 +2275,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
                 @forward-album-item="handleAlbumForwardItem"
                 @delete-album-item="handleAlbumDeleteItem"
                 @toggle-album-download-item="handleAlbumDownloadItemToggle"
+                @toggle-reaction="handleMessageReactionToggle"
                 :on-load="() => hydrateRenderedMedia(item)"
               />
             </template>
@@ -2336,6 +2422,8 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :isAlbumSelection="contextMenu.messageIds.length > 1"
       :canEdit="canEdit"
       :canDelete="canDelete"
+      :availableReactions="[...AVAILABLE_MESSAGE_REACTIONS]"
+      @react="handleContextMenuReaction"
       @reply="handleReplyMessage"
       @forward="handleForwardMessage"
       @copy="handleCopyMessage"

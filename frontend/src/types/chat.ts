@@ -10,6 +10,11 @@ export interface Conversation {
     other_user_last_seen_at?: string | null
 }
 
+export interface MessageReaction {
+    emoji: string
+    user_id: number
+}
+
 export interface Message {
     id: number
     sender_id: number
@@ -28,6 +33,7 @@ export interface Message {
     is_deleted?: boolean
     updated_at?: string
     created_at: string
+    reactions?: MessageReaction[]
     reply_to_message?: {
         id: number
         sender_id: number
