@@ -1256,13 +1256,13 @@ const handleWrapperTouchStart = (e: TouchEvent) => {
   clearLongPressTimer()
 
   longPressTimer.value = window.setTimeout(() => {
+    if (navigator.vibrate) {
+      navigator.vibrate(50)
+    }
     suppressContextClickUntil.value = Date.now() + 650
-    emit('context-menu', new MouseEvent('contextmenu', {
-      clientX: touch.clientX,
-      clientY: touch.clientY,
-    }), props.msg)
+    emit('select', props.msg)
     clearLongPressTimer()
-  }, 420)
+  }, 500)
 }
 
 const handleWrapperTouchMove = (e: TouchEvent) => {
