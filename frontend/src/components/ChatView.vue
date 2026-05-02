@@ -1179,10 +1179,13 @@ const handleMessageClick = (event: Event, msg: Message) => {
       return
     }
 
-    if (!isSelectionMode.value) return
+    if (isSelectionMode.value) {
+      event.preventDefault()
+      toggleSelection(msg.id)
+      return
+    }
 
-    event.preventDefault()
-    toggleSelection(msg.id)
+    showContextMenu(event, msg)
 }
 
 const handleEditMessage = () => {
