@@ -482,10 +482,15 @@ export async function shareFile(fileId: string, fileName: string, mimeType: stri
     diagLog('shareFile id=' + fileId, 'name=' + fileName, 'mime=' + (mimeType || ''))
 
     // Synchronous fast-path to preserve transient user activation for share().
+    // We invoke shareBlobSync DIRECTLY (not via presentCachedFile/void) so we
+    // can await its real result and surface success/failure to the caller.
     const memEntry = readMemoryEntry(fileId)
     if (memEntry) {
-        void presentCachedFile(memEntry, memEntry.fileName || fileName, 'share')
-        return true
+        const displayName = memEntry.fileName || fileName || 'file'
+        diagLog('share fast-path mem hit', 'name=' + displayName)
+        const result = shareBlobSync(memEntry, displayName)
+        if (result === false) return false
+        return await result
     }
 
     let entry = await readCachedEntry(fileId)
@@ -507,8 +512,10 @@ export async function shareFile(fileId: string, fileName: string, mimeType: stri
         entry = { ...entry, mimeType }
     }
 
-    await presentCachedFile(entry, entry.fileName || fileName, 'share')
-    return true
+    const displayName = entry.fileName || fileName || 'file'
+    const result = shareBlobSync(entry, displayName)
+    if (result === false) return false
+    return await result
 }
 
 /** Returns true if Web Share with files is reachable on this device. */

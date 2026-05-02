@@ -321,11 +321,14 @@ import {
   canShareFiles,
   useChatFileHandler,
   prewarmFileCache,
+  isFileCached,
   useFileCacheRegistry,
 } from '../../composables/chat/useChatFileHandler'
 
 const { downloadingFiles: cachedDownloadingFiles } = useChatFileHandler()
-const cachedFileIds = useFileCacheRegistry()
+// Subscribe to the reactive cached-file registry so `isDocumentCached`
+// re-evaluates whenever a file id is added to or removed from the cache.
+const cachedFileRegistry = useFileCacheRegistry()
 const supportsFileShare = canShareFiles()
 
 const messageTimeFormatter = new Intl.DateTimeFormat('fa-IR', {
@@ -535,7 +538,13 @@ const docTransferProgress = computed(() => {
   return 0
 })
 const showDocumentShare = computed(() => supportsFileShare && !isDocumentBusy.value && !props.msg.is_sending)
-const isDocumentCached = computed(() => Boolean(docFileId.value && cachedFileIds[docFileId.value!]))
+const isDocumentCached = computed(() => {
+  const id = docFileId.value
+  if (!id) return false
+  // Touch the reactive registry so this computed re-runs on cache changes.
+  void cachedFileRegistry[id]
+  return isFileCached(id)
+})
 
 function handleDocumentBusyClick() {
   if (props.msg.is_sending) {
@@ -570,13 +579,33 @@ async function handleDocumentShareClick(event: Event) {
   event.stopPropagation()
   const fileId = docFileId.value
   if (!fileId) return
-  // Try Web Share. If unsupported (e.g. cancelled/desktop), fall back to a
-  // browser-tab viewer instead of triggering an anchor download that prompts
-  // the user with the OS "Download again?" dialog.
+  // Share button MUST only ever open the OS share sheet, never trigger a
+  // device download. If the platform's share API rejects (e.g. Samsung
+  // Chrome PWA NotAllowedError on xlsx/heic) we surface a brief toast so
+  // the user gets feedback instead of a silent no-op.
   const shared = await cachedShareFile(fileId, docFileName.value, docMimeType.value, docFileUrl.value)
   if (shared) return
-  // Last-resort: open in new tab via cached blob (no redundant download).
-  await handleDocumentOpenClick()
+  showShareUnavailableToast()
+}
+
+function showShareUnavailableToast() {
+  // Lightweight inline toast — avoids pulling in a global toast library.
+  const existing = document.getElementById('chat-file-share-toast')
+  if (existing) { try { existing.remove() } catch { /* noop */ } }
+  const toast = document.createElement('div')
+  toast.id = 'chat-file-share-toast'
+  toast.textContent = 'اشتراک‌گذاری این فایل در این مرورگر پشتیبانی نمی‌شود'
+  toast.style.cssText = [
+    'position:fixed', 'left:50%', 'bottom:90px', 'transform:translateX(-50%)',
+    'background:rgba(40,40,40,0.94)', 'color:#fff', 'padding:10px 16px',
+    'border-radius:10px', 'font-size:13px', 'z-index:2147483600',
+    'max-width:88vw', 'text-align:center', 'box-shadow:0 4px 18px rgba(0,0,0,0.25)',
+    'direction:rtl', 'font-family:inherit', 'pointer-events:none',
+    'transition:opacity .25s ease', 'opacity:1',
+  ].join(';')
+  document.body.appendChild(toast)
+  setTimeout(() => { toast.style.opacity = '0' }, 2200)
+  setTimeout(() => { try { toast.remove() } catch { /* noop */ } }, 2600)
 }
 
 const docStatusText = computed(() => {
