@@ -1732,6 +1732,28 @@ function handleLightboxForward(msgId: number) {
   closeLightbox()
 }
 
+async function handleLightboxShare(msgId: number) {
+  const msg = messages.value.find(message => message.id === msgId)
+  if (!msg) return
+  const fileId = getMediaFileId(msg)
+  if (!fileId) {
+    showInlineToast('این پیام قابل اشتراک‌گذاری نیست')
+    return
+  }
+  const seeded = await ensureMessageBlobInFileCache(msg)
+  if (!seeded) {
+    showInlineToast('اشتراک‌گذاری این فایل در این مرورگر پشتیبانی نمی‌شود')
+    return
+  }
+  const shared = await cachedShareFileGlobal(
+    fileId,
+    inferMediaFileName(msg, fileId),
+    inferMediaMime(msg),
+    buildMediaDownloadUrl(fileId),
+  )
+  if (!shared) showInlineToast('اشتراک‌گذاری این فایل در این مرورگر پشتیبانی نمی‌شود')
+}
+
 async function handleLightboxDelete(msgId: number) {
   const deleted = await deleteMessagesByIds([msgId], 'آیا از حذف این مدیا اطمینان دارید؟')
   if (deleted) {
@@ -2188,6 +2210,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @navigate="handleLightboxNavigate"
       @reply="handleLightboxReply"
       @forward="handleLightboxForward"
+      @share="handleLightboxShare"
       @delete="handleLightboxDelete"
     />
 

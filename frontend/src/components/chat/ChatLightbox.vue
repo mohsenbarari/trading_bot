@@ -26,6 +26,7 @@ const emit = defineEmits<{
   (e: 'navigate', index: number): void
   (e: 'reply', msgId: number): void
   (e: 'forward', msgId: number): void
+  (e: 'share', msgId: number): void
   (e: 'delete', msgId: number): void
 }>()
 
@@ -356,7 +357,7 @@ function handleAlbumDownloadConfirm() {
   closeAlbumDownloadSheet()
 }
 
-function emitForCurrent(action: 'reply' | 'forward' | 'delete') {
+function emitForCurrent(action: 'reply' | 'forward' | 'share' | 'delete') {
   const item = currentItem.value
   if (!item) return
 
@@ -367,6 +368,10 @@ function emitForCurrent(action: 'reply' | 'forward' | 'delete') {
 
   if (action === 'forward') {
     emit('forward', item.msgId)
+    return
+  }
+  if (action === 'share') {
+    emit('share', item.msgId)
     return
   }
 
@@ -726,6 +731,12 @@ function handleTouchEnd(event: TouchEvent) {
                   </span>
                   <span class="lightbox-btn-label">هدایت</span>
                 </button>
+                <button class="lightbox-btn lightbox-btn-labeled lightbox-btn-emphasis" @click.stop="emitForCurrent('share')" title="اشتراک‌گذاری">
+                  <span class="lightbox-btn-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                  </span>
+                  <span class="lightbox-btn-label">اشتراک</span>
+                </button>
               </div>
 
               <div class="lightbox-action-group lightbox-action-group-utility">
@@ -896,10 +907,10 @@ function handleTouchEnd(event: TouchEvent) {
 }
 
 .lightbox-shell {
-  width: min(92vw, 920px);
+  width: min(98vw, 1400px);
   max-width: 100%;
   min-width: 0;
-  height: min(100%, 920px);
+  height: min(100%, 1400px);
   max-height: 100%;
   overflow: hidden;
   display: grid;
