@@ -33,6 +33,21 @@ interface CachedFileEntry {
 
 const downloadingFiles = reactive<Record<string, boolean>>({})
 
+/**
+ * Reactive map of cached file ids → true. Components can use this to hide
+ * the "needs download" affordance once a file has been cached locally.
+ */
+const cachedFileIds = reactive<Record<string, true>>({})
+
+export function useFileCacheRegistry() {
+    return readonly(cachedFileIds)
+}
+
+export function isFileCached(fileId: string): boolean {
+    if (!fileId) return false
+    return Boolean(cachedFileIds[fileId])
+}
+
 // In-memory mirror of recently fetched files, keyed by file_id. We need this
 // because navigator.share() on Android Chrome requires *transient user
 // activation* — awaiting an async IndexedDB read inside the click handler
@@ -129,6 +144,7 @@ async function readCachedEntry(fileId: string): Promise<CachedFileEntry | null> 
         const entry = await fileStore.getItem(fileId)
         if (isCachedFileEntry(entry)) {
             memoryCache.set(fileId, entry)
+            cachedFileIds[fileId] = true
             return entry
         }
         return null
@@ -283,187 +299,47 @@ function triggerAnchorDownload(blob: Blob, fileName: string) {
     }, 4000)
 }
 
-
-function fallbackSaveFromCache(entry: CachedFileEntry, displayName: string) {
-    // When navigator.share is unavailable or rejected for a binary file,
-    // anchor-download from the *cached blob* (no network fetch) is the only
-    // way to deliver the file to the user. Chrome will show its save UI but
-    // the bytes come from IndexedDB, not the server.
-    diagLog('fallbackSaveFromCache -> anchor download (offline)')
-    triggerAnchorDownload(entry.blob, displayName)
-}
-
-// Track which file_ids the user has already declined to save in this session,
-// so we don't repeatedly prompt them for the same file on every tap.
-const declinedSaveSession = new Set<string>()
-
-function formatBytes(n: number): string {
-    if (!n || n < 0) return ''
-    if (n < 1024) return n + ' B'
-    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
-    return (n / (1024 * 1024)).toFixed(2) + ' MB'
-}
-
-/**
- * Show a Telegram-style action sheet asking the user whether to save the
- * file. Returns true if the user confirmed save, false if they cancelled.
- * Used when navigator.share is rejected/unavailable for binary formats —
- * we deliberately do NOT auto-download to avoid surprise downloads on
- * every tap.
- */
-function promptSaveAction(displayName: string, sizeBytes: number): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-        const overlay = document.createElement('div')
-        overlay.className = 'chat-file-save-overlay'
-        overlay.style.cssText = [
-            'position:fixed', 'inset:0', 'z-index:2147483600',
-            'background:rgba(0,0,0,0.5)', 'display:flex', 'align-items:flex-end',
-            'justify-content:center', 'padding:0', 'animation:cf-fade-in .18s ease',
-        ].join(';')
-
-        const sheet = document.createElement('div')
-        sheet.style.cssText = [
-            'background:#fff', 'width:100%', 'max-width:520px', 'border-radius:18px 18px 0 0',
-            'padding:18px 18px max(18px, env(safe-area-inset-bottom))',
-            'box-shadow:0 -8px 30px rgba(0,0,0,0.18)', 'direction:rtl', 'text-align:right',
-            'font-family:inherit', 'animation:cf-slide-up .22s cubic-bezier(.2,.9,.3,1)',
-        ].join(';')
-
-        const title = document.createElement('div')
-        title.style.cssText = 'font-size:15px;font-weight:600;color:#111;margin-bottom:6px;'
-        title.textContent = 'باز کردن این فایل در مرورگر ممکن نیست'
-
-        const desc = document.createElement('div')
-        desc.style.cssText = 'font-size:13px;color:#444;line-height:1.7;margin-bottom:16px;word-break:break-all;'
-        const sizeStr = formatBytes(sizeBytes)
-        desc.textContent = `«${displayName}»${sizeStr ? ' (' + sizeStr + ')' : ''} برای باز کردن باید روی دستگاه ذخیره شود.`
-
-        const btnRow = document.createElement('div')
-        btnRow.style.cssText = 'display:flex;gap:10px;'
-
-        const cancelBtn = document.createElement('button')
-        cancelBtn.type = 'button'
-        cancelBtn.textContent = 'لغو'
-        cancelBtn.style.cssText = [
-            'flex:1', 'padding:12px 0', 'border-radius:12px', 'border:1px solid #e5e5e5',
-            'background:#f5f5f5', 'color:#333', 'font-size:14px', 'font-weight:500',
-            'cursor:pointer', 'font-family:inherit',
-        ].join(';')
-
-        const saveBtn = document.createElement('button')
-        saveBtn.type = 'button'
-        saveBtn.textContent = 'ذخیره روی دستگاه'
-        saveBtn.style.cssText = [
-            'flex:1.4', 'padding:12px 0', 'border-radius:12px', 'border:none',
-            'background:#3390ec', 'color:#fff', 'font-size:14px', 'font-weight:600',
-            'cursor:pointer', 'font-family:inherit',
-        ].join(';')
-
-        btnRow.appendChild(cancelBtn)
-        btnRow.appendChild(saveBtn)
-        sheet.appendChild(title)
-        sheet.appendChild(desc)
-        sheet.appendChild(btnRow)
-        overlay.appendChild(sheet)
-
-        const styleId = 'chat-file-save-style'
-        if (!document.getElementById(styleId)) {
-            const st = document.createElement('style')
-            st.id = styleId
-            st.textContent = '@keyframes cf-fade-in{from{opacity:0}to{opacity:1}}@keyframes cf-slide-up{from{transform:translateY(100%)}to{transform:translateY(0)}}'
-            document.head.appendChild(st)
-        }
-
-        const close = (confirmed: boolean) => {
-            try { overlay.remove() } catch { /* noop */ }
-            resolve(confirmed)
-        }
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false) })
-        cancelBtn.addEventListener('click', () => close(false))
-        saveBtn.addEventListener('click', () => close(true))
-
-        document.body.appendChild(overlay)
-    })
-}
-
-async function offerSaveOrDecline(entry: CachedFileEntry, displayName: string, fileId?: string): Promise<void> {
-    if (fileId && declinedSaveSession.has(fileId)) {
-        diagLog('user previously declined save -> noop')
-        return
-    }
-    diagLog('prompting user to save:', displayName)
-    const confirmed = await promptSaveAction(displayName, entry.blob?.size || 0)
-    if (confirmed) {
-        diagLog('user confirmed save -> anchor download')
-        triggerAnchorDownload(entry.blob, displayName)
-    } else {
-        diagLog('user declined save')
-        if (fileId) declinedSaveSession.add(fileId)
-    }
-}
-
-async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode: 'open' | 'share' | 'download' = 'open', fileId?: string): Promise<void> {
+async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode: 'open' | 'share' | 'download' = 'open'): Promise<void> {
     const displayName = entry.fileName || fileName || 'file'
     const mimeType = entry.mimeType || entry.blob.type || ''
     diagLog('present mode=' + mode, 'name=' + displayName, 'mime=' + mimeType, 'inline=' + isInlineViewable(mimeType, displayName))
 
     if (mode === 'download') {
-        // Explicit save-to-disk only. This is the ONLY path that ever creates
-        // an anchor download without prompting. Reserved for the dedicated
-        // download UI affordance.
+        // Explicit save-to-disk action.
         triggerAnchorDownload(entry.blob, displayName)
         return
     }
 
     if (mode === 'share') {
-        // Share button: invoke navigator.share SYNCHRONOUSLY before any await
-        // so the user-activation token is preserved on Android Chrome HTTPS.
+        // Share button: invoke navigator.share SYNCHRONOUSLY (preserve user
+        // activation) so the OS share sheet appears with the cached file.
+        // This works identically across browsers/devices when supported.
         const result = shareBlobSync(entry, displayName)
         if (result === false) {
-            // No share API at all (insecure context, desktop, etc.) — for
-            // renderable types open inline; for binary types prompt to save.
-            if (isInlineViewable(mimeType, displayName)) {
-                openBlobInTab(entry.blob, displayName)
-            } else {
-                await offerSaveOrDecline(entry, displayName, fileId)
-            }
+            // Share API unavailable on this device/context — fall back to
+            // anchor download from cache so behavior stays consistent.
+            triggerAnchorDownload(entry.blob, displayName)
             return
         }
         const shared = await result
-        if (shared) return
-        // share() rejected (NotAllowedError / SecurityError). Fallback:
-        // renderable -> open inline; binary -> ask user.
-        if (isInlineViewable(mimeType, displayName)) {
-            openBlobInTab(entry.blob, displayName)
-        } else {
-            await offerSaveOrDecline(entry, displayName, fileId)
+        if (!shared) {
+            // share() rejected (e.g. Samsung Chrome PWA NotAllowedError).
+            triggerAnchorDownload(entry.blob, displayName)
         }
         return
     }
 
-    // mode === 'open' (tap on file body)
-    // Renderable formats (PDF, images, video, audio): open inline.
+    // mode === 'open' — tap on file body.
+    // Uniform behavior across all browsers/devices:
+    //   * PDF / image / video / audio  → open in browser viewer (no download)
+    //   * Everything else              → trigger device download from cache
+    // The blob always comes from IndexedDB cache, so the network is hit at
+    // most once per file regardless of how many times the user taps.
     if (isInlineViewable(mimeType, displayName)) {
         if (openBlobInTab(entry.blob, displayName)) return
-        // Popup-blocked → try synchronous share.
-        const result = shareBlobSync(entry, displayName)
-        if (result === false) return
-        await result
-        return
+        // Popup blocked → fall through to anchor download.
     }
-    // Binary formats (xlsx, heic, docx, txt, zip, ...): try share first
-    // (preserving user activation). If share fails, do NOT auto-download —
-    // ask the user via an action sheet so they aren't surprised by repeated
-    // downloads on every tap.
-    const result = shareBlobSync(entry, displayName)
-    if (result === false) {
-        await offerSaveOrDecline(entry, displayName, fileId)
-        return
-    }
-    const shared = await result
-    if (!shared) {
-        await offerSaveOrDecline(entry, displayName, fileId)
-    }
+    triggerAnchorDownload(entry.blob, displayName)
 }
 
 async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: string): Promise<CachedFileEntry> {
@@ -487,6 +363,7 @@ async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: stri
         console.warn('[useChatFileHandler] cache write failed', err)
     }
     memoryCache.set(fileId, entry)
+    cachedFileIds[fileId] = true
     return entry
 }
 
@@ -499,11 +376,12 @@ async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: stri
  */
 export async function prewarmFileCache(fileId: string): Promise<void> {
     if (!fileId) return
-    if (memoryCache.has(fileId)) return
+    if (memoryCache.has(fileId)) { cachedFileIds[fileId] = true; return }
     try {
         const entry = await fileStore.getItem(fileId)
         if (isCachedFileEntry(entry)) {
             memoryCache.set(fileId, entry)
+            cachedFileIds[fileId] = true
         }
     } catch { /* noop */ }
 }
@@ -531,7 +409,7 @@ export async function handleFileClick(fileId: string, fileUrl: string, fileName:
     if (memEntry) {
         // Don't await before presentCachedFile — share() must be called inside
         // the user-activation window started by the click event.
-        void presentCachedFile(memEntry, memEntry.fileName || fileName, 'open', fileId)
+        void presentCachedFile(memEntry, memEntry.fileName || fileName, 'open')
         return
     }
 
@@ -541,14 +419,14 @@ export async function handleFileClick(fileId: string, fileUrl: string, fileName:
     // and subsequent taps hit the synchronous memory cache).
     const cached = await readCachedEntry(fileId)
     if (cached) {
-        await presentCachedFile(cached, cached.fileName || fileName, 'open', fileId)
+        await presentCachedFile(cached, cached.fileName || fileName, 'open')
         return
     }
 
     downloadingFiles[fileId] = true
     try {
         const entry = await fetchAndCacheFile(fileId, fileUrl, fileName)
-        await presentCachedFile(entry, entry.fileName, 'open', fileId)
+        await presentCachedFile(entry, entry.fileName, 'open')
     } catch (err) {
         console.error('[useChatFileHandler] file download failed', err)
         throw err
@@ -589,7 +467,7 @@ export async function shareFile(fileId: string, fileName: string, mimeType: stri
     // Synchronous fast-path to preserve transient user activation for share().
     const memEntry = readMemoryEntry(fileId)
     if (memEntry) {
-        void presentCachedFile(memEntry, memEntry.fileName || fileName, 'share', fileId)
+        void presentCachedFile(memEntry, memEntry.fileName || fileName, 'share')
         return true
     }
 
@@ -612,7 +490,7 @@ export async function shareFile(fileId: string, fileName: string, mimeType: stri
         entry = { ...entry, mimeType }
     }
 
-    await presentCachedFile(entry, entry.fileName || fileName, 'share', fileId)
+    await presentCachedFile(entry, entry.fileName || fileName, 'share')
     return true
 }
 
@@ -637,6 +515,7 @@ export async function clearFileCache(): Promise<void> {
     try {
         await fileStore.clear()
         memoryCache.clear()
+        for (const k of Object.keys(cachedFileIds)) delete cachedFileIds[k]
     } catch (err) {
         console.error('[useChatFileHandler] clear cache failed', err)
         throw err
