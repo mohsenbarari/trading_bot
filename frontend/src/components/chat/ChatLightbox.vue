@@ -58,7 +58,7 @@ const DOUBLE_TAP_ZOOM_SCALE = 2.4
 const DOUBLE_TAP_MAX_DELAY = 280
 const DOUBLE_TAP_MAX_DISTANCE = 24
 
-const isAlbumMenuOpen = ref(false)
+const isActionMenuOpen = ref(false)
 const isAlbumDownloadSheetOpen = ref(false)
 const albumDownloadSelection = ref<number[]>([])
 
@@ -121,13 +121,13 @@ const sceneTransform = computed<CSSProperties>(() => {
 })
 
 watch(() => props.lightboxMedia?.currentIndex, () => {
-  isAlbumMenuOpen.value = false
+  isActionMenuOpen.value = false
   resetMediaZoom()
   resetGesture()
 })
 
 watch(() => props.lightboxMedia?.albumId, () => {
-  isAlbumMenuOpen.value = false
+  isActionMenuOpen.value = false
   isAlbumDownloadSheetOpen.value = false
   albumDownloadSelection.value = []
   resetMediaZoom()
@@ -291,17 +291,26 @@ function downloadLightboxItem(item: LightboxItem, index: number) {
   document.body.removeChild(a)
 }
 
-function toggleAlbumMenu() {
-  if (!hasAlbumStrip.value) return
-  isAlbumMenuOpen.value = !isAlbumMenuOpen.value
+function toggleActionMenu() {
+  isActionMenuOpen.value = !isActionMenuOpen.value
 }
 
 function openAlbumDownloadSheet() {
   if (!props.lightboxMedia || !hasAlbumStrip.value) return
 
   albumDownloadSelection.value = props.lightboxMedia.items.map((item) => item.msgId)
-  isAlbumMenuOpen.value = false
+  isActionMenuOpen.value = false
   isAlbumDownloadSheetOpen.value = true
+}
+
+function handleMenuDownloadCurrent() {
+  isActionMenuOpen.value = false
+  handleSaveMedia()
+}
+
+function handleMenuDeleteCurrent() {
+  isActionMenuOpen.value = false
+  emitForCurrent('delete')
 }
 
 function closeAlbumDownloadSheet() {
@@ -314,8 +323,8 @@ function handleOverlayClick() {
     return
   }
 
-  if (isAlbumMenuOpen.value) {
-    isAlbumMenuOpen.value = false
+  if (isActionMenuOpen.value) {
+    isActionMenuOpen.value = false
     return
   }
 
@@ -712,11 +721,6 @@ function handleTouchEnd(event: TouchEvent) {
       <div v-if="lightboxMedia && currentItem" class="lightbox-overlay" @click="handleOverlayClick">
         <div class="lightbox-shell">
           <div class="lightbox-toolbar" @click.stop>
-            <div class="lightbox-counter" v-if="lightboxMedia.items.length > 1">
-              {{ lightboxMedia.currentIndex + 1 }} / {{ lightboxMedia.items.length }}
-            </div>
-            <div v-else class="lightbox-counter placeholder"></div>
-
             <div class="lightbox-actions">
               <div class="lightbox-action-group lightbox-action-group-primary">
                 <button class="lightbox-btn lightbox-btn-labeled lightbox-btn-emphasis" @click.stop="emitForCurrent('reply')" title="پاسخ">
@@ -740,19 +744,19 @@ function handleTouchEnd(event: TouchEvent) {
               </div>
 
               <div class="lightbox-action-group lightbox-action-group-utility">
-                <button v-if="canDeleteCurrentItem" class="lightbox-btn danger" @click.stop="emitForCurrent('delete')" title="حذف">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                </button>
-                <button class="lightbox-btn" @click.stop="handleSaveMedia" :title="hasAlbumStrip ? 'ذخیره مدیای جاری' : 'ذخیره'">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                </button>
-                <div v-if="hasAlbumStrip" class="lightbox-menu-wrap">
-                  <button class="lightbox-btn" :class="{ active: isAlbumMenuOpen }" @click.stop="toggleAlbumMenu" title="منوی آلبوم">
+                <div class="lightbox-menu-wrap">
+                  <button class="lightbox-btn" :class="{ active: isActionMenuOpen }" @click.stop="toggleActionMenu" title="گزینه‌های بیشتر">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="5" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="12" cy="19" r="1.8" /></svg>
                   </button>
-                  <div v-if="isAlbumMenuOpen" class="lightbox-menu-panel" @click.stop>
-                    <button class="lightbox-menu-item" @click.stop="openAlbumDownloadSheet">
+                  <div v-if="isActionMenuOpen" class="lightbox-menu-panel" @click.stop>
+                    <button class="lightbox-menu-item" @click.stop="handleMenuDownloadCurrent">
+                      دانلود
+                    </button>
+                    <button v-if="hasAlbumStrip" class="lightbox-menu-item" @click.stop="openAlbumDownloadSheet">
                       دانلود آلبوم
+                    </button>
+                    <button v-if="canDeleteCurrentItem" class="lightbox-menu-item lightbox-menu-item-danger" @click.stop="handleMenuDeleteCurrent">
+                      حذف
                     </button>
                   </div>
                 </div>
@@ -786,36 +790,40 @@ function handleTouchEnd(event: TouchEvent) {
                     :class="{ active: index === lightboxMedia.currentIndex }"
                     :style="getStageItemStyle(index)"
                   >
-                    <img
-                      v-if="item.type === 'image'"
-                      :src="item.url"
-                      :class="['lightbox-media', { 'is-zoomable': index === lightboxMedia.currentIndex, 'is-zoomed': index === lightboxMedia.currentIndex && isCurrentMediaZoomed }]"
-                      :style="getActiveMediaStyle(item, index)"
-                      alt="مدیا"
-                      draggable="false"
-                      @click.stop
-                      @dblclick.stop="handleMediaDoubleClick($event, item, index)"
-                    />
-                    <video
-                      v-else
-                      :src="item.url"
-                      :class="['lightbox-media', { 'is-zoomable': index === lightboxMedia.currentIndex, 'is-zoomed': index === lightboxMedia.currentIndex && isCurrentMediaZoomed }]"
-                      :style="getActiveMediaStyle(item, index)"
-                      :controls="index === lightboxMedia.currentIndex && !isCurrentMediaZoomed"
-                      :autoplay="index === lightboxMedia.currentIndex"
-                      :muted="index !== lightboxMedia.currentIndex"
-                      playsinline
-                      @click.stop
-                    ></video>
+                      <div class="lightbox-media-frame">
+                        <div v-if="lightboxMedia.items.length > 1 && index === lightboxMedia.currentIndex" class="lightbox-stage-counter">
+                          {{ index + 1 }} / {{ lightboxMedia.items.length }}
+                        </div>
+                        <img
+                          v-if="item.type === 'image'"
+                          :src="item.url"
+                          :class="['lightbox-media', { 'is-zoomable': index === lightboxMedia.currentIndex, 'is-zoomed': index === lightboxMedia.currentIndex && isCurrentMediaZoomed }]"
+                          :style="getActiveMediaStyle(item, index)"
+                          alt="مدیا"
+                          draggable="false"
+                          @click.stop
+                          @dblclick.stop="handleMediaDoubleClick($event, item, index)"
+                        />
+                        <video
+                          v-else
+                          :src="item.url"
+                          :class="['lightbox-media', { 'is-zoomable': index === lightboxMedia.currentIndex, 'is-zoomed': index === lightboxMedia.currentIndex && isCurrentMediaZoomed }]"
+                          :style="getActiveMediaStyle(item, index)"
+                          :controls="index === lightboxMedia.currentIndex && !isCurrentMediaZoomed"
+                          :autoplay="index === lightboxMedia.currentIndex"
+                          :muted="index !== lightboxMedia.currentIndex"
+                          playsinline
+                          @click.stop
+                        ></video>
+                      </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div class="lightbox-strip-slot" @click.stop>
+            <div v-if="hasAlbumStrip" class="lightbox-strip-slot" @click.stop>
             <div
-              v-if="hasAlbumStrip"
               class="lightbox-strip"
               @touchstart="handleTouchStart($event, 'strip')"
               @touchmove="handleTouchMove"
@@ -897,7 +905,7 @@ function handleTouchEnd(event: TouchEvent) {
 .lightbox-overlay {
   position: fixed;
   inset: 0;
-  padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+  padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
   background: rgba(7, 10, 16, 0.76);
   display: flex;
   align-items: center;
@@ -907,15 +915,15 @@ function handleTouchEnd(event: TouchEvent) {
 }
 
 .lightbox-shell {
-  width: min(98vw, 1400px);
+  width: min(100%, 1600px);
   max-width: 100%;
   min-width: 0;
-  height: min(100%, 1400px);
+  height: 100%;
   max-height: 100%;
   overflow: hidden;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: 8px;
   color: white;
 }
 
@@ -923,42 +931,21 @@ function handleTouchEnd(event: TouchEvent) {
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   flex-wrap: nowrap;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-}
-
-.lightbox-toolbar::-webkit-scrollbar {
-  display: none;
-}
-
-.lightbox-counter {
-  min-width: 68px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  font-size: 13px;
-  line-height: 1;
-  text-align: center;
-  backdrop-filter: blur(12px);
-}
-
-.lightbox-counter.placeholder {
-  visibility: hidden;
+  overflow: visible;
 }
 
 .lightbox-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   flex-wrap: nowrap;
-  gap: 12px;
-  flex: 0 0 auto;
-  min-width: max-content;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .lightbox-action-group {
@@ -970,6 +957,8 @@ function handleTouchEnd(event: TouchEvent) {
 }
 
 .lightbox-action-group-primary {
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 6px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
@@ -1045,7 +1034,7 @@ function handleTouchEnd(event: TouchEvent) {
   position: absolute;
   top: calc(100% + 10px);
   inset-inline-end: 0;
-  min-width: 152px;
+  min-width: 164px;
   padding: 8px;
   border-radius: 18px;
   background: rgba(12, 17, 24, 0.94);
@@ -1071,6 +1060,14 @@ function handleTouchEnd(event: TouchEvent) {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.lightbox-menu-item-danger {
+  color: #fecaca;
+}
+
+.lightbox-menu-item-danger:hover {
+  background: rgba(185, 28, 28, 0.18);
+}
+
 .lightbox-stage-wrap {
   min-height: 0;
   min-width: 0;
@@ -1082,20 +1079,20 @@ function handleTouchEnd(event: TouchEvent) {
 }
 
 .lightbox-stage {
-  width: min(100%, 820px);
+  width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
   max-width: 100%;
   max-height: 100%;
-  padding: 10px;
+  padding: clamp(2px, 0.4vw, 8px);
   box-sizing: border-box;
-  border-radius: 24px;
+  border-radius: 28px;
   overflow: hidden;
   display: grid;
   place-items: center;
-  background: rgba(10, 14, 20, 0.72);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+  background: rgba(10, 14, 20, 0.46);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.2);
 }
 
 .lightbox-stage-scene {
@@ -1128,7 +1125,7 @@ function handleTouchEnd(event: TouchEvent) {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 10px;
+  padding: clamp(4px, 0.55vw, 10px);
   box-sizing: border-box;
   overflow: hidden;
   min-width: 0;
@@ -1139,6 +1136,35 @@ function handleTouchEnd(event: TouchEvent) {
 
 .lightbox-stage-card.active {
   transition-duration: 0.34s;
+}
+
+.lightbox-media-frame {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.lightbox-stage-counter {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(10, 14, 20, 0.6);
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
 }
 
 .lightbox-media {
@@ -1184,10 +1210,10 @@ function handleTouchEnd(event: TouchEvent) {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  min-height: 92px;
+  min-height: 82px;
   display: grid;
   place-items: center;
-  padding: 10px 18px 8px;
+  padding: 4px 12px 2px;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -1216,7 +1242,7 @@ function handleTouchEnd(event: TouchEvent) {
 .lightbox-strip {
   --thumb-size: 72px;
   position: relative;
-  width: min(100%, 520px);
+  width: min(100%, 640px);
   height: calc(var(--thumb-size) + 24px);
   box-sizing: border-box;
   border-radius: 28px;
@@ -1484,24 +1510,24 @@ function handleTouchEnd(event: TouchEvent) {
 
 @media (max-width: 640px) {
   .lightbox-overlay {
-    padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    padding: max(6px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
   }
 
   .lightbox-shell {
     width: 100%;
     height: 100%;
-    gap: 10px;
+    gap: 6px;
   }
 
   .lightbox-toolbar {
     align-items: center;
-    justify-content: flex-start;
-    gap: 10px;
+    justify-content: flex-end;
+    gap: 8px;
   }
 
   .lightbox-actions {
-    width: auto;
-    justify-content: flex-start;
+    width: 100%;
+    justify-content: space-between;
     gap: 8px;
   }
 
@@ -1520,25 +1546,42 @@ function handleTouchEnd(event: TouchEvent) {
   }
 
   .lightbox-btn-labeled {
-    min-width: 82px;
-    padding-inline: 12px;
-    font-size: 12px;
+    min-width: 40px;
+    width: 40px;
+    padding-inline: 0;
+    font-size: 0;
+    border-radius: 50%;
+  }
+
+  .lightbox-btn-label {
+    display: none;
   }
 
   .lightbox-stage {
     width: 100%;
-    padding: 8px;
-    border-radius: 18px;
+    padding: 2px;
+    border-radius: 20px;
+  }
+
+  .lightbox-stage-card {
+    padding: 4px;
+  }
+
+  .lightbox-stage-counter {
+    top: 10px;
+    right: 10px;
+    padding: 7px 10px;
+    font-size: 11px;
   }
 
   .lightbox-menu-panel {
-    inset-inline-end: -4px;
+    inset-inline-end: 0;
   }
 
   .lightbox-strip-slot {
     width: 100%;
-    min-height: 80px;
-    padding-inline: 12px;
+    min-height: 74px;
+    padding-inline: 8px;
   }
 
   .lightbox-thumb {
@@ -1546,8 +1589,8 @@ function handleTouchEnd(event: TouchEvent) {
   }
 
   .lightbox-strip {
-    --thumb-size: 64px;
-    width: min(100%, 420px);
+    --thumb-size: 60px;
+    width: min(100%, 520px);
   }
 
   .album-download-backdrop {
