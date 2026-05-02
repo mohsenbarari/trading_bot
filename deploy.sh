@@ -35,6 +35,39 @@ print_header() {
 }
 
 # ==========================================
+# Auto Cleanup Logic (Every 10 deploys)
+# ==========================================
+auto_cleanup_local() {
+    COUNT_FILE="$PROJECT_DIR/.deploy_count"
+    COUNT=$(cat "$COUNT_FILE" 2>/dev/null || echo 0)
+    COUNT=$((COUNT + 1))
+    
+    if [ "$COUNT" -ge 10 ]; then
+        print_header "🧹 Auto-cleanup: Reclaiming local space"
+        docker system prune -f
+        echo 0 > "$COUNT_FILE"
+    else
+        echo "$COUNT" > "$COUNT_FILE"
+        echo "📊 Local Deployment count: $COUNT/10 (next cleanup in $((10 - COUNT)) builds)"
+    fi
+}
+
+auto_cleanup_iran() {
+    print_header "🧹 Checking Iran server for auto-cleanup"
+    ssh_iran "cd $IRAN_PROJECT_DIR && \
+        COUNT=\$(cat .deploy_count 2>/dev/null || echo 0); \
+        COUNT=\$((COUNT + 1)); \
+        if [ \"\$COUNT\" -ge 10 ]; then \
+            echo 'Reclaiming space on Iran server...'; \
+            docker system prune -f; \
+            echo 0 > .deploy_count; \
+        else \
+            echo \$COUNT > .deploy_count; \
+            echo \"Iran Deployment count: \$COUNT/10\"; \
+        fi"
+}
+
+# ==========================================
 # Parse Arguments
 # ==========================================
 TARGET="${1:-all}"  # all | frontend | foreign | iran
@@ -137,6 +170,8 @@ deploy_iran() {
 
     echo "✅ Iran deployment complete!"
     ssh_iran "cd $IRAN_PROJECT_DIR && docker compose -f docker-compose.iran.yml ps"
+    
+    auto_cleanup_iran
 }
 
 # ==========================================
@@ -152,6 +187,8 @@ deploy_foreign() {
 
     echo "✅ Foreign deployment complete!"
     docker compose ps
+
+    auto_cleanup_local
 }
 
 # ==========================================
