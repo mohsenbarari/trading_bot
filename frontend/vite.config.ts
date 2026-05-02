@@ -11,9 +11,14 @@ export default defineConfig({
       workbox: {
         cleanupOutdatedCaches: true,
         clientsClaim: true,
-        skipWaiting: true
+        skipWaiting: true,
+        importScripts: ['share-target-sw.js'],
+        // Don't intercept POST navigations — let our share-target handler
+        // (above) own POST /share-receive, and let normal API POSTs hit the
+        // network without going through the navigation fallback.
+        navigateFallbackDenylist: [/^\/api\//, /^\/share-receive/],
       },
-      includeAssets: ['favicon.ico', 'pwa-192x192.png', 'pwa-512x512.png'],
+      includeAssets: ['favicon.ico', 'pwa-192x192.png', 'pwa-512x512.png', 'share-target-sw.js'],
       manifest: {
         id: '/?source=pwa',
         name: 'Gold',
@@ -38,7 +43,38 @@ export default defineConfig({
             type: 'image/png',
             purpose: 'any maskable'
           }
-        ]
+        ],
+        share_target: {
+          action: '/share-receive',
+          method: 'POST',
+          enctype: 'multipart/form-data',
+          params: {
+            title: 'title',
+            text: 'text',
+            url: 'url',
+            files: [
+              {
+                name: 'files',
+                accept: [
+                  'image/*',
+                  'video/*',
+                  'audio/*',
+                  'application/pdf',
+                  'application/zip',
+                  'application/x-zip-compressed',
+                  'application/msword',
+                  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                  'application/vnd.ms-excel',
+                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                  'application/vnd.ms-powerpoint',
+                  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                  'text/plain',
+                  'text/csv',
+                ],
+              },
+            ],
+          },
+        },
       }
     })
   ],
