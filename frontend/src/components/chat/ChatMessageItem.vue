@@ -257,7 +257,7 @@
             <div class="doc-name">{{ docDisplayName }}</div>
             <div class="doc-size">{{ docStatusText }}</div>
           </div>
-          <div v-if="!isDocumentBusy" class="doc-download-icon">
+          <div v-if="!isDocumentBusy && !isDocumentCached" class="doc-download-icon">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="7 10 12 15 17 10"></polyline>
@@ -321,9 +321,11 @@ import {
   canShareFiles,
   useChatFileHandler,
   prewarmFileCache,
+  useFileCacheRegistry,
 } from '../../composables/chat/useChatFileHandler'
 
 const { downloadingFiles: cachedDownloadingFiles } = useChatFileHandler()
+const cachedFileIds = useFileCacheRegistry()
 const supportsFileShare = canShareFiles()
 
 const messageTimeFormatter = new Intl.DateTimeFormat('fa-IR', {
@@ -533,6 +535,7 @@ const docTransferProgress = computed(() => {
   return 0
 })
 const showDocumentShare = computed(() => supportsFileShare && !isDocumentBusy.value && !props.msg.is_sending)
+const isDocumentCached = computed(() => Boolean(docFileId.value && cachedFileIds[docFileId.value!]))
 
 function handleDocumentBusyClick() {
   if (props.msg.is_sending) {
