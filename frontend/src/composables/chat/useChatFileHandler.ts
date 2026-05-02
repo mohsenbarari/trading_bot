@@ -95,6 +95,21 @@ function diagLog(...parts: unknown[]) {
     if (box) box.textContent = diagLines.join('\n')
 }
 
+/**
+ * Force-show the diagnostic overlay (when ?chatFileDebug=1) with an initial
+ * banner. Call once at app startup so the user can confirm the flag is
+ * active even before any file is tapped.
+ */
+export function initChatFileDebugOverlay(): void {
+    if (!isDiagEnabled()) return
+    const navAny = navigator as Navigator & { share?: unknown; canShare?: unknown }
+    diagLog('[chat-file] debug overlay READY')
+    diagLog('share API:', typeof navAny.share === 'function' ? 'present' : 'MISSING')
+    diagLog('canShare API:', typeof navAny.canShare === 'function' ? 'present' : 'missing')
+    diagLog('secure ctx:', String(window.isSecureContext))
+    diagLog('UA:', navigator.userAgent.slice(0, 80))
+}
+
 function isCachedFileEntry(value: unknown): value is CachedFileEntry {
     return Boolean(
         value
@@ -397,7 +412,8 @@ export async function prewarmFileCache(fileId: string): Promise<void> {
  */
 export async function handleFileClick(fileId: string, fileUrl: string, fileName: string): Promise<void> {
     if (!fileId) return
-    if (downloadingFiles[fileId]) return
+    diagLog('handleFileClick id=' + fileId, 'name=' + fileName)
+    if (downloadingFiles[fileId]) { diagLog('already downloading -> skip'); return }
 
     // SYNCHRONOUS fast-path: if the file is already in memory, call
     // presentCachedFile WITHOUT awaiting an IDB read first. This preserves the
@@ -460,6 +476,7 @@ export async function downloadFileToDisk(fileId: string, fileUrl: string, fileNa
  */
 export async function shareFile(fileId: string, fileName: string, mimeType: string, fileUrl?: string): Promise<boolean> {
     if (!fileId) return false
+    diagLog('shareFile id=' + fileId, 'name=' + fileName, 'mime=' + (mimeType || ''))
 
     // Synchronous fast-path to preserve transient user activation for share().
     const memEntry = readMemoryEntry(fileId)

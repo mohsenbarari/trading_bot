@@ -12,6 +12,7 @@ import { requestNotificationPermission, showBrowserNotification } from './utils/
 import { unlockAudioContext } from './utils/audio'
 import { initChatUploadBackground } from './services/chatUploadBackground'
 import { initChatDocumentDownloadBackground } from './services/chatDocumentDownloadBackground'
+import { initChatFileDebugOverlay } from './composables/chat/useChatFileHandler'
 
 
 const route = useRoute()
@@ -22,6 +23,10 @@ const notificationStore = useNotificationStore()
 onMounted(() => {
   // راه‌اندازی تایمر انقضای توکن — ریدایرکت خودکار به لاگین
   setupExpiryTimer()
+
+  // Show the on-screen [chat-file] diagnostic overlay when ?chatFileDebug=1
+  // is set (or persisted in localStorage). No-op otherwise.
+  initChatFileDebugOverlay()
 
   // Initialize the background chat upload service. This restores any
   // pending uploads saved to IndexedDB from a previous session and resumes
