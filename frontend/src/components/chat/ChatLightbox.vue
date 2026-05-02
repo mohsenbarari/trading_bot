@@ -313,6 +313,12 @@ function handleMenuDeleteCurrent() {
   emitForCurrent('delete')
 }
 
+function handleMediaTap() {
+  if (isActionMenuOpen.value) {
+    isActionMenuOpen.value = false
+  }
+}
+
 function closeAlbumDownloadSheet() {
   isAlbumDownloadSheetOpen.value = false
 }
@@ -735,7 +741,7 @@ function handleTouchEnd(event: TouchEvent) {
                   </span>
                   <span class="lightbox-btn-label">هدایت</span>
                 </button>
-                <button class="lightbox-btn lightbox-btn-labeled lightbox-btn-emphasis" @click.stop="emitForCurrent('share')" title="اشتراک‌گذاری">
+                <button class="lightbox-btn lightbox-btn-labeled lightbox-btn-emphasis lightbox-btn-mobile-icon-only" @click.stop="emitForCurrent('share')" title="اشتراک‌گذاری">
                   <span class="lightbox-btn-icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
                   </span>
@@ -801,7 +807,7 @@ function handleTouchEnd(event: TouchEvent) {
                           :style="getActiveMediaStyle(item, index)"
                           alt="مدیا"
                           draggable="false"
-                          @click.stop
+                          @click.stop="handleMediaTap"
                           @dblclick.stop="handleMediaDoubleClick($event, item, index)"
                         />
                         <video
@@ -813,7 +819,7 @@ function handleTouchEnd(event: TouchEvent) {
                           :autoplay="index === lightboxMedia.currentIndex"
                           :muted="index !== lightboxMedia.currentIndex"
                           playsinline
-                          @click.stop
+                          @click.stop="handleMediaTap"
                         ></video>
                       </div>
                   </div>
@@ -1546,14 +1552,30 @@ function handleTouchEnd(event: TouchEvent) {
   }
 
   .lightbox-btn-labeled {
+    min-width: 0;
+    width: auto;
+    padding-inline: 10px;
+    font-size: 11px;
+    border-radius: 999px;
+    gap: 6px;
+  }
+
+  .lightbox-btn-label {
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .lightbox-btn-mobile-icon-only {
     min-width: 40px;
     width: 40px;
     padding-inline: 0;
     font-size: 0;
     border-radius: 50%;
+    gap: 0;
   }
 
-  .lightbox-btn-label {
+  .lightbox-btn-mobile-icon-only .lightbox-btn-label {
     display: none;
   }
 
