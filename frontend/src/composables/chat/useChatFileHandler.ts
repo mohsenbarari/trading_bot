@@ -41,6 +41,60 @@ const downloadingFiles = reactive<Record<string, boolean>>({})
 // file resolve immediately without breaking the user-activation window.
 const memoryCache = new Map<string, CachedFileEntry>()
 
+// ─── On-screen diagnostic overlay (no DevTools required) ───────────────────
+// Activated when the URL contains ?chatFileDebug=1 OR when
+// localStorage.chatFileDebug === '1'. Shows the last 12 [chat-file] events
+// in a fixed bottom-left box so users on installed PWAs (where DevTools is
+// not accessible) can still report what's happening.
+function isDiagEnabled(): boolean {
+    try {
+        if (typeof window === 'undefined') return false
+        const sp = new URLSearchParams(window.location.search)
+        if (sp.get('chatFileDebug') === '1') {
+            try { localStorage.setItem('chatFileDebug', '1') } catch { /* noop */ }
+            return true
+        }
+        return localStorage.getItem('chatFileDebug') === '1'
+    } catch { return false }
+}
+
+let diagBox: HTMLDivElement | null = null
+const diagLines: string[] = []
+
+function ensureDiagBox(): HTMLDivElement | null {
+    if (!isDiagEnabled() || typeof document === 'undefined') return null
+    if (diagBox && document.body.contains(diagBox)) return diagBox
+    const el = document.createElement('div')
+    el.id = 'chat-file-debug-box'
+    el.style.cssText = [
+        'position:fixed', 'left:8px', 'bottom:8px', 'z-index:2147483647',
+        'max-width:92vw', 'max-height:42vh', 'overflow:auto',
+        'background:rgba(0,0,0,0.82)', 'color:#0f0', 'font:11px/1.35 monospace',
+        'padding:8px 10px', 'border-radius:8px', 'pointer-events:auto',
+        'direction:ltr', 'text-align:left', 'white-space:pre-wrap',
+        'box-shadow:0 2px 12px rgba(0,0,0,0.4)',
+    ].join(';')
+    el.addEventListener('click', () => { try { el.remove() } catch { /* noop */ } })
+    document.body.appendChild(el)
+    diagBox = el
+    return el
+}
+
+function diagLog(...parts: unknown[]) {
+    const stamp = new Date().toLocaleTimeString('en-GB', { hour12: false })
+    const line = '[' + stamp + '] ' + parts.map((p) => {
+        if (p instanceof Error) return p.name + ': ' + p.message
+        if (typeof p === 'object' && p !== null) {
+            try { return JSON.stringify(p) } catch { return String(p) }
+        }
+        return String(p)
+    }).join(' ')
+    diagLines.push(line)
+    while (diagLines.length > 12) diagLines.shift()
+    const box = ensureDiagBox()
+    if (box) box.textContent = diagLines.join('\n')
+}
+
 function isCachedFileEntry(value: unknown): value is CachedFileEntry {
     return Boolean(
         value
@@ -131,8 +185,10 @@ function shareBlobSync(entry: CachedFileEntry, fallbackName: string): Promise<bo
         canShare?: (data: ShareData) => boolean
         share?: (data: ShareData) => Promise<void>
     }
+    diagLog('share() invoked sync; ua-activation:', navigator.userActivation?.isActive, 'mime:', entry.mimeType, 'size:', entry.blob?.size)
     if (typeof navAny.share !== 'function') {
         console.info('[chat-file] share API unavailable (no navigator.share)')
+        diagLog('navigator.share MISSING -> fallback')
         return false
     }
     let file: File
@@ -144,14 +200,16 @@ function shareBlobSync(entry: CachedFileEntry, fallbackName: string): Promise<bo
         )
     } catch (err) {
         console.warn('[chat-file] File() construction failed', err)
+        diagLog('File() construct FAILED:', err as Error)
         return false
     }
     const shareData: ShareData = { files: [file] }
     if (typeof navAny.canShare === 'function') {
         try {
             const ok = navAny.canShare(shareData)
+            diagLog('canShare ->', ok, 'type:', file.type)
             if (!ok) console.info('[chat-file] canShare returned false; trying share() anyway', file.type)
-        } catch (err) { console.warn('[chat-file] canShare threw', err) }
+        } catch (err) { console.warn('[chat-file] canShare threw', err); diagLog('canShare threw:', err as Error) }
     }
     let promise: Promise<void>
     try {
@@ -161,16 +219,19 @@ function shareBlobSync(entry: CachedFileEntry, fallbackName: string): Promise<bo
         // Some browsers throw synchronously (e.g. NotAllowedError when
         // activation is missing) instead of rejecting.
         const name = (err as DOMException)?.name
-        if (name === 'AbortError') return Promise.resolve(true)
+        if (name === 'AbortError') { diagLog('share aborted (sync) -> ok'); return Promise.resolve(true) }
         console.warn('[chat-file] share threw sync', name, err)
+        diagLog('share THREW sync:', name || 'Error', '-', (err as Error)?.message || String(err))
         return false
     }
+    diagLog('share() returned promise; awaiting...')
     return promise
-        .then(() => true)
+        .then(() => { diagLog('share RESOLVED ok'); return true })
         .catch((err: unknown) => {
             const name = (err as DOMException)?.name
-            if (name === 'AbortError') return true
+            if (name === 'AbortError') { diagLog('share aborted (async) -> ok'); return true }
             console.warn('[chat-file] share rejected', name, err)
+            diagLog('share REJECTED:', name || 'Error', '-', (err as Error)?.message || String(err))
             return false
         })
 }
@@ -215,12 +276,14 @@ function fallbackSaveFromCache(entry: CachedFileEntry, displayName: string) {
     // the bytes come from IndexedDB, not the server. Showing an alert with
     // no actionable button leaves the user stranded with no way to access
     // the file, so we always fall back to a real save action here.
+    diagLog('fallbackSaveFromCache -> anchor download (offline)')
     triggerAnchorDownload(entry.blob, displayName)
 }
 
 async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode: 'open' | 'share' | 'download' = 'open'): Promise<void> {
     const displayName = entry.fileName || fileName || 'file'
     const mimeType = entry.mimeType || entry.blob.type || ''
+    diagLog('present mode=' + mode, 'name=' + displayName, 'mime=' + mimeType, 'inline=' + isInlineViewable(mimeType, displayName))
 
     if (mode === 'download') {
         // Explicit save-to-disk only. This is the ONLY path that ever creates
