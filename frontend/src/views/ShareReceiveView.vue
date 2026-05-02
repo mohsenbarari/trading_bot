@@ -1,91 +1,45 @@
 <template>
-  <div class="share-receive-view">
-    <header class="share-header">
-      <button class="back-btn" @click="goBack" aria-label="بازگشت">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="19" y1="12" x2="5" y2="12"></line>
-          <polyline points="12 19 5 12 12 5"></polyline>
-        </svg>
-      </button>
-      <h2>اشتراک‌گذاری در گفتگو</h2>
-    </header>
+  <div class="share-receive-root">
+    <!-- Loading / error states (rare; modal takes over on success) -->
+    <div v-if="loading" class="state-overlay">
+      <div class="spinner"></div>
+      <p>در حال آماده‌سازی...</p>
+    </div>
 
-    <div v-if="loading" class="state-msg">در حال بارگذاری...</div>
-
-    <div v-else-if="errorMsg" class="state-msg error">
+    <div v-else-if="errorMsg" class="state-overlay error">
       <p>{{ errorMsg }}</p>
       <button class="primary-btn" @click="goHome">بازگشت به خانه</button>
     </div>
 
-    <template v-else>
-      <section class="preview" v-if="files.length || mergedText">
-        <h3 class="section-title">محتوای دریافتی</h3>
+    <!-- Sending progress overlay -->
+    <div v-else-if="sending" class="state-overlay">
+      <div class="spinner"></div>
+      <p>در حال ارسال... ({{ sentCount }}/{{ totalSendCount }})</p>
+      <ul v-if="sendErrors.length" class="errors-list">
+        <li v-for="(e, i) in sendErrors" :key="i">{{ e }}</li>
+      </ul>
+    </div>
 
-        <div v-if="files.length" class="files-grid">
-          <div v-for="(f, i) in files" :key="i" class="file-card">
-            <img v-if="f.previewUrl && isImage(f.type)" :src="f.previewUrl" />
-            <div v-else class="file-icon">
-              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-              </svg>
-            </div>
-            <div class="file-meta">
-              <span class="fname">{{ f.name }}</span>
-              <span class="fsize">{{ formatSize(f.size) }}</span>
-            </div>
-          </div>
-        </div>
+    <!-- Final result (only shown briefly on errors before redirect) -->
+    <div v-else-if="sendDone" class="state-overlay">
+      <p v-if="sendErrors.length">
+        ارسال با {{ sendErrors.length }} خطا انجام شد
+      </p>
+      <p v-else>ارسال انجام شد</p>
+      <ul v-if="sendErrors.length" class="errors-list">
+        <li v-for="(e, i) in sendErrors" :key="i">{{ e }}</li>
+      </ul>
+      <button class="primary-btn" @click="goHome">بازگشت</button>
+    </div>
 
-        <div v-if="mergedText" class="text-preview">{{ mergedText }}</div>
-      </section>
-
-      <section class="targets">
-        <button class="primary-btn full" @click="openTargetPicker">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-            <circle cx="9" cy="7" r="4"></circle>
-            <line x1="19" y1="8" x2="19" y2="14"></line>
-            <line x1="22" y1="11" x2="16" y2="11"></line>
-          </svg>
-          <span>{{ selectedTargets.length ? `${selectedTargets.length} مقصد انتخاب شده — تغییر` : 'انتخاب مقصد' }}</span>
-        </button>
-
-        <ul v-if="selectedTargets.length" class="selected-targets-list">
-          <li v-for="t in selectedTargets" :key="t.id">
-            <span class="t-avatar">{{ avatarInitial(t.title) }}</span>
-            <span class="t-name">{{ t.title }}</span>
-            <span class="t-mobile">{{ t.subtitle || '' }}</span>
-          </li>
-        </ul>
-      </section>
-
-      <section class="actions">
-        <button
-          class="primary-btn full big"
-          :disabled="!canSend || sending"
-          @click="handleSend"
-        >
-          <span v-if="sending">در حال ارسال... ({{ sentCount }}/{{ totalSendCount }})</span>
-          <span v-else>ارسال</span>
-        </button>
-        <button class="ghost-btn" @click="goBack" :disabled="sending">انصراف</button>
-      </section>
-
-      <div v-if="sendErrors.length" class="state-msg warn">
-        <p>برخی موارد ارسال نشد:</p>
-        <ul>
-          <li v-for="(e, i) in sendErrors" :key="i">{{ e }}</li>
-        </ul>
-      </div>
-
-      <ChatForwardModal
-        :showForwardModal="showPicker"
-        :sortedConversations="conversations"
-        @close="showPicker = false"
-        @forward-to="handleTargetsPicked"
-      />
-    </template>
+    <!-- Main UI: full-screen messenger-like target picker -->
+    <ChatForwardModal
+      v-else
+      :showForwardModal="true"
+      :sortedConversations="conversations"
+      @close="handleClose"
+      @forward-to="handleTargetsPicked"
+    />
   </div>
 </template>
 
@@ -97,24 +51,21 @@ import { readSharedPayload, deleteSharedPayload, type SharedPayload, type Shared
 import ChatForwardModal from '../components/chat/ChatForwardModal.vue'
 import type { ChatForwardTarget, Conversation } from '../types/chat'
 
-type LocalFile = SharedFileEntry & { previewUrl?: string }
-
 const route = useRoute()
 const router = useRouter()
 
 const loading = ref(true)
 const errorMsg = ref('')
 const payloadKey = ref('')
-const files = ref<LocalFile[]>([])
+const files = ref<SharedFileEntry[]>([])
 const sharedTitle = ref('')
 const sharedText = ref('')
 const sharedUrl = ref('')
 
 const conversations = ref<Conversation[]>([])
-const showPicker = ref(false)
-const selectedTargets = ref<ChatForwardTarget[]>([])
 
 const sending = ref(false)
+const sendDone = ref(false)
 const sentCount = ref(0)
 const sendErrors = ref<string[]>([])
 
@@ -126,48 +77,16 @@ const mergedText = computed(() => {
   return parts.join('\n').trim()
 })
 
-const totalSendCount = computed(() => {
-  const perTarget = files.value.length + (mergedText.value ? 1 : 0)
-  return perTarget * selectedTargets.value.length
-})
-
-const canSend = computed(() => {
-  if (selectedTargets.value.length === 0) return false
-  return files.value.length > 0 || mergedText.value.length > 0
-})
-
-function isImage(mime: string) { return (mime || '').startsWith('image/') }
-
-function formatSize(bytes: number) {
-  if (!bytes || bytes < 1024) return `${bytes || 0} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-function avatarInitial(name: string) { return name ? name.charAt(0).toUpperCase() : '?' }
+const totalSendCount = ref(0)
 
 async function loadConversations() {
   try {
+    // Backend returns conversations already sorted by last_message_at desc,
+    // matching the messenger conversation list ordering exactly.
     const data = await apiFetchJson('/api/chat/conversations') as Conversation[]
     conversations.value = Array.isArray(data) ? data : []
   } catch {
     conversations.value = []
-  }
-}
-
-function buildPreview(file: SharedFileEntry): LocalFile {
-  const out: LocalFile = { ...file }
-  if (isImage(file.type)) {
-    try { out.previewUrl = URL.createObjectURL(file.blob) } catch { /* noop */ }
-  }
-  return out
-}
-
-function revokePreviews() {
-  for (const f of files.value) {
-    if (f.previewUrl) {
-      try { URL.revokeObjectURL(f.previewUrl) } catch { /* noop */ }
-    }
   }
 }
 
@@ -192,20 +111,26 @@ onMounted(async () => {
     sharedTitle.value = payload.title || ''
     sharedText.value = payload.text || ''
     sharedUrl.value = payload.url || ''
-    files.value = (payload.files || []).map(buildPreview)
+    files.value = payload.files || []
+    if (files.value.length === 0 && !mergedText.value) {
+      errorMsg.value = 'محتوایی برای اشتراک‌گذاری دریافت نشد.'
+      return
+    }
     await loadConversations()
   } finally {
     loading.value = false
   }
 })
 
-onBeforeUnmount(() => { revokePreviews() })
+onBeforeUnmount(() => { /* noop — blobs are released by GC */ })
 
-function openTargetPicker() { showPicker.value = true }
-
-function handleTargetsPicked(targets: ChatForwardTarget[]) {
-  selectedTargets.value = Array.isArray(targets) ? targets : []
-  showPicker.value = false
+function handleClose() {
+  // User cancelled the picker → go back without sending.
+  if (payloadKey.value) {
+    void deleteSharedPayload(payloadKey.value)
+  }
+  if (window.history.length > 1) router.back()
+  else router.replace('/')
 }
 
 function inferMessageType(mime: string): 'image' | 'video' | 'voice' | 'document' {
@@ -248,13 +173,18 @@ async function sendMessageRaw(receiverId: number, type: string, content: string)
   return resp.json()
 }
 
-async function handleSend() {
-  if (!canSend.value || sending.value) return
+async function handleTargetsPicked(targets: ChatForwardTarget[]) {
+  if (!Array.isArray(targets) || targets.length === 0) return
+
+  const perTarget = files.value.length + (mergedText.value ? 1 : 0)
+  totalSendCount.value = perTarget * targets.length
+
   sending.value = true
   sentCount.value = 0
   sendErrors.value = []
+  sendDone.value = false
 
-  // Upload files once, reuse file_ids across targets to avoid duplicate uploads.
+  // Upload files once, reuse file_ids across targets.
   const uploadedFiles: Array<{ src: SharedFileEntry, meta: { file_id: string, file_name: string, mime_type: string, size: number } }> = []
   for (const f of files.value) {
     const meta = await uploadOne(f)
@@ -265,8 +195,7 @@ async function handleSend() {
     }
   }
 
-  for (const target of selectedTargets.value) {
-    // Send each file as a chat message.
+  for (const target of targets) {
     for (const { src, meta } of uploadedFiles) {
       try {
         const type = inferMessageType(src.type)
@@ -277,7 +206,7 @@ async function handleSend() {
           size: meta.size || src.size,
         })
         await sendMessageRaw(target.id, type, content)
-      } catch (err: any) {
+      } catch {
         sendErrors.value.push(`ارسال «${src.name}» به ${target.title} ناموفق`)
       } finally {
         sentCount.value++
@@ -294,105 +223,65 @@ async function handleSend() {
     }
   }
 
-  // Cleanup the IDB entry — share is consumed.
   if (payloadKey.value) {
     void deleteSharedPayload(payloadKey.value)
   }
 
   sending.value = false
+  sendDone.value = true
 
-  // Navigate user to the last target's chat or to messenger home.
-  const last = selectedTargets.value[selectedTargets.value.length - 1]
-  if (last && sendErrors.value.length === 0) {
-    router.replace({ path: '/chat', query: { user_id: String(last.id) } })
+  // If no errors, redirect to last target's chat (single) or messenger home (multi).
+  if (sendErrors.value.length === 0) {
+    const first = targets[0]
+    if (targets.length === 1 && first) {
+      router.replace({ path: '/chat', query: { user_id: String(first.id) } })
+    } else {
+      router.replace({ path: '/chat' })
+    }
   }
+  // On errors, the result panel stays visible until user taps "بازگشت".
 }
 
-function goBack() {
-  if (window.history.length > 1) router.back()
-  else router.replace('/')
-}
 function goHome() { router.replace('/') }
 </script>
 
 <style scoped>
-.share-receive-view {
+.share-receive-root {
   min-height: 100vh;
-  padding: 16px;
-  padding-bottom: calc(env(safe-area-inset-bottom, 0) + 24px);
-  direction: rtl;
   background: var(--app-bg, #f5f7fb);
-  color: var(--app-fg, #1f2937);
+}
+.state-overlay {
+  position: fixed;
+  inset: 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-}
-.share-header {
-  display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  background: var(--app-bg, #f5f7fb);
+  color: var(--app-fg, #1f2937);
+  direction: rtl;
+  z-index: 10;
 }
-.share-header h2 { font-size: 17px; margin: 0; }
-.back-btn {
-  background: transparent; border: none; cursor: pointer; color: inherit;
-  padding: 6px; border-radius: 50%;
+.state-overlay.error { color: #b91c1c; }
+.spinner {
+  width: 36px; height: 36px; border-radius: 50%;
+  border: 3px solid rgba(51,144,236,0.2);
+  border-top-color: #3390ec;
+  animation: spin 0.9s linear infinite;
 }
-.section-title { font-size: 14px; opacity: 0.75; margin: 0 0 8px; }
-.preview { background: rgba(0,0,0,0.04); border-radius: 14px; padding: 12px; }
-.files-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 10px;
-}
-.file-card {
-  background: #fff; border-radius: 12px; padding: 8px; display: flex; flex-direction: column;
-  gap: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); overflow: hidden;
-}
-.file-card img {
-  width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 8px; background: #eee;
-}
-.file-icon {
-  width: 100%; aspect-ratio: 1 / 1; border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  background: #eef2ff; color: #3b5bdb;
-}
-.file-meta { display: flex; flex-direction: column; gap: 2px; }
-.fname { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fsize { font-size: 11px; opacity: 0.65; }
-.text-preview {
-  margin-top: 10px; padding: 10px 12px; background: #fff; border-radius: 10px;
-  font-size: 13px; white-space: pre-wrap; word-break: break-word;
-}
-.targets { display: flex; flex-direction: column; gap: 10px; }
-.selected-targets-list {
-  list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px;
-}
-.selected-targets-list li {
-  display: flex; align-items: center; gap: 10px;
-  background: #fff; border-radius: 10px; padding: 8px 12px;
+@keyframes spin { to { transform: rotate(360deg); } }
+.errors-list {
+  list-style: disc;
+  padding-inline-start: 20px;
   font-size: 13px;
+  color: #92400e;
+  max-width: 320px;
 }
-.t-avatar {
-  width: 32px; height: 32px; border-radius: 50%; background: #3390ec; color: #fff;
-  display: inline-flex; align-items: center; justify-content: center; font-weight: 700;
-}
-.t-name { flex: 1; font-weight: 600; }
-.t-mobile { font-size: 12px; opacity: 0.6; direction: ltr; }
-.actions { display: flex; gap: 10px; align-items: center; margin-top: 6px; }
 .primary-btn {
   background: #3390ec; color: #fff; border: none; border-radius: 12px;
-  padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 8px; justify-content: center;
+  padding: 12px 22px; font-size: 14px; font-weight: 600; cursor: pointer;
 }
-.primary-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.primary-btn.full { width: 100%; }
-.primary-btn.big { padding: 14px 18px; font-size: 15px; }
-.ghost-btn {
-  background: transparent; border: 1px solid rgba(0,0,0,0.15); color: inherit;
-  border-radius: 12px; padding: 12px 18px; font-size: 14px; cursor: pointer;
-}
-.ghost-btn:disabled { opacity: 0.5; }
-.state-msg { padding: 14px; border-radius: 12px; background: #fff; }
-.state-msg.error { color: #b91c1c; }
-.state-msg.warn { color: #92400e; background: #fffbeb; }
-.state-msg ul { margin: 8px 0 0; padding-inline-start: 18px; font-size: 13px; }
 </style>
