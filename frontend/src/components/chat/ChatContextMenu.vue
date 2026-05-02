@@ -26,6 +26,16 @@
               </svg>
               <span style="flex:1;">دانلود آلبوم</span>
             </div>
+            <div v-if="canShareFiles" class="menu-item" v-ripple @click="$emit('share-album')" role="menuitem">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="18" cy="5" r="3"></circle>
+                <circle cx="6" cy="12" r="3"></circle>
+                <circle cx="18" cy="19" r="3"></circle>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+              </svg>
+              <span style="flex:1;">اشتراک‌گذاری آلبوم</span>
+            </div>
         </template>
         <template v-if="menuState.message?.message_type === 'text'">
             <div class="menu-item" v-ripple @click="$emit('copy')" role="menuitem">
@@ -45,6 +55,19 @@
                 <line x1="12" y1="15" x2="12" y2="3"></line>
               </svg>
               <span style="flex:1;">ذخیره در گالری</span>
+            </div>
+        </template>
+        <!-- Share option for any cacheable media -->
+        <template v-if="canShareFiles && !isAlbumSelection && shareableType">
+            <div class="menu-item" v-ripple @click="$emit('share')" role="menuitem">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="18" cy="5" r="3"></circle>
+                <circle cx="6" cy="12" r="3"></circle>
+                <circle cx="18" cy="19" r="3"></circle>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+              </svg>
+              <span style="flex:1;">اشتراک‌گذاری</span>
             </div>
         </template>
         <template v-if="canEdit">
@@ -70,6 +93,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { canShareFiles } from '../../composables/chat/useChatFileHandler'
 
 const props = defineProps<{
   menuState: {
@@ -84,7 +108,7 @@ const props = defineProps<{
   canDelete: boolean
 }>()
 
-const emit = defineEmits<{
+const _emit = defineEmits<{
   (e: 'reply'): void
   (e: 'forward'): void
   (e: 'copy'): void
@@ -93,7 +117,14 @@ const emit = defineEmits<{
   (e: 'close'): void
   (e: 'save-media'): void
   (e: 'save-album'): void
+  (e: 'share'): void
+  (e: 'share-album'): void
 }>()
+
+const shareableType = computed(() => {
+  const t = props.menuState.message?.message_type
+  return t === 'image' || t === 'video' || t === 'voice' || t === 'document'
+})
 
 // Smart positioning: keep menu within viewport bounds
 const menuPosition = computed(() => {

@@ -106,6 +106,21 @@
         <div class="msg-media-link w-[280px] sm:w-[320px] max-w-full rounded-lg overflow-hidden relative"
              :style="mediaStyle"
              @click.stop="$emit('media-click', msg)">
+          <button
+            v-if="showMediaShare"
+            type="button"
+            class="media-share-btn"
+            title="اشتراک‌گذاری"
+            @click.stop="handleMediaShareClick($event)"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="18" cy="5" r="3"></circle>
+              <circle cx="6" cy="12" r="3"></circle>
+              <circle cx="18" cy="19" r="3"></circle>
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+            </svg>
+          </button>
           
           <!-- 1. Downloaded, Uploading, or Local Render -->
           <template v-if="isCached || msg.local_blob_url">
@@ -209,6 +224,21 @@
             </svg>
             <div class="voice-cancel-icon" style="position: absolute; top:50%; left:50%; transform: translate(-50%, -50%); font-size:12px; color:white;">✕</div>
           </div>
+          <button
+            v-if="showMediaShare && !msg.is_sending"
+            type="button"
+            class="voice-share-btn"
+            title="اشتراک‌گذاری"
+            @click.stop="handleMediaShareClick($event)"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="18" cy="5" r="3"></circle>
+              <circle cx="6" cy="12" r="3"></circle>
+              <circle cx="18" cy="19" r="3"></circle>
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+            </svg>
+          </button>
         </div>
       </template>
       
@@ -322,6 +352,7 @@ import {
   useChatFileHandler,
   prewarmFileCache,
   isFileCached,
+  seedFileCache,
   useFileCacheRegistry,
 } from '../../composables/chat/useChatFileHandler'
 
@@ -608,6 +639,114 @@ function showShareUnavailableToast() {
   setTimeout(() => { try { toast.remove() } catch { /* noop */ } }, 2600)
 }
 
+// --- Media (image/video/voice) share + cache integration ---
+//
+// Image/video bubbles cache their blob via `useChatMedia.imageCache` (a
+// separate IndexedDB store optimized for thumbnails and album hydration).
+// Voice messages cache via the same store under their file_id. To avoid
+// downloading those bytes a second time when the user shares them, we
+// "donate" the existing cached blob URL into the unified file cache via
+// `seedFileCache()` and then call `shareFile()`.
+
+function getMediaMimeFallback(): string {
+  const t = props.msg.message_type
+  if (t === 'image') {
+    const ext = (parsedContent.value?.file_name as string || '').split('.').pop()?.toLowerCase() || ''
+    if (ext === 'png') return 'image/png'
+    if (ext === 'gif') return 'image/gif'
+    if (ext === 'webp') return 'image/webp'
+    if (ext === 'heic' || ext === 'heif') return 'image/' + ext
+    return 'image/jpeg'
+  }
+  if (t === 'video') return 'video/mp4'
+  if (t === 'voice') return 'audio/webm'
+  return 'application/octet-stream'
+}
+
+function getMediaFileNameFallback(): string {
+  const provided = parsedContent.value?.file_name
+  if (typeof provided === 'string' && provided.trim()) return provided
+  const id = mediaFileId.value || `media-${props.msg.id}`
+  const t = props.msg.message_type
+  if (t === 'image') return `image-${id}.jpg`
+  if (t === 'video') return `video-${id}.mp4`
+  if (t === 'voice') return `voice-${id}.webm`
+  return `file-${id}`
+}
+
+function getMediaApiUrl(): string {
+  if (!mediaFileId.value) return ''
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+  const token = localStorage.getItem('auth_token') || ''
+  if (!token) return ''
+  return `${baseUrl}/api/chat/files/${mediaFileId.value}?token=${token}`
+}
+
+async function ensureMediaInFileCache(): Promise<boolean> {
+  const fileId = mediaFileId.value
+  if (!fileId) return false
+  if (isFileCached(fileId)) return true
+  // Try to convert the existing imageCache blob URL into a Blob without a
+  // second network request. blob: URLs resolve instantly via fetch().
+  const localUrl = props.imageCache[fileId] || props.msg.local_blob_url
+  if (localUrl) {
+    try {
+      const resp = await fetch(localUrl)
+      const blob = await resp.blob()
+      await seedFileCache(fileId, blob, getMediaFileNameFallback(), blob.type || getMediaMimeFallback())
+      return true
+    } catch (err) {
+      console.warn('[chat-media-share] seed from local blob failed', err)
+    }
+  }
+  // Fall back to fetching from the API into the unified cache.
+  const apiUrl = getMediaApiUrl()
+  if (!apiUrl) return false
+  try {
+    const resp = await fetch(apiUrl, { credentials: 'include' })
+    if (!resp.ok) return false
+    const blob = await resp.blob()
+    await seedFileCache(fileId, blob, getMediaFileNameFallback(), blob.type || getMediaMimeFallback())
+    return true
+  } catch (err) {
+    console.warn('[chat-media-share] api fetch failed', err)
+    return false
+  }
+}
+
+const isMediaMessage = computed(() =>
+  props.msg.message_type === 'image' ||
+  props.msg.message_type === 'video' ||
+  props.msg.message_type === 'voice',
+)
+
+const showMediaShare = computed(() => (
+  supportsFileShare &&
+  isMediaMessage.value &&
+  !props.msg.is_sending &&
+  !props.msg.is_error &&
+  Boolean(mediaFileId.value)
+))
+
+async function handleMediaShareClick(event: Event) {
+  event.stopPropagation()
+  const fileId = mediaFileId.value
+  if (!fileId) return
+  // Make sure the unified file cache has the blob (no double download).
+  const ok = await ensureMediaInFileCache()
+  if (!ok) {
+    showShareUnavailableToast()
+    return
+  }
+  const shared = await cachedShareFile(
+    fileId,
+    getMediaFileNameFallback(),
+    getMediaMimeFallback(),
+    getMediaApiUrl(),
+  )
+  if (!shared) showShareUnavailableToast()
+}
+
 const docStatusText = computed(() => {
   if (props.msg.is_sending) {
     return `${formatBytes(props.msg.upload_loaded || 0)} / ${formatBytes(props.msg.upload_total || docParsed.value?.size || 0)}`
@@ -825,6 +964,16 @@ onMounted(() => {
   // user-activation token on Android Chrome HTTPS).
   if (props.msg.message_type === 'document' && docFileId.value) {
     prewarmFileCache(docFileId.value)
+  }
+  // Same pre-warm for media (image/video/voice) so share/open taps stay
+  // synchronous after the file lands in the unified cache once.
+  if (
+    (props.msg.message_type === 'image' ||
+     props.msg.message_type === 'video' ||
+     props.msg.message_type === 'voice') &&
+    mediaFileId.value
+  ) {
+    prewarmFileCache(mediaFileId.value)
   }
 })
 
@@ -1492,6 +1641,49 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 .doc-share-btn:hover { background-color: rgba(51, 144, 236, 0.12); }
 .doc-share-btn:active { background-color: rgba(51, 144, 236, 0.22); }
+
+/* Inline share button overlay for image/video bubbles */
+.media-share-btn {
+  position: absolute;
+  top: 8px;
+  inset-inline-end: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 5;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+.media-share-btn:hover { background: rgba(0, 0, 0, 0.7); }
+.media-share-btn:active { transform: scale(0.92); }
+
+/* Inline share button for voice bubbles */
+.voice-share-btn {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.75;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+  margin-inline-start: 4px;
+}
+.voice-share-btn:hover { opacity: 1; background-color: rgba(255, 255, 255, 0.08); }
+.voice-share-btn:active { opacity: 1; background-color: rgba(255, 255, 255, 0.16); }
 
 .edited-label { font-size: 10px; font-style: italic; opacity: 0.7; margin-right: 4px; }
 
