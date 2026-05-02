@@ -2142,7 +2142,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       <!-- Input Area -->
       <ChatInputBar
         ref="chatInputBarRef"
-        v-else-if="selectedUserId && !isSelectionMode"
+        v-else-if="selectedUserId"
         v-model="messageInput"
         v-model:stickerPickerOpen="showStickerPicker"
         :editingMessage="editingMessage"
