@@ -38,6 +38,7 @@ class Message(Base):
     # Edit/Delete flags
     is_deleted = Column(Boolean, nullable=False, default=False)
     edit_history = Column(JSON, nullable=False, default=list)
+    reactions = Column(JSON, nullable=False, default=list)
 
     __table_args__ = (
         Index(

@@ -156,16 +156,42 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         }
     }
 
+    function handleReactionEvent(data: any) {
+        if (!data || typeof data.id !== 'number') {
+            return
+        }
+
+        const messageIndex = messages.value.findIndex((message: any) => message && message.id === data.id)
+        if (messageIndex === -1) {
+            return
+        }
+
+        const existingMessage = messages.value[messageIndex]
+        messages.value[messageIndex] = {
+            ...existingMessage,
+            reactions: Array.isArray(data.reactions)
+                ? data.reactions
+                    .map((reaction: any) => ({
+                        emoji: typeof reaction?.emoji === 'string' ? reaction.emoji : '',
+                        user_id: Number(reaction?.user_id),
+                    }))
+                    .filter((reaction: any) => reaction.emoji && Number.isFinite(reaction.user_id))
+                : [],
+        }
+    }
+
     function setupWebSocketListeners() {
         ws.on('chat:message', handleNewMessageEvent)
         ws.on('chat:typing', handleTypingEvent)
         ws.on('chat:read', handleReadEvent)
+        ws.on('chat:reaction', handleReactionEvent)
     }
 
     function teardownWebSocketListeners() {
         ws.off('chat:message', handleNewMessageEvent)
         ws.off('chat:typing', handleTypingEvent)
         ws.off('chat:read', handleReadEvent)
+        ws.off('chat:reaction', handleReactionEvent)
     }
 
     onMounted(() => {

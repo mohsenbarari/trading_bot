@@ -36,6 +36,43 @@ logger = logging.getLogger(__name__)
 
 CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 CHAT_MEDIA_MAX_UPLOAD_LABEL = "50MB"
+COMMON_MESSAGE_REACTIONS = ("👍", "❤️", "🔥", "👏", "😂", "😮", "😢", "🙏")
+COMMON_MESSAGE_REACTION_SET = set(COMMON_MESSAGE_REACTIONS)
+COMMON_MESSAGE_REACTION_ORDER = {emoji: index for index, emoji in enumerate(COMMON_MESSAGE_REACTIONS)}
+
+
+def normalize_message_reactions(raw_reactions: object) -> list[dict[str, object]]:
+    normalized: list[dict[str, object]] = []
+    seen: set[tuple[str, int]] = set()
+
+    if not isinstance(raw_reactions, list):
+        return normalized
+
+    for reaction in raw_reactions:
+        if not isinstance(reaction, dict):
+            continue
+
+        emoji = reaction.get("emoji")
+        if emoji not in COMMON_MESSAGE_REACTION_SET:
+            continue
+
+        try:
+            user_id = int(reaction.get("user_id"))
+        except (TypeError, ValueError):
+            continue
+
+        if user_id <= 0:
+            continue
+
+        reaction_key = (emoji, user_id)
+        if reaction_key in seen:
+            continue
+
+        seen.add(reaction_key)
+        normalized.append({"emoji": emoji, "user_id": user_id})
+
+    normalized.sort(key=lambda item: (COMMON_MESSAGE_REACTION_ORDER.get(str(item["emoji"]), 999), int(item["user_id"])))
+    return normalized
 
 
 async def generate_location_snapshot(db: AsyncSession, uploader_id: int, lat: float, lng: float) -> Optional[str]:
@@ -98,6 +135,11 @@ class MessageReplyRead(BaseModel):
         from_attributes = True
 
 
+class MessageReactionRead(BaseModel):
+    emoji: str
+    user_id: int
+
+
 class MessageRead(BaseModel):
     """خواندن پیام"""
     id: int
@@ -119,6 +161,7 @@ class MessageRead(BaseModel):
     
     # Reply support
     reply_to_message: Optional[MessageReplyRead] = None
+    reactions: List[MessageReactionRead] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -136,6 +179,7 @@ class MessageRead(BaseModel):
             "updated_at": obj.updated_at,
             "created_at": obj.created_at,
             "reply_to_message": obj.reply_to_message,
+            "reactions": normalize_message_reactions(getattr(obj, "reactions", [])),
             "forwarded_from_id": obj.forwarded_from_id,
             "forwarded_from_name": obj.forwarded_from.account_name if getattr(obj, "forwarded_from", None) else None,
             "sender_name": obj.sender.account_name if getattr(obj, "sender", None) else None
@@ -163,6 +207,18 @@ class MessageSend(BaseModel):
 class MessageUpdate(BaseModel):
     """ویرایش پیام"""
     content: str = Field(..., min_length=1, max_length=4000)
+
+
+class MessageReactionToggle(BaseModel):
+    emoji: str = Field(..., min_length=1, max_length=8)
+
+    @field_validator("emoji")
+    @classmethod
+    def validate_emoji(cls, value: str) -> str:
+        emoji = value.strip()
+        if emoji not in COMMON_MESSAGE_REACTION_SET:
+            raise ValueError("Unsupported reaction")
+        return emoji
 
 
 class ConversationRead(BaseModel):
@@ -568,6 +624,68 @@ async def update_message(
     )
     msg = result.scalars().first()
     return MessageRead.from_orm_with_forwarding(msg)
+
+
+@router.post("/messages/{message_id}/reaction", response_model=MessageRead)
+async def toggle_message_reaction(
+    message_id: int,
+    data: MessageReactionToggle,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """افزودن/حذف ری‌اکشن روی پیام"""
+    msg = await db.get(Message, message_id)
+    if not msg or msg.is_deleted:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if current_user.id not in (msg.sender_id, msg.receiver_id):
+        raise HTTPException(status_code=403, detail="You can only react to messages in your own conversations")
+
+    normalized_reactions = normalize_message_reactions(msg.reactions)
+    has_same_reaction = any(
+        reaction["user_id"] == current_user.id and reaction["emoji"] == data.emoji
+        for reaction in normalized_reactions
+    )
+
+    if has_same_reaction:
+        normalized_reactions = [
+            reaction
+            for reaction in normalized_reactions
+            if not (reaction["user_id"] == current_user.id and reaction["emoji"] == data.emoji)
+        ]
+    else:
+        normalized_reactions = [
+            reaction
+            for reaction in normalized_reactions
+            if reaction["user_id"] != current_user.id
+        ]
+        normalized_reactions.append({"emoji": data.emoji, "user_id": current_user.id})
+        normalized_reactions.sort(
+            key=lambda item: (
+                COMMON_MESSAGE_REACTION_ORDER.get(str(item["emoji"]), 999),
+                int(item["user_id"]),
+            )
+        )
+
+    msg.reactions = normalized_reactions
+    await db.commit()
+
+    result = await db.execute(
+        select(Message)
+        .options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from), joinedload(Message.sender))
+        .where(Message.id == message_id)
+    )
+    updated_message = result.scalars().first()
+    if not updated_message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    reaction_payload = MessageRead.from_orm_with_forwarding(updated_message)
+    reaction_data = jsonable_encoder(reaction_payload)
+    await publish_user_event(updated_message.sender_id, "chat:reaction", reaction_data)
+    if updated_message.receiver_id != updated_message.sender_id:
+        await publish_user_event(updated_message.receiver_id, "chat:reaction", reaction_data)
+
+    return reaction_payload
 
 
 @router.delete("/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)

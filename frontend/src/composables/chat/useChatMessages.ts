@@ -81,6 +81,9 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     function cloneMessage(message: Message): Message {
         return {
             ...message,
+            reactions: Array.isArray(message.reactions)
+                ? message.reactions.map(reaction => ({ ...reaction }))
+                : undefined,
             reply_to_message: message.reply_to_message
                 ? { ...message.reply_to_message }
                 : undefined
