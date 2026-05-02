@@ -56,73 +56,19 @@ export function isFileCached(fileId: string): boolean {
 // file resolve immediately without breaking the user-activation window.
 const memoryCache = new Map<string, CachedFileEntry>()
 
-// ─── On-screen diagnostic overlay (no DevTools required) ───────────────────
-// Activated when the URL contains ?chatFileDebug=1 OR when
-// localStorage.chatFileDebug === '1'. Shows the last 12 [chat-file] events
-// in a fixed bottom-left box so users on installed PWAs (where DevTools is
-// not accessible) can still report what's happening.
-function isDiagEnabled(): boolean {
-    try {
-        if (typeof window === 'undefined') return false
-        const sp = new URLSearchParams(window.location.search)
-        if (sp.get('chatFileDebug') === '1') {
-            try { localStorage.setItem('chatFileDebug', '1') } catch { /* noop */ }
-            return true
-        }
-        return localStorage.getItem('chatFileDebug') === '1'
-    } catch { return false }
-}
+// ─── Diagnostic overlay (disabled) ─────────────────────────────────────────
+// The on-screen [chat-file] diagnostic overlay was removed by user request.
+// `diagLog` is now a no-op; `initChatFileDebugOverlay` only ensures any
+// previously-persisted debug flag and lingering DOM box are cleared.
+function diagLog(..._parts: unknown[]) { /* no-op */ }
 
-let diagBox: HTMLDivElement | null = null
-const diagLines: string[] = []
-
-function ensureDiagBox(): HTMLDivElement | null {
-    if (!isDiagEnabled() || typeof document === 'undefined') return null
-    if (diagBox && document.body.contains(diagBox)) return diagBox
-    const el = document.createElement('div')
-    el.id = 'chat-file-debug-box'
-    el.style.cssText = [
-        'position:fixed', 'left:8px', 'bottom:8px', 'z-index:2147483647',
-        'max-width:92vw', 'max-height:42vh', 'overflow:auto',
-        'background:rgba(0,0,0,0.82)', 'color:#0f0', 'font:11px/1.35 monospace',
-        'padding:8px 10px', 'border-radius:8px', 'pointer-events:auto',
-        'direction:ltr', 'text-align:left', 'white-space:pre-wrap',
-        'box-shadow:0 2px 12px rgba(0,0,0,0.4)',
-    ].join(';')
-    el.addEventListener('click', () => { try { el.remove() } catch { /* noop */ } })
-    document.body.appendChild(el)
-    diagBox = el
-    return el
-}
-
-function diagLog(...parts: unknown[]) {
-    const stamp = new Date().toLocaleTimeString('en-GB', { hour12: false })
-    const line = '[' + stamp + '] ' + parts.map((p) => {
-        if (p instanceof Error) return p.name + ': ' + p.message
-        if (typeof p === 'object' && p !== null) {
-            try { return JSON.stringify(p) } catch { return String(p) }
-        }
-        return String(p)
-    }).join(' ')
-    diagLines.push(line)
-    while (diagLines.length > 12) diagLines.shift()
-    const box = ensureDiagBox()
-    if (box) box.textContent = diagLines.join('\n')
-}
-
-/**
- * Force-show the diagnostic overlay (when ?chatFileDebug=1) with an initial
- * banner. Call once at app startup so the user can confirm the flag is
- * active even before any file is tapped.
- */
 export function initChatFileDebugOverlay(): void {
-    if (!isDiagEnabled()) return
-    const navAny = navigator as Navigator & { share?: unknown; canShare?: unknown }
-    diagLog('[chat-file] debug overlay READY')
-    diagLog('share API:', typeof navAny.share === 'function' ? 'present' : 'MISSING')
-    diagLog('canShare API:', typeof navAny.canShare === 'function' ? 'present' : 'missing')
-    diagLog('secure ctx:', String(window.isSecureContext))
-    diagLog('UA:', navigator.userAgent.slice(0, 80))
+    if (typeof window === 'undefined') return
+    try { localStorage.removeItem('chatFileDebug') } catch { /* noop */ }
+    try {
+        const existing = document.getElementById('chat-file-debug-box')
+        if (existing) existing.remove()
+    } catch { /* noop */ }
 }
 
 function isCachedFileEntry(value: unknown): value is CachedFileEntry {
