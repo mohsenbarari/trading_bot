@@ -60,6 +60,12 @@ const router = createRouter({
       name: 'notifications',
       component: () => import('../views/NotificationsView.vue'),
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/share-receive',
+      name: 'share-receive',
+      component: () => import('../views/ShareReceiveView.vue'),
+      meta: { requiresAuth: true }
     }
   ]
 })
