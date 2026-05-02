@@ -69,6 +69,8 @@ const isAlbumActionSelectionMode = computed(() => isAlbumDownloadSelectionMode.v
 const longPressTimer = ref<any>(null)
 const selectionBackStateActive = ref(false)
 let clearingSelectionFromBack = false
+const contextMenuBackStateActive = ref(false)
+let closingContextMenuFromBack = false
 
 // Search State
 const isSearchActive = ref(false)
@@ -120,9 +122,16 @@ type MessagesContainerMetrics = {
   scrollTop: number
 }
 
+type PendingSelectionAnchor = {
+  messageId: number
+  offsetTop: number
+  userId: number
+}
+
 const BOTTOM_LAYOUT_LOCK_THRESHOLD_PX = 96
 let messagesContainerResizeObserver: ResizeObserver | null = null
 let previousMessagesContainerMetrics: MessagesContainerMetrics | null = null
+let pendingSelectionAnchor: PendingSelectionAnchor | null = null
 
 // Status
 const targetUserStatus = ref('آخرین بازدید اخیراً')
@@ -233,7 +242,7 @@ const {
   lightboxMedia,
   cancelUpload,
   cancelDocumentDownload,
-  handleMediaClick,
+  handleMediaClick: openMediaLightbox,
   setLightboxIndex,
   closeLightbox,
   handleMediaUploadWrapper
@@ -349,6 +358,69 @@ function handleMessagesContainerResize() {
   previousMessagesContainerMetrics = nextMetrics
 }
 
+function captureSelectionAnchor(messageId: number) {
+  if (!isLoadingOlderMessages.value || !selectedUserId.value) {
+    return
+  }
+
+  const container = messagesContainer.value
+  const target = document.getElementById(`msg-${messageId}`)
+  if (!container || !target) {
+    return
+  }
+
+  const containerRect = container.getBoundingClientRect()
+  const targetRect = target.getBoundingClientRect()
+
+  pendingSelectionAnchor = {
+    messageId,
+    offsetTop: targetRect.top - containerRect.top,
+    userId: selectedUserId.value,
+  }
+}
+
+function restorePendingSelectionAnchor(container: HTMLElement, userId: number) {
+  const anchor = pendingSelectionAnchor
+  if (!anchor || anchor.userId !== userId) {
+    return false
+  }
+
+  pendingSelectionAnchor = null
+
+  const target = document.getElementById(`msg-${anchor.messageId}`)
+  if (!target) {
+    return false
+  }
+
+  const containerRect = container.getBoundingClientRect()
+  const targetRect = target.getBoundingClientRect()
+  const currentOffsetTop = targetRect.top - containerRect.top
+  const offsetDelta = currentOffsetTop - anchor.offsetTop
+
+  if (Math.abs(offsetDelta) < 1) {
+    return true
+  }
+
+  const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight)
+  container.scrollTop = Math.max(0, Math.min(container.scrollTop + offsetDelta, maxScrollTop))
+  return true
+}
+
+function captureSelectionAnchorForItem(item: any) {
+  if (!isLoadingOlderMessages.value) {
+    return
+  }
+
+  if (item?.type === 'album' && Array.isArray(item.messages) && item.messages.length > 0) {
+    captureSelectionAnchor(item.messages[0].id)
+    return
+  }
+
+  if (typeof item?.id === 'number') {
+    captureSelectionAnchor(item.id)
+  }
+}
+
 function attachMessagesContainerResizeObserver(container: HTMLElement | null) {
   messagesContainerResizeObserver?.disconnect()
   messagesContainerResizeObserver = null
@@ -388,8 +460,11 @@ const handleMessagesScroll = async () => {
   }
 
   await nextTick()
-  const newHeight = container.scrollHeight
-  container.scrollTop = previousTop + (newHeight - previousHeight)
+  const restoredSelectionAnchor = restorePendingSelectionAnchor(container, userId)
+  if (!restoredSelectionAnchor) {
+    const newHeight = container.scrollHeight
+    container.scrollTop = previousTop + (newHeight - previousHeight)
+  }
   syncMessagesContainerMetrics(container)
 }
 
@@ -1089,6 +1164,8 @@ function handleGroupedItemSelection(item: any) {
     return
   }
 
+  captureSelectionAnchorForItem(item)
+
   if (item?.type === 'album' && Array.isArray(item.messages)) {
     toggleSelectionBatch(item.messages.map((message: Message) => message.id))
     return
@@ -1100,7 +1177,8 @@ function handleGroupedItemSelection(item: any) {
 }
 
 const clearSelection = () => {
-    selectedMessages.value = []
+  pendingSelectionAnchor = null
+  selectedMessages.value = []
   resetSelectionContext()
 }
 
@@ -1184,11 +1262,32 @@ const handleMessageClick = (event: Event, msg: Message) => {
 
     if (isSelectionMode.value) {
       event.preventDefault()
+      captureSelectionAnchor(msg.id)
       toggleSelection(msg.id)
       return
     }
 
     showContextMenu(event, msg)
+}
+
+const handleMediaInteraction = (msg: Message) => {
+  if (isAlbumActionSelectionMode.value) {
+    handleAlbumDownloadItemToggle(msg)
+    return
+  }
+
+  if (isSelectionMode.value) {
+    captureSelectionAnchor(msg.id)
+    const messageIds = getContextMenuMessageIds(msg)
+    if (messageIds.length > 1) {
+      toggleSelectionBatch(messageIds)
+    } else {
+      toggleSelection(msg.id)
+    }
+    return
+  }
+
+  openMediaLightbox(msg)
 }
 
 const handleEditMessage = () => {
@@ -1766,6 +1865,11 @@ async function handleLightboxDelete(msgId: number) {
 }
 
 function goBack() {
+  if (contextMenu.value.visible) {
+    closeContextMenu()
+    return
+  }
+
   if (selectedUserId.value) {
     selectedUserId.value = null
     selectedUserName.value = ''
@@ -1827,6 +1931,7 @@ const handleTouchEnd = (e: TouchEvent, msg: Message) => {
 }
 
 watch(selectedUserId, (newVal) => {
+  pendingSelectionAnchor = null
   // Clear the album wrapper cache when switching chats so cached wrappers
   // from other conversations do not leak into memory over time.
   albumWrapperCache.clear()
@@ -1901,6 +2006,27 @@ watch(isSelectionMode, (isEnabled) => {
   if (selectionBackStateActive.value) {
     selectionBackStateActive.value = false
     if (!clearingSelectionFromBack) {
+      popBackState()
+    }
+  }
+})
+
+watch(() => contextMenu.value.visible, (isVisible) => {
+  if (isVisible) {
+    if (!contextMenuBackStateActive.value) {
+      contextMenuBackStateActive.value = true
+      pushBackState(() => {
+        closingContextMenuFromBack = true
+        closeContextMenu()
+        closingContextMenuFromBack = false
+      })
+    }
+    return
+  }
+
+  if (contextMenuBackStateActive.value) {
+    contextMenuBackStateActive.value = false
+    if (!closingContextMenuFromBack) {
       popBackState()
     }
   }
@@ -2055,7 +2181,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
                 @click-message="handleMessageClick"
                 @context-menu="showContextMenu"
                 @scroll-to="scrollToMessage"
-                @media-click="handleMediaClick"
+                @media-click="handleMediaInteraction"
                 @location-click="handleLocationClick"
                 @download="downloadMedia"
                 @cancel-send="handleCancelSend"
