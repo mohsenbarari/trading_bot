@@ -603,26 +603,11 @@ function clearPendingPickerTimer() {
 }
 
 function resolveChatDebugEnabled() {
+  // Diagnostic overlay disabled by user request. Clear any persisted flag so
+  // previously-enabled clients no longer keep showing the on-screen panel.
   if (typeof window === 'undefined') return false
-
-  try {
-    const params = new URLSearchParams(window.location.search)
-    const flag = params.get('chatDebug')
-
-    if (flag === '1') {
-      window.localStorage.setItem('chat_keyboard_debug', '1')
-      return true
-    }
-
-    if (flag === '0') {
-      window.localStorage.removeItem('chat_keyboard_debug')
-      return false
-    }
-
-    return window.localStorage.getItem('chat_keyboard_debug') === '1'
-  } catch {
-    return false
-  }
+  try { window.localStorage.removeItem('chat_keyboard_debug') } catch { /* noop */ }
+  return false
 }
 
 function captureDebugState(eventName: string, persistEvent = true) {
