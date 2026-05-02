@@ -274,13 +274,30 @@ async function shareBlob(entry: CachedFileEntry, fallbackName: string): Promise<
 }
 
 function openBlobInTab(blob: Blob, fileName: string): boolean {
+    // Use a programmatic anchor click WITHOUT the `download` attribute and
+    // WITHOUT `rel=noopener` — both have been observed to make Chrome treat
+    // the blob: navigation as a download instead of opening it inline.
+    // A plain `<a target="_blank" href="blob:...">` click reliably opens
+    // PDFs/images/videos in the browser viewer on Android Chrome and Safari.
     const objectUrl = URL.createObjectURL(blob)
-    const win = window.open(objectUrl, '_blank', 'noopener,noreferrer')
+    try {
+        const anchor = document.createElement('a')
+        anchor.href = objectUrl
+        anchor.target = '_blank'
+        anchor.style.display = 'none'
+        // Title hint for some browsers.
+        anchor.setAttribute('aria-label', fileName || 'file')
+        document.body.appendChild(anchor)
+        anchor.click()
+        document.body.removeChild(anchor)
+    } catch (err) {
+        console.warn('[chat-file] openBlobInTab anchor click failed', err)
+        try { URL.revokeObjectURL(objectUrl) } catch { /* noop */ }
+        return false
+    }
     setTimeout(() => {
         try { URL.revokeObjectURL(objectUrl) } catch { /* noop */ }
     }, 60_000)
-    if (!win) return false
-    try { win.document && (win.document.title = fileName || 'file') } catch { /* cross-origin no-op */ }
     return true
 }
 
@@ -313,18 +330,18 @@ async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode:
     if (mode === 'share') {
         // Share button: invoke navigator.share SYNCHRONOUSLY (preserve user
         // activation) so the OS share sheet appears with the cached file.
-        // This works identically across browsers/devices when supported.
+        // We deliberately do NOT fall back to anchor download here — per
+        // product spec the share action must only ever open the share sheet,
+        // never trigger an unexpected device download. If the platform's
+        // share API rejects, we silently log and bail.
         const result = shareBlobSync(entry, displayName)
         if (result === false) {
-            // Share API unavailable on this device/context — fall back to
-            // anchor download from cache so behavior stays consistent.
-            triggerAnchorDownload(entry.blob, displayName)
+            console.info('[chat-file] share unavailable on this device — bailing without fallback')
             return
         }
         const shared = await result
         if (!shared) {
-            // share() rejected (e.g. Samsung Chrome PWA NotAllowedError).
-            triggerAnchorDownload(entry.blob, displayName)
+            console.info('[chat-file] share() rejected — bailing without fallback')
         }
         return
     }
