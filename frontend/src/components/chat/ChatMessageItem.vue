@@ -2,11 +2,13 @@
   <div
     class="message-wrapper"
     @click="handleWrapperClick($event)"
+    @dragstart.prevent
+    @selectstart.prevent
     @touchstart="handleWrapperTouchStart($event)"
     @touchmove="handleWrapperTouchMove($event)"
     @touchend="handleWrapperTouchEnd()"
     @touchcancel="handleWrapperTouchCancel()"
-    @contextmenu.prevent="handleWrapperContextMenu($event)"
+    @contextmenu.stop.prevent="handleWrapperContextMenu($event)"
   >
     <div 
       v-if="isSwiping" 
@@ -129,10 +131,10 @@
                    v-show="!msg.is_sending || thumbnail"
                     :data-media-msg-id="msg.id"
                    :src="msg.local_blob_url || cachedUrl"
-                    alt="تصویر" class="msg-media-content w-full h-full object-cover absolute inset-0 block" />
+                  alt="تصویر" draggable="false" class="msg-media-content w-full h-full object-cover absolute inset-0 block" />
                    
               <div v-else-if="msg.message_type === 'video'" class="absolute inset-0 w-full h-full">
-                <video v-show="!msg.is_sending" :src="msg.local_blob_url || cachedUrl"
+                  <video v-show="!msg.is_sending" :src="msg.local_blob_url || cachedUrl" draggable="false"
                        class="w-full h-full object-cover absolute inset-0 block" autoplay muted loop playsinline></video>
                 <div v-if="!msg.is_sending" class="video-play-indicator">
                   <svg viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M8 5v14l11-7z"/></svg>
@@ -1148,7 +1150,7 @@ const swipeDistance = computed(() => Math.abs(swipeOffsetX.value))
 const swipeVisualProgress = computed(() => Math.min(swipeDistance.value / SWIPE_TRIGGER_DISTANCE, 1))
 const isSwipeReplyArmed = computed(() => swipeAxis.value === 'horizontal' && swipeDistance.value >= SWIPE_TRIGGER_DISTANCE)
 
-const INTERACTIVE_CONTEXT_TARGET_SELECTOR = [
+const CLICK_CONTEXT_IGNORE_TARGET_SELECTOR = [
   '[data-context-ignore]',
   '.msg-media-link',
   '.msg-location',
@@ -1174,6 +1176,20 @@ const INTERACTIVE_CONTEXT_TARGET_SELECTOR = [
   'img'
 ].join(', ')
 
+const LONG_PRESS_CONTEXT_IGNORE_TARGET_SELECTOR = [
+  '[data-context-ignore]',
+  '.download-btn',
+  '.cancel-text-btn',
+  '.cancelable-overlay',
+  '.msg-voice-uploading',
+  '.doc-download-icon',
+  'button',
+  'input',
+  'textarea',
+  'select',
+  'label'
+].join(', ')
+
 const SWIPE_IGNORE_TARGET_SELECTOR = [
   '[data-swipe-ignore]',
   '[data-context-ignore]',
@@ -1195,10 +1211,16 @@ function clearLongPressTimer() {
   }
 }
 
-function shouldIgnoreContextMenuTarget(target: EventTarget | null) {
+function shouldIgnoreContextMenuClickTarget(target: EventTarget | null) {
   const element = target instanceof Element ? target : null
   if (!element) return false
-  return Boolean(element.closest(INTERACTIVE_CONTEXT_TARGET_SELECTOR))
+  return Boolean(element.closest(CLICK_CONTEXT_IGNORE_TARGET_SELECTOR))
+}
+
+function shouldIgnoreLongPressContextTarget(target: EventTarget | null) {
+  const element = target instanceof Element ? target : null
+  if (!element) return false
+  return Boolean(element.closest(LONG_PRESS_CONTEXT_IGNORE_TARGET_SELECTOR))
 }
 
 function shouldIgnoreSwipeTarget(target: EventTarget | null) {
@@ -1217,7 +1239,7 @@ const handleWrapperClick = (e: MouseEvent) => {
     return
   }
 
-  if (shouldIgnoreContextMenuTarget(e.target)) {
+  if (shouldIgnoreContextMenuClickTarget(e.target)) {
     return
   }
 
@@ -1225,7 +1247,7 @@ const handleWrapperClick = (e: MouseEvent) => {
 }
 
 const handleWrapperTouchStart = (e: TouchEvent) => {
-  if (props.isSelectionMode || shouldIgnoreContextMenuTarget(e.target)) return
+  if (props.isSelectionMode || shouldIgnoreLongPressContextTarget(e.target)) return
 
   const touch = e.touches[0]
   if (!touch) return
@@ -1264,7 +1286,10 @@ const handleWrapperTouchCancel = () => {
 }
 
 const handleWrapperContextMenu = (e: MouseEvent) => {
-  if (shouldIgnoreContextMenuTarget(e.target)) {
+  e.preventDefault()
+  e.stopPropagation()
+
+  if (shouldIgnoreLongPressContextTarget(e.target)) {
     return
   }
 
@@ -1426,6 +1451,17 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 <style scoped>
 .message-wrapper {
   position: relative; display: flex; flex-direction: column; width: 100%;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: pan-y;
+}
+.message-wrapper img,
+.message-wrapper video,
+.message-wrapper a {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  user-select: none;
 }
 .swipe-reply-icon {
   position: absolute; top: 50%; transform: translateY(-50%); display: flex; align-items: center; justify-content: center;
