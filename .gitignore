@@ -30,3 +30,4 @@ uploads/
 map_data/
 
 /tmp/
+.deploy_count
