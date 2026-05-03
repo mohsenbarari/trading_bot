@@ -2,7 +2,8 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotificationStore } from '../stores/notifications'
-import { Bell, ArrowRight, Trash2, ShieldAlert, CheckCircle, AlertTriangle, AlertCircle } from 'lucide-vue-next'
+import { Bell, ArrowRight, Trash2 } from 'lucide-vue-next'
+import { getNotificationIconComponent } from '../utils/notificationUi'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
@@ -28,14 +29,6 @@ onMounted(async () => {
   // As a convenience, we mark all as read upon opening the center
   await notificationStore.markAllAsRead()
 })
-
-const getIconForType = (level: string, category: string) => {
-  if (category === 'system') return ShieldAlert;
-  if (level === 'success') return CheckCircle;
-  if (level === 'warning') return AlertTriangle;
-  if (level === 'error') return AlertCircle;
-  return Bell;
-}
 </script>
 
 
@@ -75,7 +68,7 @@ const getIconForType = (level: string, category: string) => {
           </button>
           
           <div class="notif-icon">
-            <component :is="getIconForType(notif.level, notif.category)" :size="18" />
+            <component :is="getNotificationIconComponent(notif)" :size="18" />
           </div>
           <div class="notif-body">
             <h3 class="notif-title">{{ notif.title || 'اعلان جدید' }}</h3>

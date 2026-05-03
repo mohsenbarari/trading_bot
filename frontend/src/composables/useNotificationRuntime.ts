@@ -66,7 +66,14 @@ export function useNotificationRuntime({ on, off, ensureSessionValidation }: Not
         const title = normalizedNotification.title || 'اعلان جدید'
         const body = normalizedNotification.body || ''
 
-        notificationStore.addToast(title, body, '/notifications')
+        notificationStore.addToast({
+            title,
+            body,
+            route: '/notifications',
+            kind: 'app',
+            level: normalizedNotification.level,
+            category: normalizedNotification.category,
+        })
 
         if (document.hidden) {
             showBrowserNotification(title, body, { route: '/notifications' })
@@ -90,7 +97,12 @@ export function useNotificationRuntime({ on, off, ensureSessionValidation }: Not
         const body = buildChatNotificationBody(payload)
         const routePath = buildChatNotificationRoute(senderId, senderName)
 
-        notificationStore.addToast(senderName, body, routePath)
+        notificationStore.addToast({
+            title: senderName,
+            body,
+            route: routePath,
+            kind: 'chat',
+        })
 
         if (document.hidden) {
             showBrowserNotification(senderName, body, { route: routePath })

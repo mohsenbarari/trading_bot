@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { X } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
+import { getNotificationIconComponent } from '../utils/notificationUi'
+import type { ToastNotification } from '../types/notifications'
 
 const store = useNotificationStore()
 const router = useRouter()
@@ -50,7 +53,7 @@ const getToastStyle = (id: number) => {
   }
 }
 
-const handleToastClick = (toast: any) => {
+const handleToastClick = (toast: ToastNotification) => {
   // If user was swiping, don't trigger click navigation
   const state = dragState.value[toast.id]
   if (state) {
@@ -59,7 +62,7 @@ const handleToastClick = (toast: any) => {
   }
   
   if (toast.route) {
-    router.push(toast.route)
+    void router.push(toast.route)
   }
   store.removeToast(toast.id)
 }
@@ -79,23 +82,14 @@ const handleToastClick = (toast: any) => {
         @click="handleToastClick(toast)"
       >
         <div class="notif-icon-circle">
-          <svg v-if="toast.route?.includes('chat')" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-          </svg>
-          <svg v-else xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path>
-            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path>
-          </svg>
+          <component :is="getNotificationIconComponent(toast)" :size="20" />
         </div>
         <div class="notif-content">
           <h4 class="notif-title">{{ toast.title }}</h4>
           <p class="notif-body-text">{{ toast.body }}</p>
         </div>
         <button @click.stop="store.removeToast(toast.id)" class="close-btn-minimal">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
+          <X :size="16" :stroke-width="2.5" />
         </button>
       </div>
     </transition-group>
