@@ -326,6 +326,45 @@
                 تلاش مجدد
               </button>
             </div>
+            <div class="location-debug-panel">
+              <div class="location-debug-header">
+                <span>لاگ موقت مکان‌یابی</span>
+                <span class="location-debug-state" :class="{ 'is-ready': canSendLocation, 'is-blocked': !canSendLocation }">
+                  {{ canSendLocation ? 'ارسال باز' : 'ارسال بسته' }}
+                </span>
+              </div>
+              <div class="location-debug-summary">
+                <div class="location-debug-row">
+                  <span class="location-debug-label">Selected</span>
+                  <span class="location-debug-value" dir="ltr">{{ selectedLatLngDebugText }}</span>
+                </div>
+                <div class="location-debug-row">
+                  <span class="location-debug-label">Detected</span>
+                  <span class="location-debug-value" dir="ltr">{{ detectedLatLngDebugText }}</span>
+                </div>
+                <div class="location-debug-row">
+                  <span class="location-debug-label">Accuracy</span>
+                  <span class="location-debug-value">{{ detectedAccuracyDebugText }}</span>
+                </div>
+                <div class="location-debug-row">
+                  <span class="location-debug-label">Mode</span>
+                  <span class="location-debug-value">{{ locationModeDebugText }}</span>
+                </div>
+              </div>
+              <div class="location-debug-log">
+                <div
+                  v-for="entry in locationDebugEntries"
+                  :key="entry.id"
+                  class="location-debug-entry"
+                >
+                  <div class="location-debug-entry-meta">
+                    <span>{{ entry.time }}</span>
+                    <span>{{ entry.label }}</span>
+                  </div>
+                  <div v-if="entry.details" class="location-debug-entry-details">{{ entry.details }}</div>
+                </div>
+              </div>
+            </div>
             <button class="send-location-btn" :disabled="!canSendLocation" @click="sendLocation">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
@@ -483,8 +522,11 @@ const MAX_ACCEPTABLE_AUTO_LOCATION_ACCURACY_METERS = 120
 const MIN_AUTO_LOCATION_CONFIRM_DISTANCE_METERS = 75
 const MAX_AUTO_LOCATION_CONFIRM_DISTANCE_METERS = 300
 const AUTO_LOCATION_CONFIRM_TIMEOUT_MS = 12000
+const MAX_LOCATION_DEBUG_ENTRIES = 18
 
 const tileUrl = ref('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
+const locationDebugEntries = ref<Array<{ id: number; time: string; label: string; details: string }>>([])
+let locationDebugSequence = 0
 
 const isUsingNativeCameraFallback = computed(() => cameraCaptureMode.value === 'native')
 const nativeCameraFallbackTitle = computed(() => (
@@ -512,6 +554,19 @@ const canSendLocation = computed(() => {
   return hasConfirmedAutoLocation.value
     && detectedLocationAccuracyM.value !== null
     && detectedLocationAccuracyM.value <= MAX_ACCEPTABLE_AUTO_LOCATION_ACCURACY_METERS
+})
+const selectedLatLngDebugText = computed(() => formatLatLngDebugText(selectedLatLng.value))
+const detectedLatLngDebugText = computed(() => formatLatLngDebugText(
+  detectedLocationLatLng.value
+    ? { lat: detectedLocationLatLng.value[0], lng: detectedLocationLatLng.value[1] }
+    : null,
+))
+const detectedAccuracyDebugText = computed(() => formatAccuracyDebugText(detectedLocationAccuracyM.value))
+const locationModeDebugText = computed(() => {
+  if (isLocating.value) return 'در حال مکان‌یابی'
+  if (hasManualLocationSelection.value) return 'انتخاب دستی پین'
+  if (hasConfirmedAutoLocation.value) return 'تایید خودکار GPS'
+  return 'در انتظار تایید'
 })
 const capturedMediaQueueLabel = computed(() => {
   const count = capturedMediaCount.value
@@ -1054,6 +1109,8 @@ function close() {
 
 function resetLocationDraft() {
   activeLocationLookupId += 1
+  locationDebugEntries.value = []
+  locationDebugSequence = 0
 
   if (locationWatchId !== null) {
     navigator.geolocation.clearWatch(locationWatchId)
@@ -1085,6 +1142,9 @@ watch(() => props.modelValue, (val) => {
 
 watch(() => activeTab.value, (val) => {
   if (val === 'location') {
+    pushLocationDebug('location-tab-opened', {
+      secure: typeof window !== 'undefined' ? window.isSecureContext : false,
+    })
     // Optionally trigger map resize to fix leaflet gray rendering
     setTimeout(() => {
       mapRef.value?.leafletObject?.invalidateSize()
@@ -1239,6 +1299,10 @@ function onMapMoveEnd() {
 
     selectedLatLng.value = { lat: center.lat, lng: center.lng }
     hasManualLocationSelection.value = true
+    pushLocationDebug('manual-pin', {
+      lat: center.lat,
+      lng: center.lng,
+    })
     clearLocationStatus()
   }
 }
@@ -1246,6 +1310,7 @@ function onMapMoveEnd() {
 function setLocationStatus(message: string, tone: 'info' | 'error' = 'info') {
   locationStatusMessage.value = message
   locationStatusTone.value = tone
+  pushLocationDebug(tone === 'error' ? 'status-error' : 'status', message)
 }
 
 function clearLocationStatus() {
@@ -1255,6 +1320,75 @@ function clearLocationStatus() {
 
 function isCurrentLocationLookup(lookupId: number) {
   return lookupId === activeLocationLookupId && props.modelValue && activeTab.value === 'location'
+}
+
+function formatDebugNumber(value: number | null | undefined, digits = 6) {
+  return Number.isFinite(value as number) ? Number(value).toFixed(digits) : '—'
+}
+
+function formatLatLngDebugText(value: { lat: number; lng: number } | null) {
+  if (!value) {
+    return '—'
+  }
+
+  return `${formatDebugNumber(value.lat)}, ${formatDebugNumber(value.lng)}`
+}
+
+function formatAccuracyDebugText(value: number | null) {
+  if (!Number.isFinite(value as number)) {
+    return '—'
+  }
+
+  return `${Math.round(Number(value))}m`
+}
+
+function stringifyLocationDebugDetails(details?: string | Record<string, unknown>) {
+  if (!details) {
+    return ''
+  }
+
+  if (typeof details === 'string') {
+    return details
+  }
+
+  return Object.entries(details)
+    .map(([key, value]) => {
+      if (typeof value === 'number') {
+        return `${key}=${Number.isInteger(value) ? value : value.toFixed(6)}`
+      }
+
+      if (typeof value === 'boolean') {
+        return `${key}=${value ? 'yes' : 'no'}`
+      }
+
+      return `${key}=${String(value)}`
+    })
+    .join(' | ')
+}
+
+function pushLocationDebug(label: string, details?: string | Record<string, unknown>) {
+  const entry = {
+    id: ++locationDebugSequence,
+    time: new Date().toLocaleTimeString('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }),
+    label,
+    details: stringifyLocationDebugDetails(details),
+  }
+
+  locationDebugEntries.value = [entry, ...locationDebugEntries.value].slice(0, MAX_LOCATION_DEBUG_ENTRIES)
+  console.info('[location-debug]', label, details ?? '')
+}
+
+function pushPositionDebug(label: string, position: GeolocationPosition, extra?: Record<string, unknown>) {
+  pushLocationDebug(label, {
+    lat: position.coords.latitude,
+    lng: position.coords.longitude,
+    accuracy: position.coords.accuracy,
+    ...(extra ?? {}),
+  })
 }
 
 function formatLocationAccuracy(accuracyM: number) {
@@ -1316,6 +1450,8 @@ function applyDetectedLocation(position: GeolocationPosition) {
   const lng = position.coords.longitude
   const accuracy = Math.max(15, Math.round(position.coords.accuracy || 0))
 
+  pushPositionDebug('apply-detected', position)
+
   mapCenter.value = [lat, lng]
   selectedLatLng.value = { lat, lng }
   detectedLocationLatLng.value = [lat, lng]
@@ -1332,6 +1468,7 @@ function applyDetectedLocation(position: GeolocationPosition) {
 
 function applyConfirmedAutoLocation(position: GeolocationPosition) {
   hasConfirmedAutoLocation.value = true
+  pushPositionDebug('auto-confirmed', position)
   applyDetectedLocation(position)
 }
 
@@ -1353,7 +1490,13 @@ async function requestStableAutoConfirmation(basePosition: GeolocationPosition, 
       return { position: null, unstable: false }
     }
 
+    pushPositionDebug('confirm-reading', confirmationPosition)
+
     if (!isAccurateEnough(confirmationPosition)) {
+      pushLocationDebug('confirm-rejected', {
+        reason: 'accuracy',
+        accuracy: confirmationPosition.coords.accuracy,
+      })
       return { position: null, unstable: false }
     }
 
@@ -1365,13 +1508,23 @@ async function requestStableAutoConfirmation(basePosition: GeolocationPosition, 
     )
     const allowedDistanceMeters = getPositionConsistencyThresholdMeters(basePosition, confirmationPosition)
     if (distanceMeters > allowedDistanceMeters) {
+      pushLocationDebug('confirm-rejected', {
+        reason: 'distance-mismatch',
+        distance: distanceMeters,
+        allowed: allowedDistanceMeters,
+      })
       return { position: null, unstable: true }
     }
 
     const confirmedPosition = getBetterPosition(basePosition, confirmationPosition)
     applyConfirmedAutoLocation(confirmedPosition)
     return { position: confirmedPosition, unstable: false }
-  } catch {
+  } catch (error) {
+    const geoError = error as GeolocationPositionError
+    pushLocationDebug('confirm-error', {
+      code: geoError?.code ?? 'unknown',
+      message: geoError?.message ?? 'unknown',
+    })
     return { position: null, unstable: false }
   }
 }
@@ -1515,6 +1668,12 @@ async function goToMyLocation(silent = false) {
   const lookupId = ++activeLocationLookupId
   let autoLocationRejectedAsUnstable = false
 
+  pushLocationDebug('lookup-start', {
+    lookupId,
+    silent,
+    secure: typeof window !== 'undefined' ? window.isSecureContext : false,
+  })
+
   if (!navigator.geolocation) {
     const message = 'مرورگر شما از مکان‌یابی پشتیبانی نمی‌کند.'
     setLocationStatus(message, 'error')
@@ -1534,6 +1693,10 @@ async function goToMyLocation(silent = false) {
   try {
     const permissionState = await getGeolocationPermissionState()
     if (!isCurrentLocationLookup(lookupId)) return
+
+    pushLocationDebug('permission-state', {
+      state: permissionState ?? 'unknown',
+    })
 
     if (permissionState === 'denied') {
       throw {
@@ -1555,6 +1718,7 @@ async function goToMyLocation(silent = false) {
         maximumAge: 0,
       })
       if (!isCurrentLocationLookup(lookupId)) return
+      pushPositionDebug('initial-reading', position)
       bestPosition = getBetterPosition(bestPosition, position)
       applyDetectedLocation(bestPosition)
       setLocationStatus('موقعیت اولیه پیدا شد. در حال بهبود دقت...', 'info')
@@ -1572,6 +1736,7 @@ async function goToMyLocation(silent = false) {
           maximumAge: 0,
         })
         if (!isCurrentLocationLookup(lookupId)) return
+        pushPositionDebug('fallback-precise-reading', position)
       } catch (preciseError) {
         const preciseGeoError = preciseError as GeolocationPositionError
         if (preciseGeoError?.code === preciseGeoError.PERMISSION_DENIED) {
@@ -1585,6 +1750,7 @@ async function goToMyLocation(silent = false) {
           maximumAge: 0,
         }, 30000)
         if (!isCurrentLocationLookup(lookupId)) return
+        pushPositionDebug('watch-first-reading', position)
       }
     }
 
@@ -1612,6 +1778,7 @@ async function goToMyLocation(silent = false) {
         maximumAge: 0,
       })
       if (!isCurrentLocationLookup(lookupId)) return
+      pushPositionDebug('fresh-precise-reading', precisePosition)
       bestPosition = getBetterPosition(bestPosition, precisePosition)
       applyDetectedLocation(bestPosition)
       if (isAccurateEnough(bestPosition)) {
@@ -1644,6 +1811,7 @@ async function goToMyLocation(silent = false) {
           DESIRED_LOCATION_ACCURACY_METERS,
           (candidate) => {
             if (!isCurrentLocationLookup(lookupId)) return
+            pushPositionDebug('watch-progress', candidate)
             bestPosition = getBetterPosition(bestPosition, candidate)
             applyDetectedLocation(bestPosition)
           },
@@ -1699,16 +1867,31 @@ async function goToMyLocation(silent = false) {
     const geoError = error as GeolocationPositionError
     const message = getLocationErrorMessage(geoError)
     console.error('Geolocation error:', geoError)
+    pushLocationDebug('lookup-error', {
+      code: geoError?.code ?? 'unknown',
+      message: geoError?.message ?? 'unknown',
+    })
     setLocationStatus(message, 'error')
   } finally {
     if (isCurrentLocationLookup(lookupId)) {
       clearLocationWatch()
       isLocating.value = false
+      pushLocationDebug('lookup-finished', {
+        sendable: canSendLocation.value,
+      })
     }
   }
 }
 
 function sendLocation() {
+  pushLocationDebug('send-attempt', {
+    selected: selectedLatLngDebugText.value,
+    detected: detectedLatLngDebugText.value,
+    sendable: canSendLocation.value,
+    manual: hasManualLocationSelection.value,
+    confirmed: hasConfirmedAutoLocation.value,
+  })
+
   if (!selectedLatLng.value) {
     const message = 'ابتدا موقعیت خود را پیدا کنید یا نقشه را روی نقطه دلخواه جابه‌جا کنید.'
     setLocationStatus(message, 'error')
@@ -2354,6 +2537,98 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.location-debug-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.location-debug-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.location-debug-state {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.location-debug-state.is-ready {
+  background: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+}
+
+.location-debug-state.is-blocked {
+  background: rgba(248, 113, 113, 0.18);
+  color: #fca5a5;
+}
+
+.location-debug-summary {
+  display: grid;
+  gap: 4px;
+}
+
+.location-debug-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.location-debug-label {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.location-debug-value {
+  text-align: left;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
+  word-break: break-word;
+}
+
+.location-debug-log {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.location-debug-entry {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.location-debug-entry-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #93c5fd;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
+}
+
+.location-debug-entry-details {
+  margin-top: 4px;
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .center-pin {
