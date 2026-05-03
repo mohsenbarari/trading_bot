@@ -70,11 +70,6 @@
               <button class="camera-error-btn" @click="startCameraStream">تلاش مجدد</button>
             </div>
 
-            <div v-if="isRecording" class="camera-recording-badge">
-              <span class="recording-dot"></span>
-              {{ formattedRecordingTime }}
-            </div>
-
             <div v-if="hasCameraZoomControl" class="camera-zoom-panel">
               <button
                 type="button"
@@ -181,20 +176,12 @@
               <div class="camera-capture-label">
                 {{ cameraMode === 'photo' ? 'ثبت عکس' : (isRecording ? 'توقف ضبط' : 'شروع ضبط ویدئو') }}
               </div>
+              <div v-if="cameraMode === 'video' && isRecording" class="camera-recording-timer-inline">
+                <span class="recording-dot"></span>
+                {{ formattedRecordingTime }}
+              </div>
               <div v-if="hasCapturedMediaQueue" class="camera-capture-queue-label">
                 {{ capturedMediaQueueLabel }}
-              </div>
-              <div
-                v-if="cameraVideoRuntimeLabel"
-                class="camera-runtime-status"
-                :class="{
-                  native: isUsingNativeCameraFallback,
-                  recording: isRecording,
-                  inline: !isUsingNativeCameraFallback && !isRecording,
-                }"
-              >
-                <div class="camera-runtime-status-label">{{ cameraVideoRuntimeLabel }}</div>
-                <div class="camera-runtime-status-hint">{{ cameraVideoRuntimeHint }}</div>
               </div>
             </div>
           </div>
@@ -682,32 +669,6 @@ const isCameraReady = computed(() => (
   isUsingNativeCameraFallback.value
   || (Boolean(cameraStream.value) && !isCameraStarting.value && !cameraError.value)
 ))
-const cameraVideoRuntimeLabel = computed(() => {
-  if (cameraMode.value !== 'video') return ''
-
-  if (isUsingNativeCameraFallback.value) {
-    return 'حالت فعلی: دوربین سیستم'
-  }
-
-  if (isRecording.value) {
-    return 'حالت فعلی: ضبط داخل اپ'
-  }
-
-  return 'حالت فعلی: پیش نمایش داخلی اپ'
-})
-const cameraVideoRuntimeHint = computed(() => {
-  if (cameraMode.value !== 'video') return ''
-
-  if (isUsingNativeCameraFallback.value) {
-    return `${cameraFallbackReasonText.value} تایمر اپ در این حالت نمایش داده نمی شود.`
-  }
-
-  if (isRecording.value) {
-    return 'ثانیه شمار دهم ثانیه ای روی تصویر فعال است.'
-  }
-
-  return 'ثانیه شمار بعد از فشردن دکمه ضبط نمایش داده می شود.'
-})
 const formattedRecordingTime = computed(() => {
   const totalSeconds = Math.floor(recordingDeciseconds.value / 10)
   const mins = Math.floor(totalSeconds / 60)
@@ -2395,22 +2356,6 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.camera-recording-badge {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 999px;
-  padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.58);
-  color: white;
-  font-size: 13px;
-  font-weight: 600;
-  backdrop-filter: blur(8px);
-}
-
 .camera-zoom-panel {
   position: absolute;
   top: 16px;
@@ -2665,42 +2610,17 @@ onBeforeUnmount(() => {
   gap: 4px;
 }
 
-.camera-runtime-status {
-  width: min(100%, 340px);
-  margin-top: 2px;
-  padding: 8px 12px;
-  border-radius: 16px;
-  text-align: center;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.camera-runtime-status.native {
-  background: rgba(255, 148, 77, 0.16);
-  border-color: rgba(255, 148, 77, 0.22);
-}
-
-.camera-runtime-status.recording {
-  background: rgba(229, 57, 53, 0.16);
-  border-color: rgba(229, 57, 53, 0.24);
-}
-
-.camera-runtime-status.inline {
-  background: rgba(51, 144, 236, 0.14);
-  border-color: rgba(51, 144, 236, 0.2);
-}
-
-.camera-runtime-status-label {
-  color: rgba(255, 255, 255, 0.95);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.camera-runtime-status-hint {
-  margin-top: 4px;
-  color: rgba(255, 255, 255, 0.78);
-  font-size: 11px;
-  line-height: 1.5;
+.camera-recording-timer-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: rgba(229, 57, 53, 0.18);
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  direction: ltr;
 }
 
 .camera-capture-queue-label {
