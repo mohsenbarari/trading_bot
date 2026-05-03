@@ -9,16 +9,45 @@
         role="menu"
         aria-label="Message actions"
       >
-        <div v-if="showReactionRow" class="reaction-row">
+        <div v-if="showReactionRow" class="reaction-picker-shell">
+          <div class="reaction-top-grid">
+            <button
+              v-for="emoji in quickReactions"
+              :key="emoji"
+              type="button"
+              class="reaction-btn"
+              :class="{ 'is-active': emoji === currentUserReactionEmoji }"
+              @click.stop="$emit('react', emoji)"
+            >
+              {{ emoji }}
+            </button>
+          </div>
           <button
-            v-for="emoji in availableReactions"
-            :key="emoji"
+            v-if="hasOverflowReactions"
             type="button"
-            class="reaction-btn"
-            @click.stop="$emit('react', emoji)"
+            class="reaction-dropdown-toggle"
+            :class="{ 'is-open': isReactionPickerExpanded }"
+            @click.stop="isReactionPickerExpanded = !isReactionPickerExpanded"
           >
-            {{ emoji }}
+            <span>واکنش‌های بیشتر</span>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
           </button>
+          <Transition name="reaction-dropdown">
+            <div v-if="isReactionPickerExpanded" class="reaction-dropdown-list">
+              <button
+                v-for="emoji in overflowReactions"
+                :key="emoji"
+                type="button"
+                class="reaction-btn is-secondary"
+                :class="{ 'is-active': emoji === currentUserReactionEmoji }"
+                @click.stop="$emit('react', emoji)"
+              >
+                {{ emoji }}
+              </button>
+            </div>
+          </Transition>
         </div>
         <div v-if="showReactionRow" class="menu-divider"></div>
         <div class="menu-item" v-ripple @click="$emit('reply')" role="menuitem">
@@ -38,7 +67,7 @@
               </svg>
               <span style="flex:1;">دانلود آلبوم</span>
             </div>
-            <div v-if="canShareFiles" class="menu-item" v-ripple @click="$emit('share-album')" role="menuitem">
+            <div v-if="supportsFileShare" class="menu-item" v-ripple @click="$emit('share-album')" role="menuitem">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="18" cy="5" r="3"></circle>
                 <circle cx="6" cy="12" r="3"></circle>
@@ -70,7 +99,7 @@
             </div>
         </template>
         <!-- Share option for any cacheable media -->
-        <template v-if="canShareFiles && !isAlbumSelection && shareableType">
+        <template v-if="supportsFileShare && !isAlbumSelection && shareableType">
             <div class="menu-item" v-ripple @click="$emit('share')" role="menuitem">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="18" cy="5" r="3"></circle>
@@ -104,8 +133,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { canShareFiles } from '../../composables/chat/useChatFileHandler'
+
+const supportsFileShare = canShareFiles()
 
 const props = defineProps<{
   menuState: {
@@ -116,6 +147,7 @@ const props = defineProps<{
     messageIds?: number[]
   }
   isAlbumSelection: boolean
+  currentUserId: number | null
   canEdit: boolean
   canDelete: boolean
   availableReactions: string[]
@@ -140,14 +172,50 @@ const shareableType = computed(() => {
   return t === 'image' || t === 'video' || t === 'voice' || t === 'document'
 })
 
+const isReactionPickerExpanded = ref(false)
+const quickReactions = computed(() => props.availableReactions.slice(0, 6))
+const overflowReactions = computed(() => props.availableReactions.slice(6))
+const hasOverflowReactions = computed(() => overflowReactions.value.length > 0)
+const currentUserReactionEmoji = computed(() => {
+  const reactions = Array.isArray(props.menuState.message?.reactions) ? props.menuState.message.reactions : []
+  const match = reactions.find((reaction: any) => Number(reaction?.user_id) === Number(props.currentUserId))
+  return typeof match?.emoji === 'string' ? match.emoji : ''
+})
+
 const showReactionRow = computed(() => {
   return Boolean(props.menuState.message && !props.menuState.message?.is_deleted && props.availableReactions.length > 0)
 })
 
+watch(
+  () => props.menuState.visible,
+  (visible) => {
+    if (!visible) {
+      isReactionPickerExpanded.value = false
+    }
+  },
+)
+
 // Smart positioning: keep menu within viewport bounds
 const menuPosition = computed(() => {
-  const menuW = 220
-  const menuH = showReactionRow.value ? 312 : 250
+  const menuW = 296
+  const actionCount = [
+    true,
+    true,
+    props.isAlbumSelection,
+    props.isAlbumSelection && supportsFileShare,
+    props.menuState.message?.message_type === 'text',
+    !props.isAlbumSelection && (props.menuState.message?.message_type === 'image' || props.menuState.message?.message_type === 'video'),
+    supportsFileShare && !props.isAlbumSelection && shareableType.value,
+    props.canEdit,
+    props.canDelete,
+  ].filter(Boolean).length
+  const reactionSectionHeight = showReactionRow.value
+    ? hasOverflowReactions.value
+      ? (isReactionPickerExpanded.value ? 230 : 100)
+      : 68
+    : 0
+  const dividerCount = (showReactionRow.value ? 1 : 0) + (props.canDelete ? 1 : 0)
+  const menuH = reactionSectionHeight + actionCount * 44 + dividerCount * 9 + 24
   const vw = typeof window !== 'undefined' ? window.innerWidth : 400
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800
   
@@ -175,9 +243,12 @@ const menuPosition = computed(() => {
   position: fixed;
   background: white;
   border-radius: 12px;
+  width: min(296px, calc(100vw - 16px));
   min-width: 190px;
   z-index: 2000;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: calc(100vh - 16px);
   padding: 4px 0;
   direction: rtl;
   backdrop-filter: blur(16px);
@@ -228,30 +299,99 @@ const menuPosition = computed(() => {
   background: rgba(239, 68, 68, 0.06);
 }
 
-.reaction-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.reaction-picker-shell {
   padding: 10px 12px 8px;
+}
+
+.reaction-top-grid,
+.reaction-dropdown-list {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.reaction-dropdown-list {
+  max-height: 164px;
+  overflow-y: auto;
+  padding-top: 10px;
+}
+
+.reaction-dropdown-toggle {
+  margin-top: 10px;
+  width: 100%;
+  min-height: 34px;
+  border: none;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.04);
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.reaction-dropdown-toggle svg {
+  transition: transform 0.18s ease;
+}
+
+.reaction-dropdown-toggle.is-open svg {
+  transform: rotate(180deg);
+}
+
+.reaction-dropdown-toggle:active,
+.reaction-dropdown-toggle:hover {
+  background: rgba(51, 144, 236, 0.1);
+  color: #2563eb;
 }
 
 .reaction-btn {
   border: none;
   background: rgba(15, 23, 42, 0.05);
-  border-radius: 999px;
-  min-width: 38px;
-  height: 38px;
-  display: inline-flex;
+  border-radius: 14px;
+  min-width: 0;
+  width: 100%;
+  height: 40px;
+  display: flex;
   align-items: center;
   justify-content: center;
   font-size: 19px;
   cursor: pointer;
-  transition: transform 0.12s ease, background 0.12s ease;
+  transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+  border: 1px solid transparent;
+}
+
+.reaction-btn.is-secondary {
+  background: rgba(15, 23, 42, 0.035);
+}
+
+.reaction-btn.is-active {
+  background: linear-gradient(180deg, rgba(51, 144, 236, 0.18), rgba(51, 144, 236, 0.12));
+  border-color: rgba(51, 144, 236, 0.25);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+}
+
+.reaction-btn:hover {
+  background: rgba(15, 23, 42, 0.085);
 }
 
 .reaction-btn:active {
   transform: scale(0.94);
   background: rgba(51, 144, 236, 0.14);
+}
+
+.reaction-dropdown-enter-active,
+.reaction-dropdown-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.reaction-dropdown-enter-from,
+.reaction-dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
 }
 
 .menu-divider {

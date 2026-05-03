@@ -349,13 +349,14 @@
         :key="reaction.emoji"
         type="button"
         class="reaction-chip"
-        :class="{ 'is-own': reaction.reactedByCurrentUser }"
+        :class="{ 'is-own': reaction.reactedByCurrentUser, 'has-count': reaction.count > 1 }"
+        :aria-pressed="reaction.reactedByCurrentUser"
         data-context-ignore
         data-swipe-ignore
         @click.stop="handleReactionChipClick(reaction.emoji)"
       >
         <span class="reaction-emoji">{{ reaction.emoji }}</span>
-        <span class="reaction-count">{{ reaction.count }}</span>
+        <span v-if="reaction.count > 1" class="reaction-count">{{ reaction.count }}</span>
       </button>
     </div>
   </div>
@@ -367,6 +368,7 @@ import { useAudioStore } from '../../stores/audio'
 import type { Message, MessageReaction } from '../../types/chat'
 import ChatAlbumLayout from './ChatAlbumLayout.vue'
 import { observeVisibility } from '../../utils/sharedVisibilityObserver'
+import { MESSAGE_REACTION_ORDER } from '../../utils/messageReactions'
 import {
   handleFileClick as cachedFileClick,
   shareFile as cachedShareFile,
@@ -450,10 +452,10 @@ const isError = computed(() => props.msg.is_error)
 const isSelected = computed(() => props.selectedMessages.includes(props.msg.id))
 const groupedReactions = computed(() => {
   if (props.msg.is_deleted || !Array.isArray(props.msg.reactions) || props.msg.reactions.length === 0) {
-    return [] as Array<{ emoji: string, count: number, reactedByCurrentUser: boolean }>
+    return [] as Array<{ emoji: string, count: number, reactedByCurrentUser: boolean, sortOrder: number }>
   }
 
-  const grouped = new Map<string, { emoji: string, count: number, reactedByCurrentUser: boolean }>()
+  const grouped = new Map<string, { emoji: string, count: number, reactedByCurrentUser: boolean, sortOrder: number }>()
 
   props.msg.reactions.forEach((reaction: MessageReaction) => {
     if (!reaction?.emoji || !Number.isFinite(Number(reaction?.user_id))) {
@@ -473,10 +475,21 @@ const groupedReactions = computed(() => {
       emoji: reaction.emoji,
       count: 1,
       reactedByCurrentUser,
+      sortOrder: MESSAGE_REACTION_ORDER.get(reaction.emoji) ?? Number.MAX_SAFE_INTEGER,
     })
   })
 
-  return Array.from(grouped.values())
+  return Array.from(grouped.values()).sort((left, right) => {
+    if (left.reactedByCurrentUser !== right.reactedByCurrentUser) {
+      return left.reactedByCurrentUser ? -1 : 1
+    }
+
+    if (left.count !== right.count) {
+      return right.count - left.count
+    }
+
+    return left.sortOrder - right.sortOrder
+  })
 })
 const parsedContent = computed(() => parseMessageContent(props.msg.content))
 const mediaFileId = computed(() => getFileId(props.msg.content, parsedContent.value))
@@ -1584,32 +1597,42 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 
 .reaction-chip {
-  border: none;
+  border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 999px;
-  padding: 3px 9px;
+  padding: 4px 10px;
   background: rgba(255, 255, 255, 0.94);
   color: #1f2937;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease, border-color 0.12s ease;
 }
 
 .reaction-chip.is-own {
-  background: rgba(51, 144, 236, 0.14);
+  background: linear-gradient(180deg, rgba(51, 144, 236, 0.18), rgba(51, 144, 236, 0.12));
   color: #1d4ed8;
+  border-color: rgba(51, 144, 236, 0.26);
+  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.14);
+  transform: translateY(-1px);
 }
 
 .message-reactions.sent .reaction-chip.is-own {
-  background: rgba(67, 160, 71, 0.16);
+  background: linear-gradient(180deg, rgba(67, 160, 71, 0.2), rgba(67, 160, 71, 0.12));
   color: #2f7d32;
+  border-color: rgba(47, 125, 50, 0.22);
+  box-shadow: 0 3px 10px rgba(47, 125, 50, 0.12);
 }
 
 .reaction-chip:active {
   transform: scale(0.96);
+}
+
+.reaction-chip:hover {
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.16);
 }
 
 .reaction-emoji {
@@ -1619,8 +1642,9 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .reaction-count {
   font-weight: 600;
   font-size: 11px;
-  min-width: 8px;
+  min-width: 10px;
   text-align: center;
+  color: rgba(15, 23, 42, 0.72);
 }
 
 .msg-time { font-size: 11px; color: rgba(0, 0, 0, 0.4); }

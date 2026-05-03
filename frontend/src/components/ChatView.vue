@@ -24,6 +24,7 @@ import {
   shareMultipleFiles,
   shareFile as cachedShareFileGlobal,
 } from '../composables/chat/useChatFileHandler'
+import { MESSAGE_REACTION_CATALOG } from '../utils/messageReactions'
 
 // Props
 const props = defineProps<{
@@ -90,7 +91,7 @@ const unreadNewMessagesCount = ref(0)
 const showScrollButton = ref(false)
 const isMobile = ref(false)
 const contextMenu = ref<{ visible: boolean; x: number; y: number; message: Message | null; messageIds: number[] }>({ visible: false, x: 0, y: 0, message: null, messageIds: [] })
-const AVAILABLE_MESSAGE_REACTIONS = ['👍', '❤️', '🔥', '👏', '😂', '😮', '😢', '🙏'] as const
+const AVAILABLE_MESSAGE_REACTIONS = [...MESSAGE_REACTION_CATALOG] as const
 
 // Input
 const messageInput = ref('')
@@ -2420,6 +2421,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
     <ChatContextMenu
       :menuState="contextMenu"
       :isAlbumSelection="contextMenu.messageIds.length > 1"
+      :currentUserId="props.currentUserId"
       :canEdit="canEdit"
       :canDelete="canDelete"
       :availableReactions="[...AVAILABLE_MESSAGE_REACTIONS]"
