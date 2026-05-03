@@ -24,10 +24,7 @@ const clearAll = async () => {
 }
 
 onMounted(async () => {
-  // Fetch history when entering this page
-  await notificationStore.fetchHistory()
-  // As a convenience, we mark all as read upon opening the center
-  await notificationStore.markAllAsRead()
+  await notificationStore.openNotificationCenter()
 })
 </script>
 

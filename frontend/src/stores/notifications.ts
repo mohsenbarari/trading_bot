@@ -105,6 +105,11 @@ export const useNotificationStore = defineStore('notifications', () => {
         }
     }
 
+    const openNotificationCenter = async () => {
+        await fetchHistory()
+        await markAllAsRead()
+    }
+
     const markAllAsRead = async () => {
         try {
              await apiFetch('/api/notifications/mark-all-read', { method: 'POST' })
@@ -173,6 +178,7 @@ export const useNotificationStore = defineStore('notifications', () => {
         removeToast,
         isLoadingHistory,
         fetchHistory,
+        openNotificationCenter,
         markAllAsRead,
         clearAllNotifications,
         deleteNotification
