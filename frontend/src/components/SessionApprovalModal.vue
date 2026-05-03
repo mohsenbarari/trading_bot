@@ -3,11 +3,12 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useWebSocket } from '../composables/useWebSocket'
 import { apiFetch } from '../utils/auth'
 import { Shield, X, Check, Smartphone } from 'lucide-vue-next'
+import { type SessionLoginRequestPayload, WS_NOTIFICATION_EVENTS } from '../types/notifications'
 
 const { connect, on, off } = useWebSocket()
 
 const showModal = ref(false)
-const pendingRequest = ref<any>(null)
+const pendingRequest = ref<SessionLoginRequestPayload | null>(null)
 const loading = ref(false)
 const countdown = ref(0)
 let countdownInterval: any = null
@@ -48,7 +49,7 @@ async function fetchPendingRequests() {
   }
 }
 
-async function handleLoginRequest(data: any) {
+async function handleLoginRequest(data: SessionLoginRequestPayload) {
   if (!localStorage.getItem('auth_token')) return
   // Only show on primary device
   try {
@@ -121,8 +122,8 @@ async function reject() {
 
 onMounted(() => {
   connect()
-  on('session:login_request', handleLoginRequest)
-  on('ws:reconnect', fetchPendingRequests)
+  on(WS_NOTIFICATION_EVENTS.sessionLoginRequest, handleLoginRequest)
+  on(WS_NOTIFICATION_EVENTS.wsReconnect, fetchPendingRequests)
   
   // Also check when tab comes back to foreground
   document.addEventListener("visibilitychange", () => {
@@ -136,8 +137,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  off('session:login_request', handleLoginRequest)
-  off('ws:reconnect', fetchPendingRequests)
+  off(WS_NOTIFICATION_EVENTS.sessionLoginRequest, handleLoginRequest)
+  off(WS_NOTIFICATION_EVENTS.wsReconnect, fetchPendingRequests)
   if (countdownInterval) clearInterval(countdownInterval)
 })
 </script>
