@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useNotificationStore } from '../stores/notifications'
 import {
@@ -17,6 +17,7 @@ import { unlockAudioContext } from '../utils/audio'
 type WebSocketEventHandler<T = any> = (data: T) => void
 
 interface NotificationRuntimeOptions {
+    connect: () => void
     on: (event: string, callback: WebSocketEventHandler) => void
     off: (event: string, callback: WebSocketEventHandler) => void
     ensureSessionValidation: () => void | Promise<void>
@@ -33,10 +34,11 @@ function buildChatNotificationBody(payload: ChatRealtimeNotificationPayload): st
     return payload.content || 'فایل جدید'
 }
 
-export function useNotificationRuntime({ on, off, ensureSessionValidation }: NotificationRuntimeOptions) {
+export function useNotificationRuntime({ connect, on, off, ensureSessionValidation }: NotificationRuntimeOptions) {
     const route = useRoute()
     const router = useRouter()
     const notificationStore = useNotificationStore()
+    let hasBootstrappedAuthenticatedRuntime = false
 
     const handleBrowserNotificationClick = (event: Event) => {
         const targetRoute = (event as CustomEvent<BrowserNotificationClickDetail>).detail?.route
@@ -57,6 +59,22 @@ export function useNotificationRuntime({ on, off, ensureSessionValidation }: Not
 
     const handleReconnect = () => {
         void notificationStore.fetchInitialCounts()
+    }
+
+    const bootstrapAuthenticatedRuntime = () => {
+        const authToken = localStorage.getItem('auth_token')
+        if (!authToken) {
+            hasBootstrappedAuthenticatedRuntime = false
+            return
+        }
+
+        connect()
+
+        if (hasBootstrappedAuthenticatedRuntime) return
+        hasBootstrappedAuthenticatedRuntime = true
+
+        void notificationStore.fetchInitialCounts()
+        void ensureSessionValidation()
     }
 
     const handleAppMessage = (payload: AppRealtimeNotificationPayload) => {
@@ -110,9 +128,7 @@ export function useNotificationRuntime({ on, off, ensureSessionValidation }: Not
     }
 
     onMounted(() => {
-        if (localStorage.getItem('auth_token')) {
-            void notificationStore.fetchInitialCounts()
-        }
+        bootstrapAuthenticatedRuntime()
 
         on(WS_NOTIFICATION_EVENTS.sessionRevoked, handleSessionRevoked)
         on(WS_NOTIFICATION_EVENTS.wsReconnect, handleReconnect)
@@ -122,6 +138,10 @@ export function useNotificationRuntime({ on, off, ensureSessionValidation }: Not
         window.addEventListener('click', handleFirstInteraction)
         window.addEventListener('touchstart', handleFirstInteraction)
         window.addEventListener(BROWSER_NOTIFICATION_CLICK_EVENT, handleBrowserNotificationClick)
+    })
+
+    watch(() => route.fullPath, () => {
+        bootstrapAuthenticatedRuntime()
     })
 
     onBeforeUnmount(() => {

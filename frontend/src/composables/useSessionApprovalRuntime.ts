@@ -12,7 +12,7 @@ const SESSION_REQUEST_FALLBACK_SECONDS = 120
 const INITIAL_PENDING_FETCH_DELAY_MS = 1000
 
 export function useSessionApprovalRuntime() {
-    const { connect, on, off } = useWebSocket()
+    const { on, off } = useWebSocket()
 
     const showModal = ref(false)
     const pendingRequest = ref<SessionLoginRequestPayload | null>(null)
@@ -149,7 +149,6 @@ export function useSessionApprovalRuntime() {
 
     onMounted(() => {
         if (hasAuthToken()) {
-            connect()
             initialFetchTimeout = window.setTimeout(() => {
                 void fetchPendingRequests()
             }, INITIAL_PENDING_FETCH_DELAY_MS)
