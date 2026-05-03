@@ -137,6 +137,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { canShareFiles } from '../../composables/chat/useChatFileHandler'
+import { buildQuickMessageReactions } from '../../utils/messageReactions'
 
 const supportsFileShare = canShareFiles()
 
@@ -174,15 +175,18 @@ const shareableType = computed(() => {
   return t === 'image' || t === 'video' || t === 'voice' || t === 'document'
 })
 
-const isReactionPickerExpanded = ref(false)
-const quickReactions = computed(() => props.availableReactions.slice(0, 6))
-const overflowReactions = computed(() => props.availableReactions.slice(6))
-const hasOverflowReactions = computed(() => overflowReactions.value.length > 0)
 const currentUserReactionEmoji = computed(() => {
   const reactions = Array.isArray(props.menuState.message?.reactions) ? props.menuState.message.reactions : []
   const match = reactions.find((reaction: any) => Number(reaction?.user_id) === Number(props.currentUserId))
   return typeof match?.emoji === 'string' ? match.emoji : ''
 })
+const isReactionPickerExpanded = ref(false)
+const quickReactions = computed(() => buildQuickMessageReactions(props.availableReactions, currentUserReactionEmoji.value))
+const overflowReactions = computed(() => {
+  const quickSet = new Set(quickReactions.value)
+  return props.availableReactions.filter((emoji) => !quickSet.has(emoji))
+})
+const hasOverflowReactions = computed(() => overflowReactions.value.length > 0)
 
 const showReactionRow = computed(() => {
   return Boolean(props.menuState.message && !props.menuState.message?.is_deleted && props.availableReactions.length > 0)

@@ -339,10 +339,12 @@
       </div>
     </div>
 
-    <div
+    <TransitionGroup
       v-if="groupedReactions.length > 0"
+      tag="div"
       class="message-reactions"
       :class="{ sent: isSent, received: !isSent }"
+      name="reaction-badge"
     >
       <button
         v-for="reaction in groupedReactions"
@@ -358,7 +360,7 @@
         <span class="reaction-emoji">{{ reaction.emoji }}</span>
         <span v-if="reaction.count > 1" class="reaction-count">{{ reaction.count }}</span>
       </button>
-    </div>
+    </TransitionGroup>
   </div>
 </template>
 
@@ -1600,16 +1602,22 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 999px;
   padding: 4px 10px;
+  min-height: 28px;
   background: rgba(255, 255, 255, 0.94);
   color: #1f2937;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
   transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+
+.reaction-chip.has-count {
+  min-width: 48px;
 }
 
 .reaction-chip.is-own {
@@ -1645,6 +1653,19 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   min-width: 10px;
   text-align: center;
   color: rgba(15, 23, 42, 0.72);
+  font-variant-numeric: tabular-nums;
+}
+
+.reaction-badge-enter-active,
+.reaction-badge-leave-active,
+.reaction-badge-move {
+  transition: transform 0.16s ease, opacity 0.16s ease;
+}
+
+.reaction-badge-enter-from,
+.reaction-badge-leave-to {
+  opacity: 0;
+  transform: translateY(4px) scale(0.9);
 }
 
 .msg-time { font-size: 11px; color: rgba(0, 0, 0, 0.4); }
