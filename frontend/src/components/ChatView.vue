@@ -246,6 +246,7 @@ const {
   lightboxMedia,
   cancelUpload,
   cancelDocumentDownload,
+  cancelMediaDownload,
   handleMediaClick: openMediaLightbox,
   setLightboxIndex,
   closeLightbox,
@@ -304,8 +305,12 @@ const handleCancelSend = (msg: any) => {
 };
 
 const handleCancelDownload = (msg: Message) => {
-  if (msg.message_type !== 'document') return
-  cancelDocumentDownload(msg.id)
+  if (msg.message_type === 'document') {
+    cancelDocumentDownload(msg.id)
+    return
+  }
+
+  cancelMediaDownload(msg.id)
 }
 
 function closeLocationModal() {

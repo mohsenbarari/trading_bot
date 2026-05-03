@@ -96,6 +96,7 @@
           @media-click="$emit('media-click', $event)"
           @download="$emit('download', $event)"
           @cancel-send="$emit('cancel-send', $event)"
+          @cancel-download="$emit('cancel-download', $event)"
           @reply-item="$emit('reply-album-item', $event)"
           @forward-item="$emit('forward-album-item', $event)"
           @delete-item="$emit('delete-album-item', $event)"
@@ -161,11 +162,12 @@
           <!-- 2. Needs Download State -->
           <template v-else>
             <div class="w-full h-full absolute inset-0 msg-media-overlay z-10" @click.stop>
-              <div v-if="msg.is_downloading" class="progress-container">
+              <div v-if="msg.is_downloading" class="progress-container cancelable" @click.stop="$emit('cancel-download', msg)">
                 <svg class="progress-ring" viewBox="0 0 36 36">
                   <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
                   <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.download_progress || 0}, 100`"></circle>
                 </svg>
+                <div class="progress-cancel-icon">✕</div>
               </div>
               <button v-else class="download-btn" @click.stop="$emit('download', msg)">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
