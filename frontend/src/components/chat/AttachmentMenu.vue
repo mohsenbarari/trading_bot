@@ -551,12 +551,12 @@ const isUsingNativeCameraFallback = computed(() => cameraCaptureMode.value === '
 const nativeCameraFallbackTitle = computed(() => (
   cameraMode.value === 'photo'
     ? 'پیش نمایش زنده دوربین در این مرورگر در دسترس نیست.'
-    : 'پیش نمایش زنده فیلم برداری در این مرورگر در دسترس نیست.'
+    : 'فیلم برداری زنده داخل اپ در این مرورگر در دسترس نیست.'
 ))
 const nativeCameraFallbackHint = computed(() => (
   cameraMode.value === 'photo'
     ? 'با دکمه پایین، دوربین سیستم برای گرفتن عکس باز می شود.'
-    : 'با دکمه پایین، دوربین سیستم برای ضبط ویدئو باز می شود.'
+    : 'با دکمه پایین، دوربین سیستم برای ضبط ویدئو باز می شود. در این حالت ثانیه شمار سفارشی اپ نمایش داده نمی شود، چون ضبط داخل دوربین سیستم انجام می شود. برای دیدن ثانیه شمار باید صفحه روی نسخه امن HTTPS باز شود تا پیش نمایش داخلی دوربین فعال باشد.'
 ))
 const capturedMediaCount = computed(() => capturedCameraMedia.value.length)
 const hasCapturedMediaQueue = computed(() => capturedMediaCount.value > 0)
