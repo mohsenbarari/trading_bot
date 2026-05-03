@@ -24,7 +24,7 @@ import {
   shareMultipleFiles,
   shareFile as cachedShareFileGlobal,
 } from '../composables/chat/useChatFileHandler'
-import { MESSAGE_REACTION_CATALOG } from '../utils/messageReactions'
+import { MESSAGE_REACTION_CATALOG, recordRecentMessageReaction } from '../utils/messageReactions'
 
 // Props
 const props = defineProps<{
@@ -92,6 +92,8 @@ const showScrollButton = ref(false)
 const isMobile = ref(false)
 const contextMenu = ref<{ visible: boolean; x: number; y: number; message: Message | null; messageIds: number[] }>({ visible: false, x: 0, y: 0, message: null, messageIds: [] })
 const AVAILABLE_MESSAGE_REACTIONS = [...MESSAGE_REACTION_CATALOG] as const
+const pendingReactionMutationVersion = new Map<number, number>()
+let reactionMutationVersion = 0
 
 // Input
 const messageInput = ref('')
@@ -560,6 +562,24 @@ function normalizeMessageReactions(rawReactions: unknown): MessageReaction[] {
     .filter((reaction): reaction is MessageReaction => Boolean(reaction))
 }
 
+function buildOptimisticMessageReactions(rawReactions: unknown, currentUserId: number, emoji: string): MessageReaction[] {
+  const normalized = normalizeMessageReactions(rawReactions)
+  const previousOwnReaction = normalized.find((reaction) => Number(reaction.user_id) === currentUserId)
+  const withoutOwnReaction = normalized.filter((reaction) => Number(reaction.user_id) !== currentUserId)
+
+  if (previousOwnReaction?.emoji === emoji) {
+    return withoutOwnReaction
+  }
+
+  return [
+    ...withoutOwnReaction,
+    {
+      emoji,
+      user_id: currentUserId,
+    },
+  ]
+}
+
 function applyMessageReactionState(messageId: number, reactions: unknown) {
   const messageIndex = messages.value.findIndex((message) => message.id === messageId)
   const normalizedReactions = normalizeMessageReactions(reactions)
@@ -689,13 +709,39 @@ async function toggleMessageReaction(msg: Message, emoji: string) {
     return
   }
 
+  const currentMessage = messages.value.find((candidate) => candidate.id === msg.id) ?? msg
+  const previousReactions = normalizeMessageReactions(currentMessage.reactions)
+  const optimisticReactions = buildOptimisticMessageReactions(previousReactions, props.currentUserId, emoji)
+  const mutationVersion = ++reactionMutationVersion
+  pendingReactionMutationVersion.set(msg.id, mutationVersion)
+  applyMessageReactionState(msg.id, optimisticReactions)
+
   try {
     const updatedMessage = await apiFetch(`/chat/messages/${msg.id}/reaction`, {
       method: 'POST',
       body: JSON.stringify({ emoji }),
     })
+
+    if (pendingReactionMutationVersion.get(msg.id) !== mutationVersion) {
+      return
+    }
+
+    pendingReactionMutationVersion.delete(msg.id)
     applyMessageReactionState(msg.id, updatedMessage?.reactions)
+
+    const persistedOwnReaction = normalizeMessageReactions(updatedMessage?.reactions).find(
+      (reaction) => Number(reaction.user_id) === props.currentUserId,
+    )
+    if (persistedOwnReaction?.emoji) {
+      recordRecentMessageReaction(persistedOwnReaction.emoji)
+    }
   } catch (err) {
+    if (pendingReactionMutationVersion.get(msg.id) !== mutationVersion) {
+      return
+    }
+
+    pendingReactionMutationVersion.delete(msg.id)
+    applyMessageReactionState(msg.id, previousReactions)
     console.error('Failed to toggle message reaction:', err)
     alert('خطا در ثبت ری‌اکشن')
   }
