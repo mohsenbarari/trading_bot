@@ -51,12 +51,6 @@ onMounted(() => {
     getAuthToken: () => localStorage.getItem('auth_token'),
   })
 
-  // وقتی کاربر احراز هویت شد، وب‌سوکت وصل می‌شود و بررسی نشست انجام می‌گیرد
-  if (localStorage.getItem('auth_token')) {
-    connect()
-    void ensureSessionValidation()
-  }
-
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     (window as any).deferredPrompt = e;
@@ -64,7 +58,7 @@ onMounted(() => {
   });
 })
 
-useNotificationRuntime({ on, off, ensureSessionValidation })
+useNotificationRuntime({ connect, on, off, ensureSessionValidation })
 </script>
 
 
