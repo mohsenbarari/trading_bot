@@ -3,6 +3,8 @@
  * Handles permission requests and displaying system-level notifications.
  */
 
+import type { BrowserNotificationClickDetail } from '../types/notifications'
+
 export const BROWSER_NOTIFICATION_CLICK_EVENT = 'app-browser-notification-click'
 
 type RoutedNotificationOptions = NotificationOptions & {
@@ -44,7 +46,7 @@ export const showBrowserNotification = (title: string, body: string, options: Ro
         notification.onclick = () => {
             window.focus();
             if (route) {
-                window.dispatchEvent(new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
+                window.dispatchEvent(new CustomEvent<BrowserNotificationClickDetail>(BROWSER_NOTIFICATION_CLICK_EVENT, {
                     detail: { route }
                 }));
             }

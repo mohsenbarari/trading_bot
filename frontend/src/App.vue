@@ -1,29 +1,32 @@
 <script setup lang="ts">
-import { useRoute, useRouter } from 'vue-router'
-import { onBeforeUnmount, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { onMounted } from 'vue'
 import BottomNav from './components/BottomNav.vue'
 import SessionApprovalModal from './components/SessionApprovalModal.vue'
 import PWAInstallOverlay from './components/PWAInstallOverlay.vue'
 import AppToasts from './components/AppToasts.vue'
-import { setupExpiryTimer, apiFetch, logout, isAppConnecting } from './utils/auth'
+import { setupExpiryTimer, apiFetch, isAppConnecting } from './utils/auth'
 import { useWebSocket } from './composables/useWebSocket'
-import { useNotificationStore } from './stores/notifications'
-import { BROWSER_NOTIFICATION_CLICK_EVENT, requestNotificationPermission, showBrowserNotification } from './utils/browserNotifications'
-import { unlockAudioContext } from './utils/audio'
+import { useNotificationRuntime } from './composables/useNotificationRuntime'
 import { initChatUploadBackground } from './services/chatUploadBackground'
 import { initChatDocumentDownloadBackground } from './services/chatDocumentDownloadBackground'
 import { initChatFileDebugOverlay } from './composables/chat/useChatFileHandler'
 
 
 const route = useRoute()
-const router = useRouter()
-const { on, connect } = useWebSocket()
-const notificationStore = useNotificationStore()
+const { on, off, connect } = useWebSocket()
 
-const handleBrowserNotificationClick = (event: Event) => {
-  const targetRoute = (event as CustomEvent<{ route?: string }>).detail?.route
-  if (!targetRoute || router.currentRoute.value.fullPath === targetRoute) return
-  void router.push(targetRoute)
+const ensureSessionValidation = async () => {
+  const refreshToken = localStorage.getItem('refresh_token')
+  if (!refreshToken) return
+  try {
+    await apiFetch('/api/sessions/verify', {
+      method: 'POST',
+      body: JSON.stringify({ refresh_token: refreshToken })
+    })
+  } catch (e) {
+    // If 401, apiFetch will automatically log the user out
+  }
 }
 
 onMounted(() => {
@@ -48,103 +51,11 @@ onMounted(() => {
     getAuthToken: () => localStorage.getItem('auth_token'),
   })
 
-  const ensureSessionValidation = async () => {
-    const refreshToken = localStorage.getItem('refresh_token')
-    if (!refreshToken) return
-    try {
-      await apiFetch('/api/sessions/verify', {
-        method: 'POST',
-        body: JSON.stringify({ refresh_token: refreshToken })
-      })
-    } catch(e) {
-      // If 401, apiFetch will automatically log the user out
-    }
-  }
-
   // وقتی کاربر احراز هویت شد، وب‌سوکت وصل می‌شود و بررسی نشست انجام می‌گیرد
   if (localStorage.getItem('auth_token')) {
     connect()
-    ensureSessionValidation()
-    notificationStore.fetchInitialCounts()
+    void ensureSessionValidation()
   }
-  
-  on('session:revoked', ensureSessionValidation)
-  on('ws:reconnect', () => {
-    notificationStore.fetchInitialCounts()
-  })
-
-  // --- Notification & Audio Permission Helper (Triggered by user interaction) ---
-  const handleFirstInteraction = () => {
-    requestNotificationPermission()
-    unlockAudioContext()
-    window.removeEventListener('click', handleFirstInteraction)
-    window.removeEventListener('touchstart', handleFirstInteraction)
-  }
-  window.addEventListener('click', handleFirstInteraction)
-  window.addEventListener('touchstart', handleFirstInteraction)
-    window.addEventListener(BROWSER_NOTIFICATION_CLICK_EVENT, handleBrowserNotificationClick)
-
-  // --- Global Notification Listeners ---
-  
-  // 1. General App Notifications (Trade, Admin, etc.)
-  on('message', (payload: any) => {
-    const normalizedNotification = notificationStore.addAppNotification(payload)
-    
-    // As per user request: Always show notification unless perhaps specifically on notifications page
-    const isNotificationPage = route.path === '/notifications'
-    if (!isNotificationPage) {
-      const title = normalizedNotification.title || 'اعلان جدید'
-      const body = normalizedNotification.body || ''
-        
-        // Always show in-app toast, route to notifications center
-        notificationStore.addToast(title, body, '/notifications')
-
-        // Try to show native notification if tab is hidden
-        if (document.hidden) {
-        showBrowserNotification(title, body, { route: '/notifications' })
-        }
-    }
-  })
-
-  // 2. Chat Messages
-  on('chat:message', (payload: any) => {
-    const senderId = Number(payload.sender_id)
-    const isChatOpen = route.path === '/chat'
-    const currentChatId = route.query.user_id ? Number(route.query.user_id) : null
-    const isViewingSameChat = isChatOpen && currentChatId !== null && currentChatId === senderId && !document.hidden
-    const shouldTreatAsUnread = !isViewingSameChat
-
-    if (shouldTreatAsUnread) {
-      notificationStore.incrementChatUnread(senderId)
-    }
-
-    if (!shouldTreatAsUnread) {
-      return
-    }
-
-    const sender = payload.sender_name || 'پیام جدید'
-    let body = payload.content || 'فایل جدید'
-    
-    // Define media labels
-    if (payload.message_type === 'image') {
-      body = 'تصویر'
-    } else if (payload.message_type === 'video') {
-      body = 'ویدئو'
-    } else if (payload.message_type === 'sticker') {
-      body = 'استیکر'
-    }
-    
-    // Correct route for MessengerView.vue (path: /chat, query: user_id)
-    const routePath = `/chat?user_id=${payload.sender_id}&user_name=${encodeURIComponent(sender)}`
-    
-    // Show in-app toast for chats
-    notificationStore.addToast(sender, body, routePath)
-
-    // Only try to show native notification if tab is hidden
-    if (document.hidden) {
-      showBrowserNotification(sender, body, { route: routePath })
-    }
-  })
 
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
@@ -153,9 +64,7 @@ onMounted(() => {
   });
 })
 
-  onBeforeUnmount(() => {
-    window.removeEventListener(BROWSER_NOTIFICATION_CLICK_EVENT, handleBrowserNotificationClick)
-  })
+useNotificationRuntime({ on, off, ensureSessionValidation })
 </script>
 
 
