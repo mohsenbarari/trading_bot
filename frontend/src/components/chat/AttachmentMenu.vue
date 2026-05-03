@@ -519,10 +519,19 @@ let activeLocationLookupId = 0
 
 const DESIRED_LOCATION_ACCURACY_METERS = 120
 const MAX_ACCEPTABLE_AUTO_LOCATION_ACCURACY_METERS = 120
+const MAX_AUTO_SELECTION_PROMOTION_ACCURACY_METERS = 600
+const MAX_COARSE_PREVIEW_ACCURACY_METERS = 5000
+const MAX_COARSE_PREVIEW_DISTANCE_METERS = 120000
 const MIN_AUTO_LOCATION_CONFIRM_DISTANCE_METERS = 75
 const MAX_AUTO_LOCATION_CONFIRM_DISTANCE_METERS = 300
 const AUTO_LOCATION_CONFIRM_TIMEOUT_MS = 12000
 const MAX_LOCATION_DEBUG_ENTRIES = 18
+const IRAN_LOCATION_BOUNDS = {
+  minLat: 24,
+  maxLat: 40.5,
+  minLng: 44,
+  maxLng: 64.5,
+} as const
 
 const tileUrl = ref('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
 const locationDebugEntries = ref<Array<{ id: number; time: string; label: string; details: string }>>([])
@@ -1435,6 +1444,50 @@ function getPositionConsistencyThresholdMeters(primary: GeolocationPosition, con
   )
 }
 
+function isWithinIranLocationBounds(lat: number, lng: number) {
+  return lat >= IRAN_LOCATION_BOUNDS.minLat
+    && lat <= IRAN_LOCATION_BOUNDS.maxLat
+    && lng >= IRAN_LOCATION_BOUNDS.minLng
+    && lng <= IRAN_LOCATION_BOUNDS.maxLng
+}
+
+function getCurrentLocationMapCenter() {
+  const center = mapRef.value?.leafletObject?.getCenter()
+  if (center) {
+    return { lat: center.lat, lng: center.lng }
+  }
+
+  return { lat: mapCenter.value[0], lng: mapCenter.value[1] }
+}
+
+function shouldPromoteDetectedLocation(accuracy: number) {
+  return hasConfirmedAutoLocation.value || accuracy <= MAX_AUTO_SELECTION_PROMOTION_ACCURACY_METERS
+}
+
+function shouldPreviewDetectedLocation(lat: number, lng: number, accuracy: number) {
+  if (accuracy <= MAX_AUTO_SELECTION_PROMOTION_ACCURACY_METERS) {
+    return true
+  }
+
+  if (accuracy > MAX_COARSE_PREVIEW_ACCURACY_METERS) {
+    return false
+  }
+
+  if (isWithinIranLocationBounds(lat, lng)) {
+    return true
+  }
+
+  const currentCenter = getCurrentLocationMapCenter()
+  const distanceToCurrentCenter = getDistanceBetweenCoordinatesMeters(
+    currentCenter.lat,
+    currentCenter.lng,
+    lat,
+    lng,
+  )
+
+  return distanceToCurrentCenter <= MAX_COARSE_PREVIEW_DISTANCE_METERS
+}
+
 function updateResolvedLocationStatus(position: GeolocationPosition) {
   const accuracyLabel = formatLocationAccuracy(position.coords.accuracy)
   if (isAccurateEnough(position)) {
@@ -1449,20 +1502,46 @@ function applyDetectedLocation(position: GeolocationPosition) {
   const lat = position.coords.latitude
   const lng = position.coords.longitude
   const accuracy = Math.max(15, Math.round(position.coords.accuracy || 0))
+  const shouldPromoteSelection = shouldPromoteDetectedLocation(accuracy)
+  const shouldPreviewMap = shouldPreviewDetectedLocation(lat, lng, accuracy)
+  const preserveManualSelection = hasManualLocationSelection.value && !shouldPromoteSelection
 
   pushPositionDebug('apply-detected', position)
 
-  mapCenter.value = [lat, lng]
-  selectedLatLng.value = { lat, lng }
   detectedLocationLatLng.value = [lat, lng]
   detectedLocationAccuracyM.value = accuracy
-  hasManualLocationSelection.value = false
 
-  const map = mapRef.value?.leafletObject
-  if (map) {
-    const targetZoom = accuracy <= 60 ? 18 : accuracy <= 150 ? 17 : accuracy <= 400 ? 16 : 15
-    isProgrammaticMapMove = true
-    map.setView([lat, lng], targetZoom)
+  if (shouldPromoteSelection) {
+    selectedLatLng.value = { lat, lng }
+    hasManualLocationSelection.value = false
+  } else if (!hasManualLocationSelection.value) {
+    selectedLatLng.value = null
+  }
+
+  if (!shouldPromoteSelection) {
+    pushLocationDebug('detected-preview-only', {
+      accuracy,
+      inIran: isWithinIranLocationBounds(lat, lng),
+      preview: shouldPreviewMap,
+      preserveManual: preserveManualSelection,
+    })
+  }
+
+  if (shouldPreviewMap && !preserveManualSelection) {
+    mapCenter.value = [lat, lng]
+    const map = mapRef.value?.leafletObject
+    if (map) {
+      const targetZoom = accuracy <= 60 ? 18 : accuracy <= 150 ? 17 : accuracy <= 400 ? 16 : 15
+      isProgrammaticMapMove = true
+      map.setView([lat, lng], targetZoom)
+    }
+  } else if (!shouldPreviewMap) {
+    pushLocationDebug('detected-ignored', {
+      lat,
+      lng,
+      accuracy,
+      reason: 'coarse-outlier',
+    })
   }
 }
 
