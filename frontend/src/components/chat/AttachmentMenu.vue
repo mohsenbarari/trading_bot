@@ -1165,6 +1165,49 @@ function close() {
   emit('update:modelValue', false)
 }
 
+function getAutoPinnedLatLng(): [number, number] | null {
+  if (hasManualLocationSelection.value) {
+    return null
+  }
+
+  if (selectedLatLng.value) {
+    return [selectedLatLng.value.lat, selectedLatLng.value.lng]
+  }
+
+  if (detectedLocationLatLng.value) {
+    return [...detectedLocationLatLng.value] as [number, number]
+  }
+
+  return null
+}
+
+async function refreshLocationMapViewport(recenterAutoPin = false) {
+  if (!props.modelValue || activeTab.value !== 'location') {
+    return
+  }
+
+  await nextTick()
+
+  const map = mapRef.value?.leafletObject
+  if (!map) {
+    return
+  }
+
+  map.invalidateSize()
+
+  if (!recenterAutoPin) {
+    return
+  }
+
+  const autoPinnedLatLng = getAutoPinnedLatLng()
+  if (!autoPinnedLatLng) {
+    return
+  }
+
+  isProgrammaticMapMove = true
+  map.setView(autoPinnedLatLng, map.getZoom?.() ?? 15, { animate: false })
+}
+
 function resetLocationDraft() {
   activeLocationLookupId += 1
   locationDebugEntries.value = []
@@ -1205,11 +1248,26 @@ watch(() => activeTab.value, (val) => {
     })
     // Optionally trigger map resize to fix leaflet gray rendering
     setTimeout(() => {
-      mapRef.value?.leafletObject?.invalidateSize()
+      void refreshLocationMapViewport(true)
       goToMyLocation(true) // Automatically try to fetch location on open
     }, 300)
   }
 })
+
+watch(
+  [
+    () => locationStatusMessage.value,
+    () => shouldShowPreciseLocationGuide.value,
+    () => preciseLocationGuideNeedsPlatformChoice.value,
+  ],
+  () => {
+    if (!props.modelValue || activeTab.value !== 'location') {
+      return
+    }
+
+    void refreshLocationMapViewport(!hasManualLocationSelection.value)
+  },
+)
 
 // Gallery file handler.
 // Do not pre-compress here: useChatMedia.ts performs the EXIF-safe pipeline.
