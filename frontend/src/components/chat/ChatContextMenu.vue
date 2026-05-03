@@ -4,12 +4,13 @@
     <Transition name="zoom-fade">
       <div 
         v-if="menuState.visible" 
-        class="context-menu telegram-menu-shadow"
+        class="context-menu"
+        :class="{ 'has-reactions': showReactionRow }"
         :style="menuPosition"
         role="menu"
         aria-label="Message actions"
       >
-        <div v-if="showReactionRow" class="reaction-picker-shell">
+        <div v-if="showReactionRow" class="reaction-picker-shell telegram-panel telegram-menu-shadow">
           <div class="reaction-top-grid">
             <button
               v-for="emoji in quickReactions"
@@ -49,7 +50,7 @@
             </div>
           </Transition>
         </div>
-        <div v-if="showReactionRow" class="menu-divider"></div>
+        <div class="menu-actions-panel telegram-panel telegram-menu-shadow">
         <div class="menu-item" v-ripple @click="$emit('reply')" role="menuitem">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>
           <span style="flex:1;">پاسخ</span>
@@ -124,6 +125,7 @@
               <span style="flex:1;">حذف</span>
             </div>
         </template>
+        </div>
       </div>
     </Transition>
     
@@ -197,7 +199,8 @@ watch(
 
 // Smart positioning: keep menu within viewport bounds
 const menuPosition = computed(() => {
-  const menuW = 296
+  const reactionPanelW = 296
+  const actionPanelW = 220
   const actionCount = [
     true,
     true,
@@ -209,21 +212,23 @@ const menuPosition = computed(() => {
     props.canEdit,
     props.canDelete,
   ].filter(Boolean).length
+  const menuW = showReactionRow.value ? reactionPanelW : actionPanelW
+  const actionPanelH = actionCount * 44 + (props.canDelete ? 9 : 0) + 16
   const reactionSectionHeight = showReactionRow.value
     ? hasOverflowReactions.value
-      ? (isReactionPickerExpanded.value ? 230 : 100)
-      : 68
+      ? (isReactionPickerExpanded.value ? 232 : 102)
+      : 72
     : 0
-  const dividerCount = (showReactionRow.value ? 1 : 0) + (props.canDelete ? 1 : 0)
-  const menuH = reactionSectionHeight + actionCount * 44 + dividerCount * 9 + 24
   const vw = typeof window !== 'undefined' ? window.innerWidth : 400
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+  const boundedMenuW = Math.min(menuW, vw - 16)
+  const menuH = actionPanelH + (showReactionRow.value ? reactionSectionHeight + 6 : 0)
   
   let x = props.menuState.x
   let y = props.menuState.y
   
   // Prevent overflow right
-  if (x + menuW > vw - 8) x = vw - menuW - 8
+  if (x + boundedMenuW > vw - 8) x = vw - boundedMenuW - 8
   // Prevent overflow left
   if (x < 8) x = 8
   // Prevent overflow bottom
@@ -233,7 +238,8 @@ const menuPosition = computed(() => {
   
   return {
     top: y + 'px',
-    left: x + 'px'
+    left: x + 'px',
+    width: boundedMenuW + 'px'
   }
 })
 </script>
@@ -241,16 +247,25 @@ const menuPosition = computed(() => {
 <style scoped>
 .context-menu {
   position: fixed;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: visible;
+  direction: rtl;
+}
+
+.context-menu.has-reactions {
+  gap: 6px;
+}
+
+.telegram-panel {
+  width: 100%;
   background: white;
   border-radius: 12px;
-  width: min(296px, calc(100vw - 16px));
-  min-width: 190px;
-  z-index: 2000;
   overflow-x: hidden;
   overflow-y: auto;
   max-height: calc(100vh - 16px);
-  padding: 4px 0;
-  direction: rtl;
   backdrop-filter: blur(16px);
   background: rgba(255, 255, 255, 0.96);
 }
@@ -274,6 +289,8 @@ const menuPosition = computed(() => {
 
 .menu-item {
   padding: 10px 16px;
+  width: 100%;
+  box-sizing: border-box;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -301,6 +318,11 @@ const menuPosition = computed(() => {
 
 .reaction-picker-shell {
   padding: 10px 12px 8px;
+}
+
+.menu-actions-panel {
+  width: min(220px, 100%);
+  padding: 4px 0;
 }
 
 .reaction-top-grid,
