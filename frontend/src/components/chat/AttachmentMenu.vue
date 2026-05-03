@@ -326,44 +326,47 @@
                 تلاش مجدد
               </button>
             </div>
-            <div class="location-debug-panel">
-              <div class="location-debug-header">
-                <span>لاگ موقت مکان‌یابی</span>
-                <span class="location-debug-state" :class="{ 'is-ready': canSendLocation, 'is-blocked': !canSendLocation }">
-                  {{ canSendLocation ? 'ارسال باز' : 'ارسال بسته' }}
-                </span>
-              </div>
-              <div class="location-debug-summary">
-                <div class="location-debug-row">
-                  <span class="location-debug-label">Selected</span>
-                  <span class="location-debug-value" dir="ltr">{{ selectedLatLngDebugText }}</span>
-                </div>
-                <div class="location-debug-row">
-                  <span class="location-debug-label">Detected</span>
-                  <span class="location-debug-value" dir="ltr">{{ detectedLatLngDebugText }}</span>
-                </div>
-                <div class="location-debug-row">
-                  <span class="location-debug-label">Accuracy</span>
-                  <span class="location-debug-value">{{ detectedAccuracyDebugText }}</span>
-                </div>
-                <div class="location-debug-row">
-                  <span class="location-debug-label">Mode</span>
-                  <span class="location-debug-value">{{ locationModeDebugText }}</span>
-                </div>
-              </div>
-              <div class="location-debug-log">
-                <div
-                  v-for="entry in locationDebugEntries"
-                  :key="entry.id"
-                  class="location-debug-entry"
-                >
-                  <div class="location-debug-entry-meta">
-                    <span>{{ entry.time }}</span>
-                    <span>{{ entry.label }}</span>
+            <div v-if="shouldShowPreciseLocationGuide" class="precise-location-guide">
+              <div class="precise-location-guide-header">
+                <div>
+                  <div class="precise-location-guide-badge">
+                    {{ preciseLocationGuideDetectedLabel }}
                   </div>
-                  <div v-if="entry.details" class="location-debug-entry-details">{{ entry.details }}</div>
+                  <div class="precise-location-guide-title">برای دقت چندمتری، موقعیت دقیق را روشن کنید</div>
+                  <p class="precise-location-guide-description">
+                    اگر این صفحه را داخل تلگرام، کروم، سافاری یا مرورگر دیگری باز کرده‌اید، باید اجازه Location را برای همان اپ روی حالت دقیق قرار دهید.
+                  </p>
                 </div>
               </div>
+
+              <div v-if="preciseLocationGuideNeedsPlatformChoice" class="precise-location-guide-chooser">
+                <div class="precise-location-guide-chooser-title">سیستم عامل دستگاه به صورت قطعی شناسایی نشد. یکی را انتخاب کنید:</div>
+                <div class="precise-location-guide-choice-row">
+                  <button type="button" class="precise-location-guide-choice" @click="selectPreciseLocationGuidePlatform('android')">
+                    آموزش اندروید
+                  </button>
+                  <button type="button" class="precise-location-guide-choice" @click="selectPreciseLocationGuidePlatform('ios')">
+                    آموزش آيفون
+                  </button>
+                </div>
+              </div>
+
+              <ol v-else class="precise-location-guide-steps">
+                <li v-for="step in preciseLocationGuideSteps" :key="step">{{ step }}</li>
+              </ol>
+
+              <div v-if="!preciseLocationGuideNeedsPlatformChoice" class="precise-location-guide-note">
+                بعد از انجام مراحل بالا به همین صفحه برگردید و یک بار روی «تلاش مجدد» بزنید.
+              </div>
+
+              <label class="precise-location-guide-dismiss">
+                <input
+                  type="checkbox"
+                  :checked="hidePreciseLocationGuideForever"
+                  @change="handlePreciseLocationGuideDismissChange"
+                />
+                <span>دیگر این راهنما را نشان نده</span>
+              </label>
             </div>
             <button class="send-location-btn" :disabled="!canSendLocation" @click="sendLocation">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -446,6 +449,8 @@ type CapturedCameraMediaItem = {
   type: 'photo' | 'video'
 }
 
+type PreciseLocationGuidePlatform = 'android' | 'ios'
+
 const props = defineProps<{
   modelValue: boolean
 }>()
@@ -526,12 +531,17 @@ const MIN_AUTO_LOCATION_CONFIRM_DISTANCE_METERS = 75
 const MAX_AUTO_LOCATION_CONFIRM_DISTANCE_METERS = 300
 const AUTO_LOCATION_CONFIRM_TIMEOUT_MS = 12000
 const MAX_LOCATION_DEBUG_ENTRIES = 18
+const PRECISE_LOCATION_GUIDE_STORAGE_KEY = 'chat_precise_location_guide_hidden_v1'
 const IRAN_LOCATION_BOUNDS = {
   minLat: 24,
   maxLat: 40.5,
   minLng: 44,
   maxLng: 64.5,
 } as const
+
+const detectedPreciseLocationGuidePlatform = detectPreciseLocationGuidePlatform()
+const hidePreciseLocationGuideForever = ref(readPreciseLocationGuideDismissed())
+const selectedPreciseLocationGuidePlatform = ref<PreciseLocationGuidePlatform | null>(detectedPreciseLocationGuidePlatform)
 
 const tileUrl = ref('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
 const locationDebugEntries = ref<Array<{ id: number; time: string; label: string; details: string }>>([])
@@ -576,6 +586,45 @@ const locationModeDebugText = computed(() => {
   if (hasManualLocationSelection.value) return 'انتخاب دستی پین'
   if (hasConfirmedAutoLocation.value) return 'تایید خودکار GPS'
   return 'در انتظار تایید'
+})
+const resolvedPreciseLocationGuidePlatform = computed(() => selectedPreciseLocationGuidePlatform.value)
+const preciseLocationGuideNeedsPlatformChoice = computed(() => resolvedPreciseLocationGuidePlatform.value === null)
+const shouldShowPreciseLocationGuide = computed(() => (
+  activeTab.value === 'location' && !hidePreciseLocationGuideForever.value
+))
+const preciseLocationGuideDetectedLabel = computed(() => {
+  const platform = resolvedPreciseLocationGuidePlatform.value
+  if (platform === 'android') {
+    return 'راهنمای اندروید'
+  }
+  if (platform === 'ios') {
+    return 'راهنمای آيفون'
+  }
+  return 'راهنمای فعال‌سازی موقعیت دقیق'
+})
+const preciseLocationGuideSteps = computed(() => {
+  const platform = resolvedPreciseLocationGuidePlatform.value
+  if (platform === 'android') {
+    return [
+      'تنظیمات گوشی را باز کنید و وارد Apps یا برنامه ها شوید.',
+      'مرورگر یا اپی که این صفحه در آن باز شده را انتخاب کنید. اگر صفحه داخل تلگرام باز شده، روی Telegram بزنید.',
+      'به Permissions > Location بروید و دسترسی مکان را روی Allow only while using the app یا گزینه مشابه قرار دهید.',
+      'گزینه Use precise location یا موقعیت دقیق را روشن کنید.',
+      'Location گوشی، GPS و در صورت امکان Wi-Fi scanning را روشن نگه دارید.',
+    ]
+  }
+
+  if (platform === 'ios') {
+    return [
+      'وارد Settings شوید و به Privacy & Security > Location Services بروید.',
+      'روی اپی که این صفحه در آن باز شده بزنید؛ معمولا Safari، Chrome یا Telegram.',
+      'اجازه Location را روی While Using the App قرار دهید.',
+      'گزینه Precise Location را روشن کنید.',
+      'به برنامه برگردید و چند ثانیه صبر کنید تا GPS دقیق تر شود.',
+    ]
+  }
+
+  return []
 })
 const capturedMediaQueueLabel = computed(() => {
   const count = capturedMediaCount.value
@@ -1329,6 +1378,64 @@ function clearLocationStatus() {
 
 function isCurrentLocationLookup(lookupId: number) {
   return lookupId === activeLocationLookupId && props.modelValue && activeTab.value === 'location'
+}
+
+function detectPreciseLocationGuidePlatform(): PreciseLocationGuidePlatform | null {
+  if (typeof navigator === 'undefined') {
+    return null
+  }
+
+  const userAgent = navigator.userAgent.toLowerCase()
+  if (/android/.test(userAgent)) {
+    return 'android'
+  }
+
+  const isIOS = /iphone|ipad|ipod/.test(userAgent)
+  const isIPadDesktopMode = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1
+  if (isIOS || isIPadDesktopMode) {
+    return 'ios'
+  }
+
+  return null
+}
+
+function readPreciseLocationGuideDismissed() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  try {
+    return window.localStorage.getItem(PRECISE_LOCATION_GUIDE_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writePreciseLocationGuideDismissed(hidden: boolean) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    if (hidden) {
+      window.localStorage.setItem(PRECISE_LOCATION_GUIDE_STORAGE_KEY, '1')
+      return
+    }
+
+    window.localStorage.removeItem(PRECISE_LOCATION_GUIDE_STORAGE_KEY)
+  } catch {
+    // Ignore storage failures and keep guide visible by default.
+  }
+}
+
+function selectPreciseLocationGuidePlatform(platform: PreciseLocationGuidePlatform) {
+  selectedPreciseLocationGuidePlatform.value = platform
+}
+
+function handlePreciseLocationGuideDismissChange(event: Event) {
+  const checked = Boolean((event.target as HTMLInputElement | null)?.checked)
+  hidePreciseLocationGuideForever.value = checked
+  writePreciseLocationGuideDismissed(checked)
 }
 
 function formatDebugNumber(value: number | null | undefined, digits = 6) {
@@ -2618,96 +2725,117 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.location-debug-panel {
+.precise-location-guide {
+  margin: 12px 16px 0;
+  padding: 14px 14px 12px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fff7ed 0%, #fffbeb 100%);
+  border: 1px solid #fed7aa;
+  color: #7c2d12;
+  box-shadow: 0 10px 24px rgba(194, 65, 12, 0.08);
+}
+
+.precise-location-guide-header {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: #0f172a;
-  color: #e2e8f0;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.location-debug-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-weight: 700;
-}
-
-.location-debug-state {
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.location-debug-state.is-ready {
-  background: rgba(34, 197, 94, 0.18);
-  color: #86efac;
-}
-
-.location-debug-state.is-blocked {
-  background: rgba(248, 113, 113, 0.18);
-  color: #fca5a5;
-}
-
-.location-debug-summary {
-  display: grid;
-  gap: 4px;
-}
-
-.location-debug-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
   gap: 10px;
 }
 
-.location-debug-label {
-  color: #94a3b8;
-  font-weight: 600;
+.precise-location-guide-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(249, 115, 22, 0.12);
+  color: #c2410c;
+  font-size: 11px;
+  font-weight: 700;
 }
 
-.location-debug-value {
-  text-align: left;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
-  word-break: break-word;
+.precise-location-guide-title {
+  margin-top: 8px;
+  font-size: 15px;
+  font-weight: 800;
+  color: #9a3412;
 }
 
-.location-debug-log {
-  max-height: 180px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 4px;
-  border-top: 1px solid rgba(148, 163, 184, 0.2);
+.precise-location-guide-description {
+  margin: 8px 0 0;
+  color: #7c2d12;
+  font-size: 13px;
+  line-height: 1.7;
 }
 
-.location-debug-entry {
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: rgba(15, 23, 42, 0.55);
+.precise-location-guide-chooser {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
 }
 
-.location-debug-entry-meta {
-  display: flex;
-  justify-content: space-between;
+.precise-location-guide-chooser-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #9a3412;
+}
+
+.precise-location-guide-choice-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  color: #93c5fd;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
 }
 
-.location-debug-entry-details {
-  margin-top: 4px;
-  color: #cbd5e1;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
-  white-space: pre-wrap;
-  word-break: break-word;
+.precise-location-guide-choice {
+  border: 1px solid #fdba74;
+  background: rgba(255, 255, 255, 0.76);
+  color: #9a3412;
+  padding: 11px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.precise-location-guide-choice:active {
+  transform: scale(0.98);
+}
+
+.precise-location-guide-steps {
+  margin: 12px 0 0;
+  padding: 0 18px 0 0;
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: #7c2d12;
+}
+
+.precise-location-guide-note {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.7;
+}
+
+.precise-location-guide-dismiss {
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #7c2d12;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.precise-location-guide-dismiss input {
+  width: 18px;
+  height: 18px;
+  accent-color: #ea580c;
 }
 
 .center-pin {
