@@ -480,6 +480,9 @@ let activeLocationLookupId = 0
 
 const DESIRED_LOCATION_ACCURACY_METERS = 120
 const MAX_ACCEPTABLE_AUTO_LOCATION_ACCURACY_METERS = 120
+const MIN_AUTO_LOCATION_CONFIRM_DISTANCE_METERS = 75
+const MAX_AUTO_LOCATION_CONFIRM_DISTANCE_METERS = 300
+const AUTO_LOCATION_CONFIRM_TIMEOUT_MS = 12000
 
 const tileUrl = ref('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
 
@@ -1274,6 +1277,30 @@ function getBetterPosition(currentBest: GeolocationPosition | null, candidate: G
   return candidate.coords.accuracy < currentBest.coords.accuracy ? candidate : currentBest
 }
 
+function getDistanceBetweenCoordinatesMeters(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+) {
+  const toRad = (value: number) => (value * Math.PI) / 180
+  const earthRadiusM = 6371000
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return earthRadiusM * c
+}
+
+function getPositionConsistencyThresholdMeters(primary: GeolocationPosition, confirmation: GeolocationPosition) {
+  const combinedAccuracy = Math.round((primary.coords.accuracy || 0) + (confirmation.coords.accuracy || 0))
+  return Math.max(
+    MIN_AUTO_LOCATION_CONFIRM_DISTANCE_METERS,
+    Math.min(MAX_AUTO_LOCATION_CONFIRM_DISTANCE_METERS, combinedAccuracy),
+  )
+}
+
 function updateResolvedLocationStatus(position: GeolocationPosition) {
   const accuracyLabel = formatLocationAccuracy(position.coords.accuracy)
   if (isAccurateEnough(position)) {
@@ -1312,6 +1339,41 @@ function requestCurrentPosition(options: PositionOptions) {
   return new Promise<GeolocationPosition>((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(resolve, reject, options)
   })
+}
+
+async function requestStableAutoConfirmation(basePosition: GeolocationPosition, lookupId: number) {
+  try {
+    const confirmationPosition = await requestCurrentPosition({
+      enableHighAccuracy: true,
+      timeout: AUTO_LOCATION_CONFIRM_TIMEOUT_MS,
+      maximumAge: 0,
+    })
+
+    if (!isCurrentLocationLookup(lookupId)) {
+      return { position: null, unstable: false }
+    }
+
+    if (!isAccurateEnough(confirmationPosition)) {
+      return { position: null, unstable: false }
+    }
+
+    const distanceMeters = getDistanceBetweenCoordinatesMeters(
+      basePosition.coords.latitude,
+      basePosition.coords.longitude,
+      confirmationPosition.coords.latitude,
+      confirmationPosition.coords.longitude,
+    )
+    const allowedDistanceMeters = getPositionConsistencyThresholdMeters(basePosition, confirmationPosition)
+    if (distanceMeters > allowedDistanceMeters) {
+      return { position: null, unstable: true }
+    }
+
+    const confirmedPosition = getBetterPosition(basePosition, confirmationPosition)
+    applyConfirmedAutoLocation(confirmedPosition)
+    return { position: confirmedPosition, unstable: false }
+  } catch {
+    return { position: null, unstable: false }
+  }
 }
 
 function clearLocationWatch() {
@@ -1451,6 +1513,7 @@ function getLocationErrorMessage(error: GeolocationPositionError | null) {
 
 async function goToMyLocation(silent = false) {
   const lookupId = ++activeLocationLookupId
+  let autoLocationRejectedAsUnstable = false
 
   if (!navigator.geolocation) {
     const message = 'مرورگر شما از مکان‌یابی پشتیبانی نمی‌کند.'
@@ -1531,9 +1594,14 @@ async function goToMyLocation(silent = false) {
     }
 
     if (isAccurateEnough(bestPosition)) {
-      applyConfirmedAutoLocation(bestPosition)
-      updateResolvedLocationStatus(bestPosition)
-      return
+      setLocationStatus('موقعیت دقیق پیدا شد. در حال تایید نهایی GPS...', 'info')
+      const confirmation = await requestStableAutoConfirmation(bestPosition, lookupId)
+      if (!isCurrentLocationLookup(lookupId)) return
+      if (confirmation.position) {
+        updateResolvedLocationStatus(confirmation.position)
+        return
+      }
+      autoLocationRejectedAsUnstable = autoLocationRejectedAsUnstable || confirmation.unstable
     }
 
     try {
@@ -1547,9 +1615,14 @@ async function goToMyLocation(silent = false) {
       bestPosition = getBetterPosition(bestPosition, precisePosition)
       applyDetectedLocation(bestPosition)
       if (isAccurateEnough(bestPosition)) {
-        applyConfirmedAutoLocation(bestPosition)
-        updateResolvedLocationStatus(bestPosition)
-        return
+        setLocationStatus('موقعیت دقیق پیدا شد. در حال تایید نهایی GPS...', 'info')
+        const confirmation = await requestStableAutoConfirmation(bestPosition, lookupId)
+        if (!isCurrentLocationLookup(lookupId)) return
+        if (confirmation.position) {
+          updateResolvedLocationStatus(confirmation.position)
+          return
+        }
+        autoLocationRejectedAsUnstable = autoLocationRejectedAsUnstable || confirmation.unstable
       }
     } catch (preciseError) {
       const preciseGeoError = preciseError as GeolocationPositionError
@@ -1573,16 +1646,20 @@ async function goToMyLocation(silent = false) {
             if (!isCurrentLocationLookup(lookupId)) return
             bestPosition = getBetterPosition(bestPosition, candidate)
             applyDetectedLocation(bestPosition)
-            if (isAccurateEnough(bestPosition)) {
-              applyConfirmedAutoLocation(bestPosition)
-            }
           },
         )
         if (!isCurrentLocationLookup(lookupId)) return
         bestPosition = getBetterPosition(bestPosition, watchedPosition)
         applyDetectedLocation(bestPosition)
         if (isAccurateEnough(bestPosition)) {
-          applyConfirmedAutoLocation(bestPosition)
+          setLocationStatus('موقعیت دقیق پیدا شد. در حال تایید نهایی GPS...', 'info')
+          const confirmation = await requestStableAutoConfirmation(bestPosition, lookupId)
+          if (!isCurrentLocationLookup(lookupId)) return
+          if (confirmation.position) {
+            updateResolvedLocationStatus(confirmation.position)
+            return
+          }
+          autoLocationRejectedAsUnstable = autoLocationRejectedAsUnstable || confirmation.unstable
         }
       } catch (watchError) {
         const watchGeoError = watchError as GeolocationPositionError
@@ -1593,6 +1670,18 @@ async function goToMyLocation(silent = false) {
     }
 
     if (!hasConfirmedAutoLocation.value && bestPosition) {
+      if (autoLocationRejectedAsUnstable && isAccurateEnough(bestPosition)) {
+        const message = 'مرورگر دو موقعیت متناقض برگرداند. برای جلوگیری از ارسال لوکیشن اشتباه، GPS را روشن نگه دارید و دوباره تلاش کنید یا پین را دستی روی نقطه درست تنظیم کنید.'
+        setLocationStatus(message, 'error')
+        return
+      }
+
+      if (isAccurateEnough(bestPosition)) {
+        const message = 'یک موقعیت دقیق پیدا شد اما تایید دوم از GPS دریافت نشد. برای جلوگیری از لوکیشن اشتباه، کمی صبر کنید یا پین را دستی روی نقطه درست تنظیم کنید.'
+        setLocationStatus(message, 'error')
+        return
+      }
+
       updateResolvedLocationStatus(bestPosition)
       return
     }
