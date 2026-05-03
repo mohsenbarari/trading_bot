@@ -497,7 +497,7 @@ const cameraCaptureMode = ref<'inline' | 'native'>('inline')
 const isCameraStarting = ref(false)
 const cameraError = ref('')
 const isRecording = ref(false)
-const recordingSeconds = ref(0)
+const recordingDeciseconds = ref(0)
 const capturedCameraMedia = ref<CapturedCameraMediaItem[]>([])
 const cameraZoomCapability = ref<CameraZoomCapability | null>(null)
 const cameraZoomValue = ref(1)
@@ -648,9 +648,11 @@ const isCameraReady = computed(() => (
   || (Boolean(cameraStream.value) && !isCameraStarting.value && !cameraError.value)
 ))
 const formattedRecordingTime = computed(() => {
-  const mins = Math.floor(recordingSeconds.value / 60)
-  const secs = recordingSeconds.value % 60
-  return `${mins}:${secs.toString().padStart(2, '0')}`
+  const totalSeconds = Math.floor(recordingDeciseconds.value / 10)
+  const mins = Math.floor(totalSeconds / 60)
+  const secs = totalSeconds % 60
+  const deciseconds = recordingDeciseconds.value % 10
+  return `${mins}:${secs.toString().padStart(2, '0')}.${deciseconds}`
 })
 const cameraZoomDisplay = computed(() => {
   const normalizedZoom = cameraZoomValue.value >= 10
@@ -833,7 +835,7 @@ function cleanupCamera(discardRecording = true, clearCapturedMedia = true) {
 
   mediaRecorder = null
   isRecording.value = false
-  recordingSeconds.value = 0
+  recordingDeciseconds.value = 0
   stopRecordingTimer()
   stopCameraTracks()
   cameraCaptureMode.value = 'inline'
@@ -1037,11 +1039,11 @@ function startVideoRecording() {
 
   mediaRecorder.start(200)
   isRecording.value = true
-  recordingSeconds.value = 0
+  recordingDeciseconds.value = 0
   stopRecordingTimer()
   recordingTimer = window.setInterval(() => {
-    recordingSeconds.value += 1
-  }, 1000)
+    recordingDeciseconds.value += 1
+  }, 100)
 }
 
 function stopVideoRecording() {
