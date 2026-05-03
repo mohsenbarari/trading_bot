@@ -50,6 +50,7 @@ const emit = defineEmits<{
   (e: 'media-click', msg: any): void
   (e: 'download', msg: any): void
   (e: 'cancel-send', msg: any): void
+  (e: 'cancel-download', msg: any): void
   (e: 'reply-item', msg: any): void
   (e: 'forward-item', msg: any): void
   (e: 'delete-item', msg: any): void
@@ -331,7 +332,7 @@ const layout = computed(() => buildLayout(props.items))
           class="album-download-progress-overlay"
           data-context-ignore
           data-swipe-ignore
-          @click.stop
+          @click.stop="emit('cancel-download', cell.item.msg)"
         >
           <div class="album-download-progress-shell">
             <svg class="album-download-progress-ring" viewBox="0 0 36 36">
@@ -344,7 +345,7 @@ const layout = computed(() => buildLayout(props.items))
                 :stroke-dasharray="`${cell.item.msg.download_progress || 0}, 100`"
               ></circle>
             </svg>
-            <span class="album-download-progress-text">{{ cell.item.msg.download_progress || 0 }}%</span>
+            <span class="album-progress-cancel">✕</span>
           </div>
         </div>
         <div v-if="props.isDownloadSelectionMode" class="album-selection-indicator">

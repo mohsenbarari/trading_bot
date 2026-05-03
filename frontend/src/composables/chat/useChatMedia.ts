@@ -32,6 +32,7 @@ const HEIC_MIME_TYPES = new Set([
 ])
 
 let optimisticUploadSequence = 0
+const mediaDownloadControllers = new Map<number, AbortController>()
 
 function formatFileSizeMb(bytes: number) {
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
@@ -822,6 +823,21 @@ export function useChatMedia(options: UseChatMediaOptions) {
         }
     }
 
+    function cancelMediaDownload(messageId: number) {
+        const controller = mediaDownloadControllers.get(messageId)
+        if (controller) {
+            controller.abort()
+            mediaDownloadControllers.delete(messageId)
+        }
+
+        const index = messages.value.findIndex(message => message.id === messageId)
+        const msg = index !== -1 ? messages.value[index] : null
+        if (msg) {
+            msg.is_downloading = false
+            msg.download_progress = 0
+        }
+    }
+
     // === IndexedDB Image Cache ===
     const imageCache = ref<Record<string, string>>({})
     const DB_NAME = 'chat_image_cache'
@@ -1152,11 +1168,21 @@ export function useChatMedia(options: UseChatMediaOptions) {
             return
         }
 
+        const existingController = mediaDownloadControllers.get(msg.id)
+        if (existingController) {
+            existingController.abort()
+            mediaDownloadControllers.delete(msg.id)
+        }
+
+        const abortController = new AbortController()
+        mediaDownloadControllers.set(msg.id, abortController)
         targetMsg.is_downloading = true
         targetMsg.download_progress = 0
 
         try {
-            const res = await fetch(`${apiBaseUrl}/api/chat/files/${fileId}?token=${jwtToken}`)
+            const res = await fetch(`${apiBaseUrl}/api/chat/files/${fileId}?token=${jwtToken}`, {
+                signal: abortController.signal,
+            })
             if (!res.ok) throw new Error('Download failed')
 
             const contentType = res.headers.get('content-type') || 'application/octet-stream'
@@ -1200,10 +1226,15 @@ export function useChatMedia(options: UseChatMediaOptions) {
             await saveToDB(fileId, combinedBlob)
             setCachedMediaUrl(fileId, URL.createObjectURL(combinedBlob))
         } catch (e) {
+            if ((e as Error)?.name === 'AbortError') {
+                return
+            }
             console.error('Download failed:', e)
             alert('خطا در دانلود فایل')
         } finally {
+            mediaDownloadControllers.delete(msg.id)
             targetMsg.is_downloading = false
+            targetMsg.download_progress = 0
         }
     }
 
@@ -2049,6 +2080,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
     return {
         cancelUpload,
         cancelDocumentDownload,
+        cancelMediaDownload,
         imageCache,
         loadImageForMessage,
         scheduleMediaHydration,
