@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
-import { onMounted, watch } from 'vue'
+import { onBeforeUnmount, onMounted, watch } from 'vue'
 import BottomNav from './components/BottomNav.vue'
 import SessionApprovalModal from './components/SessionApprovalModal.vue'
 import PWAInstallOverlay from './components/PWAInstallOverlay.vue'
@@ -8,7 +8,7 @@ import AppToasts from './components/AppToasts.vue'
 import { setupExpiryTimer, apiFetch, logout, isAppConnecting } from './utils/auth'
 import { useWebSocket } from './composables/useWebSocket'
 import { useNotificationStore } from './stores/notifications'
-import { requestNotificationPermission, showBrowserNotification } from './utils/browserNotifications'
+import { BROWSER_NOTIFICATION_CLICK_EVENT, requestNotificationPermission, showBrowserNotification } from './utils/browserNotifications'
 import { unlockAudioContext } from './utils/audio'
 import { initChatUploadBackground } from './services/chatUploadBackground'
 import { initChatDocumentDownloadBackground } from './services/chatDocumentDownloadBackground'
@@ -19,6 +19,12 @@ const route = useRoute()
 const router = useRouter()
 const { on, connect } = useWebSocket()
 const notificationStore = useNotificationStore()
+
+const handleBrowserNotificationClick = (event: Event) => {
+  const targetRoute = (event as CustomEvent<{ route?: string }>).detail?.route
+  if (!targetRoute || router.currentRoute.value.fullPath === targetRoute) return
+  void router.push(targetRoute)
+}
 
 onMounted(() => {
   // راه‌اندازی تایمر انقضای توکن — ریدایرکت خودکار به لاگین
@@ -63,6 +69,9 @@ onMounted(() => {
   }
   
   on('session:revoked', ensureSessionValidation)
+  on('ws:reconnect', () => {
+    notificationStore.fetchInitialCounts()
+  })
 
   // --- Notification & Audio Permission Helper (Triggered by user interaction) ---
   const handleFirstInteraction = () => {
@@ -73,64 +82,67 @@ onMounted(() => {
   }
   window.addEventListener('click', handleFirstInteraction)
   window.addEventListener('touchstart', handleFirstInteraction)
+    window.addEventListener(BROWSER_NOTIFICATION_CLICK_EVENT, handleBrowserNotificationClick)
 
   // --- Global Notification Listeners ---
   
   // 1. General App Notifications (Trade, Admin, etc.)
   on('message', (payload: any) => {
-    notificationStore.addAppNotification(payload)
+    const normalizedNotification = notificationStore.addAppNotification(payload)
     
     // As per user request: Always show notification unless perhaps specifically on notifications page
     const isNotificationPage = route.path === '/notifications'
     if (!isNotificationPage) {
-        const title = payload.title || 'اعلان جدید'
-        const body = payload.content || ''
+      const title = normalizedNotification.title || 'اعلان جدید'
+      const body = normalizedNotification.body || ''
         
         // Always show in-app toast, route to notifications center
         notificationStore.addToast(title, body, '/notifications')
 
         // Try to show native notification if tab is hidden
         if (document.hidden) {
-            showBrowserNotification(title, body)
+        showBrowserNotification(title, body, { route: '/notifications' })
         }
     }
   })
 
   // 2. Chat Messages
   on('chat:message', (payload: any) => {
-    // Re-fetch chat unread count to keep badge accurate
-    notificationStore.incrementChatUnread()
-    
-    // Notification logic
+    const senderId = Number(payload.sender_id)
     const isChatOpen = route.path === '/chat'
-    // Check if the current conversation is NOT with the sender of arriving message
-    // Note: MessengerView uses query.user_id, not params.id
     const currentChatId = route.query.user_id ? Number(route.query.user_id) : null
-    const isLookingAtOtherChat = currentChatId !== null && currentChatId !== Number(payload.sender_id)
-    
-    if (document.hidden || !isChatOpen || isLookingAtOtherChat) {
-        const sender = payload.sender_name || 'پیام جدید'
-        let body = payload.content || 'فایل جدید'
-        
-        // Define media labels
-        if (payload.message_type === 'image') {
-            body = 'تصویر'
-        } else if (payload.message_type === 'video') {
-            body = 'ویدئو'
-        } else if (payload.message_type === 'sticker') {
-            body = 'استیکر'
-        }
-        
-        // Correct route for MessengerView.vue (path: /chat, query: user_id)
-        const routePath = `/chat?user_id=${payload.sender_id}&user_name=${encodeURIComponent(sender)}`
-        
-        // Show in-app toast for chats
-        notificationStore.addToast(sender, body, routePath)
+    const isViewingSameChat = isChatOpen && currentChatId !== null && currentChatId === senderId && !document.hidden
+    const shouldTreatAsUnread = !isViewingSameChat
 
-        // Only try to show native notification if tab is hidden
-        if (document.hidden) {
-            showBrowserNotification(sender, body)
-        }
+    if (shouldTreatAsUnread) {
+      notificationStore.incrementChatUnread(senderId)
+    }
+
+    if (!shouldTreatAsUnread) {
+      return
+    }
+
+    const sender = payload.sender_name || 'پیام جدید'
+    let body = payload.content || 'فایل جدید'
+    
+    // Define media labels
+    if (payload.message_type === 'image') {
+      body = 'تصویر'
+    } else if (payload.message_type === 'video') {
+      body = 'ویدئو'
+    } else if (payload.message_type === 'sticker') {
+      body = 'استیکر'
+    }
+    
+    // Correct route for MessengerView.vue (path: /chat, query: user_id)
+    const routePath = `/chat?user_id=${payload.sender_id}&user_name=${encodeURIComponent(sender)}`
+    
+    // Show in-app toast for chats
+    notificationStore.addToast(sender, body, routePath)
+
+    // Only try to show native notification if tab is hidden
+    if (document.hidden) {
+      showBrowserNotification(sender, body, { route: routePath })
     }
   })
 
@@ -140,6 +152,10 @@ onMounted(() => {
     window.dispatchEvent(new Event('pwa-install-ready'));
   });
 })
+
+  onBeforeUnmount(() => {
+    window.removeEventListener(BROWSER_NOTIFICATION_CLICK_EVENT, handleBrowserNotificationClick)
+  })
 </script>
 
 

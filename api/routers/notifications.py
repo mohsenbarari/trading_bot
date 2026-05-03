@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, delete, update, func
 from typing import List
 from pydantic import BaseModel
 from datetime import datetime
@@ -33,6 +33,17 @@ class NotificationRead(BaseModel):
 
     class Config:
         from_attributes = True 
+
+
+async def sync_unread_count(db: AsyncSession, redis: Redis, user_id: int) -> int:
+    count_stmt = select(func.count(Notification.id)).where(
+        Notification.user_id == user_id,
+        Notification.is_read == False,
+    )
+    result = await db.execute(count_stmt)
+    unread_count = int(result.scalar() or 0)
+    await redis.set(f"user:{user_id}:unread_count", unread_count)
+    return unread_count
 
 @router.get("/unread-count", response_model=int)
 async def get_unread_count(
@@ -95,15 +106,7 @@ async def mark_notification_read(
     if notification and not notification.is_read:
         notification.is_read = True
         await db.commit()
-        
-        # کاهش شمارنده در Redis
-        count_key = f"user:{current_user.id}:unread_count"
-        await redis.decr(count_key)
-        
-        # اطمینان از منفی نشدن
-        current_count = await redis.get(count_key)
-        if current_count and int(current_count) < 0:
-            await redis.set(count_key, 0)
+        await sync_unread_count(db, redis, current_user.id)
 
     return None
 
@@ -125,11 +128,22 @@ async def mark_all_notifications_read(
     )
     await db.execute(stmt)
     await db.commit()
+    await sync_unread_count(db, redis, current_user.id)
     
-    # ۲. ریست کردن شمارنده در Redis
-    count_key = f"user:{current_user.id}:unread_count"
-    await redis.set(count_key, 0)
-    
+    return None
+
+
+@router.delete("/", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_all_notifications(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis)
+):
+    """حذف همه اعلان‌های کاربر."""
+    stmt = delete(Notification).where(Notification.user_id == current_user.id)
+    await db.execute(stmt)
+    await db.commit()
+    await sync_unread_count(db, redis, current_user.id)
     return None
 
 
@@ -137,7 +151,8 @@ async def mark_all_notifications_read(
 async def delete_notification(
     notification_id: int,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis)
 ):
     """حذف یک پیام خاص."""
     stmt = select(Notification).where(
@@ -152,6 +167,7 @@ async def delete_notification(
         
     await db.delete(notification)
     await db.commit()
+    await sync_unread_count(db, redis, current_user.id)
     return None
 
 

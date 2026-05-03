@@ -391,9 +391,8 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             const conv = conversations.value.find(c => c.other_user_id === selectedUserId.value)
             if (conv) {
                 conv.unread_count = 0
-                // Refresh global total unread count
-                notificationStore.fetchInitialCounts()
             }
+            notificationStore.markChatAsRead(selectedUserId.value)
         } catch (e) {
             console.error('Failed to mark as read', e)
         }
