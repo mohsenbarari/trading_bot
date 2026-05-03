@@ -4,11 +4,72 @@ import { apiFetch } from '../utils/auth'
 import { playNotificationSound } from '../utils/audio'
 
 
+function normalizeEnumValue(value: unknown): string {
+    return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function normalizeNotificationId(value: unknown): number | string {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value
+    }
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim()
+        if (!trimmed) {
+            return Date.now() + Math.random()
+        }
+
+        const numeric = Number(trimmed)
+        return Number.isFinite(numeric) ? numeric : trimmed
+    }
+
+    return Date.now() + Math.random()
+}
+
+function buildNotificationTitle(category: string): string {
+    if (category === 'system') return 'پیام مدیریت'
+    if (category === 'trade') return 'اعلان معامله'
+    if (category === 'user') return 'اعلان کاربری'
+    return 'اعلان جدید'
+}
+
+function normalizeNotificationPayload(notification: any) {
+    const category = normalizeEnumValue(notification?.category) || 'system'
+    const level = normalizeEnumValue(notification?.level) || 'info'
+    const body = notification?.content || notification?.message || notification?.body || ''
+
+    return {
+        ...notification,
+        id: normalizeNotificationId(notification?.id),
+        category,
+        level,
+        body,
+        content: notification?.content || body,
+        message: notification?.message || body,
+        title: notification?.title || buildNotificationTitle(category),
+    }
+}
+
+
 export const useNotificationStore = defineStore('notifications', () => {
     const chatUnreadCount = ref(0)
+    const unreadChatUserIds = ref<number[]>([])
     const appNotifications = ref<any[]>([])
     const activeToasts = ref<any[]>([])
     const isLoadingHistory = ref(false)
+
+    const syncUnreadChatIds = (conversations: Array<{ user_id?: unknown }> = [], fallbackCount = 0) => {
+        const nextIds = Array.from(new Set(
+            conversations
+                .map((conversation) => Number(conversation?.user_id))
+                .filter((userId) => Number.isFinite(userId) && userId > 0)
+        ))
+
+        unreadChatUserIds.value = nextIds
+        chatUnreadCount.value = nextIds.length > 0 || fallbackCount === 0
+            ? nextIds.length
+            : fallbackCount
+    }
 
 
     const fetchInitialCounts = async () => {
@@ -20,8 +81,7 @@ export const useNotificationStore = defineStore('notifications', () => {
             const response = await apiFetch('/api/chat/poll')
             if (response.ok) {
                 const data = await response.json()
-                // Change: show unread CHATS instead of total messages
-                chatUnreadCount.value = data.unread_chats_count || 0
+                syncUnreadChatIds(data.conversations_with_unread || [], data.unread_chats_count || 0)
             }
         } catch (error) {
             console.error('Failed to fetch initial notification counts:', error)
@@ -29,25 +89,32 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
 
     const setChatUnreadCount = (count: number) => {
-        chatUnreadCount.value = count
+        chatUnreadCount.value = Math.max(0, Number(count) || 0)
+        if (chatUnreadCount.value === 0) {
+            unreadChatUserIds.value = []
+        }
     }
 
-    const incrementChatUnread = () => {
-        // Instead of blind increment, re-fetch from server to be accurate on chat counts
-        fetchInitialCounts()
+    const incrementChatUnread = (userId?: number | null) => {
+        if (!Number.isFinite(userId) || !userId || userId <= 0) {
+            void fetchInitialCounts()
+            return
+        }
+
+        if (!unreadChatUserIds.value.includes(userId)) {
+            unreadChatUserIds.value = [...unreadChatUserIds.value, userId]
+            chatUnreadCount.value = unreadChatUserIds.value.length
+        }
+    }
+
+    const markChatAsRead = (userId?: number | null) => {
+        if (!Number.isFinite(userId) || !userId || userId <= 0) return
+        unreadChatUserIds.value = unreadChatUserIds.value.filter((id) => id !== userId)
+        chatUnreadCount.value = unreadChatUserIds.value.length
     }
 
     const addAppNotification = (notification: any) => {
-        // Prevent exact duplicates if backend sends SSE and then we fetch or vice versa
-        // Usually SSE comes in format: { id: ..., message: ..., level: ..., category: ... } or payload.content
-        
-        // Normalize for the UI
-        const normalized = {
-            ...notification,
-            title: notification.title || (notification.category === 'system' ? 'پیام سیستم' : 'اعلان جدید'),
-            body: notification.content || notification.message || notification.body,
-            id: notification.id || Date.now() + Math.random() // Fallback ID
-        }
+        const normalized = normalizeNotificationPayload(notification)
         
         if (!appNotifications.value.some(n => n.id === normalized.id)) {
             appNotifications.value.unshift(normalized)
@@ -56,6 +123,8 @@ export const useNotificationStore = defineStore('notifications', () => {
                 appNotifications.value.pop()
             }
         }
+
+        return normalized
     }
 
     const fetchHistory = async () => {
@@ -64,11 +133,7 @@ export const useNotificationStore = defineStore('notifications', () => {
             const res = await apiFetch('/api/notifications/')
             if (res.ok) {
                 const data = await res.json()
-                appNotifications.value = data.map((n: any) => ({
-                    ...n,
-                    title: n.category === 'system' ? 'پیام مدیریت' : 'اعلان جدید',
-                    body: n.message
-                }))
+                appNotifications.value = data.map((n: any) => normalizeNotificationPayload(n))
             }
         } catch (e) {
             console.error('Failed to fetch notifications history:', e)
@@ -83,6 +148,19 @@ export const useNotificationStore = defineStore('notifications', () => {
              appNotifications.value.forEach(n => n.is_read = true)
         } catch (e) {
              console.error('Failed to mark all as read:', e)
+        }
+    }
+
+    const clearAllNotifications = async () => {
+        const originalList = [...appNotifications.value]
+        appNotifications.value = []
+
+        try {
+            const res = await apiFetch('/api/notifications/', { method: 'DELETE' })
+            if (!res.ok) throw new Error()
+        } catch (e) {
+            appNotifications.value = originalList
+            console.error('Clear all notifications failed:', e)
         }
     }
 
@@ -124,12 +202,14 @@ export const useNotificationStore = defineStore('notifications', () => {
         fetchInitialCounts,
         setChatUnreadCount,
         incrementChatUnread,
+        markChatAsRead,
         addAppNotification,
         addToast,
         removeToast,
         isLoadingHistory,
         fetchHistory,
         markAllAsRead,
+        clearAllNotifications,
         deleteNotification
     }
 })

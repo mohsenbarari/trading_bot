@@ -3,6 +3,12 @@
  * Handles permission requests and displaying system-level notifications.
  */
 
+export const BROWSER_NOTIFICATION_CLICK_EVENT = 'app-browser-notification-click'
+
+type RoutedNotificationOptions = NotificationOptions & {
+    route?: string
+}
+
 export const requestNotificationPermission = async (): Promise<boolean> => {
     if (!('Notification' in window)) {
         console.warn('Browser does not support notifications');
@@ -19,8 +25,10 @@ export const requestNotificationPermission = async (): Promise<boolean> => {
     return false;
 };
 
-export const showBrowserNotification = (title: string, body: string, options: NotificationOptions = {}): boolean => {
+export const showBrowserNotification = (title: string, body: string, options: RoutedNotificationOptions = {}): boolean => {
     if (!('Notification' in window) || Notification.permission !== 'granted') return false;
+
+    const { route, ...notificationOptions } = options
 
     // Truncate body to 300 characters as requested by user
     const truncatedBody = body.length > 300 ? body.substring(0, 297) + '...' : body;
@@ -30,13 +38,17 @@ export const showBrowserNotification = (title: string, body: string, options: No
             body: truncatedBody,
             icon: '/pwa-192x192.png', // Default icon from PWA manifest
             vibrate: [200, 100, 200], // Vibration pattern for supported devices
-            ...options
+            ...notificationOptions
         } as any);
 
         notification.onclick = () => {
             window.focus();
+            if (route) {
+                window.dispatchEvent(new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
+                    detail: { route }
+                }));
+            }
             notification.close();
-            // Custom click handlers can be added if needed
         };
         
         return true;

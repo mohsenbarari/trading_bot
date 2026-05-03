@@ -1,19 +1,25 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotificationStore } from '../stores/notifications'
 import { Bell, ArrowRight, Trash2, ShieldAlert, CheckCircle, AlertTriangle, AlertCircle } from 'lucide-vue-next'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
+const isClearingAll = ref(false)
 
 const goBack = () => {
   router.push('/')
 }
 
-const clearAll = () => {
-  // Not implemented in backend as a single DELETE all, but we mark all as read.
-  // We can just rely on delete individual for now, or just let them disappear over time.
+const clearAll = async () => {
+  if (isClearingAll.value || notificationStore.appNotifications.length === 0) return
+  isClearingAll.value = true
+  try {
+    await notificationStore.clearAllNotifications()
+  } finally {
+    isClearingAll.value = false
+  }
 }
 
 onMounted(async () => {
@@ -40,7 +46,7 @@ const getIconForType = (level: string, category: string) => {
         <ArrowRight :size="20" />
       </button>
       <h1 class="title">مرکز اعلان‌ها</h1>
-      <button class="clear-btn" @click="clearAll" v-if="notificationStore.appNotifications.length > 0">
+      <button class="clear-btn" :disabled="isClearingAll" @click="clearAll" v-if="notificationStore.appNotifications.length > 0">
         <Trash2 :size="18" />
       </button>
     </header>
