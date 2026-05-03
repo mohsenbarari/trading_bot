@@ -184,6 +184,18 @@
               <div v-if="hasCapturedMediaQueue" class="camera-capture-queue-label">
                 {{ capturedMediaQueueLabel }}
               </div>
+              <div
+                v-if="cameraVideoRuntimeLabel"
+                class="camera-runtime-status"
+                :class="{
+                  native: isUsingNativeCameraFallback,
+                  recording: isRecording,
+                  inline: !isUsingNativeCameraFallback && !isRecording,
+                }"
+              >
+                <div class="camera-runtime-status-label">{{ cameraVideoRuntimeLabel }}</div>
+                <div class="camera-runtime-status-hint">{{ cameraVideoRuntimeHint }}</div>
+              </div>
             </div>
           </div>
         </div>
@@ -451,6 +463,12 @@ type CapturedCameraMediaItem = {
 
 type PreciseLocationGuidePlatform = 'android' | 'ios'
 
+type CameraFallbackReason =
+  | 'none'
+  | 'insecure-context'
+  | 'media-devices-unavailable'
+  | 'stream-start-failed'
+
 const props = defineProps<{
   modelValue: boolean
 }>()
@@ -496,6 +514,8 @@ const activeFacingMode = ref<'environment' | 'user'>('environment')
 const cameraCaptureMode = ref<'inline' | 'native'>('inline')
 const isCameraStarting = ref(false)
 const cameraError = ref('')
+const cameraFallbackReason = ref<CameraFallbackReason>('none')
+const cameraFallbackDetails = ref('')
 const isRecording = ref(false)
 const recordingDeciseconds = ref(0)
 const capturedCameraMedia = ref<CapturedCameraMediaItem[]>([])
@@ -548,6 +568,21 @@ const locationDebugEntries = ref<Array<{ id: number; time: string; label: string
 let locationDebugSequence = 0
 
 const isUsingNativeCameraFallback = computed(() => cameraCaptureMode.value === 'native')
+const cameraFallbackReasonText = computed(() => {
+  if (cameraFallbackReason.value === 'insecure-context') {
+    return 'این صفحه به صورت امن باز نشده است و مرورگر اجازه پیش نمایش داخلی دوربین را نمی دهد.'
+  }
+
+  if (cameraFallbackReason.value === 'media-devices-unavailable') {
+    return 'مرورگر یا وب ویوی فعلی دسترسی getUserMedia را در اختیار اپ نمی گذارد.'
+  }
+
+  if (cameraFallbackReason.value === 'stream-start-failed') {
+    return cameraFallbackDetails.value || 'راه اندازی پیش نمایش داخلی دوربین ناموفق بود.'
+  }
+
+  return 'این دستگاه در حال استفاده از دوربین سیستم است.'
+})
 const nativeCameraFallbackTitle = computed(() => (
   cameraMode.value === 'photo'
     ? 'پیش نمایش زنده دوربین در این مرورگر در دسترس نیست.'
@@ -556,7 +591,7 @@ const nativeCameraFallbackTitle = computed(() => (
 const nativeCameraFallbackHint = computed(() => (
   cameraMode.value === 'photo'
     ? 'با دکمه پایین، دوربین سیستم برای گرفتن عکس باز می شود.'
-    : 'با دکمه پایین، دوربین سیستم برای ضبط ویدئو باز می شود. در این حالت ثانیه شمار سفارشی اپ نمایش داده نمی شود، چون ضبط داخل دوربین سیستم انجام می شود. برای دیدن ثانیه شمار باید صفحه روی نسخه امن HTTPS باز شود تا پیش نمایش داخلی دوربین فعال باشد.'
+    : `${cameraFallbackReasonText.value} در این حالت ثانیه شمار سفارشی اپ نمایش داده نمی شود، چون ضبط داخل دوربین سیستم انجام می شود. برای دیدن ثانیه شمار باید صفحه روی نسخه امن HTTPS باز شود تا پیش نمایش داخلی دوربین فعال باشد.`
 ))
 const capturedMediaCount = computed(() => capturedCameraMedia.value.length)
 const hasCapturedMediaQueue = computed(() => capturedMediaCount.value > 0)
@@ -647,6 +682,32 @@ const isCameraReady = computed(() => (
   isUsingNativeCameraFallback.value
   || (Boolean(cameraStream.value) && !isCameraStarting.value && !cameraError.value)
 ))
+const cameraVideoRuntimeLabel = computed(() => {
+  if (cameraMode.value !== 'video') return ''
+
+  if (isUsingNativeCameraFallback.value) {
+    return 'حالت فعلی: دوربین سیستم'
+  }
+
+  if (isRecording.value) {
+    return 'حالت فعلی: ضبط داخل اپ'
+  }
+
+  return 'حالت فعلی: پیش نمایش داخلی اپ'
+})
+const cameraVideoRuntimeHint = computed(() => {
+  if (cameraMode.value !== 'video') return ''
+
+  if (isUsingNativeCameraFallback.value) {
+    return `${cameraFallbackReasonText.value} تایمر اپ در این حالت نمایش داده نمی شود.`
+  }
+
+  if (isRecording.value) {
+    return 'ثانیه شمار دهم ثانیه ای روی تصویر فعال است.'
+  }
+
+  return 'ثانیه شمار بعد از فشردن دکمه ضبط نمایش داده می شود.'
+})
 const formattedRecordingTime = computed(() => {
   const totalSeconds = Math.floor(recordingDeciseconds.value / 10)
   const mins = Math.floor(totalSeconds / 60)
@@ -676,6 +737,40 @@ function stopRecordingTimer() {
   if (recordingTimer !== null) {
     window.clearInterval(recordingTimer)
     recordingTimer = null
+  }
+}
+
+function setCameraFallback(reason: CameraFallbackReason, details = '') {
+  cameraFallbackReason.value = reason
+  cameraFallbackDetails.value = details
+}
+
+function getInlineCameraFallbackReason(): CameraFallbackReason {
+  if (typeof window === 'undefined' || !window.isSecureContext) {
+    return 'insecure-context'
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return 'media-devices-unavailable'
+  }
+
+  return 'none'
+}
+
+function describeCameraStartError(error: unknown) {
+  const maybeError = error as { name?: string; message?: string } | null
+  switch (maybeError?.name) {
+    case 'NotAllowedError':
+    case 'PermissionDeniedError':
+      return 'دسترسی دوربین یا میکروفون برای پیش نمایش داخلی در این مرورگر رد شده است.'
+    case 'NotReadableError':
+      return 'دوربین در اختیار برنامه دیگری است یا راه اندازی پیش نمایش داخلی ناموفق بود.'
+    case 'NotFoundError':
+      return 'هیچ دوربین در دسترس برای پیش نمایش داخلی پیدا نشد.'
+    case 'OverconstrainedError':
+      return 'تنظیمات لازم برای پیش نمایش داخلی دوربین روی این دستگاه پشتیبانی نشد.'
+    default:
+      return maybeError?.message?.trim() || 'راه اندازی پیش نمایش داخلی دوربین ناموفق بود.'
   }
 }
 
@@ -840,6 +935,7 @@ function cleanupCamera(discardRecording = true, clearCapturedMedia = true) {
   stopCameraTracks()
   cameraCaptureMode.value = 'inline'
   cameraError.value = ''
+  setCameraFallback('none')
   isCameraStarting.value = false
   showCameraCapture.value = false
 
@@ -849,9 +945,7 @@ function cleanupCamera(discardRecording = true, clearCapturedMedia = true) {
 }
 
 function supportsInlineCameraPreview() {
-  return typeof window !== 'undefined'
-    && window.isSecureContext
-    && !!navigator.mediaDevices?.getUserMedia
+  return getInlineCameraFallbackReason() === 'none'
 }
 
 function openNativeCameraCapture(mode: 'photo' | 'video' = cameraMode.value) {
@@ -863,9 +957,10 @@ function openNativeCameraCapture(mode: 'photo' | 'video' = cameraMode.value) {
   cameraPhotoInput.value?.click()
 }
 
-function enableNativeCameraFallback() {
+function enableNativeCameraFallback(reason: CameraFallbackReason = getInlineCameraFallbackReason(), details = '') {
   stopCameraTracks()
   cameraCaptureMode.value = 'native'
+  setCameraFallback(reason, details)
   cameraError.value = ''
   isCameraStarting.value = false
   showCameraCapture.value = true
@@ -898,12 +993,14 @@ async function requestCameraStream(includeAudio: boolean) {
 }
 
 async function startCameraStream() {
-  if (!supportsInlineCameraPreview()) {
-    enableNativeCameraFallback()
+  const inlineFallbackReason = getInlineCameraFallbackReason()
+  if (inlineFallbackReason !== 'none') {
+    enableNativeCameraFallback(inlineFallbackReason)
     return
   }
 
   cameraCaptureMode.value = 'inline'
+  setCameraFallback('none')
   isCameraStarting.value = true
   cameraError.value = ''
   stopCameraTracks()
@@ -925,7 +1022,7 @@ async function startCameraStream() {
     await syncCameraZoomCapability(getActiveCameraVideoTrack())
   } catch (error) {
     console.error('Camera start error:', error)
-    enableNativeCameraFallback()
+    enableNativeCameraFallback('stream-start-failed', describeCameraStartError(error))
   } finally {
     isCameraStarting.value = false
   }
@@ -1080,8 +1177,9 @@ function openCameraCapture() {
   activeFacingMode.value = 'environment'
   showCameraCapture.value = true
 
-  if (!supportsInlineCameraPreview()) {
-    enableNativeCameraFallback()
+  const inlineFallbackReason = getInlineCameraFallbackReason()
+  if (inlineFallbackReason !== 'none') {
+    enableNativeCameraFallback(inlineFallbackReason)
     return
   }
 
@@ -2565,6 +2663,44 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+}
+
+.camera-runtime-status {
+  width: min(100%, 340px);
+  margin-top: 2px;
+  padding: 8px 12px;
+  border-radius: 16px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.camera-runtime-status.native {
+  background: rgba(255, 148, 77, 0.16);
+  border-color: rgba(255, 148, 77, 0.22);
+}
+
+.camera-runtime-status.recording {
+  background: rgba(229, 57, 53, 0.16);
+  border-color: rgba(229, 57, 53, 0.24);
+}
+
+.camera-runtime-status.inline {
+  background: rgba(51, 144, 236, 0.14);
+  border-color: rgba(51, 144, 236, 0.2);
+}
+
+.camera-runtime-status-label {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.camera-runtime-status-hint {
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .camera-capture-queue-label {
