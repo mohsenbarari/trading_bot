@@ -36,7 +36,32 @@ logger = logging.getLogger(__name__)
 
 CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 CHAT_MEDIA_MAX_UPLOAD_LABEL = "50MB"
-COMMON_MESSAGE_REACTIONS = ("👍", "❤️", "🔥", "👏", "😂", "😮", "😢", "🙏")
+COMMON_MESSAGE_REACTIONS = (
+    "👍",
+    "👎",
+    "❤️",
+    "🔥",
+    "😂",
+    "😮",
+    "😢",
+    "🙏",
+    "👏",
+    "😁",
+    "🤔",
+    "🤯",
+    "😡",
+    "🎉",
+    "💯",
+    "👌",
+    "😍",
+    "🥰",
+    "🤝",
+    "🤩",
+    "👀",
+    "💔",
+    "🤣",
+    "🫡",
+)
 COMMON_MESSAGE_REACTION_SET = set(COMMON_MESSAGE_REACTIONS)
 COMMON_MESSAGE_REACTION_ORDER = {emoji: index for index, emoji in enumerate(COMMON_MESSAGE_REACTIONS)}
 
