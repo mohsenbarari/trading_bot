@@ -32,6 +32,7 @@ export interface NormalizedAppNotification extends Omit<AppRealtimeNotificationP
     content: string
     level: NotificationLevel
     category: NotificationCategory
+    client_received_at?: number
 }
 
 export interface ToastInput {
