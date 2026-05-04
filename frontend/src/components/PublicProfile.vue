@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 
 const props = defineProps<{
   user: { id: number; account_name: string } | null;
+  viewerUserId?: number | null;
   apiBaseUrl: string;
   jwtToken: string | null;
 }>();
@@ -25,6 +26,11 @@ const isLoading = ref(true);
 const error = ref('');
 const isHistoryLoading = ref(false);
 const showHistory = ref(false);
+const isOwnProfile = computed(() => {
+  if (!profileData.value) return false;
+  return Number(profileData.value.id) === Number(props.viewerUserId);
+});
+const showVisitorActions = computed(() => !isOwnProfile.value);
 
 onMounted(async () => {
   if (!props.user?.id || !props.jwtToken) {
@@ -117,19 +123,19 @@ async function loadMutualTrades() {
         </div>
       </div>
 
-      <div class="stats-grid">
+      <div class="stats-grid" :class="{ 'single-column': isOwnProfile }">
         <div class="stat-card">
             <span class="stat-icon">📅</span>
             <span class="stat-label">عضویت</span>
             <span class="stat-value">{{ profileData.created_at_jalali }}</span>
         </div>
-        <button class="message-btn" @click="$emit('navigate', 'chat', { userId: profileData.id, userName: profileData.account_name })">
+        <button v-if="showVisitorActions" class="message-btn" @click="$emit('navigate', 'chat', { userId: profileData.id, userName: profileData.account_name })">
             <span class="stat-icon">💬</span>
             <span class="stat-label">ارسال پیام</span>
         </button>
       </div>
 
-      <div class="history-section">
+      <div v-if="showVisitorActions" class="history-section">
         <button class="history-toggle-btn" @click="loadMutualTrades">
             📝 تاریخچه معاملات مشترک
             <span v-if="showHistory">🔽</span>
@@ -215,6 +221,10 @@ async function loadMutualTrades() {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   width: 100%;
+}
+
+.stats-grid.single-column {
+  grid-template-columns: 1fr;
 }
 
 .stat-card {
