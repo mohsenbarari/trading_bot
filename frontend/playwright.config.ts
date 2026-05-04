@@ -1,6 +1,8 @@
 import process from 'node:process'
 import { defineConfig, devices } from '@playwright/test'
 
+const shouldRunHeadless = !!process.env.CI || !process.env.DISPLAY
+
 /**
  * Read environment variables from file.
  * https://github.com/motdotla/dotenv
@@ -39,8 +41,8 @@ export default defineConfig({
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
 
-    /* Only on CI systems run the tests headless */
-    headless: !!process.env.CI,
+    /* Run headless on CI and on Linux hosts without an X server. */
+    headless: shouldRunHeadless,
   },
 
   /* Configure projects for major browsers */

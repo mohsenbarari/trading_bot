@@ -57,6 +57,8 @@ export function useWebSocket() {
 
         socket.onmessage = (event) => {
             try {
+                if (event.data === 'pong') return;
+
                 let message = JSON.parse(event.data);
                 message = cleanDeletedSuffixes(message);
                 if (message.type === 'heartbeat') return;
