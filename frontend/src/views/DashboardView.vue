@@ -89,7 +89,7 @@ onMounted(fetchUser)
           </div>
         </div>
         <div class="top-actions">
-          <button class="icon-btn" aria-label="اعلان‌ها">
+          <button class="icon-btn" @click="router.push('/notifications')" aria-label="اعلان‌ها">
             <Bell :size="22" />
           </button>
           <button class="icon-btn" @click="logout" aria-label="خروج">
