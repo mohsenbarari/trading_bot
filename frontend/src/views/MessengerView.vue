@@ -49,10 +49,13 @@ onMounted(() => {
 })
 
 function handleNavigate(view: string, payload?: any) {
-  // The ChatView emits "navigate" for things like profile
-  if (view === 'profile' && payload?.user_id) {
-    // If we had a public profile view, we could route there. For now, do nothing.
-    console.log('Navigate to profile', payload.user_id)
+  const profileId = Number(payload?.id ?? payload?.user_id)
+  if ((view === 'public_profile' || view === 'profile') && Number.isInteger(profileId) && profileId > 0) {
+    router.push({
+      name: 'public-profile',
+      params: { id: String(profileId) },
+      query: payload?.account_name ? { account_name: payload.account_name } : undefined,
+    })
   }
 }
 

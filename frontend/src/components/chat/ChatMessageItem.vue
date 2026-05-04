@@ -56,7 +56,17 @@
         </span>
         <div class="forward-content">
           <span class="forward-title">پیام هدایت شده</span>
-          <span class="forward-text">از {{ msg.forwarded_from_name }}</span>
+          <button
+            v-if="canOpenForwardedProfile"
+            type="button"
+            class="forward-text forward-link"
+            data-context-ignore
+            data-swipe-ignore
+            @click.stop="handleForwardedProfileClick"
+          >
+            از {{ msg.forwarded_from_name }}
+          </button>
+          <span v-else class="forward-text">از {{ msg.forwarded_from_name }}</span>
         </div>
       </div>
       
@@ -445,6 +455,7 @@ const emit = defineEmits<{
   (e: 'delete-album-item', msg: any): void
   (e: 'toggle-album-download-item', msg: any): void
   (e: 'toggle-reaction', payload: { msg: any, emoji: string }): void
+  (e: 'open-public-profile', payload: { id: number; account_name: string }): void
 }>()
 
 const audioStore = useAudioStore()
@@ -454,6 +465,9 @@ const isSent = computed(() => props.msg.sender_id === props.currentUserId)
 const isSending = computed(() => props.msg.id < 0 || props.msg.is_sending)
 const isError = computed(() => props.msg.is_error)
 const isSelected = computed(() => props.selectedMessages.includes(props.msg.id))
+const canOpenForwardedProfile = computed(() => {
+  return Number.isInteger(Number(props.msg.forwarded_from_id)) && typeof props.msg.forwarded_from_name === 'string' && props.msg.forwarded_from_name.trim().length > 0
+})
 const groupedReactions = computed(() => {
   if (props.msg.is_deleted || !Array.isArray(props.msg.reactions) || props.msg.reactions.length === 0) {
     return [] as Array<{ emoji: string, count: number, reactedByCurrentUser: boolean, sortOrder: number }>
@@ -1308,6 +1322,21 @@ function handleReactionChipClick(emoji: string) {
   emit('toggle-reaction', { msg: props.msg, emoji })
 }
 
+function handleForwardedProfileClick() {
+  if (props.isSelectionMode) {
+    emit('select', props.msg)
+    return
+  }
+
+  const id = Number(props.msg.forwarded_from_id)
+  const accountName = typeof props.msg.forwarded_from_name === 'string' ? props.msg.forwarded_from_name.trim() : ''
+  if (!Number.isInteger(id) || id <= 0 || !accountName) {
+    return
+  }
+
+  emit('open-public-profile', { id, account_name: accountName })
+}
+
 const handleWrapperClick = (e: MouseEvent) => {
   if (Date.now() < suppressContextClickUntil.value) {
     return
@@ -1687,6 +1716,17 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .forward-title { font-size: 13px; font-weight: 500; color: #3390ec; line-height: 1.2; }
 .message-bubble.sent .forward-title { color: #43A047; }
 .forward-text { font-size: 13px; color: inherit; opacity: 0.8; line-height: 1.2; }
+.forward-link {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  text-align: right;
+  font: inherit;
+  cursor: pointer;
+}
+.forward-link:hover { opacity: 1; }
 
 /* Reply Context */
 .reply-context {
