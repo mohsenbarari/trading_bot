@@ -1,13 +1,34 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PublicProfile from '../components/PublicProfile.vue'
+import { apiFetch } from '../utils/auth'
 
 const route = useRoute()
 const router = useRouter()
 
 const jwtToken = computed(() => localStorage.getItem('auth_token'))
 const apiBaseUrl = computed(() => import.meta.env.VITE_API_BASE_URL || '')
+
+function getViewerIdFromToken(token: string | null): number | null {
+  if (!token) return null
+
+  try {
+    const payloadPart = token.split('.')[1]
+    if (!payloadPart) return null
+    const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/')
+    const jsonPayload = decodeURIComponent(
+      window.atob(base64).split('').map((char) => `%${(`00${char.charCodeAt(0).toString(16)}`).slice(-2)}`).join('')
+    )
+    const payload = JSON.parse(jsonPayload)
+    const subject = Number(payload?.sub)
+    return Number.isInteger(subject) && subject > 0 ? subject : null
+  } catch {
+    return null
+  }
+}
+
+const viewerUserId = ref<number | null>(getViewerIdFromToken(jwtToken.value))
 
 const profileUser = computed(() => {
   const rawId = route.params.id
@@ -43,6 +64,24 @@ function handleNavigate(view: string, payload?: { userId?: number; userName?: st
 
   router.push('/')
 }
+
+onMounted(async () => {
+  if (viewerUserId.value) {
+    return
+  }
+
+  try {
+    const response = await apiFetch('/api/auth/me')
+    if (!response.ok) {
+      return
+    }
+
+    const currentUser = await response.json()
+    viewerUserId.value = Number.isInteger(Number(currentUser?.id)) ? Number(currentUser.id) : null
+  } catch {
+    viewerUserId.value = null
+  }
+})
 </script>
 
 <template>
@@ -50,6 +89,7 @@ function handleNavigate(view: string, payload?: { userId?: number; userName?: st
     <PublicProfile
       :key="profileUser?.id || 'invalid-profile'"
       :user="profileUser"
+      :viewerUserId="viewerUserId"
       :apiBaseUrl="apiBaseUrl"
       :jwtToken="jwtToken"
       @navigate="handleNavigate"
