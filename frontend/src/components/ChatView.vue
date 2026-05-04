@@ -2026,6 +2026,17 @@ function viewProfile() {
   }
 }
 
+function openPublicProfile(payload?: { id?: number; account_name?: string }) {
+  if (!payload?.id) {
+    return
+  }
+
+  emit('navigate', 'public_profile', {
+    id: payload.id,
+    account_name: payload.account_name || '',
+  })
+}
+
 const handleCall = () => alert('قابلیت تماس به زودی اضافه می‌شود')
 
 const SWIPE_THRESHOLD = 100 
@@ -2328,6 +2339,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
                 @delete-album-item="handleAlbumDeleteItem"
                 @toggle-album-download-item="handleAlbumDownloadItemToggle"
                 @toggle-reaction="handleMessageReactionToggle"
+                @open-public-profile="openPublicProfile"
                 :on-load="() => hydrateRenderedMedia(item)"
               />
             </template>
