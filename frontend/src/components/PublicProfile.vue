@@ -20,8 +20,30 @@ interface PublicUser {
   trades_count: number;
 }
 
+interface MutualTradePreview {
+  id: number;
+  created_at: string;
+  offer_user_id: number;
+  quantity: number;
+  commodity_name: string;
+  price: number;
+}
+
+interface ProfileStatCard {
+  key: string;
+  icon: string;
+  label: string;
+  value: string;
+}
+
+interface ProfileActionCard {
+  key: 'message';
+  icon: string;
+  label: string;
+}
+
 const profileData = ref<PublicUser | null>(null);
-const mutualTrades = ref<any[]>([]);
+const mutualTrades = ref<MutualTradePreview[]>([]);
 const isLoading = ref(true);
 const error = ref('');
 const isHistoryLoading = ref(false);
@@ -30,7 +52,37 @@ const isOwnProfile = computed(() => {
   if (!profileData.value) return false;
   return Number(profileData.value.id) === Number(props.viewerUserId);
 });
-const showVisitorActions = computed(() => !isOwnProfile.value);
+const showVisitorSections = computed(() => !isOwnProfile.value);
+const showOwnerSections = computed(() => isOwnProfile.value);
+const sharedStatCards = computed<ProfileStatCard[]>(() => {
+  if (!profileData.value) return [];
+
+  return [
+    {
+      key: 'member-since',
+      icon: '📅',
+      label: 'عضویت',
+      value: profileData.value.created_at_jalali,
+    },
+  ];
+});
+const visitorActionCards = computed<ProfileActionCard[]>(() => {
+  if (!showVisitorSections.value) return [];
+
+  return [
+    {
+      key: 'message',
+      icon: '💬',
+      label: 'ارسال پیام',
+    },
+  ];
+});
+const ownerOnlyActions = computed<ProfileActionCard[]>(() => {
+  // Future owner-specific controls (for example edit/manage actions) should be
+  // added here. Keeping the seam explicit prevents visitor-only tools such as
+  // block/unblock from leaking into the owner's own view later.
+  return [];
+});
 
 onMounted(async () => {
   if (!props.user?.id || !props.jwtToken) {
@@ -76,6 +128,22 @@ async function loadMutualTrades() {
         isHistoryLoading.value = false;
     }
 }
+
+function handleVisitorActionClick(action: ProfileActionCard) {
+  if (!profileData.value) return;
+
+  if (action.key === 'message') {
+    emit('navigate', 'chat', { userId: profileData.value.id, userName: profileData.value.account_name });
+  }
+}
+
+function getTradeBadgeClass(trade: MutualTradePreview) {
+  return trade.offer_user_id === profileData.value?.id ? 'sell' : 'buy';
+}
+
+function getTradeBadgeLabel(trade: MutualTradePreview) {
+  return trade.offer_user_id === profileData.value?.id ? '🔴 فروش به شما' : '🟢 خرید از شما';
+}
 </script>
 
 <template>
@@ -110,61 +178,74 @@ async function loadMutualTrades() {
     </div>
 
     <div v-else-if="profileData" class="profile-content">
-      <!-- Avatar Removed -->
-      
-      <div class="info-section">
-        <div class="info-row">
-            <span class="label">📞 موبایل:</span>
-            <span class="value">{{ profileData.mobile_number }}</span>
+      <section class="profile-section shared-profile-section">
+        <div class="info-section">
+          <div class="info-row">
+              <span class="label">📞 موبایل:</span>
+              <span class="value">{{ profileData.mobile_number }}</span>
+          </div>
+          <div class="info-row address-row">
+              <span class="label">📍 آدرس:</span>
+              <span class="value">{{ profileData.address }}</span>
+          </div>
         </div>
-        <div class="info-row address-row">
-            <span class="label">📍 آدرس:</span>
-            <span class="value">{{ profileData.address }}</span>
+
+        <div class="stats-grid" :class="{ 'single-column': sharedStatCards.length === 1 }">
+          <div v-for="stat in sharedStatCards" :key="stat.key" class="stat-card">
+              <span class="stat-icon">{{ stat.icon }}</span>
+              <span class="stat-label">{{ stat.label }}</span>
+              <span class="stat-value">{{ stat.value }}</span>
+          </div>
         </div>
-      </div>
+      </section>
 
-      <div class="stats-grid" :class="{ 'single-column': isOwnProfile }">
-        <div class="stat-card">
-            <span class="stat-icon">📅</span>
-            <span class="stat-label">عضویت</span>
-            <span class="stat-value">{{ profileData.created_at_jalali }}</span>
+      <section v-if="showVisitorSections" class="profile-section visitor-profile-section">
+        <div class="action-grid" :class="{ 'single-column': visitorActionCards.length === 1 }">
+          <button
+            v-for="action in visitorActionCards"
+            :key="action.key"
+            class="message-btn"
+            @click="handleVisitorActionClick(action)"
+          >
+              <span class="stat-icon">{{ action.icon }}</span>
+              <span class="stat-label">{{ action.label }}</span>
+          </button>
         </div>
-        <button v-if="showVisitorActions" class="message-btn" @click="$emit('navigate', 'chat', { userId: profileData.id, userName: profileData.account_name })">
-            <span class="stat-icon">💬</span>
-            <span class="stat-label">ارسال پیام</span>
-        </button>
-      </div>
 
-      <div v-if="showVisitorActions" class="history-section">
-        <button class="history-toggle-btn" @click="loadMutualTrades">
-            📝 تاریخچه معاملات مشترک
-            <span v-if="showHistory">🔽</span>
-            <span v-else>◀️</span>
-        </button>
+        <div class="history-section">
+          <button class="history-toggle-btn" @click="loadMutualTrades">
+              📝 تاریخچه معاملات مشترک
+              <span v-if="showHistory">🔽</span>
+              <span v-else>◀️</span>
+          </button>
 
-        <div v-if="showHistory" class="history-list">
-            <div v-if="isHistoryLoading">
-               <LoadingSkeleton :count="3" :height="60" />
-            </div>
-            <p v-else-if="mutualTrades.length === 0" class="empty-text">هیچ معامله مشترکی یافت نشد.</p>
-            <div v-else v-for="trade in mutualTrades" :key="trade.id" class="mini-trade-card">
-                <div class="trade-row">
-                    <span class="trade-date">{{ trade.created_at }}</span>
-                    <span 
-                      class="trade-badge"
-                      :class="trade.offer_user_id === profileData.id ? 'sell' : 'buy'"
-                    >
-                      {{ trade.offer_user_id === profileData.id ? '🔴 فروش به شما' : '🟢 خرید از شما' }}
-                    </span>
-                </div>
-                <div class="trade-details">
-                    <span>{{ trade.quantity }} {{ trade.commodity_name }}</span>
-                    <span>فی: {{ trade.price.toLocaleString() }}</span>
-                </div>
-            </div>
+          <div v-if="showHistory" class="history-list">
+              <div v-if="isHistoryLoading">
+                 <LoadingSkeleton :count="3" :height="60" />
+              </div>
+              <p v-else-if="mutualTrades.length === 0" class="empty-text">هیچ معامله مشترکی یافت نشد.</p>
+              <div v-else v-for="trade in mutualTrades" :key="trade.id" class="mini-trade-card">
+                  <div class="trade-row">
+                      <span class="trade-date">{{ trade.created_at }}</span>
+                      <span 
+                        class="trade-badge"
+                        :class="getTradeBadgeClass(trade)"
+                      >
+                        {{ getTradeBadgeLabel(trade) }}
+                      </span>
+                  </div>
+                  <div class="trade-details">
+                      <span>{{ trade.quantity }} {{ trade.commodity_name }}</span>
+                      <span>فی: {{ trade.price.toLocaleString() }}</span>
+                  </div>
+              </div>
+          </div>
         </div>
-      </div>
+      </section>
 
+      <section v-if="showOwnerSections && ownerOnlyActions.length > 0" class="profile-section owner-profile-section">
+        <!-- Intentionally empty for now. Future owner-only controls belong here. -->
+      </section>
     </div>
   </div>
 </template>
@@ -182,6 +263,13 @@ async function loadMutualTrades() {
   gap: 20px;
   align-items: center;
   padding: 10px 0;
+}
+
+.profile-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .info-section {
@@ -223,7 +311,18 @@ async function loadMutualTrades() {
   width: 100%;
 }
 
+.action-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  width: 100%;
+}
+
 .stats-grid.single-column {
+  grid-template-columns: 1fr;
+}
+
+.action-grid.single-column {
   grid-template-columns: 1fr;
 }
 
