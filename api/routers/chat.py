@@ -17,8 +17,14 @@ from core.db import get_db
 from core.config import settings
 from models.user import User
 from models.chat_file import ChatFile
-from api.deps import get_current_user
+from api.deps import get_current_user, verify_super_admin
 from api.routers.chat_schemas import (
+    ChannelBulkMemberAddRequest,
+    ChannelBulkMemberAddResponse,
+    ChannelCreateRequest,
+    ChannelCreateResponse,
+    ChannelInviteCandidateListResponse,
+    ChannelRoomRead,
     ConversationRead,
     MessageRead,
     MessageReactionToggle,
@@ -29,6 +35,14 @@ from api.routers.chat_schemas import (
     TypingSignal,
 )
 
+from core.enums import ChatType
+from core.services.chat_room_service import (
+    bulk_add_channel_members,
+    count_active_chat_members,
+    create_optional_channel,
+    get_channel_or_404,
+    list_channel_invite_candidates,
+)
 from core.services.chat_service import (
     apply_direct_message_delete,
     apply_direct_message_edit,
@@ -162,6 +176,96 @@ async def send_typing_signal(
         publisher=publish_user_event,
     )
     return None
+
+
+@router.post("/channels", response_model=ChannelCreateResponse, status_code=status.HTTP_201_CREATED)
+async def create_channel(
+    data: ChannelCreateRequest,
+    current_user: User = Depends(verify_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """ساخت کانال اختیاری invite-only برای مدیر ارشد"""
+    channel = await create_optional_channel(
+        db,
+        creator=current_user,
+        title=data.title,
+        description=data.description,
+    )
+    member_count = await count_active_chat_members(db, channel.id)
+    return ChannelCreateResponse(
+        channel=ChannelRoomRead(
+            id=channel.id,
+            type=ChatType.CHANNEL,
+            title=channel.title or "",
+            description=channel.description,
+            created_by_id=channel.created_by_id,
+            is_system=channel.is_system,
+            is_mandatory=channel.is_mandatory,
+            member_count=member_count,
+            created_at=channel.created_at,
+        ),
+        member_picker_required=True,
+    )
+
+
+@router.get("/channels/invite-candidates", response_model=ChannelInviteCandidateListResponse)
+async def get_channel_invite_candidates(
+    q: Optional[str] = Query(None, min_length=1),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    exclude_chat_id: Optional[int] = Query(None),
+    current_user: User = Depends(verify_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """لیست کاربران فعال پروژه برای member picker کانال"""
+    candidate_page = await list_channel_invite_candidates(
+        db,
+        query_text=q,
+        limit=limit,
+        offset=offset,
+        exclude_chat_id=exclude_chat_id,
+    )
+    return ChannelInviteCandidateListResponse(
+        items=[
+            {
+                "user_id": item.user_id,
+                "account_name": item.account_name,
+                "full_name": item.full_name,
+                "mobile_number": item.mobile_number,
+                "is_already_member": item.is_already_member,
+            }
+            for item in candidate_page.items
+        ],
+        total=candidate_page.total,
+        active_total=candidate_page.active_total,
+    )
+
+
+@router.post("/channels/{chat_id}/members/bulk", response_model=ChannelBulkMemberAddResponse)
+async def bulk_invite_channel_members(
+    chat_id: int,
+    data: ChannelBulkMemberAddRequest,
+    current_user: User = Depends(verify_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """دعوت/افزودن گروهی اعضا به کانال اختیاری"""
+    _ = current_user
+    channel = await get_channel_or_404(db, chat_id)
+    summary = await bulk_add_channel_members(
+        db,
+        chat=channel,
+        user_ids=data.user_ids,
+        select_all_active_users=data.select_all_active_users,
+    )
+    return ChannelBulkMemberAddResponse(
+        chat_id=summary.chat_id,
+        processed_user_ids=summary.processed_user_ids,
+        added_count=summary.added_count,
+        reactivated_count=summary.reactivated_count,
+        already_member_count=summary.already_member_count,
+        member_count=summary.member_count,
+        select_all_active_users=summary.select_all_active_users,
+    )
 
 
 @router.post("/send", response_model=MessageRead)
