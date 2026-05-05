@@ -30,6 +30,7 @@ from api.deps import get_current_user
 from core.services.chat_service import (
     build_direct_conversation_projection_stmt,
     get_direct_conversation_key,
+    sync_direct_read_state,
     sync_direct_message_threading,
     get_or_create_direct_conversation,
 )
@@ -663,32 +664,11 @@ async def mark_messages_read(
     db: AsyncSession = Depends(get_db)
 ):
     """علامت‌گذاری تمام پیام‌های یک کاربر به عنوان خوانده شده"""
-    # بروزرسانی پیام‌ها
-    stmt = (
-        update(Message)
-        .where(
-            Message.sender_id == user_id,
-            Message.receiver_id == current_user.id,
-            Message.is_read == False
-        )
-        .values(is_read=True)
+    await sync_direct_read_state(
+        db,
+        reader=current_user,
+        other_user_id=user_id,
     )
-    await db.execute(stmt)
-    
-    # بروزرسانی شمارنده مکالمه
-    u1, u2 = get_direct_conversation_key(current_user.id, user_id)
-    conv_stmt = select(Conversation).where(
-        Conversation.user1_id == u1,
-        Conversation.user2_id == u2
-    )
-    result = await db.execute(conv_stmt)
-    conversation = result.scalar_one_or_none()
-    
-    if conversation:
-        if current_user.id == u1:
-            conversation.unread_count_user1 = 0
-        else:
-            conversation.unread_count_user2 = 0
     
     await db.commit()
     
