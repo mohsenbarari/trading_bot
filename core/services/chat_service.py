@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from sqlalchemy import case, select
+from datetime import datetime, timezone
+
+import sqlalchemy as sa
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from core.enums import MessageType
+from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType, MessageType
+from models.chat import Chat
+from models.chat_member import ChatMember
 from models.conversation import Conversation
 from models.message import Message
 from models.user import User
@@ -15,6 +20,22 @@ from models.user import User
 def get_direct_conversation_key(user1_id: int, user2_id: int) -> tuple[int, int]:
     """Return the canonical ordering for a two-user direct conversation."""
     return (min(user1_id, user2_id), max(user1_id, user2_id))
+
+
+def _membership_status_for_user(user: User) -> ChatMembershipStatus:
+    return ChatMembershipStatus.INACTIVE if user.is_deleted else ChatMembershipStatus.ACTIVE
+
+
+def _normalize_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _same_datetime(left: datetime | None, right: datetime | None) -> bool:
+    return _normalize_datetime(left) == _normalize_datetime(right)
 
 
 def build_direct_conversation_projection_stmt(current_user_id: int):
@@ -93,5 +114,119 @@ async def get_or_create_direct_conversation(
         )
         db.add(conversation)
         await db.flush()
+
+    return conversation
+
+
+async def _find_existing_direct_chat_id(
+    db: AsyncSession,
+    user1_id: int,
+    user2_id: int,
+) -> int | None:
+    member_ids = get_direct_conversation_key(user1_id, user2_id)
+    stmt = (
+        select(Chat.id)
+        .join(ChatMember, ChatMember.chat_id == Chat.id)
+        .where(Chat.type == ChatType.DIRECT, Chat.is_deleted.is_(False))
+        .group_by(Chat.id)
+        .having(
+            func.count(sa.distinct(ChatMember.user_id)) == 2,
+            func.count(sa.distinct(ChatMember.user_id)).filter(ChatMember.user_id.in_(member_ids)) == 2,
+        )
+        .order_by(Chat.id.asc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def _load_direct_chat_members(
+    db: AsyncSession,
+    chat_id: int,
+    user1_id: int,
+    user2_id: int,
+) -> dict[int, ChatMember]:
+    stmt = (
+        select(ChatMember)
+        .where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id.in_((user1_id, user2_id)),
+        )
+        .order_by(ChatMember.id.asc())
+    )
+    result = await db.execute(stmt)
+    members: dict[int, ChatMember] = {}
+    for member in result.scalars().all():
+        members.setdefault(member.user_id, member)
+    return members
+
+
+async def get_or_create_direct_chat(
+    db: AsyncSession,
+    user1: User,
+    user2: User,
+) -> Chat:
+    """Load or create the generic direct Chat row for a user pair."""
+    chat_id = await _find_existing_direct_chat_id(db, user1.id, user2.id)
+    chat = await db.get(Chat, chat_id) if chat_id is not None else None
+
+    if chat is None:
+        chat = Chat(
+            type=ChatType.DIRECT,
+            created_by_id=None,
+        )
+        db.add(chat)
+        await db.flush()
+
+    existing_members = await _load_direct_chat_members(db, chat.id, user1.id, user2.id)
+    for user in (user1, user2):
+        expected_status = _membership_status_for_user(user)
+        expected_left_at = user.deleted_at if user.is_deleted else None
+        member = existing_members.get(user.id)
+
+        if member is None:
+            db.add(
+                ChatMember(
+                    chat_id=chat.id,
+                    user_id=user.id,
+                    role=ChatMemberRole.MEMBER,
+                    membership_status=expected_status,
+                    left_at=expected_left_at,
+                )
+            )
+            continue
+
+        if member.membership_status != expected_status:
+            member.membership_status = expected_status
+        if not _same_datetime(member.left_at, expected_left_at):
+            member.left_at = expected_left_at
+
+    return chat
+
+
+async def sync_direct_message_threading(
+    db: AsyncSession,
+    *,
+    sender: User,
+    receiver: User,
+    message: Message,
+) -> Conversation:
+    """Sync legacy Conversation state and generic direct Chat state for one sent message."""
+    conversation = await get_or_create_direct_conversation(db, sender.id, receiver.id)
+    direct_chat = await get_or_create_direct_chat(db, sender, receiver)
+
+    if message.chat_id != direct_chat.id:
+        message.chat_id = direct_chat.id
+
+    conversation.last_message_id = message.id
+    conversation.last_message_at = message.created_at
+    direct_chat.last_message_id = message.id
+    direct_chat.last_message_at = message.created_at
+
+    ordered_user1_id, _ = get_direct_conversation_key(sender.id, receiver.id)
+    if receiver.id == ordered_user1_id:
+        conversation.unread_count_user1 += 1
+    else:
+        conversation.unread_count_user2 += 1
 
     return conversation
