@@ -31,6 +31,10 @@ from core.services.chat_service import (
     build_direct_message_lookup_condition,
     build_direct_conversation_projection_stmt,
     get_direct_conversation_key,
+    mark_direct_message_deleted,
+    persist_direct_message_change,
+    toggle_direct_message_reaction_state,
+    update_direct_message_content,
     sync_direct_read_state,
     sync_direct_message_threading,
     get_or_create_direct_conversation,
@@ -536,29 +540,8 @@ async def update_message(
     if msg.created_at < now - timedelta(hours=48):
         raise HTTPException(status_code=400, detail="Message is too old to edit")
 
-    # ذخیره تاریخچه
-    history = list(msg.edit_history) if msg.edit_history else []
-    history.append({
-        "content": msg.content,
-        "updated_at": str(now)
-    })
-    # نگه داشتن ۳ نسخه آخر
-    if len(history) > 3:
-        history.pop(0)
-    
-    msg.edit_history = history
-    msg.content = data.content
-    msg.updated_at = now
-    
-    await db.commit()
-    
-    # Eager load reply_to_message and forwarded_from to avoid lazy loading in async context
-    result = await db.execute(
-        select(Message)
-        .options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from))
-        .where(Message.id == message_id)
-    )
-    msg = result.scalars().first()
+    update_direct_message_content(msg, content=data.content, updated_at=now)
+    msg = await persist_direct_message_change(db, msg)
     return MessageRead.from_orm_with_forwarding(msg)
 
 
@@ -577,41 +560,14 @@ async def toggle_message_reaction(
     if current_user.id not in (msg.sender_id, msg.receiver_id):
         raise HTTPException(status_code=403, detail="You can only react to messages in your own conversations")
 
-    normalized_reactions = normalize_message_reactions(msg.reactions)
-    has_same_reaction = any(
-        reaction["user_id"] == current_user.id and reaction["emoji"] == data.emoji
-        for reaction in normalized_reactions
+    toggle_direct_message_reaction_state(
+        msg,
+        acting_user_id=current_user.id,
+        emoji=data.emoji,
+        normalize_reactions=normalize_message_reactions,
+        reaction_order=COMMON_MESSAGE_REACTION_ORDER,
     )
-
-    if has_same_reaction:
-        normalized_reactions = [
-            reaction
-            for reaction in normalized_reactions
-            if not (reaction["user_id"] == current_user.id and reaction["emoji"] == data.emoji)
-        ]
-    else:
-        normalized_reactions = [
-            reaction
-            for reaction in normalized_reactions
-            if reaction["user_id"] != current_user.id
-        ]
-        normalized_reactions.append({"emoji": data.emoji, "user_id": current_user.id})
-        normalized_reactions.sort(
-            key=lambda item: (
-                COMMON_MESSAGE_REACTION_ORDER.get(str(item["emoji"]), 999),
-                int(item["user_id"]),
-            )
-        )
-
-    msg.reactions = normalized_reactions
-    await db.commit()
-
-    result = await db.execute(
-        select(Message)
-        .options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from), joinedload(Message.sender))
-        .where(Message.id == message_id)
-    )
-    updated_message = result.scalars().first()
+    updated_message = await persist_direct_message_change(db, msg, include_sender=True)
     if not updated_message:
         raise HTTPException(status_code=404, detail="Message not found")
 
@@ -646,10 +602,8 @@ async def delete_message(
     if msg.created_at < now - timedelta(hours=48):
         raise HTTPException(status_code=400, detail="Message is too old to delete")
 
-    msg.is_deleted = True
-    msg.updated_at = now
-    
-    await db.commit()
+    mark_direct_message_deleted(msg, deleted_at=now)
+    await persist_direct_message_change(db, msg)
     return None
 
 @router.post("/read/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

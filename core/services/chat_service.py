@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Callable
 
 import sqlalchemy as sa
 from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, joinedload
 
 from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType, MessageType
 from models.chat import Chat
@@ -403,3 +404,130 @@ async def sync_direct_read_state(
         reader_member.last_read_at = datetime.now(timezone.utc)
 
     return conversation
+
+
+async def ensure_direct_message_chat_link(
+    db: AsyncSession,
+    message: Message,
+) -> Message:
+    """Ensure a direct message is linked into the generic direct-chat foundation."""
+    if message.chat_id is not None:
+        return message
+
+    sender = await db.get(User, message.sender_id)
+    receiver = await db.get(User, message.receiver_id)
+    if sender is None or receiver is None:
+        return message
+
+    direct_chat = await get_or_create_direct_chat(db, sender, receiver)
+    message.chat_id = direct_chat.id
+
+    if direct_chat.last_message_id is None:
+        direct_chat.last_message_id = message.id
+        direct_chat.last_message_at = message.created_at
+
+    return message
+
+
+def update_direct_message_content(
+    message: Message,
+    *,
+    content: str,
+    updated_at: datetime,
+) -> Message:
+    """Apply the content mutation for a direct text message."""
+    history = list(message.edit_history) if message.edit_history else []
+    history.append(
+        {
+            "content": message.content,
+            "updated_at": str(updated_at),
+        }
+    )
+    if len(history) > 3:
+        history.pop(0)
+
+    message.edit_history = history
+    message.content = content
+    message.updated_at = updated_at
+    return message
+
+
+def mark_direct_message_deleted(
+    message: Message,
+    *,
+    deleted_at: datetime,
+) -> Message:
+    """Apply the soft-delete mutation for a direct message."""
+    message.is_deleted = True
+    message.updated_at = deleted_at
+    return message
+
+
+def toggle_direct_message_reaction_state(
+    message: Message,
+    *,
+    acting_user_id: int,
+    emoji: str,
+    normalize_reactions: Callable[[object], list[dict[str, object]]],
+    reaction_order: dict[str, int],
+) -> Message:
+    """Toggle one user's reaction state on a direct message."""
+    normalized_reactions = normalize_reactions(message.reactions)
+    has_same_reaction = any(
+        reaction["user_id"] == acting_user_id and reaction["emoji"] == emoji
+        for reaction in normalized_reactions
+    )
+
+    if has_same_reaction:
+        normalized_reactions = [
+            reaction
+            for reaction in normalized_reactions
+            if not (reaction["user_id"] == acting_user_id and reaction["emoji"] == emoji)
+        ]
+    else:
+        normalized_reactions = [
+            reaction
+            for reaction in normalized_reactions
+            if reaction["user_id"] != acting_user_id
+        ]
+        normalized_reactions.append({"emoji": emoji, "user_id": acting_user_id})
+        normalized_reactions.sort(
+            key=lambda item: (
+                reaction_order.get(str(item["emoji"]), 999),
+                int(item["user_id"]),
+            )
+        )
+
+    message.reactions = normalized_reactions
+    return message
+
+
+async def reload_direct_message(
+    db: AsyncSession,
+    message_id: int,
+    *,
+    include_sender: bool = False,
+) -> Message | None:
+    """Reload a direct message with the relationships needed by the current API serializers."""
+    options = [joinedload(Message.reply_to_message), joinedload(Message.forwarded_from)]
+    if include_sender:
+        options.append(joinedload(Message.sender))
+
+    result = await db.execute(
+        select(Message)
+        .options(*options)
+        .where(Message.id == message_id)
+    )
+    return result.scalars().first()
+
+
+async def persist_direct_message_change(
+    db: AsyncSession,
+    message: Message,
+    *,
+    include_sender: bool = False,
+) -> Message | None:
+    """Persist a direct-message mutation while preserving generic chat linkage."""
+    await ensure_direct_message_chat_link(db, message)
+    await db.commit()
+    return await reload_direct_message(db, message.id, include_sender=include_sender)
