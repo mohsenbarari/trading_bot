@@ -243,6 +243,100 @@ async def build_direct_message_lookup_condition(
     return sa.or_(Message.chat_id == existing_chat_id, legacy_condition)
 
 
+def build_direct_message_read_options(*, include_sender: bool = True):
+    """Load the message relations needed by the current direct-chat serializers."""
+    options = [
+        joinedload(Message.reply_to_message),
+        joinedload(Message.forwarded_from),
+    ]
+    if include_sender:
+        options.append(joinedload(Message.sender))
+    return tuple(options)
+
+
+async def build_direct_message_search_stmt(
+    db: AsyncSession,
+    *,
+    current_user_id: int,
+    query_text: str,
+    other_user_id: int | None = None,
+    limit: int = 50,
+):
+    """Build the direct-message search query for one user or one direct thread."""
+    stmt = (
+        select(Message)
+        .where(
+            sa.or_(
+                Message.sender_id == current_user_id,
+                Message.receiver_id == current_user_id,
+            ),
+            Message.content.ilike(f"%{query_text}%"),
+            Message.is_deleted.is_(False),
+        )
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+        .options(*build_direct_message_read_options())
+    )
+    if other_user_id is None:
+        return stmt
+
+    direct_message_condition = await build_direct_message_lookup_condition(
+        db,
+        current_user_id,
+        other_user_id,
+    )
+    return stmt.where(direct_message_condition)
+
+
+async def build_direct_message_history_statements(
+    db: AsyncSession,
+    *,
+    current_user_id: int,
+    other_user_id: int,
+    limit: int = 50,
+    before_id: int | None = None,
+    around_id: int | None = None,
+):
+    """Build direct-message history statements for pagination or around-message loading."""
+    direct_message_condition = await build_direct_message_lookup_condition(
+        db,
+        current_user_id,
+        other_user_id,
+    )
+    base_conditions = [direct_message_condition, Message.is_deleted.is_(False)]
+    read_options = build_direct_message_read_options()
+
+    if around_id is not None:
+        stmt_older = (
+            select(Message)
+            .options(*read_options)
+            .where(*base_conditions, Message.id < around_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit // 2)
+        )
+        stmt_newer = (
+            select(Message)
+            .options(*read_options)
+            .where(*base_conditions, Message.id >= around_id)
+            .order_by(Message.created_at.asc())
+            .limit(limit // 2 + 1)
+        )
+        return stmt_older, stmt_newer
+
+    conditions = list(base_conditions)
+    if before_id is not None:
+        conditions.append(Message.id < before_id)
+
+    stmt = (
+        select(Message)
+        .options(*read_options)
+        .where(*conditions)
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+    )
+    return stmt, None
+
+
 async def _get_latest_direct_message(
     db: AsyncSession,
     user1_id: int,
