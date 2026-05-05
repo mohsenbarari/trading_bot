@@ -28,7 +28,8 @@ from api.deps import get_current_user
 
 from core.services.chat_service import (
     build_direct_conversation_list_stmt,
-    build_direct_message_lookup_condition,
+    build_direct_message_history_statements,
+    build_direct_message_search_stmt,
     build_direct_unread_poll_stmt,
     get_direct_conversation_key,
     mark_direct_message_deleted,
@@ -312,24 +313,13 @@ async def search_messages(
     """
     Search messages.
     """
-    query = select(Message).where(
-        or_(
-            Message.sender_id == current_user.id,
-            Message.receiver_id == current_user.id
-        ),
-        Message.content.ilike(f"%{q}%"),
-        Message.is_deleted == False
-    ).order_by(Message.created_at.desc())
-    
-    if chat_id:
-        direct_message_condition = await build_direct_message_lookup_condition(db, current_user.id, chat_id)
-        query = query.where(direct_message_condition)
-        
-    query = query.limit(limit)
-    
-    # Needs joinedload for forwarding and sender
-    query = query.options(joinedload(Message.forwarded_from), joinedload(Message.reply_to_message), joinedload(Message.sender))
-    
+    query = await build_direct_message_search_stmt(
+        db,
+        current_user_id=current_user.id,
+        query_text=q,
+        other_user_id=chat_id,
+        limit=limit,
+    )
     result = await db.execute(query)
     messages = result.scalars().all()
     # Serializing with custom method
@@ -350,37 +340,20 @@ async def get_messages(
     target = await db.get(User, user_id)
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    # شرط مکالمه: generic chat_id when available, legacy sender/receiver otherwise.
-    direct_message_condition = await build_direct_message_lookup_condition(db, current_user.id, user_id)
-    base_conditions = [
-        direct_message_condition,
-        Message.is_deleted == False
-    ]
-    
+
+    stmt_older, stmt_newer = await build_direct_message_history_statements(
+        db,
+        current_user_id=current_user.id,
+        other_user_id=user_id,
+        limit=limit,
+        before_id=before_id,
+        around_id=around_id,
+    )
+
     if around_id:
-        # Load context: 1/2 older, 1/2 newer + target
-        # Older
-        stmt_older = (
-            select(Message)
-            .where(*base_conditions, Message.id < around_id)
-            .order_by(Message.created_at.desc())
-            .limit(limit // 2)
-        )
-        
-        # Newer (inclusive of around_id? No, treat around_id as center. Fetch it explicitly or in newer?)
-        # Let's include around_id in newer set logic or explicit fetch.
-        # Simpler: Older < ID, Newer >= ID
-        stmt_newer = (
-            select(Message)
-            .where(*base_conditions, Message.id >= around_id)
-            .order_by(Message.created_at.asc())
-            .limit(limit // 2 + 1) # +1 to ensure center is included if limit is odd
-        )
-        
         # Execute
-        res_older = await db.execute(stmt_older.options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from), joinedload(Message.sender)))
-        res_newer = await db.execute(stmt_newer.options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from), joinedload(Message.sender)))
+        res_older = await db.execute(stmt_older)
+        res_newer = await db.execute(stmt_newer)
         
         older_msgs = res_older.scalars().all() # Descending [M-1, M-2...]
         newer_msgs = res_newer.scalars().all() # Ascending [M, M+1...]
@@ -389,20 +362,7 @@ async def get_messages(
         messages = list(reversed(older_msgs)) + list(newer_msgs)
         return [MessageRead.from_orm_with_forwarding(m) for m in messages]
 
-    # Default / Pagination (before_id)
-    conditions = base_conditions.copy()
-    if before_id:
-        conditions.append(Message.id < before_id)
-    
-    stmt = (
-        select(Message)
-        .options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from), joinedload(Message.sender))
-        .where(*conditions)
-        .order_by(Message.created_at.desc())
-        .limit(limit)
-    )
-    
-    result = await db.execute(stmt)
+    result = await db.execute(stmt_older)
     messages = result.scalars().all()
     
     # معکوس کردن برای نمایش صعودی
