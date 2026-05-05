@@ -128,20 +128,37 @@ async def get_or_create_direct_conversation(
     return conversation
 
 
+def build_legacy_direct_message_condition(user1_id: int, user2_id: int):
+    """Match the existing direct-message pair using the legacy sender/receiver fields."""
+    ordered_user1_id, ordered_user2_id = get_direct_conversation_key(user1_id, user2_id)
+    return sa.or_(
+        sa.and_(Message.sender_id == ordered_user1_id, Message.receiver_id == ordered_user2_id),
+        sa.and_(Message.sender_id == ordered_user2_id, Message.receiver_id == ordered_user1_id),
+    )
+
+
+async def build_direct_message_lookup_condition(
+    db: AsyncSession,
+    user1_id: int,
+    user2_id: int,
+):
+    """Bridge direct-message reads to chat_id while keeping legacy pair fallback."""
+    legacy_condition = build_legacy_direct_message_condition(user1_id, user2_id)
+    existing_chat_id = await _find_existing_direct_chat_id(db, user1_id, user2_id)
+    if existing_chat_id is None:
+        return legacy_condition
+    return sa.or_(Message.chat_id == existing_chat_id, legacy_condition)
+
+
 async def _get_latest_direct_message(
     db: AsyncSession,
     user1_id: int,
     user2_id: int,
 ) -> Message | None:
-    ordered_user1_id, ordered_user2_id = get_direct_conversation_key(user1_id, user2_id)
+    direct_message_condition = await build_direct_message_lookup_condition(db, user1_id, user2_id)
     stmt = (
         select(Message)
-        .where(
-            sa.or_(
-                sa.and_(Message.sender_id == ordered_user1_id, Message.receiver_id == ordered_user2_id),
-                sa.and_(Message.sender_id == ordered_user2_id, Message.receiver_id == ordered_user1_id),
-            )
-        )
+        .where(direct_message_condition)
         .order_by(Message.created_at.desc(), Message.id.desc())
         .limit(1)
     )
