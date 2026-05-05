@@ -65,6 +65,16 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         direct_chat_lookup.c.chat_last_message_at,
         Conversation.last_message_at,
     ).label("last_message_at")
+    current_member_lookup = (
+        select(
+            ChatMember.chat_id.label("chat_id"),
+            func.max(ChatMember.last_read_message_id).label("last_read_message_id"),
+            func.max(ChatMember.last_read_at).label("last_read_at"),
+        )
+        .where(ChatMember.user_id == current_user_id)
+        .group_by(ChatMember.chat_id)
+        .subquery()
+    )
 
     other_user_id = case(
         (Conversation.user1_id == current_user_id, Conversation.user2_id),
@@ -82,9 +92,30 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         (Conversation.user1_id == current_user_id, user2_alias.last_seen_at),
         else_=user1_alias.last_seen_at,
     ).label("other_user_last_seen_at")
-    unread_count = case(
+    legacy_unread_count = case(
         (Conversation.user1_id == current_user_id, Conversation.unread_count_user1),
         else_=Conversation.unread_count_user2,
+    )
+    generic_unread_count = (
+        select(func.count(Message.id))
+        .where(
+            Message.chat_id == direct_chat_lookup.c.chat_id,
+            Message.sender_id != current_user_id,
+            Message.is_deleted.is_(False),
+            Message.id > func.coalesce(current_member_lookup.c.last_read_message_id, 0),
+        )
+        .correlate(direct_chat_lookup, current_member_lookup)
+        .scalar_subquery()
+    )
+    unread_count = case(
+        (
+            sa.and_(
+                direct_chat_lookup.c.chat_id.is_not(None),
+                current_member_lookup.c.last_read_message_id.is_not(None),
+            ),
+            generic_unread_count,
+        ),
+        else_=legacy_unread_count,
     ).label("unread_count")
     last_message_content = case(
         (last_message_alias.is_deleted.is_(True), "پیام حذف شد"),
@@ -113,6 +144,10 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
                 direct_chat_lookup.c.user1_id == Conversation.user1_id,
                 direct_chat_lookup.c.user2_id == Conversation.user2_id,
             ),
+        )
+        .outerjoin(
+            current_member_lookup,
+            current_member_lookup.c.chat_id == direct_chat_lookup.c.chat_id,
         )
         .outerjoin(last_message_alias, last_message_alias.id == resolved_last_message_id)
     )
@@ -294,6 +329,12 @@ async def sync_direct_message_threading(
 
     if message.chat_id != direct_chat.id:
         message.chat_id = direct_chat.id
+
+    members = await _load_direct_chat_members(db, direct_chat.id, sender.id, receiver.id)
+    sender_member = members.get(sender.id)
+    if sender_member is not None:
+        sender_member.last_read_message_id = message.id
+        sender_member.last_read_at = message.created_at or datetime.now(timezone.utc)
 
     conversation.last_message_id = message.id
     conversation.last_message_at = message.created_at
