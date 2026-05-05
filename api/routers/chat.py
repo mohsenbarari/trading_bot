@@ -29,7 +29,6 @@ from core.services.chat_service import (
     apply_direct_message_delete,
     apply_direct_message_edit,
     apply_direct_message_reaction_toggle,
-    build_direct_message_event_payload,
     build_direct_conversation_list_stmt,
     build_direct_message_history_statements,
     build_direct_message_search_stmt,
@@ -37,6 +36,10 @@ from core.services.chat_service import (
     commit_direct_read_state,
     get_direct_conversation_key,
     persist_sent_direct_message,
+    publish_direct_message_event,
+    publish_direct_read_event,
+    publish_direct_reaction_event,
+    publish_direct_typing_event,
     serialize_direct_message_for_response,
     serialize_direct_messages_for_response,
     get_or_create_direct_conversation,
@@ -386,12 +389,11 @@ async def send_typing_signal(
     current_user: User = Depends(get_current_user)
 ):
     """ارسال سیگنال تایپ کردن به گیرنده"""
-    if data.receiver_id != current_user.id:
-        await publish_user_event(
-            user_id=data.receiver_id,
-            event="chat:typing",
-            data={"sender_id": current_user.id}
-        )
+    await publish_direct_typing_event(
+        receiver_id=data.receiver_id,
+        sender_id=current_user.id,
+        publisher=publish_user_event,
+    )
     return None
 
 
@@ -443,12 +445,13 @@ async def send_message(
     
     # انتشار پیام برای گیرنده (Real-time update)
     # استفاده از MessageRead برای سریالایز کردن مناسب
-    msg_data = build_direct_message_event_payload(
-        message,
+    await publish_direct_message_event(
+        receiver_id=data.receiver_id,
+        message=message,
         serializer=MessageRead.from_orm_with_forwarding,
+        publisher=publish_user_event,
         sender_name=current_user.account_name,
     )
-    await publish_user_event(data.receiver_id, "chat:message", msg_data)
 
     return serialize_direct_message_for_response(
         message,
@@ -499,13 +502,11 @@ async def toggle_message_reaction(
         updated_message,
         serializer=MessageRead.from_orm_with_forwarding,
     )
-    reaction_data = build_direct_message_event_payload(
+    await publish_direct_reaction_event(
         updated_message,
         serializer=MessageRead.from_orm_with_forwarding,
+        publisher=publish_user_event,
     )
-    await publish_user_event(updated_message.sender_id, "chat:reaction", reaction_data)
-    if updated_message.receiver_id != updated_message.sender_id:
-        await publish_user_event(updated_message.receiver_id, "chat:reaction", reaction_data)
 
     return reaction_payload
 
@@ -538,10 +539,10 @@ async def mark_messages_read(
     )
     
     # Notify sender that messages are read
-    await publish_user_event(
-        user_id=user_id,
-        event="chat:read",
-        data={"reader_id": current_user.id}
+    await publish_direct_read_event(
+        other_user_id=user_id,
+        reader_id=current_user.id,
+        publisher=publish_user_event,
     )
     
     return None

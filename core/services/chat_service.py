@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Callable, TypeVar
+from typing import Awaitable, Callable, TypeVar
 
 import sqlalchemy as sa
 from fastapi.encoders import jsonable_encoder
@@ -21,6 +21,7 @@ from models.user import User
 
 
 SerializedMessageT = TypeVar("SerializedMessageT")
+DirectEventPublisher = Callable[[int, str, dict[str, object]], Awaitable[object]]
 
 
 def get_direct_conversation_key(user1_id: int, user2_id: int) -> tuple[int, int]:
@@ -585,6 +586,59 @@ def build_direct_message_event_payload(
     if sender_name is not None:
         payload["sender_name"] = sender_name
     return payload
+
+
+async def publish_direct_typing_event(
+    *,
+    receiver_id: int,
+    sender_id: int,
+    publisher: DirectEventPublisher,
+) -> None:
+    """Publish one direct-chat typing signal if the sender is not targeting themselves."""
+    if receiver_id == sender_id:
+        return
+
+    await publisher(receiver_id, "chat:typing", {"sender_id": sender_id})
+
+
+async def publish_direct_message_event(
+    *,
+    receiver_id: int,
+    message: Message,
+    serializer: Callable[[Message], SerializedMessageT],
+    publisher: DirectEventPublisher,
+    sender_name: str | None = None,
+) -> None:
+    """Publish the standard direct-message delivery event."""
+    payload = build_direct_message_event_payload(
+        message,
+        serializer=serializer,
+        sender_name=sender_name,
+    )
+    await publisher(receiver_id, "chat:message", payload)
+
+
+async def publish_direct_reaction_event(
+    *,
+    message: Message,
+    serializer: Callable[[Message], SerializedMessageT],
+    publisher: DirectEventPublisher,
+) -> None:
+    """Publish one direct-message reaction update to both conversation participants."""
+    payload = build_direct_message_event_payload(message, serializer=serializer)
+    await publisher(message.sender_id, "chat:reaction", payload)
+    if message.receiver_id != message.sender_id:
+        await publisher(message.receiver_id, "chat:reaction", payload)
+
+
+async def publish_direct_read_event(
+    *,
+    other_user_id: int,
+    reader_id: int,
+    publisher: DirectEventPublisher,
+) -> None:
+    """Publish the standard direct-chat read receipt."""
+    await publisher(other_user_id, "chat:read", {"reader_id": reader_id})
 
 
 def update_direct_message_content(
