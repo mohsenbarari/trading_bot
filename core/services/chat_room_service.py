@@ -53,6 +53,24 @@ class ChannelRoomSummary:
     is_mandatory: bool
     member_count: int
     created_at: datetime
+    
+@dataclass
+class ChannelMemberSummary:
+    user_id: int
+    account_name: str
+    full_name: str
+    mobile_number: str
+    role: ChatMemberRole
+    joined_at: datetime
+    is_channel_creator: bool
+
+@dataclass
+class ChannelMemberMutationSummary:
+    chat_id: int
+    user_id: int
+    role: ChatMemberRole | None
+    removed: bool
+    member_count: int
 
 
 def _utcnow() -> datetime:
@@ -185,6 +203,34 @@ async def list_optional_channels(db: AsyncSession) -> list[ChannelRoomSummary]:
             )
         )
     return summaries
+    
+async def list_channel_members(db: AsyncSession, *, chat: Chat) -> list[ChannelMemberSummary]:
+    """List active members of one optional channel for admin-side management."""
+    stmt = (
+        select(ChatMember, User)
+        .join(User, User.id == ChatMember.user_id)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .order_by(ChatMember.role.asc(), ChatMember.joined_at.asc(), ChatMember.user_id.asc())
+    )
+    result = await db.execute(stmt)
+    
+    items: list[ChannelMemberSummary] = []
+    for member, user in result.all():
+        items.append(
+            ChannelMemberSummary(
+                user_id=user.id,
+                account_name=user.account_name,
+                full_name=user.full_name,
+                mobile_number=user.mobile_number,
+                role=member.role,
+                joined_at=member.joined_at,
+                is_channel_creator=chat.created_by_id == user.id,
+            )
+        )
+    return items
 
 
 async def list_channel_invite_candidates(
@@ -350,4 +396,61 @@ async def bulk_add_channel_members(
         already_member_count=already_member_count,
         member_count=member_count,
         select_all_active_users=select_all_active_users,
+    )
+
+
+async def update_channel_member(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+    role: ChatMemberRole | None = None,
+    remove_member: bool = False,
+) -> ChannelMemberMutationSummary:
+    """Promote/demote or remove one active member from an optional channel."""
+    if chat.is_system or chat.is_mandatory:
+        raise HTTPException(status_code=400, detail="Mandatory/system channels cannot be changed here")
+
+    stmt = (
+        select(ChatMember)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.user_id == user_id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .order_by(ChatMember.id.desc())
+    )
+    result = await db.execute(stmt)
+    member = result.scalars().first()
+    if member is None:
+        raise HTTPException(status_code=404, detail="Channel member not found")
+
+    if not remove_member and role is None:
+        raise HTTPException(status_code=400, detail="No membership change requested")
+
+    now = _utcnow()
+    removed = False
+    next_role = role
+
+    if remove_member:
+        member.membership_status = ChatMembershipStatus.REMOVED
+        member.left_at = now
+        member.updated_at = now
+        removed = True
+        next_role = None
+    else:
+        member.role = role or member.role
+        member.updated_at = now
+        next_role = member.role
+
+    chat.updated_at = now
+    await db.commit()
+
+    member_count = await count_active_chat_members(db, chat.id)
+    return ChannelMemberMutationSummary(
+        chat_id=chat.id,
+        user_id=user_id,
+        role=next_role,
+        removed=removed,
+        member_count=member_count,
     )

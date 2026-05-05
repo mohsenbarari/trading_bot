@@ -48,6 +48,24 @@ type ChannelBulkMemberAddResponse = {
   select_all_active_users: boolean
 }
 
+type ChannelMember = {
+  user_id: number
+  account_name: string
+  full_name: string
+  mobile_number: string
+  role: 'admin' | 'member'
+  joined_at: string
+  is_channel_creator: boolean
+}
+
+type ChannelMemberMutationResponse = {
+  chat_id: number
+  user_id: number
+  role: 'admin' | 'member' | null
+  removed: boolean
+  member_count: number
+}
+
 const props = defineProps<{
   apiBaseUrl: string
   jwtToken: string | null
@@ -69,10 +87,13 @@ const isLoadingChannels = ref(false)
 const isLoadingCandidates = ref(false)
 const isSubmittingMembers = ref(false)
 const isUpdatingChannel = ref(false)
+const isLoadingMembers = ref(false)
+const mutatingMemberId = ref<number | null>(null)
 const errorMessage = ref('')
 const successMessage = ref('')
 const createdChannel = ref<ChannelRoom | null>(null)
 const existingChannels = ref<ChannelRoom[]>([])
+const members = ref<ChannelMember[]>([])
 const candidates = ref<ChannelInviteCandidate[]>([])
 const candidateTotal = ref(0)
 const activeTotal = ref(0)
@@ -97,6 +118,7 @@ const selectedCount = computed(() => {
 
 function resetFormState() {
   searchQuery.value = ''
+  members.value = []
   candidates.value = []
   candidateTotal.value = 0
   activeTotal.value = 0
@@ -126,6 +148,7 @@ function openExistingChannel(channel: ChannelRoom) {
   successMessage.value = `✅ مدیریت کانال «${channel.title}» فعال شد.`
   createdChannel.value = channel
   resetFormState()
+  void loadMembers()
   void loadCandidates()
 }
 
@@ -172,6 +195,19 @@ async function loadCandidates(query = '') {
     errorMessage.value = error instanceof Error ? error.message : 'خطا در دریافت کاربران فعال'
   } finally {
     isLoadingCandidates.value = false
+  }
+}
+
+async function loadMembers() {
+  if (!createdChannel.value) return
+  isLoadingMembers.value = true
+  try {
+    const data = await apiFetchJson(`/api/chat/channels/${createdChannel.value.id}/members`) as ChannelMember[]
+    members.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'خطا در دریافت اعضای کانال'
+  } finally {
+    isLoadingMembers.value = false
   }
 }
 
@@ -225,7 +261,7 @@ async function createChannel() {
     upsertExistingChannel((data as ChannelCreateResponse).channel)
     successMessage.value = '✅ کانال ساخته شد. حالا اعضای اولیه را انتخاب کنید.'
     resetFormState()
-    await loadCandidates()
+    await Promise.all([loadMembers(), loadCandidates()])
   } catch (error) {
     errorMessage.value = `❌ ${error instanceof Error ? error.message : 'خطا در ساخت کانال'}`
   } finally {
@@ -261,7 +297,7 @@ async function submitMembers() {
     successMessage.value = `✅ اعضا با موفقیت افزوده شدند. اعضای فعال کانال: ${summary.member_count}`
     selectAllActiveUsers.value = false
     selectedUserIds.value = new Set()
-    await loadCandidates(searchQuery.value)
+    await Promise.all([loadMembers(), loadCandidates(searchQuery.value)])
   } catch (error) {
     errorMessage.value = `❌ ${error instanceof Error ? error.message : 'خطا در افزودن اعضا'}`
   } finally {
@@ -297,16 +333,58 @@ async function updateChannelDetails() {
   }
 }
 
+async function mutateMember(member: ChannelMember, payload: { role?: 'admin' | 'member'; remove_member?: boolean }, successText: string) {
+  if (!createdChannel.value) return
+  mutatingMemberId.value = member.user_id
+  errorMessage.value = ''
+  successMessage.value = ''
+  try {
+    const response = await apiFetch(`/api/chat/channels/${createdChannel.value.id}/members/${member.user_id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+    const data = await response.json() as ChannelMemberMutationResponse | { detail?: string }
+    if (!response.ok) {
+      throw new Error((data as { detail?: string }).detail || 'خطا در تغییر عضو کانال')
+    }
+
+    const summary = data as ChannelMemberMutationResponse
+    createdChannel.value = {
+      ...createdChannel.value,
+      member_count: summary.member_count,
+    }
+    upsertExistingChannel(createdChannel.value)
+    successMessage.value = successText
+    await Promise.all([loadMembers(), loadCandidates(searchQuery.value)])
+  } catch (error) {
+    errorMessage.value = `❌ ${error instanceof Error ? error.message : 'خطا در تغییر عضو کانال'}`
+  } finally {
+    mutatingMemberId.value = null
+  }
+}
+
+async function promoteMember(member: ChannelMember) {
+  await mutateMember(member, { role: 'admin' }, `✅ ${member.account_name} به ادمین کانال تبدیل شد.`)
+}
+
+async function demoteMember(member: ChannelMember) {
+  await mutateMember(member, { role: 'member' }, `✅ نقش ادمینی ${member.account_name} برداشته شد.`)
+}
+
+async function removeMember(member: ChannelMember) {
+  await mutateMember(member, { remove_member: true }, `✅ ${member.account_name} از کانال حذف شد.`)
+}
+
 void loadExistingChannels()
 </script>
 
 <template>
   <div class="channel-card">
     <div class="header-block">
-      <h2>{{ isPickerActive ? 'انتخاب اعضای اولیه کانال' : 'ساخت کانال اختیاری' }}</h2>
+      <h2>{{ isPickerActive ? 'مدیریت اعضای کانال' : 'ساخت کانال اختیاری' }}</h2>
       <p>
         {{ isPickerActive
-          ? 'کاربران فعال پروژه را برای عضویت در این کانال invite کنید. عضویت در این کانال فقط با دعوت مستقیم ممکن است.'
+          ? 'اعضای فعلی کانال را مدیریت کنید و سپس کاربران فعال پروژه را به‌صورت invite-only به آن اضافه کنید.'
           : 'فقط مدیر ارشد می‌تواند کانال اختیاری بسازد. بعد از ساخت، member picker بلافاصله باز می‌شود.' }}
       </p>
     </div>
@@ -381,6 +459,57 @@ void loadExistingChannels()
           <button type="button" class="secondary-btn compact" :disabled="!canUpdateChannel || isUpdatingChannel" @click="updateChannelDetails">
             {{ isUpdatingChannel ? 'در حال ذخیره...' : 'ذخیره مشخصات کانال' }}
           </button>
+        </div>
+      </div>
+
+      <div class="member-shell">
+        <div class="member-shell-header">
+          <h3>اعضای فعلی کانال</h3>
+          <span>{{ createdChannel?.member_count ?? 0 }} عضو فعال</span>
+        </div>
+
+        <div v-if="isLoadingMembers" class="picker-state">در حال دریافت اعضای فعلی کانال...</div>
+
+        <div v-else class="member-list">
+          <div v-for="member in members" :key="member.user_id" class="member-row">
+            <div class="member-avatar">{{ getAvatarInitial(member.account_name) }}</div>
+            <div class="member-copy">
+              <div class="member-name-row">
+                <span class="member-name">{{ member.account_name }}</span>
+                <span class="member-role" :class="member.role">{{ member.role === 'admin' ? 'ادمین' : 'عضو' }}</span>
+                <span v-if="member.is_channel_creator" class="member-creator">سازنده</span>
+              </div>
+              <span class="member-details">{{ member.full_name }} • {{ member.mobile_number }}</span>
+            </div>
+            <div class="member-actions">
+              <button
+                v-if="member.role === 'member'"
+                type="button"
+                class="member-action-btn"
+                :disabled="mutatingMemberId === member.user_id"
+                @click="promoteMember(member)"
+              >
+                ادمین کردن
+              </button>
+              <button
+                v-else
+                type="button"
+                class="member-action-btn"
+                :disabled="mutatingMemberId === member.user_id"
+                @click="demoteMember(member)"
+              >
+                برداشتن ادمین
+              </button>
+              <button
+                type="button"
+                class="member-action-btn danger"
+                :disabled="mutatingMemberId === member.user_id"
+                @click="removeMember(member)"
+              >
+                حذف
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -475,6 +604,148 @@ void loadExistingChannels()
 .edit-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.member-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(245, 158, 11, 0.12);
+}
+
+.member-shell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.member-shell-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #1f2937;
+}
+
+.member-shell-header span {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255, 251, 235, 0.52);
+  border: 1px solid rgba(245, 158, 11, 0.12);
+}
+
+.member-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.member-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.member-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.member-name {
+  font-weight: 800;
+  color: #111827;
+}
+
+.member-role,
+.member-creator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.member-role.admin {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+}
+
+.member-role.member {
+  background: rgba(148, 163, 184, 0.16);
+  color: #475569;
+}
+
+.member-creator {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+}
+
+.member-details {
+  color: #6b7280;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.member-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.member-action-btn {
+  border: 0;
+  border-radius: 12px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+  cursor: pointer;
+}
+
+.member-action-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.member-action-btn.danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
 }
 
 .form-shell,
