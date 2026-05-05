@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 import sqlalchemy as sa
+from fastapi import HTTPException
 from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, joinedload
@@ -708,3 +709,64 @@ async def commit_direct_read_state(
     )
     await db.commit()
     return conversation
+
+
+async def get_editable_direct_message(
+    db: AsyncSession,
+    *,
+    message_id: int,
+    actor_id: int,
+    now: datetime,
+) -> Message:
+    """Load one direct message and enforce edit preconditions."""
+    message = await db.get(Message, message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if message.sender_id != actor_id:
+        raise HTTPException(status_code=403, detail="You can only edit your own messages")
+    if message.message_type != MessageType.TEXT:
+        raise HTTPException(status_code=400, detail="Only text messages can be edited")
+    if getattr(message, "forwarded_from_id", None):
+        raise HTTPException(status_code=400, detail="Forwarded messages cannot be edited")
+    if message.created_at < now - timedelta(hours=48):
+        raise HTTPException(status_code=400, detail="Message is too old to edit")
+    return message
+
+
+async def get_reactable_direct_message(
+    db: AsyncSession,
+    *,
+    message_id: int,
+    actor_id: int,
+) -> Message:
+    """Load one direct message and enforce reaction preconditions."""
+    message = await db.get(Message, message_id)
+    if message is None or message.is_deleted:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if actor_id not in (message.sender_id, message.receiver_id):
+        raise HTTPException(
+            status_code=403,
+            detail="You can only react to messages in your own conversations",
+        )
+    return message
+
+
+async def get_deletable_direct_message(
+    db: AsyncSession,
+    *,
+    message_id: int,
+    actor_id: int,
+    now: datetime,
+) -> Message:
+    """Load one direct message and enforce delete preconditions."""
+    if message_id <= 0 or message_id > 2147483647:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    message = await db.get(Message, message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if message.sender_id != actor_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own messages")
+    if message.created_at < now - timedelta(hours=48):
+        raise HTTPException(status_code=400, detail="Message is too old to delete")
+    return message
