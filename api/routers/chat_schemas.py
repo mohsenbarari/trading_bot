@@ -94,6 +94,15 @@ class MessageSend(BaseModel):
     forwarded_from_id: Optional[int] = None
 
 
+class RoomMessageSend(BaseModel):
+    """ارسال پیام/پست به room غیرمستقیم"""
+
+    content: str = Field(..., min_length=1, max_length=4000)
+    message_type: MessageType = MessageType.TEXT
+    reply_to_message_id: Optional[int] = None
+    forwarded_from_id: Optional[int] = None
+
+
 class MessageUpdate(BaseModel):
     """ویرایش پیام"""
 
@@ -124,6 +133,10 @@ class ConversationRead(BaseModel):
     last_message_at: Optional[datetime] = None
     unread_count: int = 0
     other_user_last_seen_at: Optional[datetime] = None
+    room_kind: str = "direct"
+    chat_id: Optional[int] = None
+    can_send: bool = True
+    member_role: Optional[str] = None
 
     class Config:
         from_attributes = True

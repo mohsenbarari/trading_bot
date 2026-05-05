@@ -10,15 +10,18 @@
       
       <!-- Avatar + User Info (when in chat and not searching) -->
       <template v-if="selectedUserId && !isSearchActive">
-        <div class="header-avatar" @click="$emit('view-profile')">{{ selectedUserName.charAt(0) }}</div>
-        <div class="header-user-info" @click="$emit('view-profile')">
+        <div class="header-avatar" @click="selectedRoomKind === 'direct' && $emit('view-profile')">{{ selectedUserName.charAt(0) }}</div>
+        <div class="header-user-info" @click="selectedRoomKind === 'direct' && $emit('view-profile')">
           <span class="header-name">
             {{ selectedUserName }}
             <span v-if="isDeleted" class="deleted-badge-small">غیرفعال</span>
           </span>
-          <span class="header-status" :class="{ 'online': targetUserStatus.includes('آنلاین') && !isDeleted || isTyping }">
+          <span class="header-status" :class="{ 'online': selectedRoomKind === 'direct' && ((targetUserStatus.includes('آنلاین') && !isDeleted) || isTyping) }">
             <template v-if="isDeleted">
               حساب کاربری غیرفعال است
+            </template>
+            <template v-else-if="selectedRoomKind === 'channel'">
+              {{ targetUserStatus }}
             </template>
             <template v-else-if="isTyping">
               در حال نوشتن<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
@@ -59,7 +62,7 @@
       <div class="header-spacer"></div>
       
       <!-- Action Buttons (only in chat view) -->
-      <template v-if="selectedUserId && !isSearchActive">
+      <template v-if="selectedUserId && !isSearchActive && selectedRoomKind === 'direct'">
         <button class="header-btn" v-ripple @click="$emit('call')">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
@@ -122,6 +125,7 @@ const props = defineProps<{
   isSelectionMode: boolean
   selectedUserId: number | null
   selectedUserName: string
+  selectedRoomKind?: 'direct' | 'channel' | null
   targetUserStatus: string
   isTyping: boolean
   totalUnread: number

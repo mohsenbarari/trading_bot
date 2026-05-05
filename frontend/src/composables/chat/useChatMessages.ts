@@ -225,6 +225,35 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         return await apiFetchJson(`/api${endpoint}`, fetchOptions)
     }
 
+    function isChannelConversationId(userId: number) {
+        return userId < 0
+    }
+
+    function resolveChannelChatId(userId: number) {
+        return Math.abs(userId)
+    }
+
+    function buildMessagesEndpoint(userId: number, query: string) {
+        if (isChannelConversationId(userId)) {
+            return `/chat/rooms/${resolveChannelChatId(userId)}/messages?${query}`
+        }
+        return `/chat/messages/${userId}?${query}`
+    }
+
+    function buildReadEndpoint(userId: number) {
+        if (isChannelConversationId(userId)) {
+            return `/chat/rooms/${resolveChannelChatId(userId)}/read`
+        }
+        return `/chat/read/${userId}`
+    }
+
+    function buildSendEndpoint(userId: number) {
+        if (isChannelConversationId(userId)) {
+            return `/chat/rooms/${resolveChannelChatId(userId)}/send`
+        }
+        return '/chat/send'
+    }
+
     async function loadConversations() {
         try {
             conversations.value = await apiFetch('/chat/conversations')
@@ -236,18 +265,19 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     async function loadMessages(userId: number, silent = false, aroundId?: number) {
         const requestId = ++latestLoadRequestId
         let effectiveSilent = silent
+        const isChannelRoom = isChannelConversationId(userId)
 
         if (!effectiveSilent) isLoadingMessages.value = true
 
         try {
-            let url = `/chat/messages/${userId}?limit=${INITIAL_CHAT_OPEN_LIMIT}&_t=${Date.now()}`
+            let url = buildMessagesEndpoint(userId, `limit=${INITIAL_CHAT_OPEN_LIMIT}&_t=${Date.now()}`)
 
             if (!aroundId && !silent) {
                 hasOlderMessages.value = true
             }
 
             if (aroundId) {
-                url = `/chat/messages/${userId}?limit=${SEARCH_CONTEXT_LIMIT}&around_id=${aroundId}&_t=${Date.now()}`
+                url = buildMessagesEndpoint(userId, `limit=${SEARCH_CONTEXT_LIMIT}&around_id=${aroundId}&_t=${Date.now()}`)
                 if (!effectiveSilent) messages.value = []
             } else if (!effectiveSilent) {
                 const cachedMessages = getMessageSnapshot(userId)
@@ -304,7 +334,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 )
 
                 if (isNewMessage) {
-                    if (lastNewMsg.sender_id !== currentUserId) {
+                    if (isChannelRoom || lastNewMsg.sender_id !== currentUserId) {
                         if (isUserAtBottom.value && !isViewingReply.value) {
                             await nextTick()
                             scrollToBottom()
@@ -355,7 +385,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
 
         try {
             const olderMessages = await apiFetch(
-                `/chat/messages/${userId}?limit=${OLDER_MESSAGES_PAGE_LIMIT}&before_id=${oldestLoadedMessage.id}&_t=${Date.now()}`
+                buildMessagesEndpoint(userId, `limit=${OLDER_MESSAGES_PAGE_LIMIT}&before_id=${oldestLoadedMessage.id}&_t=${Date.now()}`)
             )
 
             if (selectedUserId.value !== userId) {
@@ -387,7 +417,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     async function markAsRead() {
         if (!selectedUserId.value) return
         try {
-            await apiFetch(`/chat/read/${selectedUserId.value}`, { method: 'POST' })
+            await apiFetch(buildReadEndpoint(selectedUserId.value), { method: 'POST' })
             const conv = conversations.value.find(c => c.other_user_id === selectedUserId.value)
             if (conv) {
                 conv.unread_count = 0
@@ -405,16 +435,25 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         optimisticId?: number
     ) {
         if (!selectedUserId.value) return null
+        const isChannelRoom = isChannelConversationId(selectedUserId.value)
+        if (isChannelRoom && type !== 'sticker') {
+            alert('ارسال رسانه در کانال در این فاز هنوز فعال نشده است.')
+            return null
+        }
 
         isSending.value = true
         try {
-            const newMsg = await apiFetch('/chat/send', {
+            const body: Record<string, unknown> = {
+                content: content,
+                message_type: type,
+            }
+            if (!isChannelRoom) {
+                body.receiver_id = selectedUserId.value
+            }
+
+            const newMsg = await apiFetch(buildSendEndpoint(selectedUserId.value), {
                 method: 'POST',
-                body: JSON.stringify({
-                    receiver_id: selectedUserId.value,
-                    content: content,
-                    message_type: type
-                })
+                body: JSON.stringify(body)
             })
             const hydratedMsg = localBlobUrl
                 ? { ...newMsg, local_blob_url: localBlobUrl }
@@ -465,6 +504,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         }
 
         if (!selectedUserId.value) return;
+        const isChannelRoom = isChannelConversationId(selectedUserId.value)
         const content = messageInput.value;
         const stickerCount = countEmojiStickerOccurrences(content)
         if (stickerCount > MAX_STICKERS_PER_MESSAGE) {
@@ -479,7 +519,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         const tempMsg: Message = {
             id: tempId,
             sender_id: currentUserId,
-            receiver_id: selectedUserId.value,
+            receiver_id: isChannelRoom ? currentUserId : selectedUserId.value,
             content: content,
             message_type: messageType,
             is_read: false,
@@ -507,16 +547,18 @@ export function useChatMessages(options: UseChatMessagesOptions) {
 
         try {
             const body: Record<string, any> = {
-                receiver_id: selectedUserId.value,
                 content: content,
                 message_type: messageType
             };
+            if (!isChannelRoom) {
+                body.receiver_id = selectedUserId.value
+            }
             if (replyTo) body.reply_to_message_id = replyTo.id;
 
             const abortController = new AbortController();
             textSendControllers.set(tempId, abortController);
 
-            const serverMsg = await apiFetch('/chat/send', {
+            const serverMsg = await apiFetch(buildSendEndpoint(selectedUserId.value), {
                 method: 'POST',
                 body: JSON.stringify(body),
                 signal: abortController.signal

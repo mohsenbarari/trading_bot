@@ -6,12 +6,14 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased, joinedload
 
-from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType
+from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType, MessageType
 from models.chat import Chat
 from models.chat_member import ChatMember
+from models.message import Message
 from models.user import User
 
 
@@ -53,7 +55,25 @@ class ChannelRoomSummary:
     is_mandatory: bool
     member_count: int
     created_at: datetime
-    
+
+
+@dataclass
+class ChannelConversationSummary:
+    id: int
+    other_user_id: int
+    other_user_name: str
+    other_user_is_deleted: bool
+    last_message_content: str | None
+    last_message_type: MessageType | None
+    last_message_at: datetime | None
+    unread_count: int
+    other_user_last_seen_at: datetime | None
+    room_kind: str
+    chat_id: int
+    can_send: bool
+    member_role: str | None
+
+
 @dataclass
 class ChannelMemberSummary:
     user_id: int
@@ -82,6 +102,19 @@ def _clean_text(value: str | None) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+async def _reload_channel_message(db: AsyncSession, message_id: int) -> Message | None:
+    result = await db.execute(
+        select(Message)
+        .options(
+            joinedload(Message.reply_to_message),
+            joinedload(Message.forwarded_from),
+            joinedload(Message.sender),
+        )
+        .where(Message.id == message_id)
+    )
+    return result.scalars().first()
 
 
 async def get_channel_or_404(db: AsyncSession, chat_id: int) -> Chat:
@@ -203,7 +236,99 @@ async def list_optional_channels(db: AsyncSession) -> list[ChannelRoomSummary]:
             )
         )
     return summaries
-    
+
+
+async def get_active_channel_member_or_403(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+) -> ChatMember:
+    stmt = (
+        select(ChatMember)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.user_id == user_id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .order_by(ChatMember.id.desc())
+    )
+    result = await db.execute(stmt)
+    member = result.scalars().first()
+    if member is None:
+        raise HTTPException(status_code=403, detail="You are not a member of this channel")
+    return member
+
+
+async def list_channel_conversations(
+    db: AsyncSession,
+    *,
+    current_user_id: int,
+) -> list[ChannelConversationSummary]:
+    current_member = aliased(ChatMember)
+    last_message_alias = aliased(Message)
+
+    unread_count = (
+        select(func.count(Message.id))
+        .where(
+            Message.chat_id == Chat.id,
+            Message.sender_id != current_user_id,
+            Message.is_deleted.is_(False),
+            Message.id > func.coalesce(current_member.last_read_message_id, 0),
+        )
+        .correlate(Chat, current_member)
+        .scalar_subquery()
+    )
+    last_message_content = case(
+        (last_message_alias.is_deleted.is_(True), "پیام حذف شد"),
+        (last_message_alias.message_type == MessageType.TEXT, last_message_alias.content),
+        else_=None,
+    ).label("last_message_content")
+
+    stmt = (
+        select(
+            Chat,
+            current_member.role.label("member_role"),
+            last_message_content,
+            last_message_alias.message_type.label("last_message_type"),
+            unread_count.label("unread_count"),
+        )
+        .join(
+            current_member,
+            (current_member.chat_id == Chat.id)
+            & (current_member.user_id == current_user_id)
+            & (current_member.membership_status == ChatMembershipStatus.ACTIVE),
+        )
+        .outerjoin(last_message_alias, last_message_alias.id == Chat.last_message_id)
+        .where(
+            Chat.type == ChatType.CHANNEL,
+            Chat.is_deleted.is_(False),
+        )
+        .order_by(Chat.last_message_at.desc().nullslast(), Chat.id.desc())
+    )
+    result = await db.execute(stmt)
+
+    rows: list[ChannelConversationSummary] = []
+    for chat, member_role, last_content, last_type, unread in result.all():
+        synthetic_room_id = -int(chat.id)
+        rows.append(
+            ChannelConversationSummary(
+                id=synthetic_room_id,
+                other_user_id=synthetic_room_id,
+                other_user_name=chat.title or f"کانال {chat.id}",
+                other_user_is_deleted=False,
+                last_message_content=last_content,
+                last_message_type=last_type,
+                last_message_at=chat.last_message_at,
+                unread_count=int(unread or 0),
+                other_user_last_seen_at=None,
+                room_kind="channel",
+                chat_id=chat.id,
+                can_send=member_role == ChatMemberRole.ADMIN,
+                member_role=member_role.value if member_role is not None else None,
+            )
+        )
+    return rows
 async def list_channel_members(db: AsyncSession, *, chat: Chat) -> list[ChannelMemberSummary]:
     """List active members of one optional channel for admin-side management."""
     stmt = (
@@ -231,6 +356,45 @@ async def list_channel_members(db: AsyncSession, *, chat: Chat) -> list[ChannelM
             )
         )
     return items
+
+
+async def list_channel_messages(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    limit: int = 50,
+    before_id: int | None = None,
+    around_id: int | None = None,
+) -> list[Message]:
+    base_stmt = (
+        select(Message)
+        .options(
+            joinedload(Message.reply_to_message),
+            joinedload(Message.forwarded_from),
+            joinedload(Message.sender),
+        )
+        .where(Message.chat_id == chat.id)
+    )
+
+    if around_id:
+        older_limit = max(limit // 2, 1)
+        newer_limit = max(limit - older_limit, 1)
+        older_result = await db.execute(
+            base_stmt.where(Message.id < around_id).order_by(Message.id.desc()).limit(older_limit)
+        )
+        newer_result = await db.execute(
+            base_stmt.where(Message.id >= around_id).order_by(Message.id.asc()).limit(newer_limit)
+        )
+        older_messages = list(reversed(older_result.scalars().all()))
+        newer_messages = newer_result.scalars().all()
+        return [*older_messages, *newer_messages]
+
+    stmt = base_stmt.order_by(Message.id.desc()).limit(limit)
+    if before_id is not None:
+        stmt = stmt.where(Message.id < before_id)
+
+    result = await db.execute(stmt)
+    return list(reversed(result.scalars().all()))
 
 
 async def list_channel_invite_candidates(
@@ -454,3 +618,72 @@ async def update_channel_member(
         removed=removed,
         member_count=member_count,
     )
+
+
+async def send_channel_message(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    sender: User,
+    content: str,
+    message_type: MessageType,
+    reply_to_message_id: int | None = None,
+    forwarded_from_id: int | None = None,
+) -> Message:
+    member = await get_active_channel_member_or_403(db, chat=chat, user_id=sender.id)
+    if member.role != ChatMemberRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only channel admins can post messages")
+
+    if reply_to_message_id is not None:
+        reply_to_message = await db.get(Message, reply_to_message_id)
+        if reply_to_message is None or reply_to_message.chat_id != chat.id:
+            raise HTTPException(status_code=400, detail="Reply target is not part of this channel")
+
+    now = _utcnow()
+    message = Message(
+        chat_id=chat.id,
+        sender_id=sender.id,
+        receiver_id=sender.id,
+        content=content,
+        message_type=message_type,
+        reply_to_message_id=reply_to_message_id,
+        forwarded_from_id=forwarded_from_id,
+        is_read=True,
+        created_at=now,
+    )
+    db.add(message)
+    await db.flush()
+
+    chat.last_message_id = message.id
+    chat.last_message_at = now
+    chat.updated_at = now
+    member.last_read_message_id = message.id
+    member.last_read_at = now
+    member.updated_at = now
+
+    await db.commit()
+    reloaded_message = await _reload_channel_message(db, message.id)
+    if reloaded_message is None:
+        raise HTTPException(status_code=500, detail="Failed to reload channel message")
+    return reloaded_message
+
+
+async def mark_channel_messages_read(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+) -> None:
+    member = await get_active_channel_member_or_403(db, chat=chat, user_id=user_id)
+    latest_message_id_result = await db.execute(
+        select(func.max(Message.id)).where(
+            Message.chat_id == chat.id,
+            Message.is_deleted.is_(False),
+        )
+    )
+    latest_message_id = latest_message_id_result.scalar_one_or_none()
+    now = _utcnow()
+    member.last_read_message_id = latest_message_id
+    member.last_read_at = now
+    member.updated_at = now
+    await db.commit()
