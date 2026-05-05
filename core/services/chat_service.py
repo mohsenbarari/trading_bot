@@ -155,6 +155,34 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
     return stmt, unread_count, resolved_last_message_at
 
 
+def build_direct_conversation_scope_condition(current_user_id: int):
+    """Restrict direct conversation projections to rows owned by the current user."""
+    return sa.or_(
+        Conversation.user1_id == current_user_id,
+        Conversation.user2_id == current_user_id,
+    )
+
+
+def build_direct_conversation_list_stmt(current_user_id: int):
+    """Build the ordered direct-conversation list query for the current user."""
+    stmt, _, conversation_order_at = build_direct_conversation_projection_stmt(current_user_id)
+    return (
+        stmt
+        .where(build_direct_conversation_scope_condition(current_user_id))
+        .order_by(conversation_order_at.desc().nullslast())
+    )
+
+
+def build_direct_unread_poll_stmt(current_user_id: int):
+    """Build the unread-only direct conversation poll query for the current user."""
+    stmt, unread_count, _ = build_direct_conversation_projection_stmt(current_user_id)
+    return (
+        stmt
+        .where(build_direct_conversation_scope_condition(current_user_id))
+        .where(func.coalesce(unread_count, 0) > 0)
+    )
+
+
 async def get_existing_direct_conversation(
     db: AsyncSession,
     user1_id: int,
