@@ -1,9 +1,9 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from core.enums import MessageType
+from core.enums import ChatType, MessageType
 from core.services.chat_service import (
     COMMON_MESSAGE_REACTION_SET,
     normalize_message_reactions,
@@ -143,3 +143,90 @@ class StickerPack(BaseModel):
     id: str
     name: str
     stickers: List[str]
+
+
+class ChannelRoomRead(BaseModel):
+    id: int
+    type: ChatType
+    title: str
+    description: Optional[str] = None
+    created_by_id: Optional[int] = None
+    is_system: bool = False
+    is_mandatory: bool = False
+    member_count: int = 0
+    created_at: datetime
+
+
+class ChannelCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=2000)
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Channel title is required")
+        return cleaned
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class ChannelCreateResponse(BaseModel):
+    channel: ChannelRoomRead
+    member_picker_required: bool = True
+
+
+class ChannelInviteCandidateRead(BaseModel):
+    user_id: int
+    account_name: str
+    full_name: str
+    mobile_number: str
+    is_already_member: bool = False
+
+
+class ChannelInviteCandidateListResponse(BaseModel):
+    items: List[ChannelInviteCandidateRead]
+    total: int
+    active_total: int
+
+
+class ChannelBulkMemberAddRequest(BaseModel):
+    user_ids: List[int] = Field(default_factory=list)
+    select_all_active_users: bool = False
+
+    @field_validator("user_ids")
+    @classmethod
+    def normalize_user_ids(cls, value: List[int]) -> List[int]:
+        normalized: List[int] = []
+        seen: set[int] = set()
+        for user_id in value:
+            if user_id <= 0 or user_id in seen:
+                continue
+            seen.add(user_id)
+            normalized.append(user_id)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_selection_mode(self):
+        if self.select_all_active_users and self.user_ids:
+            raise ValueError("Provide either user_ids or select_all_active_users")
+        if not self.select_all_active_users and not self.user_ids:
+            raise ValueError("No users selected")
+        return self
+
+
+class ChannelBulkMemberAddResponse(BaseModel):
+    chat_id: int
+    processed_user_ids: List[int]
+    added_count: int
+    reactivated_count: int
+    already_member_count: int
+    member_count: int
+    select_all_active_users: bool = False
