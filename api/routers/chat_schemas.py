@@ -154,6 +154,15 @@ class ChannelRoomRead(BaseModel):
     is_system: bool = False
     is_mandatory: bool = False
     member_count: int = 0
+    
+    class ChannelMemberRead(BaseModel):
+        user_id: int
+        account_name: str
+        full_name: str
+        mobile_number: str
+        role: str
+        joined_at: datetime
+        is_channel_creator: bool = False
     created_at: datetime
 
 
@@ -244,6 +253,35 @@ class ChannelBulkMemberAddRequest(BaseModel):
 
 
 class ChannelBulkMemberAddResponse(BaseModel):
+    
+    class ChannelMemberUpdateRequest(BaseModel):
+        role: Optional[str] = None
+        remove_member: bool = False
+    
+        @field_validator("role")
+        @classmethod
+        def validate_role(cls, value: Optional[str]) -> Optional[str]:
+            if value is None:
+                return None
+            normalized = value.strip().lower()
+            if normalized not in {"admin", "member"}:
+                raise ValueError("Unsupported channel member role")
+            return normalized
+    
+        @model_validator(mode="after")
+        def validate_change_request(self):
+            if self.remove_member and self.role is not None:
+                raise ValueError("Provide either role or remove_member")
+            if not self.remove_member and self.role is None:
+                raise ValueError("No membership change requested")
+            return self
+    
+    class ChannelMemberMutationResponse(BaseModel):
+        chat_id: int
+        user_id: int
+        role: Optional[str] = None
+        removed: bool = False
+        member_count: int
     chat_id: int
     processed_user_ids: List[int]
     added_count: int
