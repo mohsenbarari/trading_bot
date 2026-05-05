@@ -42,6 +42,19 @@ class ChannelBulkAddSummary:
     select_all_active_users: bool
 
 
+@dataclass
+class ChannelRoomSummary:
+    id: int
+    type: ChatType
+    title: str
+    description: str | None
+    created_by_id: int | None
+    is_system: bool
+    is_mandatory: bool
+    member_count: int
+    created_at: datetime
+
+
 def _utcnow() -> datetime:
     return datetime.utcnow()
 
@@ -113,6 +126,42 @@ async def create_optional_channel(
     await db.commit()
     await db.refresh(chat)
     return chat
+
+
+async def list_optional_channels(db: AsyncSession) -> list[ChannelRoomSummary]:
+    """List active optional channels for admin-side management."""
+    member_count_expr = func.count(ChatMember.id).filter(
+        ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+    )
+    stmt = (
+        select(Chat, member_count_expr.label("member_count"))
+        .outerjoin(ChatMember, ChatMember.chat_id == Chat.id)
+        .where(
+            Chat.type == ChatType.CHANNEL,
+            Chat.is_deleted.is_(False),
+            Chat.is_mandatory.is_(False),
+        )
+        .group_by(Chat.id)
+        .order_by(Chat.created_at.desc(), Chat.id.desc())
+    )
+    result = await db.execute(stmt)
+
+    summaries: list[ChannelRoomSummary] = []
+    for chat, member_count in result.all():
+        summaries.append(
+            ChannelRoomSummary(
+                id=chat.id,
+                type=chat.type,
+                title=chat.title or "",
+                description=chat.description,
+                created_by_id=chat.created_by_id,
+                is_system=chat.is_system,
+                is_mandatory=chat.is_mandatory,
+                member_count=int(member_count or 0),
+                created_at=chat.created_at,
+            )
+        )
+    return summaries
 
 
 async def list_channel_invite_candidates(

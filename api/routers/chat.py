@@ -42,6 +42,7 @@ from core.services.chat_room_service import (
     create_optional_channel,
     get_channel_or_404,
     list_channel_invite_candidates,
+    list_optional_channels,
 )
 from core.services.chat_service import (
     apply_direct_message_delete,
@@ -176,6 +177,30 @@ async def send_typing_signal(
         publisher=publish_user_event,
     )
     return None
+
+
+@router.get("/channels", response_model=List[ChannelRoomRead])
+async def get_channels(
+    current_user: User = Depends(verify_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """لیست کانال‌های اختیاری موجود برای مدیریت ادمین"""
+    _ = current_user
+    channels = await list_optional_channels(db)
+    return [
+        ChannelRoomRead(
+            id=channel.id,
+            type=channel.type,
+            title=channel.title,
+            description=channel.description,
+            created_by_id=channel.created_by_id,
+            is_system=channel.is_system,
+            is_mandatory=channel.is_mandatory,
+            member_count=channel.member_count,
+            created_at=channel.created_at,
+        )
+        for channel in channels
+    ]
 
 
 @router.post("/channels", response_model=ChannelCreateResponse, status_code=status.HTTP_201_CREATED)
