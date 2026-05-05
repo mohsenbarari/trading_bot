@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import sqlalchemy as sa
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -90,12 +90,12 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
     return stmt, unread_count
 
 
-async def get_or_create_direct_conversation(
+async def get_existing_direct_conversation(
     db: AsyncSession,
     user1_id: int,
     user2_id: int,
-) -> Conversation:
-    """Load or create the legacy Conversation row for a direct chat pair."""
+) -> Conversation | None:
+    """Load the legacy Conversation row for a direct chat pair if it already exists."""
     ordered_user1_id, ordered_user2_id = get_direct_conversation_key(user1_id, user2_id)
 
     stmt = select(Conversation).where(
@@ -103,9 +103,19 @@ async def get_or_create_direct_conversation(
         Conversation.user2_id == ordered_user2_id,
     )
     result = await db.execute(stmt)
-    conversation = result.scalar_one_or_none()
+    return result.scalar_one_or_none()
+
+
+async def get_or_create_direct_conversation(
+    db: AsyncSession,
+    user1_id: int,
+    user2_id: int,
+) -> Conversation:
+    """Load or create the legacy Conversation row for a direct chat pair."""
+    conversation = await get_existing_direct_conversation(db, user1_id, user2_id)
 
     if conversation is None:
+        ordered_user1_id, ordered_user2_id = get_direct_conversation_key(user1_id, user2_id)
         conversation = Conversation(
             user1_id=ordered_user1_id,
             user2_id=ordered_user2_id,
@@ -116,6 +126,27 @@ async def get_or_create_direct_conversation(
         await db.flush()
 
     return conversation
+
+
+async def _get_latest_direct_message(
+    db: AsyncSession,
+    user1_id: int,
+    user2_id: int,
+) -> Message | None:
+    ordered_user1_id, ordered_user2_id = get_direct_conversation_key(user1_id, user2_id)
+    stmt = (
+        select(Message)
+        .where(
+            sa.or_(
+                sa.and_(Message.sender_id == ordered_user1_id, Message.receiver_id == ordered_user2_id),
+                sa.and_(Message.sender_id == ordered_user2_id, Message.receiver_id == ordered_user1_id),
+            )
+        )
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 async def _find_existing_direct_chat_id(
@@ -228,5 +259,60 @@ async def sync_direct_message_threading(
         conversation.unread_count_user1 += 1
     else:
         conversation.unread_count_user2 += 1
+
+    return conversation
+
+
+async def sync_direct_read_state(
+    db: AsyncSession,
+    *,
+    reader: User,
+    other_user_id: int,
+) -> Conversation | None:
+    """Sync direct-chat read state across legacy Conversation rows and generic ChatMember cursors."""
+    await db.execute(
+        update(Message)
+        .where(
+            Message.sender_id == other_user_id,
+            Message.receiver_id == reader.id,
+            Message.is_read.is_(False),
+        )
+        .values(is_read=True)
+    )
+
+    conversation = await get_existing_direct_conversation(db, reader.id, other_user_id)
+    ordered_user1_id, _ = get_direct_conversation_key(reader.id, other_user_id)
+    if conversation is not None:
+        if reader.id == ordered_user1_id:
+            conversation.unread_count_user1 = 0
+        else:
+            conversation.unread_count_user2 = 0
+
+    existing_chat_id = await _find_existing_direct_chat_id(db, reader.id, other_user_id)
+    if conversation is None and existing_chat_id is None:
+        return conversation
+
+    other_user = await db.get(User, other_user_id)
+    if other_user is None:
+        return conversation
+
+    direct_chat = await get_or_create_direct_chat(db, reader, other_user)
+    latest_message = await _get_latest_direct_message(db, reader.id, other_user_id)
+    if latest_message is None:
+        return conversation
+
+    if latest_message.chat_id != direct_chat.id:
+        latest_message.chat_id = direct_chat.id
+
+    members = await _load_direct_chat_members(db, direct_chat.id, reader.id, other_user_id)
+    reader_member = members.get(reader.id)
+    if reader_member is None:
+        direct_chat = await get_or_create_direct_chat(db, reader, other_user)
+        members = await _load_direct_chat_members(db, direct_chat.id, reader.id, other_user_id)
+        reader_member = members.get(reader.id)
+
+    if reader_member is not None:
+        reader_member.last_read_message_id = latest_message.id
+        reader_member.last_read_at = datetime.now(timezone.utc)
 
     return conversation
