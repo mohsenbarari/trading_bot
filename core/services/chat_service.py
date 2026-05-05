@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable, TypeVar
 
@@ -22,6 +24,10 @@ from models.user import User
 
 SerializedMessageT = TypeVar("SerializedMessageT")
 DirectEventPublisher = Callable[[int, str, dict[str, object]], Awaitable[object]]
+LocationSnapshotBuilder = Callable[[AsyncSession, int, float, float], Awaitable[str | None]]
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_direct_conversation_key(user1_id: int, user2_id: int) -> tuple[int, int]:
@@ -555,6 +561,63 @@ async def ensure_direct_message_chat_link(
         direct_chat.last_message_at = message.created_at
 
     return message
+
+
+async def prepare_direct_message_send(
+    db: AsyncSession,
+    *,
+    sender: User,
+    receiver_id: int,
+    content: str,
+    message_type: MessageType,
+    location_snapshot_builder: LocationSnapshotBuilder | None = None,
+) -> tuple[User, str]:
+    """Validate direct-message preconditions and normalize any send-time payload state."""
+    if receiver_id == sender.id:
+        raise HTTPException(status_code=400, detail="Cannot send message to yourself")
+
+    receiver = await db.get(User, receiver_id)
+    if receiver is None:
+        raise HTTPException(status_code=404, detail="Receiver not found")
+    if receiver.is_deleted:
+        raise HTTPException(status_code=400, detail="امکان ارسال پیام به کاربر غیرفعال وجود ندارد")
+
+    prepared_content = content
+    if message_type == MessageType.LOCATION:
+        prepared_content = await prepare_direct_location_content(
+            db,
+            uploader_id=sender.id,
+            content=content,
+            location_snapshot_builder=location_snapshot_builder,
+        )
+
+    return receiver, prepared_content
+
+
+async def prepare_direct_location_content(
+    db: AsyncSession,
+    *,
+    uploader_id: int,
+    content: str,
+    location_snapshot_builder: LocationSnapshotBuilder | None = None,
+) -> str:
+    """Normalize one location payload and attach a snapshot id when available."""
+    try:
+        location_payload = json.loads(content)
+        lat = float(location_payload.get("lat", location_payload.get("latitude")))
+        lng = float(location_payload.get("lng", location_payload.get("longitude")))
+        location_payload["lat"] = lat
+        location_payload["lng"] = lng
+
+        if location_snapshot_builder is not None:
+            snapshot_id = await location_snapshot_builder(db, uploader_id, lat, lng)
+            if snapshot_id:
+                location_payload["snapshot_id"] = snapshot_id
+
+        return json.dumps(location_payload)
+    except Exception as exc:
+        logger.warning(f"Failed to generate location snapshot: {exc}")
+        return content
 
 
 def serialize_direct_message_for_response(
