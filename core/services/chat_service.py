@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Callable
+from typing import Callable, TypeVar
 
 import sqlalchemy as sa
+from fastapi.encoders import jsonable_encoder
 from fastapi import HTTPException
 from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,9 @@ from models.chat_member import ChatMember
 from models.conversation import Conversation
 from models.message import Message
 from models.user import User
+
+
+SerializedMessageT = TypeVar("SerializedMessageT")
 
 
 def get_direct_conversation_key(user1_id: int, user2_id: int) -> tuple[int, int]:
@@ -550,6 +554,37 @@ async def ensure_direct_message_chat_link(
         direct_chat.last_message_at = message.created_at
 
     return message
+
+
+def serialize_direct_message_for_response(
+    message: Message,
+    *,
+    serializer: Callable[[Message], SerializedMessageT],
+) -> SerializedMessageT:
+    """Serialize one direct message using the API layer's existing schema callback."""
+    return serializer(message)
+
+
+def serialize_direct_messages_for_response(
+    messages: list[Message],
+    *,
+    serializer: Callable[[Message], SerializedMessageT],
+) -> list[SerializedMessageT]:
+    """Serialize a direct-message collection without duplicating list assembly in the router."""
+    return [serializer(message) for message in messages]
+
+
+def build_direct_message_event_payload(
+    message: Message,
+    *,
+    serializer: Callable[[Message], SerializedMessageT],
+    sender_name: str | None = None,
+) -> dict[str, object]:
+    """Build a realtime-safe payload for one direct message event."""
+    payload = jsonable_encoder(serializer(message))
+    if sender_name is not None:
+        payload["sender_name"] = sender_name
+    return payload
 
 
 def update_direct_message_content(
