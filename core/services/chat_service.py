@@ -770,3 +770,65 @@ async def get_deletable_direct_message(
     if message.created_at < now - timedelta(hours=48):
         raise HTTPException(status_code=400, detail="Message is too old to delete")
     return message
+
+
+async def apply_direct_message_edit(
+    db: AsyncSession,
+    *,
+    message_id: int,
+    actor_id: int,
+    content: str,
+) -> Message | None:
+    """Apply the full edit workflow for one direct text message."""
+    now = datetime.now(timezone.utc)
+    message = await get_editable_direct_message(
+        db,
+        message_id=message_id,
+        actor_id=actor_id,
+        now=now,
+    )
+    update_direct_message_content(message, content=content, updated_at=now)
+    return await persist_direct_message_change(db, message)
+
+
+async def apply_direct_message_reaction_toggle(
+    db: AsyncSession,
+    *,
+    message_id: int,
+    actor_id: int,
+    emoji: str,
+    normalize_reactions: Callable[[object], list[dict[str, object]]],
+    reaction_order: dict[str, int],
+) -> Message | None:
+    """Apply the full reaction-toggle workflow for one direct message."""
+    message = await get_reactable_direct_message(
+        db,
+        message_id=message_id,
+        actor_id=actor_id,
+    )
+    toggle_direct_message_reaction_state(
+        message,
+        acting_user_id=actor_id,
+        emoji=emoji,
+        normalize_reactions=normalize_reactions,
+        reaction_order=reaction_order,
+    )
+    return await persist_direct_message_change(db, message, include_sender=True)
+
+
+async def apply_direct_message_delete(
+    db: AsyncSession,
+    *,
+    message_id: int,
+    actor_id: int,
+) -> None:
+    """Apply the full soft-delete workflow for one direct message."""
+    now = datetime.now(timezone.utc)
+    message = await get_deletable_direct_message(
+        db,
+        message_id=message_id,
+        actor_id=actor_id,
+        now=now,
+    )
+    mark_direct_message_deleted(message, deleted_at=now)
+    await persist_direct_message_change(db, message)

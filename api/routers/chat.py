@@ -27,20 +27,16 @@ from models.chat_file import ChatFile
 from api.deps import get_current_user
 
 from core.services.chat_service import (
+    apply_direct_message_delete,
+    apply_direct_message_edit,
+    apply_direct_message_reaction_toggle,
     build_direct_conversation_list_stmt,
     build_direct_message_history_statements,
     build_direct_message_search_stmt,
     build_direct_unread_poll_stmt,
     commit_direct_read_state,
-    get_deletable_direct_message,
-    get_editable_direct_message,
-    get_reactable_direct_message,
     get_direct_conversation_key,
-    mark_direct_message_deleted,
     persist_sent_direct_message,
-    persist_direct_message_change,
-    toggle_direct_message_reaction_state,
-    update_direct_message_content,
     get_or_create_direct_conversation,
 )
 from core.utils import publish_user_event
@@ -453,16 +449,12 @@ async def update_message(
     db: AsyncSession = Depends(get_db)
 ):
     """ویرایش پیام (محدودیت ۴۸ ساعت)"""
-    now = datetime.now(timezone.utc)
-    msg = await get_editable_direct_message(
+    msg = await apply_direct_message_edit(
         db,
         message_id=message_id,
         actor_id=current_user.id,
-        now=now,
+        content=data.content,
     )
-
-    update_direct_message_content(msg, content=data.content, updated_at=now)
-    msg = await persist_direct_message_change(db, msg)
     return MessageRead.from_orm_with_forwarding(msg)
 
 
@@ -474,20 +466,14 @@ async def toggle_message_reaction(
     db: AsyncSession = Depends(get_db)
 ):
     """افزودن/حذف ری‌اکشن روی پیام"""
-    msg = await get_reactable_direct_message(
+    updated_message = await apply_direct_message_reaction_toggle(
         db,
         message_id=message_id,
         actor_id=current_user.id,
-    )
-
-    toggle_direct_message_reaction_state(
-        msg,
-        acting_user_id=current_user.id,
         emoji=data.emoji,
         normalize_reactions=normalize_message_reactions,
         reaction_order=COMMON_MESSAGE_REACTION_ORDER,
     )
-    updated_message = await persist_direct_message_change(db, msg, include_sender=True)
     if not updated_message:
         raise HTTPException(status_code=404, detail="Message not found")
 
@@ -507,16 +493,11 @@ async def delete_message(
     db: AsyncSession = Depends(get_db)
 ):
     """حذف message (Soft Delete - محدودیت ۴۸ ساعت)"""
-    now = datetime.now(timezone.utc)
-    msg = await get_deletable_direct_message(
+    await apply_direct_message_delete(
         db,
         message_id=message_id,
         actor_id=current_user.id,
-        now=now,
     )
-
-    mark_direct_message_deleted(msg, deleted_at=now)
-    await persist_direct_message_change(db, msg)
     return None
 
 @router.post("/read/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
