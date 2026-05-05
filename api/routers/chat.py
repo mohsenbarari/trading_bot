@@ -35,6 +35,7 @@ from core.services.chat_service import (
     build_direct_message_search_stmt,
     build_direct_unread_poll_stmt,
     commit_direct_read_state,
+    generate_direct_location_snapshot,
     normalize_message_reactions,
     persist_sent_direct_message,
     publish_direct_message_event,
@@ -46,51 +47,12 @@ from core.services.chat_service import (
     serialize_direct_messages_for_response,
 )
 from core.utils import publish_user_event
-import httpx
-import json
 import logging
 
 logger = logging.getLogger(__name__)
 
 CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 CHAT_MEDIA_MAX_UPLOAD_LABEL = "50MB"
-
-
-async def generate_location_snapshot(db: AsyncSession, uploader_id: int, lat: float, lng: float) -> Optional[str]:
-    """Generate a static map image from the internal tileserver, save to uploads, and create ChatFile entry."""
-    try:
-        # Use tileserver-gl static API via docker network
-        tile_url = f"http://tileserver:8080/styles/basic-preview/static/{lng},{lat},15/600x400.png"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(tile_url)
-            if resp.status_code != 200:
-                logger.warning(f"Tileserver returned {resp.status_code} for location snapshot")
-                return None
-
-        file_id = str(uuid.uuid4())
-        upload_dir = os.path.join(os.getcwd(), "uploads")
-        os.makedirs(upload_dir, exist_ok=True)
-        file_path = os.path.join(upload_dir, f"{file_id}.png")
-
-        async with aiofiles.open(file_path, "wb") as f:
-            await f.write(resp.content)
-
-        # Create DB entry for the file so the frontend can request it via /api/chat/files/{id}
-        chat_file = ChatFile(
-            id=file_id,
-            uploader_id=uploader_id,
-            s3_key=file_path,
-            file_name=f"location_preview_{file_id[:8]}.png",
-            mime_type="image/png",
-            size=len(resp.content)
-        )
-        db.add(chat_file)
-        await db.flush()
-
-        return file_id
-    except Exception as e:
-        logger.warning(f"Failed to generate location snapshot: {e}")
-        return None
 
 
 class TypingSignal(BaseModel):
@@ -349,7 +311,6 @@ async def send_message(
         receiver_id=data.receiver_id,
         content=data.content,
         message_type=data.message_type,
-        location_snapshot_builder=generate_location_snapshot,
     )
     
     message = await persist_sent_direct_message(

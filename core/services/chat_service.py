@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable, TypeVar
 
+import aiofiles
+import httpx
 import sqlalchemy as sa
 from fastapi.encoders import jsonable_encoder
 from fastapi import HTTPException
@@ -16,6 +20,7 @@ from sqlalchemy.orm import aliased, joinedload
 
 from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType, MessageType
 from models.chat import Chat
+from models.chat_file import ChatFile
 from models.chat_member import ChatMember
 from models.conversation import Conversation
 from models.message import Message
@@ -24,7 +29,6 @@ from models.user import User
 
 SerializedMessageT = TypeVar("SerializedMessageT")
 DirectEventPublisher = Callable[[int, str, dict[str, object]], Awaitable[object]]
-LocationSnapshotBuilder = Callable[[AsyncSession, int, float, float], Awaitable[str | None]]
 
 
 logger = logging.getLogger(__name__)
@@ -634,6 +638,47 @@ async def ensure_direct_message_chat_link(
     return message
 
 
+async def generate_direct_location_snapshot(
+    db: AsyncSession,
+    uploader_id: int,
+    lat: float,
+    lng: float,
+) -> str | None:
+    """Generate and persist one static location snapshot for a direct location message."""
+    try:
+        tile_url = f"http://tileserver:8080/styles/basic-preview/static/{lng},{lat},15/600x400.png"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(tile_url)
+            if response.status_code != 200:
+                logger.warning(
+                    f"Tileserver returned {response.status_code} for location snapshot"
+                )
+                return None
+
+        file_id = str(uuid.uuid4())
+        upload_dir = os.path.join(os.getcwd(), "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, f"{file_id}.png")
+
+        async with aiofiles.open(file_path, "wb") as file_handle:
+            await file_handle.write(response.content)
+
+        chat_file = ChatFile(
+            id=file_id,
+            uploader_id=uploader_id,
+            s3_key=file_path,
+            file_name=f"location_preview_{file_id[:8]}.png",
+            mime_type="image/png",
+            size=len(response.content),
+        )
+        db.add(chat_file)
+        await db.flush()
+        return file_id
+    except Exception as exc:
+        logger.warning(f"Failed to generate location snapshot: {exc}")
+        return None
+
+
 async def prepare_direct_message_send(
     db: AsyncSession,
     *,
@@ -641,7 +686,6 @@ async def prepare_direct_message_send(
     receiver_id: int,
     content: str,
     message_type: MessageType,
-    location_snapshot_builder: LocationSnapshotBuilder | None = None,
 ) -> tuple[User, str]:
     """Validate direct-message preconditions and normalize any send-time payload state."""
     if receiver_id == sender.id:
@@ -659,7 +703,6 @@ async def prepare_direct_message_send(
             db,
             uploader_id=sender.id,
             content=content,
-            location_snapshot_builder=location_snapshot_builder,
         )
 
     return receiver, prepared_content
@@ -670,7 +713,6 @@ async def prepare_direct_location_content(
     *,
     uploader_id: int,
     content: str,
-    location_snapshot_builder: LocationSnapshotBuilder | None = None,
 ) -> str:
     """Normalize one location payload and attach a snapshot id when available."""
     try:
@@ -680,10 +722,9 @@ async def prepare_direct_location_content(
         location_payload["lat"] = lat
         location_payload["lng"] = lng
 
-        if location_snapshot_builder is not None:
-            snapshot_id = await location_snapshot_builder(db, uploader_id, lat, lng)
-            if snapshot_id:
-                location_payload["snapshot_id"] = snapshot_id
+        snapshot_id = await generate_direct_location_snapshot(db, uploader_id, lat, lng)
+        if snapshot_id:
+            location_payload["snapshot_id"] = snapshot_id
 
         return json.dumps(location_payload)
     except Exception as exc:
