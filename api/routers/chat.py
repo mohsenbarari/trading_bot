@@ -4,7 +4,6 @@ API endpoints for in-app messaging system
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
-from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, update, func
 from sqlalchemy.orm import joinedload
@@ -30,6 +29,7 @@ from core.services.chat_service import (
     apply_direct_message_delete,
     apply_direct_message_edit,
     apply_direct_message_reaction_toggle,
+    build_direct_message_event_payload,
     build_direct_conversation_list_stmt,
     build_direct_message_history_statements,
     build_direct_message_search_stmt,
@@ -37,6 +37,8 @@ from core.services.chat_service import (
     commit_direct_read_state,
     get_direct_conversation_key,
     persist_sent_direct_message,
+    serialize_direct_message_for_response,
+    serialize_direct_messages_for_response,
     get_or_create_direct_conversation,
 )
 from core.utils import publish_user_event
@@ -322,7 +324,10 @@ async def search_messages(
     result = await db.execute(query)
     messages = result.scalars().all()
     # Serializing with custom method
-    return [MessageRead.from_orm_with_forwarding(m) for m in messages]
+    return serialize_direct_messages_for_response(
+        messages,
+        serializer=MessageRead.from_orm_with_forwarding,
+    )
 
 
 @router.get("/messages/{user_id}", response_model=List[MessageRead])
@@ -359,14 +364,20 @@ async def get_messages(
         
         # Combine: older reversed (to be asc) + newer
         messages = list(reversed(older_msgs)) + list(newer_msgs)
-        return [MessageRead.from_orm_with_forwarding(m) for m in messages]
+        return serialize_direct_messages_for_response(
+            messages,
+            serializer=MessageRead.from_orm_with_forwarding,
+        )
 
     result = await db.execute(stmt_older)
     messages = result.scalars().all()
     
     # معکوس کردن برای نمایش صعودی
     messages = list(reversed(messages))
-    return [MessageRead.from_orm_with_forwarding(m) for m in messages]
+    return serialize_direct_messages_for_response(
+        messages,
+        serializer=MessageRead.from_orm_with_forwarding,
+    )
 
 
 @router.post("/typing", status_code=status.HTTP_204_NO_CONTENT)
@@ -432,13 +443,17 @@ async def send_message(
     
     # انتشار پیام برای گیرنده (Real-time update)
     # استفاده از MessageRead برای سریالایز کردن مناسب
-    msg_orm = MessageRead.from_orm_with_forwarding(message)
-    msg_data = jsonable_encoder(msg_orm)
-    # Inject sender_name manually since current_user is the sender
-    msg_data["sender_name"] = current_user.account_name
+    msg_data = build_direct_message_event_payload(
+        message,
+        serializer=MessageRead.from_orm_with_forwarding,
+        sender_name=current_user.account_name,
+    )
     await publish_user_event(data.receiver_id, "chat:message", msg_data)
 
-    return MessageRead.from_orm_with_forwarding(message)
+    return serialize_direct_message_for_response(
+        message,
+        serializer=MessageRead.from_orm_with_forwarding,
+    )
 
 
 @router.put("/messages/{message_id}", response_model=MessageRead)
@@ -455,7 +470,10 @@ async def update_message(
         actor_id=current_user.id,
         content=data.content,
     )
-    return MessageRead.from_orm_with_forwarding(msg)
+    return serialize_direct_message_for_response(
+        msg,
+        serializer=MessageRead.from_orm_with_forwarding,
+    )
 
 
 @router.post("/messages/{message_id}/reaction", response_model=MessageRead)
@@ -477,8 +495,14 @@ async def toggle_message_reaction(
     if not updated_message:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    reaction_payload = MessageRead.from_orm_with_forwarding(updated_message)
-    reaction_data = jsonable_encoder(reaction_payload)
+    reaction_payload = serialize_direct_message_for_response(
+        updated_message,
+        serializer=MessageRead.from_orm_with_forwarding,
+    )
+    reaction_data = build_direct_message_event_payload(
+        updated_message,
+        serializer=MessageRead.from_orm_with_forwarding,
+    )
     await publish_user_event(updated_message.sender_id, "chat:reaction", reaction_data)
     if updated_message.receiver_id != updated_message.sender_id:
         await publish_user_event(updated_message.receiver_id, "chat:reaction", reaction_data)
