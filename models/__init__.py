@@ -10,6 +10,8 @@ from .notification import Notification
 from .trading_setting import TradingSetting
 from .offer import Offer, OfferType, OfferStatus
 from .trade import Trade, TradeType, TradeStatus
+from .chat import Chat
+from .chat_member import ChatMember
 from .message import Message
 from .conversation import Conversation
 from .user_block import UserBlock
@@ -37,6 +39,9 @@ __all__ = [
     "Trade",
     "TradeType",
     "TradeStatus",
+    # Generic Chat
+    "Chat",
+    "ChatMember",
     # Chat
     "Message",
     "Conversation",

@@ -4,7 +4,15 @@ Enum تعریف‌های مشترک اپلیکیشن
 """
 import enum
 
-__all__ = ["UserRole", "NotificationLevel", "NotificationCategory", "MessageType"]
+__all__ = [
+    "UserRole",
+    "NotificationLevel",
+    "NotificationCategory",
+    "MessageType",
+    "ChatType",
+    "ChatMemberRole",
+    "ChatMembershipStatus",
+]
 
 class UserRole(str, enum.Enum):
     WATCH = "تماشا"
@@ -35,3 +43,24 @@ class MessageType(str, enum.Enum):
     LOCATION = "location"
     VOICE = "voice"
     DOCUMENT = "document"
+
+
+class ChatType(str, enum.Enum):
+    """نوع فضای پیام‌رسانی"""
+    DIRECT = "direct"
+    GROUP = "group"
+    CHANNEL = "channel"
+
+
+class ChatMemberRole(str, enum.Enum):
+    """نقش عضو داخل chat"""
+    ADMIN = "admin"
+    MEMBER = "member"
+
+
+class ChatMembershipStatus(str, enum.Enum):
+    """وضعیت عضویت کاربر در chat"""
+    ACTIVE = "active"
+    LEFT = "left"
+    REMOVED = "removed"
+    INACTIVE = "inactive"
