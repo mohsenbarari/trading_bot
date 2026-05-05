@@ -1,6 +1,6 @@
 """add generic chat foundation
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: b6d7e8f9a0b1
 Revises: f7e8d9c0b1a2
 Create Date: 2026-05-05 10:20:00.000000
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'a1b2c3d4e5f6'
+revision: str = 'b6d7e8f9a0b1'
 down_revision: Union[str, None] = 'f7e8d9c0b1a2'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
