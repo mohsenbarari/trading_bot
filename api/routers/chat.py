@@ -40,6 +40,7 @@ from core.services.chat_service import (
     publish_direct_read_event,
     publish_direct_reaction_event,
     publish_direct_typing_event,
+    prepare_direct_message_send,
     serialize_direct_message_for_response,
     serialize_direct_messages_for_response,
     get_or_create_direct_conversation,
@@ -404,38 +405,20 @@ async def send_message(
     db: AsyncSession = Depends(get_db)
 ):
     """ارسال پیام"""
-    # بررسی وجود کاربر گیرنده
-    receiver = await db.get(User, data.receiver_id)
-    if not receiver:
-        raise HTTPException(status_code=404, detail="Receiver not found")
-        
-    if receiver.is_deleted:
-        raise HTTPException(status_code=400, detail="امکان ارسال پیام به کاربر غیرفعال وجود ندارد")
-    
-    if data.receiver_id == current_user.id:
-        raise HTTPException(status_code=400, detail="Cannot send message to yourself")
-        
-    # Synchronously generate location snapshot to attach its ID in content immediately
-    if data.message_type == MessageType.LOCATION:
-        try:
-            loc = json.loads(data.content)
-            lat = float(loc.get("lat", loc.get("latitude")))
-            lng = float(loc.get("lng", loc.get("longitude")))
-            loc["lat"], loc["lng"] = lat, lng # normalize
-            
-            file_id = await generate_location_snapshot(db, current_user.id, lat, lng)
-            if file_id:
-                loc["snapshot_id"] = file_id
-            
-            data.content = json.dumps(loc)
-        except Exception as e:
-            logger.warning(f"Failed to generate location snapshot: {e}")
+    receiver, prepared_content = await prepare_direct_message_send(
+        db,
+        sender=current_user,
+        receiver_id=data.receiver_id,
+        content=data.content,
+        message_type=data.message_type,
+        location_snapshot_builder=generate_location_snapshot,
+    )
     
     message = await persist_sent_direct_message(
         db,
         sender=current_user,
         receiver=receiver,
-        content=data.content,
+        content=prepared_content,
         message_type=data.message_type,
         reply_to_message_id=data.reply_to_message_id,
         forwarded_from_id=data.forwarded_from_id,
