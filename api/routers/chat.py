@@ -31,13 +31,13 @@ from core.services.chat_service import (
     build_direct_message_history_statements,
     build_direct_message_search_stmt,
     build_direct_unread_poll_stmt,
+    commit_direct_read_state,
     get_direct_conversation_key,
     mark_direct_message_deleted,
+    persist_sent_direct_message,
     persist_direct_message_change,
     toggle_direct_message_reaction_state,
     update_direct_message_content,
-    sync_direct_read_state,
-    sync_direct_message_threading,
     get_or_create_direct_conversation,
 )
 from core.utils import publish_user_event
@@ -419,38 +419,17 @@ async def send_message(
         except Exception as e:
             logger.warning(f"Failed to generate location snapshot: {e}")
     
-    # ایجاد پیام
-    message = Message(
-        sender_id=current_user.id,
-        receiver_id=data.receiver_id,
+    message = await persist_sent_direct_message(
+        db,
+        sender=current_user,
+        receiver=receiver,
         content=data.content,
         message_type=data.message_type,
         reply_to_message_id=data.reply_to_message_id,
         forwarded_from_id=data.forwarded_from_id,
-        is_read=False
     )
-    db.add(message)
-    await db.commit()
-    await db.refresh(message)
-
-    # Eager load reply/forwarded_from if exists (for response)
-    if message.reply_to_message_id or message.forwarded_from_id:
-        result = await db.execute(
-            select(Message)
-            .options(joinedload(Message.reply_to_message), joinedload(Message.forwarded_from))
-            .where(Message.id == message.id)
-        )
-        message = result.scalars().first()
-    
-    # Sync both the legacy Conversation row and the generic direct Chat row.
-    await sync_direct_message_threading(
-        db,
-        sender=current_user,
-        receiver=receiver,
-        message=message,
-    )
-    
-    await db.commit()
+    if message is None:
+        raise HTTPException(status_code=500, detail="Failed to persist message")
     
     # انتشار پیام برای گیرنده (Real-time update)
     # استفاده از MessageRead برای سریالایز کردن مناسب
@@ -562,13 +541,11 @@ async def mark_messages_read(
     db: AsyncSession = Depends(get_db)
 ):
     """علامت‌گذاری تمام پیام‌های یک کاربر به عنوان خوانده شده"""
-    await sync_direct_read_state(
+    await commit_direct_read_state(
         db,
         reader=current_user,
         other_user_id=user_id,
     )
-    
-    await db.commit()
     
     # Notify sender that messages are read
     await publish_user_event(

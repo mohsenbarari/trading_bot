@@ -643,6 +643,45 @@ async def reload_direct_message(
     return result.scalars().first()
 
 
+async def persist_sent_direct_message(
+    db: AsyncSession,
+    *,
+    sender: User,
+    receiver: User,
+    content: str,
+    message_type: MessageType,
+    reply_to_message_id: int | None = None,
+    forwarded_from_id: int | None = None,
+) -> Message | None:
+    """Persist one new direct message and sync both legacy and generic chat state."""
+    message = Message(
+        sender_id=sender.id,
+        receiver_id=receiver.id,
+        content=content,
+        message_type=message_type,
+        reply_to_message_id=reply_to_message_id,
+        forwarded_from_id=forwarded_from_id,
+        is_read=False,
+    )
+    db.add(message)
+    await db.commit()
+    await db.refresh(message)
+
+    if message.reply_to_message_id or message.forwarded_from_id:
+        reloaded_message = await reload_direct_message(db, message.id)
+        if reloaded_message is not None:
+            message = reloaded_message
+
+    await sync_direct_message_threading(
+        db,
+        sender=sender,
+        receiver=receiver,
+        message=message,
+    )
+    await db.commit()
+    return await reload_direct_message(db, message.id)
+
+
 async def persist_direct_message_change(
     db: AsyncSession,
     message: Message,
@@ -653,3 +692,19 @@ async def persist_direct_message_change(
     await ensure_direct_message_chat_link(db, message)
     await db.commit()
     return await reload_direct_message(db, message.id, include_sender=include_sender)
+
+
+async def commit_direct_read_state(
+    db: AsyncSession,
+    *,
+    reader: User,
+    other_user_id: int,
+) -> Conversation | None:
+    """Persist the direct-thread read-state transition for one user pair."""
+    conversation = await sync_direct_read_state(
+        db,
+        reader=reader,
+        other_user_id=other_user_id,
+    )
+    await db.commit()
+    return conversation
