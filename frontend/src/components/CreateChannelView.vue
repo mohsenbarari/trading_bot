@@ -55,11 +55,13 @@ const form = reactive({
 
 const searchQuery = ref('')
 const isCreating = ref(false)
+const isLoadingChannels = ref(false)
 const isLoadingCandidates = ref(false)
 const isSubmittingMembers = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
 const createdChannel = ref<ChannelRoom | null>(null)
+const existingChannels = ref<ChannelRoom[]>([])
 const candidates = ref<ChannelInviteCandidate[]>([])
 const candidateTotal = ref(0)
 const activeTotal = ref(0)
@@ -83,6 +85,12 @@ function resetFormState() {
   selectedUserIds.value = new Set()
 }
 
+function upsertExistingChannel(channel: ChannelRoom) {
+  const next = existingChannels.value.filter((item) => item.id !== channel.id)
+  next.unshift(channel)
+  existingChannels.value = next
+}
+
 function resetAll() {
   form.title = ''
   form.description = ''
@@ -90,6 +98,14 @@ function resetAll() {
   successMessage.value = ''
   createdChannel.value = null
   resetFormState()
+}
+
+function openExistingChannel(channel: ChannelRoom) {
+  errorMessage.value = ''
+  successMessage.value = `✅ مدیریت کانال «${channel.title}» فعال شد.`
+  createdChannel.value = channel
+  resetFormState()
+  void loadCandidates()
 }
 
 function getAvatarInitial(name: string) {
@@ -133,6 +149,18 @@ async function loadCandidates(query = '') {
   }
 }
 
+async function loadExistingChannels() {
+  isLoadingChannels.value = true
+  try {
+    const data = await apiFetchJson('/api/chat/channels') as ChannelRoom[]
+    existingChannels.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'خطا در دریافت فهرست کانال‌ها'
+  } finally {
+    isLoadingChannels.value = false
+  }
+}
+
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 watch(searchQuery, (value) => {
   if (!createdChannel.value) return
@@ -164,6 +192,7 @@ async function createChannel() {
       throw new Error((data as { detail?: string }).detail || 'خطا در ساخت کانال')
     }
     createdChannel.value = (data as ChannelCreateResponse).channel
+    upsertExistingChannel((data as ChannelCreateResponse).channel)
     successMessage.value = '✅ کانال ساخته شد. حالا اعضای اولیه را انتخاب کنید.'
     resetFormState()
     await loadCandidates()
@@ -198,6 +227,7 @@ async function submitMembers() {
       ...createdChannel.value,
       member_count: summary.member_count,
     }
+    upsertExistingChannel(createdChannel.value)
     successMessage.value = `✅ اعضا با موفقیت افزوده شدند. اعضای فعال کانال: ${summary.member_count}`
     selectAllActiveUsers.value = false
     selectedUserIds.value = new Set()
@@ -208,6 +238,8 @@ async function submitMembers() {
     isSubmittingMembers.value = false
   }
 }
+
+void loadExistingChannels()
 </script>
 
 <template>
@@ -237,6 +269,33 @@ async function submitMembers() {
           {{ isCreating ? 'در حال ساخت...' : 'ساخت کانال و ادامه' }}
         </button>
         <button type="button" class="secondary-btn" :disabled="isCreating" @click="resetAll">بازنشانی</button>
+      </div>
+
+      <div v-if="isLoadingChannels" class="picker-state">در حال دریافت کانال‌های اختیاری موجود...</div>
+
+      <div v-else-if="existingChannels.length > 0" class="existing-shell">
+        <div class="existing-title-row">
+          <h3>کانال‌های اختیاری موجود</h3>
+          <span>{{ existingChannels.length }} کانال</span>
+        </div>
+
+        <button
+          v-for="channel in existingChannels"
+          :key="channel.id"
+          type="button"
+          class="existing-channel-row"
+          @click="openExistingChannel(channel)"
+        >
+          <div class="existing-channel-avatar">{{ getAvatarInitial(channel.title) }}</div>
+          <div class="existing-channel-copy">
+            <span class="existing-channel-name">{{ channel.title }}</span>
+            <span class="existing-channel-meta">
+              اعضای فعال: {{ channel.member_count }}
+              <template v-if="channel.description"> • {{ channel.description }}</template>
+            </span>
+          </div>
+          <span class="existing-channel-action">ادامه دعوت اعضا</span>
+        </button>
       </div>
     </div>
 
@@ -579,6 +638,85 @@ async function submitMembers() {
 .message-box.error {
   background: rgba(254, 242, 242, 0.96);
   color: #b91c1c;
+}
+
+.existing-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.existing-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.existing-title-row h3 {
+  margin: 0;
+  font-size: 0.94rem;
+  font-weight: 900;
+  color: #1f2937;
+}
+
+.existing-title-row span {
+  font-size: 0.78rem;
+  color: #92400e;
+}
+
+.existing-channel-row {
+  width: 100%;
+  border: 1px solid rgba(245, 158, 11, 0.14);
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: 18px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: right;
+  cursor: pointer;
+}
+
+.existing-channel-avatar {
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0f766e, #10b981);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.existing-channel-copy {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.existing-channel-name {
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: #111827;
+}
+
+.existing-channel-meta {
+  font-size: 0.76rem;
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+.existing-channel-action {
+  flex: none;
+  color: #0f766e;
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 @media (max-width: 640px) {
