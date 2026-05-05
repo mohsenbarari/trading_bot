@@ -35,6 +35,7 @@ from api.routers.chat_schemas import (
     MessageSend,
     MessageUpdate,
     PollResponse,
+    RoomMessageSend,
     StickerPack,
     TypingSignal,
 )
@@ -44,10 +45,15 @@ from core.services.chat_room_service import (
     bulk_add_channel_members,
     count_active_chat_members,
     create_optional_channel,
+    get_active_channel_member_or_403,
     get_channel_or_404,
+    list_channel_conversations,
     list_channel_invite_candidates,
     list_channel_members,
+    list_channel_messages,
     list_optional_channels,
+    mark_channel_messages_read,
+    send_channel_message,
     update_optional_channel,
     update_channel_member,
 )
@@ -92,7 +98,31 @@ async def get_conversations(
     """لیست مکالمات کاربر"""
     stmt = build_direct_conversation_list_stmt(current_user.id)
     result = await db.execute(stmt)
-    return [ConversationRead(**row) for row in result.mappings().all()]
+    direct_conversations = [ConversationRead(**row) for row in result.mappings().all()]
+    channel_conversations = [
+        ConversationRead(
+            id=row.id,
+            other_user_id=row.other_user_id,
+            other_user_name=row.other_user_name,
+            other_user_is_deleted=row.other_user_is_deleted,
+            last_message_content=row.last_message_content,
+            last_message_type=row.last_message_type,
+            last_message_at=row.last_message_at,
+            unread_count=row.unread_count,
+            other_user_last_seen_at=row.other_user_last_seen_at,
+            room_kind=row.room_kind,
+            chat_id=row.chat_id,
+            can_send=row.can_send,
+            member_role=row.member_role,
+        )
+        for row in await list_channel_conversations(db, current_user_id=current_user.id)
+    ]
+    conversations = [*direct_conversations, *channel_conversations]
+    conversations.sort(
+        key=lambda item: item.last_message_at.isoformat() if item.last_message_at else "",
+        reverse=True,
+    )
+    return conversations
 
 
 @router.get("/search", response_model=List[MessageRead])
@@ -382,6 +412,67 @@ async def bulk_invite_channel_members(
         member_count=summary.member_count,
         select_all_active_users=summary.select_all_active_users,
     )
+
+
+@router.get("/rooms/{chat_id}/messages", response_model=List[MessageRead])
+async def get_room_messages(
+    chat_id: int,
+    limit: int = 50,
+    before_id: Optional[int] = None,
+    around_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """تاریخچه پیام‌های room/channel روی foundation عمومی chat"""
+    chat = await get_channel_or_404(db, chat_id)
+    await get_active_channel_member_or_403(db, chat=chat, user_id=current_user.id)
+    messages = await list_channel_messages(
+        db,
+        chat=chat,
+        limit=limit,
+        before_id=before_id,
+        around_id=around_id,
+    )
+    return serialize_direct_messages_for_response(
+        messages,
+        serializer=MessageRead.from_orm_with_forwarding,
+    )
+
+
+@router.post("/rooms/{chat_id}/send", response_model=MessageRead)
+async def send_room_message(
+    chat_id: int,
+    data: RoomMessageSend,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """ارسال post/message به channel runtime روی foundation عمومی chat"""
+    chat = await get_channel_or_404(db, chat_id)
+    message = await send_channel_message(
+        db,
+        chat=chat,
+        sender=current_user,
+        content=data.content,
+        message_type=data.message_type,
+        reply_to_message_id=data.reply_to_message_id,
+        forwarded_from_id=data.forwarded_from_id,
+    )
+    return serialize_direct_message_for_response(
+        message,
+        serializer=MessageRead.from_orm_with_forwarding,
+    )
+
+
+@router.post("/rooms/{chat_id}/read", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_room_messages_read(
+    chat_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """علامت‌گذاری room/channel فعلی به‌عنوان خوانده‌شده"""
+    chat = await get_channel_or_404(db, chat_id)
+    await mark_channel_messages_read(db, chat=chat, user_id=current_user.id)
+    return None
 
 
 @router.post("/send", response_model=MessageRead)

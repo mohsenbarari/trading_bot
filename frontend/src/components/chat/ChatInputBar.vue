@@ -70,8 +70,8 @@
     </div>
 
     <!-- Disabled Banner -->
-    <div v-else-if="isDeleted" class="input-container disabled-banner">
-      <span class="disabled-text">امکان ارسال پیام به این کاربر وجود ندارد.</span>
+    <div v-else-if="isDeleted || isReadOnly" class="input-container disabled-banner">
+      <span class="disabled-text">{{ disabledBannerText }}</span>
     </div>
 
     <!-- Input Container -->
@@ -113,6 +113,7 @@
       <!-- Left side buttons (Only if not recording) -->
       <template v-if="!messageInput.trim() && !isRecording && !editingMessage">
         <button 
+          v-if="!disableRichComposer"
           v-ripple 
           class="voice-btn"
           @click="startVoiceRecording"
@@ -125,7 +126,7 @@
           </svg>
         </button>
 
-        <button v-ripple class="attach-btn" @click="handleToggleAttachment">
+        <button v-if="!disableRichComposer" v-ripple class="attach-btn" @click="handleToggleAttachment">
           <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
           </svg>
@@ -281,6 +282,9 @@ const props = defineProps<{
   isUploading: boolean
   isSending: boolean
   isDeleted?: boolean
+  isReadOnly?: boolean
+  readOnlyBannerText?: string
+  disableRichComposer?: boolean
   stickerPickerOpen?: boolean
 }>()
 
@@ -486,6 +490,12 @@ const summarizeMessage = (message: any | null) => {
 
 const replyBannerText = computed(() => summarizeMessage(props.replyingToMessage))
 const editingBannerText = computed(() => summarizeMessage(props.editingMessage))
+const disabledBannerText = computed(() => {
+  if (props.isDeleted) {
+    return 'امکان ارسال پیام به این کاربر وجود ندارد.'
+  }
+  return props.readOnlyBannerText || 'ارسال پیام در این فضا غیرفعال است.'
+})
 
 function clampSelectionToLength(value: string) {
   composerSelectionStart.value = Math.min(composerSelectionStart.value, value.length)

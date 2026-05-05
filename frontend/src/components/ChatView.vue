@@ -479,7 +479,31 @@ const handleMessagesScroll = async () => {
 
 const isSelectedUserDeleted = computed(() => {
   const conv = conversations.value.find(c => c.other_user_id === selectedUserId.value)
-  return conv ? !!conv.other_user_is_deleted : false
+  return conv?.room_kind === 'channel' ? false : !!conv?.other_user_is_deleted
+})
+
+const selectedConversation = computed(() => {
+  return conversations.value.find(c => c.other_user_id === selectedUserId.value) ?? null
+})
+
+const selectedRoomKind = computed<'direct' | 'channel'>(() => {
+  return selectedConversation.value?.room_kind === 'channel' ? 'channel' : 'direct'
+})
+
+const canSendToSelectedRoom = computed(() => {
+  if (selectedRoomKind.value !== 'channel') return true
+  return selectedConversation.value?.can_send !== false
+})
+
+const isSelectedRoomReadOnly = computed(() => {
+  return selectedRoomKind.value === 'channel' && !canSendToSelectedRoom.value
+})
+
+const selectedRoomStatusText = computed(() => {
+  if (selectedRoomKind.value !== 'channel') {
+    return targetUserStatus.value
+  }
+  return canSendToSelectedRoom.value ? 'کانال • شما مدیر هستید' : 'کانال • فقط مدیران امکان ارسال دارند'
 })
 
 const sortedConversations = computed(() => {
@@ -1307,6 +1331,10 @@ const clearSelection = () => {
 const selectConversation = (conv: Conversation) => {
   selectedUserId.value = conv.other_user_id
   selectedUserName.value = conv.other_user_name
+  if (conv.room_kind === 'channel') {
+    showAttachmentMenu.value = false
+    showStickerPicker.value = false
+  }
   loadMessages(conv.other_user_id)
   contextMenu.value.visible = false;
   editingMessage.value = null;
@@ -1753,6 +1781,7 @@ function openForwardModal() {
 
 async function handleSendVoice(blob: Blob, durationMs: number) {
   if (!selectedUserId.value || !blob) return
+  if (selectedRoomKind.value === 'channel') return
   const file = new File([blob], `voice_${Date.now()}.webm`, { type: blob.type || 'audio/webm' })
   // Pack durationMs into the file object so handleMediaUploadWrapper can extract it
   ;(file as any).durationMs = durationMs
@@ -1761,6 +1790,10 @@ async function handleSendVoice(blob: Blob, durationMs: number) {
 
 async function handleSendLocation(lat: number, lng: number) {
   if (!selectedUserId.value) return
+  if (selectedRoomKind.value === 'channel') {
+    alert('ارسال موقعیت در کانال در این فاز هنوز فعال نشده است.')
+    return
+  }
   const normalized = normalizeLocationPayload({ lat, lng })
   if (!normalized) return
 
@@ -2018,7 +2051,7 @@ function goBack() {
 }
 
 function viewProfile() {
-  if (selectedUserId.value) {
+  if (selectedUserId.value && selectedRoomKind.value === 'direct') {
     emit('navigate', 'public_profile', { 
         id: selectedUserId.value, 
         account_name: selectedUserName.value 
@@ -2038,6 +2071,13 @@ function openPublicProfile(payload?: { id?: number; account_name?: string }) {
 }
 
 const handleCall = () => alert('قابلیت تماس به زودی اضافه می‌شود')
+
+function handleTypingForCurrentRoom() {
+  if (selectedRoomKind.value !== 'direct') {
+    return
+  }
+  handleTypingWrapper()
+}
 
 const SWIPE_THRESHOLD = 100 
 const handleTouchStart = (e: TouchEvent, msg: Message) => {
@@ -2086,7 +2126,11 @@ watch(selectedUserId, (newVal) => {
   groupWrapperCache.clear()
   dateSeparatorLabelCache.clear()
   if (newVal) {
-    startStatusPolling(newVal)
+    if (selectedRoomKind.value === 'direct') {
+      startStatusPolling(newVal)
+    } else {
+      stopStatusPolling()
+    }
     nextTick(() => {
       syncMessagesContainerMetrics()
     })
@@ -2187,6 +2231,9 @@ watch(showAttachmentMenu, (isOpen) => {
 })
 
 function handleToggleAttachment() {
+  if (selectedRoomKind.value === 'channel') {
+    return
+  }
   showStickerPicker.value = false
   showAttachmentMenu.value = !showAttachmentMenu.value
 }
@@ -2218,7 +2265,8 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :isSelectionMode="isSelectionMode"
       :selectedUserId="selectedUserId"
       :selectedUserName="selectedUserName"
-      :targetUserStatus="targetUserStatus"
+      :selectedRoomKind="selectedRoomKind"
+      :targetUserStatus="selectedRoomStatusText"
       :isTyping="isTyping"
       :totalUnread="totalUnread"
       :isSearchActive="isSearchActive"
@@ -2450,6 +2498,9 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         :canCopySelected="canCopySelected"
         :isSending="isSending"
         :isDeleted="isSelectedUserDeleted"
+        :isReadOnly="isSelectedRoomReadOnly"
+        :readOnlyBannerText="selectedRoomKind === 'channel' ? 'فقط مدیران کانال امکان ارسال پیام دارند.' : undefined"
+        :disableRichComposer="selectedRoomKind === 'channel'"
         :selectedMessages="selectedMessages"
         :isUploading="isUploading"
         @cancel-edit="cancelEdit"
@@ -2461,7 +2512,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         @toggle-attachment="handleToggleAttachment"
         @send-text="(text: string) => { messageInput = text; sendMessage(); }"
         @send-voice="handleSendVoice"
-        @typing="handleTypingWrapper"
+        @typing="handleTypingForCurrentRoom"
       />
 
       <!-- Attachment Bottom Sheet -->

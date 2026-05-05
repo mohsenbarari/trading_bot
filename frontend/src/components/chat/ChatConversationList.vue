@@ -18,6 +18,14 @@ function formatTime(dateStr: string) {
   return date.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
 }
 
+function isChannelConversation(conv: Conversation) {
+  return conv.room_kind === 'channel'
+}
+
+function getConversationInitial(conv: Conversation) {
+  return (conv.other_user_name || '?').charAt(0)
+}
+
 function isUserOnline(lastSeen: string | null | undefined): boolean {
   if (!lastSeen) return false
   const serverStr = lastSeen.endsWith('Z') ? lastSeen : lastSeen + 'Z';
@@ -40,6 +48,8 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
         conv.id,
         conv.other_user_id,
         conv.other_user_name,
+        conv.room_kind,
+        conv.chat_id,
         conv.other_user_is_deleted,
         conv.other_user_last_seen_at,
         conv.last_message_at,
@@ -47,21 +57,22 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
         conv.last_message_content,
         conv.unread_count,
         selectedUserId === conv.other_user_id,
-        !!typingUsers[conv.other_user_id],
+        !isChannelConversation(conv) && !!typingUsers[conv.other_user_id],
       ]"
       class="conversation-item"
       v-ripple
       :class="{ 'has-unread': conv.unread_count > 0, 'active': selectedUserId === conv.other_user_id }"
       @click="emit('select-conversation', conv)"
     >
-      <div class="conv-avatar">
-        {{ conv.other_user_name.charAt(0) }}
-        <div v-if="isUserOnline(conv.other_user_last_seen_at)" class="online-indicator-dot"></div>
+      <div class="conv-avatar" :class="{ 'channel-avatar': isChannelConversation(conv) }">
+        {{ getConversationInitial(conv) }}
+        <div v-if="!isChannelConversation(conv) && isUserOnline(conv.other_user_last_seen_at)" class="online-indicator-dot"></div>
       </div>
       <div class="conv-content">
         <div class="conv-header">
           <span class="conv-name">
             {{ conv.other_user_name }}
+            <span v-if="isChannelConversation(conv)" class="channel-badge-list">کانال</span>
             <span v-if="conv.other_user_is_deleted" class="deleted-badge-list">غیرفعال</span>
           </span>
           <span class="conv-time" v-if="conv.last_message_at">
@@ -69,10 +80,11 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
           </span>
         </div>
         <div class="conv-preview">
-          <span v-if="typingUsers[conv.other_user_id]" class="typing-text">
+          <span v-if="!isChannelConversation(conv) && typingUsers[conv.other_user_id]" class="typing-text">
              🖊️ در حال نوشتن...
           </span>
           <template v-else>
+              <template v-if="isChannelConversation(conv) && !conv.last_message_type">📣 کانال</template>
               <template v-if="conv.last_message_type === 'image'">🖼️ تصویر</template>
               <template v-else-if="conv.last_message_type === 'video'">📹 ویدئو</template>
               <template v-else-if="conv.last_message_type === 'voice'">🎤 پیام صوتی</template>
@@ -178,6 +190,10 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
   position: relative;
 }
 
+.conv-avatar.channel-avatar {
+  background: linear-gradient(135deg, #0f766e, #0ea5a4);
+}
+
 .online-indicator-dot {
   position: absolute;
   bottom: 0px;
@@ -228,6 +244,20 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
   padding: 2px 6px;
   border-radius: 4px;
   font-weight: normal;
+}
+
+.channel-badge-list {
+  font-size: 10px;
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.conversation-item.active .channel-badge-list {
+  background: rgba(255,255,255,0.18);
+  color: white;
 }
 
 .conversation-item.active .deleted-badge-list {

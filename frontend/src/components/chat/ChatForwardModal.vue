@@ -94,6 +94,7 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
   const userMap = new Map(allUsers.value.map(user => [user.id, user]))
 
   props.sortedConversations.forEach((conversation, index) => {
+    if (conversation.room_kind === 'channel') return
     if (conversation.other_user_is_deleted) return
 
     const user = userMap.get(conversation.other_user_id)
