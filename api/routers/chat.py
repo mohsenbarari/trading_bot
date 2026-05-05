@@ -292,7 +292,7 @@ async def get_conversations(
     db: AsyncSession = Depends(get_db)
 ):
     """لیست مکالمات کاربر"""
-    stmt, _ = build_direct_conversation_projection_stmt(current_user.id)
+    stmt, _, conversation_order_at = build_direct_conversation_projection_stmt(current_user.id)
     stmt = (
         stmt
         .where(
@@ -301,7 +301,7 @@ async def get_conversations(
                 Conversation.user2_id == current_user.id
             )
         )
-        .order_by(Conversation.last_message_at.desc().nullslast())
+        .order_by(conversation_order_at.desc().nullslast())
     )
 
     result = await db.execute(stmt)
@@ -683,7 +683,7 @@ async def poll_messages(
     db: AsyncSession = Depends(get_db)
 ):
     """پولینگ برای پیام‌های جدید"""
-    conv_stmt, unread_count_expr = build_direct_conversation_projection_stmt(current_user.id)
+    conv_stmt, unread_count_expr, _ = build_direct_conversation_projection_stmt(current_user.id)
     conv_stmt = (
         conv_stmt
         .where(
