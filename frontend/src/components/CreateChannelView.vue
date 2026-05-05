@@ -19,6 +19,11 @@ type ChannelCreateResponse = {
   member_picker_required: boolean
 }
 
+type ChannelUpdatePayload = {
+  title: string
+  description: string
+}
+
 type ChannelInviteCandidate = {
   user_id: number
   account_name: string
@@ -53,11 +58,17 @@ const form = reactive({
   description: '',
 })
 
+const editForm = reactive<ChannelUpdatePayload>({
+  title: '',
+  description: '',
+})
+
 const searchQuery = ref('')
 const isCreating = ref(false)
 const isLoadingChannels = ref(false)
 const isLoadingCandidates = ref(false)
 const isSubmittingMembers = ref(false)
+const isUpdatingChannel = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
 const createdChannel = ref<ChannelRoom | null>(null)
@@ -71,6 +82,14 @@ const selectedUserIds = ref<Set<number>>(new Set())
 const isPickerActive = computed(() => Boolean(createdChannel.value))
 const canSubmitMembers = computed(() => {
   return !!createdChannel.value && (selectAllActiveUsers.value || selectedUserIds.value.size > 0)
+})
+const canUpdateChannel = computed(() => {
+  const current = createdChannel.value
+  if (!current) return false
+  const nextTitle = editForm.title.trim()
+  const nextDescription = editForm.description.trim()
+  const currentDescription = current.description ?? ''
+  return nextTitle.length > 0 && (nextTitle !== current.title || nextDescription !== currentDescription)
 })
 const selectedCount = computed(() => {
   return selectAllActiveUsers.value ? activeTotal.value : selectedUserIds.value.size
@@ -94,6 +113,8 @@ function upsertExistingChannel(channel: ChannelRoom) {
 function resetAll() {
   form.title = ''
   form.description = ''
+  editForm.title = ''
+  editForm.description = ''
   errorMessage.value = ''
   successMessage.value = ''
   createdChannel.value = null
@@ -106,6 +127,11 @@ function openExistingChannel(channel: ChannelRoom) {
   createdChannel.value = channel
   resetFormState()
   void loadCandidates()
+}
+
+function syncEditForm(channel: ChannelRoom | null) {
+  editForm.title = channel?.title ?? ''
+  editForm.description = channel?.description ?? ''
 }
 
 function getAvatarInitial(name: string) {
@@ -169,6 +195,10 @@ watch(searchQuery, (value) => {
     void loadCandidates(value)
   }, 250)
 })
+
+watch(createdChannel, (channel) => {
+  syncEditForm(channel)
+}, { immediate: true })
 
 async function createChannel() {
   if (!props.jwtToken) {
@@ -239,6 +269,34 @@ async function submitMembers() {
   }
 }
 
+async function updateChannelDetails() {
+  if (!createdChannel.value || !canUpdateChannel.value) return
+  isUpdatingChannel.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+  try {
+    const response = await apiFetch(`/api/chat/channels/${createdChannel.value.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        title: editForm.title,
+        description: editForm.description || undefined,
+      }),
+    })
+    const data = await response.json() as ChannelRoom | { detail?: string }
+    if (!response.ok) {
+      throw new Error((data as { detail?: string }).detail || 'خطا در ویرایش کانال')
+    }
+
+    createdChannel.value = data as ChannelRoom
+    upsertExistingChannel(createdChannel.value)
+    successMessage.value = `✅ مشخصات کانال «${createdChannel.value.title}» ذخیره شد.`
+  } catch (error) {
+    errorMessage.value = `❌ ${error instanceof Error ? error.message : 'خطا در ویرایش کانال'}`
+  } finally {
+    isUpdatingChannel.value = false
+  }
+}
+
 void loadExistingChannels()
 </script>
 
@@ -306,6 +364,24 @@ void loadExistingChannels()
           <div class="summary-meta">اعضای فعال: {{ createdChannel?.member_count ?? 0 }}</div>
         </div>
         <button type="button" class="secondary-btn compact" @click="resetAll">کانال جدید</button>
+      </div>
+
+      <div class="channel-edit-shell">
+        <div class="form-group">
+          <label for="edit-channel-title">نام کانال</label>
+          <input id="edit-channel-title" v-model="editForm.title" type="text" maxlength="255" placeholder="نام کانال" />
+        </div>
+
+        <div class="form-group">
+          <label for="edit-channel-description">توضیحات</label>
+          <textarea id="edit-channel-description" v-model="editForm.description" rows="3" maxlength="2000" placeholder="توضیح کوتاه برای ادمین‌ها"></textarea>
+        </div>
+
+        <div class="edit-actions">
+          <button type="button" class="secondary-btn compact" :disabled="!canUpdateChannel || isUpdatingChannel" @click="updateChannelDetails">
+            {{ isUpdatingChannel ? 'در حال ذخیره...' : 'ذخیره مشخصات کانال' }}
+          </button>
+        </div>
       </div>
 
       <div class="picker-toolbar">
@@ -384,6 +460,21 @@ void loadExistingChannels()
   color: #6b7280;
   font-size: 0.85rem;
   line-height: 1.8;
+}
+
+.channel-edit-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 251, 235, 0.55);
+  border: 1px solid rgba(245, 158, 11, 0.14);
+}
+
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .form-shell,

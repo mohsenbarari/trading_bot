@@ -25,6 +25,7 @@ from api.routers.chat_schemas import (
     ChannelCreateResponse,
     ChannelInviteCandidateListResponse,
     ChannelRoomRead,
+    ChannelUpdateRequest,
     ConversationRead,
     MessageRead,
     MessageReactionToggle,
@@ -43,6 +44,7 @@ from core.services.chat_room_service import (
     get_channel_or_404,
     list_channel_invite_candidates,
     list_optional_channels,
+    update_optional_channel,
 )
 from core.services.chat_service import (
     apply_direct_message_delete,
@@ -230,6 +232,36 @@ async def create_channel(
             created_at=channel.created_at,
         ),
         member_picker_required=True,
+    )
+
+
+@router.patch("/channels/{chat_id}", response_model=ChannelRoomRead)
+async def update_channel(
+    chat_id: int,
+    data: ChannelUpdateRequest,
+    current_user: User = Depends(verify_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """ویرایش مشخصات کانال اختیاری برای مدیر ارشد"""
+    _ = current_user
+    channel = await get_channel_or_404(db, chat_id)
+    channel = await update_optional_channel(
+        db,
+        chat=channel,
+        title=data.title,
+        description=data.description,
+    )
+    member_count = await count_active_chat_members(db, channel.id)
+    return ChannelRoomRead(
+        id=channel.id,
+        type=channel.type,
+        title=channel.title or "",
+        description=channel.description,
+        created_by_id=channel.created_by_id,
+        is_system=channel.is_system,
+        is_mandatory=channel.is_mandatory,
+        member_count=member_count,
+        created_at=channel.created_at,
     )
 
 
