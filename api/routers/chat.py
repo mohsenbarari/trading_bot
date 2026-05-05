@@ -28,6 +28,7 @@ from models.chat_file import ChatFile
 from api.deps import get_current_user
 
 from core.services.chat_service import (
+    build_direct_message_lookup_condition,
     build_direct_conversation_projection_stmt,
     get_direct_conversation_key,
     sync_direct_read_state,
@@ -328,12 +329,8 @@ async def search_messages(
     ).order_by(Message.created_at.desc())
     
     if chat_id:
-        query = query.where(
-            or_(
-                and_(Message.sender_id == current_user.id, Message.receiver_id == chat_id),
-                and_(Message.sender_id == chat_id, Message.receiver_id == current_user.id)
-            )
-        )
+        direct_message_condition = await build_direct_message_lookup_condition(db, current_user.id, chat_id)
+        query = query.where(direct_message_condition)
         
     query = query.limit(limit)
     
@@ -361,12 +358,10 @@ async def get_messages(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # شرط مکالمه
+    # شرط مکالمه: generic chat_id when available, legacy sender/receiver otherwise.
+    direct_message_condition = await build_direct_message_lookup_condition(db, current_user.id, user_id)
     base_conditions = [
-        or_(
-            and_(Message.sender_id == current_user.id, Message.receiver_id == user_id),
-            and_(Message.sender_id == user_id, Message.receiver_id == current_user.id)
-        ),
+        direct_message_condition,
         Message.is_deleted == False
     ]
     
