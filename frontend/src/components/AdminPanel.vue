@@ -13,6 +13,10 @@ defineEmits(['navigate']);
         <button class="admin-action-btn primary" @click="$emit('navigate', 'create_invitation')">
           ➕ ارسال لینک دعوت
         </button>
+
+        <button class="admin-action-btn primary-alt" @click="$emit('navigate', 'create_channel')">
+          📣 ساخت کانال اختیاری
+        </button>
         
         <button class="admin-action-btn secondary" @click="$emit('navigate', 'manage_commodities')">
           📦 مدیریت کالاها
@@ -100,6 +104,16 @@ p {
 }
 .admin-action-btn.primary:hover {
   background: linear-gradient(135deg, #d97706, #b45309) !important;
+  color: white !important;
+}
+.admin-action-btn.primary-alt {
+  background: linear-gradient(135deg, #0f766e, #10b981) !important;
+  color: white !important;
+  border-color: transparent !important;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.24);
+}
+.admin-action-btn.primary-alt:hover {
+  background: linear-gradient(135deg, #0b5f59, #059669) !important;
   color: white !important;
 }
 .admin-action-btn.secondary {

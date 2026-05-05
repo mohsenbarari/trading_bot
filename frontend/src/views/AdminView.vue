@@ -7,6 +7,7 @@ import UserManager from '../components/UserManager.vue'
 import CommodityManager from '../components/CommodityManager.vue'
 import TradingSettings from '../components/TradingSettings.vue'
 import CreateInvitationView from '../components/CreateInvitationView.vue'
+import CreateChannelView from '../components/CreateChannelView.vue'
 import UserProfile from '../components/UserProfile.vue'
 
 const router = useRouter()
@@ -75,6 +76,7 @@ onUnmounted(() => clearBackStack())
                         currentSection === 'manage_commodities' ? 'مدیریت کالاها' :
                         currentSection === 'settings' ? 'تنظیمات سیستم' : 
                         currentSection === 'user_profile' ? 'پروفایل کاربر' : 
+                      currentSection === 'create_channel' ? 'ساخت کانال' :
                         currentSection === 'create_invitation' ? 'ارسال دعوت‌نامه' :
                         'پنل مدیریت' 
                      }}
@@ -95,6 +97,12 @@ onUnmounted(() => clearBackStack())
                    :apiBaseUrl="apiBaseUrl" 
                    :jwtToken="jwtToken" 
                 />
+
+                 <CreateChannelView
+                   v-else-if="currentSection === 'create_channel'"
+                   :apiBaseUrl="apiBaseUrl"
+                   :jwtToken="jwtToken"
+                 />
 
                 <CommodityManager 
                    v-else-if="currentSection === 'manage_commodities'" 
