@@ -29,6 +29,77 @@ LocationSnapshotBuilder = Callable[[AsyncSession, int, float, float], Awaitable[
 
 logger = logging.getLogger(__name__)
 
+COMMON_MESSAGE_REACTIONS = (
+    "👍",
+    "👎",
+    "❤️",
+    "🔥",
+    "😂",
+    "😮",
+    "😢",
+    "🙏",
+    "👏",
+    "😁",
+    "🤔",
+    "🤯",
+    "😡",
+    "🎉",
+    "💯",
+    "👌",
+    "😍",
+    "🥰",
+    "🤝",
+    "🤩",
+    "👀",
+    "💔",
+    "🤣",
+    "🫡",
+)
+COMMON_MESSAGE_REACTION_SET = set(COMMON_MESSAGE_REACTIONS)
+COMMON_MESSAGE_REACTION_ORDER = {
+    emoji: index for index, emoji in enumerate(COMMON_MESSAGE_REACTIONS)
+}
+
+
+def normalize_message_reactions(raw_reactions: object) -> list[dict[str, object]]:
+    """Normalize one raw reaction payload into the stable direct-chat schema format."""
+    normalized: list[dict[str, object]] = []
+    seen: set[tuple[str, int]] = set()
+
+    if not isinstance(raw_reactions, list):
+        return normalized
+
+    for reaction in raw_reactions:
+        if not isinstance(reaction, dict):
+            continue
+
+        emoji = reaction.get("emoji")
+        if emoji not in COMMON_MESSAGE_REACTION_SET:
+            continue
+
+        try:
+            user_id = int(reaction.get("user_id"))
+        except (TypeError, ValueError):
+            continue
+
+        if user_id <= 0:
+            continue
+
+        reaction_key = (emoji, user_id)
+        if reaction_key in seen:
+            continue
+
+        seen.add(reaction_key)
+        normalized.append({"emoji": emoji, "user_id": user_id})
+
+    normalized.sort(
+        key=lambda item: (
+            COMMON_MESSAGE_REACTION_ORDER.get(str(item["emoji"]), 999),
+            int(item["user_id"]),
+        )
+    )
+    return normalized
+
 
 def get_direct_conversation_key(user1_id: int, user2_id: int) -> tuple[int, int]:
     """Return the canonical ordering for a two-user direct conversation."""
@@ -743,11 +814,9 @@ def toggle_direct_message_reaction_state(
     *,
     acting_user_id: int,
     emoji: str,
-    normalize_reactions: Callable[[object], list[dict[str, object]]],
-    reaction_order: dict[str, int],
 ) -> Message:
     """Toggle one user's reaction state on a direct message."""
-    normalized_reactions = normalize_reactions(message.reactions)
+    normalized_reactions = normalize_message_reactions(message.reactions)
     has_same_reaction = any(
         reaction["user_id"] == acting_user_id and reaction["emoji"] == emoji
         for reaction in normalized_reactions
@@ -768,7 +837,7 @@ def toggle_direct_message_reaction_state(
         normalized_reactions.append({"emoji": emoji, "user_id": acting_user_id})
         normalized_reactions.sort(
             key=lambda item: (
-                reaction_order.get(str(item["emoji"]), 999),
+                COMMON_MESSAGE_REACTION_ORDER.get(str(item["emoji"]), 999),
                 int(item["user_id"]),
             )
         )
@@ -949,8 +1018,6 @@ async def apply_direct_message_reaction_toggle(
     message_id: int,
     actor_id: int,
     emoji: str,
-    normalize_reactions: Callable[[object], list[dict[str, object]]],
-    reaction_order: dict[str, int],
 ) -> Message | None:
     """Apply the full reaction-toggle workflow for one direct message."""
     message = await get_reactable_direct_message(
@@ -962,8 +1029,6 @@ async def apply_direct_message_reaction_toggle(
         message,
         acting_user_id=actor_id,
         emoji=emoji,
-        normalize_reactions=normalize_reactions,
-        reaction_order=reaction_order,
     )
     return await persist_direct_message_change(db, message, include_sender=True)
 
