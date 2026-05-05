@@ -30,6 +30,7 @@ from api.deps import get_current_user
 from core.services.chat_service import (
     build_direct_conversation_projection_stmt,
     get_direct_conversation_key,
+    sync_direct_message_threading,
     get_or_create_direct_conversation,
 )
 from core.utils import publish_user_event
@@ -492,17 +493,13 @@ async def send_message(
         )
         message = result.scalars().first()
     
-    # بروزرسانی مکالمه
-    conversation = await get_or_create_direct_conversation(db, current_user.id, data.receiver_id)
-    conversation.last_message_id = message.id
-    conversation.last_message_at = message.created_at
-    
-    # افزایش شمارنده خوانده نشده برای گیرنده
-    u1, u2 = get_direct_conversation_key(current_user.id, data.receiver_id)
-    if data.receiver_id == u1:
-        conversation.unread_count_user1 += 1
-    else:
-        conversation.unread_count_user2 += 1
+    # Sync both the legacy Conversation row and the generic direct Chat row.
+    await sync_direct_message_threading(
+        db,
+        sender=current_user,
+        receiver=receiver,
+        message=message,
+    )
     
     await db.commit()
     
