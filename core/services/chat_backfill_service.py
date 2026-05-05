@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 import sqlalchemy as sa
@@ -40,6 +41,18 @@ class DirectChatBackfillStats:
 
 def _membership_status_for_user(user: User) -> ChatMembershipStatus:
     return ChatMembershipStatus.INACTIVE if user.is_deleted else ChatMembershipStatus.ACTIVE
+
+
+def _normalize_datetime(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _same_datetime(left: Optional[datetime], right: Optional[datetime]) -> bool:
+    return _normalize_datetime(left) == _normalize_datetime(right)
 
 
 async def _find_existing_direct_chat_id(
@@ -190,7 +203,7 @@ async def backfill_direct_chats(
                     needs_member_sync = False
                     if member.membership_status != expected_status:
                         needs_member_sync = True
-                    if user.is_deleted and member.left_at != user.deleted_at:
+                    if user.is_deleted and not _same_datetime(member.left_at, user.deleted_at):
                         needs_member_sync = True
                     if needs_member_sync:
                         stats.members_updated += 1
