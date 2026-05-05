@@ -15,6 +15,7 @@ class Message(Base):
     __tablename__ = "messages"
     
     id = Column(Integer, primary_key=True, index=True)
+    chat_id = Column(Integer, ForeignKey("chats.id", name="fk_messages_chat"), nullable=True, index=True)
     sender_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     receiver_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     
@@ -55,8 +56,22 @@ class Message(Base):
             sender_id,
             postgresql_where=text("is_read = false"),
         ),
+        Index(
+            "ix_messages_chat_window_active",
+            chat_id,
+            created_at,
+            id,
+            postgresql_where=text("is_deleted = false"),
+        ),
+        Index(
+            "ix_messages_chat_sender_active",
+            chat_id,
+            sender_id,
+            created_at,
+        ),
     )
     
     # روابط
+    chat = relationship("Chat", back_populates="messages", foreign_keys=[chat_id])
     sender = relationship("User", foreign_keys=[sender_id], backref="sent_messages")
     receiver = relationship("User", foreign_keys=[receiver_id], backref="received_messages")
