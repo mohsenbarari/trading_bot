@@ -6,8 +6,8 @@ API endpoints for in-app messaging system
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, update, func, case
-from sqlalchemy.orm import joinedload, aliased
+from sqlalchemy import select, and_, or_, update, func
+from sqlalchemy.orm import joinedload
 from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, timedelta, timezone
@@ -27,6 +27,11 @@ from models.user import User
 from models.chat_file import ChatFile
 from api.deps import get_current_user
 
+from core.services.chat_service import (
+    build_direct_conversation_projection_stmt,
+    get_direct_conversation_key,
+    get_or_create_direct_conversation,
+)
 from core.utils import publish_user_event
 import httpx
 import json
@@ -276,93 +281,6 @@ class StickerPack(BaseModel):
     stickers: List[str]
 
 
-# ===== Helper Functions =====
-
-def get_conversation_key(user1_id: int, user2_id: int) -> tuple:
-    """همیشه user1_id < user2_id برای یکتایی"""
-    return (min(user1_id, user2_id), max(user1_id, user2_id))
-
-
-def build_conversation_projection_stmt(current_user_id: int):
-    """Return a projected conversation query with only the fields needed by list/poll endpoints."""
-    user1_alias = aliased(User)
-    user2_alias = aliased(User)
-    last_message_alias = aliased(Message)
-
-    other_user_id = case(
-        (Conversation.user1_id == current_user_id, Conversation.user2_id),
-        else_=Conversation.user1_id,
-    ).label("other_user_id")
-    other_user_name = case(
-        (Conversation.user1_id == current_user_id, user2_alias.account_name),
-        else_=user1_alias.account_name,
-    ).label("other_user_name")
-    other_user_is_deleted = case(
-        (Conversation.user1_id == current_user_id, user2_alias.is_deleted),
-        else_=user1_alias.is_deleted,
-    ).label("other_user_is_deleted")
-    other_user_last_seen_at = case(
-        (Conversation.user1_id == current_user_id, user2_alias.last_seen_at),
-        else_=user1_alias.last_seen_at,
-    ).label("other_user_last_seen_at")
-    unread_count = case(
-        (Conversation.user1_id == current_user_id, Conversation.unread_count_user1),
-        else_=Conversation.unread_count_user2,
-    ).label("unread_count")
-    last_message_content = case(
-        (last_message_alias.is_deleted.is_(True), "پیام حذف شد"),
-        (last_message_alias.message_type == MessageType.TEXT, last_message_alias.content),
-        else_=None,
-    ).label("last_message_content")
-
-    stmt = (
-        select(
-            Conversation.id.label("id"),
-            other_user_id,
-            other_user_name,
-            other_user_is_deleted,
-            last_message_content,
-            last_message_alias.message_type.label("last_message_type"),
-            Conversation.last_message_at.label("last_message_at"),
-            unread_count,
-            other_user_last_seen_at,
-        )
-        .select_from(Conversation)
-        .join(user1_alias, Conversation.user1_id == user1_alias.id)
-        .join(user2_alias, Conversation.user2_id == user2_alias.id)
-        .outerjoin(last_message_alias, Conversation.last_message_id == last_message_alias.id)
-    )
-    return stmt, unread_count
-
-
-async def get_or_create_conversation(
-    db: AsyncSession, 
-    user1_id: int, 
-    user2_id: int
-) -> Conversation:
-    """دریافت یا ایجاد مکالمه بین دو کاربر"""
-    u1, u2 = get_conversation_key(user1_id, user2_id)
-    
-    stmt = select(Conversation).where(
-        Conversation.user1_id == u1,
-        Conversation.user2_id == u2
-    )
-    result = await db.execute(stmt)
-    conversation = result.scalar_one_or_none()
-    
-    if not conversation:
-        conversation = Conversation(
-            user1_id=u1,
-            user2_id=u2,
-            unread_count_user1=0,
-            unread_count_user2=0
-        )
-        db.add(conversation)
-        await db.flush()
-    
-    return conversation
-
-
 # ===== Endpoints =====
 
 @router.get("/conversations", response_model=List[ConversationRead])
@@ -371,7 +289,7 @@ async def get_conversations(
     db: AsyncSession = Depends(get_db)
 ):
     """لیست مکالمات کاربر"""
-    stmt, _ = build_conversation_projection_stmt(current_user.id)
+    stmt, _ = build_direct_conversation_projection_stmt(current_user.id)
     stmt = (
         stmt
         .where(
@@ -575,12 +493,12 @@ async def send_message(
         message = result.scalars().first()
     
     # بروزرسانی مکالمه
-    conversation = await get_or_create_conversation(db, current_user.id, data.receiver_id)
+    conversation = await get_or_create_direct_conversation(db, current_user.id, data.receiver_id)
     conversation.last_message_id = message.id
     conversation.last_message_at = message.created_at
     
     # افزایش شمارنده خوانده نشده برای گیرنده
-    u1, u2 = get_conversation_key(current_user.id, data.receiver_id)
+    u1, u2 = get_direct_conversation_key(current_user.id, data.receiver_id)
     if data.receiver_id == u1:
         conversation.unread_count_user1 += 1
     else:
@@ -761,7 +679,7 @@ async def mark_messages_read(
     await db.execute(stmt)
     
     # بروزرسانی شمارنده مکالمه
-    u1, u2 = get_conversation_key(current_user.id, user_id)
+    u1, u2 = get_direct_conversation_key(current_user.id, user_id)
     conv_stmt = select(Conversation).where(
         Conversation.user1_id == u1,
         Conversation.user2_id == u2
@@ -793,7 +711,7 @@ async def poll_messages(
     db: AsyncSession = Depends(get_db)
 ):
     """پولینگ برای پیام‌های جدید"""
-    conv_stmt, unread_count_expr = build_conversation_projection_stmt(current_user.id)
+    conv_stmt, unread_count_expr = build_direct_conversation_projection_stmt(current_user.id)
     conv_stmt = (
         conv_stmt
         .where(
