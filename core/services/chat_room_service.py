@@ -128,6 +128,29 @@ async def create_optional_channel(
     return chat
 
 
+async def update_optional_channel(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    title: str,
+    description: str | None = None,
+) -> Chat:
+    """Update one optional channel title/description for admin-side management."""
+    if chat.is_system or chat.is_mandatory:
+        raise HTTPException(status_code=400, detail="Only optional channels can be updated")
+
+    cleaned_title = _clean_text(title)
+    if not cleaned_title:
+        raise HTTPException(status_code=400, detail="Channel title is required")
+
+    chat.title = cleaned_title
+    chat.description = _clean_text(description)
+    chat.updated_at = _utcnow()
+    await db.commit()
+    await db.refresh(chat)
+    return chat
+
+
 async def list_optional_channels(db: AsyncSession) -> list[ChannelRoomSummary]:
     """List active optional channels for admin-side management."""
     member_count_expr = func.count(ChatMember.id).filter(
