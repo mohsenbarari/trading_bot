@@ -32,6 +32,9 @@ from core.services.chat_service import (
     build_direct_message_search_stmt,
     build_direct_unread_poll_stmt,
     commit_direct_read_state,
+    get_deletable_direct_message,
+    get_editable_direct_message,
+    get_reactable_direct_message,
     get_direct_conversation_key,
     mark_direct_message_deleted,
     persist_sent_direct_message,
@@ -450,23 +453,13 @@ async def update_message(
     db: AsyncSession = Depends(get_db)
 ):
     """ویرایش پیام (محدودیت ۴۸ ساعت)"""
-    msg = await db.get(Message, message_id)
-    if not msg:
-        raise HTTPException(status_code=404, detail="Message not found")
-        
-    if msg.sender_id != current_user.id:
-        raise HTTPException(status_code=403, detail="You can only edit your own messages")
-        
-    if msg.message_type != MessageType.TEXT:
-        raise HTTPException(status_code=400, detail="Only text messages can be edited")
-        
-    if getattr(msg, 'forwarded_from_id', None):
-        raise HTTPException(status_code=400, detail="Forwarded messages cannot be edited")
-
-    # بررسی زمان (۴۸ ساعت)
     now = datetime.now(timezone.utc)
-    if msg.created_at < now - timedelta(hours=48):
-        raise HTTPException(status_code=400, detail="Message is too old to edit")
+    msg = await get_editable_direct_message(
+        db,
+        message_id=message_id,
+        actor_id=current_user.id,
+        now=now,
+    )
 
     update_direct_message_content(msg, content=data.content, updated_at=now)
     msg = await persist_direct_message_change(db, msg)
@@ -481,12 +474,11 @@ async def toggle_message_reaction(
     db: AsyncSession = Depends(get_db)
 ):
     """افزودن/حذف ری‌اکشن روی پیام"""
-    msg = await db.get(Message, message_id)
-    if not msg or msg.is_deleted:
-        raise HTTPException(status_code=404, detail="Message not found")
-
-    if current_user.id not in (msg.sender_id, msg.receiver_id):
-        raise HTTPException(status_code=403, detail="You can only react to messages in your own conversations")
+    msg = await get_reactable_direct_message(
+        db,
+        message_id=message_id,
+        actor_id=current_user.id,
+    )
 
     toggle_direct_message_reaction_state(
         msg,
@@ -515,20 +507,13 @@ async def delete_message(
     db: AsyncSession = Depends(get_db)
 ):
     """حذف message (Soft Delete - محدودیت ۴۸ ساعت)"""
-    if message_id <= 0 or message_id > 2147483647:
-        raise HTTPException(status_code=404, detail="Message not found")
-
-    msg = await db.get(Message, message_id)
-    if not msg:
-        raise HTTPException(status_code=404, detail="Message not found")
-        
-    if msg.sender_id != current_user.id:
-        raise HTTPException(status_code=403, detail="You can only delete your own messages")
-
-    # بررسی زمان (۴۸ ساعت)
     now = datetime.now(timezone.utc)
-    if msg.created_at < now - timedelta(hours=48):
-        raise HTTPException(status_code=400, detail="Message is too old to delete")
+    msg = await get_deletable_direct_message(
+        db,
+        message_id=message_id,
+        actor_id=current_user.id,
+        now=now,
+    )
 
     mark_direct_message_deleted(msg, deleted_at=now)
     await persist_direct_message_change(db, msg)
