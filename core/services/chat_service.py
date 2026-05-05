@@ -43,6 +43,28 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
     user1_alias = aliased(User)
     user2_alias = aliased(User)
     last_message_alias = aliased(Message)
+    direct_chat_lookup = (
+        select(
+            Chat.id.label("chat_id"),
+            func.min(ChatMember.user_id).label("user1_id"),
+            func.max(ChatMember.user_id).label("user2_id"),
+            Chat.last_message_id.label("chat_last_message_id"),
+            Chat.last_message_at.label("chat_last_message_at"),
+        )
+        .join(ChatMember, ChatMember.chat_id == Chat.id)
+        .where(Chat.type == ChatType.DIRECT, Chat.is_deleted.is_(False))
+        .group_by(Chat.id, Chat.last_message_id, Chat.last_message_at)
+        .having(func.count(sa.distinct(ChatMember.user_id)) == 2)
+        .subquery()
+    )
+    resolved_last_message_id = func.coalesce(
+        direct_chat_lookup.c.chat_last_message_id,
+        Conversation.last_message_id,
+    )
+    resolved_last_message_at = func.coalesce(
+        direct_chat_lookup.c.chat_last_message_at,
+        Conversation.last_message_at,
+    ).label("last_message_at")
 
     other_user_id = case(
         (Conversation.user1_id == current_user_id, Conversation.user2_id),
@@ -78,16 +100,23 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
             other_user_is_deleted,
             last_message_content,
             last_message_alias.message_type.label("last_message_type"),
-            Conversation.last_message_at.label("last_message_at"),
+            resolved_last_message_at,
             unread_count,
             other_user_last_seen_at,
         )
         .select_from(Conversation)
         .join(user1_alias, Conversation.user1_id == user1_alias.id)
         .join(user2_alias, Conversation.user2_id == user2_alias.id)
-        .outerjoin(last_message_alias, Conversation.last_message_id == last_message_alias.id)
+        .outerjoin(
+            direct_chat_lookup,
+            sa.and_(
+                direct_chat_lookup.c.user1_id == Conversation.user1_id,
+                direct_chat_lookup.c.user2_id == Conversation.user2_id,
+            ),
+        )
+        .outerjoin(last_message_alias, last_message_alias.id == resolved_last_message_id)
     )
-    return stmt, unread_count
+    return stmt, unread_count, resolved_last_message_at
 
 
 async def get_existing_direct_conversation(
