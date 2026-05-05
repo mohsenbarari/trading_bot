@@ -22,14 +22,14 @@ from core.db import get_db
 from core.enums import MessageType
 from core.config import settings
 from models.message import Message
-from models.conversation import Conversation
 from models.user import User
 from models.chat_file import ChatFile
 from api.deps import get_current_user
 
 from core.services.chat_service import (
+    build_direct_conversation_list_stmt,
     build_direct_message_lookup_condition,
-    build_direct_conversation_projection_stmt,
+    build_direct_unread_poll_stmt,
     get_direct_conversation_key,
     mark_direct_message_deleted,
     persist_direct_message_change,
@@ -296,18 +296,7 @@ async def get_conversations(
     db: AsyncSession = Depends(get_db)
 ):
     """لیست مکالمات کاربر"""
-    stmt, _, conversation_order_at = build_direct_conversation_projection_stmt(current_user.id)
-    stmt = (
-        stmt
-        .where(
-            or_(
-                Conversation.user1_id == current_user.id,
-                Conversation.user2_id == current_user.id
-            )
-        )
-        .order_by(conversation_order_at.desc().nullslast())
-    )
-
+    stmt = build_direct_conversation_list_stmt(current_user.id)
     result = await db.execute(stmt)
     return [ConversationRead(**row) for row in result.mappings().all()]
 
@@ -637,11 +626,7 @@ async def poll_messages(
     db: AsyncSession = Depends(get_db)
 ):
     """پولینگ برای پیام‌های جدید"""
-    conv_stmt, unread_count_expr, _ = build_direct_conversation_projection_stmt(current_user.id)
-    conv_stmt = (
-        conv_stmt
-        .where(func.coalesce(unread_count_expr, 0) > 0)
-    )
+    conv_stmt = build_direct_unread_poll_stmt(current_user.id)
     result = await db.execute(conv_stmt)
     convs = result.mappings().all()
 
