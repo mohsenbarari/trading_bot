@@ -249,7 +249,7 @@ async def toggle_message_reaction(
         serializer=MessageRead.from_orm_with_forwarding,
     )
     await publish_direct_reaction_event(
-        updated_message,
+        message=updated_message,
         serializer=MessageRead.from_orm_with_forwarding,
         publisher=publish_user_event,
     )
