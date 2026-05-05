@@ -24,12 +24,12 @@ from api.routers.chat_schemas import (
     ChannelCreateRequest,
     ChannelCreateResponse,
     ChannelInviteCandidateListResponse,
+    ChannelMemberMutationResponse,
+    ChannelMemberRead,
+    ChannelMemberUpdateRequest,
     ChannelRoomRead,
     ChannelUpdateRequest,
     ConversationRead,
-        ChannelMemberMutationResponse,
-        ChannelMemberRead,
-        ChannelMemberUpdateRequest,
     MessageRead,
     MessageReactionToggle,
     MessageSend,
@@ -39,15 +39,17 @@ from api.routers.chat_schemas import (
     TypingSignal,
 )
 
-from core.enums import ChatType
+from core.enums import ChatMemberRole, ChatType
 from core.services.chat_room_service import (
     bulk_add_channel_members,
     count_active_chat_members,
     create_optional_channel,
     get_channel_or_404,
     list_channel_invite_candidates,
+    list_channel_members,
     list_optional_channels,
     update_optional_channel,
+    update_channel_member,
 )
 from core.services.chat_service import (
     apply_direct_message_delete,
@@ -268,60 +270,62 @@ async def update_channel(
     )
 
 
+@router.get("/channels/{chat_id}/members", response_model=List[ChannelMemberRead])
+async def get_channel_members(
+    chat_id: int,
+    current_user: User = Depends(verify_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """لیست اعضای فعلی کانال اختیاری برای مدیریت ادمین"""
+    _ = current_user
+    channel = await get_channel_or_404(db, chat_id)
+    members = await list_channel_members(db, chat=channel)
+    return [
+        ChannelMemberRead(
+            user_id=member.user_id,
+            account_name=member.account_name,
+            full_name=member.full_name,
+            mobile_number=member.mobile_number,
+            role=member.role.value,
+            joined_at=member.joined_at,
+            is_channel_creator=member.is_channel_creator,
+        )
+        for member in members
+    ]
+
+
+@router.patch("/channels/{chat_id}/members/{user_id}", response_model=ChannelMemberMutationResponse)
+async def patch_channel_member(
+    chat_id: int,
+    user_id: int,
+    data: ChannelMemberUpdateRequest,
+    current_user: User = Depends(verify_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """تغییر نقش یا حذف عضو از کانال اختیاری"""
+    _ = current_user
+    channel = await get_channel_or_404(db, chat_id)
+    next_role = None
+    if data.role is not None:
+        next_role = ChatMemberRole.ADMIN if data.role == "admin" else ChatMemberRole.MEMBER
+    summary = await update_channel_member(
+        db,
+        chat=channel,
+        user_id=user_id,
+        role=next_role,
+        remove_member=data.remove_member,
+    )
+    return ChannelMemberMutationResponse(
+        chat_id=summary.chat_id,
+        user_id=summary.user_id,
+        role=summary.role.value if summary.role is not None else None,
+        removed=summary.removed,
+        member_count=summary.member_count,
+    )
+
+
 @router.get("/channels/invite-candidates", response_model=ChannelInviteCandidateListResponse)
 async def get_channel_invite_candidates(
-    
-    @router.get("/channels/{chat_id}/members", response_model=List[ChannelMemberRead])
-    async def get_channel_members(
-        chat_id: int,
-        current_user: User = Depends(verify_super_admin),
-        db: AsyncSession = Depends(get_db),
-    ):
-        """لیست اعضای فعلی کانال اختیاری برای مدیریت ادمین"""
-        _ = current_user
-        channel = await get_channel_or_404(db, chat_id)
-        members = await list_channel_members(db, chat=channel)
-        return [
-            ChannelMemberRead(
-                user_id=member.user_id,
-                account_name=member.account_name,
-                full_name=member.full_name,
-                mobile_number=member.mobile_number,
-                role=member.role.value,
-                joined_at=member.joined_at,
-                is_channel_creator=member.is_channel_creator,
-            )
-            for member in members
-        ]
-    
-    @router.patch("/channels/{chat_id}/members/{user_id}", response_model=ChannelMemberMutationResponse)
-    async def patch_channel_member(
-        chat_id: int,
-        user_id: int,
-        data: ChannelMemberUpdateRequest,
-        current_user: User = Depends(verify_super_admin),
-        db: AsyncSession = Depends(get_db),
-    ):
-        """تغییر نقش یا حذف عضو از کانال اختیاری"""
-        _ = current_user
-        channel = await get_channel_or_404(db, chat_id)
-        next_role = None
-        if data.role is not None:
-            next_role = ChatMemberRole.ADMIN if data.role == "admin" else ChatMemberRole.MEMBER
-        summary = await update_channel_member(
-            db,
-            chat=channel,
-            user_id=user_id,
-            role=next_role,
-            remove_member=data.remove_member,
-        )
-        return ChannelMemberMutationResponse(
-            chat_id=summary.chat_id,
-            user_id=summary.user_id,
-            role=summary.role.value if summary.role is not None else None,
-            removed=summary.removed,
-            member_count=summary.member_count,
-        )
     q: Optional[str] = Query(None, min_length=1),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
