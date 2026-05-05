@@ -640,12 +640,7 @@ async def poll_messages(
     conv_stmt, unread_count_expr, _ = build_direct_conversation_projection_stmt(current_user.id)
     conv_stmt = (
         conv_stmt
-        .where(
-            or_(
-                and_(Conversation.user1_id == current_user.id, Conversation.unread_count_user1 > 0),
-                and_(Conversation.user2_id == current_user.id, Conversation.unread_count_user2 > 0)
-            )
-        )
+        .where(func.coalesce(unread_count_expr, 0) > 0)
     )
     result = await db.execute(conv_stmt)
     convs = result.mappings().all()
