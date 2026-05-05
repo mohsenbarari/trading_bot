@@ -26,6 +26,7 @@ from models.chat_file import ChatFile
 from api.deps import get_current_user
 
 from core.services.chat_service import (
+    COMMON_MESSAGE_REACTION_SET,
     apply_direct_message_delete,
     apply_direct_message_edit,
     apply_direct_message_reaction_toggle,
@@ -34,7 +35,7 @@ from core.services.chat_service import (
     build_direct_message_search_stmt,
     build_direct_unread_poll_stmt,
     commit_direct_read_state,
-    get_direct_conversation_key,
+    normalize_message_reactions,
     persist_sent_direct_message,
     publish_direct_message_event,
     publish_direct_read_event,
@@ -43,7 +44,6 @@ from core.services.chat_service import (
     prepare_direct_message_send,
     serialize_direct_message_for_response,
     serialize_direct_messages_for_response,
-    get_or_create_direct_conversation,
 )
 from core.utils import publish_user_event
 import httpx
@@ -54,68 +54,6 @@ logger = logging.getLogger(__name__)
 
 CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 CHAT_MEDIA_MAX_UPLOAD_LABEL = "50MB"
-COMMON_MESSAGE_REACTIONS = (
-    "👍",
-    "👎",
-    "❤️",
-    "🔥",
-    "😂",
-    "😮",
-    "😢",
-    "🙏",
-    "👏",
-    "😁",
-    "🤔",
-    "🤯",
-    "😡",
-    "🎉",
-    "💯",
-    "👌",
-    "😍",
-    "🥰",
-    "🤝",
-    "🤩",
-    "👀",
-    "💔",
-    "🤣",
-    "🫡",
-)
-COMMON_MESSAGE_REACTION_SET = set(COMMON_MESSAGE_REACTIONS)
-COMMON_MESSAGE_REACTION_ORDER = {emoji: index for index, emoji in enumerate(COMMON_MESSAGE_REACTIONS)}
-
-
-def normalize_message_reactions(raw_reactions: object) -> list[dict[str, object]]:
-    normalized: list[dict[str, object]] = []
-    seen: set[tuple[str, int]] = set()
-
-    if not isinstance(raw_reactions, list):
-        return normalized
-
-    for reaction in raw_reactions:
-        if not isinstance(reaction, dict):
-            continue
-
-        emoji = reaction.get("emoji")
-        if emoji not in COMMON_MESSAGE_REACTION_SET:
-            continue
-
-        try:
-            user_id = int(reaction.get("user_id"))
-        except (TypeError, ValueError):
-            continue
-
-        if user_id <= 0:
-            continue
-
-        reaction_key = (emoji, user_id)
-        if reaction_key in seen:
-            continue
-
-        seen.add(reaction_key)
-        normalized.append({"emoji": emoji, "user_id": user_id})
-
-    normalized.sort(key=lambda item: (COMMON_MESSAGE_REACTION_ORDER.get(str(item["emoji"]), 999), int(item["user_id"])))
-    return normalized
 
 
 async def generate_location_snapshot(db: AsyncSession, uploader_id: int, lat: float, lng: float) -> Optional[str]:
@@ -475,8 +413,6 @@ async def toggle_message_reaction(
         message_id=message_id,
         actor_id=current_user.id,
         emoji=data.emoji,
-        normalize_reactions=normalize_message_reactions,
-        reaction_order=COMMON_MESSAGE_REACTION_ORDER,
     )
     if not updated_message:
         raise HTTPException(status_code=404, detail="Message not found")
