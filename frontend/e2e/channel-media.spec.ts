@@ -2043,4 +2043,105 @@ test.describe('Channel media regressions', () => {
       .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
       .toEqual(expect.arrayContaining([expect.stringContaining(sharedVoiceName)]))
   })
+
+  test('group create/list/detail APIs add initial members and enforce the 50-member cap', async ({
+    request,
+  }) => {
+    const fixture = seedChannelSession('group_create_api', 'admin')
+    const groupTitle = `Playwright Group ${Date.now()}`
+
+    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        title: groupTitle,
+        member_ids: [fixture.userId, fixture.userId],
+      },
+    })
+
+    expect(createResponse.ok()).toBeTruthy()
+    const createPayload = await createResponse.json()
+    const groupId = Number(createPayload.group.id)
+
+    expect(createPayload.group.title).toBe(groupTitle)
+    expect(createPayload.group.type).toBe('group')
+    expect(createPayload.group.member_count).toBe(2)
+    expect(createPayload.group.max_members).toBe(50)
+    expect(createPayload.group.current_user_role).toBe('admin')
+
+    const [creatorListResponse, memberListResponse, creatorDetailResponse, memberDetailResponse] = await Promise.all([
+      request.get(`${BACKEND_BASE_URL}/api/chat/groups`, {
+        headers: authHeaders(fixture.creatorAccessToken),
+      }),
+      request.get(`${BACKEND_BASE_URL}/api/chat/groups`, {
+        headers: authHeaders(fixture.accessToken),
+      }),
+      request.get(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}`, {
+        headers: authHeaders(fixture.creatorAccessToken),
+      }),
+      request.get(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}`, {
+        headers: authHeaders(fixture.accessToken),
+      }),
+    ])
+
+    expect(creatorListResponse.ok()).toBeTruthy()
+    expect(memberListResponse.ok()).toBeTruthy()
+    expect(creatorDetailResponse.ok()).toBeTruthy()
+    expect(memberDetailResponse.ok()).toBeTruthy()
+
+    const creatorGroups = await creatorListResponse.json()
+    const memberGroups = await memberListResponse.json()
+    const creatorDetail = await creatorDetailResponse.json()
+    const memberDetail = await memberDetailResponse.json()
+
+    expect(creatorGroups).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: groupId,
+        title: groupTitle,
+        current_user_role: 'admin',
+        member_count: 2,
+      }),
+    ]))
+    expect(memberGroups).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: groupId,
+        title: groupTitle,
+        current_user_role: 'member',
+        member_count: 2,
+      }),
+    ]))
+
+    expect(creatorDetail.group).toMatchObject({
+      id: groupId,
+      title: groupTitle,
+      current_user_role: 'admin',
+      member_count: 2,
+      max_members: 50,
+    })
+    expect(memberDetail.group).toMatchObject({
+      id: groupId,
+      title: groupTitle,
+      current_user_role: 'member',
+      member_count: 2,
+      max_members: 50,
+    })
+
+    const detailRolesById = new Map<number, string>(
+      creatorDetail.members.map((member: { user_id: number, role: string }) => [Number(member.user_id), member.role]),
+    )
+    expect(detailRolesById.get(fixture.creatorUserId)).toBe('admin')
+    expect(detailRolesById.get(fixture.userId)).toBe('member')
+
+    const overLimitResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        title: `${groupTitle} limit`,
+        member_ids: Array.from({ length: 50 }, (_value, index) => 900000 + index),
+      },
+    })
+
+    expect(overLimitResponse.status()).toBe(400)
+    await expect(overLimitResponse.json()).resolves.toMatchObject({
+      detail: expect.stringContaining('Group member limit exceeded'),
+    })
+  })
 })
