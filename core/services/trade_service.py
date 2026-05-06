@@ -242,7 +242,7 @@ def validate_quantity(quantity: Union[int, float, str]) -> Tuple[bool, str]:
     
     settings = get_trading_settings()
     MIN_QTY = settings.offer_min_quantity
-    MAX_QTY = min(settings.offer_max_quantity, 50)
+    MAX_QTY = settings.offer_max_quantity
     
     if quantity < MIN_QTY:
         return False, f"❌ تعداد باید حداقل {MIN_QTY} باشد."
