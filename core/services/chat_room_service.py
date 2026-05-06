@@ -502,6 +502,77 @@ async def list_groups_for_user(
     return items
 
 
+async def list_group_conversations(
+    db: AsyncSession,
+    *,
+    current_user_id: int,
+) -> list[ChannelConversationSummary]:
+    current_member = aliased(ChatMember)
+    last_message_alias = aliased(Message)
+
+    unread_count = (
+        select(func.count(Message.id))
+        .where(
+            Message.chat_id == Chat.id,
+            Message.sender_id != current_user_id,
+            Message.is_deleted.is_(False),
+            Message.id > func.coalesce(current_member.last_read_message_id, 0),
+        )
+        .correlate(Chat, current_member)
+        .scalar_subquery()
+    )
+    last_message_content = case(
+        (last_message_alias.is_deleted.is_(True), "پیام حذف شد"),
+        (last_message_alias.message_type == MessageType.TEXT, last_message_alias.content),
+        else_=None,
+    ).label("last_message_content")
+
+    stmt = (
+        select(
+            Chat,
+            current_member.role.label("member_role"),
+            last_message_content,
+            last_message_alias.message_type.label("last_message_type"),
+            unread_count.label("unread_count"),
+        )
+        .join(
+            current_member,
+            (current_member.chat_id == Chat.id)
+            & (current_member.user_id == current_user_id)
+            & (current_member.membership_status == ChatMembershipStatus.ACTIVE),
+        )
+        .outerjoin(last_message_alias, last_message_alias.id == Chat.last_message_id)
+        .where(
+            Chat.type == ChatType.GROUP,
+            Chat.is_deleted.is_(False),
+        )
+        .order_by(Chat.last_message_at.desc().nullslast(), Chat.id.desc())
+    )
+    result = await db.execute(stmt)
+
+    rows: list[ChannelConversationSummary] = []
+    for chat, member_role, last_content, last_type, unread in result.all():
+        synthetic_room_id = -int(chat.id)
+        rows.append(
+            ChannelConversationSummary(
+                id=synthetic_room_id,
+                other_user_id=synthetic_room_id,
+                other_user_name=chat.title or f"گروه {chat.id}",
+                other_user_is_deleted=False,
+                last_message_content=last_content,
+                last_message_type=last_type,
+                last_message_at=chat.last_message_at,
+                unread_count=int(unread or 0),
+                other_user_last_seen_at=None,
+                room_kind="group",
+                chat_id=chat.id,
+                can_send=True,
+                member_role=member_role.value if member_role is not None else None,
+            )
+        )
+    return rows
+
+
 async def list_group_members(db: AsyncSession, *, chat: Chat) -> list[GroupMemberSummary]:
     """List active members of one group for the group detail view."""
     stmt = (
