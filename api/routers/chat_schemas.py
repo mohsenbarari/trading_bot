@@ -170,6 +170,62 @@ class ChannelRoomRead(BaseModel):
     created_at: datetime
 
 
+class GroupRoomRead(BaseModel):
+    id: int
+    type: ChatType
+    title: str
+    description: Optional[str] = None
+    created_by_id: Optional[int] = None
+    member_count: int = 0
+    max_members: int = 50
+    created_at: datetime
+    current_user_role: Optional[str] = None
+
+
+class GroupMemberRead(BaseModel):
+    user_id: int
+    account_name: str
+    full_name: str
+    mobile_number: str
+    role: str
+    joined_at: datetime
+    is_group_creator: bool = False
+
+
+class GroupCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    member_ids: List[int] = Field(default_factory=list)
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Group title is required")
+        return cleaned
+
+    @field_validator("member_ids")
+    @classmethod
+    def normalize_member_ids(cls, value: List[int]) -> List[int]:
+        normalized: List[int] = []
+        seen: set[int] = set()
+        for user_id in value:
+            if user_id <= 0 or user_id in seen:
+                continue
+            seen.add(user_id)
+            normalized.append(user_id)
+        return normalized
+
+
+class GroupCreateResponse(BaseModel):
+    group: GroupRoomRead
+
+
+class GroupDetailRead(BaseModel):
+    group: GroupRoomRead
+    members: List[GroupMemberRead]
+
+
 class ChannelMemberRead(BaseModel):
     user_id: int
     account_name: str

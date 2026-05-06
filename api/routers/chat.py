@@ -31,6 +31,11 @@ from api.routers.chat_schemas import (
     ChannelRoomRead,
     ChannelUpdateRequest,
     ConversationRead,
+    GroupCreateRequest,
+    GroupCreateResponse,
+    GroupDetailRead,
+    GroupMemberRead,
+    GroupRoomRead,
     MessageRead,
     MessageReactionToggle,
     MessageSend,
@@ -45,9 +50,14 @@ from core.enums import ChatMemberRole, ChatType
 from core.services.chat_room_service import (
     bulk_add_channel_members,
     count_active_chat_members,
+    create_group_chat,
     create_optional_channel,
+    get_active_group_member_or_403,
     get_active_channel_member_or_403,
+    get_group_or_404,
     get_channel_or_404,
+    list_group_members,
+    list_groups_for_user,
     list_channel_conversations,
     list_active_channel_member_user_ids,
     list_channel_invite_candidates,
@@ -220,6 +230,96 @@ async def send_typing_signal(
         publisher=publish_user_event,
     )
     return None
+
+
+@router.get("/groups", response_model=List[GroupRoomRead])
+async def get_groups(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """لیست گروه‌هایی که کاربر فعلاً عضو فعال آن‌هاست"""
+    groups = await list_groups_for_user(db, user_id=current_user.id)
+    return [
+        GroupRoomRead(
+            id=group.id,
+            type=group.type,
+            title=group.title,
+            description=group.description,
+            created_by_id=group.created_by_id,
+            member_count=group.member_count,
+            max_members=group.max_members,
+            created_at=group.created_at,
+            current_user_role=group.current_user_role.value if group.current_user_role is not None else None,
+        )
+        for group in groups
+    ]
+
+
+@router.post("/groups", response_model=GroupCreateResponse, status_code=status.HTTP_201_CREATED)
+async def create_group(
+    data: GroupCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """ساخت گروه جدید با سازنده به‌عنوان admin و اعضای اولیه"""
+    group = await create_group_chat(
+        db,
+        creator=current_user,
+        title=data.title,
+        member_ids=data.member_ids,
+    )
+    member_count = await count_active_chat_members(db, group.id)
+    return GroupCreateResponse(
+        group=GroupRoomRead(
+            id=group.id,
+            type=ChatType.GROUP,
+            title=group.title or "",
+            description=group.description,
+            created_by_id=group.created_by_id,
+            member_count=member_count,
+            max_members=int(group.max_members or 50),
+            created_at=group.created_at,
+            current_user_role="admin",
+        )
+    )
+
+
+@router.get("/groups/{chat_id}", response_model=GroupDetailRead)
+async def get_group_detail(
+    chat_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """جزئیات یک گروه برای اعضای فعال آن"""
+    group = await get_group_or_404(db, chat_id)
+    member = await get_active_group_member_or_403(db, chat=group, user_id=current_user.id)
+    member_count = await count_active_chat_members(db, group.id)
+    members = await list_group_members(db, chat=group)
+    return GroupDetailRead(
+        group=GroupRoomRead(
+            id=group.id,
+            type=group.type,
+            title=group.title or "",
+            description=group.description,
+            created_by_id=group.created_by_id,
+            member_count=member_count,
+            max_members=int(group.max_members or 50),
+            created_at=group.created_at,
+            current_user_role=member.role.value,
+        ),
+        members=[
+            GroupMemberRead(
+                user_id=item.user_id,
+                account_name=item.account_name,
+                full_name=item.full_name,
+                mobile_number=item.mobile_number,
+                role=item.role.value,
+                joined_at=item.joined_at,
+                is_group_creator=item.is_group_creator,
+            )
+            for item in members
+        ],
+    )
 
 
 @router.get("/channels", response_model=List[ChannelRoomRead])

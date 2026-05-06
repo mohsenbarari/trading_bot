@@ -63,6 +63,19 @@ class ChannelRoomSummary:
 
 
 @dataclass
+class GroupRoomSummary:
+    id: int
+    type: ChatType
+    title: str
+    description: str | None
+    created_by_id: int | None
+    member_count: int
+    max_members: int
+    created_at: datetime
+    current_user_role: ChatMemberRole | None
+
+
+@dataclass
 class ChannelConversationSummary:
     id: int
     other_user_id: int
@@ -88,6 +101,17 @@ class ChannelMemberSummary:
     role: ChatMemberRole
     joined_at: datetime
     is_channel_creator: bool
+
+
+@dataclass
+class GroupMemberSummary:
+    user_id: int
+    account_name: str
+    full_name: str
+    mobile_number: str
+    role: ChatMemberRole
+    joined_at: datetime
+    is_group_creator: bool
 
 @dataclass
 class ChannelMemberMutationSummary:
@@ -116,6 +140,9 @@ def _clean_text(value: str | None) -> str | None:
     return cleaned or None
 
 
+GROUP_MAX_MEMBERS = 50
+
+
 async def _reload_channel_message(db: AsyncSession, message_id: int) -> Message | None:
     result = await db.execute(
         select(Message)
@@ -140,6 +167,20 @@ async def get_channel_or_404(db: AsyncSession, chat_id: int) -> Chat:
     chat = result.scalar_one_or_none()
     if chat is None:
         raise HTTPException(status_code=404, detail="Channel not found")
+    return chat
+
+
+async def get_group_or_404(db: AsyncSession, chat_id: int) -> Chat:
+    """Load one active group room or raise a 404."""
+    stmt = select(Chat).where(
+        Chat.id == chat_id,
+        Chat.type == ChatType.GROUP,
+        Chat.is_deleted.is_(False),
+    )
+    result = await db.execute(stmt)
+    chat = result.scalar_one_or_none()
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Group not found")
     return chat
 
 
@@ -195,6 +236,86 @@ async def create_optional_channel(
             membership_status=ChatMembershipStatus.ACTIVE,
         )
     )
+    await db.commit()
+    await db.refresh(chat)
+    return chat
+
+
+async def create_group_chat(
+    db: AsyncSession,
+    *,
+    creator: User,
+    title: str,
+    member_ids: list[int],
+) -> Chat:
+    """Create one group chat with the creator as admin and initial active members."""
+    cleaned_title = _clean_text(title)
+    if not cleaned_title:
+        raise HTTPException(status_code=400, detail="Group title is required")
+
+    normalized_member_ids: list[int] = []
+    seen_user_ids: set[int] = {creator.id}
+    for user_id in member_ids:
+        if user_id <= 0 or user_id in seen_user_ids:
+            continue
+        seen_user_ids.add(user_id)
+        normalized_member_ids.append(user_id)
+
+    total_members = 1 + len(normalized_member_ids)
+    if total_members > GROUP_MAX_MEMBERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Group member limit exceeded ({GROUP_MAX_MEMBERS})",
+        )
+
+    member_users: list[User] = []
+    if normalized_member_ids:
+        result = await db.execute(
+            select(User).where(
+                User.id.in_(normalized_member_ids),
+                User.is_deleted.is_(False),
+            )
+        )
+        member_users = list(result.scalars().all())
+        if len(member_users) != len(normalized_member_ids):
+            raise HTTPException(status_code=400, detail="Some selected group members are invalid")
+
+    now = _utcnow()
+    chat = Chat(
+        type=ChatType.GROUP,
+        title=cleaned_title,
+        description=None,
+        created_by_id=creator.id,
+        is_system=False,
+        is_mandatory=False,
+        max_members=GROUP_MAX_MEMBERS,
+        updated_at=now,
+    )
+    db.add(chat)
+    await db.flush()
+
+    db.add(
+        ChatMember(
+            chat_id=chat.id,
+            user_id=creator.id,
+            role=ChatMemberRole.ADMIN,
+            membership_status=ChatMembershipStatus.ACTIVE,
+            joined_at=now,
+            updated_at=now,
+        )
+    )
+    for user in member_users:
+        db.add(
+            ChatMember(
+                chat_id=chat.id,
+                user_id=user.id,
+                role=ChatMemberRole.MEMBER,
+                membership_status=ChatMembershipStatus.ACTIVE,
+                joined_at=now,
+                updated_at=now,
+            )
+        )
+
     await db.commit()
     await db.refresh(chat)
     return chat
@@ -259,6 +380,94 @@ async def list_optional_channels(db: AsyncSession) -> list[ChannelRoomSummary]:
     return summaries
 
 
+async def list_groups_for_user(
+    db: AsyncSession,
+    *,
+    user_id: int,
+) -> list[GroupRoomSummary]:
+    """List active groups that the current user belongs to."""
+    current_member = aliased(ChatMember)
+    member_count = (
+        select(func.count(ChatMember.id))
+        .where(
+            ChatMember.chat_id == Chat.id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .correlate(Chat)
+        .scalar_subquery()
+    )
+    stmt = (
+        select(
+            Chat,
+            current_member.role.label("member_role"),
+            member_count.label("member_count"),
+        )
+        .join(
+            current_member,
+            (current_member.chat_id == Chat.id)
+            & (current_member.user_id == user_id)
+            & (current_member.membership_status == ChatMembershipStatus.ACTIVE),
+        )
+        .where(
+            Chat.type == ChatType.GROUP,
+            Chat.is_deleted.is_(False),
+        )
+        .order_by(
+            Chat.last_message_at.desc().nullslast(),
+            Chat.updated_at.desc().nullslast(),
+            Chat.created_at.desc(),
+            Chat.id.desc(),
+        )
+    )
+    result = await db.execute(stmt)
+
+    items: list[GroupRoomSummary] = []
+    for chat, member_role, active_member_count in result.all():
+        items.append(
+            GroupRoomSummary(
+                id=chat.id,
+                type=chat.type,
+                title=chat.title or "",
+                description=chat.description,
+                created_by_id=chat.created_by_id,
+                member_count=int(active_member_count or 0),
+                max_members=int(chat.max_members or GROUP_MAX_MEMBERS),
+                created_at=chat.created_at,
+                current_user_role=member_role,
+            )
+        )
+    return items
+
+
+async def list_group_members(db: AsyncSession, *, chat: Chat) -> list[GroupMemberSummary]:
+    """List active members of one group for the group detail view."""
+    stmt = (
+        select(ChatMember, User)
+        .join(User, User.id == ChatMember.user_id)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .order_by(ChatMember.role.asc(), ChatMember.joined_at.asc(), ChatMember.user_id.asc())
+    )
+    result = await db.execute(stmt)
+
+    items: list[GroupMemberSummary] = []
+    for member, user in result.all():
+        items.append(
+            GroupMemberSummary(
+                user_id=user.id,
+                account_name=user.account_name,
+                full_name=user.full_name,
+                mobile_number=user.mobile_number,
+                role=member.role,
+                joined_at=member.joined_at,
+                is_group_creator=chat.created_by_id == user.id,
+            )
+        )
+    return items
+
+
 async def get_active_channel_member_or_403(
     db: AsyncSession,
     *,
@@ -278,6 +487,28 @@ async def get_active_channel_member_or_403(
     member = result.scalars().first()
     if member is None:
         raise HTTPException(status_code=403, detail="You are not a member of this channel")
+    return member
+
+
+async def get_active_group_member_or_403(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+) -> ChatMember:
+    stmt = (
+        select(ChatMember)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.user_id == user_id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .order_by(ChatMember.id.desc())
+    )
+    result = await db.execute(stmt)
+    member = result.scalars().first()
+    if member is None:
+        raise HTTPException(status_code=403, detail="You are not a member of this group")
     return member
 
 
