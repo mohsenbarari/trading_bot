@@ -259,6 +259,26 @@ async function fetchChannelConversationUnread(
   return Number(channel?.unread_count || 0)
 }
 
+async function fetchRoomMessageReactionEmojis(
+  request: APIRequestContext,
+  fixture: SeededChannelAdminFixture,
+  messageId: number,
+): Promise<string[]> {
+  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/rooms/${fixture.channelId}/messages?limit=20`, {
+    headers: authHeaders(fixture.accessToken),
+  })
+
+  expect(response.ok()).toBeTruthy()
+  const body = (await response.json()) as Array<{ id?: number; reactions?: Array<{ emoji?: string }> }>
+  const message = Array.isArray(body)
+    ? body.find((item) => Number(item?.id) === messageId)
+    : undefined
+
+  return Array.isArray(message?.reactions)
+    ? message.reactions.map((reaction) => reaction?.emoji || '').filter(Boolean)
+    : []
+}
+
 async function seedShareReceivePayload(page: Page, payload: {
   key: string
   title?: string
@@ -524,6 +544,47 @@ test.describe('Channel media regressions', () => {
     await expect
       .poll(async () => fetchChannelConversationUnread(request, fixture), { timeout: 30000 })
       .toBe(0)
+  })
+
+  test('channel reactions patch live into an open member room', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('channel_reaction_live', 'member')
+    const bootstrapContent = `PW CHANNEL REACTION ${Date.now()}`
+    const bootstrapMessage = await seedBootstrapChannelMessage(request, fixture, bootstrapContent) as { id?: number }
+    const messageId = Number(bootstrapMessage?.id)
+
+    expect(Number.isFinite(messageId)).toBeTruthy()
+
+    await loginWithSeededSession(page, fixture)
+
+    await page.goto('/chat')
+    await expect(page.getByText(fixture.channelTitle)).toBeVisible()
+    await page.getByText(fixture.channelTitle).click()
+
+    const messageRoot = page.locator(`#msg-${messageId}`)
+    const liveReactionChip = page.locator('.messages-container .reaction-chip').filter({ hasText: '🔥' })
+    await expect(messageRoot.getByText(bootstrapContent)).toBeVisible()
+    await expect(liveReactionChip).toHaveCount(0)
+
+    const reactionResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/messages/${messageId}/reaction`, {
+      headers: authHeaders(fixture.bootstrapAccessToken),
+      data: {
+        emoji: '🔥',
+      },
+    })
+
+    expect(reactionResponse.ok()).toBeTruthy()
+    await expect(reactionResponse.json()).resolves.toMatchObject({
+      id: messageId,
+    })
+
+    await expect(liveReactionChip).toHaveCount(1)
+    await expect(liveReactionChip).toContainText('🔥')
+    await expect
+      .poll(async () => fetchRoomMessageReactionEmojis(request, fixture, messageId), { timeout: 30000 })
+      .toEqual(['🔥'])
   })
 
   test('share receive can route shared text into a writable channel target', async ({
