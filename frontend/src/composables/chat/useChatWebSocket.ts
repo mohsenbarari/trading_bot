@@ -37,6 +37,16 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     const typingTimeouts = ref<Record<number, number>>({})
     const isTyping = computed(() => selectedUserId.value ? !!typingUsers.value[selectedUserId.value] : false)
 
+    function getConversationKeyFromPayload(data: any): number | null {
+        if (data?.room_kind === 'channel') {
+            const chatId = Number(data?.chat_id)
+            return Number.isFinite(chatId) && chatId > 0 ? -chatId : null
+        }
+
+        const senderId = Number(data?.sender_id)
+        return Number.isFinite(senderId) ? senderId : null
+    }
+
     async function sendTypingSignal() {
         if (!messageInput.value) return;
         const now = Date.now();
@@ -99,12 +109,12 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         }
 
         const currentSelected = selectedUserId.value ? Number(selectedUserId.value) : null;
-        const arrivingSender = senderId != null ? Number(senderId) : null;
+        const arrivingConversationKey = getConversationKeyFromPayload(data)
 
         // Append directly to messages if this chat is open. The backend
         // publishes a fully serialized MessageRead so we avoid a 200-msg
         // refetch on every incoming message.
-        if (currentSelected !== null && arrivingSender === currentSelected && data && typeof data.id === 'number') {
+        if (currentSelected !== null && arrivingConversationKey === currentSelected && data && typeof data.id === 'number') {
             const list = messages.value
             const alreadyExists = list.some((m: any) => m && m.id === data.id)
             if (!alreadyExists) {
@@ -115,7 +125,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
             }
             // Mark as read quickly since chat is open.
             markAsRead();
-        } else if (currentSelected !== null && arrivingSender === currentSelected) {
+        } else if (currentSelected !== null && arrivingConversationKey === currentSelected) {
             // Payload missing fields — fall back to the previous full reload.
             loadMessages(currentSelected, true).then(() => markAsRead())
         }
@@ -123,14 +133,14 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         // Patch conversation list entry in-place so the preview/unread
         // update is instant, and still schedule a debounced reload as
         // a convergence safety net.
-        let shouldReloadConversations = arrivingSender === null
-        if (arrivingSender !== null) {
-            const conv = conversations.value.find((c: any) => c && c.other_user_id === arrivingSender)
+        let shouldReloadConversations = arrivingConversationKey === null
+        if (arrivingConversationKey !== null) {
+            const conv = conversations.value.find((c: any) => c && c.other_user_id === arrivingConversationKey)
             if (conv) {
                 if (data?.created_at) conv.last_message_at = data.created_at
                 if (data?.message_type) conv.last_message_type = data.message_type
                 conv.last_message_content = getConversationPreviewContent(data)
-                if (!(currentSelected !== null && arrivingSender === currentSelected)) {
+                if (!(currentSelected !== null && arrivingConversationKey === currentSelected)) {
                     conv.unread_count = (conv.unread_count || 0) + 1
                 }
             } else {
@@ -144,6 +154,22 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     }
 
     function handleReadEvent(data: any) {
+        if (data?.room_kind === 'channel') {
+            const chatId = Number(data?.chat_id)
+            if (!Number.isFinite(chatId) || chatId <= 0) {
+                return
+            }
+
+            const conversationKey = -chatId
+            if (selectedUserId.value === conversationKey) {
+                const conv = conversations.value.find((item: any) => item && item.other_user_id === conversationKey)
+                if (conv) {
+                    conv.unread_count = 0
+                }
+            }
+            return
+        }
+
         // If the current chat user read our messages, patch in-place
         // instead of refetching all 200 messages.
         if (selectedUserId.value && (data.reader_id === selectedUserId.value)) {

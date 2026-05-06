@@ -27,6 +27,23 @@ function buildChatNotificationRoute(senderId: number, senderName: string): strin
     return `/chat?user_id=${senderId}&user_name=${encodeURIComponent(senderName)}`
 }
 
+function resolveRealtimeConversationKey(payload: ChatRealtimeNotificationPayload): number | null {
+    if (payload.room_kind === 'channel') {
+        const chatId = Number(payload.chat_id)
+        return Number.isFinite(chatId) && chatId > 0 ? -chatId : null
+    }
+
+    const senderId = Number(payload.sender_id)
+    return Number.isFinite(senderId) ? senderId : null
+}
+
+function buildRealtimeConversationLabel(payload: ChatRealtimeNotificationPayload): string {
+    if (payload.room_kind === 'channel') {
+        return payload.conversation_title || 'کانال'
+    }
+    return payload.sender_name || 'پیام جدید'
+}
+
 function buildChatNotificationBody(payload: ChatRealtimeNotificationPayload): string {
     if (payload.message_type === 'image') return 'تصویر'
     if (payload.message_type === 'video') return 'ویدئو'
@@ -99,21 +116,23 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
     }
 
     const handleChatMessage = (payload: ChatRealtimeNotificationPayload) => {
-        const senderId = Number(payload.sender_id)
+        const conversationKey = resolveRealtimeConversationKey(payload)
+        if (conversationKey === null) return
+
         const isChatOpen = route.path === '/chat'
         const currentChatId = route.query.user_id ? Number(route.query.user_id) : null
-        const isViewingSameChat = isChatOpen && currentChatId !== null && currentChatId === senderId && !document.hidden
+        const isViewingSameChat = isChatOpen && currentChatId !== null && currentChatId === conversationKey && !document.hidden
         const shouldTreatAsUnread = !isViewingSameChat
 
         if (shouldTreatAsUnread) {
-            notificationStore.incrementChatUnread(senderId)
+            notificationStore.incrementChatUnread(conversationKey)
         }
 
         if (!shouldTreatAsUnread) return
 
-        const senderName = payload.sender_name || 'پیام جدید'
+        const senderName = buildRealtimeConversationLabel(payload)
         const body = buildChatNotificationBody(payload)
-        const routePath = buildChatNotificationRoute(senderId, senderName)
+        const routePath = buildChatNotificationRoute(conversationKey, senderName)
 
         notificationStore.addToast({
             title: senderName,

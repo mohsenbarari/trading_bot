@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Callable, TypeVar
 
 from fastapi import HTTPException
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, joinedload
@@ -15,6 +17,9 @@ from models.chat import Chat
 from models.chat_member import ChatMember
 from models.message import Message
 from models.user import User
+
+SerializedMessageT = TypeVar("SerializedMessageT")
+RoomEventPublisher = Callable[[int, str, dict], object]
 
 
 @dataclass
@@ -93,6 +98,13 @@ class ChannelMemberMutationSummary:
     member_count: int
 
 
+@dataclass
+class ChannelReadBroadcastSummary:
+    member_user_ids: list[int]
+    reader_id: int
+    chat_id: int
+
+
 def _utcnow() -> datetime:
     return datetime.utcnow()
 
@@ -139,6 +151,15 @@ async def count_active_chat_members(db: AsyncSession, chat_id: int) -> int:
     )
     result = await db.execute(stmt)
     return int(result.scalar_one() or 0)
+
+
+async def list_active_channel_member_user_ids(db: AsyncSession, *, chat_id: int) -> list[int]:
+    stmt = select(ChatMember.user_id).where(
+        ChatMember.chat_id == chat_id,
+        ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+    )
+    result = await db.execute(stmt)
+    return [int(user_id) for user_id in result.scalars().all()]
 
 
 async def create_optional_channel(
@@ -395,6 +416,59 @@ async def list_channel_messages(
 
     result = await db.execute(stmt)
     return list(reversed(result.scalars().all()))
+
+
+def build_channel_message_event_payload(
+    message: Message,
+    *,
+    chat: Chat,
+    serializer: Callable[[Message], SerializedMessageT],
+) -> dict[str, object]:
+    payload = jsonable_encoder(serializer(message))
+    payload["room_kind"] = "channel"
+    payload["chat_id"] = chat.id
+    payload["conversation_id"] = -int(chat.id)
+    payload["conversation_other_user_id"] = -int(chat.id)
+    payload["conversation_title"] = chat.title or f"کانال {chat.id}"
+    payload["can_send"] = None
+    return payload
+
+
+async def publish_channel_message_event(
+    *,
+    chat: Chat,
+    message: Message,
+    member_user_ids: list[int],
+    serializer: Callable[[Message], SerializedMessageT],
+    publisher: RoomEventPublisher,
+) -> None:
+    payload = build_channel_message_event_payload(
+        message,
+        chat=chat,
+        serializer=serializer,
+    )
+    for user_id in member_user_ids:
+        if user_id == message.sender_id:
+            continue
+        await publisher(user_id, "chat:message", payload)
+
+
+async def publish_channel_read_event(
+    *,
+    chat_id: int,
+    reader_id: int,
+    member_user_ids: list[int],
+    publisher: RoomEventPublisher,
+) -> None:
+    payload = {
+        "room_kind": "channel",
+        "chat_id": chat_id,
+        "reader_id": reader_id,
+    }
+    for user_id in member_user_ids:
+        if user_id == reader_id:
+            continue
+        await publisher(user_id, "chat:read", payload)
 
 
 async def list_channel_invite_candidates(
@@ -687,3 +761,17 @@ async def mark_channel_messages_read(
     member.last_read_at = now
     member.updated_at = now
     await db.commit()
+
+
+async def mark_channel_messages_read_with_broadcast(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+) -> ChannelReadBroadcastSummary:
+    await mark_channel_messages_read(db, chat=chat, user_id=user_id)
+    return ChannelReadBroadcastSummary(
+        member_user_ids=await list_active_channel_member_user_ids(db, chat_id=chat.id),
+        reader_id=user_id,
+        chat_id=chat.id,
+    )
