@@ -116,6 +116,10 @@ const selectedCount = computed(() => {
   return selectAllActiveUsers.value ? activeTotal.value : selectedUserIds.value.size
 })
 
+const activeAdminCount = computed(() => {
+  return members.value.filter((member) => member.role === 'admin').length
+})
+
 function resetFormState() {
   searchQuery.value = ''
   members.value = []
@@ -159,6 +163,30 @@ function syncEditForm(channel: ChannelRoom | null) {
 
 function getAvatarInitial(name: string) {
   return name ? name.charAt(0).toUpperCase() : '?'
+}
+
+function canDemoteMember(member: ChannelMember) {
+  if (member.role !== 'admin') return false
+  if (member.is_channel_creator) return false
+  return activeAdminCount.value > 1
+}
+
+function canRemoveMember(member: ChannelMember) {
+  if (member.is_channel_creator) return false
+  if (member.role === 'admin') {
+    return activeAdminCount.value > 1
+  }
+  return true
+}
+
+function getMemberGuardReason(member: ChannelMember) {
+  if (member.is_channel_creator) {
+    return 'سازنده کانال باید عضو و ادمین باقی بماند.'
+  }
+  if (member.role === 'admin' && activeAdminCount.value <= 1) {
+    return 'کانال باید حداقل یک ادمین فعال داشته باشد.'
+  }
+  return ''
 }
 
 function toggleUser(userId: number) {
@@ -495,7 +523,8 @@ void loadExistingChannels()
                 v-else
                 type="button"
                 class="member-action-btn"
-                :disabled="mutatingMemberId === member.user_id"
+                :disabled="mutatingMemberId === member.user_id || !canDemoteMember(member)"
+                :title="getMemberGuardReason(member)"
                 @click="demoteMember(member)"
               >
                 برداشتن ادمین
@@ -503,7 +532,8 @@ void loadExistingChannels()
               <button
                 type="button"
                 class="member-action-btn danger"
-                :disabled="mutatingMemberId === member.user_id"
+                :disabled="mutatingMemberId === member.user_id || !canRemoveMember(member)"
+                :title="getMemberGuardReason(member)"
                 @click="removeMember(member)"
               >
                 حذف

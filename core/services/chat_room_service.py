@@ -666,6 +666,22 @@ async def update_channel_member(
     if not remove_member and role is None:
         raise HTTPException(status_code=400, detail="No membership change requested")
 
+    is_admin_downgrade = member.role == ChatMemberRole.ADMIN and (remove_member or role == ChatMemberRole.MEMBER)
+    if member.user_id == chat.created_by_id and is_admin_downgrade:
+        raise HTTPException(status_code=400, detail="Channel creator must remain an active admin")
+
+    if is_admin_downgrade:
+        admin_count_result = await db.execute(
+            select(func.count(ChatMember.id)).where(
+                ChatMember.chat_id == chat.id,
+                ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+                ChatMember.role == ChatMemberRole.ADMIN,
+            )
+        )
+        admin_count = int(admin_count_result.scalar_one() or 0)
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Channel must keep at least one active admin")
+
     now = _utcnow()
     removed = False
     next_role = role
