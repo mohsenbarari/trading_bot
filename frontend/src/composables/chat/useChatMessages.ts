@@ -8,6 +8,13 @@ import {
     MAX_STICKERS_PER_MESSAGE,
 } from '../../utils/emojiStickerCatalog'
 import {
+    buildChatMessagesEndpoint,
+    buildChatReadEndpoint,
+    buildChatSendBody,
+    buildChatSendEndpoint,
+    isChannelConversationKey,
+} from '../../utils/chatRoomRouting'
+import {
     getPendingForUser as backgroundGetPendingForUser,
     buildOptimisticMessageFromUpload,
 } from '../../services/chatUploadBackground'
@@ -225,33 +232,16 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         return await apiFetchJson(`/api${endpoint}`, fetchOptions)
     }
 
-    function isChannelConversationId(userId: number) {
-        return userId < 0
-    }
-
-    function resolveChannelChatId(userId: number) {
-        return Math.abs(userId)
-    }
-
     function buildMessagesEndpoint(userId: number, query: string) {
-        if (isChannelConversationId(userId)) {
-            return `/chat/rooms/${resolveChannelChatId(userId)}/messages?${query}`
-        }
-        return `/chat/messages/${userId}?${query}`
+        return buildChatMessagesEndpoint(userId, query)
     }
 
     function buildReadEndpoint(userId: number) {
-        if (isChannelConversationId(userId)) {
-            return `/chat/rooms/${resolveChannelChatId(userId)}/read`
-        }
-        return `/chat/read/${userId}`
+        return buildChatReadEndpoint(userId)
     }
 
     function buildSendEndpoint(userId: number) {
-        if (isChannelConversationId(userId)) {
-            return `/chat/rooms/${resolveChannelChatId(userId)}/send`
-        }
-        return '/chat/send'
+        return buildChatSendEndpoint(userId)
     }
 
     async function loadConversations() {
@@ -265,7 +255,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     async function loadMessages(userId: number, silent = false, aroundId?: number) {
         const requestId = ++latestLoadRequestId
         let effectiveSilent = silent
-        const isChannelRoom = isChannelConversationId(userId)
+        const isChannelRoom = isChannelConversationKey(userId)
 
         if (!effectiveSilent) isLoadingMessages.value = true
 
@@ -435,21 +425,12 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         optimisticId?: number
     ) {
         if (!selectedUserId.value) return null
-        const isChannelRoom = isChannelConversationId(selectedUserId.value)
-        if (isChannelRoom && type !== 'sticker') {
-            alert('ارسال رسانه در کانال در این فاز هنوز فعال نشده است.')
-            return null
-        }
-
         isSending.value = true
         try {
-            const body: Record<string, unknown> = {
-                content: content,
+            const body = buildChatSendBody(selectedUserId.value, {
+                content,
                 message_type: type,
-            }
-            if (!isChannelRoom) {
-                body.receiver_id = selectedUserId.value
-            }
+            })
 
             const newMsg = await apiFetch(buildSendEndpoint(selectedUserId.value), {
                 method: 'POST',
@@ -504,7 +485,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         }
 
         if (!selectedUserId.value) return;
-        const isChannelRoom = isChannelConversationId(selectedUserId.value)
+        const isChannelRoom = isChannelConversationKey(selectedUserId.value)
         const content = messageInput.value;
         const stickerCount = countEmojiStickerOccurrences(content)
         if (stickerCount > MAX_STICKERS_PER_MESSAGE) {
@@ -546,14 +527,11 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         });
 
         try {
-            const body: Record<string, any> = {
-                content: content,
-                message_type: messageType
-            };
-            if (!isChannelRoom) {
-                body.receiver_id = selectedUserId.value
-            }
-            if (replyTo) body.reply_to_message_id = replyTo.id;
+            const body = buildChatSendBody(selectedUserId.value, {
+                content,
+                message_type: messageType,
+                reply_to_message_id: replyTo?.id,
+            });
 
             const abortController = new AbortController();
             textSendControllers.set(tempId, abortController);
