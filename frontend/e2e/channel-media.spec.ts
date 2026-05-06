@@ -1593,6 +1593,104 @@ test.describe('Channel media regressions', () => {
     expect(channelImagePayload?.file_id).toBe(directImagePayload?.file_id)
   })
 
+  test('share receive can fan out shared text, image, and video to a channel and a direct chat target', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('share_receive_multi_text_image_video', 'admin')
+    const bootstrapContent = `PLAYWRIGHT SHARE RECEIVE MULTI TEXT IMAGE VIDEO ${Date.now()}`
+    const seedDirectContent = `PW DIRECT TEXT IMAGE VIDEO TARGET SEED ${Date.now()}`
+    const shareKey = `pw-share-multi-text-image-video-${Date.now()}`
+    const shareTitle = `Playwright Shared Image Video Title ${Date.now()}`
+    const shareText = `Playwright Shared Image Video Body ${Date.now()}`
+    const shareUrl = `https://example.test/share/multi-text-image-video/${Date.now()}`
+    const expectedMergedText = `${shareTitle}\n${shareText}\n${shareUrl}`
+    const sharedImageName = `pw-share-multi-text-image-video-${Date.now()}.png`
+    const sharedVideoName = `pw-share-multi-text-image-video-${Date.now()}.webm`
+    const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
+    const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
+
+    await seedBootstrapChannelMessage(request, fixture, bootstrapContent)
+    await seedDirectTextMessage(request, fixture, seedDirectContent)
+    await loginWithSeededSession(page, fixture)
+    await seedShareReceivePayload(page, {
+      key: shareKey,
+      title: shareTitle,
+      text: shareText,
+      url: shareUrl,
+      files: [
+        {
+          name: sharedImageName,
+          type: 'image/png',
+          bodyBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ6kAAAAASUVORK5CYII=',
+        },
+        {
+          name: sharedVideoName,
+          type: 'video/webm',
+          generator: 'video',
+        },
+      ],
+    })
+
+    await page.goto(`/share-receive?share_key=${shareKey}`)
+    await expect(page.locator('.forward-modal')).toBeVisible()
+    await expect(channelTarget).toBeVisible()
+    await expect(directTarget).toBeVisible()
+
+    await channelTarget.click()
+    await directTarget.click()
+    await page.getByRole('button', { name: 'هدایت به 2 مقصد' }).click()
+
+    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await expect
+      .poll(() => {
+        const url = new URL(page.url())
+        return `${url.pathname}${url.search}`
+      }, { timeout: 30000 })
+      .toBe('/chat')
+    await expect(page.locator('.conversation-item').filter({ hasText: fixture.channelTitle })).toBeVisible()
+    await expect(page.locator('.conversation-item').filter({ hasText: fixture.creatorAccountName })).toBeVisible()
+
+    await expect
+      .poll(async () => fetchLatestRoomMessageTypes(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['text', 'image', 'video']))
+    await expect
+      .poll(async () => fetchLatestDirectMessageTypes(request, fixture, fixture.creatorUserId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['text', 'image', 'video']))
+    await expect
+      .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([
+        expectedMergedText,
+        expect.stringContaining(sharedImageName),
+        expect.stringContaining(sharedVideoName),
+      ]))
+    await expect
+      .poll(async () => fetchLatestDirectContents(request, fixture, fixture.creatorUserId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([
+        expectedMergedText,
+        expect.stringContaining(sharedImageName),
+        expect.stringContaining(sharedVideoName),
+      ]))
+
+    const [channelContents, directContents] = await Promise.all([
+      fetchLatestRoomContents(request, fixture),
+      fetchLatestDirectContents(request, fixture, fixture.creatorUserId),
+    ])
+
+    const channelImagePayload = extractSharedFilePayload(channelContents, sharedImageName)
+    const directImagePayload = extractSharedFilePayload(directContents, sharedImageName)
+    const channelVideoPayload = extractSharedFilePayload(channelContents, sharedVideoName)
+    const directVideoPayload = extractSharedFilePayload(directContents, sharedVideoName)
+
+    expect(channelImagePayload?.file_id).toBeTruthy()
+    expect(directImagePayload?.file_id).toBeTruthy()
+    expect(channelImagePayload?.file_id).toBe(directImagePayload?.file_id)
+
+    expect(channelVideoPayload?.file_id).toBeTruthy()
+    expect(directVideoPayload?.file_id).toBeTruthy()
+    expect(channelVideoPayload?.file_id).toBe(directVideoPayload?.file_id)
+  })
+
   test('share receive can route shared file and media payloads into a writable channel target', async ({
     page,
     request,
