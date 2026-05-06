@@ -37,6 +37,7 @@
       v-else
       :showForwardModal="true"
       :sortedConversations="conversations"
+      :includeChannels="true"
       @close="handleClose"
       @forward-to="handleTargetsPicked"
     />
@@ -158,16 +159,27 @@ async function uploadOne(file: SharedFileEntry): Promise<{ file_id: string, file
   }
 }
 
-async function sendMessageRaw(receiverId: number, type: string, content: string) {
+function getTargetChatQueryId(target: ChatForwardTarget) {
+  return target.kind === 'channel' ? -Math.abs(target.id) : target.id
+}
+
+async function sendMessageRaw(target: ChatForwardTarget, type: string, content: string) {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
   const token = localStorage.getItem('auth_token') || ''
-  const resp = await fetch(`${baseUrl}/api/chat/send`, {
+  const endpoint = target.kind === 'channel'
+    ? `${baseUrl}/api/chat/rooms/${target.id}/send`
+    : `${baseUrl}/api/chat/send`
+  const body = target.kind === 'channel'
+    ? { content, message_type: type }
+    : { receiver_id: target.id, content, message_type: type }
+
+  const resp = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ receiver_id: receiverId, content, message_type: type }),
+    body: JSON.stringify(body),
   })
   if (!resp.ok) throw new Error(`send failed (${resp.status})`)
   return resp.json()
@@ -205,7 +217,7 @@ async function handleTargetsPicked(targets: ChatForwardTarget[]) {
           mime_type: meta.mime_type || src.type,
           size: meta.size || src.size,
         })
-        await sendMessageRaw(target.id, type, content)
+        await sendMessageRaw(target, type, content)
       } catch {
         sendErrors.value.push(`ارسال «${src.name}» به ${target.title} ناموفق`)
       } finally {
@@ -214,7 +226,7 @@ async function handleTargetsPicked(targets: ChatForwardTarget[]) {
     }
     if (mergedText.value) {
       try {
-        await sendMessageRaw(target.id, 'text', mergedText.value)
+        await sendMessageRaw(target, 'text', mergedText.value)
       } catch {
         sendErrors.value.push(`ارسال متن به ${target.title} ناموفق`)
       } finally {
@@ -234,7 +246,7 @@ async function handleTargetsPicked(targets: ChatForwardTarget[]) {
   if (sendErrors.value.length === 0) {
     const first = targets[0]
     if (targets.length === 1 && first) {
-      router.replace({ path: '/chat', query: { user_id: String(first.id) } })
+      router.replace({ path: '/chat', query: { user_id: String(getTargetChatQueryId(first)) } })
     } else {
       router.replace({ path: '/chat' })
     }
