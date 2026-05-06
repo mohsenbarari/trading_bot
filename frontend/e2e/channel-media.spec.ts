@@ -396,7 +396,7 @@ async function seedShareReceivePayload(page: Page, payload: {
     name: string
     type: string
     bodyBase64?: string
-    generator?: 'video'
+    generator?: 'video' | 'audio'
   }>
 }) {
   await page.evaluate(async (entry) => {
@@ -463,9 +463,64 @@ async function seedShareReceivePayload(page: Page, payload: {
       })
     }
 
-    const buildPendingShareFile = async (file: { name: string; type: string; bodyBase64?: string; generator?: 'video' }) => {
+    const createGeneratedAudioBlob = async () => {
+      const sampleRate = 16000
+      const durationSeconds = 0.45
+      const frameCount = Math.floor(sampleRate * durationSeconds)
+      const channelCount = 1
+      const bitsPerSample = 16
+      const blockAlign = channelCount * (bitsPerSample / 8)
+      const byteRate = sampleRate * blockAlign
+      const pcmBytes = frameCount * blockAlign
+      const totalLength = 44 + pcmBytes
+      const buffer = new ArrayBuffer(totalLength)
+      const view = new DataView(buffer)
+
+      const writeAscii = (offset: number, value: string) => {
+        for (let index = 0; index < value.length; index += 1) {
+          view.setUint8(offset + index, value.charCodeAt(index))
+        }
+      }
+
+      writeAscii(0, 'RIFF')
+      view.setUint32(4, 36 + pcmBytes, true)
+      writeAscii(8, 'WAVE')
+      writeAscii(12, 'fmt ')
+      view.setUint32(16, 16, true)
+      view.setUint16(20, 1, true)
+      view.setUint16(22, channelCount, true)
+      view.setUint32(24, sampleRate, true)
+      view.setUint32(28, byteRate, true)
+      view.setUint16(32, blockAlign, true)
+      view.setUint16(34, bitsPerSample, true)
+      writeAscii(36, 'data')
+      view.setUint32(40, pcmBytes, true)
+
+      let writeOffset = 44
+      for (let sampleIndex = 0; sampleIndex < frameCount; sampleIndex += 1) {
+        const time = sampleIndex / sampleRate
+        const amplitude = Math.sin(2 * Math.PI * 660 * time) * 0.35
+        const value = Math.max(-1, Math.min(1, amplitude))
+        view.setInt16(writeOffset, value * 0x7fff, true)
+        writeOffset += 2
+      }
+
+      return new Blob([buffer], { type: 'audio/wav' })
+    }
+
+    const buildPendingShareFile = async (file: { name: string; type: string; bodyBase64?: string; generator?: 'video' | 'audio' }) => {
       if (file.generator === 'video') {
         const blob = await createGeneratedVideoBlob()
+        return {
+          name: file.name,
+          type: blob.type || file.type,
+          size: blob.size,
+          blob,
+        }
+      }
+
+      if (file.generator === 'audio') {
+        const blob = await createGeneratedAudioBlob()
         return {
           name: file.name,
           type: blob.type || file.type,
@@ -1135,5 +1190,47 @@ test.describe('Channel media regressions', () => {
     await expect
       .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
       .toEqual(expect.arrayContaining([expect.stringContaining(sharedVideoName)]))
+  })
+
+  test('share receive can route a shared voice clip into a writable channel target', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('share_receive_channel_voice', 'admin')
+    const bootstrapContent = `PLAYWRIGHT SHARE RECEIVE VOICE ${Date.now()}`
+    const shareKey = `pw-share-voice-${Date.now()}`
+    const sharedVoiceName = `pw-share-voice-${Date.now()}.wav`
+
+    await seedBootstrapChannelMessage(request, fixture, bootstrapContent)
+    await loginWithSeededSession(page, fixture)
+    await seedShareReceivePayload(page, {
+      key: shareKey,
+      files: [
+        {
+          name: sharedVoiceName,
+          type: 'audio/wav',
+          generator: 'audio',
+        },
+      ],
+    })
+
+    await page.goto(`/share-receive?share_key=${shareKey}`)
+    await expect(page.locator('.forward-modal')).toBeVisible()
+
+    await page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle }).click()
+    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
+
+    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
+    await expect(page.locator('.chat-header').getByText(fixture.channelTitle)).toBeVisible()
+    await expect(page.locator('.messages-container .msg-voice')).toBeVisible()
+    await expect(page.locator('.messages-container .voice-play-btn')).toBeVisible()
+
+    await expect
+      .poll(async () => fetchLatestRoomMessageTypes(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['voice']))
+    await expect
+      .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([expect.stringContaining(sharedVoiceName)]))
   })
 })
