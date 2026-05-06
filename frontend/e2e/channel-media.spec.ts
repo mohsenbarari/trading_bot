@@ -10,9 +10,12 @@ interface SeededChannelAdminFixture {
   accountName: string
   accessToken: string
   refreshToken: string
+  bootstrapAccessToken: string
   channelId: number
   channelTitle: string
 }
+
+type SeededChannelRole = 'admin' | 'member'
 
 function runPythonInApp<T>(script: string): T {
   const stdout = execFileSync('docker', ['exec', '-i', 'trading_bot_app', 'python', '-'], {
@@ -33,7 +36,7 @@ function runPythonInApp<T>(script: string): T {
   return JSON.parse(lastLine) as T
 }
 
-function seedChannelAdminSession(label: string): SeededChannelAdminFixture {
+function seedChannelSession(label: string, role: SeededChannelRole): SeededChannelAdminFixture {
   return runPythonInApp<SeededChannelAdminFixture>(`
 import asyncio
 import json
@@ -50,20 +53,57 @@ from models.session import Platform, UserSession
 from models.user import User
 
 label = ${JSON.stringify(label)}
+role = ${JSON.stringify(role)}
 
 async def main():
     suffix = uuid.uuid4().hex[:10]
-    account_name = f"pw_{label}_{suffix}"
-    mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
-    mobile_number = f"09{mobile_seed:09d}"
+    member_account_name = f"pw_{label}_{suffix}"
+    member_mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+    member_mobile_number = f"09{member_mobile_seed:09d}"
     channel_title = f"Playwright Channel {suffix}"
     now = datetime.utcnow()
 
     async with AsyncSessionLocal() as db:
+        creator_account_name = f"pw_creator_{label}_{suffix}"
+        creator_mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+        creator_mobile_number = f"09{creator_mobile_seed:09d}"
+
+        creator = User(
+            account_name=creator_account_name,
+            mobile_number=creator_mobile_number,
+            full_name=creator_account_name,
+            address='Playwright Channel Creator',
+            role=UserRole.STANDARD,
+            has_bot_access=True,
+            max_sessions=1,
+        )
+        db.add(creator)
+        await db.flush()
+
+        creator_refresh_token = create_refresh_token(subject=creator.id)
+        creator_session = UserSession(
+            user_id=creator.id,
+            device_name='Playwright Channel Creator Device',
+            device_ip='127.0.0.1',
+            platform=Platform.WEB,
+            refresh_token_hash=hash_token(creator_refresh_token),
+            is_primary=True,
+            is_active=True,
+            expires_at=None,
+        )
+        db.add(creator_session)
+        await db.flush()
+
+        creator_access_token = create_access_token(
+            subject=creator.id,
+            expires_delta=timedelta(minutes=60),
+            session_id=str(creator_session.id),
+        )
+
         user = User(
-            account_name=account_name,
-            mobile_number=mobile_number,
-            full_name=account_name,
+            account_name=member_account_name,
+            mobile_number=member_mobile_number,
+            full_name=member_account_name,
             address='Playwright Channel Test',
             role=UserRole.STANDARD,
             has_bot_access=True,
@@ -90,7 +130,7 @@ async def main():
             type=ChatType.CHANNEL,
             title=channel_title,
             description='Playwright seeded optional channel',
-            created_by_id=user.id,
+            created_by_id=creator.id,
             is_system=False,
             is_mandatory=False,
             created_at=now,
@@ -101,12 +141,23 @@ async def main():
 
         db.add(ChatMember(
             chat_id=channel.id,
-            user_id=user.id,
+            user_id=creator.id,
             role=ChatMemberRole.ADMIN,
             membership_status=ChatMembershipStatus.ACTIVE,
             joined_at=now,
             updated_at=now,
         ))
+
+        member_role = ChatMemberRole.ADMIN if role == 'admin' else ChatMemberRole.MEMBER
+        if user.id != creator.id:
+          db.add(ChatMember(
+            chat_id=channel.id,
+            user_id=user.id,
+            role=member_role,
+            membership_status=ChatMembershipStatus.ACTIVE,
+            joined_at=now,
+            updated_at=now,
+          ))
 
         access_token = create_access_token(
             subject=user.id,
@@ -118,9 +169,10 @@ async def main():
 
     print(json.dumps({
         'userId': user.id,
-        'accountName': account_name,
+      'accountName': member_account_name,
         'accessToken': access_token,
         'refreshToken': refresh_token,
+      'bootstrapAccessToken': creator_access_token if role == 'member' else access_token,
         'channelId': channel.id,
         'channelTitle': channel_title,
     }))
@@ -153,7 +205,7 @@ async function seedBootstrapChannelMessage(
   content: string,
 ) {
   const response = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${fixture.channelId}/send`, {
-    headers: authHeaders(fixture.accessToken),
+    headers: authHeaders(fixture.bootstrapAccessToken),
     data: {
       content,
       message_type: 'text',
@@ -277,7 +329,7 @@ test.describe('Channel media regressions', () => {
     page,
     request,
   }) => {
-    const fixture = seedChannelAdminSession('channel_media')
+    const fixture = seedChannelSession('channel_media', 'admin')
     const bootstrapContent = `PLAYWRIGHT CHANNEL BOOTSTRAP ${Date.now()}`
     await seedBootstrapChannelMessage(request, fixture, bootstrapContent)
 
@@ -308,5 +360,39 @@ test.describe('Channel media regressions', () => {
     await expect
       .poll(async () => fetchLatestRoomMessageTypes(request, fixture), { timeout: 30000 })
       .toEqual(expect.arrayContaining(['image', 'video']))
+  })
+
+  test('channel member sees read-only composer and backend rejects posting', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('channel_member', 'member')
+    const bootstrapContent = `PLAYWRIGHT CHANNEL MEMBER ${Date.now()}`
+    await seedBootstrapChannelMessage(request, fixture, bootstrapContent)
+
+    await loginWithSeededSession(page, fixture)
+
+    await page.goto('/chat')
+    await expect(page.getByText(fixture.channelTitle)).toBeVisible()
+    await page.getByText(fixture.channelTitle).click()
+
+    await expect(page.getByText('کانال • فقط مدیران امکان ارسال دارند')).toBeVisible()
+    await expect(page.getByText('فقط مدیران کانال امکان ارسال پیام دارند.')).toBeVisible()
+    await expect(page.locator('button.attach-btn')).toHaveCount(0)
+    await expect(page.locator('button.voice-btn')).toHaveCount(0)
+    await expect(page.getByRole('textbox', { name: 'پیام...' })).toHaveCount(0)
+
+    const response = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${fixture.channelId}/send`, {
+      headers: authHeaders(fixture.accessToken),
+      data: {
+        content: `PLAYWRIGHT MEMBER BLOCKED ${Date.now()}`,
+        message_type: 'text',
+      },
+    })
+
+    expect(response.status()).toBe(403)
+    await expect(response.json()).resolves.toMatchObject({
+      detail: 'Only channel admins can post messages',
+    })
   })
 })
