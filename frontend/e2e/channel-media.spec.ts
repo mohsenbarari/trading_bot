@@ -1503,6 +1503,96 @@ test.describe('Channel media regressions', () => {
     expect(channelPayload?.file_id).toBe(directPayload?.file_id)
   })
 
+  test('share receive can fan out shared document and image uploads to a channel and a direct chat target', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('share_receive_multi_two_files', 'admin')
+    const bootstrapContent = `PLAYWRIGHT SHARE RECEIVE MULTI TWO FILES ${Date.now()}`
+    const seedDirectContent = `PW DIRECT TWO FILE TARGET SEED ${Date.now()}`
+    const shareKey = `pw-share-multi-two-files-${Date.now()}`
+    const sharedDocumentName = `pw-share-multi-two-files-${Date.now()}.txt`
+    const sharedImageName = `pw-share-multi-two-files-${Date.now()}.png`
+    const sharedDocumentBody = `PW SHARE MULTI TWO FILE BODY ${Date.now()}`
+    const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
+    const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
+
+    await seedBootstrapChannelMessage(request, fixture, bootstrapContent)
+    await seedDirectTextMessage(request, fixture, seedDirectContent)
+    await loginWithSeededSession(page, fixture)
+    await seedShareReceivePayload(page, {
+      key: shareKey,
+      files: [
+        {
+          name: sharedDocumentName,
+          type: 'text/plain',
+          bodyBase64: Buffer.from(sharedDocumentBody, 'utf8').toString('base64'),
+        },
+        {
+          name: sharedImageName,
+          type: 'image/png',
+          bodyBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ6kAAAAASUVORK5CYII=',
+        },
+      ],
+    })
+
+    await page.goto(`/share-receive?share_key=${shareKey}`)
+    await expect(page.locator('.forward-modal')).toBeVisible()
+    await expect(channelTarget).toBeVisible()
+    await expect(directTarget).toBeVisible()
+
+    await channelTarget.click()
+    await directTarget.click()
+    await page.getByRole('button', { name: 'هدایت به 2 مقصد' }).click()
+
+    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await expect
+      .poll(() => {
+        const url = new URL(page.url())
+        return `${url.pathname}${url.search}`
+      }, { timeout: 30000 })
+      .toBe('/chat')
+    await expect(page.locator('.conversation-item').filter({ hasText: fixture.channelTitle })).toBeVisible()
+    await expect(page.locator('.conversation-item').filter({ hasText: fixture.creatorAccountName })).toBeVisible()
+
+    await expect
+      .poll(async () => fetchLatestRoomMessageTypes(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['document', 'image']))
+    await expect
+      .poll(async () => fetchLatestDirectMessageTypes(request, fixture, fixture.creatorUserId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['document', 'image']))
+    await expect
+      .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([
+        expect.stringContaining(sharedDocumentName),
+        expect.stringContaining(sharedImageName),
+      ]))
+    await expect
+      .poll(async () => fetchLatestDirectContents(request, fixture, fixture.creatorUserId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([
+        expect.stringContaining(sharedDocumentName),
+        expect.stringContaining(sharedImageName),
+      ]))
+
+    const [channelContents, directContents] = await Promise.all([
+      fetchLatestRoomContents(request, fixture),
+      fetchLatestDirectContents(request, fixture, fixture.creatorUserId),
+    ])
+
+    const channelDocumentPayload = extractSharedFilePayload(channelContents, sharedDocumentName)
+    const directDocumentPayload = extractSharedFilePayload(directContents, sharedDocumentName)
+    const channelImagePayload = extractSharedFilePayload(channelContents, sharedImageName)
+    const directImagePayload = extractSharedFilePayload(directContents, sharedImageName)
+
+    expect(channelDocumentPayload?.file_id).toBeTruthy()
+    expect(directDocumentPayload?.file_id).toBeTruthy()
+    expect(channelDocumentPayload?.file_id).toBe(directDocumentPayload?.file_id)
+
+    expect(channelImagePayload?.file_id).toBeTruthy()
+    expect(directImagePayload?.file_id).toBeTruthy()
+    expect(channelImagePayload?.file_id).toBe(directImagePayload?.file_id)
+  })
+
   test('share receive can route shared file and media payloads into a writable channel target', async ({
     page,
     request,
