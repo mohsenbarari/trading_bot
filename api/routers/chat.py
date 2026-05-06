@@ -15,6 +15,7 @@ from jose import jwt, JWTError
 
 from core.db import get_db
 from core.config import settings
+from models.chat import Chat
 from models.user import User
 from models.chat_file import ChatFile
 from api.deps import get_current_user, verify_super_admin
