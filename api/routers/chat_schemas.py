@@ -226,6 +226,32 @@ class GroupDetailRead(BaseModel):
     members: List[GroupMemberRead]
 
 
+class GroupUpdateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Group title is required")
+        return cleaned
+
+
+class GroupMemberAddRequest(BaseModel):
+    user_id: int = Field(..., gt=0)
+
+
+class GroupMemberMutationResponse(BaseModel):
+    chat_id: int
+    user_id: int
+    role: Optional[str] = None
+    removed: bool = False
+    left: bool = False
+    member_count: int
+    unchanged: bool = False
+
+
 class ChannelMemberRead(BaseModel):
     user_id: int
     account_name: str

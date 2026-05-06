@@ -34,8 +34,11 @@ from api.routers.chat_schemas import (
     GroupCreateRequest,
     GroupCreateResponse,
     GroupDetailRead,
+    GroupMemberAddRequest,
     GroupMemberRead,
+    GroupMemberMutationResponse,
     GroupRoomRead,
+    GroupUpdateRequest,
     MessageRead,
     MessageReactionToggle,
     MessageSend,
@@ -50,11 +53,14 @@ from core.enums import ChatMemberRole, ChatType
 from core.services.chat_room_service import (
     bulk_add_channel_members,
     count_active_chat_members,
+    add_group_member,
     create_group_chat,
     create_optional_channel,
+    get_active_group_admin_or_403,
     get_active_group_member_or_403,
     get_active_channel_member_or_403,
     get_group_or_404,
+    leave_group_chat,
     get_channel_or_404,
     list_group_members,
     list_groups_for_user,
@@ -69,7 +75,10 @@ from core.services.chat_room_service import (
     publish_channel_message_event,
     publish_channel_reaction_event,
     publish_channel_read_event,
+    remove_group_member,
     send_channel_message,
+    update_group_admin_status,
+    update_group_chat,
     update_optional_channel,
     update_channel_member,
 )
@@ -319,6 +328,139 @@ async def get_group_detail(
             )
             for item in members
         ],
+    )
+
+
+@router.patch("/groups/{chat_id}", response_model=GroupRoomRead)
+async def patch_group(
+    chat_id: int,
+    data: GroupUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """تغییر نام گروه توسط یکی از adminهای فعال"""
+    group = await get_group_or_404(db, chat_id)
+    admin_member = await get_active_group_admin_or_403(db, chat=group, user_id=current_user.id)
+    group = await update_group_chat(db, chat=group, title=data.title)
+    member_count = await count_active_chat_members(db, group.id)
+    return GroupRoomRead(
+        id=group.id,
+        type=group.type,
+        title=group.title or "",
+        description=group.description,
+        created_by_id=group.created_by_id,
+        member_count=member_count,
+        max_members=int(group.max_members or 50),
+        created_at=group.created_at,
+        current_user_role=admin_member.role.value,
+    )
+
+
+@router.post("/groups/{chat_id}/members", response_model=GroupMemberMutationResponse)
+async def post_group_member(
+    chat_id: int,
+    data: GroupMemberAddRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """افزودن یا re-activate کردن یک عضو گروه توسط admin فعال"""
+    group = await get_group_or_404(db, chat_id)
+    await get_active_group_admin_or_403(db, chat=group, user_id=current_user.id)
+    summary = await add_group_member(db, chat=group, user_id=data.user_id)
+    return GroupMemberMutationResponse(
+        chat_id=summary.chat_id,
+        user_id=summary.user_id,
+        role=summary.role.value if summary.role is not None else None,
+        removed=summary.removed,
+        left=summary.left,
+        member_count=summary.member_count,
+        unchanged=summary.unchanged,
+    )
+
+
+@router.delete("/groups/{chat_id}/members/{user_id}", response_model=GroupMemberMutationResponse)
+async def delete_group_member(
+    chat_id: int,
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """حذف یک عضو گروه توسط admin فعال"""
+    group = await get_group_or_404(db, chat_id)
+    await get_active_group_admin_or_403(db, chat=group, user_id=current_user.id)
+    summary = await remove_group_member(db, chat=group, acting_user_id=current_user.id, user_id=user_id)
+    return GroupMemberMutationResponse(
+        chat_id=summary.chat_id,
+        user_id=summary.user_id,
+        role=summary.role.value if summary.role is not None else None,
+        removed=summary.removed,
+        left=summary.left,
+        member_count=summary.member_count,
+        unchanged=summary.unchanged,
+    )
+
+
+@router.post("/groups/{chat_id}/admins/{user_id}", response_model=GroupMemberMutationResponse)
+async def promote_group_admin(
+    chat_id: int,
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """ارتقای یک عضو فعال گروه به admin"""
+    group = await get_group_or_404(db, chat_id)
+    await get_active_group_admin_or_403(db, chat=group, user_id=current_user.id)
+    summary = await update_group_admin_status(db, chat=group, user_id=user_id, make_admin=True)
+    return GroupMemberMutationResponse(
+        chat_id=summary.chat_id,
+        user_id=summary.user_id,
+        role=summary.role.value if summary.role is not None else None,
+        removed=summary.removed,
+        left=summary.left,
+        member_count=summary.member_count,
+        unchanged=summary.unchanged,
+    )
+
+
+@router.delete("/groups/{chat_id}/admins/{user_id}", response_model=GroupMemberMutationResponse)
+async def demote_group_admin(
+    chat_id: int,
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """تنزل یک admin گروه به member با last-admin guard"""
+    group = await get_group_or_404(db, chat_id)
+    await get_active_group_admin_or_403(db, chat=group, user_id=current_user.id)
+    summary = await update_group_admin_status(db, chat=group, user_id=user_id, make_admin=False)
+    return GroupMemberMutationResponse(
+        chat_id=summary.chat_id,
+        user_id=summary.user_id,
+        role=summary.role.value if summary.role is not None else None,
+        removed=summary.removed,
+        left=summary.left,
+        member_count=summary.member_count,
+        unchanged=summary.unchanged,
+    )
+
+
+@router.post("/groups/{chat_id}/leave", response_model=GroupMemberMutationResponse)
+async def post_group_leave(
+    chat_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """خروج عضو فعال از گروه با last-admin guard برای adminها"""
+    group = await get_group_or_404(db, chat_id)
+    summary = await leave_group_chat(db, chat=group, user_id=current_user.id)
+    return GroupMemberMutationResponse(
+        chat_id=summary.chat_id,
+        user_id=summary.user_id,
+        role=summary.role.value if summary.role is not None else None,
+        removed=summary.removed,
+        left=summary.left,
+        member_count=summary.member_count,
+        unchanged=summary.unchanged,
     )
 
 
