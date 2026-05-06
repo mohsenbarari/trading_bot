@@ -8,7 +8,7 @@ export interface Conversation {
     last_message_at: string | null
     unread_count: number
     other_user_last_seen_at?: string | null
-    room_kind?: 'direct' | 'channel'
+    room_kind?: 'direct' | 'channel' | 'group'
     chat_id?: number | null
     can_send?: boolean
     member_role?: 'admin' | 'member' | null

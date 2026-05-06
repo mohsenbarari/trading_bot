@@ -541,29 +541,35 @@ const handleMessagesScroll = async () => {
 
 const isSelectedUserDeleted = computed(() => {
   const conv = conversations.value.find(c => c.other_user_id === selectedUserId.value)
-  return conv?.room_kind === 'channel' ? false : !!conv?.other_user_is_deleted
+  return conv?.room_kind && conv.room_kind !== 'direct' ? false : !!conv?.other_user_is_deleted
 })
 
 const selectedConversation = computed(() => {
   return conversations.value.find(c => c.other_user_id === selectedUserId.value) ?? null
 })
 
-const selectedRoomKind = computed<'direct' | 'channel'>(() => {
-  return selectedConversation.value?.room_kind === 'channel' ? 'channel' : 'direct'
+const selectedRoomKind = computed<'direct' | 'channel' | 'group'>(() => {
+  const roomKind = selectedConversation.value?.room_kind
+  return roomKind === 'channel' || roomKind === 'group' ? roomKind : 'direct'
 })
 
 const canSendToSelectedRoom = computed(() => {
-  if (selectedRoomKind.value !== 'channel') return true
+  if (selectedRoomKind.value === 'direct') return true
   return selectedConversation.value?.can_send !== false
 })
 
 const isSelectedRoomReadOnly = computed(() => {
-  return selectedRoomKind.value === 'channel' && !canSendToSelectedRoom.value
+  return selectedRoomKind.value !== 'direct' && !canSendToSelectedRoom.value
 })
 
 const selectedRoomStatusText = computed(() => {
-  if (selectedRoomKind.value !== 'channel') {
+  if (selectedRoomKind.value === 'direct') {
     return targetUserStatus.value
+  }
+  if (selectedRoomKind.value === 'group') {
+    return selectedConversation.value?.member_role === 'admin'
+      ? 'گروه • شما مدیر هستید'
+      : 'گروه • عضو گروه هستید'
   }
   return canSendToSelectedRoom.value ? 'کانال • شما مدیر هستید' : 'کانال • فقط مدیران امکان ارسال دارند'
 })
@@ -1843,7 +1849,7 @@ function openForwardModal() {
 
 async function handleSendVoice(blob: Blob, durationMs: number) {
   if (!selectedUserId.value || !blob) return
-  if (selectedRoomKind.value === 'channel') return
+  if (selectedRoomKind.value !== 'direct') return
   const file = new File([blob], `voice_${Date.now()}.webm`, { type: blob.type || 'audio/webm' })
   // Pack durationMs into the file object so handleMediaUploadWrapper can extract it
   ;(file as any).durationMs = durationMs
@@ -1852,8 +1858,10 @@ async function handleSendVoice(blob: Blob, durationMs: number) {
 
 async function handleSendLocation(lat: number, lng: number) {
   if (!selectedUserId.value) return
-  if (selectedRoomKind.value === 'channel') {
-    alert('ارسال موقعیت در کانال در این فاز هنوز فعال نشده است.')
+  if (selectedRoomKind.value !== 'direct') {
+    alert(selectedRoomKind.value === 'group'
+      ? 'ارسال موقعیت در گروه در این فاز هنوز فعال نشده است.'
+      : 'ارسال موقعیت در کانال در این فاز هنوز فعال نشده است.')
     return
   }
   const normalized = normalizeLocationPayload({ lat, lng })
@@ -2601,7 +2609,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         :isReadOnly="isSelectedRoomReadOnly"
         :readOnlyBannerText="selectedRoomKind === 'channel' ? 'فقط مدیران کانال امکان ارسال پیام دارند.' : undefined"
         :disableRichComposer="isSelectedRoomReadOnly"
-        :allowVoiceRecording="selectedRoomKind !== 'channel'"
+        :allowVoiceRecording="selectedRoomKind === 'direct'"
         :selectedMessages="selectedMessages"
         :isUploading="isUploading"
         @cancel-edit="cancelEdit"
@@ -2619,7 +2627,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       <!-- Attachment Bottom Sheet -->
       <AttachmentMenu
         v-model="showAttachmentMenu"
-        :allowLocation="selectedRoomKind !== 'channel'"
+        :allowLocation="selectedRoomKind === 'direct'"
         @select-media="handleMediaUploadWrapper"
         @select-file="(file) => handleMediaUploadWrapper(file, null, 0, 1, { sendAsDocument: true })"
         @select-location="handleSendLocation"

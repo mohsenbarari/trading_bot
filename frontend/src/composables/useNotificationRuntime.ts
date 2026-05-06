@@ -13,6 +13,7 @@ import {
     showBrowserNotification,
 } from '../utils/browserNotifications'
 import { unlockAudioContext } from '../utils/audio'
+import { resolveRoomConversationKey } from '../utils/chatRoomRouting'
 
 type WebSocketEventHandler<T = any> = (data: T) => void
 
@@ -28,9 +29,9 @@ function buildChatNotificationRoute(senderId: number, senderName: string): strin
 }
 
 function resolveRealtimeConversationKey(payload: ChatRealtimeNotificationPayload): number | null {
-    if (payload.room_kind === 'channel') {
-        const chatId = Number(payload.chat_id)
-        return Number.isFinite(chatId) && chatId > 0 ? -chatId : null
+    const roomConversationKey = resolveRoomConversationKey(payload.room_kind, payload.chat_id)
+    if (roomConversationKey !== null) {
+        return roomConversationKey
     }
 
     const senderId = Number(payload.sender_id)
@@ -40,6 +41,9 @@ function resolveRealtimeConversationKey(payload: ChatRealtimeNotificationPayload
 function buildRealtimeConversationLabel(payload: ChatRealtimeNotificationPayload): string {
     if (payload.room_kind === 'channel') {
         return payload.conversation_title || 'کانال'
+    }
+    if (payload.room_kind === 'group') {
+        return payload.conversation_title || 'گروه'
     }
     return payload.sender_name || 'پیام جدید'
 }

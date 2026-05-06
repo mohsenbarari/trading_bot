@@ -22,6 +22,14 @@ function isChannelConversation(conv: Conversation) {
   return conv.room_kind === 'channel'
 }
 
+function isGroupConversation(conv: Conversation) {
+  return conv.room_kind === 'group'
+}
+
+function isRoomConversation(conv: Conversation) {
+  return isChannelConversation(conv) || isGroupConversation(conv)
+}
+
 function getConversationInitial(conv: Conversation) {
   return (conv.other_user_name || '?').charAt(0)
 }
@@ -57,22 +65,23 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
         conv.last_message_content,
         conv.unread_count,
         selectedUserId === conv.other_user_id,
-        !isChannelConversation(conv) && !!typingUsers[conv.other_user_id],
+        !isRoomConversation(conv) && !!typingUsers[conv.other_user_id],
       ]"
       class="conversation-item"
       v-ripple
       :class="{ 'has-unread': conv.unread_count > 0, 'active': selectedUserId === conv.other_user_id }"
       @click="emit('select-conversation', conv)"
     >
-      <div class="conv-avatar" :class="{ 'channel-avatar': isChannelConversation(conv) }">
+      <div class="conv-avatar" :class="{ 'channel-avatar': isRoomConversation(conv) }">
         {{ getConversationInitial(conv) }}
-        <div v-if="!isChannelConversation(conv) && isUserOnline(conv.other_user_last_seen_at)" class="online-indicator-dot"></div>
+        <div v-if="!isRoomConversation(conv) && isUserOnline(conv.other_user_last_seen_at)" class="online-indicator-dot"></div>
       </div>
       <div class="conv-content">
         <div class="conv-header">
           <span class="conv-name">
             {{ conv.other_user_name }}
             <span v-if="isChannelConversation(conv)" class="channel-badge-list">کانال</span>
+            <span v-else-if="isGroupConversation(conv)" class="channel-badge-list">گروه</span>
             <span v-if="conv.other_user_is_deleted" class="deleted-badge-list">غیرفعال</span>
           </span>
           <span class="conv-time" v-if="conv.last_message_at">
@@ -80,11 +89,12 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
           </span>
         </div>
         <div class="conv-preview">
-          <span v-if="!isChannelConversation(conv) && typingUsers[conv.other_user_id]" class="typing-text">
+            <span v-if="!isRoomConversation(conv) && typingUsers[conv.other_user_id]" class="typing-text">
              🖊️ در حال نوشتن...
           </span>
           <template v-else>
               <template v-if="isChannelConversation(conv) && !conv.last_message_type">📣 کانال</template>
+              <template v-else-if="isGroupConversation(conv) && !conv.last_message_type">👥 گروه</template>
               <template v-if="conv.last_message_type === 'image'">🖼️ تصویر</template>
               <template v-else-if="conv.last_message_type === 'video'">📹 ویدئو</template>
               <template v-else-if="conv.last_message_type === 'voice'">🎤 پیام صوتی</template>
