@@ -125,7 +125,7 @@ const props = defineProps<{
   isSelectionMode: boolean
   selectedUserId: number | null
   selectedUserName: string
-  selectedRoomKind?: 'direct' | 'channel' | null
+  selectedRoomKind?: 'direct' | 'channel' | 'group' | null
   targetUserStatus: string
   isTyping: boolean
   totalUnread: number

@@ -1,5 +1,6 @@
 import { ref, computed, onMounted, onUnmounted, type Ref } from 'vue'
 import { useWebSocket } from '../../composables/useWebSocket'
+import { resolveRoomConversationKey } from '../../utils/chatRoomRouting'
 
 export interface UseChatWebSocketOptions {
     selectedUserId: Ref<number | null>
@@ -38,9 +39,9 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     const isTyping = computed(() => selectedUserId.value ? !!typingUsers.value[selectedUserId.value] : false)
 
     function getConversationKeyFromPayload(data: any): number | null {
-        if (data?.room_kind === 'channel') {
-            const chatId = Number(data?.chat_id)
-            return Number.isFinite(chatId) && chatId > 0 ? -chatId : null
+        const roomConversationKey = resolveRoomConversationKey(data?.room_kind, data?.chat_id)
+        if (roomConversationKey !== null) {
+            return roomConversationKey
         }
 
         const senderId = Number(data?.sender_id)
@@ -154,13 +155,9 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     }
 
     function handleReadEvent(data: any) {
-        if (data?.room_kind === 'channel') {
-            const chatId = Number(data?.chat_id)
-            if (!Number.isFinite(chatId) || chatId <= 0) {
-                return
-            }
-
-            const conversationKey = -chatId
+        const roomConversationKey = resolveRoomConversationKey(data?.room_kind, data?.chat_id)
+        if (roomConversationKey !== null) {
+            const conversationKey = roomConversationKey
             if (selectedUserId.value === conversationKey) {
                 const conv = conversations.value.find((item: any) => item && item.other_user_id === conversationKey)
                 if (conv) {

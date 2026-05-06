@@ -440,17 +440,25 @@ async function fetchChannelConversationUnread(
   request: APIRequestContext,
   fixture: SeededChannelAdminFixture,
 ): Promise<number> {
+  return fetchConversationUnreadByChatId(request, fixture.accessToken, fixture.channelId)
+}
+
+async function fetchConversationUnreadByChatId(
+  request: APIRequestContext,
+  accessToken: string,
+  chatId: number,
+): Promise<number> {
   const response = await request.get(`${BACKEND_BASE_URL}/api/chat/conversations`, {
-    headers: authHeaders(fixture.accessToken),
+    headers: authHeaders(accessToken),
   })
 
   expect(response.ok()).toBeTruthy()
   const body = (await response.json()) as Array<{ chat_id?: number; unread_count?: number }>
-  const channel = Array.isArray(body)
-    ? body.find((item) => Number(item?.chat_id) === fixture.channelId)
+  const roomConversation = Array.isArray(body)
+    ? body.find((item) => Number(item?.chat_id) === chatId)
     : undefined
 
-  return Number(channel?.unread_count || 0)
+  return Number(roomConversation?.unread_count || 0)
 }
 
 async function fetchRoomMessageReactionEmojis(
@@ -2458,5 +2466,75 @@ test.describe('Channel media regressions', () => {
         unread_count: 1,
       }),
     ]))
+  })
+
+  test('group member gets realtime unread update and live append in an open room', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('group_realtime_ui', 'member')
+    const groupTitle = `Group Realtime ${Date.now()}`
+    const unreadContent = `PW GROUP UNREAD ${Date.now()}`
+    const liveContent = `PW GROUP LIVE ${Date.now()}`
+
+    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        title: groupTitle,
+        member_ids: [fixture.userId],
+      },
+    })
+    expect(createResponse.ok()).toBeTruthy()
+    const createPayload = await createResponse.json()
+    const groupId = Number(createPayload.group.id)
+    const conversationRow = page.locator('.conversation-item').filter({ hasText: groupTitle })
+
+    await loginWithSeededSession(page, fixture)
+
+    await page.goto('/chat')
+    await expect(conversationRow).toBeVisible()
+    await expect(conversationRow.locator('.channel-badge-list')).toHaveText('گروه')
+    await page.waitForTimeout(1200)
+
+    await expect(conversationRow.locator('.unread-badge')).toHaveCount(0)
+    await expect
+      .poll(async () => fetchConversationUnreadByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
+      .toBe(0)
+
+    const unreadResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        content: unreadContent,
+        message_type: 'text',
+      },
+    })
+
+    expect(unreadResponse.ok()).toBeTruthy()
+
+    await expect(conversationRow.locator('.unread-badge')).toHaveText('1')
+    await expect
+      .poll(async () => fetchConversationUnreadByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
+      .toBe(1)
+
+    await conversationRow.click()
+
+    await expect(page.locator('.chat-header').getByText(groupTitle)).toBeVisible()
+    await expect(page.locator('.chat-header').getByText('گروه • عضو گروه هستید')).toBeVisible()
+    await expect(page.locator('.messages-container').getByText(unreadContent)).toBeVisible()
+    await expect
+      .poll(async () => fetchConversationUnreadByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
+      .toBe(0)
+
+    const liveResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        content: liveContent,
+        message_type: 'text',
+      },
+    })
+
+    expect(liveResponse.ok()).toBeTruthy()
+
+    await expect(page.locator('.messages-container').getByText(liveContent)).toBeVisible()
   })
 })

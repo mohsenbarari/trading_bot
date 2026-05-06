@@ -108,6 +108,10 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
   const userMap = new Map(allUsers.value.map(user => [user.id, user]))
 
   props.sortedConversations.forEach((conversation, index) => {
+    if (conversation.room_kind === 'group') {
+      return
+    }
+
     if (conversation.room_kind === 'channel') {
       const chatId = conversation.chat_id
       if (!props.includeChannels || typeof chatId !== 'number' || conversation.can_send === false) return
