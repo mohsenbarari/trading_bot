@@ -2413,4 +2413,50 @@ test.describe('Channel media regressions', () => {
       }),
     ]))
   })
+
+  test('group conversations appear in the main conversation list with synthetic room ids', async ({
+    request,
+  }) => {
+    const fixture = seedChannelSession('group_conversation_list', 'admin')
+    const groupTitle = `Group Conversation ${Date.now()}`
+    const creatorMessageText = `GROUP CONVERSATION ROW ${Date.now()}`
+
+    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        title: groupTitle,
+        member_ids: [fixture.userId],
+      },
+    })
+    expect(createResponse.ok()).toBeTruthy()
+    const createPayload = await createResponse.json()
+    const groupId = Number(createPayload.group.id)
+
+    const sendResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        content: creatorMessageText,
+        message_type: 'text',
+      },
+    })
+    expect(sendResponse.ok()).toBeTruthy()
+
+    const conversationsResponse = await request.get(`${BACKEND_BASE_URL}/api/chat/conversations`, {
+      headers: authHeaders(fixture.accessToken),
+    })
+    expect(conversationsResponse.ok()).toBeTruthy()
+    await expect(conversationsResponse.json()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: -groupId,
+        other_user_id: -groupId,
+        other_user_name: groupTitle,
+        room_kind: 'group',
+        chat_id: groupId,
+        can_send: true,
+        member_role: 'member',
+        last_message_content: creatorMessageText,
+        unread_count: 1,
+      }),
+    ]))
+  })
 })
