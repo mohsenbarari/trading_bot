@@ -364,6 +364,20 @@ async function fetchLatestDirectContents(
   return Array.isArray(body) ? body.map((item) => item.content || '') : []
 }
 
+async function fetchLatestDirectMessageTypes(
+  request: APIRequestContext,
+  fixture: SeededChannelAdminFixture,
+  otherUserId: number,
+): Promise<string[]> {
+  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/messages/${otherUserId}?limit=12`, {
+    headers: authHeaders(fixture.accessToken),
+  })
+
+  expect(response.ok()).toBeTruthy()
+  const body = (await response.json()) as Array<{ message_type?: string }>
+  return Array.isArray(body) ? body.map((item) => item.message_type || '') : []
+}
+
 function extractSharedFilePayload(
   contents: string[],
   expectedFileName: string,
@@ -1399,6 +1413,90 @@ test.describe('Channel media regressions', () => {
 
     const channelPayload = extractSharedFilePayload(channelContents, sharedImageName)
     const directPayload = extractSharedFilePayload(directContents, sharedImageName)
+
+    expect(channelPayload?.file_id).toBeTruthy()
+    expect(directPayload?.file_id).toBeTruthy()
+    expect(channelPayload?.file_id).toBe(directPayload?.file_id)
+  })
+
+  test('share receive can fan out shared text and one shared video to a channel and a direct chat target', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('share_receive_multi_text_video', 'admin')
+    const bootstrapContent = `PLAYWRIGHT SHARE RECEIVE MULTI TEXT VIDEO ${Date.now()}`
+    const seedDirectContent = `PW DIRECT TEXT VIDEO TARGET SEED ${Date.now()}`
+    const shareKey = `pw-share-multi-text-video-${Date.now()}`
+    const shareTitle = `Playwright Shared Video Title ${Date.now()}`
+    const shareText = `Playwright Shared Video Body ${Date.now()}`
+    const shareUrl = `https://example.test/share/multi-text-video/${Date.now()}`
+    const expectedMergedText = `${shareTitle}\n${shareText}\n${shareUrl}`
+    const sharedVideoName = `pw-share-multi-text-video-${Date.now()}.webm`
+    const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
+    const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
+
+    await seedBootstrapChannelMessage(request, fixture, bootstrapContent)
+    await seedDirectTextMessage(request, fixture, seedDirectContent)
+    await loginWithSeededSession(page, fixture)
+    await seedShareReceivePayload(page, {
+      key: shareKey,
+      title: shareTitle,
+      text: shareText,
+      url: shareUrl,
+      files: [
+        {
+          name: sharedVideoName,
+          type: 'video/webm',
+          generator: 'video',
+        },
+      ],
+    })
+
+    await page.goto(`/share-receive?share_key=${shareKey}`)
+    await expect(page.locator('.forward-modal')).toBeVisible()
+    await expect(channelTarget).toBeVisible()
+    await expect(directTarget).toBeVisible()
+
+    await channelTarget.click()
+    await directTarget.click()
+    await page.getByRole('button', { name: 'هدایت به 2 مقصد' }).click()
+
+    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await expect
+      .poll(() => {
+        const url = new URL(page.url())
+        return `${url.pathname}${url.search}`
+      }, { timeout: 30000 })
+      .toBe('/chat')
+    await expect(page.locator('.conversation-item').filter({ hasText: fixture.channelTitle })).toBeVisible()
+    await expect(page.locator('.conversation-item').filter({ hasText: fixture.creatorAccountName })).toBeVisible()
+
+    await expect
+      .poll(async () => fetchLatestRoomMessageTypes(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['video', 'text']))
+    await expect
+      .poll(async () => fetchLatestDirectMessageTypes(request, fixture, fixture.creatorUserId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['video', 'text']))
+    await expect
+      .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([
+        expectedMergedText,
+        expect.stringContaining(sharedVideoName),
+      ]))
+    await expect
+      .poll(async () => fetchLatestDirectContents(request, fixture, fixture.creatorUserId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([
+        expectedMergedText,
+        expect.stringContaining(sharedVideoName),
+      ]))
+
+    const [channelContents, directContents] = await Promise.all([
+      fetchLatestRoomContents(request, fixture),
+      fetchLatestDirectContents(request, fixture, fixture.creatorUserId),
+    ])
+
+    const channelPayload = extractSharedFilePayload(channelContents, sharedVideoName)
+    const directPayload = extractSharedFilePayload(directContents, sharedVideoName)
 
     expect(channelPayload?.file_id).toBeTruthy()
     expect(directPayload?.file_id).toBeTruthy()
