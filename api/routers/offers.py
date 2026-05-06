@@ -4,7 +4,7 @@ API Router for Offer Management - MiniApp Integration
 """
 import logging
 import os
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 import httpx
@@ -38,7 +38,7 @@ class OfferCreate(BaseModel):
     """ایجاد لفظ جدید"""
     offer_type: str = Field(..., pattern="^(buy|sell)$", description="نوع: buy یا sell")
     commodity_id: int = Field(..., gt=0)
-    quantity: int = Field(..., gt=0, le=1000)
+    quantity: int = Field(..., gt=0, le=50)
     price: int = Field(..., gt=0)
     is_wholesale: bool = Field(default=True, description="یکجا یا خُرد")
     lot_sizes: Optional[List[int]] = Field(default=None, description="بخش‌ها برای فروش خُرد")
@@ -72,7 +72,7 @@ class OfferResponse(BaseModel):
 
 class ParseOfferRequest(BaseModel):
     """درخواست پارس متن لفظ"""
-    text: str = Field(..., min_length=3, max_length=200)
+    text: str = Field(..., min_length=3, max_length=500)
 
 
 class ParseOfferResponse(BaseModel):
@@ -492,6 +492,38 @@ async def expire_offer(
     """
     منقضی کردن لفظ
     """
+    ts = get_trading_settings()
+
+    from bot.utils.redis_helpers import track_daily_expire, track_expire_rate
+
+    rate_count = await track_expire_rate(current_user.id, window_seconds=60)
+    if rate_count > ts.offer_expire_rate_per_minute:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"حداکثر {ts.offer_expire_rate_per_minute} منقضی در دقیقه مجاز است"
+        )
+
+    start_of_day = datetime.combine(date.today(), datetime.min.time())
+    total_offers_today = await db.scalar(
+        select(func.count(Offer.id)).where(
+            Offer.user_id == current_user.id,
+            Offer.created_at >= start_of_day
+        )
+    ) or 0
+
+    daily_data = await track_daily_expire(current_user.id, total_offers_today)
+    threshold = ts.offer_expire_daily_limit_after_threshold
+    if daily_data["count"] >= threshold:
+        max_allowed = total_offers_today // 3
+        if daily_data["count"] >= max_allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"شما امروز {daily_data['count']} لفظ منقضی کرده‌اید. "
+                    f"برای منقضی کردن بیشتر، باید لفظ‌های جدید ثبت کنید."
+                )
+            )
+
     offer = await db.get(Offer, offer_id)
     
     if not offer:

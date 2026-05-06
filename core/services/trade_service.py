@@ -242,7 +242,7 @@ def validate_quantity(quantity: Union[int, float, str]) -> Tuple[bool, str]:
     
     settings = get_trading_settings()
     MIN_QTY = settings.offer_min_quantity
-    MAX_QTY = settings.offer_max_quantity
+    MAX_QTY = min(settings.offer_max_quantity, 50)
     
     if quantity < MIN_QTY:
         return False, f"❌ تعداد باید حداقل {MIN_QTY} باشد."
@@ -271,6 +271,9 @@ def validate_price(price: Union[int, float, str]) -> Tuple[bool, str]:
     
     if price <= 0:
         return False, "❌ قیمت باید بزرگ‌تر از صفر باشد."
+
+    if len(str(price)) not in (5, 6):
+        return False, "❌ قیمت باید 5 یا 6 رقم باشد (مثال: 75800 یا 758000)"
     
     return True, ""
 
