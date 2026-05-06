@@ -48,11 +48,15 @@ from core.services.chat_room_service import (
     get_active_channel_member_or_403,
     get_channel_or_404,
     list_channel_conversations,
+    list_active_channel_member_user_ids,
     list_channel_invite_candidates,
     list_channel_members,
     list_channel_messages,
     list_optional_channels,
     mark_channel_messages_read,
+    mark_channel_messages_read_with_broadcast,
+    publish_channel_message_event,
+    publish_channel_read_event,
     send_channel_message,
     update_optional_channel,
     update_channel_member,
@@ -457,6 +461,13 @@ async def send_room_message(
         reply_to_message_id=data.reply_to_message_id,
         forwarded_from_id=data.forwarded_from_id,
     )
+    await publish_channel_message_event(
+        chat=chat,
+        message=message,
+        member_user_ids=await list_active_channel_member_user_ids(db, chat_id=chat.id),
+        serializer=MessageRead.from_orm_with_forwarding,
+        publisher=publish_user_event,
+    )
     return serialize_direct_message_for_response(
         message,
         serializer=MessageRead.from_orm_with_forwarding,
@@ -471,7 +482,17 @@ async def mark_room_messages_read(
 ):
     """علامت‌گذاری room/channel فعلی به‌عنوان خوانده‌شده"""
     chat = await get_channel_or_404(db, chat_id)
-    await mark_channel_messages_read(db, chat=chat, user_id=current_user.id)
+    read_summary = await mark_channel_messages_read_with_broadcast(
+        db,
+        chat=chat,
+        user_id=current_user.id,
+    )
+    await publish_channel_read_event(
+        chat_id=read_summary.chat_id,
+        reader_id=read_summary.reader_id,
+        member_user_ids=read_summary.member_user_ids,
+        publisher=publish_user_event,
+    )
     return None
 
 

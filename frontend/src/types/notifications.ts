@@ -54,6 +54,9 @@ export interface ChatRealtimeNotificationPayload {
     sender_name?: string
     content?: string
     message_type?: string
+    room_kind?: 'direct' | 'channel' | string
+    chat_id?: number | string
+    conversation_title?: string
 }
 
 export interface SessionLoginRequestPayload {
