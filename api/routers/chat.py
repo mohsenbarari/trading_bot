@@ -56,6 +56,7 @@ from core.services.chat_room_service import (
     mark_channel_messages_read,
     mark_channel_messages_read_with_broadcast,
     publish_channel_message_event,
+    publish_channel_reaction_event,
     publish_channel_read_event,
     send_channel_message,
     update_optional_channel,
@@ -580,11 +581,21 @@ async def toggle_message_reaction(
         updated_message,
         serializer=MessageRead.from_orm_with_forwarding,
     )
-    await publish_direct_reaction_event(
-        message=updated_message,
-        serializer=MessageRead.from_orm_with_forwarding,
-        publisher=publish_user_event,
-    )
+    reaction_chat = await db.get(Chat, updated_message.chat_id) if updated_message.chat_id else None
+    if reaction_chat is not None and reaction_chat.type == ChatType.CHANNEL and not reaction_chat.is_deleted:
+        await publish_channel_reaction_event(
+            chat=reaction_chat,
+            message=updated_message,
+            member_user_ids=await list_active_channel_member_user_ids(db, chat_id=reaction_chat.id),
+            serializer=MessageRead.from_orm_with_forwarding,
+            publisher=publish_user_event,
+        )
+    else:
+        await publish_direct_reaction_event(
+            message=updated_message,
+            serializer=MessageRead.from_orm_with_forwarding,
+            publisher=publish_user_event,
+        )
 
     return reaction_payload
 
