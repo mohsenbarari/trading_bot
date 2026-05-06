@@ -141,6 +141,13 @@ class ChannelReadBroadcastSummary:
     chat_id: int
 
 
+@dataclass
+class GroupReadBroadcastSummary:
+    member_user_ids: list[int]
+    reader_id: int
+    chat_id: int
+
+
 def _utcnow() -> datetime:
     return datetime.utcnow()
 
@@ -196,6 +203,19 @@ async def get_group_or_404(db: AsyncSession, chat_id: int) -> Chat:
     return chat
 
 
+async def get_room_or_404(db: AsyncSession, chat_id: int) -> Chat:
+    stmt = select(Chat).where(
+        Chat.id == chat_id,
+        Chat.type.in_((ChatType.CHANNEL, ChatType.GROUP)),
+        Chat.is_deleted.is_(False),
+    )
+    result = await db.execute(stmt)
+    chat = result.scalar_one_or_none()
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+    return chat
+
+
 async def count_active_chat_members(db: AsyncSession, chat_id: int) -> int:
     """Count active members for one chat room."""
     stmt = select(func.count(ChatMember.id)).where(
@@ -217,6 +237,10 @@ async def count_active_chat_admins(db: AsyncSession, chat_id: int) -> int:
 
 
 async def list_active_channel_member_user_ids(db: AsyncSession, *, chat_id: int) -> list[int]:
+    return await list_active_room_member_user_ids(db, chat_id=chat_id)
+
+
+async def list_active_room_member_user_ids(db: AsyncSession, *, chat_id: int) -> list[int]:
     stmt = select(ChatMember.user_id).where(
         ChatMember.chat_id == chat_id,
         ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
@@ -505,6 +529,23 @@ async def list_group_members(db: AsyncSession, *, chat: Chat) -> list[GroupMembe
             )
         )
     return items
+
+
+async def list_group_messages(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    limit: int = 50,
+    before_id: int | None = None,
+    around_id: int | None = None,
+) -> list[Message]:
+    return await list_channel_messages(
+        db,
+        chat=chat,
+        limit=limit,
+        before_id=before_id,
+        around_id=around_id,
+    )
 
 
 async def get_active_channel_member_or_403(
@@ -978,6 +1019,76 @@ async def publish_channel_reaction_event(
         await publisher(user_id, "chat:reaction", payload)
 
 
+def build_group_message_event_payload(
+    message: Message,
+    *,
+    chat: Chat,
+    serializer: Callable[[Message], SerializedMessageT],
+) -> dict[str, object]:
+    payload = jsonable_encoder(serializer(message))
+    payload["room_kind"] = "group"
+    payload["chat_id"] = chat.id
+    payload["conversation_id"] = -int(chat.id)
+    payload["conversation_other_user_id"] = -int(chat.id)
+    payload["conversation_title"] = chat.title or f"گروه {chat.id}"
+    payload["can_send"] = True
+    return payload
+
+
+async def publish_group_message_event(
+    *,
+    chat: Chat,
+    message: Message,
+    member_user_ids: list[int],
+    serializer: Callable[[Message], SerializedMessageT],
+    publisher: RoomEventPublisher,
+) -> None:
+    payload = build_group_message_event_payload(
+        message,
+        chat=chat,
+        serializer=serializer,
+    )
+    for user_id in member_user_ids:
+        if user_id == message.sender_id:
+            continue
+        await publisher(user_id, "chat:message", payload)
+
+
+async def publish_group_read_event(
+    *,
+    chat_id: int,
+    reader_id: int,
+    member_user_ids: list[int],
+    publisher: RoomEventPublisher,
+) -> None:
+    payload = {
+        "room_kind": "group",
+        "chat_id": chat_id,
+        "reader_id": reader_id,
+    }
+    for user_id in member_user_ids:
+        if user_id == reader_id:
+            continue
+        await publisher(user_id, "chat:read", payload)
+
+
+async def publish_group_reaction_event(
+    *,
+    chat: Chat,
+    message: Message,
+    member_user_ids: list[int],
+    serializer: Callable[[Message], SerializedMessageT],
+    publisher: RoomEventPublisher,
+) -> None:
+    payload = build_group_message_event_payload(
+        message,
+        chat=chat,
+        serializer=serializer,
+    )
+    for user_id in member_user_ids:
+        await publisher(user_id, "chat:reaction", payload)
+
+
 async def list_channel_invite_candidates(
     db: AsyncSession,
     *,
@@ -1265,6 +1376,52 @@ async def send_channel_message(
     return reloaded_message
 
 
+async def send_group_message(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    sender: User,
+    content: str,
+    message_type: MessageType,
+    reply_to_message_id: int | None = None,
+    forwarded_from_id: int | None = None,
+) -> Message:
+    member = await get_active_group_member_or_403(db, chat=chat, user_id=sender.id)
+
+    if reply_to_message_id is not None:
+        reply_to_message = await db.get(Message, reply_to_message_id)
+        if reply_to_message is None or reply_to_message.chat_id != chat.id:
+            raise HTTPException(status_code=400, detail="Reply target is not part of this group")
+
+    now = _utcnow()
+    message = Message(
+        chat_id=chat.id,
+        sender_id=sender.id,
+        receiver_id=sender.id,
+        content=content,
+        message_type=message_type,
+        reply_to_message_id=reply_to_message_id,
+        forwarded_from_id=forwarded_from_id,
+        is_read=True,
+        created_at=now,
+    )
+    db.add(message)
+    await db.flush()
+
+    chat.last_message_id = message.id
+    chat.last_message_at = now
+    chat.updated_at = now
+    member.last_read_message_id = message.id
+    member.last_read_at = now
+    member.updated_at = now
+
+    await db.commit()
+    reloaded_message = await _reload_channel_message(db, message.id)
+    if reloaded_message is None:
+        raise HTTPException(status_code=500, detail="Failed to reload group message")
+    return reloaded_message
+
+
 async def mark_channel_messages_read(
     db: AsyncSession,
     *,
@@ -1295,6 +1452,41 @@ async def mark_channel_messages_read_with_broadcast(
     await mark_channel_messages_read(db, chat=chat, user_id=user_id)
     return ChannelReadBroadcastSummary(
         member_user_ids=await list_active_channel_member_user_ids(db, chat_id=chat.id),
+        reader_id=user_id,
+        chat_id=chat.id,
+    )
+
+
+async def mark_group_messages_read(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+) -> None:
+    member = await get_active_group_member_or_403(db, chat=chat, user_id=user_id)
+    latest_message_id_result = await db.execute(
+        select(func.max(Message.id)).where(
+            Message.chat_id == chat.id,
+            Message.is_deleted.is_(False),
+        )
+    )
+    latest_message_id = latest_message_id_result.scalar_one_or_none()
+    now = _utcnow()
+    member.last_read_message_id = latest_message_id
+    member.last_read_at = now
+    member.updated_at = now
+    await db.commit()
+
+
+async def mark_group_messages_read_with_broadcast(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+) -> GroupReadBroadcastSummary:
+    await mark_group_messages_read(db, chat=chat, user_id=user_id)
+    return GroupReadBroadcastSummary(
+        member_user_ids=await list_active_room_member_user_ids(db, chat_id=chat.id),
         reader_id=user_id,
         chat_id=chat.id,
     )

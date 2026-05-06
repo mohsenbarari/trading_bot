@@ -51,19 +51,22 @@ from api.routers.chat_schemas import (
 
 from core.enums import ChatMemberRole, ChatType
 from core.services.chat_room_service import (
+    add_group_member,
     bulk_add_channel_members,
     count_active_chat_members,
-    add_group_member,
     create_group_chat,
     create_optional_channel,
+    get_room_or_404,
     get_active_group_admin_or_403,
     get_active_group_member_or_403,
     get_active_channel_member_or_403,
     get_group_or_404,
-    leave_group_chat,
     get_channel_or_404,
+    leave_group_chat,
     list_group_members,
+    list_group_messages,
     list_groups_for_user,
+    list_active_room_member_user_ids,
     list_channel_conversations,
     list_active_channel_member_user_ids,
     list_channel_invite_candidates,
@@ -72,10 +75,15 @@ from core.services.chat_room_service import (
     list_optional_channels,
     mark_channel_messages_read,
     mark_channel_messages_read_with_broadcast,
+    mark_group_messages_read_with_broadcast,
+    publish_group_message_event,
+    publish_group_reaction_event,
+    publish_group_read_event,
     publish_channel_message_event,
     publish_channel_reaction_event,
     publish_channel_read_event,
     remove_group_member,
+    send_group_message,
     send_channel_message,
     update_group_admin_status,
     update_group_chat,
@@ -671,16 +679,26 @@ async def get_room_messages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """تاریخچه پیام‌های room/channel روی foundation عمومی chat"""
-    chat = await get_channel_or_404(db, chat_id)
-    await get_active_channel_member_or_403(db, chat=chat, user_id=current_user.id)
-    messages = await list_channel_messages(
-        db,
-        chat=chat,
-        limit=limit,
-        before_id=before_id,
-        around_id=around_id,
-    )
+    """تاریخچه پیام‌های room/group/channel روی foundation عمومی chat"""
+    chat = await get_room_or_404(db, chat_id)
+    if chat.type == ChatType.GROUP:
+        await get_active_group_member_or_403(db, chat=chat, user_id=current_user.id)
+        messages = await list_group_messages(
+            db,
+            chat=chat,
+            limit=limit,
+            before_id=before_id,
+            around_id=around_id,
+        )
+    else:
+        await get_active_channel_member_or_403(db, chat=chat, user_id=current_user.id)
+        messages = await list_channel_messages(
+            db,
+            chat=chat,
+            limit=limit,
+            before_id=before_id,
+            around_id=around_id,
+        )
     return serialize_direct_messages_for_response(
         messages,
         serializer=MessageRead.from_orm_with_forwarding,
@@ -694,24 +712,42 @@ async def send_room_message(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """ارسال post/message به channel runtime روی foundation عمومی chat"""
-    chat = await get_channel_or_404(db, chat_id)
-    message = await send_channel_message(
-        db,
-        chat=chat,
-        sender=current_user,
-        content=data.content,
-        message_type=data.message_type,
-        reply_to_message_id=data.reply_to_message_id,
-        forwarded_from_id=data.forwarded_from_id,
-    )
-    await publish_channel_message_event(
-        chat=chat,
-        message=message,
-        member_user_ids=await list_active_channel_member_user_ids(db, chat_id=chat.id),
-        serializer=MessageRead.from_orm_with_forwarding,
-        publisher=publish_user_event,
-    )
+    """ارسال post/message به room/group/channel روی foundation عمومی chat"""
+    chat = await get_room_or_404(db, chat_id)
+    if chat.type == ChatType.GROUP:
+        message = await send_group_message(
+            db,
+            chat=chat,
+            sender=current_user,
+            content=data.content,
+            message_type=data.message_type,
+            reply_to_message_id=data.reply_to_message_id,
+            forwarded_from_id=data.forwarded_from_id,
+        )
+        await publish_group_message_event(
+            chat=chat,
+            message=message,
+            member_user_ids=await list_active_room_member_user_ids(db, chat_id=chat.id),
+            serializer=MessageRead.from_orm_with_forwarding,
+            publisher=publish_user_event,
+        )
+    else:
+        message = await send_channel_message(
+            db,
+            chat=chat,
+            sender=current_user,
+            content=data.content,
+            message_type=data.message_type,
+            reply_to_message_id=data.reply_to_message_id,
+            forwarded_from_id=data.forwarded_from_id,
+        )
+        await publish_channel_message_event(
+            chat=chat,
+            message=message,
+            member_user_ids=await list_active_channel_member_user_ids(db, chat_id=chat.id),
+            serializer=MessageRead.from_orm_with_forwarding,
+            publisher=publish_user_event,
+        )
     return serialize_direct_message_for_response(
         message,
         serializer=MessageRead.from_orm_with_forwarding,
@@ -724,19 +760,32 @@ async def mark_room_messages_read(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """علامت‌گذاری room/channel فعلی به‌عنوان خوانده‌شده"""
-    chat = await get_channel_or_404(db, chat_id)
-    read_summary = await mark_channel_messages_read_with_broadcast(
-        db,
-        chat=chat,
-        user_id=current_user.id,
-    )
-    await publish_channel_read_event(
-        chat_id=read_summary.chat_id,
-        reader_id=read_summary.reader_id,
-        member_user_ids=read_summary.member_user_ids,
-        publisher=publish_user_event,
-    )
+    """علامت‌گذاری room/group/channel فعلی به‌عنوان خوانده‌شده"""
+    chat = await get_room_or_404(db, chat_id)
+    if chat.type == ChatType.GROUP:
+        read_summary = await mark_group_messages_read_with_broadcast(
+            db,
+            chat=chat,
+            user_id=current_user.id,
+        )
+        await publish_group_read_event(
+            chat_id=read_summary.chat_id,
+            reader_id=read_summary.reader_id,
+            member_user_ids=read_summary.member_user_ids,
+            publisher=publish_user_event,
+        )
+    else:
+        read_summary = await mark_channel_messages_read_with_broadcast(
+            db,
+            chat=chat,
+            user_id=current_user.id,
+        )
+        await publish_channel_read_event(
+            chat_id=read_summary.chat_id,
+            reader_id=read_summary.reader_id,
+            member_user_ids=read_summary.member_user_ids,
+            publisher=publish_user_event,
+        )
     return None
 
 
@@ -830,6 +879,14 @@ async def toggle_message_reaction(
             chat=reaction_chat,
             message=updated_message,
             member_user_ids=await list_active_channel_member_user_ids(db, chat_id=reaction_chat.id),
+            serializer=MessageRead.from_orm_with_forwarding,
+            publisher=publish_user_event,
+        )
+    elif reaction_chat is not None and reaction_chat.type == ChatType.GROUP and not reaction_chat.is_deleted:
+        await publish_group_reaction_event(
+            chat=reaction_chat,
+            message=updated_message,
+            member_user_ids=await list_active_room_member_user_ids(db, chat_id=reaction_chat.id),
             serializer=MessageRead.from_orm_with_forwarding,
             publisher=publish_user_event,
         )

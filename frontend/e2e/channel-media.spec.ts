@@ -2323,4 +2323,94 @@ test.describe('Channel media regressions', () => {
       }),
     ])
   })
+
+  test('group room APIs let active members send load read and react on group messages', async ({
+    request,
+  }) => {
+    const fixture = seedChannelSession('group_room_api', 'admin')
+    const groupTitle = `Group Room ${Date.now()}`
+    const creatorMessageText = `GROUP ROOM CREATOR ${Date.now()}`
+    const memberMessageText = `GROUP ROOM MEMBER ${Date.now()}`
+
+    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        title: groupTitle,
+        member_ids: [fixture.userId],
+      },
+    })
+    expect(createResponse.ok()).toBeTruthy()
+    const createPayload = await createResponse.json()
+    const groupId = Number(createPayload.group.id)
+
+    const creatorSendResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        content: creatorMessageText,
+        message_type: 'text',
+      },
+    })
+    expect(creatorSendResponse.ok()).toBeTruthy()
+    const creatorMessage = await creatorSendResponse.json()
+    expect(creatorMessage.content).toBe(creatorMessageText)
+    expect(creatorMessage.sender_id).toBe(fixture.creatorUserId)
+
+    const memberLoadResponse = await request.get(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/messages`, {
+      headers: authHeaders(fixture.accessToken),
+    })
+    expect(memberLoadResponse.ok()).toBeTruthy()
+    await expect(memberLoadResponse.json()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: creatorMessage.id,
+        content: creatorMessageText,
+        sender_id: fixture.creatorUserId,
+      }),
+    ]))
+
+    const memberSendResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+      headers: authHeaders(fixture.accessToken),
+      data: {
+        content: memberMessageText,
+        message_type: 'text',
+      },
+    })
+    expect(memberSendResponse.ok()).toBeTruthy()
+    const memberMessage = await memberSendResponse.json()
+    expect(memberMessage.content).toBe(memberMessageText)
+    expect(memberMessage.sender_id).toBe(fixture.userId)
+
+    const reactionResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/messages/${creatorMessage.id}/reaction`, {
+      headers: authHeaders(fixture.accessToken),
+      data: { emoji: '🔥' },
+    })
+    expect(reactionResponse.ok()).toBeTruthy()
+    const reactionPayload = await reactionResponse.json()
+    expect(reactionPayload.reactions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        emoji: '🔥',
+        user_id: fixture.userId,
+      }),
+    ]))
+
+    const creatorReadResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/read`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+    })
+    expect(creatorReadResponse.status()).toBe(204)
+
+    const creatorLoadResponse = await request.get(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/messages`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+    })
+    expect(creatorLoadResponse.ok()).toBeTruthy()
+    await expect(creatorLoadResponse.json()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: creatorMessage.id,
+        content: creatorMessageText,
+      }),
+      expect.objectContaining({
+        id: memberMessage.id,
+        content: memberMessageText,
+        sender_id: fixture.userId,
+      }),
+    ]))
+  })
 })

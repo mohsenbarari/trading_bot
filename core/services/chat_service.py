@@ -1001,14 +1001,14 @@ async def get_reactable_direct_message(
     message_id: int,
     actor_id: int,
 ) -> Message:
-    """Load one message and enforce direct/channel reaction preconditions."""
+    """Load one message and enforce direct/group/channel reaction preconditions."""
     message = await db.get(Message, message_id)
     if message is None or message.is_deleted:
         raise HTTPException(status_code=404, detail="Message not found")
     if actor_id not in (message.sender_id, message.receiver_id):
         if message.chat_id is not None:
             chat = await db.get(Chat, message.chat_id)
-            if chat is not None and chat.type == ChatType.CHANNEL and not chat.is_deleted:
+            if chat is not None and chat.type in (ChatType.CHANNEL, ChatType.GROUP) and not chat.is_deleted:
                 member_result = await db.execute(
                     select(ChatMember.id).where(
                         ChatMember.chat_id == chat.id,
