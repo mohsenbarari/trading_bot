@@ -19,10 +19,13 @@ type ForwardTargetCandidate = ChatForwardTarget & {
 const USER_FETCH_LIMIT = 5000
 const MAX_FORWARD_TARGETS = 10
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   showForwardModal: boolean
   sortedConversations: Conversation[]
-}>()
+  includeChannels?: boolean
+}>(), {
+  includeChannels: false,
+})
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -49,6 +52,17 @@ function getAvatarInitial(name: string) {
 function buildSearchText(parts: Array<string | null | undefined>) {
   return normalizeSearchValue(parts.filter(Boolean).join(' '))
 }
+
+function getTargetBadge(target: ForwardTargetCandidate) {
+  if (target.kind === 'channel') return 'کانال'
+  return target.isConversation ? 'گفتگو' : 'کاربر'
+}
+
+const searchPlaceholder = computed(() => (
+  props.includeChannels
+    ? 'جستجو با نام کاربری، کانال یا شماره تماس...'
+    : 'جستجو با نام کاربری یا شماره تماس...'
+))
 
 async function loadForwardUsers() {
   const requestId = ++fetchSequence
@@ -94,7 +108,22 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
   const userMap = new Map(allUsers.value.map(user => [user.id, user]))
 
   props.sortedConversations.forEach((conversation, index) => {
-    if (conversation.room_kind === 'channel') return
+    if (conversation.room_kind === 'channel') {
+      const chatId = conversation.chat_id
+      if (!props.includeChannels || typeof chatId !== 'number' || conversation.can_send === false) return
+
+      targets.push({
+        key: `channel-${chatId}`,
+        kind: 'channel',
+        id: chatId,
+        title: conversation.other_user_name,
+        subtitle: 'ارسال به کانال',
+        isConversation: true,
+        conversationIndex: index,
+        searchText: buildSearchText([conversation.other_user_name, 'کانال', 'ارسال به کانال']),
+      })
+      return
+    }
     if (conversation.other_user_is_deleted) return
 
     const user = userMap.get(conversation.other_user_id)
@@ -202,7 +231,7 @@ function confirmForward() {
             <div class="header-copy">
               <h3>هدایت پیام</h3>
               <p>
-                تا ۱۰ گفتگو/کاربر را انتخاب کنید
+                تا ۱۰ مقصد را انتخاب کنید
                 <span v-if="selectedCount > 0" class="header-count" :class="{ 'is-flash': limitFlash }">
                   ({{ selectedCount }}/{{ MAX_FORWARD_TARGETS }})
                 </span>
@@ -227,7 +256,7 @@ function confirmForward() {
             <input
               v-model="searchQuery"
               type="text"
-              placeholder="جستجو با نام کاربری یا شماره تماس..."
+              :placeholder="searchPlaceholder"
               class="forward-search-input"
             />
           </div>
@@ -241,7 +270,7 @@ function confirmForward() {
             </div>
 
             <div v-else-if="filteredTargets.length === 0" class="forward-modal-state empty">
-              کاربری یافت نشد
+              مقصدی یافت نشد
             </div>
 
             <template v-else>
@@ -265,7 +294,7 @@ function confirmForward() {
                   <div class="target-copy">
                     <div class="target-title-row">
                       <span class="target-title">{{ target.title }}</span>
-                      <span class="target-chip">گفتگو</span>
+                      <span class="target-chip">{{ getTargetBadge(target) }}</span>
                     </div>
                     <span v-if="target.subtitle" class="target-subtitle" dir="ltr">{{ target.subtitle }}</span>
                   </div>

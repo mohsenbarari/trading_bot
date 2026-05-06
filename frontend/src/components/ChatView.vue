@@ -1820,16 +1820,35 @@ function closeForwardModal() {
 
 async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardTarget[]) {
   const targetList = Array.isArray(targets) ? targets : [targets]
-  const userTargets = targetList.filter(t => t.kind === 'user')
-  const hasNonUser = targetList.length !== userTargets.length
+  const supportedTargets = targetList.filter(
+    (target): target is ChatForwardTarget => target.kind === 'user' || target.kind === 'channel'
+  )
+  const hasUnsupportedTargets = targetList.length !== supportedTargets.length
 
-  if (userTargets.length === 0) {
-    if (hasNonUser) alert('هدایت پیام به گروه به زودی اضافه می‌شود')
+  if (supportedTargets.length === 0) {
+    if (hasUnsupportedTargets) alert('هدایت پیام به گروه به زودی اضافه می‌شود')
     return
   }
 
   const preparedBatch = prepareForwardBatch(selectedMessages.value)
   if (preparedBatch.length === 0) return
+
+  const getTargetKey = (target: ChatForwardTarget) => `${target.kind}:${target.id}`
+  const getConversationIdForTarget = (target: ChatForwardTarget) => (
+    target.kind === 'channel' ? -Math.abs(target.id) : target.id
+  )
+  const findConversationForTarget = (target: ChatForwardTarget) => {
+    if (target.kind === 'channel') {
+      return conversations.value.find(conversation => (
+        conversation.room_kind === 'channel'
+        && (conversation.chat_id === target.id || conversation.other_user_id === -Math.abs(target.id))
+      ))
+    }
+
+    return conversations.value.find(conversation => (
+      conversation.room_kind !== 'channel' && conversation.other_user_id === target.id
+    ))
+  }
 
   // Close modal and clear selection immediately so the UI unblocks.
   // Sending happens in parallel in the background.
@@ -1843,18 +1862,19 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
     item: (typeof preparedBatch)[number]
   }
   const tasks: ForwardTask[] = []
-  for (const target of userTargets) {
+  for (const target of supportedTargets) {
     for (const item of preparedBatch) {
       tasks.push({ target, item })
     }
   }
 
-  const failuresByTarget = new Map<number, number>()
-  const titleByTarget = new Map<number, string>()
-  const totalByTarget = new Map<number, number>()
-  userTargets.forEach(t => {
-    titleByTarget.set(t.id, t.title)
-    totalByTarget.set(t.id, preparedBatch.length)
+  const failuresByTarget = new Map<string, number>()
+  const titleByTarget = new Map<string, string>()
+  const totalByTarget = new Map<string, number>()
+  supportedTargets.forEach((target) => {
+    const targetKey = getTargetKey(target)
+    titleByTarget.set(targetKey, target.title)
+    totalByTarget.set(targetKey, preparedBatch.length)
   })
 
   // Adaptive concurrency: keep weak devices safe, boost on capable devices.
@@ -1874,18 +1894,30 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
       const task = tasks.shift()
       if (!task) return
       try {
-        await messagesLogic.apiFetch('/chat/send', {
+        const endpoint = task.target.kind === 'channel'
+          ? `/chat/rooms/${task.target.id}/send`
+          : '/chat/send'
+        const payload = task.target.kind === 'channel'
+          ? {
+              content: task.item.content,
+              message_type: task.item.message.message_type,
+              forwarded_from_id: task.item.forwardedFromId,
+            }
+          : {
+              receiver_id: task.target.id,
+              content: task.item.content,
+              message_type: task.item.message.message_type,
+              forwarded_from_id: task.item.forwardedFromId,
+            }
+
+        await messagesLogic.apiFetch(endpoint, {
           method: 'POST',
-          body: JSON.stringify({
-            receiver_id: task.target.id,
-            content: task.item.content,
-            message_type: task.item.message.message_type,
-            forwarded_from_id: task.item.forwardedFromId,
-          })
+          body: JSON.stringify(payload)
         })
       } catch (forwardError) {
         console.error('Failed to forward message:', task.item.message.id, 'to', task.target.id, forwardError)
-        failuresByTarget.set(task.target.id, (failuresByTarget.get(task.target.id) ?? 0) + 1)
+        const targetKey = getTargetKey(task.target)
+        failuresByTarget.set(targetKey, (failuresByTarget.get(targetKey) ?? 0) + 1)
       }
     }
   }
@@ -1896,11 +1928,12 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
 
     const fullyFailedTargets: string[] = []
     let anySuccess = false
-    userTargets.forEach(t => {
-      const failed = failuresByTarget.get(t.id) ?? 0
-      const total = totalByTarget.get(t.id) ?? 0
+    supportedTargets.forEach((target) => {
+      const targetKey = getTargetKey(target)
+      const failed = failuresByTarget.get(targetKey) ?? 0
+      const total = totalByTarget.get(targetKey) ?? 0
       if (failed >= total) {
-        fullyFailedTargets.push(titleByTarget.get(t.id) ?? String(t.id))
+        fullyFailedTargets.push(titleByTarget.get(targetKey) ?? target.title)
       } else {
         anySuccess = true
       }
@@ -1913,7 +1946,7 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
 
     if (fullyFailedTargets.length > 0) {
       alert(`بخشی از پیام‌ها برای این مقاصد هدایت نشدند: ${fullyFailedTargets.join('، ')}`)
-    } else if (hasNonUser) {
+    } else if (hasUnsupportedTargets) {
       alert('هدایت پیام به گروه به زودی اضافه می‌شود')
     }
 
@@ -1921,19 +1954,24 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
     void loadConversations()
 
     // If only one target, open that chat (previous UX). For multi-target, stay on current chat.
-    if (userTargets.length === 1) {
-      const only = userTargets[0]!
-      const targetUserId = only.id
-      const targetConversation = conversations.value.find(c => c.other_user_id === targetUserId)
+    if (supportedTargets.length === 1) {
+      const only = supportedTargets[0]!
+      const targetConversationId = getConversationIdForTarget(only)
+      const targetConversation = findConversationForTarget(only)
       const targetName = targetConversation?.other_user_name || only.title
 
-      if (selectedUserId.value !== targetUserId) {
-        selectedUserId.value = targetUserId
+      if (only.kind === 'channel') {
+        showAttachmentMenu.value = false
+        showStickerPicker.value = false
+      }
+
+      if (selectedUserId.value !== targetConversationId) {
+        selectedUserId.value = targetConversationId
         selectedUserName.value = targetName
-        void loadMessages(targetUserId)
+        void loadMessages(targetConversationId)
       } else {
         selectedUserName.value = targetName
-        void loadMessages(targetUserId, true)
+        void loadMessages(targetConversationId, true)
       }
     }
   } finally {
@@ -2527,6 +2565,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       <ChatForwardModal
         :showForwardModal="showForwardModal"
         :sortedConversations="sortedConversations"
+        :includeChannels="true"
         @close="closeForwardModal"
         @forward-to="forwardSelectedMessages"
       />

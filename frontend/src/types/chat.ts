@@ -47,7 +47,7 @@ export interface Message {
 }
 
 export interface ChatForwardTarget {
-    kind: 'user' | 'group'
+    kind: 'user' | 'channel' | 'group'
     id: number
     title: string
     subtitle?: string | null
