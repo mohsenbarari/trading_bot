@@ -113,6 +113,18 @@ class GroupMemberSummary:
     joined_at: datetime
     is_group_creator: bool
 
+
+@dataclass
+class GroupMemberMutationSummary:
+    chat_id: int
+    user_id: int
+    role: ChatMemberRole | None
+    removed: bool
+    left: bool
+    member_count: int
+    unchanged: bool
+
+
 @dataclass
 class ChannelMemberMutationSummary:
     chat_id: int
@@ -189,6 +201,16 @@ async def count_active_chat_members(db: AsyncSession, chat_id: int) -> int:
     stmt = select(func.count(ChatMember.id)).where(
         ChatMember.chat_id == chat_id,
         ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+    )
+    result = await db.execute(stmt)
+    return int(result.scalar_one() or 0)
+
+
+async def count_active_chat_admins(db: AsyncSession, chat_id: int) -> int:
+    stmt = select(func.count(ChatMember.id)).where(
+        ChatMember.chat_id == chat_id,
+        ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        ChatMember.role == ChatMemberRole.ADMIN,
     )
     result = await db.execute(stmt)
     return int(result.scalar_one() or 0)
@@ -316,6 +338,23 @@ async def create_group_chat(
             )
         )
 
+    await db.commit()
+    await db.refresh(chat)
+    return chat
+
+
+async def update_group_chat(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    title: str,
+) -> Chat:
+    cleaned_title = _clean_text(title)
+    if not cleaned_title:
+        raise HTTPException(status_code=400, detail="Group title is required")
+
+    chat.title = cleaned_title
+    chat.updated_at = _utcnow()
     await db.commit()
     await db.refresh(chat)
     return chat
@@ -510,6 +549,226 @@ async def get_active_group_member_or_403(
     if member is None:
         raise HTTPException(status_code=403, detail="You are not a member of this group")
     return member
+
+
+async def get_active_group_admin_or_403(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+) -> ChatMember:
+    member = await get_active_group_member_or_403(db, chat=chat, user_id=user_id)
+    if member.role != ChatMemberRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only group admins can manage this group")
+    return member
+
+
+async def add_group_member(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+) -> GroupMemberMutationSummary:
+    user = await db.get(User, user_id)
+    if user is None or user.is_deleted:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    stmt = (
+        select(ChatMember)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.user_id == user_id,
+        )
+        .order_by(ChatMember.id.desc())
+    )
+    result = await db.execute(stmt)
+    member = result.scalars().first()
+
+    if member is not None and member.membership_status == ChatMembershipStatus.ACTIVE:
+        member_count = await count_active_chat_members(db, chat.id)
+        return GroupMemberMutationSummary(
+            chat_id=chat.id,
+            user_id=user_id,
+            role=member.role,
+            removed=False,
+            left=False,
+            member_count=member_count,
+            unchanged=True,
+        )
+
+    member_count = await count_active_chat_members(db, chat.id)
+    max_members = int(chat.max_members or GROUP_MAX_MEMBERS)
+    if member_count >= max_members:
+        raise HTTPException(status_code=400, detail=f"Group member limit exceeded ({max_members})")
+
+    now = _utcnow()
+    if member is None:
+        db.add(
+            ChatMember(
+                chat_id=chat.id,
+                user_id=user_id,
+                role=ChatMemberRole.MEMBER,
+                membership_status=ChatMembershipStatus.ACTIVE,
+                joined_at=now,
+                updated_at=now,
+            )
+        )
+    else:
+        member.role = ChatMemberRole.MEMBER
+        member.membership_status = ChatMembershipStatus.ACTIVE
+        member.left_at = None
+        member.joined_at = now
+        member.updated_at = now
+
+    chat.updated_at = now
+    await db.commit()
+
+    next_member_count = await count_active_chat_members(db, chat.id)
+    return GroupMemberMutationSummary(
+        chat_id=chat.id,
+        user_id=user_id,
+        role=ChatMemberRole.MEMBER,
+        removed=False,
+        left=False,
+        member_count=next_member_count,
+        unchanged=False,
+    )
+
+
+async def update_group_admin_status(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+    make_admin: bool,
+) -> GroupMemberMutationSummary:
+    stmt = (
+        select(ChatMember)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.user_id == user_id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .order_by(ChatMember.id.desc())
+    )
+    result = await db.execute(stmt)
+    member = result.scalars().first()
+    if member is None:
+        raise HTTPException(status_code=404, detail="Group member not found")
+
+    target_role = ChatMemberRole.ADMIN if make_admin else ChatMemberRole.MEMBER
+    if member.role == target_role:
+        member_count = await count_active_chat_members(db, chat.id)
+        return GroupMemberMutationSummary(
+            chat_id=chat.id,
+            user_id=user_id,
+            role=member.role,
+            removed=False,
+            left=False,
+            member_count=member_count,
+            unchanged=True,
+        )
+
+    if not make_admin:
+        admin_count = await count_active_chat_admins(db, chat.id)
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Group must keep at least one active admin")
+
+    now = _utcnow()
+    member.role = target_role
+    member.updated_at = now
+    chat.updated_at = now
+    await db.commit()
+
+    member_count = await count_active_chat_members(db, chat.id)
+    return GroupMemberMutationSummary(
+        chat_id=chat.id,
+        user_id=user_id,
+        role=target_role,
+        removed=False,
+        left=False,
+        member_count=member_count,
+        unchanged=False,
+    )
+
+
+async def remove_group_member(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    acting_user_id: int,
+    user_id: int,
+) -> GroupMemberMutationSummary:
+    if acting_user_id == user_id:
+        raise HTTPException(status_code=400, detail="Use the leave endpoint to leave a group")
+
+    stmt = (
+        select(ChatMember)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.user_id == user_id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .order_by(ChatMember.id.desc())
+    )
+    result = await db.execute(stmt)
+    member = result.scalars().first()
+    if member is None:
+        raise HTTPException(status_code=404, detail="Group member not found")
+
+    if member.role == ChatMemberRole.ADMIN:
+        admin_count = await count_active_chat_admins(db, chat.id)
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Group must keep at least one active admin")
+
+    now = _utcnow()
+    member.membership_status = ChatMembershipStatus.REMOVED
+    member.left_at = now
+    member.updated_at = now
+    chat.updated_at = now
+    await db.commit()
+
+    member_count = await count_active_chat_members(db, chat.id)
+    return GroupMemberMutationSummary(
+        chat_id=chat.id,
+        user_id=user_id,
+        role=None,
+        removed=True,
+        left=False,
+        member_count=member_count,
+        unchanged=False,
+    )
+
+
+async def leave_group_chat(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+) -> GroupMemberMutationSummary:
+    member = await get_active_group_member_or_403(db, chat=chat, user_id=user_id)
+    if member.role == ChatMemberRole.ADMIN:
+        admin_count = await count_active_chat_admins(db, chat.id)
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Group must keep at least one active admin")
+
+    now = _utcnow()
+    member.membership_status = ChatMembershipStatus.LEFT
+    member.left_at = now
+    member.updated_at = now
+    chat.updated_at = now
+    await db.commit()
+
+    member_count = await count_active_chat_members(db, chat.id)
+    return GroupMemberMutationSummary(
+        chat_id=chat.id,
+        user_id=user_id,
+        role=None,
+        removed=False,
+        left=True,
+        member_count=member_count,
+        unchanged=False,
+    )
 
 
 async def list_channel_conversations(

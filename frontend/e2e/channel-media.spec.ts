@@ -20,6 +20,46 @@ interface SeededChannelAdminFixture {
 
 type SeededChannelRole = 'admin' | 'member'
 
+function seedActiveUserIds(label: string, count: number): number[] {
+  const payload = runPythonInApp<{ userIds: number[] }>(`
+import asyncio
+import json
+import uuid
+
+from core.db import AsyncSessionLocal
+from core.enums import UserRole
+from models.user import User
+
+label = ${JSON.stringify(label)}
+count = ${JSON.stringify(count)}
+
+async def main():
+    user_ids = []
+    async with AsyncSessionLocal() as db:
+        for _ in range(count):
+            suffix = uuid.uuid4().hex[:10]
+            mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+            user = User(
+                account_name=f"pw_{label}_{suffix}",
+                mobile_number=f"09{mobile_seed:09d}",
+                full_name=f"pw_{label}_{suffix}",
+                address='Playwright Group User',
+                role=UserRole.STANDARD,
+                has_bot_access=True,
+                max_sessions=1,
+            )
+            db.add(user)
+            await db.flush()
+            user_ids.append(user.id)
+        await db.commit()
+
+    print(json.dumps({'userIds': user_ids}))
+
+asyncio.run(main())
+`)
+  return payload.userIds
+}
+
 function runPythonInApp<T>(script: string): T {
   const stdout = execFileSync('docker', ['exec', '-i', 'trading_bot_app', 'python', '-'], {
     input: script,
@@ -2143,5 +2183,144 @@ test.describe('Channel media regressions', () => {
     await expect(overLimitResponse.json()).resolves.toMatchObject({
       detail: expect.stringContaining('Group member limit exceeded'),
     })
+  })
+
+  test('group admin management APIs enforce last-admin safety while supporting rename add promote demote remove and leave', async ({
+    request,
+  }) => {
+    const fixture = seedChannelSession('group_manage_api', 'admin')
+    const [extraUserId] = seedActiveUserIds('group_manage_member', 1)
+    const initialTitle = `Managed Group ${Date.now()}`
+    const renamedTitle = `${initialTitle} renamed`
+
+    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        title: initialTitle,
+        member_ids: [fixture.userId],
+      },
+    })
+
+    expect(createResponse.ok()).toBeTruthy()
+    const createPayload = await createResponse.json()
+    const groupId = Number(createPayload.group.id)
+
+    const renameResponse = await request.patch(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: { title: renamedTitle },
+    })
+    expect(renameResponse.ok()).toBeTruthy()
+    await expect(renameResponse.json()).resolves.toMatchObject({
+      id: groupId,
+      title: renamedTitle,
+      current_user_role: 'admin',
+    })
+
+    const demoteLastAdminResponse = await request.delete(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}/admins/${fixture.creatorUserId}`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+    })
+    expect(demoteLastAdminResponse.status()).toBe(400)
+    await expect(demoteLastAdminResponse.json()).resolves.toMatchObject({
+      detail: expect.stringContaining('at least one active admin'),
+    })
+
+    const addMemberResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}/members`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: { user_id: extraUserId },
+    })
+    expect(addMemberResponse.ok()).toBeTruthy()
+    await expect(addMemberResponse.json()).resolves.toMatchObject({
+      chat_id: groupId,
+      user_id: extraUserId,
+      role: 'member',
+      removed: false,
+      left: false,
+      member_count: 3,
+      unchanged: false,
+    })
+
+    const promoteResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}/admins/${fixture.userId}`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+    })
+    expect(promoteResponse.ok()).toBeTruthy()
+    await expect(promoteResponse.json()).resolves.toMatchObject({
+      chat_id: groupId,
+      user_id: fixture.userId,
+      role: 'admin',
+      removed: false,
+      left: false,
+      member_count: 3,
+      unchanged: false,
+    })
+
+    const demoteResponse = await request.delete(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}/admins/${fixture.userId}`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+    })
+    expect(demoteResponse.ok()).toBeTruthy()
+    await expect(demoteResponse.json()).resolves.toMatchObject({
+      chat_id: groupId,
+      user_id: fixture.userId,
+      role: 'member',
+      removed: false,
+      left: false,
+      member_count: 3,
+      unchanged: false,
+    })
+
+    const promoteAgainResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}/admins/${fixture.userId}`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+    })
+    expect(promoteAgainResponse.ok()).toBeTruthy()
+
+    const leaveResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}/leave`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+    })
+    expect(leaveResponse.ok()).toBeTruthy()
+    await expect(leaveResponse.json()).resolves.toMatchObject({
+      chat_id: groupId,
+      user_id: fixture.creatorUserId,
+      role: null,
+      removed: false,
+      left: true,
+      member_count: 2,
+      unchanged: false,
+    })
+
+    const removeMemberResponse = await request.delete(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}/members/${extraUserId}`, {
+      headers: authHeaders(fixture.accessToken),
+    })
+    expect(removeMemberResponse.ok()).toBeTruthy()
+    await expect(removeMemberResponse.json()).resolves.toMatchObject({
+      chat_id: groupId,
+      user_id: extraUserId,
+      role: null,
+      removed: true,
+      left: false,
+      member_count: 1,
+      unchanged: false,
+    })
+
+    const creatorDetailAfterLeaveResponse = await request.get(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+    })
+    expect(creatorDetailAfterLeaveResponse.status()).toBe(403)
+
+    const memberDetailResponse = await request.get(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}`, {
+      headers: authHeaders(fixture.accessToken),
+    })
+    expect(memberDetailResponse.ok()).toBeTruthy()
+    const memberDetailPayload = await memberDetailResponse.json()
+    expect(memberDetailPayload.group).toMatchObject({
+      id: groupId,
+      title: renamedTitle,
+      current_user_role: 'admin',
+      member_count: 1,
+    })
+    expect(memberDetailPayload.members).toEqual([
+      expect.objectContaining({
+        user_id: fixture.userId,
+        role: 'admin',
+      }),
+    ])
   })
 })
