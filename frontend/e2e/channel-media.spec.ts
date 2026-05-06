@@ -11,6 +11,9 @@ interface SeededChannelAdminFixture {
   accessToken: string
   refreshToken: string
   bootstrapAccessToken: string
+  creatorUserId: number
+  creatorAccountName: string
+  creatorAccessToken: string
   channelId: number
   channelTitle: string
 }
@@ -169,10 +172,13 @@ async def main():
 
     print(json.dumps({
         'userId': user.id,
-      'accountName': member_account_name,
+        'accountName': member_account_name,
         'accessToken': access_token,
         'refreshToken': refresh_token,
-      'bootstrapAccessToken': creator_access_token if role == 'member' else access_token,
+        'bootstrapAccessToken': creator_access_token if role == 'member' else access_token,
+        'creatorUserId': creator.id,
+        'creatorAccountName': creator_account_name,
+        'creatorAccessToken': creator_access_token,
         'channelId': channel.id,
         'channelTitle': channel_title,
     }))
@@ -185,6 +191,12 @@ function authHeaders(accessToken: string) {
   return {
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
+  }
+}
+
+function authOnlyHeaders(accessToken: string) {
+  return {
+    Authorization: `Bearer ${accessToken}`,
   }
 }
 
@@ -214,6 +226,44 @@ async function seedBootstrapChannelMessage(
 
   expect(response.ok()).toBeTruthy()
   return response.json()
+}
+
+async function seedDirectDocumentMessage(
+  request: APIRequestContext,
+  fixture: SeededChannelAdminFixture,
+  fileName: string,
+  fileBody: string,
+) {
+  const uploadResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/upload-media`, {
+    headers: authOnlyHeaders(fixture.creatorAccessToken),
+    multipart: {
+      file: {
+        name: fileName,
+        mimeType: 'text/plain',
+        buffer: Buffer.from(fileBody, 'utf8'),
+      },
+    },
+  })
+
+  expect(uploadResponse.ok()).toBeTruthy()
+  const uploadPayload = await uploadResponse.json() as {
+    file_id: string
+    file_name: string
+    mime_type: string
+    size: number
+  }
+
+  const sendResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/send`, {
+    headers: authHeaders(fixture.creatorAccessToken),
+    data: {
+      receiver_id: fixture.userId,
+      content: JSON.stringify(uploadPayload),
+      message_type: 'document',
+    },
+  })
+
+  expect(sendResponse.ok()).toBeTruthy()
+  return sendResponse.json()
 }
 
 async function fetchLatestRoomMessageTypes(
@@ -485,6 +535,49 @@ test.describe('Channel media regressions', () => {
     await expect(response.json()).resolves.toMatchObject({
       detail: 'Only channel admins can post messages',
     })
+  })
+
+  test('channel admin can forward a document message into the channel', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('channel_forward_document', 'admin')
+    const fileName = `pw-forward-${Date.now()}.txt`
+    const fileBody = `PW FORWARD DOCUMENT ${Date.now()}`
+    const directDocumentMessage = await seedDirectDocumentMessage(request, fixture, fileName, fileBody) as { id?: number }
+    const sourceMessageId = Number(directDocumentMessage?.id)
+
+    expect(Number.isFinite(sourceMessageId)).toBeTruthy()
+
+    await loginWithSeededSession(page, fixture)
+
+    await page.goto('/chat')
+    await expect(page.getByText(fixture.creatorAccountName)).toBeVisible()
+    await page.getByText(fixture.creatorAccountName).click()
+
+    const sourceMessageBubble = page.locator(`#msg-${sourceMessageId}`)
+    await expect(sourceMessageBubble.getByText(fileName)).toBeVisible()
+
+    await sourceMessageBubble.dispatchEvent('click')
+    await expect(page.locator('.context-menu')).toBeVisible()
+    await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
+
+    await expect(page.locator('.forward-modal')).toBeVisible()
+    await page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle }).click()
+    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
+
+    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await expect(page.getByText(fixture.channelTitle)).toBeVisible()
+    await expect(page.getByText('کانال • شما مدیر هستید')).toBeVisible()
+    await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.creatorAccountName}`)
+    await expect(page.locator('.messages-container .msg-document').getByText(fileName)).toBeVisible()
+
+    await expect
+      .poll(async () => fetchLatestRoomMessageTypes(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['document']))
+    await expect
+      .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([expect.stringContaining(fileName)]))
   })
 
   test('channel member gets realtime unread update and live read reset', async ({
