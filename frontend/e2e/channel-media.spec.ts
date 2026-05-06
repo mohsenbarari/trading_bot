@@ -364,6 +364,24 @@ async function fetchLatestDirectContents(
   return Array.isArray(body) ? body.map((item) => item.content || '') : []
 }
 
+function extractSharedFilePayload(
+  contents: string[],
+  expectedFileName: string,
+): { file_id?: string; file_name?: string; mime_type?: string; size?: number } | null {
+  for (const content of contents) {
+    try {
+      const parsed = JSON.parse(content) as { file_id?: string; file_name?: string; mime_type?: string; size?: number }
+      if (parsed?.file_name === expectedFileName) {
+        return parsed
+      }
+    } catch {
+      // Ignore plain text messages in mixed threads.
+    }
+  }
+
+  return null
+}
+
 async function fetchChannelConversationUnread(
   request: APIRequestContext,
   fixture: SeededChannelAdminFixture,
@@ -1162,6 +1180,72 @@ test.describe('Channel media regressions', () => {
     await expect
       .poll(async () => fetchLatestDirectContents(request, fixture, fixture.creatorUserId), { timeout: 30000 })
       .toEqual(expect.arrayContaining([expectedMergedText]))
+  })
+
+  test('share receive can fan out one shared document upload to a channel and a direct chat target', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('share_receive_multi_file', 'admin')
+    const bootstrapContent = `PLAYWRIGHT SHARE RECEIVE MULTI FILE ${Date.now()}`
+    const seedDirectContent = `PW DIRECT FILE TARGET SEED ${Date.now()}`
+    const shareKey = `pw-share-multi-file-${Date.now()}`
+    const sharedDocumentName = `pw-share-multi-${Date.now()}.txt`
+    const sharedDocumentBody = `PW SHARE MULTI FILE BODY ${Date.now()}`
+    const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
+    const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
+
+    await seedBootstrapChannelMessage(request, fixture, bootstrapContent)
+    await seedDirectTextMessage(request, fixture, seedDirectContent)
+    await loginWithSeededSession(page, fixture)
+    await seedShareReceivePayload(page, {
+      key: shareKey,
+      files: [
+        {
+          name: sharedDocumentName,
+          type: 'text/plain',
+          bodyBase64: Buffer.from(sharedDocumentBody, 'utf8').toString('base64'),
+        },
+      ],
+    })
+
+    await page.goto(`/share-receive?share_key=${shareKey}`)
+    await expect(page.locator('.forward-modal')).toBeVisible()
+    await expect(channelTarget).toBeVisible()
+    await expect(directTarget).toBeVisible()
+
+    await channelTarget.click()
+    await directTarget.click()
+    await page.getByRole('button', { name: 'هدایت به 2 مقصد' }).click()
+
+    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await expect
+      .poll(() => {
+        const url = new URL(page.url())
+        return `${url.pathname}${url.search}`
+      }, { timeout: 30000 })
+      .toBe('/chat')
+    await expect(page.locator('.conversation-item').filter({ hasText: fixture.channelTitle })).toBeVisible()
+    await expect(page.locator('.conversation-item').filter({ hasText: fixture.creatorAccountName })).toBeVisible()
+
+    await expect
+      .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([expect.stringContaining(sharedDocumentName)]))
+    await expect
+      .poll(async () => fetchLatestDirectContents(request, fixture, fixture.creatorUserId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([expect.stringContaining(sharedDocumentName)]))
+
+    const [channelContents, directContents] = await Promise.all([
+      fetchLatestRoomContents(request, fixture),
+      fetchLatestDirectContents(request, fixture, fixture.creatorUserId),
+    ])
+
+    const channelPayload = extractSharedFilePayload(channelContents, sharedDocumentName)
+    const directPayload = extractSharedFilePayload(directContents, sharedDocumentName)
+
+    expect(channelPayload?.file_id).toBeTruthy()
+    expect(directPayload?.file_id).toBeTruthy()
+    expect(channelPayload?.file_id).toBe(directPayload?.file_id)
   })
 
   test('share receive can route shared file and media payloads into a writable channel target', async ({
