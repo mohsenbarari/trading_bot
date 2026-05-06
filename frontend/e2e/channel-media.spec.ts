@@ -350,6 +350,20 @@ async function fetchLatestRoomContents(
   return Array.isArray(body) ? body.map((item) => item.content || '') : []
 }
 
+async function fetchLatestDirectContents(
+  request: APIRequestContext,
+  fixture: SeededChannelAdminFixture,
+  otherUserId: number,
+): Promise<string[]> {
+  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/messages/${otherUserId}?limit=12`, {
+    headers: authHeaders(fixture.accessToken),
+  })
+
+  expect(response.ok()).toBeTruthy()
+  const body = (await response.json()) as Array<{ content?: string }>
+  return Array.isArray(body) ? body.map((item) => item.content || '') : []
+}
+
 async function fetchChannelConversationUnread(
   request: APIRequestContext,
   fixture: SeededChannelAdminFixture,
@@ -1095,6 +1109,58 @@ test.describe('Channel media regressions', () => {
 
     await expect
       .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([expectedMergedText]))
+  })
+
+  test('share receive can fan out shared text to a channel and a direct chat target', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('share_receive_multi_target', 'admin')
+    const bootstrapContent = `PLAYWRIGHT SHARE RECEIVE MULTI ${Date.now()}`
+    const seedDirectContent = `PW DIRECT TARGET SEED ${Date.now()}`
+    const shareKey = `pw-share-multi-${Date.now()}`
+    const shareTitle = `Playwright Shared Multi Title ${Date.now()}`
+    const shareText = `Playwright Shared Multi Body ${Date.now()}`
+    const shareUrl = `https://example.test/share/multi/${Date.now()}`
+    const expectedMergedText = `${shareTitle}\n${shareText}\n${shareUrl}`
+    const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
+    const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
+
+    await seedBootstrapChannelMessage(request, fixture, bootstrapContent)
+    await seedDirectTextMessage(request, fixture, seedDirectContent)
+    await loginWithSeededSession(page, fixture)
+    await seedShareReceivePayload(page, {
+      key: shareKey,
+      title: shareTitle,
+      text: shareText,
+      url: shareUrl,
+    })
+
+    await page.goto(`/share-receive?share_key=${shareKey}`)
+    await expect(page.locator('.forward-modal')).toBeVisible()
+    await expect(channelTarget).toBeVisible()
+    await expect(directTarget).toBeVisible()
+
+    await channelTarget.click()
+    await directTarget.click()
+    await page.getByRole('button', { name: 'هدایت به 2 مقصد' }).click()
+
+    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await expect
+      .poll(() => {
+        const url = new URL(page.url())
+        return `${url.pathname}${url.search}`
+      }, { timeout: 30000 })
+      .toBe('/chat')
+    await expect(page.locator('.conversation-item').filter({ hasText: fixture.channelTitle })).toBeVisible()
+    await expect(page.locator('.conversation-item').filter({ hasText: fixture.creatorAccountName })).toBeVisible()
+
+    await expect
+      .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([expectedMergedText]))
+    await expect
+      .poll(async () => fetchLatestDirectContents(request, fixture, fixture.creatorUserId), { timeout: 30000 })
       .toEqual(expect.arrayContaining([expectedMergedText]))
   })
 
