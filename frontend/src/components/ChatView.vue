@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, onUnmounted, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import MessengerLoadingScreen from './chat/MessengerLoadingScreen.vue'
 import ChatAlbumLayout from './chat/ChatAlbumLayout.vue'
 import ChatHeader from './chat/ChatHeader.vue'
@@ -34,6 +35,9 @@ const props = defineProps<{
   targetUserId?: number
   targetUserName?: string
 }>()
+
+const router = useRouter()
+const route = useRoute()
 
 // Emits
 const emit = defineEmits<{
@@ -140,6 +144,60 @@ let pendingSelectionAnchor: PendingSelectionAnchor | null = null
 // Status
 const targetUserStatus = ref('آخرین بازدید اخیراً')
 
+function getRouteQueryValue(value: string | string[] | null | undefined) {
+  if (Array.isArray(value)) {
+    return value[0] || ''
+  }
+
+  return value || ''
+}
+
+function resolveSelectedConversationName(userId: number | null, fallback = '') {
+  if (userId == null) {
+    return ''
+  }
+
+  const normalizedFallback = fallback.trim()
+  if (normalizedFallback) {
+    return normalizedFallback
+  }
+
+  return conversations.value.find((conversation) => conversation.other_user_id === userId)?.other_user_name || ''
+}
+
+function syncSelectedConversationRoute(userId: number | null, userName = '') {
+  const currentUserId = getRouteQueryValue(route.query.user_id as string | string[] | undefined)
+  const currentUserName = getRouteQueryValue(route.query.user_name as string | string[] | undefined)
+  const nextUserId = userId == null ? '' : String(userId)
+  const nextUserName = resolveSelectedConversationName(userId, userName)
+
+  if (currentUserId === nextUserId && currentUserName === nextUserName) {
+    return
+  }
+
+  const nextQuery: Record<string, string> = {}
+  Object.entries(route.query).forEach(([key, value]) => {
+    if (key === 'user_id' || key === 'user_name') {
+      return
+    }
+
+    const normalizedValue = getRouteQueryValue(value as string | string[] | undefined)
+    if (normalizedValue) {
+      nextQuery[key] = normalizedValue
+    }
+  })
+
+  if (nextUserId) {
+    nextQuery.user_id = nextUserId
+  }
+
+  if (nextUserName) {
+    nextQuery.user_name = nextUserName
+  }
+
+  void router.replace({ path: route.path, query: nextQuery })
+}
+
 function updateIsMobile() {
   isMobile.value = window.innerWidth < 768
 }
@@ -162,6 +220,10 @@ const {
 })
 
 watch(scrollIsViewingReply, (val) => { isViewingReply.value = val })
+
+watch([selectedUserId, selectedUserName], ([nextUserId, nextUserName]) => {
+  syncSelectedConversationRoute(nextUserId, nextUserName)
+})
 
 const messagesLogic = useChatMessages({
   apiBaseUrl: props.apiBaseUrl,
@@ -2187,10 +2249,10 @@ onMounted(async () => {
   await loadConversations()
   isLoading.value = false
   
-  if (props.targetUserId && props.targetUserName) {
+  if (props.targetUserId) {
     selectedUserId.value = props.targetUserId
-    selectedUserName.value = props.targetUserName
-    loadMessages(props.targetUserId)
+    selectedUserName.value = resolveSelectedConversationName(props.targetUserId, props.targetUserName || '')
+    void loadMessages(props.targetUserId)
     pushBackState(() => {
       selectedUserId.value = null
       selectedUserName.value = ''
@@ -2207,10 +2269,10 @@ onMounted(async () => {
 })
 
 watch(() => props.targetUserId, (newId) => {
-  if (newId && props.targetUserName) {
+  if (newId && newId !== selectedUserId.value) {
     selectedUserId.value = newId
-    selectedUserName.value = props.targetUserName
-    loadMessages(newId)
+    selectedUserName.value = resolveSelectedConversationName(newId, props.targetUserName || '')
+    void loadMessages(newId)
     pushBackState(() => {
       selectedUserId.value = null
       selectedUserName.value = ''
