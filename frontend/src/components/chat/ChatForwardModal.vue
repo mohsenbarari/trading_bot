@@ -23,8 +23,10 @@ const props = withDefaults(defineProps<{
   showForwardModal: boolean
   sortedConversations: Conversation[]
   includeChannels?: boolean
+  includeGroups?: boolean
 }>(), {
   includeChannels: false,
+  includeGroups: false,
 })
 
 const emit = defineEmits<{
@@ -55,14 +57,22 @@ function buildSearchText(parts: Array<string | null | undefined>) {
 
 function getTargetBadge(target: ForwardTargetCandidate) {
   if (target.kind === 'channel') return 'کانال'
+  if (target.kind === 'group') return 'گروه'
   return target.isConversation ? 'گفتگو' : 'کاربر'
 }
 
-const searchPlaceholder = computed(() => (
-  props.includeChannels
-    ? 'جستجو با نام کاربری، کانال یا شماره تماس...'
-    : 'جستجو با نام کاربری یا شماره تماس...'
-))
+const searchPlaceholder = computed(() => {
+  if (props.includeChannels && props.includeGroups) {
+    return 'جستجو با نام کاربری، گروه، کانال یا شماره تماس...'
+  }
+  if (props.includeGroups) {
+    return 'جستجو با نام کاربری، گروه یا شماره تماس...'
+  }
+  if (props.includeChannels) {
+    return 'جستجو با نام کاربری، کانال یا شماره تماس...'
+  }
+  return 'جستجو با نام کاربری یا شماره تماس...'
+})
 
 async function loadForwardUsers() {
   const requestId = ++fetchSequence
@@ -109,6 +119,19 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
 
   props.sortedConversations.forEach((conversation, index) => {
     if (conversation.room_kind === 'group') {
+      const chatId = conversation.chat_id
+      if (!props.includeGroups || typeof chatId !== 'number' || conversation.can_send === false) return
+
+      targets.push({
+        key: `group-${chatId}`,
+        kind: 'group',
+        id: chatId,
+        title: conversation.other_user_name,
+        subtitle: 'ارسال به گروه',
+        isConversation: true,
+        conversationIndex: index,
+        searchText: buildSearchText([conversation.other_user_name, 'گروه', 'ارسال به گروه']),
+      })
       return
     }
 

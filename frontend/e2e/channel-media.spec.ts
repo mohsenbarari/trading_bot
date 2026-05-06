@@ -368,8 +368,23 @@ async function fetchLatestRoomMessageTypes(
   request: APIRequestContext,
   fixture: SeededChannelAdminFixture,
 ): Promise<string[]> {
-  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/rooms/${fixture.channelId}/messages?limit=12`, {
-    headers: authHeaders(fixture.accessToken),
+  return fetchLatestRoomMessageTypesByChatId(request, fixture.accessToken, fixture.channelId)
+}
+
+async function fetchLatestRoomContents(
+  request: APIRequestContext,
+  fixture: SeededChannelAdminFixture,
+): Promise<string[]> {
+  return fetchLatestRoomContentsByChatId(request, fixture.accessToken, fixture.channelId)
+}
+
+async function fetchLatestRoomMessageTypesByChatId(
+  request: APIRequestContext,
+  accessToken: string,
+  chatId: number,
+): Promise<string[]> {
+  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/rooms/${chatId}/messages?limit=12`, {
+    headers: authHeaders(accessToken),
   })
 
   expect(response.ok()).toBeTruthy()
@@ -377,12 +392,13 @@ async function fetchLatestRoomMessageTypes(
   return Array.isArray(body) ? body.map((item) => item.message_type || '') : []
 }
 
-async function fetchLatestRoomContents(
+async function fetchLatestRoomContentsByChatId(
   request: APIRequestContext,
-  fixture: SeededChannelAdminFixture,
+  accessToken: string,
+  chatId: number,
 ): Promise<string[]> {
-  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/rooms/${fixture.channelId}/messages?limit=12`, {
-    headers: authHeaders(fixture.accessToken),
+  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/rooms/${chatId}/messages?limit=12`, {
+    headers: authHeaders(accessToken),
   })
 
   expect(response.ok()).toBeTruthy()
@@ -967,6 +983,70 @@ test.describe('Channel media regressions', () => {
     await expect
       .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
       .toEqual(expect.arrayContaining([expect.stringContaining(fileName)]))
+  })
+
+  test('group member can forward a direct text message into the group', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('group_forward_text', 'member')
+    const groupTitle = `Group Forward ${Date.now()}`
+    const bootstrapContent = `PW GROUP TARGET ${Date.now()}`
+    const sourceContent = `PW GROUP FORWARD ${Date.now()}`
+
+    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        title: groupTitle,
+        member_ids: [fixture.userId],
+      },
+    })
+    expect(createResponse.ok()).toBeTruthy()
+    const createPayload = await createResponse.json() as { group: { id: number } }
+    const groupId = Number(createPayload.group.id)
+
+    const bootstrapResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        content: bootstrapContent,
+        message_type: 'text',
+      },
+    })
+    expect(bootstrapResponse.ok()).toBeTruthy()
+
+    const directTextMessage = await seedDirectTextMessage(request, fixture, sourceContent) as { id?: number }
+    const sourceMessageId = Number(directTextMessage?.id)
+    expect(Number.isFinite(sourceMessageId)).toBeTruthy()
+
+    await loginWithSeededSession(page, fixture)
+
+    await page.goto('/chat')
+    await expect(page.getByText(fixture.creatorAccountName)).toBeVisible()
+    await page.getByText(fixture.creatorAccountName).click()
+
+    const sourceMessageBubble = page.locator(`#msg-${sourceMessageId}`)
+    await expect(sourceMessageBubble.getByText(sourceContent)).toBeVisible()
+
+    await sourceMessageBubble.dispatchEvent('click')
+    await expect(page.locator('.context-menu')).toBeVisible()
+    await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
+
+    await expect(page.locator('.forward-modal')).toBeVisible()
+    await page.locator('.forward-target-item').filter({ hasText: groupTitle }).click()
+    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
+
+    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await expect(page.locator('.chat-header').getByText(groupTitle)).toBeVisible()
+    await expect(page.locator('.chat-header').getByText('گروه • عضو گروه هستید')).toBeVisible()
+    await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.creatorAccountName}`)
+    await expect(page.locator('.messages-container').getByText(sourceContent)).toBeVisible()
+
+    await expect
+      .poll(async () => fetchLatestRoomMessageTypesByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['text']))
+    await expect
+      .poll(async () => fetchLatestRoomContentsByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([sourceContent]))
   })
 
   test('channel admin can forward an image message into the channel', async ({
