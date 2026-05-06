@@ -26,6 +26,12 @@ import {
   shareFile as cachedShareFileGlobal,
 } from '../composables/chat/useChatFileHandler'
 import { MESSAGE_REACTION_CATALOG, recordRecentMessageReaction } from '../utils/messageReactions'
+import {
+  buildChatSendBody,
+  buildChatSendEndpoint,
+  isNamedRoomKind,
+  resolveRoomConversationKey,
+} from '../utils/chatRoomRouting'
 
 // Props
 const props = defineProps<{
@@ -1891,12 +1897,12 @@ function closeForwardModal() {
 async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardTarget[]) {
   const targetList = Array.isArray(targets) ? targets : [targets]
   const supportedTargets = targetList.filter(
-    (target): target is ChatForwardTarget => target.kind === 'user' || target.kind === 'channel'
+    (target): target is ChatForwardTarget => target.kind === 'user' || isNamedRoomKind(target.kind)
   )
   const hasUnsupportedTargets = targetList.length !== supportedTargets.length
 
   if (supportedTargets.length === 0) {
-    if (hasUnsupportedTargets) alert('هدایت پیام به گروه به زودی اضافه می‌شود')
+    if (hasUnsupportedTargets) alert('هدایت پیام به این مقصد هنوز فعال نشده است')
     return
   }
 
@@ -1904,19 +1910,23 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
   if (preparedBatch.length === 0) return
 
   const getTargetKey = (target: ChatForwardTarget) => `${target.kind}:${target.id}`
-  const getConversationIdForTarget = (target: ChatForwardTarget) => (
-    target.kind === 'channel' ? -Math.abs(target.id) : target.id
-  )
+  const getConversationIdForTarget = (target: ChatForwardTarget) => {
+    if (isNamedRoomKind(target.kind)) {
+      return resolveRoomConversationKey(target.kind, target.id) ?? target.id
+    }
+    return target.id
+  }
   const findConversationForTarget = (target: ChatForwardTarget) => {
-    if (target.kind === 'channel') {
+    if (isNamedRoomKind(target.kind)) {
+      const conversationId = getConversationIdForTarget(target)
       return conversations.value.find(conversation => (
-        conversation.room_kind === 'channel'
-        && (conversation.chat_id === target.id || conversation.other_user_id === -Math.abs(target.id))
+        conversation.room_kind === target.kind
+        && (conversation.chat_id === target.id || conversation.other_user_id === conversationId)
       ))
     }
 
     return conversations.value.find(conversation => (
-      conversation.room_kind !== 'channel' && conversation.other_user_id === target.id
+      (conversation.room_kind === 'direct' || !conversation.room_kind) && conversation.other_user_id === target.id
     ))
   }
 
@@ -1964,21 +1974,13 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
       const task = tasks.shift()
       if (!task) return
       try {
-        const endpoint = task.target.kind === 'channel'
-          ? `/chat/rooms/${task.target.id}/send`
-          : '/chat/send'
-        const payload = task.target.kind === 'channel'
-          ? {
-              content: task.item.content,
-              message_type: task.item.message.message_type,
-              forwarded_from_id: task.item.forwardedFromId,
-            }
-          : {
-              receiver_id: task.target.id,
-              content: task.item.content,
-              message_type: task.item.message.message_type,
-              forwarded_from_id: task.item.forwardedFromId,
-            }
+        const targetConversationId = getConversationIdForTarget(task.target)
+        const endpoint = buildChatSendEndpoint(targetConversationId)
+        const payload = buildChatSendBody(targetConversationId, {
+          content: task.item.content,
+          message_type: task.item.message.message_type,
+        })
+        payload.forwarded_from_id = task.item.forwardedFromId
 
         await messagesLogic.apiFetch(endpoint, {
           method: 'POST',
@@ -2017,7 +2019,7 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
     if (fullyFailedTargets.length > 0) {
       alert(`بخشی از پیام‌ها برای این مقاصد هدایت نشدند: ${fullyFailedTargets.join('، ')}`)
     } else if (hasUnsupportedTargets) {
-      alert('هدایت پیام به گروه به زودی اضافه می‌شود')
+      alert('برخی مقصدها هنوز برای هدایت پشتیبانی نمی‌شوند')
     }
 
     // Fire conversation refresh in background; don't block UI.
@@ -2030,7 +2032,7 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
       const targetConversation = findConversationForTarget(only)
       const targetName = targetConversation?.other_user_name || only.title
 
-      if (only.kind === 'channel') {
+      if (isNamedRoomKind(only.kind)) {
         showAttachmentMenu.value = false
         showStickerPicker.value = false
       }
@@ -2638,6 +2640,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         :showForwardModal="showForwardModal"
         :sortedConversations="sortedConversations"
         :includeChannels="true"
+        :includeGroups="true"
         @close="closeForwardModal"
         @forward-to="forwardSelectedMessages"
       />
