@@ -1,4 +1,6 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from bot.utils import offer_parser
 from bot.utils.offer_parser import _match_commodity_name
@@ -12,9 +14,12 @@ class ManualOfferValidationTests(unittest.TestCase):
         self.assertTrue(validate_price(999999)[0])
         self.assertFalse(validate_price(1000000)[0])
 
-    def test_quantity_never_allows_more_than_fifty(self):
-        self.assertTrue(validate_quantity(50)[0])
-        self.assertFalse(validate_quantity(51)[0])
+    def test_quantity_uses_admin_configured_system_maximum(self):
+        custom_settings = SimpleNamespace(offer_min_quantity=5, offer_max_quantity=75)
+
+        with patch("core.services.trade_service.get_trading_settings", return_value=custom_settings):
+            self.assertTrue(validate_quantity(75)[0])
+            self.assertFalse(validate_quantity(76)[0])
 
     def test_bahar_variants_match_distinct_longest_aliases(self):
         commodities = {
@@ -37,6 +42,7 @@ class ManualOfferValidationTests(unittest.TestCase):
 class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.original_find_commodity = offer_parser.find_commodity
+        self.original_get_trading_settings = offer_parser.get_trading_settings
 
         async def fake_find_commodity(text):
             mapping = {
@@ -51,6 +57,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         offer_parser.find_commodity = self.original_find_commodity
+        offer_parser.get_trading_settings = self.original_get_trading_settings
 
     async def test_text_offer_accepts_required_manual_format(self):
         result, error = await offer_parser.parse_offer_text("خ امام 30تا 75800 15 15: فقط نقدی")
@@ -63,6 +70,20 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.price, 75800)
         self.assertEqual(result.lot_sizes, [15, 15])
         self.assertEqual(result.notes, "فقط نقدی")
+
+    async def test_text_offer_quantity_limit_follows_system_settings(self):
+        offer_parser.get_trading_settings = lambda: SimpleNamespace(
+            offer_min_quantity=5,
+            offer_max_quantity=75,
+            lot_min_size=5,
+            lot_max_count=3,
+        )
+
+        result, error = await offer_parser.parse_offer_text("خ امام 60تا 75800")
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.quantity, 60)
 
     async def test_text_offer_rejects_invalid_manual_format(self):
         invalid_samples = [

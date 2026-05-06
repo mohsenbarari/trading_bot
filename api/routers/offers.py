@@ -38,7 +38,7 @@ class OfferCreate(BaseModel):
     """ایجاد لفظ جدید"""
     offer_type: str = Field(..., pattern="^(buy|sell)$", description="نوع: buy یا sell")
     commodity_id: int = Field(..., gt=0)
-    quantity: int = Field(..., gt=0, le=50)
+    quantity: int = Field(..., gt=0)
     price: int = Field(..., gt=0)
     is_wholesale: bool = Field(default=True, description="یکجا یا خُرد")
     lot_sizes: Optional[List[int]] = Field(default=None, description="بخش‌ها برای فروش خُرد")
