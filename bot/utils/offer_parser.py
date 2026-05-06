@@ -32,6 +32,8 @@ class ParseError:
 # جدول تبدیل اعداد فارسی/عربی به انگلیسی
 PERSIAN_DIGITS = '۰۱۲۳۴۵۶۷۸۹'
 ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩'
+COMMODITY_BOUNDARY_CHARS = r'\u0600-\u06FF\u200C0-9'
+BAHAR_QUALIFIERS = {"ربع", "نیم"}
 
 
 def normalize_digits(text: str) -> str:
@@ -57,6 +59,50 @@ def validate_characters(text: str) -> Tuple[bool, Optional[str]]:
         return False, "کاراکتر غیرمجاز در متن"
     
     return True, None
+
+
+def _normalize_commodity_phrase(text: str) -> str:
+    """Normalize commodity text for exact phrase matching."""
+    return ' '.join(text.replace('\u200c', ' ').split())
+
+
+def _commodity_phrase_pattern(name: str) -> re.Pattern:
+    normalized = _normalize_commodity_phrase(name)
+    escaped_parts = [re.escape(part) for part in normalized.split()]
+    phrase = r'\s+'.join(escaped_parts)
+    return re.compile(rf'(?<![{COMMODITY_BOUNDARY_CHARS}]){phrase}(?![{COMMODITY_BOUNDARY_CHARS}])')
+
+
+def _has_bahar_qualifier_conflict(text: str, match: re.Match, candidate_name: str) -> bool:
+    candidate = _normalize_commodity_phrase(candidate_name)
+    if candidate != "بهار":
+        return False
+
+    before = text[:match.start()].strip()
+    if not before:
+        return False
+
+    previous_word = before.split()[-1]
+    return previous_word in BAHAR_QUALIFIERS
+
+
+def _match_commodity_name(text: str, name_to_commodity: dict) -> Tuple[Optional[int], str]:
+    """Match the longest explicit commodity name/alias as a standalone phrase."""
+    normalized_text = _normalize_commodity_phrase(text)
+    names = sorted(
+        (name for name in name_to_commodity.keys() if _normalize_commodity_phrase(name)),
+        key=lambda item: len(_normalize_commodity_phrase(item)),
+        reverse=True,
+    )
+
+    for name in names:
+        pattern = _commodity_phrase_pattern(name)
+        for match in pattern.finditer(normalized_text):
+            if _has_bahar_qualifier_conflict(normalized_text, match, name):
+                continue
+            return name_to_commodity[name]
+
+    return None, "نامشخص"
 
 
 def extract_trade_type(text: str) -> Tuple[Optional[str], Optional[str]]:
@@ -221,11 +267,10 @@ async def find_commodity(text: str) -> Tuple[Optional[int], str]:
                     alias_str = alias["alias"] if isinstance(alias, dict) else alias
                     name_to_commodity[alias_str] = (item["id"], item["name"])
     
-    # جستجو در متن (اولویت با نام‌های بلندتر تا تطبیق دقیق‌تر)
-    sorted_names = sorted(name_to_commodity.keys(), key=len, reverse=True)
-    for name in sorted_names:
-        if name in text:
-            return name_to_commodity[name]
+    # جستجو در متن (اولویت با نام/نام مستعار بلندتر و فقط به صورت عبارت مستقل)
+    commodity_id, commodity_name = _match_commodity_name(text, name_to_commodity)
+    if commodity_id is not None:
+        return commodity_id, commodity_name
     
     # --- تشخیص: کاربر نام کالا ننوشته یا اشتباه نوشته؟ ---
     # حذف اعداد و کلمات کلیدی از متن
@@ -234,18 +279,7 @@ async def find_commodity(text: str) -> Tuple[Optional[int], str]:
     remaining = remaining.strip()
     remaining = ' '.join(remaining.split())                 # حذف فاصله‌های اضافی
     
-    # اگر هنوز حروف فارسی/عربی باقی مانده → کاربر نام کالایی نوشته که اشتباه است
-    if re.search(r'[\u0600-\u06FF]', remaining):
-        return None, "نامشخص"
-    
-    # هیچ نام کالایی نوشته نشده → پیش‌فرض: امام
-    for item in commodities_list:
-        if 'امام' in item["name"]:
-            return item["id"], item["name"]
-    
-    if commodities_list:
-        return commodities_list[0]["id"], commodities_list[0]["name"]
-    
+    # نام کالا باید صراحتاً در متن آمده باشد و با نام/alias مجاز دیتابیس تطبیق بخورد.
     return None, "نامشخص"
 
 
