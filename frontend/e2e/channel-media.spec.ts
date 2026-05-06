@@ -229,6 +229,60 @@ async function fetchLatestRoomMessageTypes(
   return Array.isArray(body) ? body.map((item) => item.message_type || '') : []
 }
 
+async function fetchLatestRoomContents(
+  request: APIRequestContext,
+  fixture: SeededChannelAdminFixture,
+): Promise<string[]> {
+  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/rooms/${fixture.channelId}/messages?limit=12`, {
+    headers: authHeaders(fixture.accessToken),
+  })
+
+  expect(response.ok()).toBeTruthy()
+  const body = (await response.json()) as Array<{ content?: string }>
+  return Array.isArray(body) ? body.map((item) => item.content || '') : []
+}
+
+async function seedShareReceivePayload(page: Page, payload: {
+  key: string
+  title?: string
+  text?: string
+  url?: string
+}) {
+  await page.evaluate(async (entry) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open('trading-bot-share-target', 1)
+      req.onupgradeneeded = () => {
+        const nextDb = req.result
+        if (!nextDb.objectStoreNames.contains('pending')) {
+          nextDb.createObjectStore('pending', { keyPath: 'key' })
+        }
+      }
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('pending', 'readwrite')
+      tx.objectStore('pending').put({
+        key: entry.key,
+        createdAt: Date.now(),
+        title: entry.title || '',
+        text: entry.text || '',
+        url: entry.url || '',
+        files: [],
+      })
+      tx.oncomplete = () => {
+        db.close()
+        resolve()
+      }
+      tx.onerror = () => {
+        db.close()
+        reject(tx.error)
+      }
+    })
+  }, payload)
+}
+
 async function injectGalleryImageAndVideo(page: Page) {
   await page.evaluate(async () => {
     const input = document.querySelector('input[type="file"][accept="image/*,video/*"]')
@@ -394,5 +448,40 @@ test.describe('Channel media regressions', () => {
     await expect(response.json()).resolves.toMatchObject({
       detail: 'Only channel admins can post messages',
     })
+  })
+
+  test('share receive can route shared text into a writable channel target', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('share_receive_channel', 'admin')
+    const bootstrapContent = `PLAYWRIGHT SHARE RECEIVE BOOTSTRAP ${Date.now()}`
+    const shareKey = `pw-share-${Date.now()}`
+    const shareTitle = `Playwright Shared Title ${Date.now()}`
+    const shareText = `Playwright Shared Body ${Date.now()}`
+    const shareUrl = `https://example.test/share/${Date.now()}`
+    const expectedMergedText = `${shareTitle}\n${shareText}\n${shareUrl}`
+
+    await seedBootstrapChannelMessage(request, fixture, bootstrapContent)
+    await loginWithSeededSession(page, fixture)
+    await seedShareReceivePayload(page, {
+      key: shareKey,
+      title: shareTitle,
+      text: shareText,
+      url: shareUrl,
+    })
+
+    await page.goto(`/share-receive?share_key=${shareKey}`)
+    await expect(page.locator('.forward-modal')).toBeVisible()
+
+    await page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle }).click()
+    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
+
+    await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
+    await expect(page.getByText(fixture.channelTitle)).toBeVisible()
+
+    await expect
+      .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([expectedMergedText]))
   })
 })
