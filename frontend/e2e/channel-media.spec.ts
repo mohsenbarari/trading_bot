@@ -242,6 +242,23 @@ async function fetchLatestRoomContents(
   return Array.isArray(body) ? body.map((item) => item.content || '') : []
 }
 
+async function fetchChannelConversationUnread(
+  request: APIRequestContext,
+  fixture: SeededChannelAdminFixture,
+): Promise<number> {
+  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/conversations`, {
+    headers: authHeaders(fixture.accessToken),
+  })
+
+  expect(response.ok()).toBeTruthy()
+  const body = (await response.json()) as Array<{ chat_id?: number; unread_count?: number }>
+  const channel = Array.isArray(body)
+    ? body.find((item) => Number(item?.chat_id) === fixture.channelId)
+    : undefined
+
+  return Number(channel?.unread_count || 0)
+}
+
 async function seedShareReceivePayload(page: Page, payload: {
   key: string
   title?: string
@@ -448,6 +465,65 @@ test.describe('Channel media regressions', () => {
     await expect(response.json()).resolves.toMatchObject({
       detail: 'Only channel admins can post messages',
     })
+  })
+
+  test('channel member gets realtime unread update and live read reset', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('channel_realtime_unread', 'member')
+    const unreadContent = `PW CHANNEL UNREAD ${Date.now()}`
+    const liveContent = `PW CHANNEL LIVE ${Date.now()}`
+    const conversationRow = page.locator('.conversation-item').filter({ hasText: fixture.channelTitle })
+
+    await loginWithSeededSession(page, fixture)
+
+    await page.goto('/chat')
+    await expect(conversationRow).toBeVisible()
+    await page.waitForTimeout(1200)
+
+    await expect(conversationRow.locator('.unread-badge')).toHaveCount(0)
+    await expect
+      .poll(async () => fetchChannelConversationUnread(request, fixture), { timeout: 30000 })
+      .toBe(0)
+
+    const unreadResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${fixture.channelId}/send`, {
+      headers: authHeaders(fixture.bootstrapAccessToken),
+      data: {
+        content: unreadContent,
+        message_type: 'text',
+      },
+    })
+
+    expect(unreadResponse.ok()).toBeTruthy()
+
+    await expect(conversationRow.locator('.unread-badge')).toHaveText('1')
+    await expect
+      .poll(async () => fetchChannelConversationUnread(request, fixture), { timeout: 30000 })
+      .toBe(1)
+
+    await conversationRow.click()
+
+    await expect(page.getByText('کانال • فقط مدیران امکان ارسال دارند')).toBeVisible()
+    await expect(page.locator('.messages-container').getByText(unreadContent)).toBeVisible()
+    await expect
+      .poll(async () => fetchChannelConversationUnread(request, fixture), { timeout: 30000 })
+      .toBe(0)
+
+    const liveResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${fixture.channelId}/send`, {
+      headers: authHeaders(fixture.bootstrapAccessToken),
+      data: {
+        content: liveContent,
+        message_type: 'text',
+      },
+    })
+
+    expect(liveResponse.ok()).toBeTruthy()
+
+    await expect(page.locator('.messages-container').getByText(liveContent)).toBeVisible()
+    await expect
+      .poll(async () => fetchChannelConversationUnread(request, fixture), { timeout: 30000 })
+      .toBe(0)
   })
 
   test('share receive can route shared text into a writable channel target', async ({
