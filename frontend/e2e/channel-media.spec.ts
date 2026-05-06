@@ -1272,6 +1272,60 @@ test.describe('Channel media regressions', () => {
       .toEqual(expect.arrayContaining([expectedMergedText]))
   })
 
+  test('share receive can route shared text into a writable group target', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('share_receive_group', 'member')
+    const shareKey = `pw-share-group-${Date.now()}`
+    const shareTitle = `Playwright Shared Group Title ${Date.now()}`
+    const shareText = `Playwright Shared Group Body ${Date.now()}`
+    const shareUrl = `https://example.test/share/group/${Date.now()}`
+    const expectedMergedText = `${shareTitle}\n${shareText}\n${shareUrl}`
+    const groupTitle = `Playwright Share Group ${Date.now()}`
+
+    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        title: groupTitle,
+        member_ids: [fixture.userId],
+      },
+    })
+    expect(createResponse.ok()).toBeTruthy()
+    const createPayload = await createResponse.json() as { group: { id: number } }
+    const groupId = Number(createPayload.group.id)
+
+    const bootstrapResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        content: `PLAYWRIGHT SHARE RECEIVE GROUP ${Date.now()}`,
+        message_type: 'text',
+      },
+    })
+    expect(bootstrapResponse.ok()).toBeTruthy()
+
+    await loginWithSeededSession(page, fixture)
+    await seedShareReceivePayload(page, {
+      key: shareKey,
+      title: shareTitle,
+      text: shareText,
+      url: shareUrl,
+    })
+
+    await page.goto(`/share-receive?share_key=${shareKey}`)
+    await expect(page.locator('.forward-modal')).toBeVisible()
+
+    await page.locator('.forward-target-item').filter({ hasText: groupTitle }).click()
+    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
+
+    await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${groupId}`)
+    await expect(page.locator('.chat-header').getByText(groupTitle)).toBeVisible()
+
+    await expect
+      .poll(async () => fetchLatestRoomContentsByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([expectedMergedText]))
+  })
+
   test('share receive can fan out shared text to a channel and a direct chat target', async ({
     page,
     request,

@@ -38,6 +38,7 @@
       :showForwardModal="true"
       :sortedConversations="conversations"
       :includeChannels="true"
+      :includeGroups="true"
       @close="handleClose"
       @forward-to="handleTargetsPicked"
     />
@@ -50,7 +51,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { apiFetchJson } from '../utils/auth'
 import { readSharedPayload, deleteSharedPayload, type SharedPayload, type SharedFileEntry } from '../utils/shareTargetStore'
 import ChatForwardModal from '../components/chat/ChatForwardModal.vue'
-import type { ChatForwardTarget, Conversation } from '../types/chat'
+import type { ChatForwardTarget, Conversation, Message } from '../types/chat'
+import {
+  buildChatSendBody,
+  buildChatSendEndpoint,
+  isNamedRoomKind,
+  resolveRoomConversationKey,
+} from '../utils/chatRoomRouting'
 
 const route = useRoute()
 const router = useRouter()
@@ -160,18 +167,21 @@ async function uploadOne(file: SharedFileEntry): Promise<{ file_id: string, file
 }
 
 function getTargetChatQueryId(target: ChatForwardTarget) {
-  return target.kind === 'channel' ? -Math.abs(target.id) : target.id
+  if (isNamedRoomKind(target.kind)) {
+    return resolveRoomConversationKey(target.kind, target.id) ?? target.id
+  }
+  return target.id
 }
 
-async function sendMessageRaw(target: ChatForwardTarget, type: string, content: string) {
+async function sendMessageRaw(target: ChatForwardTarget, type: Message['message_type'], content: string) {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
   const token = localStorage.getItem('auth_token') || ''
-  const endpoint = target.kind === 'channel'
-    ? `${baseUrl}/api/chat/rooms/${target.id}/send`
-    : `${baseUrl}/api/chat/send`
-  const body = target.kind === 'channel'
-    ? { content, message_type: type }
-    : { receiver_id: target.id, content, message_type: type }
+  const conversationKey = getTargetChatQueryId(target)
+  const endpoint = `${baseUrl}/api${buildChatSendEndpoint(conversationKey)}`
+  const body = buildChatSendBody(conversationKey, {
+    content,
+    message_type: type,
+  })
 
   const resp = await fetch(endpoint, {
     method: 'POST',
