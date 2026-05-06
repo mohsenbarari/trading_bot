@@ -27,6 +27,10 @@
  */
 
 import type { Message } from '../types/chat'
+import {
+    buildChatSendBody,
+    buildChatSendEndpoint,
+} from '../utils/chatRoomRouting'
 
 // -----------------------------------------------------------------------------
 // Types
@@ -725,20 +729,11 @@ async function sendOne(upload: PendingUpload): Promise<void> {
 
     const content = buildContent(upload, 'final')
     const token = config.getAuthToken()
-    const isChannelRoom = upload.userId < 0
-    const endpoint = isChannelRoom
-        ? `${config.apiBaseUrl}/api/chat/rooms/${Math.abs(upload.userId)}/send`
-        : `${config.apiBaseUrl}/api/chat/send`
-    const body = isChannelRoom
-        ? {
-            content,
-            message_type: upload.msgType,
-        }
-        : {
-            receiver_id: upload.userId,
-            content,
-            message_type: upload.msgType,
-        }
+    const endpoint = `${config.apiBaseUrl}/api${buildChatSendEndpoint(upload.userId)}`
+    const body = buildChatSendBody(upload.userId, {
+        content,
+        message_type: upload.msgType,
+    })
 
     try {
         const res = await fetch(endpoint, {
