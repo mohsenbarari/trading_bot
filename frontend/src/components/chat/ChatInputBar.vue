@@ -113,7 +113,7 @@
       <!-- Left side buttons (Only if not recording) -->
       <template v-if="!messageInput.trim() && !isRecording && !editingMessage">
         <button 
-          v-if="!disableRichComposer"
+          v-if="!disableRichComposer && props.allowVoiceRecording !== false"
           v-ripple 
           class="voice-btn"
           @click="startVoiceRecording"
@@ -285,6 +285,7 @@ const props = defineProps<{
   isReadOnly?: boolean
   readOnlyBannerText?: string
   disableRichComposer?: boolean
+  allowVoiceRecording?: boolean
   stickerPickerOpen?: boolean
 }>()
 

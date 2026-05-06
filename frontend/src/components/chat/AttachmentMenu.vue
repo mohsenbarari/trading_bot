@@ -205,7 +205,7 @@
         <!-- Tabs -->
         <div class="sheet-tabs">
           <button
-            v-for="tab in tabs"
+            v-for="tab in visibleTabs"
             :key="tab.id"
             :class="['tab-btn', { active: activeTab === tab.id }]"
             @click="activeTab = tab.id"
@@ -456,9 +456,12 @@ type CameraFallbackReason =
   | 'media-devices-unavailable'
   | 'stream-start-failed'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   modelValue: boolean
-}>()
+  allowLocation?: boolean
+}>(), {
+  allowLocation: true,
+})
 
 const emit = defineEmits<{
   (e: 'update:modelValue', val: boolean): void
@@ -688,6 +691,8 @@ const tabs = [
   { id: 'file' as const, label: 'فایل', icon: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' },
   { id: 'location' as const, label: 'موقعیت', icon: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>' },
 ]
+
+const visibleTabs = computed(() => props.allowLocation ? tabs : tabs.filter(tab => tab.id !== 'location'))
 
 // Swipe to dismiss
 let startY = 0
@@ -1299,6 +1304,12 @@ watch(() => props.modelValue, (val) => {
   if (!val) {
     cleanupCamera(true)
     resetLocationDraft()
+  }
+})
+
+watch(() => props.allowLocation, (allowLocation) => {
+  if (!allowLocation && activeTab.value === 'location') {
+    activeTab.value = 'gallery'
   }
 })
 
