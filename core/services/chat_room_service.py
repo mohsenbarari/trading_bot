@@ -471,6 +471,23 @@ async def publish_channel_read_event(
         await publisher(user_id, "chat:read", payload)
 
 
+async def publish_channel_reaction_event(
+    *,
+    chat: Chat,
+    message: Message,
+    member_user_ids: list[int],
+    serializer: Callable[[Message], SerializedMessageT],
+    publisher: RoomEventPublisher,
+) -> None:
+    payload = build_channel_message_event_payload(
+        message,
+        chat=chat,
+        serializer=serializer,
+    )
+    for user_id in member_user_ids:
+        await publisher(user_id, "chat:reaction", payload)
+
+
 async def list_channel_invite_candidates(
     db: AsyncSession,
     *,
