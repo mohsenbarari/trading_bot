@@ -266,6 +266,46 @@ async function seedDirectDocumentMessage(
   return sendResponse.json()
 }
 
+async function seedDirectImageMessage(
+  request: APIRequestContext,
+  fixture: SeededChannelAdminFixture,
+  fileName: string,
+) {
+  const uploadResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/upload-media`, {
+    headers: authOnlyHeaders(fixture.creatorAccessToken),
+    multipart: {
+      file: {
+        name: fileName,
+        mimeType: 'image/png',
+        buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ6kAAAAASUVORK5CYII=', 'base64'),
+      },
+    },
+  })
+
+  expect(uploadResponse.ok()).toBeTruthy()
+  const uploadPayload = await uploadResponse.json() as {
+    file_id: string
+    file_name: string
+    mime_type: string
+    size: number
+    width?: number
+    height?: number
+    thumbnail?: string | null
+  }
+
+  const sendResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/send`, {
+    headers: authHeaders(fixture.creatorAccessToken),
+    data: {
+      receiver_id: fixture.userId,
+      content: JSON.stringify(uploadPayload),
+      message_type: 'image',
+    },
+  })
+
+  expect(sendResponse.ok()).toBeTruthy()
+  return sendResponse.json()
+}
+
 async function fetchLatestRoomMessageTypes(
   request: APIRequestContext,
   fixture: SeededChannelAdminFixture,
@@ -575,6 +615,48 @@ test.describe('Channel media regressions', () => {
     await expect
       .poll(async () => fetchLatestRoomMessageTypes(request, fixture), { timeout: 30000 })
       .toEqual(expect.arrayContaining(['document']))
+    await expect
+      .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([expect.stringContaining(fileName)]))
+  })
+
+  test('channel admin can forward an image message into the channel', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('channel_forward_image', 'admin')
+    const fileName = `pw-forward-${Date.now()}.png`
+    const directImageMessage = await seedDirectImageMessage(request, fixture, fileName) as { id?: number }
+    const sourceMessageId = Number(directImageMessage?.id)
+
+    expect(Number.isFinite(sourceMessageId)).toBeTruthy()
+
+    await loginWithSeededSession(page, fixture)
+
+    await page.goto('/chat')
+    await expect(page.getByText(fixture.creatorAccountName)).toBeVisible()
+    await page.getByText(fixture.creatorAccountName).click()
+
+    const sourceMessageBubble = page.locator(`#msg-${sourceMessageId}`)
+    await expect(sourceMessageBubble.locator('.msg-media-link')).toBeVisible()
+
+    await sourceMessageBubble.dispatchEvent('click')
+    await expect(page.locator('.context-menu')).toBeVisible()
+    await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
+
+    await expect(page.locator('.forward-modal')).toBeVisible()
+    await page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle }).click()
+    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
+
+    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await expect(page.getByText(fixture.channelTitle)).toBeVisible()
+    await expect(page.getByText('کانال • شما مدیر هستید')).toBeVisible()
+    await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.creatorAccountName}`)
+    await expect(page.locator('.messages-container .msg-media-link')).toBeVisible()
+
+    await expect
+      .poll(async () => fetchLatestRoomMessageTypes(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['image']))
     await expect
       .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
       .toEqual(expect.arrayContaining([expect.stringContaining(fileName)]))
