@@ -395,7 +395,8 @@ async function seedShareReceivePayload(page: Page, payload: {
   files?: Array<{
     name: string
     type: string
-    bodyBase64: string
+    bodyBase64?: string
+    generator?: 'video'
   }>
 }) {
   await page.evaluate(async (entry) => {
@@ -411,21 +412,86 @@ async function seedShareReceivePayload(page: Page, payload: {
       req.onerror = () => reject(req.error)
     })
 
+    const createGeneratedVideoBlob = async () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = 96
+      canvas.height = 96
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        throw new Error('Share-receive video context unavailable')
+      }
+      if (typeof canvas.captureStream !== 'function' || typeof MediaRecorder === 'undefined') {
+        throw new Error('Share-receive MediaRecorder unavailable')
+      }
+
+      const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type))
+      if (!mimeType) {
+        throw new Error('No supported share-receive MediaRecorder mime type')
+      }
+
+      return await new Promise<Blob>(async (resolveVideo, rejectVideo) => {
+        const stream = canvas.captureStream(8)
+        const recorder = new MediaRecorder(stream, { mimeType })
+        const chunks: BlobPart[] = []
+
+        recorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            chunks.push(event.data)
+          }
+        }
+        recorder.onerror = () => rejectVideo(new Error('Share-receive MediaRecorder error'))
+        recorder.onstop = () => resolveVideo(new Blob(chunks, { type: mimeType }))
+
+        const drawFrame = (frame: number) => {
+          ctx.fillStyle = frame % 2 === 0 ? '#dc2626' : '#7c3aed'
+          ctx.fillRect(0, 0, 96, 96)
+          ctx.fillStyle = '#ffffff'
+          ctx.beginPath()
+          ctx.arc(28 + frame * 5, 48, 16, 0, Math.PI * 2)
+          ctx.fill()
+          ctx.fillStyle = '#e2e8f0'
+          ctx.font = 'bold 15px sans-serif'
+          ctx.fillText('SHR', 42, 54)
+        }
+
+        recorder.start()
+        for (let frame = 0; frame < 6; frame += 1) {
+          drawFrame(frame)
+          await new Promise((resolveFrame) => window.setTimeout(resolveFrame, 90))
+        }
+        recorder.stop()
+      })
+    }
+
+    const buildPendingShareFile = async (file: { name: string; type: string; bodyBase64?: string; generator?: 'video' }) => {
+      if (file.generator === 'video') {
+        const blob = await createGeneratedVideoBlob()
+        return {
+          name: file.name,
+          type: blob.type || file.type,
+          size: blob.size,
+          blob,
+        }
+      }
+
+      if (!file.bodyBase64) {
+        throw new Error(`Missing share payload body for ${file.name}`)
+      }
+
+      const binary = atob(file.bodyBase64)
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+      return {
+        name: file.name,
+        type: file.type,
+        size: bytes.byteLength,
+        blob: new Blob([bytes], { type: file.type }),
+      }
+    }
+
+    const files = await Promise.all(Array.isArray(entry.files) ? entry.files.map((file) => buildPendingShareFile(file)) : [])
+
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction('pending', 'readwrite')
-      const files = Array.isArray(entry.files)
-        ? entry.files.map((file) => {
-            const binary = atob(file.bodyBase64)
-            const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
-            return {
-              name: file.name,
-              type: file.type,
-              size: bytes.byteLength,
-              blob: new Blob([bytes], { type: file.type }),
-            }
-          })
-        : []
-
       tx.objectStore('pending').put({
         key: entry.key,
         createdAt: Date.now(),
@@ -434,6 +500,7 @@ async function seedShareReceivePayload(page: Page, payload: {
         url: entry.url || '',
         files,
       })
+
       tx.oncomplete = () => {
         db.close()
         resolve()
@@ -1026,5 +1093,47 @@ test.describe('Channel media regressions', () => {
         expect.stringContaining(sharedDocumentName),
         expect.stringContaining(sharedImageName),
       ]))
+  })
+
+  test('share receive can route a shared video into a writable channel target', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('share_receive_channel_video', 'admin')
+    const bootstrapContent = `PLAYWRIGHT SHARE RECEIVE VIDEO ${Date.now()}`
+    const shareKey = `pw-share-video-${Date.now()}`
+    const sharedVideoName = `pw-share-video-${Date.now()}.webm`
+
+    await seedBootstrapChannelMessage(request, fixture, bootstrapContent)
+    await loginWithSeededSession(page, fixture)
+    await seedShareReceivePayload(page, {
+      key: shareKey,
+      files: [
+        {
+          name: sharedVideoName,
+          type: 'video/webm',
+          generator: 'video',
+        },
+      ],
+    })
+
+    await page.goto(`/share-receive?share_key=${shareKey}`)
+    await expect(page.locator('.forward-modal')).toBeVisible()
+
+    await page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle }).click()
+    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
+
+    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
+    await expect(page.locator('.chat-header').getByText(fixture.channelTitle)).toBeVisible()
+    await expect(page.locator('.messages-container .msg-media-link')).toBeVisible()
+    await expect(page.locator('.messages-container .media-type-badge')).toContainText('ویدئو')
+
+    await expect
+      .poll(async () => fetchLatestRoomMessageTypes(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['video']))
+    await expect
+      .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([expect.stringContaining(sharedVideoName)]))
   })
 })
