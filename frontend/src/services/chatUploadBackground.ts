@@ -45,7 +45,7 @@ export type UploadPhase =
 
 export interface PendingUpload {
     id: number // optimistic id (negative)
-    userId: number // receiver id (captured at submit time)
+    userId: number // conversation key captured at submit time; negative = channel room
     senderId: number
     msgType: UploadMsgType
     file: Blob // preprocessed blob — IndexedDB can store Blobs/Files
@@ -73,7 +73,7 @@ export interface PendingUpload {
 
 export interface SubmitUploadParams {
     optimisticId: number
-    userId: number
+    userId: number // conversation key captured at submit time; negative = channel room
     senderId: number
     msgType: UploadMsgType
     file: Blob
@@ -725,19 +725,29 @@ async function sendOne(upload: PendingUpload): Promise<void> {
 
     const content = buildContent(upload, 'final')
     const token = config.getAuthToken()
+    const isChannelRoom = upload.userId < 0
+    const endpoint = isChannelRoom
+        ? `${config.apiBaseUrl}/api/chat/rooms/${Math.abs(upload.userId)}/send`
+        : `${config.apiBaseUrl}/api/chat/send`
+    const body = isChannelRoom
+        ? {
+            content,
+            message_type: upload.msgType,
+        }
+        : {
+            receiver_id: upload.userId,
+            content,
+            message_type: upload.msgType,
+        }
 
     try {
-        const res = await fetch(`${config.apiBaseUrl}/api/chat/send`, {
+        const res = await fetch(endpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 ...(token ? { Authorization: `Bearer ${token}` } : {}),
             },
-            body: JSON.stringify({
-                receiver_id: upload.userId,
-                content,
-                message_type: upload.msgType,
-            }),
+            body: JSON.stringify(body),
         })
 
         if (!res.ok) {

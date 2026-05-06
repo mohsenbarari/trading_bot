@@ -2269,7 +2269,7 @@ watch(showAttachmentMenu, (isOpen) => {
 })
 
 function handleToggleAttachment() {
-  if (selectedRoomKind.value === 'channel') {
+  if (selectedRoomKind.value === 'channel' && !canSendToSelectedRoom.value) {
     return
   }
   showStickerPicker.value = false
@@ -2538,7 +2538,8 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         :isDeleted="isSelectedUserDeleted"
         :isReadOnly="isSelectedRoomReadOnly"
         :readOnlyBannerText="selectedRoomKind === 'channel' ? 'فقط مدیران کانال امکان ارسال پیام دارند.' : undefined"
-        :disableRichComposer="selectedRoomKind === 'channel'"
+        :disableRichComposer="isSelectedRoomReadOnly"
+        :allowVoiceRecording="selectedRoomKind !== 'channel'"
         :selectedMessages="selectedMessages"
         :isUploading="isUploading"
         @cancel-edit="cancelEdit"
@@ -2556,6 +2557,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       <!-- Attachment Bottom Sheet -->
       <AttachmentMenu
         v-model="showAttachmentMenu"
+        :allowLocation="selectedRoomKind !== 'channel'"
         @select-media="handleMediaUploadWrapper"
         @select-file="(file) => handleMediaUploadWrapper(file, null, 0, 1, { sendAsDocument: true })"
         @select-location="handleSendLocation"
