@@ -84,7 +84,8 @@ Scope rules:
 - [x] Cover `api/routers/chat.py` direct conversations/search/history/typing/read/poll endpoints.
 - [x] Cover `api/routers/chat.py` direct send/edit/delete/reaction endpoints.
 - [x] Cover `api/routers/chat.py` media/file flows.
-- [ ] Cover `api/routers/sessions.py`, `api/routers/notifications.py`, and `api/routers/sync.py` runtime contracts.
+- [x] Cover `api/routers/sessions.py` verify/active/terminate/logout runtime contracts.
+- [ ] Cover remaining `api/routers/sessions.py` login-request approval/poll contracts and the `notifications.py` / `sync.py` runtime contracts.
 - [ ] Cover remaining routers: `users.py`, `users_public.py`, `blocks.py`, `commodities.py`, `realtime.py`, `trading_settings.py`, `config` surface via `main.py`.
 
 ## Phase 4 - Bot Handler and FSM Coverage
