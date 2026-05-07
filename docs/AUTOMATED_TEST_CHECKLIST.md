@@ -76,7 +76,8 @@ Scope rules:
 - [x] Cover `api/routers/offers.py` successful create/home-server behavior.
 - [x] Cover `api/routers/trades.py` read endpoints (`/my`, `/{id}`, `/with/{user}`).
 - [x] Cover `api/routers/trades.py` forwarding and internal-execute wrapper paths.
-- [ ] Cover remaining `api/routers/trades.py` authoritative execute/error paths.
+- [x] Cover `api/routers/trades.py` authoritative execute guard/error branches.
+- [ ] Cover remaining `api/routers/trades.py` successful authoritative execution and side effects.
 - [x] Cover `api/routers/chat.py` group management endpoints.
 - [x] Cover `api/routers/chat.py` channel management endpoints.
 - [x] Cover `api/routers/chat.py` room send/read/message-list endpoints.
