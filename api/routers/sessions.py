@@ -35,6 +35,7 @@ class SessionOut(BaseModel):
     device_name: str
     device_ip: Optional[str] = None
     platform: str
+    home_server: str
     is_primary: bool
     is_active: bool
     created_at: datetime
@@ -67,6 +68,7 @@ def session_to_dict(s: UserSession) -> dict:
         "device_name": s.device_name,
         "device_ip": s.device_ip,
         "platform": s.platform.value if hasattr(s.platform, 'value') else str(s.platform),
+        "home_server": s.home_server or "foreign",
         "is_primary": s.is_primary,
         "is_active": s.is_active,
         "created_at": s.created_at.isoformat() if s.created_at else None,
@@ -333,11 +335,17 @@ async def approve_request(
         raise HTTPException(status_code=403, detail="فقط از نشست اصلی مجاز به تایید هستید")
 
     # Generate refresh token for new session
+    stmt_req = select(SessionLoginRequest).where(SessionLoginRequest.id == rid)
+    login_req = (await db.execute(stmt_req)).scalar_one_or_none()
+    if not login_req:
+        raise HTTPException(status_code=404, detail="درخواست یافت نشد")
+
     new_refresh = create_refresh_token(subject=current_user.id)
 
     result = await approve_login_request(
         db, rid, primary_session, new_refresh,
         device_ip=request.client.host if request.client else None,
+        home_server=login_req.requester_home_server,
     )
 
     if "error" in result:
@@ -424,6 +432,7 @@ async def poll_login_request_status(
             response["access_token"] = create_access_token(
                 subject=login_req.user_id,
                 session_id=str(new_session.id),
+                server_id=new_session.home_server or "foreign",
             )
             # Retrieve actual refresh token from Redis
             try:

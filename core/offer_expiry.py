@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from core.db import AsyncSessionLocal
 from core.config import settings
+from core.server_routing import current_server
 from models.offer import Offer, OfferStatus
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ async def expire_stale_offers() -> int:
             select(Offer)
             .where(
                 Offer.status == OfferStatus.ACTIVE,
+                Offer.home_server == current_server(),
                 Offer.created_at < cutoff_time
             )
         )
@@ -85,7 +87,7 @@ async def expire_stale_offers() -> int:
         # Bulk update status to EXPIRED
         await session.execute(
             update(Offer)
-            .where(Offer.id.in_(offer_ids))
+            .where(Offer.id.in_(offer_ids), Offer.home_server == current_server())
             .values(status=OfferStatus.EXPIRED)
         )
         await session.commit()

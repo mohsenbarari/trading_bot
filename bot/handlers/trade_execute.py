@@ -16,8 +16,11 @@ from bot.callbacks import ChannelTradeCallback
 from api.routers.realtime import publish_event
 from core.services.trade_service import (
     build_lot_unavailable_suggestion_payload,
+    get_available_trade_amounts,
     validate_offer_trade_amount,
 )
+from core.server_routing import current_server, is_remote_home
+from core.trade_forwarding import forward_trade_to_home_server
 from bot.utils.trade_suggestion_messages import (
     PRIVATE_SUGGESTION_CONFIRM_TIMEOUT,
     build_offer_trade_buttons,
@@ -165,6 +168,70 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
         
         # تعداد واقعی معامله
         actual_amount = trade_amount or offer.remaining_quantity or offer.quantity
+        if is_remote_home(offer.home_server):
+            is_confirmed = await check_double_click(user.id, offer_id, actual_amount, timeout=PRIVATE_SUGGESTION_CONFIRM_TIMEOUT)
+            local_available_amounts = get_available_trade_amounts(
+                quantity=offer.quantity,
+                remaining_quantity=offer.remaining_quantity or offer.quantity,
+                is_wholesale=offer.is_wholesale,
+                lot_sizes=offer.lot_sizes,
+            )
+
+            if not is_confirmed:
+                if callback.message and callback.message.chat.id != settings.channel_id:
+                    try:
+                        pending_keyboard = build_trade_amount_buttons(offer.id, local_available_amounts, pending_amount=actual_amount)
+                        await callback.message.edit_reply_markup(reply_markup=pending_keyboard)
+                        await upsert_trade_suggestion_record(
+                            offer_id=offer.id,
+                            chat_id=callback.message.chat.id,
+                            message_id=callback.message.message_id,
+                            requested_amount=actual_amount,
+                        )
+                        schedule_trade_suggestion_cleanup(bot, offer.id, callback.message.chat.id, callback.message.message_id)
+                        schedule_trade_suggestion_pending_reset(bot, offer.id)
+                    except Exception as exc:
+                        logger.debug(f"Failed to set pending state for remote-home offer: {exc}")
+                await callback.answer("برای تایید دوباره روی همان دکمه بزنید ☑️", show_alert=False)
+                return
+
+            status_code, body = await forward_trade_to_home_server(
+                offer.home_server,
+                {
+                    "offer_id": offer.id,
+                    "quantity": actual_amount,
+                    "responder_user_id": user.id,
+                    "edge_received_at": datetime.utcnow().isoformat(),
+                    "source_server": current_server(),
+                    "idempotency_key": f"bot:{user.id}:{offer.id}:{actual_amount}:{callback.id}",
+                },
+            )
+
+            if status_code == 409 and isinstance(body, dict) and body.get("error_code") == "TRADE_LOT_UNAVAILABLE":
+                target_chat_id = user.telegram_id or callback.from_user.id
+                await send_or_update_trade_suggestion_message(
+                    callback=callback,
+                    bot=bot,
+                    target_chat_id=target_chat_id,
+                    payload=body,
+                )
+                await callback.answer("پیشنهاد جدید برای شما ارسال شد.", show_alert=False)
+                return
+
+            if 200 <= status_code < 300:
+                try:
+                    if callback.message and callback.message.chat.id != settings.channel_id:
+                        await callback.message.edit_reply_markup(reply_markup=None)
+                        await remove_trade_suggestion_record(offer.id, callback.message.chat.id, callback.message.message_id)
+                except Exception as exc:
+                    logger.debug(f"Failed to clear remote-home suggestion buttons: {exc}")
+                await callback.answer("معامله ثبت شد ✅", show_alert=False)
+                return
+
+            detail = body.get("detail") if isinstance(body, dict) else None
+            await callback.answer(f"❌ {detail or 'امکان انجام این معامله وجود ندارد.'}", show_alert=True)
+            return
+
         
         remaining = offer.remaining_quantity or offer.quantity
         is_valid_amount, amount_error, actual_amount, available_amounts = validate_offer_trade_amount(

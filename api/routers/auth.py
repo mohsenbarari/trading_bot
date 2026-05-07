@@ -32,6 +32,7 @@ from core.services.session_service import handle_login_session, get_session_by_r
 from models.session import Platform, UserSession
 import uuid
 from core.utils import utc_now
+from core.server_routing import SERVER_FOREIGN, server_from_request
 
 
 router = APIRouter()
@@ -60,6 +61,10 @@ def _extract_device_info(request) -> dict:
 
     ip = request.client.host if hasattr(request, 'client') and request.client else None
     return {"device_name": device_name, "device_ip": ip, "platform": platform}
+
+
+def _login_home_server(raw_request: Request, *, is_telegram: bool = False) -> str:
+    return server_from_request(raw_request, force_telegram_foreign=is_telegram)
 
 # --- Schemas ---
 class Token(BaseModel):
@@ -184,7 +189,8 @@ async def register_complete(
         full_name=inv.account_name, # Temporary full name
         address=req.address,
         has_bot_access=True, # Default to True as requested
-        telegram_id=None # Web only user
+        telegram_id=None, # Web only user
+        home_server=_login_home_server(raw_request),
     )
     
     db.add(new_user)
@@ -220,6 +226,7 @@ async def register_complete(
         device_name=device_info["device_name"],
         device_ip=device_info["device_ip"],
         platform=device_info["platform"],
+        home_server=new_user.home_server,
     )
     
     # Generate access token with session_id
@@ -228,6 +235,7 @@ async def register_complete(
         subject=new_user.id,
         expires_delta=access_token_expires,
         session_id=session_id,
+        server_id=new_user.home_server,
     )
     
     return {
@@ -290,6 +298,7 @@ async def refresh_access_token(
             subject=user.id,
             expires_delta=access_token_expires,
             session_id=str(session.id),
+            server_id=session.home_server or user.home_server or SERVER_FOREIGN,
         )
         
         await db.commit()
@@ -338,6 +347,8 @@ async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
         
     refresh_token = create_refresh_token(subject=user.id)
     device_info = _extract_device_info(raw_request)
+    login_home_server = _login_home_server(raw_request)
+    user.home_server = login_home_server
     
     session = UserSession(
         id=uuid.uuid4(),
@@ -346,6 +357,7 @@ async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
         device_ip=real_ip,
         platform=device_info["platform"],
         refresh_token_hash=hash_token(refresh_token),
+        home_server=login_home_server,
         is_primary=False,
         is_active=True,
         expires_at=utc_now() + timedelta(days=365)
@@ -358,6 +370,7 @@ async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
         subject=user.id,
         expires_delta=access_token_expires,
         session_id=str(session.id),
+        server_id=login_home_server,
     )
     
     return {
@@ -553,12 +566,15 @@ async def verify_otp(
     
     # Session management
     device_info = _extract_device_info(raw_request)
+    login_home_server = _login_home_server(raw_request)
+    user.home_server = login_home_server
     session_result = await handle_login_session(
         db, user, refresh_token,
         device_name=device_info["device_name"],
         device_ip=device_info["device_ip"],
         platform=device_info["platform"],
         suspended_refresh_token=request.suspended_refresh_token,
+        home_server=login_home_server,
     )
     
     if session_result["action"] == "blocked":
@@ -579,6 +595,7 @@ async def verify_otp(
         subject=user.id,
         expires_delta=access_token_expires,
         session_id=session_id,
+        server_id=login_home_server,
     )
     
     return {
@@ -643,12 +660,15 @@ async def webapp_login(
         # Override platform to telegram_mini_app for webapp login
         device_info["platform"] = Platform.TELEGRAM_MINI_APP
         device_info["device_name"] = "Telegram Mini App"
+        login_home_server = SERVER_FOREIGN
+        user.home_server = login_home_server
         
         session_result = await handle_login_session(
             db, user, refresh_token,
             device_name=device_info["device_name"],
             device_ip=device_info["device_ip"],
             platform=device_info["platform"],
+            home_server=login_home_server,
         )
         
         if session_result["action"] == "blocked":
@@ -664,7 +684,7 @@ async def webapp_login(
             }
         
         session_id = str(session_result["session"].id) if session_result.get("session") else None
-        access_token = create_access_token(subject=user.id, session_id=session_id)
+        access_token = create_access_token(subject=user.id, session_id=session_id, server_id=login_home_server)
         
         return {
             "access_token": access_token,

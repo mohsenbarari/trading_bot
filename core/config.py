@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     
     # Server Mode (iran vs foreign)
     server_mode: str = "foreign"
+    peer_server_url: str | None = None
+    iran_server_url: str | None = None
+    germany_server_url: str | None = None
+    foreign_server_domain: str | None = None
+    iran_server_domain: str | None = None
+    trade_forward_timeout_seconds: float = 3.0
+    trade_forward_grace_seconds: int = 3
     foreign_server_url: str | None = None
     sync_api_key: str | None = None
 
