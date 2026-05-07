@@ -13,6 +13,8 @@ __all__ = [
     "suggest_lot_combination",
     "generate_default_lots",
     "validate_lot_sizes",
+    "get_available_trade_amounts",
+    "validate_offer_trade_amount",
     "validate_quantity",
     "validate_price",
     "parse_lot_sizes_text",
@@ -222,6 +224,83 @@ def validate_lot_sizes(
             return False, f"❌ جمع ترکیب ({lot_sum}) با کل ({total}) برابر نیست.", None
     
     return True, "", lot_sizes
+
+
+def get_available_trade_amounts(
+    quantity: Union[int, float, str],
+    remaining_quantity: Optional[Union[int, float, str]],
+    is_wholesale: bool,
+    lot_sizes: Optional[List[Union[int, float, str]]]
+) -> List[int]:
+    """
+    Return the exact amounts that can currently be traded for an offer.
+
+    Wholesale offers are traded as the full remaining quantity. Retail offers
+    must be traded only through the still-active lot sizes defined by the offer
+    owner; the aggregate remaining quantity is not an implicit lot.
+    """
+    try:
+        total = _ensure_int(quantity, "quantity")
+        remaining = _ensure_int(remaining_quantity if remaining_quantity is not None else total, "remaining_quantity")
+    except TypeError:
+        return []
+
+    if remaining <= 0:
+        return []
+
+    if is_wholesale or not lot_sizes:
+        return [remaining]
+
+    try:
+        normalized_lots = _ensure_int_list(lot_sizes, "lot_sizes")
+    except TypeError:
+        return []
+
+    seen = set()
+    available: List[int] = []
+    for lot in normalized_lots:
+        if lot <= 0 or lot > remaining or lot in seen:
+            continue
+        seen.add(lot)
+        available.append(lot)
+
+    return available
+
+
+def validate_offer_trade_amount(
+    quantity: Union[int, float, str],
+    remaining_quantity: Optional[Union[int, float, str]],
+    is_wholesale: bool,
+    lot_sizes: Optional[List[Union[int, float, str]]],
+    requested_amount: Union[int, float, str]
+) -> Tuple[bool, str, int, List[int]]:
+    """
+    Validate that a trade amount is allowed by the offer's current state.
+
+    The caller must run this after locking the offer row. That guarantees a
+    second simultaneous request sees the lot removed by the first request and
+    cannot consume the same lot again.
+    """
+    try:
+        total = _ensure_int(quantity, "quantity")
+        remaining = _ensure_int(remaining_quantity if remaining_quantity is not None else total, "remaining_quantity")
+        amount = _ensure_int(requested_amount, "requested_amount")
+    except TypeError as exc:
+        return False, str(exc), 0, []
+
+    if amount <= 0:
+        return False, "تعداد معامله نامعتبر است.", amount, []
+
+    if amount > remaining:
+        return False, f"تعداد درخواستی بیشتر از موجودی است. موجودی: {remaining}", amount, []
+
+    available_amounts = get_available_trade_amounts(total, remaining, is_wholesale, lot_sizes)
+    if amount not in available_amounts:
+        if is_wholesale or not lot_sizes:
+            return False, f"تعداد درخواستی بیشتر از موجودی است. موجودی: {remaining}", amount, available_amounts
+        return False, "این لات دیگر موجود نیست.", amount, available_amounts
+
+    return True, "", amount, available_amounts
 
 
 def validate_quantity(quantity: Union[int, float, str]) -> Tuple[bool, str]:

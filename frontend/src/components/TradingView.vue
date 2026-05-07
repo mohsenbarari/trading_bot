@@ -676,7 +676,7 @@ watch(activeTab, (val) => {
               </template>
               <template v-else>
                 <button 
-                  v-for="amount in [...new Set([offer.remaining_quantity, ...(offer.lot_sizes || [])])]
+                  v-for="amount in [...new Set(offer.lot_sizes || [])]
                     .filter(a => a > 0 && a <= offer.remaining_quantity)
                     .sort((a, b) => a - b)"
                   :key="offer.id + '-' + amount"

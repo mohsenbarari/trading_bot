@@ -4,7 +4,12 @@ from unittest.mock import patch
 
 from bot.utils import offer_parser
 from bot.utils.offer_parser import _match_commodity_name
-from core.services.trade_service import validate_price, validate_quantity
+from core.services.trade_service import (
+    get_available_trade_amounts,
+    validate_offer_trade_amount,
+    validate_price,
+    validate_quantity,
+)
 
 
 class ManualOfferValidationTests(unittest.TestCase):
@@ -20,6 +25,47 @@ class ManualOfferValidationTests(unittest.TestCase):
         with patch("core.services.trade_service.get_trading_settings", return_value=custom_settings):
             self.assertTrue(validate_quantity(75)[0])
             self.assertFalse(validate_quantity(76)[0])
+
+    def test_retail_trade_must_match_active_registered_lot(self):
+        available = get_available_trade_amounts(
+            quantity=34,
+            remaining_quantity=34,
+            is_wholesale=False,
+            lot_sizes=[16, 10, 8],
+        )
+        self.assertEqual(available, [16, 10, 8])
+
+        valid, error, amount, _ = validate_offer_trade_amount(34, 34, False, [16, 10, 8], 10)
+        self.assertTrue(valid)
+        self.assertEqual(error, "")
+        self.assertEqual(amount, 10)
+
+        valid_after_first_trade, error_after_first_trade, _, available_after_first_trade = validate_offer_trade_amount(
+            quantity=34,
+            remaining_quantity=24,
+            is_wholesale=False,
+            lot_sizes=[16, 8],
+            requested_amount=10,
+        )
+
+        self.assertFalse(valid_after_first_trade)
+        self.assertEqual(error_after_first_trade, "این لات دیگر موجود نیست.")
+        self.assertEqual(available_after_first_trade, [16, 8])
+
+    def test_retail_trade_does_not_create_implicit_remaining_lot(self):
+        available = get_available_trade_amounts(
+            quantity=34,
+            remaining_quantity=18,
+            is_wholesale=False,
+            lot_sizes=[10, 8],
+        )
+
+        self.assertEqual(available, [10, 8])
+        self.assertNotIn(18, available)
+
+        valid, error, _, _ = validate_offer_trade_amount(34, 18, False, [10, 8], 16)
+        self.assertFalse(valid)
+        self.assertEqual(error, "این لات دیگر موجود نیست.")
 
     def test_bahar_variants_match_distinct_longest_aliases(self):
         commodities = {

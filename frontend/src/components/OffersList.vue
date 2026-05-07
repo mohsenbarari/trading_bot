@@ -96,8 +96,8 @@ function getLotButtons(offer: any): number[] {
     return [remaining];
   }
   
-  // Retail: total + individual lots (filter valid ones)
-  const allAmounts = [remaining, ...offer.lot_sizes.filter((l: number) => l <= remaining)];
+  // Retail: only the offer owner's still-active lots are valid trade amounts.
+  const allAmounts = offer.lot_sizes.filter((l: number) => l <= remaining);
   // Deduplicate
   const seen = new Set<number>();
   const unique: number[] = [];

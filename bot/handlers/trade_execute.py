@@ -15,6 +15,7 @@ from core.utils import check_user_limits, increment_user_counter, create_user_no
 from core.enums import NotificationLevel, NotificationCategory, UserRole
 from bot.callbacks import ChannelTradeCallback
 from api.routers.realtime import publish_event
+from core.services.trade_service import get_available_trade_amounts, validate_offer_trade_amount
 
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,12 @@ router = Router()
 
 def build_lot_buttons(offer_id: int, remaining: int, lot_sizes: list[int]) -> InlineKeyboardMarkup:
     """ساخت دکمه‌های لات بر اساس باقیمانده و لات‌های موجود"""
-    all_amounts = [remaining] + sorted(lot_sizes, reverse=True)
+    all_amounts = get_available_trade_amounts(
+        quantity=remaining,
+        remaining_quantity=remaining,
+        is_wholesale=False,
+        lot_sizes=sorted(lot_sizes, reverse=True),
+    )
     # حذف تکراری‌ها با حفظ ترتیب
     seen = set()
     unique_amounts = []
@@ -103,10 +109,16 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
         # تعداد واقعی معامله
         actual_amount = trade_amount or offer.remaining_quantity or offer.quantity
         
-        # بررسی اینکه تعداد درخواستی از باقیمانده بیشتر نباشد
         remaining = offer.remaining_quantity or offer.quantity
-        if actual_amount > remaining:
-            await callback.answer("❌ این تعداد دیگر موجود نیست")
+        is_valid_amount, amount_error, actual_amount, _ = validate_offer_trade_amount(
+            quantity=offer.quantity,
+            remaining_quantity=remaining,
+            is_wholesale=offer.is_wholesale,
+            lot_sizes=offer.lot_sizes,
+            requested_amount=actual_amount,
+        )
+        if not is_valid_amount:
+            await callback.answer(f"❌ {amount_error}", show_alert=True)
             return
         
         # بررسی دابل‌کلیک با Redis (0.5 ثانیه)
