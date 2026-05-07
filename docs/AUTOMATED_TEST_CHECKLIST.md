@@ -37,8 +37,7 @@ Scope rules:
 
 ## Phase 2 - Core Service Layer Expansion
 
-- [x] Cover `core/services/trade_service.py` quantity, price, lot helpers, retail-lot availability, and race-recovery payload logic.
-- [ ] Cover remaining `core/services/trade_service.py` authority and competitive-price async logic.
+- [x] Cover `core/services/trade_service.py` quantity, price, lot helpers, retail-lot availability, competitive-price, and race-recovery logic.
 - [x] Cover `core/services/session_service.py` limits, approval, revoke, suspend, and revive logic.
 - [ ] Cover `core/services/chat_service.py` direct-chat send/read/search/mutation rules.
 - [ ] Cover `core/services/chat_room_service.py` group/channel membership, posting, reaction, and read rules.

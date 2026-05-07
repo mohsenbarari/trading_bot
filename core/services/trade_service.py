@@ -559,19 +559,18 @@ async def validate_competitive_price(
     if len(prices) < MIN_SIMILAR_OFFERS:
         return True, ""
     
-    # محاسبه میانگین قیمت
-    avg_price = sum(prices) / len(prices)
+    price_sum = sum(prices)
+    price_count = len(prices)
+    tolerance_per_thousand = int(round(PRICE_TOLERANCE * 1000))
     
     # اعتبارسنجی بر اساس نوع لفظ
     if offer_type == "sell":
-        # فروش: قیمت نباید بیش از 0.3% بالاتر از میانگین باشد
-        max_allowed = avg_price * (1 + PRICE_TOLERANCE)
-        if proposed_price > max_allowed:
+        # فروش: قیمت نباید بیش از 0.3% بالاتر از میانگین باشد.
+        if proposed_price * price_count * 1000 > price_sum * (1000 + tolerance_per_thousand):
             return False, "❌ لفظ شما تایید نشد.\nفروشنده‌ای با قیمت پایین‌تر وجود دارد."
     else:
-        # خرید: قیمت نباید بیش از 0.3% پایین‌تر از میانگین باشد
-        min_allowed = avg_price * (1 - PRICE_TOLERANCE)
-        if proposed_price < min_allowed:
+        # خرید: قیمت نباید بیش از 0.3% پایین‌تر از میانگین باشد.
+        if proposed_price * price_count * 1000 < price_sum * (1000 - tolerance_per_thousand):
             return False, "❌ لفظ شما تایید نشد.\nخریداری با قیمت بالاتر وجود دارد."
     
     return True, ""
