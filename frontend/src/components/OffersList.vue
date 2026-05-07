@@ -129,6 +129,9 @@ function getLotButtons(offer: any): number[] {
 }
 
 function isOwnOffer(offer: any): boolean {
+  if (typeof offer?.is_own_offer === 'boolean') {
+    return offer.is_own_offer;
+  }
   return props.currentUserId ? offer.user_id === props.currentUserId : false;
 }
 

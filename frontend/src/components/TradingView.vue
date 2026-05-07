@@ -29,8 +29,9 @@ interface Commodity {
 
 interface Offer {
   id: number
-  user_id: number
+  user_id: number | null
   user_account_name: string
+  is_own_offer: boolean
   offer_type: 'buy' | 'sell'
   commodity_id: number
   commodity_name: string
@@ -446,7 +447,7 @@ async function parseAndSubmitTextOffer() {
 
 // Trade Logic
 function openTradeModal(offer: Offer, qty?: number) {
-  if (offer.user_id === props.user?.id) return
+  if (offer.is_own_offer) return
   selectedOffer.value = offer
   tradeQuantity.value = qty || offer.remaining_quantity
   showTradeModal.value = true
@@ -804,7 +805,7 @@ watch(activeTab, (val) => {
           </div>
           
           <div class="offer-footer">
-            <div class="trade-buttons" v-if="offer.user_id !== user?.id">
+            <div class="trade-buttons" v-if="!offer.is_own_offer">
               <template v-if="offer.is_wholesale || !offer.lot_sizes">
                 <button class="trade-btn full-width" @click="openTradeModal(offer)">
                   {{ offer.remaining_quantity }} عدد

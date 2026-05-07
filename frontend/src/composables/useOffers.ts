@@ -7,6 +7,7 @@ const isLoading = ref(false);
 const error = ref('');
 let pollingInterval: any = null;
 let isFetching = false;
+let refreshOffersFromServer: null | (() => Promise<void>) = null;
 
 
 
@@ -18,13 +19,11 @@ let isFetching = false;
 const { on, connect } = useWebSocket();
 
 // Real-time Event Handlers
-function handleOfferCreated(data: any) {
-    console.log('RT: Offer Created', data)
-
-    // Add to list
-    offers.value.unshift(data)
-
-    // Play sound?
+function handleOfferCreated(_data: any) {
+    console.log('RT: Offer Created')
+    if (refreshOffersFromServer) {
+        void refreshOffersFromServer()
+    }
 }
 function handleOfferUpdated(data: any) {
     console.log('RT: Offer Updated', data);
@@ -84,6 +83,7 @@ export function useOffers() {
     function startPolling() {
         connect(); // Ensure WS is connected
         if (pollingInterval) return;
+        refreshOffersFromServer = () => fetchOffers(true);
         fetchOffers(); // Initial fetch
         pollingInterval = setInterval(() => fetchOffers(true), 1000);
     }
@@ -93,6 +93,7 @@ export function useOffers() {
             clearInterval(pollingInterval);
             pollingInterval = null;
         }
+        refreshOffersFromServer = null;
     }
 
     return {
