@@ -11,7 +11,7 @@ Scope rules:
 
 - [x] Phase 0 - Inventory, baseline commands, and repository-wide checklist created.
 - [x] Phase 1 - Critical backend routing/forwarding baseline.
-- [ ] Phase 2 - Core service layer expansion.
+- [x] Phase 2 - Core service layer expansion.
 - [ ] Phase 3 - API router integration coverage.
 - [ ] Phase 4 - Bot handler and FSM coverage.
 - [ ] Phase 5 - Frontend unit/component baseline.
@@ -53,7 +53,7 @@ Scope rules:
 - [x] Cover `core/services/chat_room_service.py` channel/group send and read-state orchestration helpers.
 - [x] Cover `core/services/chat_room_service.py` optional-channel admin read-model helpers.
 - [x] Cover `core/services/chat_room_service.py` group/channel conversation, member, and room-message query helpers.
-- [ ] Cover remaining `core/services/chat_room_service.py` room lookup, create/update, and any higher-level orchestration rules.
+- [x] Cover `core/services/chat_room_service.py` room lookup, count/list-active, create/update, and remaining helper rules.
 - [x] Cover `core/services/user_deletion_service.py` rollback and negative-path behavior beyond existing tests.
 - [x] Cover `core/services/block_service.py` invariants.
 - [x] Cover `core/services/chat_backfill_service.py` invariants.
