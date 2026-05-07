@@ -45,6 +45,7 @@ Scope rules:
 - [ ] Cover remaining `core/services/chat_service.py` direct-chat send/read/search/mutation orchestration rules.
 - [x] Cover `core/services/chat_room_service.py` event payload and broadcast helpers.
 - [x] Cover `core/services/chat_room_service.py` active membership/admin access guards.
+- [x] Cover `core/services/chat_room_service.py` group member add/reactivate/limit rules.
 - [ ] Cover remaining `core/services/chat_room_service.py` group/channel membership mutation, posting, reaction, and read rules.
 - [x] Cover `core/services/user_deletion_service.py` rollback and negative-path behavior beyond existing tests.
 - [x] Cover `core/services/block_service.py` invariants.
