@@ -17,6 +17,7 @@ interface TradeLotSuggestionState {
   lotSummary: string;
   availableLots: number[];
   expiresAtTs?: number | null;
+  sourceSignature?: string | null;
 }
 
 // Define Props
@@ -154,6 +155,13 @@ function isPending(offerId: number, amount: number): boolean {
   return pendingConfirm.value === `${offerId}:${amount}`;
 }
 
+function buildOfferSignature(offer: any | null): string | null {
+  if (!offer) return null;
+  const availableLots = getLotButtons(offer);
+  const remaining = Number(offer.remaining_quantity ?? offer.quantity ?? 0);
+  return [offer.status || '', remaining, availableLots.join(','), offer.expires_at_ts ?? ''].join('|');
+}
+
 function createTradeSuggestionState(data: any, fallbackOffer?: any): TradeLotSuggestionState {
   const sourceOffer = fallbackOffer || (Array.isArray(props.offers) ? props.offers.find((offer: any) => offer.id === (data.offer_id || 0)) : null);
   return {
@@ -168,6 +176,7 @@ function createTradeSuggestionState(data: any, fallbackOffer?: any): TradeLotSug
     lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? data.available_lots.join(' + ') : ''),
     availableLots: Array.isArray(data.available_lots) ? data.available_lots : [],
     expiresAtTs: sourceOffer?.expires_at_ts ?? null,
+    sourceSignature: buildOfferSignature(sourceOffer),
   };
 }
 
@@ -176,6 +185,11 @@ function syncTradeSuggestionFromOffers() {
   const sourceOffer = Array.isArray(props.offers)
     ? props.offers.find((offer: any) => offer.id === tradeSuggestion.value?.offerId)
     : null;
+  const currentSourceSignature = buildOfferSignature(sourceOffer);
+
+  if (currentSourceSignature === tradeSuggestion.value.sourceSignature) {
+    return;
+  }
 
   if (!sourceOffer) {
     closeTradeSuggestion();
@@ -201,6 +215,7 @@ function syncTradeSuggestionFromOffers() {
     lotSummary: availableLots.join(' + '),
     availableLots,
     expiresAtTs: sourceOffer.expires_at_ts ?? null,
+    sourceSignature: currentSourceSignature,
   };
 }
 

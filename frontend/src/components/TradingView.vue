@@ -80,6 +80,7 @@ interface TradeLotSuggestionState {
   lotSummary: string
   availableLots: number[]
   expiresAtTs?: number | null
+  sourceSignature?: string | null
 }
 
 // State
@@ -192,6 +193,13 @@ function getLotButtons(offer: Offer): number[] {
 
   const uniqueLots = [...new Set((offer.lot_sizes || []).filter((amount) => amount > 0))]
   return uniqueLots.filter((amount) => amount <= remaining)
+}
+
+function buildOfferSignature(offer: Offer | null): string | null {
+  if (!offer) return null
+  const availableLots = getLotButtons(offer)
+  const remaining = Number(offer.remaining_quantity ?? offer.quantity ?? 0)
+  return [offer.status || '', remaining, availableLots.join(','), offer.expires_at_ts ?? ''].join('|')
 }
 
 function hsla(c: [number, number, number], a: number): string {
@@ -477,6 +485,7 @@ async function executeTrade() {
           lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? data.available_lots.join(' + ') : ''),
           availableLots: data.available_lots,
           expiresAtTs: selectedOffer.value.expires_at_ts ?? null,
+          sourceSignature: buildOfferSignature(selectedOffer.value),
         }
         return
       }
@@ -507,6 +516,10 @@ async function executeSuggestedTrade(amount: number) {
 function syncTradeSuggestionFromOffers() {
   if (!tradeSuggestion.value) return
   const sourceOffer = offers.value.find((offer) => offer.id === tradeSuggestion.value?.offerId)
+  const currentSourceSignature = buildOfferSignature(sourceOffer ?? null)
+  if (currentSourceSignature === tradeSuggestion.value.sourceSignature) {
+    return
+  }
   if (!sourceOffer) {
     closeTradeSuggestion()
     return
@@ -530,6 +543,7 @@ function syncTradeSuggestionFromOffers() {
     lotSummary: availableLots.join(' + '),
     availableLots,
     expiresAtTs: sourceOffer.expires_at_ts ?? null,
+    sourceSignature: currentSourceSignature,
   }
 }
 
