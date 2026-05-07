@@ -71,7 +71,8 @@ Scope rules:
 - [ ] Cover `api/routers/trades.py` execute/internal execute/forwarding/error paths.
 - [x] Cover `api/routers/chat.py` group management endpoints.
 - [x] Cover `api/routers/chat.py` channel management endpoints.
-- [ ] Cover remaining `api/routers/chat.py` direct/room send-read/edit-delete/reaction/file flows.
+- [x] Cover `api/routers/chat.py` room send/read/message-list endpoints.
+- [ ] Cover remaining `api/routers/chat.py` direct send-read/edit-delete/reaction/file flows.
 - [ ] Cover `api/routers/sessions.py`, `api/routers/notifications.py`, and `api/routers/sync.py` runtime contracts.
 - [ ] Cover remaining routers: `users.py`, `users_public.py`, `blocks.py`, `commodities.py`, `realtime.py`, `trading_settings.py`, `config` surface via `main.py`.
 
