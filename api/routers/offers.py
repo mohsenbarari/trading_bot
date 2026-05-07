@@ -50,8 +50,9 @@ class OfferCreate(BaseModel):
 class OfferResponse(BaseModel):
     """پاسخ لفظ"""
     id: int
-    user_id: int
-    user_account_name: str
+    user_id: Optional[int] = None
+    user_account_name: str = ""
+    is_own_offer: bool = False
     offer_type: str
     commodity_id: int
     commodity_name: str
@@ -87,9 +88,16 @@ class ParseOfferResponse(BaseModel):
 
 # --- Helper Functions ---
 
-def offer_to_response(offer: Offer, start_settings: Optional['TradingSettings'] = None) -> OfferResponse:
+def offer_to_response(
+    offer: Offer,
+    start_settings: Optional['TradingSettings'] = None,
+    *,
+    viewer_user_id: Optional[int] = None,
+    include_owner_identity: bool = False,
+) -> OfferResponse:
     """تبدیل مدل Offer به پاسخ API"""
     remaining = offer.remaining_quantity or offer.quantity
+    is_own_offer = viewer_user_id is not None and offer.user_id == viewer_user_id
     
     # محاسبه زمان انقضا
     expires_at_ts = None
@@ -108,8 +116,9 @@ def offer_to_response(offer: Offer, start_settings: Optional['TradingSettings'] 
 
     return OfferResponse(
         id=offer.id,
-        user_id=offer.user_id,
-        user_account_name="",  # نام ثبت‌کننده نمایش داده نشود - فقط در نوتیفیکیشن معامله
+        user_id=offer.user_id if include_owner_identity else None,
+        user_account_name=(offer.user.account_name if include_owner_identity and offer.user else ""),
+        is_own_offer=is_own_offer,
         offer_type=offer.offer_type.value,
         commodity_id=offer.commodity_id,
         commodity_name=offer.commodity.name if offer.commodity else "نامشخص",
@@ -379,7 +388,7 @@ async def create_offer(
     
     await publish_event("offer:created", {
         "id": new_offer.id,
-        "user_id": new_offer.user_id,
+        "user_id": None,
         "offer_type": new_offer.offer_type.value,
         "commodity_id": new_offer.commodity_id,
         "commodity_name": new_offer.commodity.name,
@@ -388,7 +397,8 @@ async def create_offer(
         "price": new_offer.price,
         "status": new_offer.status.value,
         "created_at": to_jalali_str(new_offer.created_at) or "",
-        "user_account_name": current_user.account_name,
+        "user_account_name": "",
+        "is_own_offer": False,
         "notes": new_offer.notes,
         "is_wholesale": new_offer.is_wholesale,
         "lot_sizes": new_offer.lot_sizes,
@@ -396,7 +406,7 @@ async def create_offer(
         "expires_at_ts": sse_expires_at_ts,
     })
     
-    return offer_to_response(new_offer, ts)
+    return offer_to_response(new_offer, ts, viewer_user_id=current_user.id, include_owner_identity=True)
 
 
 @router.get("/", response_model=List[OfferResponse])
@@ -431,7 +441,7 @@ async def get_active_offers(
     from core.trading_settings import get_trading_settings_async
     ts = await get_trading_settings_async()
     
-    return [offer_to_response(o, ts) for o in offers]
+    return [offer_to_response(o, ts, viewer_user_id=current_user.id, include_owner_identity=False) for o in offers]
 
 
 @router.get("/my", response_model=List[OfferResponse])
@@ -488,7 +498,7 @@ async def get_my_offers(
     from core.trading_settings import get_trading_settings_async
     ts = await get_trading_settings_async()
     
-    return [offer_to_response(o, ts) for o in offers]
+    return [offer_to_response(o, ts, viewer_user_id=current_user.id, include_owner_identity=True) for o in offers]
 
 
 @router.delete("/{offer_id}", status_code=status.HTTP_204_NO_CONTENT)
