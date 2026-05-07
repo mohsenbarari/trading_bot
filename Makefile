@@ -9,7 +9,7 @@
 IRAN_HOST = root@87.107.110.68
 IRAN_DIR  = /root/trading-bot/trading_bot
 
-.PHONY: help up deploy frontend iran foreign down logs logs-iran restart restart-iran status
+.PHONY: help up deploy frontend iran foreign sync-recover down logs logs-iran restart restart-iran status
 
 help:
 	@echo ""
@@ -19,6 +19,7 @@ help:
 	@echo "  make frontend   - Build frontend + deploy to Iran only"
 	@echo "  make iran       - Build frontend + full Iran deploy"
 	@echo "  make foreign    - Rebuild Docker on foreign server only"
+	@echo "  make sync-recover - Catch up both servers after Iran reconnects"
 	@echo ""
 	@echo "  make down        - Stop foreign containers"
 	@echo "  make logs        - Foreign server logs"
@@ -46,6 +47,10 @@ iran:
 foreign:
 	@chmod +x ./deploy.sh
 	@./deploy.sh foreign
+
+sync-recover:
+	@chmod +x ./scripts/recover_cross_server_sync.sh
+	@./scripts/recover_cross_server_sync.sh
 
 # --- Management Commands ---
 

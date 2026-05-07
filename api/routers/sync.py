@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.db import get_db
 from models.change_log import ChangeLog
 from core.config import settings
+from core.server_routing import default_peer_server_url, peer_server_url_for
 import hmac
 import hashlib
 import time
@@ -406,6 +407,7 @@ async def resync_from_changelog(
     db: AsyncSession = Depends(get_db),
     limit: int = 100,
     table_filter: str = None,
+    target_server: str = None,
 ):
     """
     Resync unsynced change_log entries to the target server.
@@ -416,11 +418,11 @@ async def resync_from_changelog(
     if dev_key != settings.dev_api_key:
         raise HTTPException(status_code=403, detail="Dev API Key required")
 
-    target_url = getattr(settings, "foreign_server_url", None)
+    target_url = peer_server_url_for(target_server) if target_server else default_peer_server_url()
     api_key = getattr(settings, "sync_api_key", None)
 
     if not target_url or not api_key:
-        raise HTTPException(status_code=500, detail="Sync not configured (FOREIGN_SERVER_URL or SYNC_API_KEY missing)")
+        raise HTTPException(status_code=500, detail="Sync not configured (peer server URL or SYNC_API_KEY missing)")
 
     if target_url.endswith("/"):
         target_url = target_url[:-1]

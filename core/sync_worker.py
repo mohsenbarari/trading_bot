@@ -7,6 +7,7 @@ import hashlib
 import httpx
 import redis.asyncio as redis
 from core.config import settings
+from core.server_routing import default_peer_server_url
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -55,7 +56,7 @@ async def main():
     retry_queue = "sync:retry"
 
     # Get configuration (handle potential missing attributes gracefully)
-    target_url = getattr(settings, "foreign_server_url", None)
+    target_url = default_peer_server_url()
     api_key = getattr(settings, "sync_api_key", None)
     
     # Default URL normalization (remove trailing slash)
