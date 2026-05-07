@@ -1,6 +1,6 @@
 <script setup lang="ts">
 
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { Search, Loader2 } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
 import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue';
@@ -16,6 +16,7 @@ interface TradeLotSuggestionState {
   remainingQuantity: number;
   lotSummary: string;
   availableLots: number[];
+  expiresAtTs?: number | null;
 }
 
 // Define Props
@@ -153,6 +154,63 @@ function isPending(offerId: number, amount: number): boolean {
   return pendingConfirm.value === `${offerId}:${amount}`;
 }
 
+function createTradeSuggestionState(data: any, fallbackOffer?: any): TradeLotSuggestionState {
+  const sourceOffer = fallbackOffer || (Array.isArray(props.offers) ? props.offers.find((offer: any) => offer.id === (data.offer_id || 0)) : null);
+  return {
+    title: data.title || 'پیشنهاد معامله',
+    introText: data.intro_text || data.detail || 'لات انتخابی شما دیگر در دسترس نیست.',
+    offerId: data.offer_id || sourceOffer?.id || 0,
+    offerType: data.offer_type || sourceOffer?.offer_type || '',
+    offerTypeLabel: data.offer_type_label || ((data.offer_type || sourceOffer?.offer_type) === 'buy' ? 'خرید' : 'فروش'),
+    commodityName: data.commodity_name || sourceOffer?.commodity_name || 'کالا',
+    price: Number(data.price || sourceOffer?.price || 0),
+    remainingQuantity: Number(data.remaining_quantity || sourceOffer?.remaining_quantity || sourceOffer?.quantity || 0),
+    lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? data.available_lots.join(' + ') : ''),
+    availableLots: Array.isArray(data.available_lots) ? data.available_lots : [],
+    expiresAtTs: sourceOffer?.expires_at_ts ?? null,
+  };
+}
+
+function syncTradeSuggestionFromOffers() {
+  if (!tradeSuggestion.value) return;
+  const sourceOffer = Array.isArray(props.offers)
+    ? props.offers.find((offer: any) => offer.id === tradeSuggestion.value?.offerId)
+    : null;
+
+  if (!sourceOffer) {
+    closeTradeSuggestion();
+    return;
+  }
+
+  const expired = !!sourceOffer.expires_at_ts && sourceOffer.expires_at_ts <= now.value;
+  const remaining = Number(sourceOffer.remaining_quantity ?? sourceOffer.quantity ?? 0);
+  const availableLots = getLotButtons(sourceOffer);
+
+  if (expired || sourceOffer.status !== 'active' || remaining <= 0 || availableLots.length === 0) {
+    closeTradeSuggestion();
+    return;
+  }
+
+  tradeSuggestion.value = {
+    ...tradeSuggestion.value,
+    offerType: sourceOffer.offer_type || tradeSuggestion.value.offerType,
+    offerTypeLabel: sourceOffer.offer_type === 'buy' ? 'خرید' : 'فروش',
+    commodityName: sourceOffer.commodity_name || tradeSuggestion.value.commodityName,
+    price: Number(sourceOffer.price || tradeSuggestion.value.price),
+    remainingQuantity: remaining,
+    lotSummary: availableLots.join(' + '),
+    availableLots,
+    expiresAtTs: sourceOffer.expires_at_ts ?? null,
+  };
+}
+
+watch(() => props.offers, () => syncTradeSuggestionFromOffers(), { deep: true });
+watch(now, () => {
+  if (tradeSuggestion.value?.expiresAtTs && tradeSuggestion.value.expiresAtTs <= now.value) {
+    closeTradeSuggestion();
+  }
+});
+
 async function executeTrade(offerId: number, quantity: number) {
   tradingOfferId.value = offerId;
   tradingAmount.value = quantity;
@@ -179,18 +237,7 @@ async function executeTrade(offerId: number, quantity: number) {
       emit('trade-completed');
     } else {
       if (data?.error_code === 'TRADE_LOT_UNAVAILABLE' && Array.isArray(data.available_lots) && data.available_lots.length > 0) {
-        tradeSuggestion.value = {
-          title: data.title || 'پیشنهاد معامله',
-          introText: data.intro_text || data.detail || 'لات انتخابی شما دیگر در دسترس نیست.',
-          offerId: data.offer_id || offerId,
-          offerType: data.offer_type || '',
-          offerTypeLabel: data.offer_type_label || (data.offer_type === 'buy' ? 'خرید' : 'فروش'),
-          commodityName: data.commodity_name || 'کالا',
-          price: Number(data.price || 0),
-          remainingQuantity: Number(data.remaining_quantity || quantity),
-          lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? data.available_lots.join(' + ') : ''),
-          availableLots: data.available_lots,
-        };
+        tradeSuggestion.value = createTradeSuggestionState(data);
         return;
       }
       tradeError.value = data?.detail || 'خطا در انجام معامله';
@@ -224,7 +271,7 @@ function closeTradeSuggestion() {
     :available-lots="tradeSuggestion?.availableLots || []"
     :busy="tradingOfferId === tradeSuggestion?.offerId"
     :busy-amount="tradingAmount"
-    :auto-close-seconds="10"
+    :auto-close-seconds="15"
     @close="closeTradeSuggestion"
     @select-lot="(amount) => tradeSuggestion && executeTrade(tradeSuggestion.offerId, amount)"
   />

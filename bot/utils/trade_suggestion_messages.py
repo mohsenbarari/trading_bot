@@ -1,0 +1,292 @@
+import asyncio
+import json
+import logging
+import time
+from typing import Optional
+
+import redis.asyncio as redis
+from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+from bot.callbacks import ChannelTradeCallback
+from core.db import AsyncSessionLocal
+from core.redis import pool
+from core.services.trade_service import (
+    build_lot_unavailable_suggestion_payload,
+    get_available_trade_amounts,
+)
+from models.offer import Offer, OfferStatus
+
+logger = logging.getLogger(__name__)
+
+TRADE_SUGGESTION_TTL_SECONDS = 15
+PRIVATE_SUGGESTION_CONFIRM_TIMEOUT = 3.0
+
+_memory_suggestions: dict[int, dict[str, dict]] = {}
+
+
+def build_trade_amount_buttons(
+    offer_id: int,
+    amounts: list[int],
+    pending_amount: Optional[int] = None,
+) -> Optional[InlineKeyboardMarkup]:
+    seen = set()
+    unique_amounts = []
+    for amount in amounts:
+        if amount not in seen and amount > 0:
+            seen.add(amount)
+            unique_amounts.append(amount)
+
+    buttons = []
+    for amount in unique_amounts:
+        label = f"تایید {amount} عدد؟" if pending_amount == amount else f"{amount} عدد"
+        buttons.append(
+            InlineKeyboardButton(
+                text=label,
+                callback_data=ChannelTradeCallback(offer_id=offer_id, amount=amount).pack(),
+            )
+        )
+
+    return InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
+
+
+def build_offer_trade_buttons(
+    offer_id: int,
+    quantity: int,
+    remaining: int,
+    is_wholesale: bool,
+    lot_sizes: Optional[list[int]],
+    pending_amount: Optional[int] = None,
+) -> Optional[InlineKeyboardMarkup]:
+    all_amounts = get_available_trade_amounts(
+        quantity=quantity,
+        remaining_quantity=remaining,
+        is_wholesale=is_wholesale,
+        lot_sizes=sorted(lot_sizes, reverse=True) if lot_sizes else None,
+    )
+    return build_trade_amount_buttons(offer_id, all_amounts, pending_amount=pending_amount)
+
+
+def _record_field(chat_id: int, message_id: int) -> str:
+    return f"{chat_id}:{message_id}"
+
+
+def _record_key(offer_id: int) -> str:
+    return f"trade_suggestion:offer:{offer_id}"
+
+
+async def upsert_trade_suggestion_record(
+    offer_id: int,
+    chat_id: int,
+    message_id: int,
+    requested_amount: int,
+    ttl_seconds: int = TRADE_SUGGESTION_TTL_SECONDS,
+) -> None:
+    now = time.time()
+    field = _record_field(chat_id, message_id)
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "requested_amount": requested_amount,
+        "expires_at": now + ttl_seconds,
+        "offer_id": offer_id,
+    }
+    redis_client = None
+    try:
+        redis_client = redis.Redis(connection_pool=pool)
+        await redis_client.hset(_record_key(offer_id), field, json.dumps(payload, ensure_ascii=False))
+        await redis_client.expire(_record_key(offer_id), ttl_seconds + 60)
+        return
+    except Exception as exc:
+        logger.debug(f"Failed to persist trade suggestion record in Redis: {exc}")
+    finally:
+        if redis_client is not None:
+            await redis_client.aclose()
+
+    bucket = _memory_suggestions.setdefault(offer_id, {})
+    bucket[field] = payload
+
+
+async def remove_trade_suggestion_record(offer_id: int, chat_id: int, message_id: int) -> None:
+    field = _record_field(chat_id, message_id)
+    redis_client = None
+    try:
+        redis_client = redis.Redis(connection_pool=pool)
+        await redis_client.hdel(_record_key(offer_id), field)
+    except Exception as exc:
+        logger.debug(f"Failed to remove trade suggestion record from Redis: {exc}")
+    finally:
+        if redis_client is not None:
+            await redis_client.aclose()
+
+    bucket = _memory_suggestions.get(offer_id)
+    if bucket:
+        bucket.pop(field, None)
+        if not bucket:
+            _memory_suggestions.pop(offer_id, None)
+
+
+async def get_trade_suggestion_records(offer_id: int) -> list[dict]:
+    now = time.time()
+    records: list[dict] = []
+    redis_client = None
+    try:
+        redis_client = redis.Redis(connection_pool=pool)
+        raw_records = await redis_client.hgetall(_record_key(offer_id))
+        for field, raw_value in raw_records.items():
+            try:
+                record = json.loads(raw_value)
+            except Exception:
+                await redis_client.hdel(_record_key(offer_id), field)
+                continue
+            if record.get("expires_at", 0) <= now:
+                await redis_client.hdel(_record_key(offer_id), field)
+                continue
+            records.append(record)
+        return records
+    except Exception as exc:
+        logger.debug(f"Failed to read trade suggestion records from Redis: {exc}")
+    finally:
+        if redis_client is not None:
+            await redis_client.aclose()
+
+    bucket = _memory_suggestions.get(offer_id, {})
+    stale_fields = []
+    for field, record in bucket.items():
+        if record.get("expires_at", 0) <= now:
+            stale_fields.append(field)
+            continue
+        records.append(record)
+    for field in stale_fields:
+        bucket.pop(field, None)
+    if not bucket and offer_id in _memory_suggestions:
+        _memory_suggestions.pop(offer_id, None)
+    return records
+
+
+async def _clear_suggestion_markup(bot: Bot, chat_id: int, message_id: int) -> None:
+    try:
+        await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None)
+    except Exception as exc:
+        if "message is not modified" not in str(exc).lower():
+            logger.debug(f"Failed to clear suggestion markup chat={chat_id} message={message_id}: {exc}")
+
+
+async def sync_trade_suggestions_for_offer(bot: Bot, offer_id: int) -> None:
+    records = await get_trade_suggestion_records(offer_id)
+    if not records:
+        return
+
+    async with AsyncSessionLocal() as session:
+        offer = await session.get(Offer, offer_id)
+        if offer:
+            await session.refresh(offer, ["commodity"])
+
+    if not offer or offer.status != OfferStatus.ACTIVE:
+        for record in records:
+            await _clear_suggestion_markup(bot, int(record["chat_id"]), int(record["message_id"]))
+            await remove_trade_suggestion_record(offer_id, int(record["chat_id"]), int(record["message_id"]))
+        return
+
+    available_amounts = get_available_trade_amounts(
+        quantity=offer.quantity,
+        remaining_quantity=offer.remaining_quantity,
+        is_wholesale=offer.is_wholesale,
+        lot_sizes=offer.lot_sizes,
+    )
+
+    for record in records:
+        chat_id = int(record["chat_id"])
+        message_id = int(record["message_id"])
+        requested_amount = int(record.get("requested_amount") or 0)
+
+        payload = build_lot_unavailable_suggestion_payload(
+            offer_id=offer.id,
+            requested_amount=requested_amount,
+            offer_type=offer.offer_type,
+            commodity_name=offer.commodity.name if offer.commodity else None,
+            price=offer.price,
+            remaining_quantity=offer.remaining_quantity or offer.quantity,
+            available_amounts=available_amounts,
+        )
+        reply_markup = build_trade_amount_buttons(offer.id, available_amounts)
+
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=payload["message"],
+                reply_markup=reply_markup,
+            )
+        except Exception as exc:
+            if "message is not modified" not in str(exc).lower():
+                logger.debug(f"Failed to sync suggestion message chat={chat_id} message={message_id}: {exc}")
+        if not available_amounts:
+            await remove_trade_suggestion_record(offer_id, chat_id, message_id)
+
+
+def schedule_trade_suggestion_cleanup(bot: Bot, offer_id: int, chat_id: int, message_id: int) -> None:
+    async def _runner() -> None:
+        await asyncio.sleep(TRADE_SUGGESTION_TTL_SECONDS + 0.2)
+        records = await get_trade_suggestion_records(offer_id)
+        for record in records:
+            if int(record["chat_id"]) == chat_id and int(record["message_id"]) == message_id and float(record.get("expires_at", 0)) <= time.time():
+                await _clear_suggestion_markup(bot, chat_id, message_id)
+                await remove_trade_suggestion_record(offer_id, chat_id, message_id)
+                break
+
+    asyncio.create_task(_runner())
+
+
+def schedule_trade_suggestion_pending_reset(bot: Bot, offer_id: int) -> None:
+    async def _runner() -> None:
+        await asyncio.sleep(PRIVATE_SUGGESTION_CONFIRM_TIMEOUT + 0.2)
+        await sync_trade_suggestions_for_offer(bot, offer_id)
+
+    asyncio.create_task(_runner())
+
+
+async def listen_trade_suggestion_events(bot: Bot) -> None:
+    redis_client = redis.Redis(connection_pool=pool)
+    pubsub = redis_client.pubsub()
+    channels = [
+        "events:offer:updated",
+        "events:offer:completed",
+        "events:offer:expired",
+        "events:offer:cancelled",
+    ]
+    await pubsub.subscribe(*channels)
+    logger.info("🔔 Trade suggestion sync listener started")
+
+    try:
+        while True:
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if not message or message.get("type") != "message":
+                await asyncio.sleep(0.1)
+                continue
+
+            raw_data = message.get("data", "")
+            data_str = raw_data.decode("utf-8") if isinstance(raw_data, bytes) else str(raw_data)
+            try:
+                payload = json.loads(data_str)
+            except Exception:
+                await asyncio.sleep(0.1)
+                continue
+
+            offer_id = payload.get("id") or payload.get("offer_id")
+            if not offer_id:
+                await asyncio.sleep(0.1)
+                continue
+
+            try:
+                await sync_trade_suggestions_for_offer(bot, int(offer_id))
+            except Exception as exc:
+                logger.debug(f"Trade suggestion sync failed for offer={offer_id}: {exc}")
+            await asyncio.sleep(0.05)
+    except asyncio.CancelledError:
+        logger.info("🔕 Trade suggestion sync listener stopped")
+        raise
+    finally:
+        await pubsub.unsubscribe(*channels)
+        await pubsub.close()
+        await redis_client.aclose()

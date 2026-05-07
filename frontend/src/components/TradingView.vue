@@ -79,6 +79,7 @@ interface TradeLotSuggestionState {
   remainingQuantity: number
   lotSummary: string
   availableLots: number[]
+  expiresAtTs?: number | null
 }
 
 // State
@@ -177,6 +178,20 @@ function getTimerColor(pct: number): [number, number, number] {
 
 function hsl(c: [number, number, number]): string {
   return `hsl(${c[0]}, ${c[1]}%, ${c[2]}%)`
+}
+
+function getLotButtons(offer: Offer): number[] {
+  if (offer.is_wholesale || !offer.lot_sizes?.length) {
+    return [offer.remaining_quantity]
+  }
+
+  const remaining = typeof offer.remaining_quantity === 'number' ? offer.remaining_quantity : offer.quantity
+  if (remaining <= 0) {
+    return []
+  }
+
+  const uniqueLots = [...new Set((offer.lot_sizes || []).filter((amount) => amount > 0))]
+  return uniqueLots.filter((amount) => amount <= remaining)
 }
 
 function hsla(c: [number, number, number], a: number): string {
@@ -461,6 +476,7 @@ async function executeTrade() {
           remainingQuantity: Number(data.remaining_quantity || selectedOffer.value.remaining_quantity || tradeQuantity.value),
           lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? data.available_lots.join(' + ') : ''),
           availableLots: data.available_lots,
+          expiresAtTs: selectedOffer.value.expires_at_ts ?? null,
         }
         return
       }
@@ -486,6 +502,35 @@ async function executeSuggestedTrade(amount: number) {
   if (!selectedOffer.value) return
   tradeQuantity.value = amount
   await executeTrade()
+}
+
+function syncTradeSuggestionFromOffers() {
+  if (!tradeSuggestion.value) return
+  const sourceOffer = offers.value.find((offer) => offer.id === tradeSuggestion.value?.offerId)
+  if (!sourceOffer) {
+    closeTradeSuggestion()
+    return
+  }
+
+  const expired = !!sourceOffer.expires_at_ts && sourceOffer.expires_at_ts <= now.value
+  const remaining = Number(sourceOffer.remaining_quantity ?? sourceOffer.quantity ?? 0)
+  const availableLots = getLotButtons(sourceOffer as any)
+  if (expired || sourceOffer.status !== 'active' || remaining <= 0 || availableLots.length === 0) {
+    closeTradeSuggestion()
+    return
+  }
+
+  tradeSuggestion.value = {
+    ...tradeSuggestion.value,
+    offerType: sourceOffer.offer_type,
+    offerTypeLabel: sourceOffer.offer_type === 'buy' ? 'خرید' : 'فروش',
+    commodityName: sourceOffer.commodity_name,
+    price: Number(sourceOffer.price),
+    remainingQuantity: remaining,
+    lotSummary: availableLots.join(' + '),
+    availableLots,
+    expiresAtTs: sourceOffer.expires_at_ts ?? null,
+  }
 }
 
 async function expireOffer(id: number) {
@@ -604,7 +649,14 @@ watch(now, () => {
   for (const o of expired) {
     removeOfferById(o.id)
   }
+  if (tradeSuggestion.value?.expiresAtTs && tradeSuggestion.value.expiresAtTs <= now.value) {
+    closeTradeSuggestion()
+  }
 })
+
+watch(offers, () => {
+  syncTradeSuggestionFromOffers()
+}, { deep: true })
 
 watch(activeTab, (val) => {
    if (val === 'offers') loadOffers()
@@ -630,7 +682,7 @@ watch(activeTab, (val) => {
       :available-lots="tradeSuggestion?.availableLots || []"
       :busy="isTrading"
       :busy-amount="tradeQuantity"
-      :auto-close-seconds="10"
+      :auto-close-seconds="15"
       @close="closeTradeSuggestion"
       @select-lot="executeSuggestedTrade"
     />

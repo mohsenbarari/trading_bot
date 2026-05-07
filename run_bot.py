@@ -21,6 +21,7 @@ from bot.handlers import (
 from core.db import init_db, AsyncSessionLocal
 from core.events import setup_event_listeners
 from bot.middlewares import AuthMiddleware
+from bot.utils.trade_suggestion_messages import listen_trade_suggestion_events
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -62,11 +63,17 @@ async def main():
     dp.include_router(default.router)
 
     logger.info("🤖 Bot started...")
+    suggestion_sync_task = asyncio.create_task(listen_trade_suggestion_events(bot))
     try:
         await dp.start_polling(bot)
     except Exception as e:
         logger.error(f"Bot error: {e}")
     finally:
+        suggestion_sync_task.cancel()
+        try:
+            await suggestion_sync_task
+        except asyncio.CancelledError:
+            pass
         await bot.session.close()
 
 if __name__ == "__main__":

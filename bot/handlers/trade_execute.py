@@ -1,6 +1,5 @@
 import logging
 from aiogram import Router, F, types, Bot
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import Optional, List
 from sqlalchemy import select
 from datetime import datetime
@@ -17,50 +16,22 @@ from bot.callbacks import ChannelTradeCallback
 from api.routers.realtime import publish_event
 from core.services.trade_service import (
     build_lot_unavailable_suggestion_payload,
-    get_available_trade_amounts,
     validate_offer_trade_amount,
+)
+from bot.utils.trade_suggestion_messages import (
+    PRIVATE_SUGGESTION_CONFIRM_TIMEOUT,
+    build_offer_trade_buttons,
+    build_trade_amount_buttons,
+    remove_trade_suggestion_record,
+    schedule_trade_suggestion_cleanup,
+    schedule_trade_suggestion_pending_reset,
+    upsert_trade_suggestion_record,
 )
 
 
 logger = logging.getLogger(__name__)
 
 router = Router()
-
-def build_trade_amount_buttons(offer_id: int, amounts: list[int]) -> Optional[InlineKeyboardMarkup]:
-    """ساخت دکمه‌های معامله از روی مقادیر معتبر فعلی"""
-    # حذف تکراری‌ها با حفظ ترتیب
-    seen = set()
-    unique_amounts = []
-    for a in amounts:
-        if a not in seen and a > 0:
-            seen.add(a)
-            unique_amounts.append(a)
-    
-    buttons = []
-    for amount in unique_amounts:
-        buttons.append(InlineKeyboardButton(
-            text=f"{amount} عدد",
-            callback_data=ChannelTradeCallback(offer_id=offer_id, amount=amount).pack()
-        ))
-    
-    return InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
-
-
-def build_lot_buttons(
-    offer_id: int,
-    quantity: int,
-    remaining: int,
-    is_wholesale: bool,
-    lot_sizes: Optional[list[int]],
-) -> Optional[InlineKeyboardMarkup]:
-    """ساخت دکمه‌های لات بر اساس وضعیت فعلی لفظ"""
-    all_amounts = get_available_trade_amounts(
-        quantity=quantity,
-        remaining_quantity=remaining,
-        is_wholesale=is_wholesale,
-        lot_sizes=sorted(lot_sizes, reverse=True) if lot_sizes else None,
-    )
-    return build_trade_amount_buttons(offer_id, all_amounts)
 
 
 async def update_offer_channel_markup(bot: Bot, offer: Offer) -> None:
@@ -76,7 +47,7 @@ async def update_offer_channel_markup(bot: Bot, offer: Offer) -> None:
         )
         return
 
-    new_keyboard = build_lot_buttons(
+    new_keyboard = build_offer_trade_buttons(
         offer.id,
         offer.quantity,
         offer.remaining_quantity,
@@ -109,15 +80,29 @@ async def send_or_update_trade_suggestion_message(
     if is_private_suggestion_message:
         try:
             await callback_message.edit_text(payload["message"], reply_markup=reply_markup)
+            await upsert_trade_suggestion_record(
+                offer_id=int(payload["offer_id"]),
+                chat_id=target_chat_id,
+                message_id=callback_message.message_id,
+                requested_amount=int(payload["requested_amount"]),
+            )
+            schedule_trade_suggestion_cleanup(bot, int(payload["offer_id"]), target_chat_id, callback_message.message_id)
             return
         except Exception as exc:
             logger.debug(f"Failed to update existing trade suggestion message: {exc}")
 
-    await bot.send_message(
+    sent_message = await bot.send_message(
         chat_id=target_chat_id,
         text=payload["message"],
         reply_markup=reply_markup,
     )
+    await upsert_trade_suggestion_record(
+        offer_id=int(payload["offer_id"]),
+        chat_id=target_chat_id,
+        message_id=sent_message.message_id,
+        requested_amount=int(payload["requested_amount"]),
+    )
+    schedule_trade_suggestion_cleanup(bot, int(payload["offer_id"]), target_chat_id, sent_message.message_id)
 
 
 @router.callback_query(ChannelTradeCallback.filter())
@@ -213,7 +198,7 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
             return
         
         # بررسی دابل‌کلیک با Redis (0.5 ثانیه)
-        is_confirmed = await check_double_click(user.id, offer_id, actual_amount, timeout=0.5)
+        is_confirmed = await check_double_click(user.id, offer_id, actual_amount, timeout=PRIVATE_SUGGESTION_CONFIRM_TIMEOUT)
         
         if is_confirmed:
             # دابل‌کلیک - انجام معامله
@@ -400,10 +385,25 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
             try:
                 if callback.message and callback.message.chat.id != settings.channel_id:
                     await callback.message.edit_reply_markup(reply_markup=None)
+                    await remove_trade_suggestion_record(offer.id, callback.message.chat.id, callback.message.message_id)
             except Exception as e:
                 logger.debug(f"Failed to clear private suggestion buttons: {e}")
             
             await callback.answer()
         else:
             # کلیک اول - Redis ثبت کرده، راهنمایی به کاربر
-            await callback.answer("برای تایید دوباره کلیک کنید ☑️", show_alert=False)
+            if callback.message and callback.message.chat.id != settings.channel_id:
+                try:
+                    pending_keyboard = build_trade_amount_buttons(offer.id, available_amounts, pending_amount=actual_amount)
+                    await callback.message.edit_reply_markup(reply_markup=pending_keyboard)
+                    await upsert_trade_suggestion_record(
+                        offer_id=offer.id,
+                        chat_id=callback.message.chat.id,
+                        message_id=callback.message.message_id,
+                        requested_amount=actual_amount,
+                    )
+                    schedule_trade_suggestion_cleanup(bot, offer.id, callback.message.chat.id, callback.message.message_id)
+                    schedule_trade_suggestion_pending_reset(bot, offer.id)
+                except Exception as exc:
+                    logger.debug(f"Failed to set pending confirmation state for suggestion message: {exc}")
+            await callback.answer("برای تایید دوباره روی همان دکمه بزنید ☑️", show_alert=False)
