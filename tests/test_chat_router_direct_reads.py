@@ -1,0 +1,215 @@
+import unittest
+from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from fastapi import HTTPException
+
+from api.routers.chat import (
+    get_conversations,
+    get_messages,
+    mark_messages_read,
+    poll_messages,
+    search_messages,
+    send_typing_signal,
+)
+
+
+class FakeScalarResult:
+    def __init__(self, values):
+        self._values = values
+
+    def all(self):
+        return self._values
+
+
+class FakeMappingResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class FakeExecuteResult:
+    def __init__(self, *, scalars=None, mappings=None):
+        self._scalars = scalars or []
+        self._mappings = mappings or []
+
+    def scalars(self):
+        return FakeScalarResult(self._scalars)
+
+    def mappings(self):
+        return FakeMappingResult(self._mappings)
+
+
+class FakeDB:
+    def __init__(self, *, execute_results=None, get_map=None):
+        self.execute_results = list(execute_results or [])
+        self.get_map = dict(get_map or {})
+
+    async def execute(self, _stmt):
+        if not self.execute_results:
+            raise AssertionError("Unexpected execute() call")
+        return self.execute_results.pop(0)
+
+    async def get(self, _model, primary_key):
+        return self.get_map.get(primary_key)
+
+
+class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_get_conversations_merges_and_sorts_direct_group_and_channel_rows(self):
+        current_user = SimpleNamespace(id=5)
+        direct_rows = [
+            {
+                "id": 1,
+                "other_user_id": 9,
+                "other_user_name": "Direct",
+                "other_user_is_deleted": False,
+                "last_message_content": "d",
+                "last_message_type": "text",
+                "last_message_at": datetime(2026, 5, 1, 10, 0, 0),
+                "unread_count": 1,
+                "other_user_last_seen_at": None,
+                "room_kind": "direct",
+                "chat_id": None,
+                "can_send": True,
+                "member_role": None,
+            }
+        ]
+        group_row = SimpleNamespace(
+            id=-20,
+            other_user_id=-20,
+            other_user_name="Group",
+            other_user_is_deleted=False,
+            last_message_content="g",
+            last_message_type="text",
+            last_message_at=datetime(2026, 5, 2, 10, 0, 0),
+            unread_count=2,
+            other_user_last_seen_at=None,
+            room_kind="group",
+            chat_id=20,
+            can_send=True,
+            member_role="admin",
+        )
+        channel_row = SimpleNamespace(
+            id=-30,
+            other_user_id=-30,
+            other_user_name="Channel",
+            other_user_is_deleted=False,
+            last_message_content="c",
+            last_message_type="text",
+            last_message_at=datetime(2026, 5, 3, 10, 0, 0),
+            unread_count=3,
+            other_user_last_seen_at=None,
+            room_kind="channel",
+            chat_id=30,
+            can_send=False,
+            member_role="member",
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(mappings=direct_rows)])
+
+        with patch("api.routers.chat.build_direct_conversation_list_stmt", return_value="stmt") as stmt_mock, patch(
+            "api.routers.chat.list_group_conversations",
+            new=AsyncMock(return_value=[group_row]),
+        ) as groups_mock, patch(
+            "api.routers.chat.list_channel_conversations",
+            new=AsyncMock(return_value=[channel_row]),
+        ) as channels_mock:
+            result = await get_conversations(current_user=current_user, db=db)
+
+        stmt_mock.assert_called_once_with(5)
+        groups_mock.assert_awaited_once_with(db, current_user_id=5)
+        channels_mock.assert_awaited_once_with(db, current_user_id=5)
+        self.assertEqual([item.other_user_name for item in result], ["Channel", "Group", "Direct"])
+
+    async def test_search_messages_builds_query_and_serializes(self):
+        current_user = SimpleNamespace(id=5)
+        db = FakeDB(execute_results=[FakeExecuteResult(scalars=[SimpleNamespace(id=1), SimpleNamespace(id=2)])])
+        serialized = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
+
+        with patch("api.routers.chat.build_direct_message_search_stmt", new=AsyncMock(return_value="stmt")) as build_mock, patch(
+            "api.routers.chat.serialize_direct_messages_for_response",
+            return_value=serialized,
+        ) as serialize_mock:
+            result = await search_messages(q="hello", chat_id=9, limit=15, db=db, current_user=current_user)
+
+        build_mock.assert_awaited_once_with(db, current_user_id=5, query_text="hello", other_user_id=9, limit=15)
+        serialize_mock.assert_called_once()
+        self.assertIs(result, serialized)
+
+    async def test_get_messages_raises_404_when_target_user_missing(self):
+        current_user = SimpleNamespace(id=5)
+        db = FakeDB(get_map={})
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await get_messages(user_id=9, current_user=current_user, db=db)
+        self.assertEqual(exc_info.exception.status_code, 404)
+        self.assertEqual(exc_info.exception.detail, "User not found")
+
+    async def test_get_messages_handles_around_and_default_paths(self):
+        current_user = SimpleNamespace(id=5)
+        target = SimpleNamespace(id=9)
+        serialized = [SimpleNamespace(id=8), SimpleNamespace(id=9), SimpleNamespace(id=10)]
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(scalars=[SimpleNamespace(id=9), SimpleNamespace(id=8)]),
+                FakeExecuteResult(scalars=[SimpleNamespace(id=10)]),
+                FakeExecuteResult(scalars=[SimpleNamespace(id=7), SimpleNamespace(id=6)]),
+            ],
+            get_map={9: target},
+        )
+
+        with patch(
+            "api.routers.chat.build_direct_message_history_statements",
+            new=AsyncMock(return_value=("older", "newer")),
+        ) as build_mock, patch(
+            "api.routers.chat.serialize_direct_messages_for_response",
+            side_effect=[serialized, [SimpleNamespace(id=6), SimpleNamespace(id=7)]],
+        ) as serialize_mock:
+            around_result = await get_messages(user_id=9, around_id=9, current_user=current_user, db=db)
+            default_result = await get_messages(user_id=9, current_user=current_user, db=db)
+
+        self.assertEqual(build_mock.await_count, 2)
+        serialize_mock.assert_any_call([unittest.mock.ANY, unittest.mock.ANY, unittest.mock.ANY], serializer=unittest.mock.ANY)
+        self.assertEqual([item.id for item in around_result], [8, 9, 10])
+        self.assertEqual([item.id for item in default_result], [6, 7])
+
+    async def test_send_typing_signal_and_mark_messages_read_publish_events(self):
+        current_user = SimpleNamespace(id=5)
+        db = object()
+        typing_data = SimpleNamespace(receiver_id=9)
+
+        with patch("api.routers.chat.publish_direct_typing_event", new=AsyncMock()) as typing_mock:
+            result = await send_typing_signal(data=typing_data, current_user=current_user)
+        typing_mock.assert_awaited_once_with(receiver_id=9, sender_id=5, publisher=unittest.mock.ANY)
+        self.assertIsNone(result)
+
+        with patch("api.routers.chat.commit_direct_read_state", new=AsyncMock()) as commit_mock, patch(
+            "api.routers.chat.publish_direct_read_event",
+            new=AsyncMock(),
+        ) as publish_mock:
+            result = await mark_messages_read(user_id=9, current_user=current_user, db=db)
+        commit_mock.assert_awaited_once_with(db, reader=current_user, other_user_id=9)
+        publish_mock.assert_awaited_once_with(other_user_id=9, reader_id=5, publisher=unittest.mock.ANY)
+        self.assertIsNone(result)
+
+    async def test_poll_messages_shapes_unread_summary(self):
+        current_user = SimpleNamespace(id=5)
+        rows = [
+            {"other_user_id": 9, "other_user_name": "A", "unread_count": 2, "other_user_is_deleted": False},
+            {"other_user_id": 10, "other_user_name": "B", "unread_count": 3, "other_user_is_deleted": True},
+        ]
+        db = FakeDB(execute_results=[FakeExecuteResult(mappings=rows)])
+
+        with patch("api.routers.chat.build_direct_unread_poll_stmt", return_value="stmt") as stmt_mock:
+            result = await poll_messages(current_user=current_user, db=db)
+
+        stmt_mock.assert_called_once_with(5)
+        self.assertEqual(result.total_unread, 5)
+        self.assertEqual(result.unread_chats_count, 2)
+        self.assertEqual(result.conversations_with_unread[1]["is_deleted"], True)
+
+
+if __name__ == "__main__":
+    unittest.main()
