@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Loader2, X } from 'lucide-vue-next'
+import { Loader2 } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = defineProps<{
@@ -24,10 +24,12 @@ const emit = defineEmits<{
 }>()
 
 const countdown = ref(0)
+const pendingAmount = ref<number | null>(null)
 let closeTimeout: ReturnType<typeof setTimeout> | null = null
 let countdownInterval: ReturnType<typeof setInterval> | null = null
+let pendingTimeout: ReturnType<typeof setTimeout> | null = null
 
-const autoCloseSeconds = computed(() => Math.max(1, props.autoCloseSeconds ?? 10))
+const autoCloseSeconds = computed(() => Math.max(1, props.autoCloseSeconds ?? 15))
 const offerTypeClass = computed(() => props.offerType || 'sell')
 
 function clearTimers() {
@@ -39,6 +41,32 @@ function clearTimers() {
     clearInterval(countdownInterval)
     countdownInterval = null
   }
+  if (pendingTimeout) {
+    clearTimeout(pendingTimeout)
+    pendingTimeout = null
+  }
+}
+
+function clearPending() {
+  if (pendingTimeout) {
+    clearTimeout(pendingTimeout)
+    pendingTimeout = null
+  }
+  pendingAmount.value = null
+}
+
+function handleLotClick(amount: number) {
+  if (props.busy) return
+  if (pendingAmount.value === amount) {
+    clearPending()
+    emit('select-lot', amount)
+    return
+  }
+  pendingAmount.value = amount
+  pendingTimeout = setTimeout(() => {
+    pendingAmount.value = null
+    pendingTimeout = null
+  }, 3000)
 }
 
 function startAutoClose() {
@@ -60,15 +88,36 @@ watch(
     if (!show) {
       clearTimers()
       countdown.value = 0
+      clearPending()
       return
     }
     if (busy) {
-      clearTimers()
+      if (closeTimeout) {
+        clearTimeout(closeTimeout)
+        closeTimeout = null
+      }
+      if (countdownInterval) {
+        clearInterval(countdownInterval)
+        countdownInterval = null
+      }
       return
     }
     startAutoClose()
   },
   { immediate: true }
+)
+
+watch(
+  () => [props.availableLots.join(','), props.remainingQuantity, props.lotSummary, props.show] as const,
+  () => {
+    if (!props.show) {
+      clearPending()
+      return
+    }
+    if (pendingAmount.value !== null && !props.availableLots.includes(pendingAmount.value)) {
+      clearPending()
+    }
+  }
 )
 
 onBeforeUnmount(() => {
@@ -79,16 +128,13 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <transition name="trade-suggestion-fade">
-      <div v-if="props.show" class="trade-suggestion-overlay" @click.self="emit('close')">
+      <div v-if="props.show" class="trade-suggestion-overlay" @click.self="() => {}">
         <div class="trade-suggestion-card" role="alertdialog" aria-modal="true" :aria-label="props.title">
           <div class="trade-suggestion-topbar" :class="offerTypeClass">
             <div class="trade-suggestion-topbar-copy">
               <span class="trade-suggestion-kicker">پیشنهاد معامله</span>
               <span class="trade-suggestion-autoclose">{{ props.busy ? 'در حال ارسال...' : `بستن خودکار تا ${countdown} ثانیه` }}</span>
             </div>
-            <button type="button" class="trade-suggestion-close" @click="emit('close')" aria-label="بستن">
-              <X :size="18" />
-            </button>
           </div>
 
           <div class="trade-suggestion-body">
@@ -115,17 +161,22 @@ onBeforeUnmount(() => {
                 :key="amount"
                 type="button"
                 class="trade-suggestion-lot-btn"
+                :class="[
+                  offerTypeClass,
+                  pendingAmount === amount ? 'pending' : '',
+                  props.busy ? 'busy' : ''
+                ]"
                 :disabled="props.busy"
-                @click="emit('select-lot', amount)"
+                @click="handleLotClick(amount)"
               >
                 <Loader2 v-if="props.busy && props.busyAmount === amount" class="animate-spin" :size="14" />
-                <span>{{ amount.toLocaleString() }} عدد</span>
+                <span v-if="pendingAmount === amount">تایید {{ amount.toLocaleString() }} عدد؟</span>
+                <span v-else>{{ amount.toLocaleString() }} عدد</span>
               </button>
             </div>
 
             <div class="trade-suggestion-footer">
-              <button type="button" class="trade-suggestion-dismiss danger" @click="emit('close')">رد کردن</button>
-              <button type="button" class="trade-suggestion-dismiss" @click="emit('close')">بستن</button>
+              <button type="button" class="trade-suggestion-dismiss" @click="emit('close')">رد کردن</button>
             </div>
           </div>
         </div>
@@ -191,18 +242,6 @@ onBeforeUnmount(() => {
 
 .trade-suggestion-body {
   padding: 1rem;
-}
-
-.trade-suggestion-close {
-  border: none;
-  background: rgba(255, 255, 255, 0.18);
-  color: #ffffff;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .trade-suggestion-message {
@@ -302,43 +341,71 @@ onBeforeUnmount(() => {
 }
 
 .trade-suggestion-lot-btn {
-  border: none;
-  border-radius: 999px;
-  padding: 0.8rem 1.1rem;
-  background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);
+  padding: 8px 12px;
   color: white;
-  font-weight: 800;
-  font-size: 0.9rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 50px;
+  max-width: 120px;
+  text-align: center;
+  transition: all 0.2s ease;
+  letter-spacing: 0.02em;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.45rem;
-  box-shadow: 0 10px 24px rgba(234, 88, 12, 0.22);
+}
+
+.trade-suggestion-lot-btn:active {
+  transform: scale(0.96);
+}
+
+.trade-suggestion-lot-btn.buy {
+  background: linear-gradient(135deg, #10b981, #059669);
+}
+
+.trade-suggestion-lot-btn.sell {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+.trade-suggestion-lot-btn.pending {
+  background: #f59e0b;
+  animation: pulse-soft 1s ease-in-out infinite;
+}
+
+.trade-suggestion-lot-btn.busy {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .trade-suggestion-lot-btn:disabled {
   opacity: 0.75;
+  cursor: wait;
 }
 
 .trade-suggestion-footer {
-  display: flex;
-  gap: 0.75rem;
   margin-top: 1rem;
 }
 
 .trade-suggestion-dismiss {
-  flex: 1;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.92);
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  letter-spacing: 0.02em;
+  background: #f3f4f6;
   color: #475569;
-  font-weight: 700;
-  padding: 0.78rem 1rem;
 }
 
-.trade-suggestion-dismiss.danger {
-  border-color: rgba(248, 113, 113, 0.32);
-  color: #dc2626;
-  background: #fff5f5;
+.trade-suggestion-dismiss:active {
+  transform: scale(0.96);
 }
 
 @keyframes tradeSuggestionScaleIn {
@@ -360,6 +427,11 @@ onBeforeUnmount(() => {
 .trade-suggestion-fade-enter-from,
 .trade-suggestion-fade-leave-to {
   opacity: 0;
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(0.98); }
 }
 
 @media (max-width: 480px) {

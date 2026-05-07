@@ -89,6 +89,20 @@ class ManualOfferValidationTests(unittest.TestCase):
         self.assertIn("🔴فروش سکه امامی 24 عدد 75,800", payload["message"])
         self.assertIn("16 + 8", payload["message"])
 
+    def test_lot_unavailable_payload_handles_empty_available_lots(self):
+        payload = build_lot_unavailable_suggestion_payload(
+            offer_id=78,
+            requested_amount=10,
+            offer_type="sell",
+            commodity_name="سکه امامی",
+            price=75800,
+            remaining_quantity=0,
+            available_amounts=[],
+        )
+
+        self.assertEqual(payload["lot_summary"], "ندارد")
+        self.assertIn("این پیشنهاد در حال حاضر دکمه فعالی ندارد.", payload["message"])
+
     def test_bahar_variants_match_distinct_longest_aliases(self):
         commodities = {
             "بهار": (1, "بهار"),

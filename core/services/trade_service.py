@@ -331,8 +331,8 @@ def build_lot_unavailable_suggestion_payload(
 
     offer_type_label = {"buy": "خرید", "sell": "فروش"}.get(normalized_offer_type, "")
     offer_type_emoji = {"buy": "🟢", "sell": "🔴"}.get(normalized_offer_type, "")
-    lots_inline_text = " + ".join(str(amount) for amount in normalized_available_amounts)
-    lots_button_text = "، ".join(f"{amount} عدد" for amount in normalized_available_amounts)
+    lots_inline_text = " + ".join(str(amount) for amount in normalized_available_amounts) if normalized_available_amounts else "ندارد"
+    lots_button_text = "، ".join(f"{amount} عدد" for amount in normalized_available_amounts) if normalized_available_amounts else "ندارد"
     commodity_label = (commodity_name or "کالا").strip() or "کالا"
     title = "پیشنهاد معامله"
     intro_text = f"لات {normalized_requested_amount} عددی که انتخاب کرده بودید لحظاتی قبل توسط کاربر دیگری انجام شد."
@@ -340,12 +340,17 @@ def build_lot_unavailable_suggestion_payload(
         f"{offer_type_emoji}{offer_type_label} {commodity_label} "
         f"{normalized_remaining} عدد {normalized_price:,}"
     ).strip()
+    action_text = (
+        "اگر مایل هستید، یکی از دکمه\u200cهای زیر را انتخاب کنید."
+        if normalized_available_amounts
+        else "این پیشنهاد در حال حاضر دکمه فعالی ندارد."
+    )
     message = (
         f"{title}\n\n"
         f"{intro_text}\n\n"
         f"{offer_summary}\n"
         f"🔢 خُرد: {lots_inline_text}\n\n"
-        "اگر مایل هستید، یکی از دکمه\u200cهای زیر را انتخاب کنید."
+        f"{action_text}"
     )
 
     return {
