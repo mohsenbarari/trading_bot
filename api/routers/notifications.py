@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, update, func
+from sqlalchemy import select, func
 from typing import List
 from pydantic import BaseModel
 from datetime import datetime
@@ -119,15 +119,17 @@ async def mark_all_notifications_read(
     """
     تمام پیام‌ها را در دیتابیس خوانده شده ثبت می‌کند و شمارنده Redis را صفر می‌کند.
     """
-    # ۱. آپدیت دیتابیس
-    stmt = update(Notification).where(
+    stmt = select(Notification).where(
         Notification.user_id == current_user.id,
         Notification.is_read == False
-    ).values(
-        is_read = True
     )
-    await db.execute(stmt)
-    await db.commit()
+    result = await db.execute(stmt)
+    notifications = result.scalars().all()
+    for notification in notifications:
+        notification.is_read = True
+
+    if notifications:
+        await db.commit()
     await sync_unread_count(db, redis, current_user.id)
     
     return None
@@ -140,9 +142,14 @@ async def delete_all_notifications(
     redis: Redis = Depends(get_redis)
 ):
     """حذف همه اعلان‌های کاربر."""
-    stmt = delete(Notification).where(Notification.user_id == current_user.id)
-    await db.execute(stmt)
-    await db.commit()
+    stmt = select(Notification).where(Notification.user_id == current_user.id)
+    result = await db.execute(stmt)
+    notifications = result.scalars().all()
+    for notification in notifications:
+        await db.delete(notification)
+
+    if notifications:
+        await db.commit()
     await sync_unread_count(db, redis, current_user.id)
     return None
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import httpx
-from sqlalchemy import delete as sql_delete, or_, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.utils.redis_helpers import mark_deleted_telegram_user
@@ -76,14 +76,13 @@ async def delete_user_account(db: AsyncSession, user: User) -> DeletedUserResult
             .where(Offer.user_id == user.id, Offer.status == OfferStatus.ACTIVE)
             .values(status=OfferStatus.EXPIRED)
         )
-        await db.execute(
-            sql_delete(Invitation).where(
-                or_(
-                    Invitation.mobile_number == mobile_number,
-                    Invitation.account_name == account_name,
-                )
+        invitation_result = await db.execute(
+            select(Invitation).where(
+                or_(Invitation.mobile_number == mobile_number, Invitation.account_name == account_name)
             )
         )
+        for invitation in invitation_result.scalars().all():
+            await db.delete(invitation)
 
         revoked_sessions = await deactivate_active_sessions(db, user.id)
         user.soft_delete()
