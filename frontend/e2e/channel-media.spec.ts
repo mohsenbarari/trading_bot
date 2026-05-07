@@ -2178,6 +2178,250 @@ test.describe('Channel media regressions', () => {
     expect(groupPayload?.file_id).toBe(directPayload?.file_id)
   })
 
+  test('share receive can fan out shared text, image, and video to a group and a direct chat target', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('share_receive_group_direct_text_image_video', 'member')
+    const shareKey = `pw-share-group-direct-text-image-video-${Date.now()}`
+    const shareTitle = `Playwright Shared Group Direct Image Video Title ${Date.now()}`
+    const shareText = `Playwright Shared Group Direct Image Video Body ${Date.now()}`
+    const shareUrl = `https://example.test/share/group-direct-text-image-video/${Date.now()}`
+    const expectedMergedText = `${shareTitle}\n${shareText}\n${shareUrl}`
+    const groupTitle = `Playwright Share Group Direct Image Video ${Date.now()}`
+    const sharedImageName = `pw-share-group-direct-text-image-video-${Date.now()}.png`
+    const sharedVideoName = `pw-share-group-direct-text-image-video-${Date.now()}.webm`
+    const directSeedContent = `PW DIRECT GROUP TEXT IMAGE VIDEO TARGET SEED ${Date.now()}`
+
+    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        title: groupTitle,
+        member_ids: [fixture.userId],
+      },
+    })
+    expect(createResponse.ok()).toBeTruthy()
+    const createPayload = await createResponse.json() as { group: { id: number } }
+    const groupId = Number(createPayload.group.id)
+
+    const bootstrapResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        content: `PLAYWRIGHT SHARE RECEIVE GROUP DIRECT TEXT IMAGE VIDEO ${Date.now()}`,
+        message_type: 'text',
+      },
+    })
+    expect(bootstrapResponse.ok()).toBeTruthy()
+
+    await seedDirectTextMessage(request, fixture, directSeedContent)
+    await loginWithSeededSession(page, fixture)
+    await seedShareReceivePayload(page, {
+      key: shareKey,
+      title: shareTitle,
+      text: shareText,
+      url: shareUrl,
+      files: [
+        {
+          name: sharedImageName,
+          type: 'image/png',
+          bodyBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ6kAAAAASUVORK5CYII=',
+        },
+        {
+          name: sharedVideoName,
+          type: 'video/webm',
+          generator: 'video',
+        },
+      ],
+    })
+
+    await page.goto(`/share-receive?share_key=${shareKey}`)
+    await expect(page.locator('.forward-modal')).toBeVisible()
+
+    const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
+    const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
+
+    await expect(groupTarget).toBeVisible()
+    await expect(directTarget).toBeVisible()
+
+    await groupTarget.click()
+    await directTarget.click()
+    await page.getByRole('button', { name: 'هدایت به 2 مقصد' }).click()
+
+    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await expect
+      .poll(() => {
+        const url = new URL(page.url())
+        return `${url.pathname}${url.search}`
+      }, { timeout: 30000 })
+      .toBe('/chat')
+    await expect(page.locator('.conversation-item').filter({ hasText: groupTitle })).toBeVisible()
+    await expect(page.locator('.conversation-item').filter({ hasText: fixture.creatorAccountName })).toBeVisible()
+
+    await expect
+      .poll(async () => fetchLatestRoomMessageTypesByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['text', 'image', 'video']))
+    await expect
+      .poll(async () => fetchLatestDirectMessageTypes(request, fixture, fixture.creatorUserId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['text', 'image', 'video']))
+    await expect
+      .poll(async () => fetchLatestRoomContentsByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([
+        expectedMergedText,
+        expect.stringContaining(sharedImageName),
+        expect.stringContaining(sharedVideoName),
+      ]))
+    await expect
+      .poll(async () => fetchLatestDirectContents(request, fixture, fixture.creatorUserId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([
+        expectedMergedText,
+        expect.stringContaining(sharedImageName),
+        expect.stringContaining(sharedVideoName),
+      ]))
+
+    const [groupContents, directContents] = await Promise.all([
+      fetchLatestRoomContentsByChatId(request, fixture.accessToken, groupId),
+      fetchLatestDirectContents(request, fixture, fixture.creatorUserId),
+    ])
+
+    const groupImagePayload = extractSharedFilePayload(groupContents, sharedImageName)
+    const directImagePayload = extractSharedFilePayload(directContents, sharedImageName)
+    const groupVideoPayload = extractSharedFilePayload(groupContents, sharedVideoName)
+    const directVideoPayload = extractSharedFilePayload(directContents, sharedVideoName)
+
+    expect(groupImagePayload?.file_id).toBeTruthy()
+    expect(directImagePayload?.file_id).toBeTruthy()
+    expect(groupImagePayload?.file_id).toBe(directImagePayload?.file_id)
+
+    expect(groupVideoPayload?.file_id).toBeTruthy()
+    expect(directVideoPayload?.file_id).toBeTruthy()
+    expect(groupVideoPayload?.file_id).toBe(directVideoPayload?.file_id)
+  })
+
+  test('share receive can fan out shared document, image, and video uploads to a group and a direct chat target', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedChannelSession('share_receive_group_direct_three_files', 'member')
+    const shareKey = `pw-share-group-direct-three-files-${Date.now()}`
+    const groupTitle = `Playwright Share Group Direct Three Files ${Date.now()}`
+    const sharedDocumentName = `pw-share-group-direct-three-files-${Date.now()}.txt`
+    const sharedImageName = `pw-share-group-direct-three-files-${Date.now()}.png`
+    const sharedVideoName = `pw-share-group-direct-three-files-${Date.now()}.webm`
+    const sharedDocumentBody = `PW SHARE GROUP DIRECT THREE FILE BODY ${Date.now()}`
+    const directSeedContent = `PW DIRECT GROUP THREE FILE TARGET SEED ${Date.now()}`
+
+    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        title: groupTitle,
+        member_ids: [fixture.userId],
+      },
+    })
+    expect(createResponse.ok()).toBeTruthy()
+    const createPayload = await createResponse.json() as { group: { id: number } }
+    const groupId = Number(createPayload.group.id)
+
+    const bootstrapResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+      headers: authHeaders(fixture.creatorAccessToken),
+      data: {
+        content: `PLAYWRIGHT SHARE RECEIVE GROUP DIRECT THREE FILES ${Date.now()}`,
+        message_type: 'text',
+      },
+    })
+    expect(bootstrapResponse.ok()).toBeTruthy()
+
+    await seedDirectTextMessage(request, fixture, directSeedContent)
+    await loginWithSeededSession(page, fixture)
+    await seedShareReceivePayload(page, {
+      key: shareKey,
+      files: [
+        {
+          name: sharedDocumentName,
+          type: 'text/plain',
+          bodyBase64: Buffer.from(sharedDocumentBody, 'utf8').toString('base64'),
+        },
+        {
+          name: sharedImageName,
+          type: 'image/png',
+          bodyBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ6kAAAAASUVORK5CYII=',
+        },
+        {
+          name: sharedVideoName,
+          type: 'video/webm',
+          generator: 'video',
+        },
+      ],
+    })
+
+    await page.goto(`/share-receive?share_key=${shareKey}`)
+    await expect(page.locator('.forward-modal')).toBeVisible()
+
+    const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
+    const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
+
+    await expect(groupTarget).toBeVisible()
+    await expect(directTarget).toBeVisible()
+
+    await groupTarget.click()
+    await directTarget.click()
+    await page.getByRole('button', { name: 'هدایت به 2 مقصد' }).click()
+
+    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await expect
+      .poll(() => {
+        const url = new URL(page.url())
+        return `${url.pathname}${url.search}`
+      }, { timeout: 30000 })
+      .toBe('/chat')
+    await expect(page.locator('.conversation-item').filter({ hasText: groupTitle })).toBeVisible()
+    await expect(page.locator('.conversation-item').filter({ hasText: fixture.creatorAccountName })).toBeVisible()
+
+    await expect
+      .poll(async () => fetchLatestRoomMessageTypesByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['document', 'image', 'video']))
+    await expect
+      .poll(async () => fetchLatestDirectMessageTypes(request, fixture, fixture.creatorUserId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining(['document', 'image', 'video']))
+    await expect
+      .poll(async () => fetchLatestRoomContentsByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([
+        expect.stringContaining(sharedDocumentName),
+        expect.stringContaining(sharedImageName),
+        expect.stringContaining(sharedVideoName),
+      ]))
+    await expect
+      .poll(async () => fetchLatestDirectContents(request, fixture, fixture.creatorUserId), { timeout: 30000 })
+      .toEqual(expect.arrayContaining([
+        expect.stringContaining(sharedDocumentName),
+        expect.stringContaining(sharedImageName),
+        expect.stringContaining(sharedVideoName),
+      ]))
+
+    const [groupContents, directContents] = await Promise.all([
+      fetchLatestRoomContentsByChatId(request, fixture.accessToken, groupId),
+      fetchLatestDirectContents(request, fixture, fixture.creatorUserId),
+    ])
+
+    const groupDocumentPayload = extractSharedFilePayload(groupContents, sharedDocumentName)
+    const directDocumentPayload = extractSharedFilePayload(directContents, sharedDocumentName)
+    const groupImagePayload = extractSharedFilePayload(groupContents, sharedImageName)
+    const directImagePayload = extractSharedFilePayload(directContents, sharedImageName)
+    const groupVideoPayload = extractSharedFilePayload(groupContents, sharedVideoName)
+    const directVideoPayload = extractSharedFilePayload(directContents, sharedVideoName)
+
+    expect(groupDocumentPayload?.file_id).toBeTruthy()
+    expect(directDocumentPayload?.file_id).toBeTruthy()
+    expect(groupDocumentPayload?.file_id).toBe(directDocumentPayload?.file_id)
+
+    expect(groupImagePayload?.file_id).toBeTruthy()
+    expect(directImagePayload?.file_id).toBeTruthy()
+    expect(groupImagePayload?.file_id).toBe(directImagePayload?.file_id)
+
+    expect(groupVideoPayload?.file_id).toBeTruthy()
+    expect(directVideoPayload?.file_id).toBeTruthy()
+    expect(groupVideoPayload?.file_id).toBe(directVideoPayload?.file_id)
+  })
+
   test('share receive can fan out shared document and image uploads to a group and a channel target', async ({
     page,
     request,
