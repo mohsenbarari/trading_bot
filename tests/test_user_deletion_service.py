@@ -105,6 +105,72 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         db.rollback.assert_not_awaited()
         user.soft_delete.assert_not_called()
 
+    async def test_db_failure_rolls_back_and_skips_post_commit_side_effects(self):
+        user = SimpleNamespace(
+            id=20,
+            telegram_id=55443322,
+            mobile_number="09127778888",
+            account_name="nima",
+            is_deleted=False,
+            soft_delete=Mock(),
+        )
+        db = SimpleNamespace(
+            execute=AsyncMock(side_effect=[Mock(), Mock(), Mock(), scalar_result([])]),
+            delete=AsyncMock(),
+            commit=AsyncMock(),
+            rollback=AsyncMock(),
+        )
+
+        with patch("core.services.user_deletion_service.deactivate_active_sessions", AsyncMock(side_effect=RuntimeError("session revoke failed"))), \
+             patch("core.services.user_deletion_service.mark_deleted_telegram_user", AsyncMock()) as mark_deleted_telegram_user, \
+             patch("core.services.user_deletion_service.send_telegram_notification", AsyncMock()) as send_telegram_notification, \
+             patch("core.services.user_deletion_service.publish_session_revocation", AsyncMock()) as publish_session_revocation, \
+             patch("core.services.user_deletion_service.remove_user_from_telegram_channel", AsyncMock()) as remove_user_from_channel:
+            with self.assertRaisesRegex(RuntimeError, "session revoke failed"):
+                await delete_user_account(db, user)
+
+        db.commit.assert_not_awaited()
+        db.rollback.assert_awaited_once()
+        user.soft_delete.assert_not_called()
+        mark_deleted_telegram_user.assert_not_awaited()
+        send_telegram_notification.assert_not_awaited()
+        publish_session_revocation.assert_not_awaited()
+        remove_user_from_channel.assert_not_awaited()
+
+    async def test_post_commit_telegram_failures_do_not_abort_revocation_or_result(self):
+        user = SimpleNamespace(
+            id=21,
+            telegram_id=66554433,
+            mobile_number="09129990000",
+            account_name="pouya",
+            is_deleted=False,
+            soft_delete=Mock(),
+        )
+        db = SimpleNamespace(
+            execute=AsyncMock(side_effect=[Mock(), Mock(), Mock(), scalar_result([])]),
+            delete=AsyncMock(),
+            commit=AsyncMock(),
+            rollback=AsyncMock(),
+        )
+        revoked_sessions = [SimpleNamespace(id="s10")]
+
+        with patch("core.services.user_deletion_service.deactivate_active_sessions", AsyncMock(return_value=revoked_sessions)), \
+             patch("core.services.user_deletion_service.mark_deleted_telegram_user", AsyncMock(side_effect=RuntimeError("redis write failed"))) as mark_deleted_telegram_user, \
+             patch("core.services.user_deletion_service.send_telegram_notification", AsyncMock(side_effect=RuntimeError("telegram send failed"))) as send_telegram_notification, \
+             patch("core.services.user_deletion_service.publish_session_revocation", AsyncMock()) as publish_session_revocation, \
+             patch("core.services.user_deletion_service.remove_user_from_telegram_channel", AsyncMock(side_effect=RuntimeError("channel cleanup failed"))) as remove_user_from_channel:
+            result = await delete_user_account(db, user)
+
+        db.commit.assert_awaited_once()
+        db.rollback.assert_not_awaited()
+        user.soft_delete.assert_called_once_with()
+        mark_deleted_telegram_user.assert_awaited_once_with(user.telegram_id)
+        send_telegram_notification.assert_awaited_once_with(user.telegram_id, unittest.mock.ANY)
+        publish_session_revocation.assert_awaited_once_with(user.id, revoked_sessions)
+        remove_user_from_channel.assert_awaited_once_with(user.telegram_id)
+        self.assertEqual(result.user_id, user.id)
+        self.assertEqual(result.revoked_session_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
