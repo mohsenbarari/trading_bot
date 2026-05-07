@@ -66,7 +66,8 @@ Scope rules:
 ## Phase 3 - API Router Integration Coverage
 
 - [x] Cover `api/routers/auth.py` refresh and setup-password flows.
-- [ ] Cover remaining `api/routers/auth.py` OTP, registration, dev-login, and web-login/session approval flows.
+- [x] Cover `api/routers/auth.py` invitation registration OTP/request/verify/complete flows.
+- [ ] Cover remaining `api/routers/auth.py` direct login OTP, dev-login, and web-login/session approval flows.
 - [ ] Cover `api/routers/invitations.py` create/reuse/expire/validate flows.
 - [ ] Cover `api/routers/offers.py` create/list/expire/parse/home-server behavior.
 - [ ] Cover `api/routers/trades.py` execute/internal execute/forwarding/error paths.
