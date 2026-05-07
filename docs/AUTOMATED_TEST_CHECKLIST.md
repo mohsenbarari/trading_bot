@@ -74,7 +74,8 @@ Scope rules:
 - [x] Cover `api/routers/offers.py` expire endpoint and related limit/error flows.
 - [x] Cover `api/routers/offers.py` create endpoint guard and validation branches.
 - [x] Cover `api/routers/offers.py` successful create/home-server behavior.
-- [ ] Cover `api/routers/trades.py` execute/internal execute/forwarding/error paths.
+- [x] Cover `api/routers/trades.py` read endpoints (`/my`, `/{id}`, `/with/{user}`).
+- [ ] Cover remaining `api/routers/trades.py` execute/internal execute/forwarding/error paths.
 - [x] Cover `api/routers/chat.py` group management endpoints.
 - [x] Cover `api/routers/chat.py` channel management endpoints.
 - [x] Cover `api/routers/chat.py` room send/read/message-list endpoints.
