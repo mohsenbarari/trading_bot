@@ -395,40 +395,47 @@ async def logout_session(
         
     return new_primary
 
-async def force_clear_sessions(
-    db: AsyncSession, user_id: int, exclude_session_id: Optional[uuid.UUID] = None
-) -> int:
-    """Force-clear all active sessions for a user. Returns count of cleared sessions."""
+
+async def deactivate_active_sessions(
+    db: AsyncSession,
+    user_id: int,
+    exclude_session_id: Optional[uuid.UUID] = None,
+) -> List[UserSession]:
+    """Mark all active sessions for a user as inactive inside the current transaction."""
     sessions = await get_active_sessions(db, user_id)
-    count = 0
-    cleared_sessions = []
-    
-    for s in sessions:
-        if exclude_session_id and s.id == exclude_session_id:
+    revoked_sessions: List[UserSession] = []
+
+    for session in sessions:
+        if exclude_session_id and session.id == exclude_session_id:
             continue
-            
-        s.is_active = False
-        count += 1
-        cleared_sessions.append(s)
-        
-    await db.commit()
-    
+
+        session.is_active = False
+        revoked_sessions.append(session)
+
+    await db.flush()
+    return revoked_sessions
+
+
+async def publish_session_revocation(user_id: int, revoked_sessions: List[UserSession]) -> None:
+    """Blacklist revoked session IDs and notify active clients to validate again."""
     try:
         from core.utils import publish_user_event
         await publish_user_event(user_id, "session:revoked", {"action": "check_session"})
     except Exception as e:
         logger.warning(f"Failed to publish session:revoked event: {e}")
-        
-    # Blacklist actual cleared session IDs
-    try:
-        from bot.utils.redis_helpers import get_redis
-        r = await get_redis()
-        for s in cleared_sessions:
-            await r.setex(f"session_blacklist:{s.id}", SESSION_BLACKLIST_TTL, "1")
-    except Exception as e:
-        logger.warning(f"Failed to blacklist sessions: {e}")
 
-    return count
+    for session in revoked_sessions:
+        await blacklist_session(session.id)
+
+async def force_clear_sessions(
+    db: AsyncSession, user_id: int, exclude_session_id: Optional[uuid.UUID] = None
+) -> int:
+    """Force-clear all active sessions for a user. Returns count of cleared sessions."""
+    cleared_sessions = await deactivate_active_sessions(db, user_id, exclude_session_id=exclude_session_id)
+    await db.commit()
+
+    await publish_session_revocation(user_id, cleared_sessions)
+    return len(cleared_sessions)
 
 
 async def blacklist_session(session_id) -> None:

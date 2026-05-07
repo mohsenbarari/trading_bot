@@ -7,10 +7,11 @@ import asyncio
 import pytz
 
 from core.db import get_db
+from core.services.user_deletion_service import delete_user_account
 from models.user import User
 from api.deps import verify_super_admin_or_dev_key
 
-from core.utils import create_user_notification, to_jalali_str, send_telegram_notification
+from core.utils import create_user_notification, to_jalali_str
 from core.enums import NotificationLevel, NotificationCategory
 import schemas
 
@@ -300,95 +301,18 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
 @router.delete("/{user_id}")
 async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
     """حذف نرم کاربر (Soft Delete) با تراکنش اتمیک"""
-    from core.config import settings
-    from models.offer import Offer, OfferStatus
-    from models.trade import Trade
-    from models.invitation import Invitation
-    from sqlalchemy import update, delete as sql_delete
-    import httpx
-    
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
-    # ذخیره اطلاعات قبل از تغییرات
-    telegram_id = user.telegram_id
-    mobile_number = user.mobile_number
-    account_name = user.account_name
-    
+    if user.is_deleted:
+        raise HTTPException(status_code=404, detail="User not found")
+
     try:
-        # ===== شروع عملیات اتمیک =====
-        
-        # 1. ذخیره شماره موبایل در معاملات (لفظ‌دهنده)
-        await db.execute(
-            update(Trade)
-            .where(Trade.offer_user_id == user_id)
-            .values(offer_user_mobile=mobile_number)
-        )
-        
-        # 2. ذخیره شماره موبایل در معاملات (پاسخ‌دهنده)
-        await db.execute(
-            update(Trade)
-            .where(Trade.responder_user_id == user_id)
-            .values(responder_user_mobile=mobile_number)
-        )
-        
-        # 3. منقضی کردن لفظ‌های فعال کاربر
-        await db.execute(
-            update(Offer)
-            .where(Offer.user_id == user_id, Offer.status == OfferStatus.ACTIVE)
-            .values(status=OfferStatus.EXPIRED)
-        )
-        
-        # 4. حذف دعوت‌نامه‌های مرتبط
-        await db.execute(
-            sql_delete(Invitation).where(
-                or_(
-                    Invitation.mobile_number == mobile_number,
-                    Invitation.account_name == account_name
-                )
-            )
-        )
-        
-        # 5. Soft Delete کاربر (به جای حذف واقعی)
-        user.soft_delete()
-        
-        # ===== Commit همه تغییرات به صورت اتمیک =====
-        await db.commit()
-        
+        await delete_user_account(db, user)
     except Exception as e:
-        # ===== Rollback در صورت هر خطایی =====
-        await db.rollback()
         raise HTTPException(
             status_code=500, 
             detail=f"خطا در حذف کاربر: {str(e)}"
         )
-    
-    # ===== عملیات غیر-بحرانی (پس از commit موفق) =====
-    # این عملیات خارج از تراکنش هستند و خطای آنها مهم نیست
-    
-    if telegram_id:
-        # ارسال نوتیفیکیشن به کاربر
-        notification_text = (
-            "ℹ️ **اطلاعیه**\n\n"
-            "حساب کاربری شما توسط مدیر سیستم حذف شده است.\n\n"
-            "در صورت نیاز به اطلاعات بیشتر، با پشتیبانی تماس بگیرید."
-        )
-        await send_telegram_notification(telegram_id, notification_text)
-        
-        # حذف کاربر از کانال
-        if settings.channel_id:
-            try:
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"https://api.telegram.org/bot{settings.bot_token}/banChatMember",
-                        json={"chat_id": settings.channel_id, "user_id": telegram_id, "revoke_messages": False}
-                    )
-                    await client.post(
-                        f"https://api.telegram.org/bot{settings.bot_token}/unbanChatMember",
-                        json={"chat_id": settings.channel_id, "user_id": telegram_id, "only_if_banned": True}
-                    )
-            except Exception:
-                pass  # خطای تلگرام مهم نیست
     
     return {"message": "User deleted successfully"}
