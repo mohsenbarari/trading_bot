@@ -1,0 +1,183 @@
+import unittest
+from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from fastapi import BackgroundTasks, HTTPException
+from fastapi.responses import JSONResponse
+
+from api.routers.trades import (
+    InternalTradeExecuteRequest,
+    TradeCreate,
+    create_trade,
+    execute_trade_internal,
+)
+
+
+class FakeDB:
+    def __init__(self, *, get_results=None):
+        self.get_results = list(get_results or [])
+
+    async def get(self, _model, _id):
+        if not self.get_results:
+            raise AssertionError("Unexpected get() call")
+        return self.get_results.pop(0)
+
+
+def make_request(body=b"{}", headers=None):
+    async def body_reader():
+        return body
+
+    return SimpleNamespace(body=body_reader, headers=headers or {})
+
+
+class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
+    async def test_create_trade_returns_forwarded_response_when_remote_home(self):
+        trade_data = TradeCreate(offer_id=7, quantity=3, idempotency_key="idem-1")
+        background_tasks = BackgroundTasks()
+        current_user = SimpleNamespace(id=5)
+        forwarded = JSONResponse(status_code=202, content={"forwarded": True})
+
+        with patch(
+            "api.routers.trades._forward_trade_if_remote_home",
+            new=AsyncMock(return_value=forwarded),
+        ) as forward_mock, patch(
+            "api.routers.trades._execute_trade_authoritatively",
+            new=AsyncMock(),
+        ) as execute_mock:
+            result = await create_trade(
+                trade_data=trade_data,
+                background_tasks=background_tasks,
+                raw_request=SimpleNamespace(),
+                db=FakeDB(),
+                current_user=current_user,
+            )
+
+        self.assertIs(result, forwarded)
+        forward_mock.assert_awaited_once()
+        execute_mock.assert_not_awaited()
+
+    async def test_create_trade_delegates_to_authoritative_execution_when_local(self):
+        trade_data = TradeCreate(offer_id=7, quantity=3, idempotency_key="idem-1")
+        background_tasks = BackgroundTasks()
+        current_user = SimpleNamespace(id=5)
+
+        with patch(
+            "api.routers.trades._forward_trade_if_remote_home",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.trades._execute_trade_authoritatively",
+            new=AsyncMock(return_value={"id": 77}),
+        ) as execute_mock:
+            result = await create_trade(
+                trade_data=trade_data,
+                background_tasks=background_tasks,
+                raw_request=SimpleNamespace(),
+                db=FakeDB(),
+                current_user=current_user,
+            )
+
+        self.assertEqual(result, {"id": 77})
+        execute_mock.assert_awaited_once()
+        self.assertEqual(execute_mock.await_args.kwargs["trade_data"], trade_data)
+        self.assertIs(execute_mock.await_args.kwargs["background_tasks"], background_tasks)
+        self.assertEqual(execute_mock.await_args.kwargs["current_user"], current_user)
+        self.assertIsInstance(execute_mock.await_args.kwargs["edge_received_at"], datetime)
+
+    async def test_execute_trade_internal_rejects_invalid_signature(self):
+        internal_data = InternalTradeExecuteRequest(
+            offer_id=7,
+            quantity=3,
+            responder_user_id=5,
+            edge_received_at=datetime.utcnow(),
+            source_server="foreign",
+            idempotency_key="idem-1",
+        )
+
+        with patch("api.routers.trades.verify_internal_signature", return_value=False):
+            with self.assertRaises(HTTPException) as exc_info:
+                await execute_trade_internal(
+                    internal_data=internal_data,
+                    background_tasks=BackgroundTasks(),
+                    raw_request=make_request(headers={}),
+                    db=FakeDB(),
+                )
+        self.assertEqual(exc_info.exception.status_code, 401)
+        self.assertEqual(exc_info.exception.detail, "Invalid internal trade signature")
+
+    async def test_execute_trade_internal_rejects_wrong_offer_server_or_missing_responder(self):
+        internal_data = InternalTradeExecuteRequest(
+            offer_id=7,
+            quantity=3,
+            responder_user_id=5,
+            edge_received_at=datetime.utcnow(),
+            source_server="foreign",
+            idempotency_key="idem-1",
+        )
+        headers = {"x-timestamp": "1", "x-signature": "sig", "x-api-key": "key"}
+
+        with patch("api.routers.trades.verify_internal_signature", return_value=True), patch(
+            "api.routers.trades.normalize_server",
+            return_value="iran",
+        ), patch("api.routers.trades.current_server", return_value="foreign"):
+            with self.assertRaises(HTTPException) as exc_info:
+                await execute_trade_internal(
+                    internal_data=internal_data,
+                    background_tasks=BackgroundTasks(),
+                    raw_request=make_request(headers=headers),
+                    db=FakeDB(get_results=[SimpleNamespace(home_server="iran")]),
+                )
+        self.assertEqual(exc_info.exception.status_code, 409)
+
+        with patch("api.routers.trades.verify_internal_signature", return_value=True), patch(
+            "api.routers.trades.normalize_server",
+            return_value="foreign",
+        ), patch("api.routers.trades.current_server", return_value="foreign"):
+            with self.assertRaises(HTTPException) as exc_info:
+                await execute_trade_internal(
+                    internal_data=internal_data,
+                    background_tasks=BackgroundTasks(),
+                    raw_request=make_request(headers=headers),
+                    db=FakeDB(get_results=[SimpleNamespace(home_server="foreign"), None]),
+                )
+        self.assertEqual(exc_info.exception.status_code, 404)
+        self.assertEqual(exc_info.exception.detail, "کاربر درخواست‌دهنده یافت نشد")
+
+    async def test_execute_trade_internal_delegates_to_authoritative_execution(self):
+        internal_data = InternalTradeExecuteRequest(
+            offer_id=7,
+            quantity=3,
+            responder_user_id=5,
+            edge_received_at=datetime(2026, 1, 1, 12, 0, 0),
+            source_server="foreign",
+            idempotency_key="idem-1",
+        )
+        headers = {"x-timestamp": "1", "x-signature": "sig", "x-api-key": "key"}
+        responder = SimpleNamespace(id=5, is_deleted=False)
+
+        with patch("api.routers.trades.verify_internal_signature", return_value=True), patch(
+            "api.routers.trades.normalize_server",
+            return_value="foreign",
+        ), patch("api.routers.trades.current_server", return_value="foreign"), patch(
+            "api.routers.trades._execute_trade_authoritatively",
+            new=AsyncMock(return_value={"id": 99}),
+        ) as execute_mock:
+            result = await execute_trade_internal(
+                internal_data=internal_data,
+                background_tasks=BackgroundTasks(),
+                raw_request=make_request(body=b"payload", headers=headers),
+                db=FakeDB(get_results=[SimpleNamespace(home_server="foreign"), responder]),
+            )
+
+        self.assertEqual(result, {"id": 99})
+        execute_mock.assert_awaited_once()
+        delegated_trade_data = execute_mock.await_args.kwargs["trade_data"]
+        self.assertEqual(delegated_trade_data.offer_id, 7)
+        self.assertEqual(delegated_trade_data.quantity, 3)
+        self.assertEqual(delegated_trade_data.idempotency_key, "idem-1")
+        self.assertEqual(execute_mock.await_args.kwargs["current_user"], responder)
+        self.assertEqual(execute_mock.await_args.kwargs["edge_received_at"], internal_data.edge_received_at)
+
+
+if __name__ == "__main__":
+    unittest.main()
