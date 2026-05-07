@@ -86,8 +86,9 @@ def push_sync_direct(payload: dict):
     Falls back to sync_worker retry if push fails.
     """
     from core.config import settings
+    from core.server_routing import default_peer_server_url
 
-    target_url = getattr(settings, "foreign_server_url", None)
+    target_url = default_peer_server_url()
     api_key = getattr(settings, "sync_api_key", None)
 
     if not target_url or not api_key:

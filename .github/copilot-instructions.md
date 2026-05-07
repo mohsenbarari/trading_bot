@@ -17,10 +17,10 @@
 > 
 > **To Revert when regular internet access resumes:**
 > 1. Remove this warning block from `.github/copilot-instructions.md`.
-> 2. Restart sync worker: `docker start trading_bot_sync_worker`.
+> 2. Restart sync worker: `docker compose --profile disabled up -d sync_worker` on Foreign and `docker compose -f docker-compose.iran.yml up -d sync_worker` on Iran.
 > 3. Revert `deploy.sh`: Remove the `build_frontend` line from the `foreign)` case if you don't want the frontend to automatically build on foreign-only deployments.
 > 4. Run full deploy: `make up`.
-> 5. Run `POST /api/sync/resync` to merge any out-of-sync database records between Germany and Iran.
+> 5. Run `make sync-recover` from the Foreign server to replay `change_log` in both directions until both sides converge.
 
 ### Two-Server Deployment
 | Server | Location | Services | Domain |
@@ -558,3 +558,4 @@ make status      # Container status
 | 2026-05-07 10:05 UTC | Copilot | **Lot Suggestion Regression + Pre-Trade Privacy Hardening Added**: Added `frontend/e2e/lot-suggestion.spec.ts` to lock the `409` lot-suggestion modal against stale market snapshots while asserting no counterpart identity appears before trade, and hardened public offer delivery so `/api/offers/` plus `offer:created` realtime payloads no longer expose owner identity and frontend own-offer gating now relies on `is_own_offer`. |
 | 2026-05-07 16:33 UTC | Copilot | **User Removal Session/Bot Hardening**: Unified user deletion behind a shared service so both web and bot removals now revoke all active web sessions, publish immediate session-revoked events, send one final Telegram notice before silencing future bot replies, eject linked users from the Telegram channel without leaving them banned, and reject deleted/blacklisted websocket reconnects. |
 | 2026-05-07 17:20 UTC | Copilot | **Offer Home-Server Trade Authority Added**: Added `home_server` affinity for users, sessions, login requests, and offers; stamped new offers with the local server; extended access tokens with a server claim; added HMAC-signed `/api/trades/internal/execute` forwarding so remote-home offers execute only on their authoritative server; routed bot confirmations through the same authority path; and limited automatic offer expiry to locally-owned offers so replica servers no longer race each other. |
+| 2026-05-07 18:05 UTC | Copilot | **Iran Outage Sync Recovery Flow Added**: Made `sync_push`, `sync_worker`, and `/api/sync/resync` peer-server aware instead of legacy `FOREIGN_SERVER_URL` only, then added `scripts/recover_cross_server_sync.sh` plus `make sync-recover` to restart sync workers and replay `change_log` in dependency order from both servers after Iran connectivity returns. |

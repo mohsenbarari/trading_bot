@@ -25,6 +25,10 @@ def current_server() -> str:
     return normalize_server(settings.server_mode)
 
 
+def peer_server_name() -> str:
+    return SERVER_IRAN if current_server() == SERVER_FOREIGN else SERVER_FOREIGN
+
+
 def _host_from_request(request) -> str:
     if not request or not hasattr(request, "headers"):
         return ""
@@ -66,6 +70,10 @@ def peer_server_url_for(target_server: str) -> Optional[str]:
 
     legacy_peer = settings.peer_server_url or settings.foreign_server_url
     return legacy_peer.rstrip("/") if legacy_peer else None
+
+
+def default_peer_server_url() -> Optional[str]:
+    return peer_server_url_for(peer_server_name())
 
 
 def is_remote_home(home_server: Optional[str]) -> bool:
