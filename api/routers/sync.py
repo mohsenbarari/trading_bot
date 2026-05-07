@@ -14,7 +14,17 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Table processing order: dependencies first
-TABLE_ORDER = {"users": 0, "user_blocks": 1, "commodities": 2, "commodity_aliases": 3, "trading_settings": 4, "offers": 5, "trades": 6}
+TABLE_ORDER = {
+    "users": 0,
+    "invitations": 1,
+    "notifications": 2,
+    "user_blocks": 3,
+    "commodities": 4,
+    "commodity_aliases": 5,
+    "trading_settings": 6,
+    "offers": 7,
+    "trades": 8,
+}
 
 async def verify_signature(request: Request):
     """Verify HMAC signature and timestamp"""
@@ -62,6 +72,8 @@ from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from models.user import User
+from models.invitation import Invitation
+from models.notification import Notification
 from models.offer import Offer
 from models.trade import Trade
 from models.commodity import Commodity, CommodityAlias
@@ -77,12 +89,15 @@ NATURAL_KEYS = {
     "commodities": "name",
     "commodity_aliases": "alias",
     "users": "telegram_id",
+    "invitations": "token",
     "trades": "trade_number",
 }
 
 def get_model_class(table_name: str):
     mapping = {
         "users": User,
+        "invitations": Invitation,
+        "notifications": Notification,
         "offers": Offer,
         "trades": Trade,
         "commodities": Commodity,
@@ -196,6 +211,49 @@ async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, d
     return 'error'
 
 
+def _notification_user_ids_from_items(items: list[dict]) -> set[int]:
+    user_ids: set[int] = set()
+    for item in items:
+        if item.get("table") != "notifications":
+            continue
+        data = item.get("data") or {}
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except ValueError:
+                data = {}
+        user_id = data.get("user_id") if isinstance(data, dict) else None
+        if user_id is not None:
+            try:
+                user_ids.add(int(user_id))
+            except (TypeError, ValueError):
+                pass
+    return user_ids
+
+
+async def _refresh_notification_unread_counts(db: AsyncSession, user_ids: set[int]) -> None:
+    if not user_ids:
+        return
+    try:
+        from core.redis import get_redis_client
+        redis_client = get_redis_client()
+    except Exception as exc:
+        logger.warning(f"Could not refresh notification unread counts after sync: {exc}")
+        return
+
+    for user_id in user_ids:
+        try:
+            count_stmt = select(sa_func.count(Notification.id)).where(
+                Notification.user_id == user_id,
+                Notification.is_read == False,
+            )
+            result = await db.execute(count_stmt)
+            unread_count = int(result.scalar() or 0)
+            await redis_client.set(f"user:{user_id}:unread_count", unread_count)
+        except Exception as exc:
+            logger.warning(f"Could not refresh notification unread count for user {user_id}: {exc}")
+
+
 def _parse_item(item: dict):
     """Parse a sync item: extract table, operation, model, data, record_id."""
     table = item.get('table')
@@ -238,6 +296,7 @@ async def receive_sync_data(
     errors = []
     deferred_items = []
     new_offers = []
+    notification_user_ids = _notification_user_ids_from_items(sorted_items)
 
     try:
         # --- Pass 1: Process all items ---
@@ -303,6 +362,8 @@ async def receive_sync_data(
             "users": ("users_id_seq", "users"),
             "offers": ("offers_id_seq", "offers"),
             "trades": ("trades_id_seq", "trades"),
+            "invitations": ("invitations_id_seq", "invitations"),
+            "notifications": ("notifications_id_seq", "notifications"),
             "commodities": ("commodities_id_seq", "commodities"),
             "commodity_aliases": ("commodity_aliases_id_seq", "commodity_aliases"),
             "user_blocks": ("user_blocks_id_seq", "user_blocks"),
@@ -329,6 +390,9 @@ async def receive_sync_data(
                 logger.info("🔄 Trading settings cache refreshed")
             except Exception as e:
                  logger.error(f"Failed to refresh settings cache: {e}")
+
+        if "notifications" in items_tables:
+            await _refresh_notification_unread_counts(db, notification_user_ids)
 
         if items_tables & {"commodities", "commodity_aliases"}:
             try:

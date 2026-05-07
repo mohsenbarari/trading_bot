@@ -5,6 +5,12 @@ from unittest.mock import AsyncMock, Mock, patch
 from core.services.user_deletion_service import delete_user_account
 
 
+def scalar_result(rows):
+    result = Mock()
+    result.scalars.return_value.all.return_value = rows
+    return result
+
+
 class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
     async def test_linked_user_deletion_revokes_sessions_and_telegram_side_effects(self):
         user = SimpleNamespace(
@@ -15,7 +21,13 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
             is_deleted=False,
             soft_delete=Mock(),
         )
-        db = SimpleNamespace(execute=AsyncMock(), commit=AsyncMock(), rollback=AsyncMock())
+        invitations = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
+        db = SimpleNamespace(
+            execute=AsyncMock(side_effect=[Mock(), Mock(), Mock(), scalar_result(invitations)]),
+            delete=AsyncMock(),
+            commit=AsyncMock(),
+            rollback=AsyncMock(),
+        )
         revoked_sessions = [SimpleNamespace(id="s1"), SimpleNamespace(id="s2")]
 
         with patch("core.services.user_deletion_service.deactivate_active_sessions", AsyncMock(return_value=revoked_sessions)) as deactivate_sessions, \
@@ -26,6 +38,7 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
             result = await delete_user_account(db, user)
 
         self.assertEqual(db.execute.await_count, 4)
+        self.assertEqual(db.delete.await_count, 2)
         deactivate_sessions.assert_awaited_once_with(db, user.id)
         db.commit.assert_awaited_once()
         db.rollback.assert_not_awaited()
@@ -49,7 +62,12 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
             is_deleted=False,
             soft_delete=Mock(),
         )
-        db = SimpleNamespace(execute=AsyncMock(), commit=AsyncMock(), rollback=AsyncMock())
+        db = SimpleNamespace(
+            execute=AsyncMock(side_effect=[Mock(), Mock(), Mock(), scalar_result([])]),
+            delete=AsyncMock(),
+            commit=AsyncMock(),
+            rollback=AsyncMock(),
+        )
         revoked_sessions = [SimpleNamespace(id="s3")]
 
         with patch("core.services.user_deletion_service.deactivate_active_sessions", AsyncMock(return_value=revoked_sessions)), \
@@ -60,6 +78,7 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
             result = await delete_user_account(db, user)
 
         user.soft_delete.assert_called_once_with()
+        db.delete.assert_not_awaited()
         mark_deleted_telegram_user.assert_not_awaited()
         send_telegram_notification.assert_not_awaited()
         remove_user_from_channel.assert_not_awaited()
@@ -75,12 +94,13 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
             is_deleted=True,
             soft_delete=Mock(),
         )
-        db = SimpleNamespace(execute=AsyncMock(), commit=AsyncMock(), rollback=AsyncMock())
+        db = SimpleNamespace(execute=AsyncMock(), delete=AsyncMock(), commit=AsyncMock(), rollback=AsyncMock())
 
         with self.assertRaisesRegex(ValueError, "already deleted"):
             await delete_user_account(db, user)
 
         db.execute.assert_not_awaited()
+        db.delete.assert_not_awaited()
         db.commit.assert_not_awaited()
         db.rollback.assert_not_awaited()
         user.soft_delete.assert_not_called()

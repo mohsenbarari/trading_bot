@@ -136,7 +136,11 @@ def setup_offer_events():
                 "notes": target.notes,
                 "status": target.status.value if target.status else None,
                 "channel_message_id": target.channel_message_id,
+                "republished_offer_id": target.republished_offer_id,
                 "created_at": target.created_at.isoformat() if target.created_at else None,
+                "updated_at": target.updated_at.isoformat() if target.updated_at else None,
+                "idempotency_key": target.idempotency_key,
+                "archived": target.archived,
             }
             log_change(connection, "offers", target.id, "INSERT", data)
             publish_event_sync("offer:created", data)
@@ -164,7 +168,9 @@ def setup_offer_events():
                 "notes": target.notes,
                 "status": target.status.value if target.status else None,
                 "channel_message_id": target.channel_message_id,
+                "republished_offer_id": target.republished_offer_id,
                 "created_at": target.created_at.isoformat() if target.created_at else None,
+                "updated_at": target.updated_at.isoformat() if target.updated_at else None,
                 "idempotency_key": target.idempotency_key,
                 "archived": target.archived
             }
@@ -285,6 +291,8 @@ def setup_user_events():
                 "address": target.address,
                 "role": target.role.value if target.role else None,
                 "has_bot_access": target.has_bot_access,
+                "admin_password_hash": target.admin_password_hash,
+                "must_change_password": target.must_change_password,
                 "home_server": target.home_server,
                 "is_deleted": target.is_deleted,
                 "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
@@ -298,6 +306,7 @@ def setup_user_events():
                 "trades_count": target.trades_count,
                 "commodities_traded_count": target.commodities_traded_count,
                 "channel_messages_count": target.channel_messages_count,
+                "max_sessions": target.max_sessions,
                 "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
                 "created_at": target.created_at.isoformat() if target.created_at else None,
             }
@@ -321,6 +330,8 @@ def setup_user_events():
                 "address": target.address,
                 "role": target.role.value if target.role else None,
                 "has_bot_access": target.has_bot_access,
+                "admin_password_hash": target.admin_password_hash,
+                "must_change_password": target.must_change_password,
                 "home_server": target.home_server,
                 "is_deleted": target.is_deleted,
                 "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
@@ -334,6 +345,7 @@ def setup_user_events():
                 "trades_count": target.trades_count,
                 "commodities_traded_count": target.commodities_traded_count,
                 "channel_messages_count": target.channel_messages_count,
+                "max_sessions": target.max_sessions,
                 "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
                 "updated_at": target.updated_at.isoformat() if target.updated_at else None,
             }
@@ -510,15 +522,114 @@ def setup_trading_settings_events():
 
     logger.info("✅ TradingSetting event listeners registered")
 
+
+def setup_invitation_events():
+    """Setup event listeners for Invitation model"""
+    from models.invitation import Invitation
+
+    def invitation_payload(target):
+        return {
+            "id": target.id,
+            "account_name": target.account_name,
+            "mobile_number": target.mobile_number,
+            "token": target.token,
+            "short_code": target.short_code,
+            "role": target.role.value if target.role else None,
+            "created_by_id": target.created_by_id,
+            "is_used": target.is_used,
+            "expires_at": target.expires_at.isoformat() if target.expires_at else None,
+            "created_at": target.created_at.isoformat() if target.created_at else None,
+        }
+
+    @event.listens_for(Invitation, 'after_insert')
+    def on_invitation_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "invitations", target.id, "INSERT", invitation_payload(target))
+        except Exception as e:
+            logger.error(f"Error in invitation after_insert event: {e}")
+
+    @event.listens_for(Invitation, 'after_update')
+    def on_invitation_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "invitations", target.id, "UPDATE", invitation_payload(target))
+        except Exception as e:
+            logger.error(f"Error in invitation after_update event: {e}")
+
+    @event.listens_for(Invitation, 'after_delete')
+    def on_invitation_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {"id": target.id, "token": target.token, "short_code": target.short_code}
+            log_change(connection, "invitations", target.id, "DELETE", data)
+        except Exception as e:
+            logger.error(f"Error in invitation after_delete event: {e}")
+
+    logger.info("✅ Invitation event listeners registered")
+
+
+def setup_notification_events():
+    """Setup event listeners for Notification model"""
+    from models.notification import Notification
+
+    def notification_payload(target):
+        level = target.level.value if hasattr(target.level, "value") else target.level
+        category = target.category.value if hasattr(target.category, "value") else target.category
+        return {
+            "id": target.id,
+            "user_id": target.user_id,
+            "message": target.message,
+            "is_read": target.is_read,
+            "created_at": (target.created_at or datetime.utcnow()).isoformat(),
+            "level": level,
+            "category": category,
+        }
+
+    @event.listens_for(Notification, 'after_insert')
+    def on_notification_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "notifications", target.id, "INSERT", notification_payload(target))
+        except Exception as e:
+            logger.error(f"Error in notification after_insert event: {e}")
+
+    @event.listens_for(Notification, 'after_update')
+    def on_notification_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "notifications", target.id, "UPDATE", notification_payload(target))
+        except Exception as e:
+            logger.error(f"Error in notification after_update event: {e}")
+
+    @event.listens_for(Notification, 'after_delete')
+    def on_notification_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {"id": target.id, "user_id": target.user_id}
+            log_change(connection, "notifications", target.id, "DELETE", data)
+        except Exception as e:
+            logger.error(f"Error in notification after_delete event: {e}")
+
+    logger.info("✅ Notification event listeners registered")
+
 def setup_all_events():
     """Setup all event listeners"""
     setup_user_events()
+    setup_invitation_events()
     setup_offer_events()
     setup_trade_events()
     setup_commodity_events()
     setup_commodity_alias_events()
     setup_trading_settings_events()
     setup_user_block_events()
+    setup_notification_events()
     logger.info("🎯 All event listeners initialized")
 
 
