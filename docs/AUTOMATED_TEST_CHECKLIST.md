@@ -50,7 +50,8 @@ Scope rules:
 - [x] Cover `core/services/chat_room_service.py` group admin promote/demote invariants.
 - [x] Cover `core/services/chat_room_service.py` group remove/leave membership mutations.
 - [x] Cover `core/services/chat_room_service.py` channel bulk-add and member-update mutations.
-- [ ] Cover remaining `core/services/chat_room_service.py` posting, reaction, read, and room-message orchestration rules.
+- [x] Cover `core/services/chat_room_service.py` channel/group send and read-state orchestration helpers.
+- [ ] Cover remaining `core/services/chat_room_service.py` room-message query/reaction and higher-level orchestration rules.
 - [x] Cover `core/services/user_deletion_service.py` rollback and negative-path behavior beyond existing tests.
 - [x] Cover `core/services/block_service.py` invariants.
 - [x] Cover `core/services/chat_backfill_service.py` invariants.
