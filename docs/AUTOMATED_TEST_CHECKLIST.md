@@ -42,6 +42,7 @@ Scope rules:
 - [x] Cover `core/services/chat_service.py` pure reaction and mutation helpers.
 - [x] Cover `core/services/chat_service.py` direct-chat create/member-sync rules.
 - [x] Cover `core/services/chat_service.py` direct-message query builders and lookup bridging.
+- [x] Cover `core/services/chat_service.py` edit/reaction/delete precondition guards.
 - [ ] Cover remaining `core/services/chat_service.py` direct-chat send/read/search/mutation orchestration rules.
 - [x] Cover `core/services/chat_room_service.py` event payload and broadcast helpers.
 - [x] Cover `core/services/chat_room_service.py` active membership/admin access guards.
