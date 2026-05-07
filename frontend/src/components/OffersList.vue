@@ -3,6 +3,14 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { Search, Loader2 } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
+import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue';
+
+interface TradeLotSuggestionState {
+  title: string;
+  message: string;
+  offerId: number;
+  availableLots: number[];
+}
 
 // Define Props
 const props = defineProps<{
@@ -22,6 +30,7 @@ const tradingOfferId = ref<number | null>(null);
 const tradingAmount = ref<number | null>(null);
 const tradeError = ref('');
 const tradeSuccess = ref('');
+const tradeSuggestion = ref<TradeLotSuggestionState | null>(null);
 
 // Confirmation state (double-tap like Telegram)
 const pendingConfirm = ref<string | null>(null); // "offerId:amount"
@@ -150,13 +159,29 @@ async function executeTrade(offerId: number, quantity: number) {
       body: JSON.stringify({ offer_id: offerId, quantity })
     });
     
+    let data: any = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
     if (response.ok) {
+      tradeSuggestion.value = null;
       tradeSuccess.value = `معامله ${quantity} عدد با موفقیت انجام شد ✅`;
       setTimeout(() => tradeSuccess.value = '', 4000);
       emit('trade-completed');
     } else {
-      const data = await response.json();
-      tradeError.value = data.detail || 'خطا در انجام معامله';
+      if (data?.error_code === 'TRADE_LOT_UNAVAILABLE' && Array.isArray(data.available_lots) && data.available_lots.length > 0) {
+        tradeSuggestion.value = {
+          title: data.title || 'پیشنهاد معامله',
+          message: data.message || 'لات انتخابی شما دیگر در دسترس نیست.',
+          offerId: data.offer_id || offerId,
+          availableLots: data.available_lots,
+        };
+        return;
+      }
+      tradeError.value = data?.detail || 'خطا در انجام معامله';
       setTimeout(() => tradeError.value = '', 5000);
     }
   } catch (e: any) {
@@ -167,9 +192,23 @@ async function executeTrade(offerId: number, quantity: number) {
     tradingAmount.value = null;
   }
 }
+
+function closeTradeSuggestion() {
+  tradeSuggestion.value = null;
+}
 </script>
 
 <template>
+  <TradeLotSuggestionAlert
+    :show="!!tradeSuggestion"
+    :title="tradeSuggestion?.title || ''"
+    :message="tradeSuggestion?.message || ''"
+    :available-lots="tradeSuggestion?.availableLots || []"
+    :busy="tradingOfferId === tradeSuggestion?.offerId"
+    :busy-amount="tradingAmount"
+    @close="closeTradeSuggestion"
+    @select-lot="(amount) => tradeSuggestion && executeTrade(tradeSuggestion.offerId, amount)"
+  />
     <!-- Trade Success Toast -->
     <transition name="fade">
         <div v-if="tradeSuccess" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-gradient-to-r from-green-500 to-green-600 text-white px-5 py-2.5 rounded-2xl text-sm font-bold shadow-lg shadow-green-500/25">

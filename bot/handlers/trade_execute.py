@@ -15,25 +15,23 @@ from core.utils import check_user_limits, increment_user_counter, create_user_no
 from core.enums import NotificationLevel, NotificationCategory, UserRole
 from bot.callbacks import ChannelTradeCallback
 from api.routers.realtime import publish_event
-from core.services.trade_service import get_available_trade_amounts, validate_offer_trade_amount
+from core.services.trade_service import (
+    build_lot_unavailable_suggestion_payload,
+    get_available_trade_amounts,
+    validate_offer_trade_amount,
+)
 
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
-def build_lot_buttons(offer_id: int, remaining: int, lot_sizes: list[int]) -> InlineKeyboardMarkup:
-    """ساخت دکمه‌های لات بر اساس باقیمانده و لات‌های موجود"""
-    all_amounts = get_available_trade_amounts(
-        quantity=remaining,
-        remaining_quantity=remaining,
-        is_wholesale=False,
-        lot_sizes=sorted(lot_sizes, reverse=True),
-    )
+def build_trade_amount_buttons(offer_id: int, amounts: list[int]) -> Optional[InlineKeyboardMarkup]:
+    """ساخت دکمه‌های معامله از روی مقادیر معتبر فعلی"""
     # حذف تکراری‌ها با حفظ ترتیب
     seen = set()
     unique_amounts = []
-    for a in all_amounts:
+    for a in amounts:
         if a not in seen and a > 0:
             seen.add(a)
             unique_amounts.append(a)
@@ -46,6 +44,80 @@ def build_lot_buttons(offer_id: int, remaining: int, lot_sizes: list[int]) -> In
         ))
     
     return InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
+
+
+def build_lot_buttons(
+    offer_id: int,
+    quantity: int,
+    remaining: int,
+    is_wholesale: bool,
+    lot_sizes: Optional[list[int]],
+) -> Optional[InlineKeyboardMarkup]:
+    """ساخت دکمه‌های لات بر اساس وضعیت فعلی لفظ"""
+    all_amounts = get_available_trade_amounts(
+        quantity=quantity,
+        remaining_quantity=remaining,
+        is_wholesale=is_wholesale,
+        lot_sizes=sorted(lot_sizes, reverse=True) if lot_sizes else None,
+    )
+    return build_trade_amount_buttons(offer_id, all_amounts)
+
+
+async def update_offer_channel_markup(bot: Bot, offer: Offer) -> None:
+    """همیشه دکمه‌های کانال را با channel_message_id واقعی به‌روزرسانی کن."""
+    if not offer.channel_message_id:
+        return
+
+    if offer.remaining_quantity <= 0 or offer.status != OfferStatus.ACTIVE:
+        await bot.edit_message_reply_markup(
+            chat_id=settings.channel_id,
+            message_id=offer.channel_message_id,
+            reply_markup=None,
+        )
+        return
+
+    new_keyboard = build_lot_buttons(
+        offer.id,
+        offer.quantity,
+        offer.remaining_quantity,
+        offer.is_wholesale,
+        list(offer.lot_sizes) if offer.lot_sizes else None,
+    )
+    await bot.edit_message_reply_markup(
+        chat_id=settings.channel_id,
+        message_id=offer.channel_message_id,
+        reply_markup=new_keyboard,
+    )
+
+
+async def send_or_update_trade_suggestion_message(
+    callback: types.CallbackQuery,
+    bot: Bot,
+    target_chat_id: int,
+    payload: dict,
+) -> None:
+    """ارسال یا به‌روزرسانی پیام پیشنهاد معامله با دکمه‌های لات باقی‌مانده."""
+    reply_markup = build_trade_amount_buttons(payload["offer_id"], payload["available_lots"])
+    callback_message = callback.message
+    is_private_suggestion_message = bool(
+        callback_message
+        and callback_message.chat
+        and callback_message.chat.id == target_chat_id
+        and callback_message.chat.id != settings.channel_id
+    )
+
+    if is_private_suggestion_message:
+        try:
+            await callback_message.edit_text(payload["message"], reply_markup=reply_markup)
+            return
+        except Exception as exc:
+            logger.debug(f"Failed to update existing trade suggestion message: {exc}")
+
+    await bot.send_message(
+        chat_id=target_chat_id,
+        text=payload["message"],
+        reply_markup=reply_markup,
+    )
 
 
 @router.callback_query(ChannelTradeCallback.filter())
@@ -110,7 +182,7 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
         actual_amount = trade_amount or offer.remaining_quantity or offer.quantity
         
         remaining = offer.remaining_quantity or offer.quantity
-        is_valid_amount, amount_error, actual_amount, _ = validate_offer_trade_amount(
+        is_valid_amount, amount_error, actual_amount, available_amounts = validate_offer_trade_amount(
             quantity=offer.quantity,
             remaining_quantity=remaining,
             is_wholesale=offer.is_wholesale,
@@ -118,7 +190,25 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
             requested_amount=actual_amount,
         )
         if not is_valid_amount:
-            await callback.answer(f"❌ {amount_error}", show_alert=True)
+            if not offer.is_wholesale and available_amounts and amount_error == "این لات دیگر موجود نیست.":
+                suggestion_payload = build_lot_unavailable_suggestion_payload(
+                    offer_id=offer.id,
+                    requested_amount=actual_amount,
+                    commodity_name=offer.commodity.name if offer.commodity else None,
+                    price=offer.price,
+                    remaining_quantity=remaining,
+                    available_amounts=available_amounts,
+                )
+                target_chat_id = user.telegram_id or callback.from_user.id
+                await send_or_update_trade_suggestion_message(
+                    callback=callback,
+                    bot=bot,
+                    target_chat_id=target_chat_id,
+                    payload=suggestion_payload,
+                )
+                await callback.answer("پیشنهاد جدید برای شما ارسال شد.", show_alert=False)
+            else:
+                await callback.answer(f"❌ {amount_error}", show_alert=True)
             return
         
         # بررسی دابل‌کلیک با Redis (0.5 ثانیه)
@@ -302,15 +392,15 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
             
             # بروزرسانی دکمه‌های پست کانال
             try:
-                if new_remaining <= 0:
-                    # لفظ تکمیل - حذف دکمه‌ها
-                    await callback.message.edit_reply_markup(reply_markup=None)
-                else:
-                    # ساخت دکمه‌های جدید
-                    new_keyboard = build_lot_buttons(offer_id, new_remaining, new_lot_sizes)
-                    await callback.message.edit_reply_markup(reply_markup=new_keyboard)
+                await update_offer_channel_markup(bot, offer)
             except Exception as e:
                 logger.debug(f"Failed to update channel buttons: {e}")
+
+            try:
+                if callback.message and callback.message.chat.id != settings.channel_id:
+                    await callback.message.edit_reply_markup(reply_markup=None)
+            except Exception as e:
+                logger.debug(f"Failed to clear private suggestion buttons: {e}")
             
             await callback.answer()
         else:

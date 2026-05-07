@@ -5,6 +5,7 @@ from unittest.mock import patch
 from bot.utils import offer_parser
 from bot.utils.offer_parser import _match_commodity_name
 from core.services.trade_service import (
+    build_lot_unavailable_suggestion_payload,
     get_available_trade_amounts,
     validate_offer_trade_amount,
     validate_price,
@@ -66,6 +67,23 @@ class ManualOfferValidationTests(unittest.TestCase):
         valid, error, _, _ = validate_offer_trade_amount(34, 18, False, [10, 8], 16)
         self.assertFalse(valid)
         self.assertEqual(error, "این لات دیگر موجود نیست.")
+
+    def test_lot_unavailable_payload_contains_remaining_buttons(self):
+        payload = build_lot_unavailable_suggestion_payload(
+            offer_id=77,
+            requested_amount=10,
+            commodity_name="سکه امامی",
+            price=75800,
+            remaining_quantity=24,
+            available_amounts=[16, 8],
+        )
+
+        self.assertEqual(payload["error_code"], "TRADE_LOT_UNAVAILABLE")
+        self.assertEqual(payload["offer_id"], 77)
+        self.assertEqual(payload["available_lots"], [16, 8])
+        self.assertIn("لات 10 عددی", payload["message"])
+        self.assertIn("16 عدد", payload["message"])
+        self.assertIn("8 عدد", payload["message"])
 
     def test_bahar_variants_match_distinct_longest_aliases(self):
         commodities = {

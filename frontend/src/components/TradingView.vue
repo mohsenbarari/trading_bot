@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
+import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue'
 import { useWebSocket } from '../composables/useWebSocket'
 import { useTradingSort } from '../composables/useTradingSort'
-import { apiFetchJson } from '../utils/auth'
+import { apiFetch, apiFetchJson } from '../utils/auth'
 
 const { connect: wsConnect, on: wsOn, off: wsOff } = useWebSocket()
 
@@ -67,6 +68,13 @@ interface TradingSettings {
   offer_expiry_minutes: number
 }
 
+interface TradeLotSuggestionState {
+  title: string
+  message: string
+  offerId: number
+  availableLots: number[]
+}
+
 // State
 const activeTab = ref<'offers' | 'my_offers' | 'my_trades'>(props.initialTab || 'offers')
 const isLoading = ref(true)
@@ -125,6 +133,7 @@ const showTradeModal = ref(false)
 const selectedOffer = ref<Offer | null>(null)
 const tradeQuantity = ref(0)
 const isTrading = ref(false)
+const tradeSuggestion = ref<TradeLotSuggestionState | null>(null)
 
 // Polling
 let pollingInterval: number | null = null
@@ -418,13 +427,35 @@ async function executeTrade() {
   if (!selectedOffer.value) return
   isTrading.value = true
   try {
-    await api('/trades/', {
+    const response = await apiFetch('/api/trades/', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         offer_id: selectedOffer.value.id,
         quantity: tradeQuantity.value
       })
     })
+    let data: any = null
+    try {
+      data = await response.json()
+    } catch {
+      data = null
+    }
+
+    if (!response.ok) {
+      if (data?.error_code === 'TRADE_LOT_UNAVAILABLE' && Array.isArray(data.available_lots) && data.available_lots.length > 0) {
+        tradeSuggestion.value = {
+          title: data.title || 'پیشنهاد معامله',
+          message: data.message || 'لات انتخابی شما دیگر در دسترس نیست.',
+          offerId: data.offer_id || selectedOffer.value.id,
+          availableLots: data.available_lots,
+        }
+        return
+      }
+      throw new Error(data?.detail || 'خطا در انجام معامله')
+    }
+
+    tradeSuggestion.value = null
     successMessage.value = 'معامله انجام شد'
     showTradeModal.value = false
     await loadOffers()
@@ -433,6 +464,16 @@ async function executeTrade() {
   } finally {
     isTrading.value = false
   }
+}
+
+function closeTradeSuggestion() {
+  tradeSuggestion.value = null
+}
+
+async function executeSuggestedTrade(amount: number) {
+  if (!selectedOffer.value) return
+  tradeQuantity.value = amount
+  await executeTrade()
 }
 
 async function expireOffer(id: number) {
@@ -564,6 +605,16 @@ watch(activeTab, (val) => {
   <div class="trading-view">
     <!-- Success/Error Messages -->
     <div v-if="successMessage" class="message success">{{ successMessage }}</div>
+    <TradeLotSuggestionAlert
+      :show="!!tradeSuggestion"
+      :title="tradeSuggestion?.title || ''"
+      :message="tradeSuggestion?.message || ''"
+      :available-lots="tradeSuggestion?.availableLots || []"
+      :busy="isTrading"
+      :busy-amount="tradeQuantity"
+      @close="closeTradeSuggestion"
+      @select-lot="executeSuggestedTrade"
+    />
     <div v-if="error" class="message error">{{ error }}</div>
     
     <!-- Filter Bar at Top -->
