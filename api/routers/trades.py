@@ -338,6 +338,7 @@ async def create_trade(
                 content=build_lot_unavailable_suggestion_payload(
                     offer_id=offer.id,
                     requested_amount=trade_data.quantity,
+                    offer_type=offer.offer_type,
                     commodity_name=offer.commodity.name if offer.commodity else None,
                     price=offer.price,
                     remaining_quantity=offer.remaining_quantity or offer.quantity,

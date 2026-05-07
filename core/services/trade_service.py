@@ -308,6 +308,7 @@ def build_lot_unavailable_suggestion_payload(
     *,
     offer_id: Union[int, float, str],
     requested_amount: Union[int, float, str],
+    offer_type: Optional[Union[str, object]],
     commodity_name: Optional[str],
     price: Union[int, float, str],
     remaining_quantity: Union[int, float, str],
@@ -323,15 +324,27 @@ def build_lot_unavailable_suggestion_payload(
     normalized_remaining = _ensure_int(remaining_quantity, "remaining_quantity")
     normalized_available_amounts = _ensure_int_list(available_amounts, "available_amounts")
 
-    lots_text = "، ".join(f"{amount} عدد" for amount in normalized_available_amounts)
+    raw_offer_type = getattr(offer_type, "value", offer_type)
+    normalized_offer_type = str(raw_offer_type or "").strip().lower()
+    if normalized_offer_type not in {"buy", "sell"}:
+        normalized_offer_type = ""
+
+    offer_type_label = {"buy": "خرید", "sell": "فروش"}.get(normalized_offer_type, "")
+    offer_type_emoji = {"buy": "🟢", "sell": "🔴"}.get(normalized_offer_type, "")
+    lots_inline_text = " + ".join(str(amount) for amount in normalized_available_amounts)
+    lots_button_text = "، ".join(f"{amount} عدد" for amount in normalized_available_amounts)
     commodity_label = (commodity_name or "کالا").strip() or "کالا"
     title = "پیشنهاد معامله"
+    intro_text = f"لات {normalized_requested_amount} عددی که انتخاب کرده بودید لحظاتی قبل توسط کاربر دیگری انجام شد."
+    offer_summary = (
+        f"{offer_type_emoji}{offer_type_label} {commodity_label} "
+        f"{normalized_remaining} عدد {normalized_price:,}"
+    ).strip()
     message = (
-        f"لات {normalized_requested_amount} عددی که انتخاب کرده بودید لحظاتی قبل توسط کاربر دیگری انجام شد.\n\n"
-        f"🏷️ کالا: {commodity_label}\n"
-        f"💰 فی: {normalized_price:,}\n"
-        f"📦 باقی\u200cمانده: {normalized_remaining:,} عدد\n"
-        f"🔹 لات\u200cهای قابل انجام: {lots_text}\n\n"
+        f"{title}\n\n"
+        f"{intro_text}\n\n"
+        f"{offer_summary}\n"
+        f"🔢 خُرد: {lots_inline_text}\n\n"
         "اگر مایل هستید، یکی از دکمه\u200cهای زیر را انتخاب کنید."
     )
 
@@ -339,13 +352,20 @@ def build_lot_unavailable_suggestion_payload(
         "error_code": "TRADE_LOT_UNAVAILABLE",
         "detail": "لات انتخابی شما لحظاتی قبل انجام شد.",
         "title": title,
+        "intro_text": intro_text,
         "message": message,
         "offer_id": normalized_offer_id,
         "requested_amount": normalized_requested_amount,
+        "offer_type": normalized_offer_type,
+        "offer_type_label": offer_type_label,
+        "offer_type_emoji": offer_type_emoji,
         "commodity_name": commodity_label,
         "price": normalized_price,
         "remaining_quantity": normalized_remaining,
+        "offer_summary": offer_summary,
+        "lot_summary": lots_inline_text,
         "available_lots": normalized_available_amounts,
+        "available_lots_text": lots_button_text,
     }
 
 
