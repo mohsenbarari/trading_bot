@@ -71,7 +71,8 @@ Scope rules:
 - [x] Cover `api/routers/auth.py` dev-login and web-login/session approval flows.
 - [x] Cover `api/routers/invitations.py` create/reuse/expire/validate flows.
 - [x] Cover `api/routers/offers.py` list/my-offers/parse flows.
-- [ ] Cover remaining `api/routers/offers.py` create/expire/home-server behavior.
+- [x] Cover `api/routers/offers.py` expire endpoint and related limit/error flows.
+- [ ] Cover remaining `api/routers/offers.py` create/home-server behavior.
 - [ ] Cover `api/routers/trades.py` execute/internal execute/forwarding/error paths.
 - [x] Cover `api/routers/chat.py` group management endpoints.
 - [x] Cover `api/routers/chat.py` channel management endpoints.
