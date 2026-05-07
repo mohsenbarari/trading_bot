@@ -1,4 +1,5 @@
 from typing import Generator, Optional
+import uuid
 from fastapi import Depends, HTTPException, status, Security
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
@@ -8,6 +9,7 @@ from sqlalchemy import select
 from core import security
 from core.config import settings
 from core.db import get_db
+from models.session import UserSession
 from models.user import User, UserRole
 from datetime import datetime
 import logging
@@ -84,6 +86,24 @@ async def get_current_user(
         
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    if session_id:
+        try:
+            session_uuid = uuid.UUID(session_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        active_session = await db.get(UserSession, session_uuid)
+        if not active_session or not active_session.is_active or active_session.user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         
     if user.is_deleted:
         raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")

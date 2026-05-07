@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timedelta
 
 from core.db import AsyncSessionLocal
+from core.services.user_deletion_service import delete_user_account
 from models.user import User
 from core.enums import UserRole, NotificationLevel, NotificationCategory
 from core.utils import normalize_account_name, normalize_persian_numerals, to_jalali_str, create_user_notification, send_telegram_notification
@@ -784,48 +785,10 @@ async def handle_user_delete_confirm(callback: types.CallbackQuery, user: Option
         stmt = select(User).where(User.id == target_user_id)
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
-        if target_user:
-            from models.offer import Offer, OfferStatus
-            from models.trade import Trade
-            from models.invitation import Invitation
-            from sqlalchemy import update as sql_update, delete as sql_delete, or_
-            
-            mobile_number = target_user.mobile_number
-            account_name = target_user.account_name
-            
+        if target_user and not target_user.is_deleted:
             try:
-                # 1. Save mobile in trades (offer user)
-                await session.execute(
-                    sql_update(Trade)
-                    .where(Trade.offer_user_id == target_user_id)
-                    .values(offer_user_mobile=mobile_number)
-                )
-                # 2. Save mobile in trades (responder)
-                await session.execute(
-                    sql_update(Trade)
-                    .where(Trade.responder_user_id == target_user_id)
-                    .values(responder_user_mobile=mobile_number)
-                )
-                # 3. Expire active offers
-                await session.execute(
-                    sql_update(Offer)
-                    .where(Offer.user_id == target_user_id, Offer.status == OfferStatus.ACTIVE)
-                    .values(status=OfferStatus.EXPIRED)
-                )
-                # 4. Delete related invitations
-                await session.execute(
-                    sql_delete(Invitation).where(
-                        or_(
-                            Invitation.mobile_number == mobile_number,
-                            Invitation.account_name == account_name
-                        )
-                    )
-                )
-                # 5. Soft delete
-                target_user.soft_delete()
-                await session.commit()
+                await delete_user_account(session, target_user)
             except Exception as e:
-                await session.rollback()
                 await callback.answer(f"❌ خطا در حذف کاربر: {str(e)}", show_alert=True)
                 return
             

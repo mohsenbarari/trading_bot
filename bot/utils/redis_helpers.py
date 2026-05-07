@@ -19,6 +19,7 @@ _memory_fallback = {
     "daily_tracker": {},     # user_id -> {"date": str, "count": int}
     "confirmations": {},     # key -> timestamp
     "cache": {},             # key -> {"data": any, "expires": timestamp}
+    "deleted_telegram_users": set(),  # telegram_id set for removed users
 }
 
 
@@ -258,6 +259,40 @@ async def invalidate_commodity_cache():
             await redis_client.aclose()
         except Exception as e:
             logger.debug(f"Failed to invalidate commodity cache: {e}")
+
+
+async def mark_deleted_telegram_user(telegram_id: int):
+    """Remember that a Telegram user was removed so the bot can stay silent afterwards."""
+    key = f"deleted_telegram_user:{telegram_id}"
+
+    redis_client = await get_redis_client()
+    if redis_client:
+        try:
+            await redis_client.set(key, "1")
+            await redis_client.aclose()
+            return
+        except Exception as e:
+            logger.warning(f"Redis deleted-user mark failed: {e}")
+            await redis_client.aclose()
+
+    _memory_fallback["deleted_telegram_users"].add(int(telegram_id))
+
+
+async def is_deleted_telegram_user(telegram_id: int) -> bool:
+    """Check whether a Telegram user was previously removed from the project."""
+    key = f"deleted_telegram_user:{telegram_id}"
+
+    redis_client = await get_redis_client()
+    if redis_client:
+        try:
+            exists = await redis_client.exists(key)
+            await redis_client.aclose()
+            return bool(exists)
+        except Exception as e:
+            logger.warning(f"Redis deleted-user lookup failed: {e}")
+            await redis_client.aclose()
+
+    return int(telegram_id) in _memory_fallback["deleted_telegram_users"]
     
     # Fallback
     if key in _memory_fallback["cache"]:

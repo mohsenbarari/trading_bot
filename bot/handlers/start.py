@@ -45,7 +45,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                 stmt = select(User).where(User.id == target_user_id)
                 target_user = (await session.execute(stmt)).scalar_one_or_none()
                 
-                if target_user:
+                if target_user and not target_user.is_deleted:
                     profile_text = (
                         f"👤 پروفایل عمومی\n\n"
                         f"🔸 نام کاربری: {target_user.account_name}\n"

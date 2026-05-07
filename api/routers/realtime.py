@@ -8,12 +8,16 @@ import redis.asyncio as redis
 import asyncio
 import json
 import logging
+import uuid
 from typing import List, Dict, Set, Optional
 
 from jose import jwt, JWTError
 
 from core.redis import pool
 from core.config import settings
+from core.db import AsyncSessionLocal
+from core.services.session_service import is_session_blacklisted
+from models.session import UserSession
 from models.user import User
 from api.deps import get_current_user_optional
 
@@ -69,7 +73,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-def verify_ws_token(token: str) -> Optional[int]:
+def verify_ws_token(token: str) -> Optional[tuple[int, Optional[str]]]:
     """
     Validate JWT token and return user_id.
     Returns None if token is invalid.
@@ -81,7 +85,7 @@ def verify_ws_token(token: str) -> Optional[int]:
         sub = payload.get("sub")
         if sub is None:
             return None
-        return int(sub)
+        return int(sub), payload.get("sid")
     except (JWTError, ValueError, Exception):
         return None
 
@@ -101,10 +105,33 @@ async def websocket_endpoint(
         await websocket.close(code=4001, reason="Missing authentication token")
         return
     
-    user_id = verify_ws_token(token)
-    if user_id is None:
+    auth_result = verify_ws_token(token)
+    if auth_result is None:
         await websocket.close(code=4003, reason="Invalid or expired token")
         return
+    user_id, session_id = auth_result
+
+    if session_id and await is_session_blacklisted(session_id):
+        await websocket.close(code=4003, reason="Session has been revoked")
+        return
+
+    async with AsyncSessionLocal() as session:
+        user = await session.get(User, user_id)
+        if not user or user.is_deleted:
+            await websocket.close(code=4003, reason="User is inactive")
+            return
+
+        if session_id:
+            try:
+                session_uuid = uuid.UUID(session_id)
+            except ValueError:
+                await websocket.close(code=4003, reason="Invalid session")
+                return
+
+            active_session = await session.get(UserSession, session_uuid)
+            if not active_session or not active_session.is_active or active_session.user_id != user_id:
+                await websocket.close(code=4003, reason="Session has been revoked")
+                return
     
     logging.info(f"✅ WebSocket authenticated: user_id={user_id}")
     await manager.connect(websocket)

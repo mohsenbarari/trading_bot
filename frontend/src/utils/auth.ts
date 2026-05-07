@@ -234,6 +234,10 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
                         }
                         throw new Error('شما باید رمز عبور خود را تغییر دهید');
                     }
+                    if (errorData?.detail === 'حساب کاربری غیرفعال شده است' || errorData?.detail === 'User is blocked') {
+                        forceLogout();
+                        throw new Error('حساب کاربری شما غیرفعال شده است');
+                    }
                 } catch (e) {
                     // Ignore parsing errors for other 403s
                 }
