@@ -43,8 +43,12 @@ Scope rules:
 - [ ] Cover `core/services/chat_room_service.py` group/channel membership, posting, reaction, and read rules.
 - [x] Cover `core/services/user_deletion_service.py` rollback and negative-path behavior beyond existing tests.
 - [x] Cover `core/services/block_service.py` invariants.
-- [ ] Cover `core/services/chat_backfill_service.py` invariants.
-- [ ] Cover `core/sync_push.py`, `core/sync_worker.py`, `core/notifications.py`, `core/offer_expiry.py`, and `core/server_routing.py` edge cases.
+- [x] Cover `core/services/chat_backfill_service.py` invariants.
+- [x] Cover `core/server_routing.py` edge cases.
+- [x] Cover `core/notifications.py` edge cases.
+- [x] Cover `core/sync_push.py` edge cases.
+- [x] Cover `core/offer_expiry.py` edge cases.
+- [ ] Cover `core/sync_worker.py` edge cases.
 
 ## Phase 3 - API Router Integration Coverage
 
