@@ -17,7 +17,8 @@ from core.db import AsyncSessionLocal
 from core.services.trade_service import (
     validate_lot_sizes,
     validate_quantity,
-    validate_price
+    validate_price,
+    get_available_trade_amounts,
 )
 from core.utils import to_jalali_str, check_user_limits, increment_user_counter
 from bot.handlers.trade_utils import (
@@ -625,10 +626,13 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
                     )]
                 ])
             else:
-                # خُرد - چند دکمه
-                # ترتیب: کل + بخش‌ها (بزرگ به کوچک)
                 buttons = []
-                all_amounts = [quantity] + sorted(lot_sizes, reverse=True)
+                all_amounts = get_available_trade_amounts(
+                    quantity=quantity,
+                    remaining_quantity=quantity,
+                    is_wholesale=False,
+                    lot_sizes=sorted(lot_sizes, reverse=True),
+                )
                 # حذف تکراری‌ها با حفظ ترتیب
                 seen = set()
                 unique_amounts = []
@@ -1091,7 +1095,12 @@ async def handle_text_offer_confirm(callback: types.CallbackQuery, state: FSMCon
                 ])
             else:
                 buttons = []
-                all_amounts = [quantity] + sorted(lot_sizes, reverse=True)
+                all_amounts = get_available_trade_amounts(
+                    quantity=quantity,
+                    remaining_quantity=quantity,
+                    is_wholesale=False,
+                    lot_sizes=sorted(lot_sizes, reverse=True),
+                )
                 seen = set()
                 unique_amounts = []
                 for a in all_amounts:

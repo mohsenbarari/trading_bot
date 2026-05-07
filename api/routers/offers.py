@@ -18,6 +18,7 @@ from core.db import get_db
 from core.config import settings
 from core.trading_settings import get_trading_settings
 from core.utils import check_user_limits, increment_user_counter, to_jalali_str
+from core.services.trade_service import get_available_trade_amounts
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
 from models.commodity import Commodity
@@ -148,7 +149,12 @@ async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
     if offer.is_wholesale or not offer.lot_sizes:
         buttons = [[{"text": f"{offer.quantity} عدد", "callback_data": f"channel_trade:{offer.id}:{offer.quantity}"}]]
     else:
-        all_amounts = [offer.quantity] + sorted(offer.lot_sizes, reverse=True)
+        all_amounts = get_available_trade_amounts(
+            quantity=offer.quantity,
+            remaining_quantity=offer.remaining_quantity or offer.quantity,
+            is_wholesale=False,
+            lot_sizes=sorted(offer.lot_sizes, reverse=True),
+        )
         seen = set()
         unique_amounts = []
         for a in all_amounts:
@@ -275,7 +281,9 @@ async def create_offer(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_price)
     
     # 3. اعتبارسنجی لات‌ها
-    if not offer_data.is_wholesale and offer_data.lot_sizes:
+    if not offer_data.is_wholesale:
+        if not offer_data.lot_sizes:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="برای آفر خُرد باید لات‌ها مشخص شوند.")
         is_valid_lots, err_lots, suggested_lots = validate_lot_sizes(offer_data.quantity, offer_data.lot_sizes)
         if not is_valid_lots:
             detail_msg = err_lots

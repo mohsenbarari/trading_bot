@@ -21,6 +21,7 @@ from core.utils import (
     check_user_limits, increment_user_counter, to_jalali_str,
     create_user_notification, send_telegram_notification
 )
+from core.services.trade_service import get_available_trade_amounts, validate_offer_trade_amount
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
 from models.trade import Trade, TradeType, TradeStatus
@@ -130,18 +131,24 @@ async def update_channel_buttons(offer: Offer) -> bool:
         if offer.is_wholesale or not offer.lot_sizes:
             buttons = [[{"text": f"{offer.remaining_quantity} عدد", "callback_data": f"channel_trade:{offer.id}:{offer.remaining_quantity}"}]]
         else:
-            # فیلتر lot_sizes که بیشتر از remaining نباشند
-            valid_lots = [l for l in offer.lot_sizes if l <= offer.remaining_quantity]
-            if offer.remaining_quantity not in valid_lots:
-                valid_lots = [offer.remaining_quantity] + valid_lots
-            valid_lots = sorted(set(valid_lots), reverse=True)
-            buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer.id}:{a}"} for a in valid_lots]]
+            valid_lots = get_available_trade_amounts(
+                quantity=offer.quantity,
+                remaining_quantity=offer.remaining_quantity,
+                is_wholesale=False,
+                lot_sizes=offer.lot_sizes,
+            )
+            if not valid_lots:
+                payload = {"chat_id": channel_id, "message_id": offer.channel_message_id}
+                buttons = None
+            else:
+                buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer.id}:{a}"} for a in valid_lots]]
         
-        payload = {
-            "chat_id": channel_id,
-            "message_id": offer.channel_message_id,
-            "reply_markup": {"inline_keyboard": buttons}
-        }
+        if buttons is not None:
+            payload = {
+                "chat_id": channel_id,
+                "message_id": offer.channel_message_id,
+                "reply_markup": {"inline_keyboard": buttons}
+            }
     
     try:
         async with httpx.AsyncClient() as client:
@@ -224,13 +231,20 @@ async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, 
             if offer.is_wholesale or not lot_sizes:
                 buttons = [[{"text": f"{remaining_quantity} عدد", "callback_data": f"channel_trade:{offer_id}:{remaining_quantity}"}]]
             else:
-                valid_lots = [l for l in lot_sizes if l <= remaining_quantity]
-                if remaining_quantity not in valid_lots:
-                    valid_lots = [remaining_quantity] + valid_lots
-                valid_lots = sorted(set(valid_lots), reverse=True)
-                buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer_id}:{a}"} for a in valid_lots]]
+                valid_lots = get_available_trade_amounts(
+                    quantity=offer.quantity,
+                    remaining_quantity=remaining_quantity,
+                    is_wholesale=False,
+                    lot_sizes=lot_sizes,
+                )
+                if not valid_lots:
+                    payload = {"chat_id": channel_id, "message_id": offer.channel_message_id}
+                    buttons = None
+                else:
+                    buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer_id}:{a}"} for a in valid_lots]]
             
-            payload = {"chat_id": channel_id, "message_id": offer.channel_message_id, "reply_markup": {"inline_keyboard": buttons}}
+            if buttons is not None:
+                payload = {"chat_id": channel_id, "message_id": offer.channel_message_id, "reply_markup": {"inline_keyboard": buttons}}
     
     async with httpx.AsyncClient() as client:
         response = await client.post(url, json=payload, timeout=10)
@@ -300,10 +314,17 @@ async def create_trade(
             detail="امکان انجام این معامله وجود ندارد."
         )
     
-    if trade_data.quantity > offer.remaining_quantity:
+    is_valid_amount, amount_error, trade_quantity, _ = validate_offer_trade_amount(
+        quantity=offer.quantity,
+        remaining_quantity=offer.remaining_quantity,
+        is_wholesale=offer.is_wholesale,
+        lot_sizes=offer.lot_sizes,
+        requested_amount=trade_data.quantity,
+    )
+    if not is_valid_amount:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"تعداد درخواستی بیشتر از موجودی است. موجودی: {offer.remaining_quantity}"
+            detail=amount_error
         )
     
     # بارگذاری روابط لفظ
@@ -326,21 +347,21 @@ async def create_trade(
         responder_user_mobile=current_user.mobile_number,
         commodity_id=offer.commodity_id,
         trade_type=responder_trade_type,
-        quantity=trade_data.quantity,
+        quantity=trade_quantity,
         price=offer.price,
         status=TradeStatus.COMPLETED
     )
     db.add(new_trade)
     
     # آپدیت لفظ
-    offer.remaining_quantity -= trade_data.quantity
+    offer.remaining_quantity -= trade_quantity
     
     # بروزرسانی لات‌ها - حذف مقدار معامله شده از لیست
     if offer.lot_sizes:
         from sqlalchemy.orm.attributes import flag_modified
         new_lot_sizes = list(offer.lot_sizes)
-        if trade_data.quantity in new_lot_sizes:
-            new_lot_sizes.remove(trade_data.quantity)
+        if trade_quantity in new_lot_sizes:
+            new_lot_sizes.remove(trade_quantity)
         offer.lot_sizes = new_lot_sizes if new_lot_sizes else None
         flag_modified(offer, "lot_sizes")  # اجبار SQLAlchemy برای تشخیص تغییر
     
@@ -402,7 +423,7 @@ async def create_trade(
     responder_msg = (
         f"{respond_emoji} **{respond_type_fa}**\n\n"
         f"💰 فی: {offer.price:,}\n"
-        f"📦 تعداد: {trade_data.quantity}\n"
+        f"📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
         f"👤 طرف معامله: {offer.user.account_name if offer.user else 'نامشخص'}\n"
         f"🔢 شماره معامله: {new_trade_number}\n"
@@ -413,7 +434,7 @@ async def create_trade(
     offer_owner_msg = (
         f"{offer_emoji} **{offer_type_fa}**\n\n"
         f"💰 فی: {offer.price:,}\n"
-        f"📦 تعداد: {trade_data.quantity}\n"
+        f"📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
         f"👤 طرف معامله: {current_user.account_name}\n"
         f"🔢 شماره معامله: {new_trade_number}\n"
@@ -428,7 +449,7 @@ async def create_trade(
     # ارسال نوتیفیکیشن اپ
     notif_msg_responder = (
         f"{respond_emoji} {respond_type_fa}\n"
-        f"💰 فی: {offer.price:,} | 📦 تعداد: {trade_data.quantity}\n"
+        f"💰 فی: {offer.price:,} | 📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
         f"👤 طرف معامله: {offer.user.account_name if offer.user else 'نامشخص'}\n"
         f"🔢 شماره: {new_trade_number}"
@@ -436,7 +457,7 @@ async def create_trade(
     
     notif_msg_owner = (
         f"{offer_emoji} {offer_type_fa}\n"
-        f"💰 فی: {offer.price:,} | 📦 تعداد: {trade_data.quantity}\n"
+        f"💰 فی: {offer.price:,} | 📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
         f"👤 طرف معامله: {current_user.account_name}\n"
         f"🔢 شماره: {new_trade_number}"
@@ -462,14 +483,14 @@ async def create_trade(
     # صاحب لفظ شمارنده‌اش افزایش نمی‌یابد (چون او فقط لفظ داده، فعالانه معامله نکرده)
     user_for_counter = await db.get(User, current_user.id)
     if user_for_counter:
-        await increment_user_counter(db, user_for_counter, 'trade', trade_data.quantity)
+        await increment_user_counter(db, user_for_counter, 'trade', trade_quantity)
     
     # ارسال رویداد SSE
     from .realtime import publish_event
     await publish_event("trade:created", {
         "trade_number": new_trade_number,
         "offer_id": offer.id,
-        "quantity": trade_data.quantity,
+        "quantity": trade_quantity,
         "price": offer.price,
         "commodity_name": offer.commodity.name,
         "trade_type": responder_trade_type.value,
