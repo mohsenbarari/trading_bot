@@ -194,6 +194,7 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
                 suggestion_payload = build_lot_unavailable_suggestion_payload(
                     offer_id=offer.id,
                     requested_amount=actual_amount,
+                    offer_type=offer.offer_type,
                     commodity_name=offer.commodity.name if offer.commodity else None,
                     price=offer.price,
                     remaining_quantity=remaining,

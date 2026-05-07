@@ -72,6 +72,7 @@ class ManualOfferValidationTests(unittest.TestCase):
         payload = build_lot_unavailable_suggestion_payload(
             offer_id=77,
             requested_amount=10,
+            offer_type="sell",
             commodity_name="سکه امامی",
             price=75800,
             remaining_quantity=24,
@@ -80,10 +81,13 @@ class ManualOfferValidationTests(unittest.TestCase):
 
         self.assertEqual(payload["error_code"], "TRADE_LOT_UNAVAILABLE")
         self.assertEqual(payload["offer_id"], 77)
+        self.assertEqual(payload["offer_type"], "sell")
+        self.assertEqual(payload["offer_type_label"], "فروش")
         self.assertEqual(payload["available_lots"], [16, 8])
+        self.assertEqual(payload["lot_summary"], "16 + 8")
         self.assertIn("لات 10 عددی", payload["message"])
-        self.assertIn("16 عدد", payload["message"])
-        self.assertIn("8 عدد", payload["message"])
+        self.assertIn("🔴فروش سکه امامی 24 عدد 75,800", payload["message"])
+        self.assertIn("16 + 8", payload["message"])
 
     def test_bahar_variants_match_distinct_longest_aliases(self):
         commodities = {

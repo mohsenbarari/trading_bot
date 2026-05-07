@@ -7,8 +7,14 @@ import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue';
 
 interface TradeLotSuggestionState {
   title: string;
-  message: string;
+  introText: string;
   offerId: number;
+  offerType: 'buy' | 'sell' | '';
+  offerTypeLabel: string;
+  commodityName: string;
+  price: number;
+  remainingQuantity: number;
+  lotSummary: string;
   availableLots: number[];
 }
 
@@ -175,8 +181,14 @@ async function executeTrade(offerId: number, quantity: number) {
       if (data?.error_code === 'TRADE_LOT_UNAVAILABLE' && Array.isArray(data.available_lots) && data.available_lots.length > 0) {
         tradeSuggestion.value = {
           title: data.title || 'پیشنهاد معامله',
-          message: data.message || 'لات انتخابی شما دیگر در دسترس نیست.',
+          introText: data.intro_text || data.detail || 'لات انتخابی شما دیگر در دسترس نیست.',
           offerId: data.offer_id || offerId,
+          offerType: data.offer_type || '',
+          offerTypeLabel: data.offer_type_label || (data.offer_type === 'buy' ? 'خرید' : 'فروش'),
+          commodityName: data.commodity_name || 'کالا',
+          price: Number(data.price || 0),
+          remainingQuantity: Number(data.remaining_quantity || quantity),
+          lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? data.available_lots.join(' + ') : ''),
           availableLots: data.available_lots,
         };
         return;
@@ -202,10 +214,17 @@ function closeTradeSuggestion() {
   <TradeLotSuggestionAlert
     :show="!!tradeSuggestion"
     :title="tradeSuggestion?.title || ''"
-    :message="tradeSuggestion?.message || ''"
+    :intro-text="tradeSuggestion?.introText || ''"
+    :offer-type="tradeSuggestion?.offerType || ''"
+    :offer-type-label="tradeSuggestion?.offerTypeLabel || ''"
+    :commodity-name="tradeSuggestion?.commodityName || ''"
+    :price="tradeSuggestion?.price || 0"
+    :remaining-quantity="tradeSuggestion?.remainingQuantity || 0"
+    :lot-summary="tradeSuggestion?.lotSummary || ''"
     :available-lots="tradeSuggestion?.availableLots || []"
     :busy="tradingOfferId === tradeSuggestion?.offerId"
     :busy-amount="tradingAmount"
+    :auto-close-seconds="10"
     @close="closeTradeSuggestion"
     @select-lot="(amount) => tradeSuggestion && executeTrade(tradeSuggestion.offerId, amount)"
   />

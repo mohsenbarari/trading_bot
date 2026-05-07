@@ -70,8 +70,14 @@ interface TradingSettings {
 
 interface TradeLotSuggestionState {
   title: string
-  message: string
+  introText: string
   offerId: number
+  offerType: 'buy' | 'sell' | ''
+  offerTypeLabel: string
+  commodityName: string
+  price: number
+  remainingQuantity: number
+  lotSummary: string
   availableLots: number[]
 }
 
@@ -446,8 +452,14 @@ async function executeTrade() {
       if (data?.error_code === 'TRADE_LOT_UNAVAILABLE' && Array.isArray(data.available_lots) && data.available_lots.length > 0) {
         tradeSuggestion.value = {
           title: data.title || 'پیشنهاد معامله',
-          message: data.message || 'لات انتخابی شما دیگر در دسترس نیست.',
+          introText: data.intro_text || data.detail || 'لات انتخابی شما دیگر در دسترس نیست.',
           offerId: data.offer_id || selectedOffer.value.id,
+          offerType: data.offer_type || selectedOffer.value.offer_type || '',
+          offerTypeLabel: data.offer_type_label || ((data.offer_type || selectedOffer.value.offer_type) === 'buy' ? 'خرید' : 'فروش'),
+          commodityName: data.commodity_name || selectedOffer.value.commodity_name || 'کالا',
+          price: Number(data.price || selectedOffer.value.price || 0),
+          remainingQuantity: Number(data.remaining_quantity || selectedOffer.value.remaining_quantity || tradeQuantity.value),
+          lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? data.available_lots.join(' + ') : ''),
           availableLots: data.available_lots,
         }
         return
@@ -608,10 +620,17 @@ watch(activeTab, (val) => {
     <TradeLotSuggestionAlert
       :show="!!tradeSuggestion"
       :title="tradeSuggestion?.title || ''"
-      :message="tradeSuggestion?.message || ''"
+      :intro-text="tradeSuggestion?.introText || ''"
+      :offer-type="tradeSuggestion?.offerType || ''"
+      :offer-type-label="tradeSuggestion?.offerTypeLabel || ''"
+      :commodity-name="tradeSuggestion?.commodityName || ''"
+      :price="tradeSuggestion?.price || 0"
+      :remaining-quantity="tradeSuggestion?.remainingQuantity || 0"
+      :lot-summary="tradeSuggestion?.lotSummary || ''"
       :available-lots="tradeSuggestion?.availableLots || []"
       :busy="isTrading"
       :busy-amount="tradeQuantity"
+      :auto-close-seconds="10"
       @close="closeTradeSuggestion"
       @select-lot="executeSuggestedTrade"
     />
