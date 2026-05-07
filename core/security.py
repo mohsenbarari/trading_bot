@@ -10,12 +10,14 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 
-def create_access_token(subject: Union[int, str, Any] = None, data: dict = None, expires_delta: Optional[timedelta] = None, session_id: str = None) -> str:
+def create_access_token(subject: Union[int, str, Any] = None, data: dict = None, expires_delta: Optional[timedelta] = None, session_id: str = None, server_id: str = None) -> str:
     to_encode = data.copy() if data else {}
     if subject is not None:
         to_encode["sub"] = str(subject)
     if session_id is not None:
         to_encode["sid"] = session_id
+    if server_id is not None:
+        to_encode["srv"] = server_id
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:

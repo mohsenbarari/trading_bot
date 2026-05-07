@@ -23,6 +23,7 @@ from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
 from models.commodity import Commodity
 from api.deps import get_current_user
+from core.server_routing import current_server
 
 
 logger = logging.getLogger(__name__)
@@ -326,6 +327,7 @@ async def create_offer(
     # ایجاد لفظ
     new_offer = Offer(
         user_id=current_user.id,
+        home_server=current_server(),
         offer_type=OfferType.BUY if offer_data.offer_type == "buy" else OfferType.SELL,
         commodity_id=offer_data.commodity_id,
         quantity=offer_data.quantity,

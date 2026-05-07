@@ -41,6 +41,7 @@ class Offer(Base):
     # کاربر لفظ‌دهنده - nullable برای حفظ رکورد پس از حذف کاربر
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     user = relationship("User", foreign_keys=[user_id])
+    home_server = Column(String(16), nullable=False, default="foreign", index=True)
     
     # نوع لفظ
     offer_type = Column(Enum(OfferType), nullable=False)

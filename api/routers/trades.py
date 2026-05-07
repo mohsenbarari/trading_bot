@@ -4,11 +4,11 @@ API Router for Trade Management - MiniApp Integration
 """
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
@@ -32,6 +32,8 @@ from models.offer import Offer, OfferType, OfferStatus
 from models.trade import Trade, TradeType, TradeStatus
 from models.commodity import Commodity
 from api.deps import get_current_user
+from core.server_routing import current_server, is_remote_home, normalize_server
+from core.trade_forwarding import forward_trade_to_home_server, verify_internal_signature
 
 
 logger = logging.getLogger(__name__)
@@ -48,6 +50,17 @@ class TradeCreate(BaseModel):
     """ایجاد معامله جدید"""
     offer_id: int = Field(..., gt=0)
     quantity: int = Field(..., gt=0)
+    idempotency_key: Optional[str] = None
+
+
+class InternalTradeExecuteRequest(BaseModel):
+    """درخواست داخلی اجرای معامله روی سرور مرجع آفر"""
+    offer_id: int = Field(..., gt=0)
+    quantity: int = Field(..., gt=0)
+    responder_user_id: int = Field(..., gt=0)
+    edge_received_at: datetime
+    source_server: str
+    idempotency_key: Optional[str] = None
 
 
 class TradeResponse(BaseModel):
@@ -258,12 +271,62 @@ async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, 
 
 # --- Endpoints ---
 
-@router.post("/", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)
-async def create_trade(
+def _normalize_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+async def _is_offer_expired_for_trade(offer: Offer, edge_received_at: Optional[datetime]) -> bool:
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    if ts.offer_expiry_minutes <= 0 or not offer.created_at:
+        return False
+
+    created_at = _normalize_naive_utc(offer.created_at) or datetime.utcnow()
+    expiry_at = created_at + timedelta(minutes=ts.offer_expiry_minutes)
+    now = datetime.utcnow()
+    edge_at = _normalize_naive_utc(edge_received_at)
+
+    if edge_at and edge_at <= expiry_at:
+        transit_seconds = max(0.0, (now - edge_at).total_seconds())
+        if transit_seconds <= settings.trade_forward_grace_seconds:
+            return False
+
+    return now > expiry_at
+
+
+async def _forward_trade_if_remote_home(
+    db: AsyncSession,
+    trade_data: TradeCreate,
+    current_user: User,
+    edge_received_at: datetime,
+) -> Optional[JSONResponse]:
+    offer = await db.get(Offer, trade_data.offer_id)
+    if not offer or not is_remote_home(offer.home_server):
+        return None
+
+    payload = {
+        "offer_id": trade_data.offer_id,
+        "quantity": trade_data.quantity,
+        "responder_user_id": current_user.id,
+        "edge_received_at": edge_received_at.isoformat(),
+        "source_server": current_server(),
+        "idempotency_key": trade_data.idempotency_key,
+    }
+    status_code, body = await forward_trade_to_home_server(offer.home_server, payload)
+    return JSONResponse(status_code=status_code, content=body)
+
+
+async def _execute_trade_authoritatively(
     trade_data: TradeCreate,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    edge_received_at: Optional[datetime] = None,
 ):
     """
     انجام معامله روی یک لفظ از MiniApp
@@ -304,7 +367,14 @@ async def create_trade(
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
     
-    if offer.status != OfferStatus.ACTIVE:
+    expired_for_trade = await _is_offer_expired_for_trade(offer, edge_received_at)
+
+    allow_in_flight_after_auto_expiry = (
+        offer.status == OfferStatus.EXPIRED
+        and edge_received_at is not None
+        and not expired_for_trade
+    )
+    if (offer.status != OfferStatus.ACTIVE and not allow_in_flight_after_auto_expiry) or expired_for_trade:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ دیگر فعال نیست.")
     
     if offer.user_id == current_user.id:
@@ -352,6 +422,20 @@ async def create_trade(
     
     # بارگذاری روابط لفظ
     await db.refresh(offer, ["user", "commodity"])
+
+    if trade_data.idempotency_key:
+        existing_trade = await db.execute(
+            select(Trade)
+            .options(
+                selectinload(Trade.offer_user),
+                selectinload(Trade.responder_user),
+                selectinload(Trade.commodity),
+            )
+            .where(Trade.idempotency_key == trade_data.idempotency_key)
+        )
+        existing_trade_obj = existing_trade.scalar_one_or_none()
+        if existing_trade_obj:
+            return trade_to_response(existing_trade_obj)
     
     # گرفتن شماره معامله جدید
     max_trade_number = await db.scalar(select(func.max(Trade.trade_number)))
@@ -372,7 +456,8 @@ async def create_trade(
         trade_type=responder_trade_type,
         quantity=trade_quantity,
         price=offer.price,
-        status=TradeStatus.COMPLETED
+        status=TradeStatus.COMPLETED,
+        idempotency_key=trade_data.idempotency_key,
     )
     db.add(new_trade)
     
@@ -530,6 +615,65 @@ async def create_trade(
     })
     
     return trade_to_response(new_trade)
+
+
+@router.post("/", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)
+async def create_trade(
+    trade_data: TradeCreate,
+    background_tasks: BackgroundTasks,
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    edge_received_at = datetime.utcnow()
+    forwarded_response = await _forward_trade_if_remote_home(db, trade_data, current_user, edge_received_at)
+    if forwarded_response is not None:
+        return forwarded_response
+
+    return await _execute_trade_authoritatively(
+        trade_data=trade_data,
+        background_tasks=background_tasks,
+        db=db,
+        current_user=current_user,
+        edge_received_at=edge_received_at,
+    )
+
+
+@router.post("/internal/execute", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)
+async def execute_trade_internal(
+    internal_data: InternalTradeExecuteRequest,
+    background_tasks: BackgroundTasks,
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    body = await raw_request.body()
+    if not verify_internal_signature(
+        body,
+        raw_request.headers.get("x-timestamp"),
+        raw_request.headers.get("x-signature"),
+        raw_request.headers.get("x-api-key"),
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal trade signature")
+
+    offer = await db.get(Offer, internal_data.offer_id)
+    if offer and normalize_server(offer.home_server) != current_server():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="این سرور مرجع آفر نیست.")
+
+    responder = await db.get(User, internal_data.responder_user_id)
+    if not responder or responder.is_deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کاربر درخواست‌دهنده یافت نشد")
+
+    return await _execute_trade_authoritatively(
+        trade_data=TradeCreate(
+            offer_id=internal_data.offer_id,
+            quantity=internal_data.quantity,
+            idempotency_key=internal_data.idempotency_key,
+        ),
+        background_tasks=background_tasks,
+        db=db,
+        current_user=responder,
+        edge_received_at=internal_data.edge_received_at,
+    )
 
 
 @router.get("/my", response_model=List[TradeResponse])

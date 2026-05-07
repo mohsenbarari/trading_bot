@@ -80,6 +80,7 @@ async def create_session(
     device_ip: Optional[str] = None,
     platform: Platform = Platform.WEB,
     is_primary: bool = False,
+    home_server: str = "foreign",
 ) -> UserSession:
     """Create a new active session."""
     session = UserSession(
@@ -87,6 +88,7 @@ async def create_session(
         user_id=user_id,
         device_name=device_name,
         device_ip=device_ip,
+        home_server=home_server,
         platform=platform,
         refresh_token_hash=hash_token(refresh_token),
         is_primary=is_primary,
@@ -124,6 +126,7 @@ async def handle_login_session(
     device_ip: Optional[str] = None,
     platform: Platform = Platform.WEB,
     suspended_refresh_token: Optional[str] = None,
+    home_server: str = "foreign",
 ) -> dict:
     """
     Core login session logic. Returns one of:
@@ -155,6 +158,7 @@ async def handle_login_session(
             if device_ip:
                 suspended_session.device_ip = device_ip
             suspended_session.platform = platform
+            suspended_session.home_server = home_server
             suspended_session.last_active_at = datetime.utcnow()
             suspended_session.expires_at = datetime.utcnow() + timedelta(days=30)
             await db.commit()
@@ -167,6 +171,7 @@ async def handle_login_session(
         session = await create_session(
             db, user.id, refresh_token, device_name, device_ip, platform,
             is_primary=True,
+            home_server=home_server,
         )
         await db.commit()
         return {"action": "session_created", "session": session}
@@ -176,6 +181,7 @@ async def handle_login_session(
         session = await create_session(
             db, user.id, refresh_token, device_name, device_ip, platform,
             is_primary=False,
+            home_server=home_server,
         )
         await db.commit()
         return {"action": "session_created", "session": session}
@@ -231,6 +237,7 @@ async def handle_login_session(
         user_id=user.id,
         requester_device_name=device_name,
         requester_ip=device_ip,
+        requester_home_server=home_server,
         status=LoginRequestStatus.PENDING,
         expires_at=datetime.utcnow() + timedelta(seconds=LOGIN_REQUEST_TIMEOUT_SECONDS),
     )
@@ -270,6 +277,7 @@ async def approve_login_request(
     device_name: str = "Unknown Device",
     device_ip: Optional[str] = None,
     platform: Platform = Platform.WEB,
+    home_server: Optional[str] = None,
 ) -> dict:
     """
     Approve a login request from the primary device.
@@ -324,6 +332,7 @@ async def approve_login_request(
         login_req.requester_ip,
         platform,
         is_primary=(not has_primary),
+        home_server=home_server or login_req.requester_home_server,
     )
 
     await db.commit()
