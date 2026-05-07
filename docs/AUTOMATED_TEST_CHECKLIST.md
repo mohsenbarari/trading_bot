@@ -73,7 +73,8 @@ Scope rules:
 - [x] Cover `api/routers/chat.py` channel management endpoints.
 - [x] Cover `api/routers/chat.py` room send/read/message-list endpoints.
 - [x] Cover `api/routers/chat.py` direct conversations/search/history/typing/read/poll endpoints.
-- [ ] Cover remaining `api/routers/chat.py` direct send/edit/delete/reaction and media/file flows.
+- [x] Cover `api/routers/chat.py` direct send/edit/delete/reaction endpoints.
+- [ ] Cover remaining `api/routers/chat.py` media/file flows.
 - [ ] Cover `api/routers/sessions.py`, `api/routers/notifications.py`, and `api/routers/sync.py` runtime contracts.
 - [ ] Cover remaining routers: `users.py`, `users_public.py`, `blocks.py`, `commodities.py`, `realtime.py`, `trading_settings.py`, `config` surface via `main.py`.
 
