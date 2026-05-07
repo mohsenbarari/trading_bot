@@ -1,0 +1,201 @@
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import httpx
+
+from core import server_routing, trade_forwarding
+
+
+class ServerRoutingTests(unittest.TestCase):
+    def test_normalize_server_maps_aliases_and_defaults(self):
+        self.assertEqual(server_routing.normalize_server(None), server_routing.SERVER_FOREIGN)
+        self.assertEqual(server_routing.normalize_server("DE"), server_routing.SERVER_FOREIGN)
+        self.assertEqual(server_routing.normalize_server("german"), server_routing.SERVER_FOREIGN)
+        self.assertEqual(server_routing.normalize_server("IR"), server_routing.SERVER_IRAN)
+        self.assertEqual(server_routing.normalize_server("unknown", default=server_routing.SERVER_IRAN), server_routing.SERVER_IRAN)
+
+    def test_server_from_request_prefers_forwarded_host_and_telegram_override(self):
+        request = SimpleNamespace(headers={"x-forwarded-host": "coin.gold-trade.ir:443", "host": "coin.362514.ir"})
+
+        self.assertEqual(server_routing.server_from_request(request), server_routing.SERVER_IRAN)
+        self.assertEqual(
+            server_routing.server_from_request(request, force_telegram_foreign=True),
+            server_routing.SERVER_FOREIGN,
+        )
+
+    def test_peer_server_url_for_uses_specific_urls_and_legacy_fallback(self):
+        with patch.object(server_routing.settings, "server_mode", "foreign"), \
+             patch.object(server_routing.settings, "iran_server_url", "https://iran.example/"), \
+             patch.object(server_routing.settings, "germany_server_url", "https://germany.example/"), \
+             patch.object(server_routing.settings, "peer_server_url", None), \
+             patch.object(server_routing.settings, "foreign_server_url", None):
+            self.assertEqual(server_routing.peer_server_url_for("iran"), "https://iran.example")
+            self.assertIsNone(server_routing.peer_server_url_for("foreign"))
+
+        with patch.object(server_routing.settings, "server_mode", "iran"), \
+             patch.object(server_routing.settings, "germany_server_url", None), \
+             patch.object(server_routing.settings, "peer_server_url", "https://legacy-peer.example/"), \
+             patch.object(server_routing.settings, "foreign_server_url", None):
+            self.assertEqual(server_routing.peer_server_url_for("foreign"), "https://legacy-peer.example")
+
+
+class TradeForwardingSignatureTests(unittest.TestCase):
+    def test_verify_internal_signature_accepts_valid_signed_payload(self):
+        body = b'{"offer_id":1,"quantity":5}'
+        timestamp = 1_700_000_000
+
+        with patch.object(trade_forwarding.settings, "sync_api_key", "secret"), \
+             patch("core.trade_forwarding.time.time", return_value=timestamp):
+            signature = trade_forwarding.sign_internal_payload(body.decode(), timestamp)
+
+            self.assertTrue(
+                trade_forwarding.verify_internal_signature(body, str(timestamp), signature, "secret")
+            )
+
+    def test_verify_internal_signature_rejects_stale_missing_or_wrong_key_payloads(self):
+        body = b'{"offer_id":1}'
+
+        with patch.object(trade_forwarding.settings, "sync_api_key", "secret"), \
+             patch("core.trade_forwarding.time.time", return_value=200):
+            fresh_signature = trade_forwarding.sign_internal_payload(body.decode(), 200)
+
+            self.assertFalse(trade_forwarding.verify_internal_signature(body, None, fresh_signature, "secret"))
+            self.assertFalse(trade_forwarding.verify_internal_signature(body, "100", fresh_signature, "secret"))
+            self.assertFalse(trade_forwarding.verify_internal_signature(body, "200", fresh_signature, "wrong"))
+
+
+class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_forward_trade_returns_service_unavailable_without_peer_url(self):
+        with patch("core.trade_forwarding.peer_server_url_for", return_value=None):
+            status_code, body = await trade_forwarding.forward_trade_to_home_server("iran", {"offer_id": 12})
+
+        self.assertEqual(status_code, 503)
+        self.assertEqual(body, {"detail": "سرور مرجع معامله در دسترس نیست."})
+
+    async def test_forward_trade_posts_signed_payload_and_returns_json(self):
+        recorded: dict[str, object] = {}
+
+        class Response:
+            status_code = 201
+            text = ""
+
+            def json(self):
+                return {"ok": True, "trade_id": 55}
+
+        class ClientSpy:
+            def __init__(self, *args, **kwargs):
+                recorded["init"] = kwargs
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, url, content, headers):
+                recorded["url"] = url
+                recorded["content"] = content
+                recorded["headers"] = headers
+                return Response()
+
+        payload = {"offer_id": 12, "quantity": 5}
+        timestamp = 1_700_000_123
+        expected_signature = None
+
+        with patch("core.trade_forwarding.peer_server_url_for", return_value="https://iran.example"), \
+             patch("core.trade_forwarding.current_server", return_value="foreign"), \
+             patch.object(trade_forwarding.settings, "sync_api_key", "secret"), \
+             patch.object(trade_forwarding.settings, "trade_forward_timeout_seconds", 9.5), \
+             patch("core.trade_forwarding.time.time", return_value=timestamp), \
+             patch("core.trade_forwarding.httpx.AsyncClient", ClientSpy):
+            expected_signature = trade_forwarding.sign_internal_payload(
+                trade_forwarding._json_body(payload),
+                timestamp,
+            )
+            status_code, body = await trade_forwarding.forward_trade_to_home_server("iran", payload)
+
+        self.assertEqual(status_code, 201)
+        self.assertEqual(body, {"ok": True, "trade_id": 55})
+        self.assertEqual(recorded["init"], {"timeout": 9.5, "verify": False})
+        self.assertEqual(recorded["url"], "https://iran.example/api/trades/internal/execute")
+        self.assertEqual(recorded["content"], trade_forwarding._json_body(payload))
+
+        headers = recorded["headers"]
+        self.assertEqual(headers["X-API-Key"], "secret")
+        self.assertEqual(headers["X-Timestamp"], str(timestamp))
+        self.assertEqual(headers["X-Source-Server"], "foreign")
+        self.assertEqual(headers["X-Signature"], expected_signature)
+
+    async def test_forward_trade_maps_timeout_and_request_errors(self):
+        class TimeoutClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, url, content, headers):
+                raise httpx.TimeoutException("timed out")
+
+        class ErrorClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, url, content, headers):
+                raise httpx.RequestError("network down")
+
+        with patch("core.trade_forwarding.peer_server_url_for", return_value="https://iran.example"), \
+             patch("core.trade_forwarding.httpx.AsyncClient", TimeoutClient):
+            status_code, body = await trade_forwarding.forward_trade_to_home_server("iran", {"offer_id": 1})
+
+        self.assertEqual(status_code, 504)
+        self.assertIn("مهلت ارتباط", body["detail"])
+
+        with patch("core.trade_forwarding.peer_server_url_for", return_value="https://iran.example"), \
+             patch("core.trade_forwarding.httpx.AsyncClient", ErrorClient):
+            status_code, body = await trade_forwarding.forward_trade_to_home_server("iran", {"offer_id": 1})
+
+        self.assertEqual(status_code, 503)
+        self.assertIn("ارتباط با سرور مرجع معامله برقرار نشد", body["detail"])
+
+    async def test_forward_trade_returns_text_fallback_for_invalid_json(self):
+        class Response:
+            status_code = 502
+            text = "bad gateway"
+
+            def json(self):
+                raise ValueError("invalid json")
+
+        class ClientSpy:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, url, content, headers):
+                return Response()
+
+        with patch("core.trade_forwarding.peer_server_url_for", return_value="https://iran.example"), \
+             patch("core.trade_forwarding.httpx.AsyncClient", ClientSpy):
+            status_code, body = await trade_forwarding.forward_trade_to_home_server("iran", {"offer_id": 1})
+
+        self.assertEqual(status_code, 502)
+        self.assertEqual(body, {"detail": "bad gateway"})
+
+
+if __name__ == "__main__":
+    unittest.main()

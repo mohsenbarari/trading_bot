@@ -3,6 +3,7 @@ app_logs.txt
 # Build artifacts
 check-dns
 docs/*
+!docs/AUTOMATED_TEST_CHECKLIST.md
 .env
 .env.iran
 # Environments
