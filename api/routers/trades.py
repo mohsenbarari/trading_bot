@@ -9,6 +9,7 @@ from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +22,11 @@ from core.utils import (
     check_user_limits, increment_user_counter, to_jalali_str,
     create_user_notification, send_telegram_notification
 )
-from core.services.trade_service import get_available_trade_amounts, validate_offer_trade_amount
+from core.services.trade_service import (
+    build_lot_unavailable_suggestion_payload,
+    get_available_trade_amounts,
+    validate_offer_trade_amount,
+)
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
 from models.trade import Trade, TradeType, TradeStatus
@@ -314,7 +319,7 @@ async def create_trade(
             detail="امکان انجام این معامله وجود ندارد."
         )
     
-    is_valid_amount, amount_error, trade_quantity, _ = validate_offer_trade_amount(
+    is_valid_amount, amount_error, trade_quantity, available_amounts = validate_offer_trade_amount(
         quantity=offer.quantity,
         remaining_quantity=offer.remaining_quantity,
         is_wholesale=offer.is_wholesale,
@@ -322,6 +327,23 @@ async def create_trade(
         requested_amount=trade_data.quantity,
     )
     if not is_valid_amount:
+        if (
+            not offer.is_wholesale
+            and available_amounts
+            and amount_error == "این لات دیگر موجود نیست."
+        ):
+            await db.refresh(offer, ["commodity"])
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content=build_lot_unavailable_suggestion_payload(
+                    offer_id=offer.id,
+                    requested_amount=trade_data.quantity,
+                    commodity_name=offer.commodity.name if offer.commodity else None,
+                    price=offer.price,
+                    remaining_quantity=offer.remaining_quantity or offer.quantity,
+                    available_amounts=available_amounts,
+                ),
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=amount_error

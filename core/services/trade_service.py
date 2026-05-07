@@ -15,6 +15,7 @@ __all__ = [
     "validate_lot_sizes",
     "get_available_trade_amounts",
     "validate_offer_trade_amount",
+    "build_lot_unavailable_suggestion_payload",
     "validate_quantity",
     "validate_price",
     "parse_lot_sizes_text",
@@ -301,6 +302,51 @@ def validate_offer_trade_amount(
         return False, "این لات دیگر موجود نیست.", amount, available_amounts
 
     return True, "", amount, available_amounts
+
+
+def build_lot_unavailable_suggestion_payload(
+    *,
+    offer_id: Union[int, float, str],
+    requested_amount: Union[int, float, str],
+    commodity_name: Optional[str],
+    price: Union[int, float, str],
+    remaining_quantity: Union[int, float, str],
+    available_amounts: List[Union[int, float, str]],
+) -> dict:
+    """
+    Build a shared UI payload for the "requested retail lot was just taken"
+    recovery flow used by both the bot and the web app.
+    """
+    normalized_offer_id = _ensure_int(offer_id, "offer_id")
+    normalized_requested_amount = _ensure_int(requested_amount, "requested_amount")
+    normalized_price = _ensure_int(price, "price")
+    normalized_remaining = _ensure_int(remaining_quantity, "remaining_quantity")
+    normalized_available_amounts = _ensure_int_list(available_amounts, "available_amounts")
+
+    lots_text = "، ".join(f"{amount} عدد" for amount in normalized_available_amounts)
+    commodity_label = (commodity_name or "کالا").strip() or "کالا"
+    title = "پیشنهاد معامله"
+    message = (
+        f"لات {normalized_requested_amount} عددی که انتخاب کرده بودید لحظاتی قبل توسط کاربر دیگری انجام شد.\n\n"
+        f"🏷️ کالا: {commodity_label}\n"
+        f"💰 فی: {normalized_price:,}\n"
+        f"📦 باقی\u200cمانده: {normalized_remaining:,} عدد\n"
+        f"🔹 لات\u200cهای قابل انجام: {lots_text}\n\n"
+        "اگر مایل هستید، یکی از دکمه\u200cهای زیر را انتخاب کنید."
+    )
+
+    return {
+        "error_code": "TRADE_LOT_UNAVAILABLE",
+        "detail": "لات انتخابی شما لحظاتی قبل انجام شد.",
+        "title": title,
+        "message": message,
+        "offer_id": normalized_offer_id,
+        "requested_amount": normalized_requested_amount,
+        "commodity_name": commodity_label,
+        "price": normalized_price,
+        "remaining_quantity": normalized_remaining,
+        "available_lots": normalized_available_amounts,
+    }
 
 
 def validate_quantity(quantity: Union[int, float, str]) -> Tuple[bool, str]:
