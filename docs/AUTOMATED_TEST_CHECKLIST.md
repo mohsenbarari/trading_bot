@@ -48,7 +48,7 @@ Scope rules:
 - [x] Cover `core/notifications.py` edge cases.
 - [x] Cover `core/sync_push.py` edge cases.
 - [x] Cover `core/offer_expiry.py` edge cases.
-- [ ] Cover `core/sync_worker.py` edge cases.
+- [x] Cover `core/sync_worker.py` edge cases.
 
 ## Phase 3 - API Router Integration Coverage
 
