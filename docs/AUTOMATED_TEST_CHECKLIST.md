@@ -12,7 +12,7 @@ Scope rules:
 - [x] Phase 0 - Inventory, baseline commands, and repository-wide checklist created.
 - [x] Phase 1 - Critical backend routing/forwarding baseline.
 - [x] Phase 2 - Core service layer expansion.
-- [ ] Phase 3 - API router integration coverage.
+- [x] Phase 3 - API router integration coverage.
 - [ ] Phase 4 - Bot handler and FSM coverage.
 - [ ] Phase 5 - Frontend unit/component baseline.
 - [ ] Phase 6 - Frontend E2E expansion.
@@ -114,7 +114,7 @@ Scope rules:
 - [x] Cover text-offer parse/confirm/cancel handlers in `trade_create.py`.
 - [x] Cover invitation admin flows in `admin.py`.
 - [x] Cover `admin_commodities.py` helpers, view rendering, entry handlers, and alias-add flow.
-- [ ] Cover remaining commodity edit/delete/add/cancel flows in `admin_commodities.py`.
+- [x] Cover remaining commodity edit/delete/add/cancel flows in `admin_commodities.py`.
 - [ ] Cover admin user flows in `admin_users.py`.
 - [x] Cover unauthorized fallback flow in `bot/handlers/default.py`.
 - [x] Cover user block-management flows in `block_manage.py`.
