@@ -17,7 +17,7 @@ Scope rules:
 - [x] Phase 5 - Frontend unit/component baseline.
 - [x] Phase 6 - Frontend E2E expansion.
 - [x] Phase 7 - Models, migrations, startup, and deployment smoke coverage.
-- [ ] Phase 8 - Load, sync, resilience, and regression hardening.
+- [x] Phase 8 - Load, sync, resilience, and regression hardening.
 
 ## Phase 0 - Inventory and Baseline
 
@@ -153,12 +153,13 @@ Scope rules:
 ## Phase 8 - Load, Sync, Resilience, and Regression Hardening
 
 - [x] Normalize and retain nonfunctional scripts in `tests/api_load_test.py`, `tests/load_test.py`, `tests/live_simulation.py`, and `tests/debug_trade.py` as explicit non-regression tools.
-- [ ] Add focused regression tests for every future production bugfix.
-- [ ] Add coverage gates/reporting once the repository has meaningful breadth across backend, bot, and frontend.
+- [x] Add a diff-based regression gate for future product changes via `scripts/report_test_matrix.py --check-diff --base-ref <ref>`.
+- [x] Add repository-wide coverage reporting and breadth gates via `make test-report`, `make test-gate`, and `make test-diff-gate BASE=<ref>`.
+- [x] Run focused validation for the Phase 8 governance and surface-smoke slice: `/bin/python3 -m unittest tests.test_report_test_matrix tests.test_schemas_smoke tests.test_scripts_surface_smoke tests.test_static_surface_smoke` and `make test-gate`.
 
 ## Directory Coverage Checklist
 
-- [ ] Root runtime files: `main.py`, `run_bot.py`, `manage.py`, `schemas.py`, `deploy.sh`, `Makefile`.
+- [x] Root runtime files: `main.py`, `run_bot.py`, `manage.py`, `schemas.py`, `deploy.sh`, `Makefile`.
 - [x] `api/`
 - [x] `bot/`
 - [x] `core/`
@@ -167,5 +168,5 @@ Scope rules:
 - [x] `frontend/src/`
 - [x] `frontend/e2e/`
 - [x] `alembic/` and `migrations/`
-- [ ] `scripts/`
-- [ ] Smoke/build validation only: `mini_app_dist/`, `templates/`, `fonts/`, `map_data/`, `pip_packages/`, root `src/`, generated caches, and browser/build artifacts.
+- [x] `scripts/`
+- [x] Smoke/build validation only: `mini_app_dist/`, `templates/`, `fonts/`, `map_data/`, `pip_packages/`, root `src/`, generated caches, and browser/build artifacts.
