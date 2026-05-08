@@ -107,7 +107,8 @@ Scope rules:
 - [x] Cover trade history keyboard/query/format/navigation and export callback flows in `trade_history.py`.
 - [x] Cover trade history file-generation helpers in `trade_history.py`.
 - [x] Cover offer execution and suggestion handlers in `trade_execute.py`.
-- [ ] Cover offer creation/text-offer handlers in `trade_create.py` and `trade_utils.py`.
+- [x] Cover trade keyboard/helper builders in `trade_utils.py`.
+- [ ] Cover offer creation/text-offer handlers in `trade_create.py`.
 - [x] Cover invitation admin flows in `admin.py`.
 - [ ] Cover admin user and commodity flows in `admin_users.py` and `admin_commodities.py`.
 - [x] Cover unauthorized fallback flow in `bot/handlers/default.py`.
