@@ -1,0 +1,70 @@
+import asyncio
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from fastapi.responses import StreamingResponse
+
+from api.routers.realtime import event_generator, sse_stream
+
+
+class FakePubSub:
+    def __init__(self, messages=None):
+        self.messages = list(messages or [])
+        self.subscribed = None
+        self.unsubscribe_calls = 0
+
+    async def subscribe(self, *channels):
+        self.subscribed = channels
+
+    async def get_message(self, ignore_subscribe_messages=True, timeout=1.0):
+        if self.messages:
+            next_item = self.messages.pop(0)
+            if isinstance(next_item, Exception):
+                raise next_item
+            return next_item
+        raise asyncio.CancelledError()
+
+    async def unsubscribe(self):
+        self.unsubscribe_calls += 1
+
+
+class FakeRedisClient:
+    def __init__(self, pubsub):
+        self._pubsub = pubsub
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def pubsub(self):
+        return self._pubsub
+
+
+class RealtimeRouterSseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_event_generator_sanitizes_payload_and_unsubscribes_on_cancel(self):
+        pubsub = FakePubSub([
+            {"type": "message", "channel": b"events:offer:created", "data": b'{"safe": 1, "mobile_number": "0912"}'},
+        ])
+        with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(pubsub)):
+            generator = event_generator(user_id=5)
+            first = await generator.__anext__()
+            with self.assertRaises(asyncio.CancelledError):
+                await generator.__anext__()
+
+        self.assertIn("event: offer:created", first)
+        self.assertIn('"safe": 1', first)
+        self.assertNotIn("mobile_number", first)
+        self.assertEqual(pubsub.unsubscribe_calls, 2)
+
+    async def test_sse_stream_wraps_generator_with_expected_headers(self):
+        response = await sse_stream(request=SimpleNamespace(), current_user=SimpleNamespace(id=7))
+        self.assertIsInstance(response, StreamingResponse)
+        self.assertEqual(response.headers["Cache-Control"], "no-cache")
+        self.assertEqual(response.headers["X-Accel-Buffering"], "no")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -95,7 +95,8 @@ Scope rules:
 - [x] Cover `api/routers/blocks.py` status/list/block/unblock/check/search flows.
 - [x] Cover `api/routers/commodities.py` request-source helper, commodity CRUD, and alias mutation flows.
 - [x] Cover `main.py` lifespan, public config, frontend serving, and root/config surface.
-- [ ] Cover remaining routers: `users.py` and `realtime.py`.
+- [x] Cover `api/routers/realtime.py` helper, SSE, Redis-listener, publish, and WebSocket guard/runtime flows.
+- [ ] Cover remaining routers: `users.py`.
 
 ## Phase 4 - Bot Handler and FSM Coverage
 
