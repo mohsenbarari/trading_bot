@@ -129,7 +129,7 @@ Scope rules:
 - [x] Cover `frontend/src/utils/auth.ts` token refresh, auth-guard, and storage/logout behavior.
 - [ ] Expand `frontend/src/utils/auth.ts` coverage to `apiFetch` reconnect and 401/403 handling.
 - [x] Cover `frontend/src/router/index.ts` auth guard and route recovery behavior.
-- [ ] Cover `frontend/src/stores/notifications.ts` and notification normalization helpers.
+- [x] Cover `frontend/src/stores/notifications.ts` and notification normalization helpers.
 - [ ] Cover selected composables under `frontend/src/composables/` with deterministic logic first.
 - [ ] Add component tests for key stateful views/components such as `LoginView.vue`, `ProfileView.vue`, and focused non-chat UI slices.
 
