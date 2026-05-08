@@ -226,20 +226,22 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
             // 🔴 403 Forbidden with specific detail
             if (response.status === 403) {
                 const clone = response.clone();
+                let errorData: any = null;
                 try {
-                    const errorData = await clone.json();
-                    if (errorData?.detail === 'REQUIRES_PASSWORD_CHANGE') {
-                        if (window.location.pathname !== '/setup-password') {
-                            window.location.href = '/setup-password';
-                        }
-                        throw new Error('شما باید رمز عبور خود را تغییر دهید');
-                    }
-                    if (errorData?.detail === 'حساب کاربری غیرفعال شده است' || errorData?.detail === 'User is blocked') {
-                        forceLogout();
-                        throw new Error('حساب کاربری شما غیرفعال شده است');
-                    }
+                    errorData = await clone.json();
                 } catch (e) {
                     // Ignore parsing errors for other 403s
+                }
+
+                if (errorData?.detail === 'REQUIRES_PASSWORD_CHANGE') {
+                    if (window.location.pathname !== '/setup-password') {
+                        window.location.href = '/setup-password';
+                    }
+                    throw new Error('شما باید رمز عبور خود را تغییر دهید');
+                }
+                if (errorData?.detail === 'حساب کاربری غیرفعال شده است' || errorData?.detail === 'User is blocked') {
+                    forceLogout();
+                    throw new Error('حساب کاربری شما غیرفعال شده است');
                 }
             }
 
