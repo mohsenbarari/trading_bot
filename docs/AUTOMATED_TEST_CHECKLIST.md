@@ -14,7 +14,7 @@ Scope rules:
 - [x] Phase 2 - Core service layer expansion.
 - [x] Phase 3 - API router integration coverage.
 - [x] Phase 4 - Bot handler and FSM coverage.
-- [ ] Phase 5 - Frontend unit/component baseline.
+- [x] Phase 5 - Frontend unit/component baseline.
 - [ ] Phase 6 - Frontend E2E expansion.
 - [ ] Phase 7 - Models, migrations, startup, and deployment smoke coverage.
 - [ ] Phase 8 - Load, sync, resilience, and regression hardening.
@@ -133,7 +133,7 @@ Scope rules:
 - [x] Cover selected composables under `frontend/src/composables/` with deterministic logic first.
 - [x] Add focused component tests for non-chat notification UI slices such as `AppToasts.vue` and `NotificationsView.vue`.
 - [x] Add component tests for `LoginView.vue` OTP and approval-required flows.
-- [ ] Add component tests for `ProfileView.vue` and remaining key stateful non-chat views.
+- [x] Add component tests for `ProfileView.vue` and remaining key stateful non-chat views.
 
 ## Phase 6 - Frontend E2E Expansion
 
