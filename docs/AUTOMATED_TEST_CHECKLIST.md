@@ -146,7 +146,7 @@ Scope rules:
 ## Phase 7 - Models, Migrations, Startup, and Deployment Smoke Coverage
 
 - [x] Cover behaviorful model helpers in `models/`.
-- [ ] Add migration/alembic smoke validation for `alembic/` and `migrations/`.
+- [x] Add migration/alembic smoke validation for `alembic/` and `migrations/`.
 - [ ] Add startup/import smoke checks for `main.py`, `run_bot.py`, and `manage.py`.
 - [ ] Add smoke validation for deploy/build surfaces: `Dockerfile*`, `docker-compose*.yml`, `deploy.sh`, `Makefile`, `nginx.conf`.
 
