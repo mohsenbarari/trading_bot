@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent, nextTick } from 'vue'
+import { defineComponent, nextTick, toRef } from 'vue'
 import { mount } from '@vue/test-utils'
 import { useUserProfileTiming } from './useUserProfileTiming'
 
@@ -11,14 +11,7 @@ const TimingHarness = defineComponent({
     },
   },
   setup(props) {
-    return useUserProfileTiming({
-      get value() {
-        return props.user as any
-      },
-      set value(_value) {
-        // read-only prop-backed ref for the composable under test
-      },
-    })
+    return useUserProfileTiming(toRef(props, 'user'))
   },
   template: '<div />',
 })
