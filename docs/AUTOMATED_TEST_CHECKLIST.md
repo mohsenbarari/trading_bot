@@ -132,7 +132,8 @@ Scope rules:
 - [x] Cover `frontend/src/stores/notifications.ts` and notification normalization helpers.
 - [x] Cover selected composables under `frontend/src/composables/` with deterministic logic first.
 - [x] Add focused component tests for non-chat notification UI slices such as `AppToasts.vue` and `NotificationsView.vue`.
-- [ ] Add component tests for key stateful views/components such as `LoginView.vue` and `ProfileView.vue`.
+- [x] Add component tests for `LoginView.vue` OTP and approval-required flows.
+- [ ] Add component tests for `ProfileView.vue` and remaining key stateful non-chat views.
 
 ## Phase 6 - Frontend E2E Expansion
 
