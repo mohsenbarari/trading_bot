@@ -117,7 +117,8 @@ Scope rules:
 - [x] Cover remaining commodity edit/delete/add/cancel flows in `admin_commodities.py`.
 - [x] Cover `admin_users.py` helpers, user-list/profile navigation, and search entry/cancel flows.
 - [x] Cover `admin_users.py` search-processing, settings menu, and block/unblock/unlimit flows.
-- [ ] Cover remaining admin user role, bot-access, delete, limitation, and block-setting flows in `admin_users.py`.
+- [x] Cover `admin_users.py` role, bot-access, and delete flows.
+- [ ] Cover remaining admin user limitation and block-setting flows in `admin_users.py`.
 - [x] Cover unauthorized fallback flow in `bot/handlers/default.py`.
 - [x] Cover user block-management flows in `block_manage.py`.
 - [x] Cover user-control flows in `panel.py`.
