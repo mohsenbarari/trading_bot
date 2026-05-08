@@ -131,7 +131,8 @@ Scope rules:
 - [x] Cover `frontend/src/router/index.ts` auth guard and route recovery behavior.
 - [x] Cover `frontend/src/stores/notifications.ts` and notification normalization helpers.
 - [x] Cover selected composables under `frontend/src/composables/` with deterministic logic first.
-- [ ] Add component tests for key stateful views/components such as `LoginView.vue`, `ProfileView.vue`, and focused non-chat UI slices.
+- [x] Add focused component tests for non-chat notification UI slices such as `AppToasts.vue` and `NotificationsView.vue`.
+- [ ] Add component tests for key stateful views/components such as `LoginView.vue` and `ProfileView.vue`.
 
 ## Phase 6 - Frontend E2E Expansion
 
