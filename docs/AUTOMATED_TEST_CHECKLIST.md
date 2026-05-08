@@ -13,7 +13,7 @@ Scope rules:
 - [x] Phase 1 - Critical backend routing/forwarding baseline.
 - [x] Phase 2 - Core service layer expansion.
 - [x] Phase 3 - API router integration coverage.
-- [ ] Phase 4 - Bot handler and FSM coverage.
+- [x] Phase 4 - Bot handler and FSM coverage.
 - [ ] Phase 5 - Frontend unit/component baseline.
 - [ ] Phase 6 - Frontend E2E expansion.
 - [ ] Phase 7 - Models, migrations, startup, and deployment smoke coverage.
@@ -118,7 +118,7 @@ Scope rules:
 - [x] Cover `admin_users.py` helpers, user-list/profile navigation, and search entry/cancel flows.
 - [x] Cover `admin_users.py` search-processing, settings menu, and block/unblock/unlimit flows.
 - [x] Cover `admin_users.py` role, bot-access, and delete flows.
-- [ ] Cover remaining admin user limitation and block-setting flows in `admin_users.py`.
+- [x] Cover remaining admin user limitation and block-setting flows in `admin_users.py`.
 - [x] Cover unauthorized fallback flow in `bot/handlers/default.py`.
 - [x] Cover user block-management flows in `block_manage.py`.
 - [x] Cover user-control flows in `panel.py`.
