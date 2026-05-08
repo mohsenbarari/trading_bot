@@ -101,10 +101,12 @@ Scope rules:
 
 ## Phase 4 - Bot Handler and FSM Coverage
 
-- [ ] Cover onboarding handlers in `bot/handlers/start.py` and `bot/handlers/link_account.py`.
+- [x] Cover account-link onboarding handlers in `bot/handlers/link_account.py`.
+- [ ] Cover onboarding and trade-confirmation handlers in `bot/handlers/start.py`.
 - [ ] Cover offer creation/execution/management handlers in `trade_create.py`, `trade_execute.py`, `trade_manage.py`, `trade_history.py`, and `trade_utils.py`.
 - [ ] Cover admin flows in `admin.py`, `admin_users.py`, and `admin_commodities.py`.
-- [ ] Cover user-control flows in `panel.py`, `block_manage.py`, and `default.py`.
+- [x] Cover unauthorized fallback flow in `bot/handlers/default.py`.
+- [ ] Cover user-control flows in `panel.py` and `block_manage.py`.
 
 ## Phase 5 - Frontend Unit/Component Baseline
 
