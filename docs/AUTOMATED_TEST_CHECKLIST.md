@@ -92,7 +92,8 @@ Scope rules:
 - [x] Cover `api/routers/sync.py` sequence repair, unread/cache-refresh edge cases, and foreign-offer publish branches.
 - [x] Cover `api/routers/users_public.py` public search and read endpoints.
 - [x] Cover `api/routers/trading_settings.py` get/update/reset flows.
-- [ ] Cover remaining routers: `users.py`, `blocks.py`, `commodities.py`, `realtime.py`, and `config` surface via `main.py`.
+- [x] Cover `api/routers/blocks.py` status/list/block/unblock/check/search flows.
+- [ ] Cover remaining routers: `users.py`, `commodities.py`, `realtime.py`, and `config` surface via `main.py`.
 
 ## Phase 4 - Bot Handler and FSM Coverage
 
