@@ -108,7 +108,9 @@ Scope rules:
 - [x] Cover trade history file-generation helpers in `trade_history.py`.
 - [x] Cover offer execution and suggestion handlers in `trade_execute.py`.
 - [x] Cover trade keyboard/helper builders in `trade_utils.py`.
-- [ ] Cover offer creation/text-offer handlers in `trade_create.py`.
+- [x] Cover early FSM creation handlers in `trade_create.py` through type/commodity/quantity/lot selection.
+- [ ] Cover price/notes/preview/confirm handlers in `trade_create.py`.
+- [ ] Cover text-offer parse/confirm/cancel handlers in `trade_create.py`.
 - [x] Cover invitation admin flows in `admin.py`.
 - [ ] Cover admin user and commodity flows in `admin_users.py` and `admin_commodities.py`.
 - [x] Cover unauthorized fallback flow in `bot/handlers/default.py`.
