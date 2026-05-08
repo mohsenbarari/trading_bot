@@ -90,7 +90,9 @@ Scope rules:
 - [x] Cover `api/routers/sync.py` signature verification, parse helpers, and `resync` runtime contracts.
 - [x] Cover `api/routers/sync.py` `_apply_item` merge/defer/delete branches and baseline `receive` success/error contracts.
 - [x] Cover `api/routers/sync.py` sequence repair, unread/cache-refresh edge cases, and foreign-offer publish branches.
-- [ ] Cover remaining routers: `users.py`, `users_public.py`, `blocks.py`, `commodities.py`, `realtime.py`, `trading_settings.py`, `config` surface via `main.py`.
+- [x] Cover `api/routers/users_public.py` public search and read endpoints.
+- [x] Cover `api/routers/trading_settings.py` get/update/reset flows.
+- [ ] Cover remaining routers: `users.py`, `blocks.py`, `commodities.py`, `realtime.py`, and `config` surface via `main.py`.
 
 ## Phase 4 - Bot Handler and FSM Coverage
 
