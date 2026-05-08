@@ -9,7 +9,7 @@
 IRAN_HOST = root@87.107.110.68
 IRAN_DIR  = /root/trading-bot/trading_bot
 
-.PHONY: help up deploy frontend iran foreign sync-recover down logs logs-iran restart restart-iran status
+.PHONY: help up deploy frontend iran foreign sync-recover down logs logs-iran restart restart-iran status test-report test-gate test-diff-gate
 
 help:
 	@echo ""
@@ -27,6 +27,9 @@ help:
 	@echo "  make restart     - Restart foreign containers"
 	@echo "  make restart-iran - Restart Iran containers"
 	@echo "  make status      - Show status of both servers"
+	@echo "  make test-report - Show repository test breadth summary"
+	@echo "  make test-gate   - Enforce repository test breadth baseline"
+	@echo "  make test-diff-gate BASE=<ref> - Enforce test changes alongside product changes"
 	@echo ""
 
 # --- Deploy Commands ---
@@ -76,3 +79,12 @@ status:
 	@echo ""
 	@echo "🇮🇷 Iran Server (87.107.110.68):"
 	@ssh -o StrictHostKeyChecking=no $(IRAN_HOST) 'cd $(IRAN_DIR) && docker compose -f docker-compose.iran.yml ps'
+
+test-report:
+	@/bin/python3 ./scripts/report_test_matrix.py
+
+test-gate:
+	@/bin/python3 ./scripts/report_test_matrix.py --check-breadth
+
+test-diff-gate:
+	@/bin/python3 ./scripts/report_test_matrix.py --check-breadth --check-diff --base-ref $${BASE:-HEAD~1}

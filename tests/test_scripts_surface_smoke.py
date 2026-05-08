@@ -1,0 +1,60 @@
+import json
+import subprocess
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+PYTHON_SCRIPTS = (
+    'scripts/backfill_direct_chats.py',
+    'scripts/create_superadmin.py',
+    'scripts/free_deleted_user.py',
+    'scripts/report_test_matrix.py',
+    'scripts/reset_sessions.py',
+    'scripts/test_invite.py',
+    'scripts/test_session_realtime.py',
+    'scripts/test_ws_e2e.py',
+)
+
+SHELL_SCRIPTS = (
+    'scripts/init_offline_map.sh',
+    'scripts/recover_cross_server_sync.sh',
+    'scripts/setup_iran_nginx.sh',
+    'scripts/setup_network.sh',
+)
+
+
+def run_checked(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+class ScriptsSurfaceSmokeTests(unittest.TestCase):
+    def test_python_scripts_compile(self):
+        result = run_checked(['/bin/python3', '-m', 'py_compile', *PYTHON_SCRIPTS])
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+
+    def test_shell_scripts_have_valid_bash_syntax(self):
+        result = run_checked(['bash', '-n', *SHELL_SCRIPTS])
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+
+    def test_report_test_matrix_cli_outputs_parseable_json(self):
+        result = run_checked(['/bin/python3', 'scripts/report_test_matrix.py', '--json'])
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+
+        payload = json.loads(result.stdout)
+
+        self.assertGreaterEqual(payload['summary']['python_unittest_files'], 200)
+        self.assertGreaterEqual(payload['summary']['frontend_unit_files'], 10)
+        self.assertGreaterEqual(payload['summary']['frontend_e2e_files'], 7)
+        self.assertEqual(payload['summary']['manual_non_regression_tools'], 4)
+
+
+if __name__ == '__main__':
+    unittest.main()
