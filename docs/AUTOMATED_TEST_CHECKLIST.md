@@ -138,7 +138,7 @@ Scope rules:
 ## Phase 6 - Frontend E2E Expansion
 
 - [ ] Preserve current Playwright coverage in `frontend/e2e/notifications.spec.ts`, `frontend/e2e/lot-suggestion.spec.ts`, and `frontend/e2e/channel-media.spec.ts`.
-- [ ] Add login/auth E2E coverage.
+- [x] Add login/auth E2E coverage.
 - [ ] Add market/offer creation E2E coverage.
 - [ ] Add direct chat E2E coverage beyond channel/group/share-target paths.
 - [ ] Add admin E2E smoke coverage for invitations, users, settings, and optional channels.
