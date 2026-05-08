@@ -141,7 +141,7 @@ Scope rules:
 - [x] Add login/auth E2E coverage.
 - [x] Add market/offer creation E2E coverage.
 - [x] Add direct chat E2E coverage beyond channel/group/share-target paths.
-- [ ] Add admin E2E smoke coverage for invitations, users, settings, and optional channels.
+- [x] Add admin E2E smoke coverage for invitations, users, settings, and optional channels.
 
 ## Phase 7 - Models, Migrations, Startup, and Deployment Smoke Coverage
 
