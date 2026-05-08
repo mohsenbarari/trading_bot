@@ -147,7 +147,7 @@ Scope rules:
 
 - [x] Cover behaviorful model helpers in `models/`.
 - [x] Add migration/alembic smoke validation for `alembic/` and `migrations/`.
-- [ ] Add startup/import smoke checks for `main.py`, `run_bot.py`, and `manage.py`.
+- [x] Add startup/import smoke checks for `main.py`, `run_bot.py`, and `manage.py`.
 - [ ] Add smoke validation for deploy/build surfaces: `Dockerfile*`, `docker-compose*.yml`, `deploy.sh`, `Makefile`, `nginx.conf`.
 
 ## Phase 8 - Load, Sync, Resilience, and Regression Hardening
