@@ -2,6 +2,7 @@
 """
 تست فشار سنگین (Extreme Load Testing) - Trading Bot
 سناریو: 4000 کاربر، 2 میلیون لفظ، 1 میلیون معامله در 5 دقیقه
+This file is a manual non-regression tool and is intentionally retained outside the automated unittest discovery flow.
 
 ویژگی‌ها:
 - استفاده از Bulk Insert برای سرعت بالا

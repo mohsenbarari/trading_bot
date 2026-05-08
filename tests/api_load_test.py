@@ -3,6 +3,7 @@
 تست فشار API - Trading Bot
 
 این اسکریپت API endpoints را به صورت همزمان تست می‌کند.
+This file is a manual non-regression tool and is intentionally retained outside the automated unittest discovery flow.
 
 استفاده:
     python tests/api_load_test.py --base-url http://localhost:8000 --concurrent 20 --requests 100
