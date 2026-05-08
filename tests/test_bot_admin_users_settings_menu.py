@@ -1,0 +1,60 @@
+import unittest
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from bot.handlers.admin_users import handle_user_settings
+from core.enums import UserRole
+
+
+class FakeScalarOneResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar_one_or_none(self):
+        return self.value
+
+
+class FakeSession:
+    def __init__(self, value):
+        self.value = value
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def execute(self, stmt):
+        return FakeScalarOneResult(self.value)
+
+
+class BotAdminUsersSettingsMenuTests(unittest.IsolatedAsyncioTestCase):
+    async def test_handle_user_settings_handles_missing_user_and_success(self):
+        callback = SimpleNamespace(data="user_settings_9", answer=AsyncMock())
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(None)):
+            await handle_user_settings(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+        callback.answer.assert_awaited_once_with("❌ کاربر یافت نشد.", show_alert=True)
+
+        target_user = SimpleNamespace(
+            id=9,
+            trading_restricted_until=datetime.utcnow() + timedelta(days=1),
+            max_daily_trades=1,
+            max_active_commodities=2,
+            max_daily_requests=None,
+            can_block_users=True,
+            max_blocked_users=5,
+        )
+        message = SimpleNamespace(edit_text=AsyncMock())
+        callback = SimpleNamespace(data="user_settings_9", message=message, answer=AsyncMock())
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(target_user)), patch(
+            "bot.handlers.admin_users.get_user_profile_text", new=AsyncMock(return_value="PROFILE")
+        ), patch("bot.handlers.admin_users.get_user_settings_keyboard", return_value="KB") as keyboard_mock:
+            await handle_user_settings(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+        keyboard_mock.assert_called_once_with(9, is_restricted=True, has_limitations=True, can_block=True, max_blocked=5)
+        message.edit_text.assert_awaited_once_with("PROFILE", reply_markup="KB", parse_mode="Markdown")
+        callback.answer.assert_awaited_once()
+
+
+if __name__ == "__main__":
+    unittest.main()
