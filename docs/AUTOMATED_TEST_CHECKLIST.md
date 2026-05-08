@@ -16,7 +16,7 @@ Scope rules:
 - [x] Phase 4 - Bot handler and FSM coverage.
 - [x] Phase 5 - Frontend unit/component baseline.
 - [x] Phase 6 - Frontend E2E expansion.
-- [ ] Phase 7 - Models, migrations, startup, and deployment smoke coverage.
+- [x] Phase 7 - Models, migrations, startup, and deployment smoke coverage.
 - [ ] Phase 8 - Load, sync, resilience, and regression hardening.
 
 ## Phase 0 - Inventory and Baseline
@@ -148,7 +148,7 @@ Scope rules:
 - [x] Cover behaviorful model helpers in `models/`.
 - [x] Add migration/alembic smoke validation for `alembic/` and `migrations/`.
 - [x] Add startup/import smoke checks for `main.py`, `run_bot.py`, and `manage.py`.
-- [ ] Add smoke validation for deploy/build surfaces: `Dockerfile*`, `docker-compose*.yml`, `deploy.sh`, `Makefile`, `nginx.conf`.
+- [x] Add smoke validation for deploy/build surfaces: `Dockerfile*`, `docker-compose*.yml`, `deploy.sh`, `Makefile`, `nginx.conf`.
 
 ## Phase 8 - Load, Sync, Resilience, and Regression Hardening
 
@@ -159,13 +159,13 @@ Scope rules:
 ## Directory Coverage Checklist
 
 - [ ] Root runtime files: `main.py`, `run_bot.py`, `manage.py`, `schemas.py`, `deploy.sh`, `Makefile`.
-- [ ] `api/`
-- [ ] `bot/`
-- [ ] `core/`
-- [ ] `models/`
-- [ ] `tests/`
-- [ ] `frontend/src/`
-- [ ] `frontend/e2e/`
-- [ ] `alembic/` and `migrations/`
+- [x] `api/`
+- [x] `bot/`
+- [x] `core/`
+- [x] `models/`
+- [x] `tests/`
+- [x] `frontend/src/`
+- [x] `frontend/e2e/`
+- [x] `alembic/` and `migrations/`
 - [ ] `scripts/`
 - [ ] Smoke/build validation only: `mini_app_dist/`, `templates/`, `fonts/`, `map_data/`, `pip_packages/`, root `src/`, generated caches, and browser/build artifacts.
