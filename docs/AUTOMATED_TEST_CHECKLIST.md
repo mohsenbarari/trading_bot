@@ -113,7 +113,9 @@ Scope rules:
 - [x] Cover successful channel publish/persistence flow in `trade_create.py`.
 - [x] Cover text-offer parse/confirm/cancel handlers in `trade_create.py`.
 - [x] Cover invitation admin flows in `admin.py`.
-- [ ] Cover admin user and commodity flows in `admin_users.py` and `admin_commodities.py`.
+- [x] Cover `admin_commodities.py` helpers, view rendering, entry handlers, and alias-add flow.
+- [ ] Cover remaining commodity edit/delete/add/cancel flows in `admin_commodities.py`.
+- [ ] Cover admin user flows in `admin_users.py`.
 - [x] Cover unauthorized fallback flow in `bot/handlers/default.py`.
 - [x] Cover user block-management flows in `block_manage.py`.
 - [x] Cover user-control flows in `panel.py`.
