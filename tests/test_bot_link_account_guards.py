@@ -1,0 +1,82 @@
+import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from bot.handlers.link_account import handle_contact
+
+
+class FakeState:
+    def __init__(self):
+        self.cleared = 0
+
+    async def clear(self):
+        self.cleared += 1
+
+
+class FakeExecuteResult:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
+class FakeDB:
+    def __init__(self, user):
+        self.user = user
+
+    async def execute(self, stmt):
+        return FakeExecuteResult(self.user)
+
+
+def db_factory(user):
+    async def _gen():
+        yield FakeDB(user)
+    return _gen
+
+
+def make_message(contact_user_id=10, phone="+989121111111", from_user_id=10, username="u", full_name="User Name"):
+    return SimpleNamespace(
+        contact=SimpleNamespace(user_id=contact_user_id, phone_number=phone),
+        from_user=SimpleNamespace(id=from_user_id, username=username, full_name=full_name),
+        answer=AsyncMock(),
+    )
+
+
+class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
+    async def test_handle_contact_rejects_contact_for_other_sender(self):
+        state = FakeState()
+        message = make_message(contact_user_id=99, from_user_id=10)
+
+        await handle_contact(message, state)
+
+        self.assertIn("شماره خودتان", message.answer.await_args.args[0])
+        self.assertEqual(state.cleared, 0)
+
+    async def test_handle_contact_handles_missing_already_linked_and_already_connected_users(self):
+        message = make_message()
+        state = FakeState()
+        with patch("bot.handlers.link_account.get_db", new=db_factory(None)):
+            await handle_contact(message, state)
+        self.assertIn("کاربری با این شماره یافت نشد", message.answer.await_args.args[0])
+        self.assertEqual(state.cleared, 1)
+
+        other_user = SimpleNamespace(telegram_id=77, account_name="acc", full_name="acc")
+        message = make_message()
+        state = FakeState()
+        with patch("bot.handlers.link_account.get_db", new=db_factory(other_user)):
+            await handle_contact(message, state)
+        self.assertIn("قبلاً به یک اکانت تلگرام دیگر", message.answer.await_args.args[0])
+        self.assertEqual(state.cleared, 1)
+
+        same_user = SimpleNamespace(telegram_id=10, account_name="acc", full_name="acc")
+        message = make_message()
+        state = FakeState()
+        with patch("bot.handlers.link_account.get_db", new=db_factory(same_user)):
+            await handle_contact(message, state)
+        self.assertIn("قبلاً متصل شده", message.answer.await_args.args[0])
+        self.assertEqual(state.cleared, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
