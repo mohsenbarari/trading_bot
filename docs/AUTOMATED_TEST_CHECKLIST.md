@@ -152,7 +152,7 @@ Scope rules:
 
 ## Phase 8 - Load, Sync, Resilience, and Regression Hardening
 
-- [ ] Normalize and retain nonfunctional scripts in `tests/api_load_test.py`, `tests/load_test.py`, `tests/live_simulation.py`, and `tests/debug_trade.py` as explicit non-regression tools.
+- [x] Normalize and retain nonfunctional scripts in `tests/api_load_test.py`, `tests/load_test.py`, `tests/live_simulation.py`, and `tests/debug_trade.py` as explicit non-regression tools.
 - [ ] Add focused regression tests for every future production bugfix.
 - [ ] Add coverage gates/reporting once the repository has meaningful breadth across backend, bot, and frontend.
 
