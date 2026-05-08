@@ -1,0 +1,108 @@
+import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from bot.handlers.trade_create import handle_text_offer_cancel, handle_text_offer_confirm
+from models.offer import OfferStatus
+
+
+class FakeSession:
+    def __init__(self, scalar_values=None):
+        self.scalar_values = list(scalar_values or [])
+        self.added = []
+
+    async def scalar(self, stmt):
+        return self.scalar_values.pop(0)
+
+    def add(self, value):
+        if getattr(value, "id", None) is None:
+            value.id = 78
+        self.added.append(value)
+
+    async def commit(self):
+        return None
+
+    async def refresh(self, value):
+        return None
+
+    async def get(self, model, key):
+        if self.added and model.__name__ == "Offer":
+            return self.added[0]
+        return None
+
+
+class FakeSessionContext:
+    def __init__(self, session):
+        self.session = session
+
+    async def __aenter__(self):
+        return self.session
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class BotTradeCreateTextOfferFailureCancelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_handle_text_offer_confirm_handles_channel_unset_and_runtime_error_and_cancel(self):
+        data = {
+            "quantity": 12,
+            "trade_type": "buy",
+            "commodity_id": 7,
+            "commodity_name": "سکه",
+            "price": 123456,
+            "is_wholesale": True,
+            "lot_sizes": None,
+            "notes": None,
+        }
+
+        callback = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock(), from_user=SimpleNamespace(id=555))
+        state = SimpleNamespace(get_data=AsyncMock(return_value=data), clear=AsyncMock())
+        with patch("core.trading_settings.get_trading_settings", return_value=SimpleNamespace(max_active_offers=3)), patch(
+            "core.utils.check_user_limits", side_effect=[(True, None), (True, None)]
+        ), patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            side_effect=[FakeSessionContext(FakeSession([0])), FakeSessionContext(FakeSession())],
+        ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
+            "bot.handlers.trade_create.settings", SimpleNamespace(channel_id=None, bot_username="botname")
+        ):
+            await handle_text_offer_confirm(callback, state, user=SimpleNamespace(id=1, limitations_expire_at=None), bot=SimpleNamespace())
+        self.assertIn("کانال تنظیم نشده است", callback.message.edit_text.await_args.args[0])
+
+        create_session = FakeSession()
+        rollback_session = FakeSession()
+
+        async def rollback_get(model, key):
+            if create_session.added:
+                return create_session.added[0]
+            return None
+
+        rollback_session.get = rollback_get
+        callback = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock(), from_user=SimpleNamespace(id=555))
+        state = SimpleNamespace(get_data=AsyncMock(return_value=data), clear=AsyncMock())
+        with patch("core.trading_settings.get_trading_settings", return_value=SimpleNamespace(max_active_offers=3)), patch(
+            "core.utils.check_user_limits", side_effect=[(True, None), (True, None)]
+        ), patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            side_effect=[
+                FakeSessionContext(FakeSession([0])),
+                FakeSessionContext(FakeSession()),
+                FakeSessionContext(create_session),
+                FakeSessionContext(rollback_session),
+            ],
+        ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
+            "bot.handlers.trade_create.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
+        ):
+            await handle_text_offer_confirm(callback, state, user=SimpleNamespace(id=1, limitations_expire_at=None), bot=SimpleNamespace(send_message=AsyncMock(side_effect=RuntimeError("boom"))))
+        self.assertEqual(create_session.added[0].status, OfferStatus.EXPIRED)
+        self.assertIn("خطا در ارسال به کانال", callback.message.edit_text.await_args.args[0])
+
+        callback = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        state = SimpleNamespace(clear=AsyncMock())
+        await handle_text_offer_cancel(callback, state, user=SimpleNamespace(id=1))
+        self.assertIn("لفظ لغو شد", callback.message.edit_text.await_args.args[0])
+        state.clear.assert_awaited_once()
+        callback.answer.assert_awaited_once_with()
+
+
+if __name__ == "__main__":
+    unittest.main()
