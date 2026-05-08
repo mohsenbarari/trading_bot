@@ -15,7 +15,7 @@ Scope rules:
 - [x] Phase 3 - API router integration coverage.
 - [x] Phase 4 - Bot handler and FSM coverage.
 - [x] Phase 5 - Frontend unit/component baseline.
-- [ ] Phase 6 - Frontend E2E expansion.
+- [x] Phase 6 - Frontend E2E expansion.
 - [ ] Phase 7 - Models, migrations, startup, and deployment smoke coverage.
 - [ ] Phase 8 - Load, sync, resilience, and regression hardening.
 
@@ -137,7 +137,7 @@ Scope rules:
 
 ## Phase 6 - Frontend E2E Expansion
 
-- [ ] Preserve current Playwright coverage in `frontend/e2e/notifications.spec.ts`, `frontend/e2e/lot-suggestion.spec.ts`, and `frontend/e2e/channel-media.spec.ts`.
+- [x] Preserve current Playwright coverage in `frontend/e2e/notifications.spec.ts`, `frontend/e2e/lot-suggestion.spec.ts`, and `frontend/e2e/channel-media.spec.ts`.
 - [x] Add login/auth E2E coverage.
 - [x] Add market/offer creation E2E coverage.
 - [x] Add direct chat E2E coverage beyond channel/group/share-target paths.
