@@ -130,7 +130,7 @@ Scope rules:
 - [ ] Expand `frontend/src/utils/auth.ts` coverage to `apiFetch` reconnect and 401/403 handling.
 - [x] Cover `frontend/src/router/index.ts` auth guard and route recovery behavior.
 - [x] Cover `frontend/src/stores/notifications.ts` and notification normalization helpers.
-- [ ] Cover selected composables under `frontend/src/composables/` with deterministic logic first.
+- [x] Cover selected composables under `frontend/src/composables/` with deterministic logic first.
 - [ ] Add component tests for key stateful views/components such as `LoginView.vue`, `ProfileView.vue`, and focused non-chat UI slices.
 
 ## Phase 6 - Frontend E2E Expansion
