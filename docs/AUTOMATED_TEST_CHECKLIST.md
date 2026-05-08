@@ -140,7 +140,7 @@ Scope rules:
 - [ ] Preserve current Playwright coverage in `frontend/e2e/notifications.spec.ts`, `frontend/e2e/lot-suggestion.spec.ts`, and `frontend/e2e/channel-media.spec.ts`.
 - [x] Add login/auth E2E coverage.
 - [x] Add market/offer creation E2E coverage.
-- [ ] Add direct chat E2E coverage beyond channel/group/share-target paths.
+- [x] Add direct chat E2E coverage beyond channel/group/share-target paths.
 - [ ] Add admin E2E smoke coverage for invitations, users, settings, and optional channels.
 
 ## Phase 7 - Models, Migrations, Startup, and Deployment Smoke Coverage
