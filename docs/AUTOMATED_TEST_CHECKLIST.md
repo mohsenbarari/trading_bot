@@ -111,7 +111,7 @@ Scope rules:
 - [ ] Cover admin user and commodity flows in `admin_users.py` and `admin_commodities.py`.
 - [x] Cover unauthorized fallback flow in `bot/handlers/default.py`.
 - [x] Cover user block-management flows in `block_manage.py`.
-- [ ] Cover user-control flows in `panel.py`.
+- [x] Cover user-control flows in `panel.py`.
 
 ## Phase 5 - Frontend Unit/Component Baseline
 
