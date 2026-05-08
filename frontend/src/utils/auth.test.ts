@@ -10,7 +10,7 @@ function makeJwt(exp: number): string {
 }
 
 function mockLocation() {
-  const location = { href: 'http://localhost/' }
+  const location = { href: 'http://localhost/', pathname: '/' }
   Object.defineProperty(window, 'location', {
     value: location,
     configurable: true,
@@ -19,10 +19,22 @@ function mockLocation() {
   return location
 }
 
+function makeJsonResponse(payload: unknown, status = 200, ok = status >= 200 && status < 300) {
+  return {
+    ok,
+    status,
+    json: async () => payload,
+    clone() {
+      return makeJsonResponse(payload, status, ok)
+    },
+  }
+}
+
 describe('auth utils', () => {
   let fetchMock: FetchMock
 
   beforeEach(() => {
+    vi.resetModules()
     localStorage.clear()
     fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
@@ -122,5 +134,59 @@ describe('auth utils', () => {
     localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 3600))
     await authGuard({ path: '/admin', meta: { requiresAdmin: true } } as any, {} as any, next)
     expect(next).toHaveBeenLastCalledWith()
+  })
+
+  it('apiFetch refreshes on 401 and retries the original request with the new token', async () => {
+    localStorage.setItem('auth_token', 'old-auth')
+    localStorage.setItem('refresh_token', 'refresh-token')
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({}, 401, false))
+      .mockResolvedValueOnce(makeJsonResponse({ access_token: 'new-auth', refresh_token: 'new-refresh' }))
+      .mockResolvedValueOnce(makeJsonResponse({ result: 'ok' }))
+
+    const { apiFetch } = await import(authModulePath)
+    const response = await apiFetch('/api/test')
+
+    expect(response.ok).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/test')
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ Authorization: 'Bearer old-auth' })
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/auth/refresh')
+    expect(fetchMock.mock.calls[2]?.[1]?.headers).toMatchObject({ Authorization: 'Bearer new-auth' })
+    expect(localStorage.getItem('auth_token')).toBe('new-auth')
+    expect(localStorage.getItem('refresh_token')).toBe('new-refresh')
+  })
+
+  it('apiFetch redirects to setup-password when the backend requires a password change', async () => {
+    localStorage.setItem('auth_token', 'auth-token')
+    const location = mockLocation()
+    location.pathname = '/chat'
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: 'REQUIRES_PASSWORD_CHANGE' }, 403, false))
+
+    const { apiFetch } = await import(authModulePath)
+    await expect(apiFetch('/api/private')).rejects.toThrow('شما باید رمز عبور خود را تغییر دهید')
+    expect(location.href).toBe('/setup-password')
+  })
+
+  it('apiFetch marks the app as reconnecting on network errors and clears it after a successful retry', async () => {
+    vi.useFakeTimers()
+    localStorage.setItem('auth_token', 'auth-token')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchMock
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(makeJsonResponse({ ok: true }))
+
+    const { apiFetch, isAppConnecting } = await import(authModulePath)
+    const responsePromise = apiFetch('/api/retry')
+
+    await Promise.resolve()
+    expect(isAppConnecting.value).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(1500)
+    const response = await responsePromise
+    expect(response.ok).toBe(true)
+    expect(isAppConnecting.value).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    warnSpy.mockRestore()
   })
 })
