@@ -107,9 +107,11 @@ Scope rules:
 - [x] Cover trade history keyboard/query/format/navigation and export callback flows in `trade_history.py`.
 - [ ] Cover trade history file-generation helpers in `trade_history.py`.
 - [ ] Cover offer creation/execution handlers in `trade_create.py`, `trade_execute.py`, and `trade_utils.py`.
-- [ ] Cover admin flows in `admin.py`, `admin_users.py`, and `admin_commodities.py`.
+- [x] Cover invitation admin flows in `admin.py`.
+- [ ] Cover admin user and commodity flows in `admin_users.py` and `admin_commodities.py`.
 - [x] Cover unauthorized fallback flow in `bot/handlers/default.py`.
-- [ ] Cover user-control flows in `panel.py` and `block_manage.py`.
+- [x] Cover user block-management flows in `block_manage.py`.
+- [ ] Cover user-control flows in `panel.py`.
 
 ## Phase 5 - Frontend Unit/Component Baseline
 
