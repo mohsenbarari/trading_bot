@@ -109,7 +109,8 @@ Scope rules:
 - [x] Cover offer execution and suggestion handlers in `trade_execute.py`.
 - [x] Cover trade keyboard/helper builders in `trade_utils.py`.
 - [x] Cover early FSM creation handlers in `trade_create.py` through type/commodity/quantity/lot selection.
-- [ ] Cover price/notes/preview/confirm handlers in `trade_create.py`.
+- [x] Cover price/notes/preview handlers and pre-submit confirm guards in `trade_create.py`.
+- [ ] Cover successful channel publish/persistence flow in `trade_create.py`.
 - [ ] Cover text-offer parse/confirm/cancel handlers in `trade_create.py`.
 - [x] Cover invitation admin flows in `admin.py`.
 - [ ] Cover admin user and commodity flows in `admin_users.py` and `admin_commodities.py`.
