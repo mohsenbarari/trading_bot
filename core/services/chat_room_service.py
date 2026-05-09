@@ -90,6 +90,10 @@ class ChannelConversationSummary:
     chat_id: int
     can_send: bool
     member_role: str | None
+    member_count: int | None = None
+    max_members: int | None = None
+    is_system: bool = False
+    is_mandatory: bool = False
 
 
 @dataclass
@@ -521,6 +525,15 @@ async def list_group_conversations(
         .correlate(Chat, current_member)
         .scalar_subquery()
     )
+    active_member_count = (
+        select(func.count(ChatMember.id))
+        .where(
+            ChatMember.chat_id == Chat.id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .correlate(Chat)
+        .scalar_subquery()
+    )
     last_message_content = case(
         (last_message_alias.is_deleted.is_(True), "پیام حذف شد"),
         (last_message_alias.message_type == MessageType.TEXT, last_message_alias.content),
@@ -534,6 +547,7 @@ async def list_group_conversations(
             last_message_content,
             last_message_alias.message_type.label("last_message_type"),
             unread_count.label("unread_count"),
+            active_member_count.label("member_count"),
         )
         .join(
             current_member,
@@ -551,7 +565,7 @@ async def list_group_conversations(
     result = await db.execute(stmt)
 
     rows: list[ChannelConversationSummary] = []
-    for chat, member_role, last_content, last_type, unread in result.all():
+    for chat, member_role, last_content, last_type, unread, member_count in result.all():
         synthetic_room_id = -int(chat.id)
         rows.append(
             ChannelConversationSummary(
@@ -568,6 +582,10 @@ async def list_group_conversations(
                 chat_id=chat.id,
                 can_send=True,
                 member_role=member_role.value if member_role is not None else None,
+                member_count=int(member_count or 0),
+                max_members=int(chat.max_members or GROUP_MAX_MEMBERS),
+                is_system=bool(chat.is_system),
+                is_mandatory=bool(chat.is_mandatory),
             )
         )
     return rows
@@ -902,6 +920,15 @@ async def list_channel_conversations(
         .correlate(Chat, current_member)
         .scalar_subquery()
     )
+    active_member_count = (
+        select(func.count(ChatMember.id))
+        .where(
+            ChatMember.chat_id == Chat.id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .correlate(Chat)
+        .scalar_subquery()
+    )
     last_message_content = case(
         (last_message_alias.is_deleted.is_(True), "پیام حذف شد"),
         (last_message_alias.message_type == MessageType.TEXT, last_message_alias.content),
@@ -915,6 +942,7 @@ async def list_channel_conversations(
             last_message_content,
             last_message_alias.message_type.label("last_message_type"),
             unread_count.label("unread_count"),
+            active_member_count.label("member_count"),
         )
         .join(
             current_member,
@@ -932,7 +960,7 @@ async def list_channel_conversations(
     result = await db.execute(stmt)
 
     rows: list[ChannelConversationSummary] = []
-    for chat, member_role, last_content, last_type, unread in result.all():
+    for chat, member_role, last_content, last_type, unread, member_count in result.all():
         synthetic_room_id = -int(chat.id)
         rows.append(
             ChannelConversationSummary(
@@ -949,6 +977,10 @@ async def list_channel_conversations(
                 chat_id=chat.id,
                 can_send=member_role == ChatMemberRole.ADMIN,
                 member_role=member_role.value if member_role is not None else None,
+                member_count=int(member_count or 0),
+                max_members=None,
+                is_system=bool(chat.is_system),
+                is_mandatory=bool(chat.is_mandatory),
             )
         )
     return rows

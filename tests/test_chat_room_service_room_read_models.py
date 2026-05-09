@@ -91,14 +91,14 @@ class ChatRoomServiceRoomReadModelsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_list_group_conversations_shapes_synthetic_rows(self):
         last_message_at = datetime(2026, 5, 3, 10, 0, 0)
-        titled_chat = SimpleNamespace(id=21, title="Ops", last_message_at=last_message_at)
-        untitled_chat = SimpleNamespace(id=22, title=None, last_message_at=None)
+        titled_chat = SimpleNamespace(id=21, title="Ops", last_message_at=last_message_at, max_members=100, is_system=False, is_mandatory=False)
+        untitled_chat = SimpleNamespace(id=22, title=None, last_message_at=None, max_members=None, is_system=False, is_mandatory=False)
         db = FakeDB(
             execute_results=[
                 FakeExecuteResult(
                     rows=[
-                        (titled_chat, ChatMemberRole.ADMIN, "hello", None, 4),
-                        (untitled_chat, None, None, None, None),
+                        (titled_chat, ChatMemberRole.ADMIN, "hello", None, 4, 10),
+                        (untitled_chat, None, None, None, None, 0),
                     ]
                 )
             ]
@@ -113,21 +113,25 @@ class ChatRoomServiceRoomReadModelsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0].unread_count, 4)
         self.assertTrue(rows[0].can_send)
         self.assertEqual(rows[0].member_role, ChatMemberRole.ADMIN.value)
+        self.assertEqual(rows[0].member_count, 10)
+        self.assertEqual(rows[0].max_members, 100)
         self.assertEqual(rows[1].id, -22)
         self.assertEqual(rows[1].other_user_name, "گروه 22")
         self.assertEqual(rows[1].unread_count, 0)
         self.assertIsNone(rows[1].member_role)
+        self.assertEqual(rows[1].member_count, 0)
+        self.assertEqual(rows[1].max_members, GROUP_MAX_MEMBERS)
 
     async def test_list_channel_conversations_shapes_send_capability_by_role(self):
         last_message_at = datetime(2026, 5, 3, 11, 0, 0)
-        admin_chat = SimpleNamespace(id=31, title="Broadcast", last_message_at=last_message_at)
-        member_chat = SimpleNamespace(id=32, title=None, last_message_at=None)
+        admin_chat = SimpleNamespace(id=31, title="Broadcast", last_message_at=last_message_at, is_system=False, is_mandatory=False)
+        member_chat = SimpleNamespace(id=32, title=None, last_message_at=None, is_system=True, is_mandatory=True)
         db = FakeDB(
             execute_results=[
                 FakeExecuteResult(
                     rows=[
-                        (admin_chat, ChatMemberRole.ADMIN, "notice", None, 2),
-                        (member_chat, ChatMemberRole.MEMBER, None, None, None),
+                        (admin_chat, ChatMemberRole.ADMIN, "notice", None, 2, 100),
+                        (member_chat, ChatMemberRole.MEMBER, None, None, None, 50),
                     ]
                 )
             ]
@@ -144,6 +148,11 @@ class ChatRoomServiceRoomReadModelsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[1].other_user_name, "کانال 32")
         self.assertFalse(rows[1].can_send)
         self.assertEqual(rows[1].member_role, ChatMemberRole.MEMBER.value)
+        self.assertEqual(rows[0].member_count, 100)
+        self.assertFalse(rows[0].is_mandatory)
+        self.assertEqual(rows[1].member_count, 50)
+        self.assertTrue(rows[1].is_system)
+        self.assertTrue(rows[1].is_mandatory)
 
     async def test_list_group_members_shapes_creator_flag(self):
         joined_at = datetime(2026, 5, 2, 8, 0, 0)

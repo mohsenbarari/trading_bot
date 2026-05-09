@@ -148,6 +148,10 @@ async def get_conversations(
             chat_id=row.chat_id,
             can_send=row.can_send,
             member_role=row.member_role,
+            member_count=row.member_count,
+            max_members=row.max_members,
+            is_system=row.is_system,
+            is_mandatory=row.is_mandatory,
         )
         for row in await list_group_conversations(db, current_user_id=current_user.id)
     ]
@@ -166,6 +170,10 @@ async def get_conversations(
             chat_id=row.chat_id,
             can_send=row.can_send,
             member_role=row.member_role,
+            member_count=row.member_count,
+            max_members=row.max_members,
+            is_system=row.is_system,
+            is_mandatory=row.is_mandatory,
         )
         for row in await list_channel_conversations(db, current_user_id=current_user.id)
     ]

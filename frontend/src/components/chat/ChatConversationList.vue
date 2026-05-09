@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { type Conversation } from '../../types/chat'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
+import { Megaphone, MessageCirclePlus, UsersRound } from 'lucide-vue-next'
 
 const props = defineProps<{
   conversations: Conversation[]
@@ -34,6 +35,37 @@ function getConversationInitial(conv: Conversation) {
   return (conv.other_user_name || '?').charAt(0)
 }
 
+function formatMemberCount(conv: Conversation) {
+  const count = Number(conv.member_count || 0)
+  if (!isRoomConversation(conv) || count <= 0) return ''
+  return `${count.toLocaleString('fa-IR')} عضو`
+}
+
+function formatEmptyRoomPreview(conv: Conversation) {
+  const members = formatMemberCount(conv)
+  if (isGroupConversation(conv)) {
+    return members || 'گروه'
+  }
+  if (isChannelConversation(conv)) {
+    if (conv.is_mandatory) return members ? `کانال اجباری • ${members}` : 'کانال اجباری'
+    return members || 'کانال'
+  }
+  return '...'
+}
+
+function getPreviewText(conv: Conversation) {
+  if (!conv.last_message_type) {
+    return isRoomConversation(conv) ? formatEmptyRoomPreview(conv) : '...'
+  }
+  if (conv.last_message_type === 'image') return 'تصویر'
+  if (conv.last_message_type === 'video') return 'ویدئو'
+  if (conv.last_message_type === 'voice') return 'پیام صوتی'
+  if (conv.last_message_type === 'sticker') return 'استیکر'
+  if (conv.last_message_type === 'location') return 'موقعیت'
+  if (conv.last_message_type === 'document') return 'فایل'
+  return conv.last_message_content?.substring(0, 30) || '...'
+}
+
 function isUserOnline(lastSeen: string | null | undefined): boolean {
   if (!lastSeen) return false
   const serverStr = lastSeen.endsWith('Z') ? lastSeen : lastSeen + 'Z';
@@ -64,6 +96,9 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
         conv.last_message_type,
         conv.last_message_content,
         conv.unread_count,
+        conv.member_count,
+        conv.is_mandatory,
+        conv.is_system,
         selectedUserId === conv.other_user_id,
         !isRoomConversation(conv) && !!typingUsers[conv.other_user_id],
       ]"
@@ -72,16 +107,28 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
       :class="{ 'has-unread': conv.unread_count > 0, 'active': selectedUserId === conv.other_user_id }"
       @click="emit('select-conversation', conv)"
     >
-      <div class="conv-avatar" :class="{ 'channel-avatar': isRoomConversation(conv) }">
-        {{ getConversationInitial(conv) }}
+      <div
+        class="conv-avatar"
+        :class="{
+          'room-avatar': isRoomConversation(conv),
+          'channel-avatar': isChannelConversation(conv),
+          'group-avatar': isGroupConversation(conv),
+        }"
+      >
+        <Megaphone v-if="isChannelConversation(conv)" :size="22" />
+        <UsersRound v-else-if="isGroupConversation(conv)" :size="22" />
+        <template v-else>{{ getConversationInitial(conv) }}</template>
         <div v-if="!isRoomConversation(conv) && isUserOnline(conv.other_user_last_seen_at)" class="online-indicator-dot"></div>
       </div>
       <div class="conv-content">
         <div class="conv-header">
           <span class="conv-name">
             {{ conv.other_user_name }}
-            <span v-if="isChannelConversation(conv)" class="channel-badge-list">کانال</span>
-            <span v-else-if="isGroupConversation(conv)" class="channel-badge-list">گروه</span>
+            <span v-if="isChannelConversation(conv)" class="room-badge-list channel-badge-list channel">کانال</span>
+            <span v-else-if="isGroupConversation(conv)" class="room-badge-list channel-badge-list group">گروه</span>
+            <span v-if="isChannelConversation(conv) && conv.is_mandatory" class="room-badge-list mandatory">اجباری</span>
+            <span v-if="isChannelConversation(conv) && conv.is_system" class="room-badge-list system">سیستمی</span>
+            <span v-if="formatMemberCount(conv)" class="member-count-list">{{ formatMemberCount(conv) }}</span>
             <span v-if="conv.other_user_is_deleted" class="deleted-badge-list">غیرفعال</span>
           </span>
           <span class="conv-time" v-if="conv.last_message_at">
@@ -93,15 +140,7 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
              🖊️ در حال نوشتن...
           </span>
           <template v-else>
-              <template v-if="isChannelConversation(conv) && !conv.last_message_type">📣 کانال</template>
-              <template v-else-if="isGroupConversation(conv) && !conv.last_message_type">👥 گروه</template>
-              <template v-if="conv.last_message_type === 'image'">🖼️ تصویر</template>
-              <template v-else-if="conv.last_message_type === 'video'">📹 ویدئو</template>
-              <template v-else-if="conv.last_message_type === 'voice'">🎤 پیام صوتی</template>
-              <template v-else-if="conv.last_message_type === 'sticker'">😊 استیکر</template>
-              <template v-else-if="conv.last_message_type === 'location'">📍 موقعیت</template>
-              <template v-else-if="conv.last_message_type === 'document'">📎 فایل</template>
-              <template v-else>{{ conv.last_message_content?.substring(0, 30) || '...' }}</template>
+              {{ getPreviewText(conv) }}
           </template>
         </div>
       </div>
@@ -113,11 +152,7 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
     
     <!-- Floating Action Button for New Chat -->
     <button class="fab-new-chat" v-ripple @click="emit('new-conversation')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-        <line x1="12" y1="9" x2="12" y2="13"></line>
-        <line x1="10" y1="11" x2="14" y2="11"></line>
-      </svg>
+      <MessageCirclePlus :size="28" />
     </button>
   </div>
 </template>
@@ -204,6 +239,14 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
   background: linear-gradient(135deg, #0f766e, #0ea5a4);
 }
 
+.conv-avatar.group-avatar {
+  background: linear-gradient(135deg, #2563eb, #06b6d4);
+}
+
+.conv-avatar.room-avatar svg {
+  stroke-width: 2.2;
+}
+
 .online-indicator-dot {
   position: absolute;
   bottom: 0px;
@@ -256,16 +299,42 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
   font-weight: normal;
 }
 
-.channel-badge-list {
+.room-badge-list,
+.member-count-list {
   font-size: 10px;
-  background: rgba(15, 118, 110, 0.12);
-  color: #0f766e;
   padding: 2px 6px;
   border-radius: 999px;
   font-weight: 700;
+  flex-shrink: 0;
 }
 
-.conversation-item.active .channel-badge-list {
+.room-badge-list.channel {
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+}
+
+.room-badge-list.group {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+}
+
+.room-badge-list.mandatory {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+}
+
+.room-badge-list.system {
+  background: rgba(124, 58, 237, 0.12);
+  color: #6d28d9;
+}
+
+.member-count-list {
+  background: rgba(148, 163, 184, 0.14);
+  color: #64748b;
+}
+
+.conversation-item.active .room-badge-list,
+.conversation-item.active .member-count-list {
   background: rgba(255,255,255,0.18);
   color: white;
 }

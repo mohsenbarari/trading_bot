@@ -10,10 +10,24 @@
       
       <!-- Avatar + User Info (when in chat and not searching) -->
       <template v-if="selectedUserId && !isSearchActive">
-        <div class="header-avatar" @click="selectedRoomKind === 'direct' && $emit('view-profile')">{{ selectedUserName.charAt(0) }}</div>
-        <div class="header-user-info" @click="selectedRoomKind === 'direct' && $emit('view-profile')">
+        <div
+          class="header-avatar"
+          :class="{
+            'room-avatar': selectedRoomKind !== 'direct',
+            'channel-avatar': selectedRoomKind === 'channel',
+            'group-avatar': selectedRoomKind === 'group',
+          }"
+          @click="handleTitleClick"
+        >
+          <Megaphone v-if="selectedRoomKind === 'channel'" :size="21" />
+          <UsersRound v-else-if="selectedRoomKind === 'group'" :size="21" />
+          <template v-else>{{ selectedUserName.charAt(0) }}</template>
+        </div>
+        <div class="header-user-info" @click="handleTitleClick">
           <span class="header-name">
             {{ selectedUserName }}
+            <span v-if="selectedRoomKind === 'channel'" class="room-badge-small channel">کانال</span>
+            <span v-else-if="selectedRoomKind === 'group'" class="room-badge-small group">گروه</span>
             <span v-if="isDeleted" class="deleted-badge-small">غیرفعال</span>
           </span>
           <span class="header-status" :class="{ 'online': selectedRoomKind === 'direct' && ((targetUserStatus.includes('آنلاین') && !isDeleted) || isTyping) }">
@@ -21,7 +35,14 @@
               حساب کاربری غیرفعال است
             </template>
             <template v-else-if="selectedRoomKind === 'channel'">
-              {{ targetUserStatus }}
+              <span>{{ targetUserStatus }}</span>
+              <span v-if="roomMemberCountText" class="header-room-meta">{{ roomMemberCountText }}</span>
+              <span v-if="isRoomMandatory" class="header-room-meta mandatory">اجباری</span>
+              <span v-if="isRoomSystem" class="header-room-meta system">سیستمی</span>
+            </template>
+            <template v-else-if="selectedRoomKind === 'group'">
+              <span>{{ targetUserStatus }}</span>
+              <span v-if="roomMemberCountText" class="header-room-meta">{{ roomMemberCountText }}</span>
             </template>
             <template v-else-if="isTyping">
               در حال نوشتن<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
@@ -91,6 +112,25 @@
             <div v-if="isMenuOpen" class="menu-overlay" @click="closeMenu"></div>
         </div>
       </template>
+
+      <template v-else-if="selectedUserId && !isSearchActive && selectedRoomKind !== 'direct'">
+        <div class="header-menu-container" style="position: relative;">
+          <button class="header-btn" v-ripple @click.stop="toggleMenu">
+            <MoreVertical :size="22" />
+          </button>
+          <div v-if="isMenuOpen" class="header-dropdown-menu" v-click-outside="closeMenu">
+            <div class="header-menu-item" @click="handleMenuSearch">
+              <span>جستجو</span>
+              <Search :size="18" />
+            </div>
+            <div v-if="selectedRoomKind === 'group'" class="header-menu-item" @click="handleMenuManageRoom">
+              <span>مدیریت گروه</span>
+              <UsersRound :size="18" />
+            </div>
+          </div>
+          <div v-if="isMenuOpen" class="menu-overlay" @click="closeMenu"></div>
+        </div>
+      </template>
       
       <!-- Conversation List Actions -->
       <template v-else-if="!selectedUserId && !isSearchActive">
@@ -119,7 +159,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { Megaphone, MoreVertical, Search, UsersRound } from 'lucide-vue-next'
 
 const props = defineProps<{
   isSelectionMode: boolean
@@ -135,6 +176,9 @@ const props = defineProps<{
   currentSearchIndex: number
   selectedMessagesCount: number
   isDeleted?: boolean
+  roomMemberCount?: number | null
+  isRoomMandatory?: boolean
+  isRoomSystem?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -145,6 +189,7 @@ const emit = defineEmits<{
   (e: 'result-click', result: any): void
   (e: 'call'): void
   (e: 'clear-selection'): void
+  (e: 'manage-room'): void
 }>()
 
 const isMenuOpen = ref(false)
@@ -152,6 +197,12 @@ const internalSearchQuery = ref(props.searchQuery)
 
 watch(() => props.searchQuery, (newVal) => {
   internalSearchQuery.value = newVal
+})
+
+const roomMemberCountText = computed(() => {
+  const count = Number(props.roomMemberCount || 0)
+  if (props.selectedRoomKind === 'direct' || count <= 0) return ''
+  return `${count.toLocaleString('fa-IR')} عضو`
 })
 
 const onSearchInput = () => {
@@ -174,6 +225,21 @@ const handleMenuSearch = () => {
 const handleMenuViewProfile = () => {
   closeMenu()
   emit('view-profile')
+}
+
+const handleMenuManageRoom = () => {
+  closeMenu()
+  emit('manage-room')
+}
+
+const handleTitleClick = () => {
+  if (props.selectedRoomKind === 'direct') {
+    emit('view-profile')
+    return
+  }
+  if (props.selectedRoomKind === 'group') {
+    emit('manage-room')
+  }
 }
 
 function formatDateForSeparator(dateString: string) {
@@ -241,6 +307,23 @@ function formatDateForSeparator(dateString: string) {
   cursor: pointer;
 }
 
+.header-avatar.room-avatar {
+  cursor: default;
+}
+
+.header-avatar.channel-avatar {
+  background: linear-gradient(135deg, #0f766e, #0ea5a4);
+}
+
+.header-avatar.group-avatar {
+  background: linear-gradient(135deg, #2563eb, #06b6d4);
+  cursor: pointer;
+}
+
+.header-avatar svg {
+  stroke-width: 2.2;
+}
+
 .header-user-info {
   display: flex;
   flex-direction: column;
@@ -306,6 +389,45 @@ function formatDateForSeparator(dateString: string) {
   border-radius: 10px;
   margin-right: 6px;
   vertical-align: middle;
+}
+
+.room-badge-small,
+.header-room-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.room-badge-small.channel {
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+}
+
+.room-badge-small.group {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+}
+
+.header-room-meta {
+  background: rgba(148, 163, 184, 0.14);
+  color: #64748b;
+}
+
+.header-room-meta.mandatory {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+}
+
+.header-room-meta.system {
+  background: rgba(124, 58, 237, 0.12);
+  color: #6d28d9;
 }
 
 .search-bar-container {

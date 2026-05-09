@@ -1,3 +1,5 @@
+export type ChatKind = 'direct' | 'channel' | 'group'
+
 export interface Conversation {
     id: number
     other_user_id: number
@@ -8,11 +10,17 @@ export interface Conversation {
     last_message_at: string | null
     unread_count: number
     other_user_last_seen_at?: string | null
-    room_kind?: 'direct' | 'channel' | 'group'
+    room_kind?: ChatKind
     chat_id?: number | null
     can_send?: boolean
     member_role?: 'admin' | 'member' | null
+    member_count?: number | null
+    max_members?: number | null
+    is_system?: boolean
+    is_mandatory?: boolean
 }
+
+export type ChatListItem = Conversation
 
 export interface MessageReaction {
     emoji: string
