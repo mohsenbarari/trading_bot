@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import BottomNav from './components/BottomNav.vue'
 import SessionApprovalModal from './components/SessionApprovalModal.vue'
 import PWAInstallOverlay from './components/PWAInstallOverlay.vue'
@@ -22,6 +22,19 @@ const { on, off, connect } = useWebSocket()
 // Until then we show a full-screen spinner instead of a blank white page.
 const isFirstRouteReady = ref(false)
 router.isReady().then(() => { isFirstRouteReady.value = true })
+
+watch(isFirstRouteReady, (ready) => {
+  if (!ready) return
+
+  document.documentElement.setAttribute('data-app-mounted', '1')
+  document.documentElement.removeAttribute('data-app-boot-timeout')
+
+  const bootTimeoutId = (window as any).__appBootTimeoutId
+  if (typeof bootTimeoutId === 'number') {
+    window.clearTimeout(bootTimeoutId)
+    delete (window as any).__appBootTimeoutId
+  }
+}, { immediate: true })
 
 const ensureSessionValidation = async () => {
   const refreshToken = localStorage.getItem('refresh_token')
