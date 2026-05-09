@@ -17,13 +17,115 @@
   <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="/pwa-512x512.png">
   <link rel="apple-touch-icon" href="/pwa-192x192.png">
+  <style>
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: #f9fafb;
+    }
+
+    body {
+      font-family: Vazirmatn, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    #boot-loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: linear-gradient(160deg, #fefce8 0%, #ffffff 40%, #fffbeb 100%);
+      z-index: 9999;
+      transition: opacity 0.25s ease, visibility 0.25s ease;
+    }
+
+    #boot-loader-card {
+      width: min(100%, 320px);
+      border-radius: 24px;
+      padding: 28px 24px;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 20px 60px rgba(180, 83, 9, 0.12);
+      border: 1px solid rgba(245, 158, 11, 0.14);
+    }
+
+    #boot-loader-spinner {
+      width: 44px;
+      height: 44px;
+      margin: 0 auto 16px;
+      border: 4px solid #fde68a;
+      border-top-color: transparent;
+      border-radius: 9999px;
+      animation: boot-spin 0.9s linear infinite;
+    }
+
+    #boot-loader-title {
+      color: #111827;
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    #boot-loader-note {
+      color: #6b7280;
+      font-size: 14px;
+      line-height: 1.7;
+      display: none;
+      margin-top: 8px;
+    }
+
+    #boot-loader-refresh {
+      display: none;
+      margin: 16px auto 0;
+      border: 0;
+      border-radius: 9999px;
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #fff;
+      font: inherit;
+      font-weight: 700;
+      padding: 12px 18px;
+      cursor: pointer;
+    }
+
+    html[data-app-boot-timeout='1'] #boot-loader-note,
+    html[data-app-boot-timeout='1'] #boot-loader-refresh {
+      display: block;
+    }
+
+    html[data-app-mounted='1'] #boot-loader {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    @keyframes boot-spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+  </style>
   
   <title>پنل کاربری</title>
   <script async src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 
 <body>
+  <div id="boot-loader" aria-live="polite">
+    <div id="boot-loader-card">
+      <div id="boot-loader-spinner"></div>
+      <div id="boot-loader-title">در حال بارگذاری بازار طلا</div>
+      <div id="boot-loader-note">اگر صفحه بالا نیامد، یک بار بارگذاری مجدد را امتحان کنید.</div>
+      <button id="boot-loader-refresh" type="button" onclick="window.location.reload()">بارگذاری مجدد</button>
+    </div>
+  </div>
   <div id="app"></div>
+  <script>
+    window.__appBootTimeoutId = window.setTimeout(function () {
+      document.documentElement.setAttribute('data-app-boot-timeout', '1')
+    }, 8000)
+  </script>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
