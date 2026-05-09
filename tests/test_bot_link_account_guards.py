@@ -61,7 +61,7 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("کاربری با این شماره یافت نشد", message.answer.await_args.args[0])
         self.assertEqual(state.cleared, 1)
 
-        other_user = SimpleNamespace(telegram_id=77, account_name="acc", full_name="acc")
+        other_user = SimpleNamespace(id=2, telegram_id=77, account_name="acc", full_name="acc", address="تهران خیابان آزادی پلاک ۱۰")
         message = make_message()
         state = FakeState()
         with patch("bot.handlers.link_account.get_db", new=db_factory(other_user)):
@@ -69,7 +69,7 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("قبلاً به یک اکانت تلگرام دیگر", message.answer.await_args.args[0])
         self.assertEqual(state.cleared, 1)
 
-        same_user = SimpleNamespace(telegram_id=10, account_name="acc", full_name="acc")
+        same_user = SimpleNamespace(id=3, telegram_id=10, account_name="acc", full_name="acc", address="تهران خیابان آزادی پلاک ۱۰")
         message = make_message()
         state = FakeState()
         with patch("bot.handlers.link_account.get_db", new=db_factory(same_user)):
