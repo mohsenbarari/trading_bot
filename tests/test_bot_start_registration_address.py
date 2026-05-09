@@ -29,6 +29,7 @@ class FakeSession:
     def __init__(self, invitation):
         self.invitation = invitation
         self.added = []
+        self.flush = AsyncMock(side_effect=self._flush)
         self.commits = 0
 
     async def execute(self, stmt):
@@ -36,6 +37,11 @@ class FakeSession:
 
     def add(self, value):
         self.added.append(value)
+
+    async def _flush(self):
+        for value in self.added:
+            if getattr(value, "id", None) is None:
+                value.id = 77
 
     async def commit(self):
         self.commits += 1
@@ -100,7 +106,10 @@ class BotStartRegistrationAddressTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
             "bot.handlers.start.AsyncSessionLocal",
             return_value=FakeSessionContext(session),
-        ), patch("bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"), patch(
+        ), patch(
+            "bot.handlers.start.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ) as mandatory_mock, patch("bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"), patch(
             "bot.handlers.start.set_anchor"
         ) as set_anchor, patch(
             "bot.handlers.start.build_channel_join_request_line",
@@ -111,8 +120,10 @@ class BotStartRegistrationAddressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.cleared, 1)
         self.assertTrue(invitation.is_used)
         self.assertEqual(session.commits, 1)
+        session.flush.assert_awaited_once()
         self.assertEqual(len(session.added), 1)
         new_user = session.added[0]
+        self.assertIs(mandatory_mock.await_args.kwargs["user"], new_user)
         self.assertEqual(new_user.telegram_id, 5)
         self.assertEqual(new_user.account_name, "acc")
         self.assertIn("درخواست عضویت در کانال معاملات", message.answer.await_args.args[0])

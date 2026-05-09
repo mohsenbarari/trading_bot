@@ -73,6 +73,9 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         message = make_message()
 
         with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ) as mandatory_mock, patch(
             "bot.handlers.link_account.settings",
             SimpleNamespace(frontend_url="https://app.example"),
         ):
@@ -82,6 +85,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user.username, "u")
         self.assertEqual(user.full_name, "Linked User")
         self.assertTrue(user.has_bot_access)
+        self.assertIs(mandatory_mock.await_args.kwargs["user"], user)
         self.assertEqual(db.commits, 1)
         self.assertEqual(state.cleared, 1)
         self.assertIn("با موفقیت", message.answer.await_args.args[0])
@@ -94,6 +98,9 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         message = make_message()
 
         with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ), patch(
             "bot.handlers.link_account.settings",
             SimpleNamespace(frontend_url="https://app.example"),
         ):
@@ -147,6 +154,9 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ) as mandatory_mock, patch(
             "bot.handlers.link_account.build_channel_join_request_line",
             new=AsyncMock(return_value="🔗 [درخواست عضویت در کانال معاملات](https://t.me/joinreq)"),
         ), patch(
@@ -159,6 +169,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user.username, "u")
         self.assertEqual(user.address, "تهران خیابان آزادی پلاک ۱۰")
         self.assertTrue(user.has_bot_access)
+        self.assertIs(mandatory_mock.await_args.kwargs["user"], user)
         self.assertEqual(db.commits, 1)
         self.assertEqual(state.cleared, 1)
         self.assertIn("درخواست عضویت در کانال معاملات", message.answer.await_args.args[0])

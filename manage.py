@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 # ایمپورت‌های مورد نیاز برای ساخت کاربر
 from core.db import AsyncSessionLocal
+from core.services.chat_room_service import ensure_mandatory_channel_membership
 from models.user import User
 from core.enums import UserRole
 
@@ -94,12 +95,15 @@ async def create_super_admin_async():
             account_name=account_name,
             mobile_number=mobile_number,
             telegram_id=telegram_id,
+            address="System Default",
             role=UserRole.SUPER_ADMIN, # نقش ادمین ارشد
             has_bot_access=True,
             username=None # اختیاری
         )
         
         session.add(new_admin)
+        await session.flush()
+        await ensure_mandatory_channel_membership(session, user=new_admin)
         await session.commit()
         print(f"\n✅ Super Admin '{full_name}' created successfully!")
 

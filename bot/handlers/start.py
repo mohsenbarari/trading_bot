@@ -12,6 +12,7 @@ import logging
 
 from core.db import AsyncSessionLocal
 from core.config import settings
+from core.services.chat_room_service import ensure_mandatory_channel_membership
 from models.invitation import Invitation
 from models.user import User
 from bot.states import Registration
@@ -283,6 +284,8 @@ async def handle_address(message: types.Message, state: FSMContext):
 
         invitation.is_used = True
         session.add(new_user)
+        await session.flush()
+        await ensure_mandatory_channel_membership(session, user=new_user)
         await session.commit()
 
         welcome_text = (

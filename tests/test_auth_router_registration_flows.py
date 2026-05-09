@@ -28,6 +28,7 @@ class FakeDB:
     def __init__(self, execute_results=None, commit_side_effect=None):
         self.execute_results = list(execute_results or [])
         self.commit = AsyncMock(side_effect=commit_side_effect)
+        self.flush = AsyncMock(side_effect=self._flush)
         self.refresh = AsyncMock(side_effect=self._refresh)
         self.rollback = AsyncMock()
         self.added = []
@@ -39,6 +40,11 @@ class FakeDB:
 
     def add(self, item):
         self.added.append(item)
+
+    async def _flush(self):
+        for item in self.added:
+            if getattr(item, "id", None) is None:
+                item.id = 77
 
     async def _refresh(self, item):
         if getattr(item, "id", None) is None:
@@ -184,6 +190,9 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
             "api.routers.auth._login_home_server",
             return_value="foreign",
+        ), patch(
+            "api.routers.auth.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await register_complete(RegisterComplete(token="abc", address="Tehran"), raw_request=make_request(), db=db)
@@ -213,6 +222,9 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.auth._login_home_server",
             return_value="iran",
         ), patch(
+            "api.routers.auth.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ) as mandatory_mock, patch(
             "api.routers.auth.create_refresh_token",
             return_value="refresh-token",
         ) as refresh_mock, patch(
@@ -237,6 +249,8 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(new_user.has_bot_access)
         self.assertIsNone(new_user.telegram_id)
         self.assertTrue(invitation.is_used)
+        db.flush.assert_awaited_once()
+        self.assertIs(mandatory_mock.await_args.kwargs["user"], new_user)
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(new_user)
         self.assertEqual(redis.delete_calls, ["reg_otp:abc", "reg_verified:abc"])

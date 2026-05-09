@@ -11,11 +11,12 @@ from api.routers import (
 )
 from core.config import settings
 from core.redis import init_redis, close_redis
-from core.db import init_db
+from core.db import AsyncSessionLocal, init_db
 from core.events import setup_event_listeners
 from core.connectivity import connectivity_monitor_loop
 from core.offer_expiry import offer_expiry_loop
 from core.session_expiry import session_expiry_loop
+from core.services.chat_room_service import ensure_mandatory_channel_rollout
 import asyncio
 import schemas
 
@@ -32,6 +33,14 @@ async def lifespan(app: FastAPI):
     await init_db()
     await init_redis()
     setup_event_listeners()
+
+    async with AsyncSessionLocal() as session:
+        try:
+            await ensure_mandatory_channel_rollout(session)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
     
     # Start connectivity monitor task (Iran only)
     if settings.server_mode == "iran":
