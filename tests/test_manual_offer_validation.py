@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from bot.utils import offer_parser
 from bot.utils.offer_parser import _match_commodity_name
@@ -11,6 +11,25 @@ from core.services.trade_service import (
     validate_price,
     validate_quantity,
 )
+
+
+class _AsyncSessionContext:
+    def __init__(self, session):
+        self.session = session
+
+    async def __aenter__(self):
+        return self.session
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+def all_result(items):
+    scalars = Mock()
+    scalars.all.return_value = items
+    result = Mock()
+    result.scalars.return_value = scalars
+    return result
 
 
 class ManualOfferValidationTests(unittest.TestCase):
@@ -120,6 +139,47 @@ class ManualOfferValidationTests(unittest.TestCase):
         self.assertEqual(_match_commodity_name("ربع بهار 10تا 75800", commodities), (None, "نامشخص"))
         self.assertEqual(_match_commodity_name("نیم بهار 10تا 75800", commodities), (None, "نامشخص"))
 
+    def test_offer_parser_helper_error_paths(self):
+        self.assertEqual(offer_parser.normalize_digits("۱۲٣"), "123")
+        self.assertEqual(offer_parser.validate_characters("امام 30تا"), (True, None))
+        self.assertEqual(offer_parser.validate_characters(""), (False, "کاراکتر غیرمجاز در متن"))
+        self.assertEqual(offer_parser.validate_characters("امام 30تا @"), (False, "کاراکتر غیرمجاز: «@»"))
+
+        self.assertEqual(offer_parser.extract_trade_type("سلام"), (None, None))
+        self.assertEqual(
+            offer_parser.extract_trade_type("خ خرید امام 30تا 75800"),
+            (None, "❌ چندین نشانگر خرید در لفظ وجود دارد"),
+        )
+        self.assertEqual(
+            offer_parser.extract_trade_type("ف فروش امام 30تا 75800"),
+            (None, "❌ چندین نشانگر فروش در لفظ وجود دارد"),
+        )
+        self.assertEqual(
+            offer_parser.extract_trade_type("خ ف امام 30تا 75800"),
+            (None, "❌ هم نشانگر خرید و هم فروش در لفظ وجود دارد"),
+        )
+        self.assertEqual(offer_parser.extract_trade_type("ف امام 30تا 75800"), ("sell", None))
+
+        self.assertEqual(
+            offer_parser.extract_quantity("30تا 20 عدد"),
+            (None, "❌ چندین تعداد در لفظ وجود دارد"),
+        )
+        self.assertEqual(
+            offer_parser.extract_price("75800 85900"),
+            (None, "❌ چندین قیمت در لفظ وجود دارد (فقط یک عدد 5 یا 6 رقمی مجاز است)"),
+        )
+
+        with patch("bot.utils.offer_parser.get_trading_settings", return_value=SimpleNamespace(lot_min_size=5, lot_max_count=2)):
+            self.assertEqual(
+                offer_parser.extract_lot_sizes("30تا 75800 10 10 10", 30, 75800),
+                (None, False, "❌ حداکثر 2 بخش مجاز است (تعداد فعلی: 3)"),
+            )
+        with patch("bot.utils.offer_parser.get_trading_settings", return_value=SimpleNamespace(lot_min_size=5, lot_max_count=4)):
+            self.assertEqual(
+                offer_parser.extract_lot_sizes("30تا 75800 3 27", 30, 75800),
+                (None, False, "❌ هر بخش باید حداقل 5 عدد باشد (بخش نامعتبر: 3)"),
+            )
+
 
 class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -182,6 +242,61 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
                 result, error = await offer_parser.parse_offer_text(sample)
                 self.assertIsNone(result)
                 self.assertIsNotNone(error)
+
+    async def test_find_commodity_supports_cached_aliases_and_db_backfill(self):
+        cached_items = [
+            {"id": 1, "name": "امام", "aliases": ["ام", {"alias": "امامی"}]},
+        ]
+        with patch("bot.utils.redis_helpers.get_cached_commodities", AsyncMock(return_value=cached_items)), patch(
+            "bot.utils.redis_helpers.set_cached_commodities", AsyncMock()
+        ) as set_cached:
+            self.assertEqual(await self.original_find_commodity("امامی 30تا 75800"), (1, "امام"))
+        set_cached.assert_not_awaited()
+
+        commodities = [SimpleNamespace(id=1, name="امام"), SimpleNamespace(id=2, name="بهار")]
+        aliases = [SimpleNamespace(id=7, alias="امامی", commodity_id=1)]
+        session = SimpleNamespace(execute=AsyncMock(side_effect=[all_result(commodities), all_result(aliases)]))
+        with patch("bot.utils.redis_helpers.get_cached_commodities", AsyncMock(return_value=None)), patch(
+            "bot.utils.redis_helpers.set_cached_commodities", AsyncMock()
+        ) as set_cached, patch("bot.utils.offer_parser.AsyncSessionLocal", return_value=_AsyncSessionContext(session)):
+            self.assertEqual(await self.original_find_commodity("امامی 30تا 75800"), (1, "امام"))
+
+        set_cached.assert_awaited_once()
+        self.assertEqual(set_cached.await_args.kwargs["ttl"], 300)
+
+        with patch(
+            "bot.utils.redis_helpers.get_cached_commodities",
+            AsyncMock(return_value=[{"id": 1, "name": "امام", "aliases": []}]),
+        ), patch("bot.utils.redis_helpers.set_cached_commodities", AsyncMock()):
+            self.assertEqual(await self.original_find_commodity("ناشناس 30تا 75800"), (None, "نامشخص"))
+
+    async def test_parse_offer_text_guard_paths(self):
+        too_long_notes = "خ امام 30تا 75800:" + ("الف" * 201)
+        result, error = await offer_parser.parse_offer_text(too_long_notes)
+        self.assertIsNone(result)
+        self.assertEqual(error.message, "❌ توضیحات نباید بیش از 200 کاراکتر باشد")
+
+        result, error = await offer_parser.parse_offer_text("سلام")
+        self.assertIsNone(result)
+        self.assertIsNone(error)
+
+        result, error = await offer_parser.parse_offer_text("خ امام 30تا 75800 @")
+        self.assertIsNone(result)
+        self.assertEqual(error.message, "کاراکتر غیرمجاز: «@»")
+
+        result, error = await offer_parser.parse_offer_text("خ خرید امام 30تا 75800")
+        self.assertIsNone(result)
+        self.assertEqual(error.message, "❌ چندین نشانگر خرید در لفظ وجود دارد")
+
+        offer_parser.get_trading_settings = lambda: SimpleNamespace(
+            offer_min_quantity=5,
+            offer_max_quantity=75,
+            lot_min_size=5,
+            lot_max_count=3,
+        )
+        result, error = await offer_parser.parse_offer_text("خ امام 4تا 75800")
+        self.assertIsNone(result)
+        self.assertEqual(error.message, "❌ حداقل تعداد باید 5 باشد")
 
 
 if __name__ == "__main__":

@@ -230,6 +230,46 @@ class HandleLoginSessionTests(unittest.IsolatedAsyncioTestCase):
         db.add.assert_not_called()
         publish_user_event.assert_awaited_once()
 
+    async def test_reuses_existing_pending_request_when_publish_fails(self):
+        existing_request = SimpleNamespace(
+            id=uuid.uuid4(),
+            requester_device_name=None,
+            requester_ip=None,
+            expires_at=datetime.utcnow() + timedelta(seconds=90),
+        )
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=scalar_one_or_none_result(existing_request)),
+            commit=AsyncMock(),
+            add=Mock(),
+        )
+        user = SimpleNamespace(id=24, role=UserRole.STANDARD, max_sessions=1)
+        fake_redis = FakeRedis({
+            "session_req:24:daily": "0",
+            "session_req:24:weekly": "0",
+            "session_req:24:monthly": "0",
+        })
+        settings = SimpleNamespace(
+            anti_abuse_daily_base=4,
+            anti_abuse_weekly_base=10,
+            anti_abuse_monthly_base=20,
+        )
+
+        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[SimpleNamespace()])), \
+             patch("bot.utils.redis_helpers.get_redis", AsyncMock(return_value=fake_redis)), \
+             patch("core.services.session_service.get_trading_settings_async", AsyncMock(return_value=settings)), \
+             patch("core.utils.publish_user_event", AsyncMock(side_effect=RuntimeError("pub down"))), \
+             patch.object(session_service, "logger") as logger:
+            result = await session_service.handle_login_session(
+                db,
+                user,
+                "refresh-4b",
+                device_name="Fallback Device",
+                device_ip="192.168.1.51",
+            )
+
+        self.assertEqual(result, {"action": "approval_required", "request": existing_request})
+        logger.warning.assert_called_once()
+
     async def test_creates_login_request_and_increments_all_period_counters(self):
         db = SimpleNamespace(
             execute=AsyncMock(return_value=scalar_one_or_none_result(None)),
@@ -275,6 +315,41 @@ class HandleLoginSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(("expire", "session_req:23:daily", 86400), fake_redis.pipeline_calls)
         self.assertIn(("expire", "session_req:23:weekly", 604800), fake_redis.pipeline_calls)
         self.assertIn(("expire", "session_req:23:monthly", 2592000), fake_redis.pipeline_calls)
+
+    async def test_creates_login_request_even_when_publish_fails(self):
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=scalar_one_or_none_result(None)),
+            commit=AsyncMock(),
+            add=Mock(),
+        )
+        user = SimpleNamespace(id=25, role=UserRole.STANDARD, max_sessions=1)
+        fake_redis = FakeRedis({
+            "session_req:25:daily": "0",
+            "session_req:25:weekly": "0",
+            "session_req:25:monthly": "0",
+        })
+        settings = SimpleNamespace(
+            anti_abuse_daily_base=4,
+            anti_abuse_weekly_base=10,
+            anti_abuse_monthly_base=20,
+        )
+
+        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[SimpleNamespace(is_primary=True)])), \
+             patch("bot.utils.redis_helpers.get_redis", AsyncMock(return_value=fake_redis)), \
+             patch("core.services.session_service.get_trading_settings_async", AsyncMock(return_value=settings)), \
+             patch("core.utils.publish_user_event", AsyncMock(side_effect=RuntimeError("pub down"))), \
+             patch.object(session_service, "logger") as logger:
+            result = await session_service.handle_login_session(
+                db,
+                user,
+                "refresh-5b",
+                device_name="Queued Device",
+                device_ip="172.16.0.11",
+            )
+
+        self.assertEqual(result["action"], "approval_required")
+        db.commit.assert_awaited_once()
+        logger.warning.assert_called_once()
 
 
 class ApproveAndRevocationTests(unittest.IsolatedAsyncioTestCase):
@@ -408,6 +483,283 @@ class ApproveAndRevocationTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("bot.utils.redis_helpers.get_redis", AsyncMock(side_effect=RuntimeError("redis down"))):
             self.assertFalse(await session_service.is_session_blacklisted(session_id))
+
+
+class SessionServiceAdditionalCoverageTests(unittest.IsolatedAsyncioTestCase):
+    async def test_lookup_and_creation_helpers(self):
+        token = "refresh-token"
+        hashed = session_service.hash_token(token)
+        self.assertEqual(len(hashed), 64)
+        self.assertNotEqual(hashed, token)
+
+        active_a = SimpleNamespace(id=uuid.uuid4())
+        active_b = SimpleNamespace(id=uuid.uuid4())
+        db = SimpleNamespace(
+            execute=AsyncMock(
+                side_effect=[
+                    Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=[active_a, active_b])))),
+                    scalar_one_or_none_result(active_b),
+                ]
+            )
+        )
+
+        active_sessions = await session_service.get_active_sessions(db, 5)
+        session_by_token = await session_service.get_session_by_refresh_token(db, token)
+
+        self.assertEqual(active_sessions, [active_a, active_b])
+        self.assertIs(session_by_token, active_b)
+
+        create_db = SimpleNamespace(add=Mock(), flush=AsyncMock())
+        session = await session_service.create_session(
+            create_db,
+            user_id=17,
+            refresh_token=token,
+            device_name="Pixel",
+            device_ip="10.0.0.4",
+            platform=Platform.ANDROID,
+            is_primary=True,
+            home_server="iran",
+        )
+
+        self.assertEqual(session.user_id, 17)
+        self.assertEqual(session.device_name, "Pixel")
+        self.assertEqual(session.device_ip, "10.0.0.4")
+        self.assertEqual(session.platform, Platform.ANDROID)
+        self.assertTrue(session.is_primary)
+        self.assertTrue(session.is_active)
+        self.assertEqual(session.home_server, "iran")
+        self.assertEqual(session.refresh_token_hash, hashed)
+        self.assertGreater(session.expires_at, datetime.utcnow() + timedelta(days=29))
+        create_db.add.assert_called_once_with(session)
+        create_db.flush.assert_awaited_once()
+
+    async def test_deactivate_and_promote_helpers(self):
+        session = SimpleNamespace(id=uuid.uuid4(), user_id=21, is_active=True)
+        db = SimpleNamespace(flush=AsyncMock())
+
+        with patch("core.services.session_service.blacklist_session", AsyncMock()) as blacklist_session:
+            await session_service.deactivate_session(db, session)
+
+        self.assertFalse(session.is_active)
+        blacklist_session.assert_awaited_once_with(session.id)
+        db.flush.assert_awaited_once()
+
+        oldest = SimpleNamespace(id=uuid.uuid4(), is_primary=False)
+        newest = SimpleNamespace(id=uuid.uuid4(), is_primary=False)
+        db = SimpleNamespace(flush=AsyncMock())
+        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[oldest, newest])):
+            promoted = await session_service.promote_next_primary(db, 22)
+
+        self.assertIs(promoted, oldest)
+        self.assertTrue(oldest.is_primary)
+        db.flush.assert_awaited_once()
+
+        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[])):
+            self.assertIsNone(await session_service.promote_next_primary(SimpleNamespace(flush=AsyncMock()), 22))
+
+    async def test_approve_login_request_handles_missing_processed_and_primary_eviction(self):
+        approver_session = SimpleNamespace(id=uuid.uuid4())
+        request_id = uuid.uuid4()
+
+        db = SimpleNamespace(execute=AsyncMock(return_value=scalar_one_or_none_result(None)), commit=AsyncMock())
+        self.assertEqual(
+            await session_service.approve_login_request(db, request_id, approver_session, "refresh-x"),
+            {"error": "درخواست یافت نشد"},
+        )
+
+        processed_request = SimpleNamespace(
+            id=request_id,
+            status=LoginRequestStatus.REJECTED,
+            expires_at=datetime.utcnow() + timedelta(seconds=30),
+        )
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=scalar_one_or_none_result(processed_request)),
+            commit=AsyncMock(),
+        )
+        self.assertEqual(
+            await session_service.approve_login_request(db, request_id, approver_session, "refresh-y"),
+            {"error": "درخواست قبلاً پردازش شده است"},
+        )
+
+        pending_request = SimpleNamespace(
+            id=request_id,
+            user_id=41,
+            status=LoginRequestStatus.PENDING,
+            expires_at=datetime.utcnow() + timedelta(seconds=60),
+            requester_device_name="Requester Device",
+            requester_ip="10.0.0.8",
+            requester_home_server="iran",
+            resolved_by_session_id=None,
+        )
+        only_primary = SimpleNamespace(id=uuid.uuid4(), is_primary=True)
+        user = SimpleNamespace(id=41, role=UserRole.STANDARD, max_sessions=1)
+        new_session = SimpleNamespace(id=uuid.uuid4())
+        db = SimpleNamespace(
+            execute=AsyncMock(side_effect=[scalar_one_or_none_result(pending_request), scalar_one_result(user)]),
+            commit=AsyncMock(),
+        )
+
+        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[only_primary])), \
+             patch("core.services.session_service.deactivate_session", AsyncMock()) as deactivate_session, \
+             patch("core.services.session_service.create_session", AsyncMock(return_value=new_session)) as create_session, \
+             patch("core.utils.publish_user_event", AsyncMock(side_effect=RuntimeError("pub down"))), \
+             patch.object(session_service, "logger") as logger:
+            result = await session_service.approve_login_request(
+                db,
+                request_id,
+                approver_session,
+                "refresh-z",
+                device_name="Ignored Device",
+                device_ip="127.0.0.1",
+                platform=Platform.WEB,
+                home_server="foreign",
+            )
+
+        self.assertEqual(result, {"session": new_session})
+        deactivate_session.assert_awaited_once_with(db, only_primary)
+        create_session.assert_awaited_once_with(
+            db,
+            pending_request.user_id,
+            "refresh-z",
+            "Requester Device",
+            "10.0.0.8",
+            Platform.WEB,
+            is_primary=True,
+            home_server="foreign",
+        )
+        self.assertEqual(pending_request.status, LoginRequestStatus.APPROVED)
+        self.assertEqual(pending_request.resolved_by_session_id, approver_session.id)
+        logger.warning.assert_called_once()
+
+    async def test_approve_login_request_handles_drained_active_session_list(self):
+        class DrainingSessions:
+            def __init__(self):
+                self.len_calls = 0
+
+            def __len__(self):
+                self.len_calls += 1
+                return 2 if self.len_calls == 1 else 0
+
+            def __iter__(self):
+                return iter(())
+
+            def remove(self, _item):
+                raise AssertionError("remove should not be called when list is drained before eviction")
+
+        request_id = uuid.uuid4()
+        approver_session = SimpleNamespace(id=uuid.uuid4())
+        pending_request = SimpleNamespace(
+            id=request_id,
+            user_id=42,
+            status=LoginRequestStatus.PENDING,
+            expires_at=datetime.utcnow() + timedelta(seconds=60),
+            requester_device_name="Requester Device",
+            requester_ip="10.0.0.9",
+            requester_home_server="foreign",
+            resolved_by_session_id=None,
+        )
+        user = SimpleNamespace(id=42, role=UserRole.STANDARD, max_sessions=2)
+        new_session = SimpleNamespace(id=uuid.uuid4())
+        db = SimpleNamespace(
+            execute=AsyncMock(side_effect=[scalar_one_or_none_result(pending_request), scalar_one_result(user)]),
+            commit=AsyncMock(),
+        )
+
+        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=DrainingSessions())), \
+             patch("core.services.session_service.deactivate_session", AsyncMock()) as deactivate_session, \
+             patch("core.services.session_service.create_session", AsyncMock(return_value=new_session)) as create_session, \
+             patch("core.utils.publish_user_event", AsyncMock()):
+            result = await session_service.approve_login_request(
+                db,
+                request_id,
+                approver_session,
+                "refresh-break",
+            )
+
+        self.assertEqual(result, {"session": new_session})
+        deactivate_session.assert_not_awaited()
+        create_session.assert_awaited_once_with(
+            db,
+            pending_request.user_id,
+            "refresh-break",
+            "Requester Device",
+            "10.0.0.9",
+            Platform.WEB,
+            is_primary=True,
+            home_server="foreign",
+        )
+
+    async def test_reject_logout_and_revocation_failure_paths(self):
+        approver_session = SimpleNamespace(id=uuid.uuid4())
+        request_id = uuid.uuid4()
+
+        db = SimpleNamespace(execute=AsyncMock(return_value=scalar_one_or_none_result(None)), commit=AsyncMock())
+        self.assertEqual(
+            await session_service.reject_login_request(db, request_id, approver_session),
+            {"error": "درخواست یافت نشد"},
+        )
+
+        processed_request = SimpleNamespace(id=request_id, status=LoginRequestStatus.APPROVED)
+        db = SimpleNamespace(execute=AsyncMock(return_value=scalar_one_or_none_result(processed_request)), commit=AsyncMock())
+        self.assertEqual(
+            await session_service.reject_login_request(db, request_id, approver_session),
+            {"error": "درخواست قبلاً پردازش شده است"},
+        )
+
+        pending_request = SimpleNamespace(
+            id=request_id,
+            user_id=52,
+            status=LoginRequestStatus.PENDING,
+            resolved_by_session_id=None,
+        )
+        db = SimpleNamespace(execute=AsyncMock(return_value=scalar_one_or_none_result(pending_request)), commit=AsyncMock())
+        with patch("core.utils.publish_user_event", AsyncMock(side_effect=RuntimeError("pub down"))), patch.object(
+            session_service, "logger"
+        ) as logger:
+            result = await session_service.reject_login_request(db, request_id, approver_session)
+
+        self.assertEqual(result, {"success": True})
+        self.assertEqual(pending_request.status, LoginRequestStatus.REJECTED)
+        self.assertEqual(pending_request.resolved_by_session_id, approver_session.id)
+        db.commit.assert_awaited_once()
+        logger.warning.assert_called_once()
+
+        active_session = SimpleNamespace(id=uuid.uuid4(), user_id=61, is_primary=True)
+        db = SimpleNamespace(commit=AsyncMock())
+        promoted = SimpleNamespace(id=uuid.uuid4())
+        with patch("core.services.session_service.deactivate_session", AsyncMock()) as deactivate_session, \
+             patch("core.services.session_service.promote_next_primary", AsyncMock(return_value=promoted)) as promote_next_primary, \
+             patch("core.utils.publish_user_event", AsyncMock(side_effect=RuntimeError("pub down"))), \
+             patch.object(session_service, "logger") as logger:
+            result = await session_service.logout_session(db, active_session)
+
+        self.assertIs(result, promoted)
+        deactivate_session.assert_awaited_once_with(db, active_session)
+        promote_next_primary.assert_awaited_once_with(db, active_session.user_id)
+        db.commit.assert_awaited_once()
+        logger.warning.assert_called_once()
+
+        revoked = [SimpleNamespace(id=uuid.uuid4()), SimpleNamespace(id=uuid.uuid4())]
+        with patch("core.utils.publish_user_event", AsyncMock(side_effect=RuntimeError("pub down"))), \
+             patch("core.services.session_service.blacklist_session", AsyncMock()) as blacklist_session, \
+             patch.object(session_service, "logger") as logger:
+            await session_service.publish_session_revocation(77, revoked)
+
+        self.assertEqual(blacklist_session.await_count, 2)
+        logger.warning.assert_called_once()
+
+    async def test_blacklist_failure_and_zero_blacklist_lookup(self):
+        session_id = uuid.uuid4()
+        with patch("bot.utils.redis_helpers.get_redis", AsyncMock(side_effect=RuntimeError("redis down"))), patch.object(
+            session_service, "logger"
+        ) as logger:
+            await session_service.blacklist_session(session_id)
+
+        logger.warning.assert_called_once()
+
+        redis = SimpleNamespace(exists=AsyncMock(return_value=0))
+        with patch("bot.utils.redis_helpers.get_redis", AsyncMock(return_value=redis)):
+            self.assertFalse(await session_service.is_session_blacklisted("missing-session"))
 
 
 if __name__ == "__main__":

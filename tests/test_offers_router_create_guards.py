@@ -177,6 +177,46 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "not competitive")
 
+    async def test_create_offer_rejects_missing_or_invalid_retail_lots(self):
+        current_user = make_user()
+        commodity = SimpleNamespace(id=1)
+        settings = SimpleNamespace(max_active_offers=5)
+
+        with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=settings,
+        ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=0)), patch(
+            "core.services.trade_service.validate_quantity",
+            return_value=(True, None),
+        ), patch("core.services.trade_service.validate_price", return_value=(True, None)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_offer(
+                    make_offer(is_wholesale=False, lot_sizes=None),
+                    db=FakeDB(scalar_result=0, get_result=commodity),
+                    current_user=current_user,
+                )
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "برای آفر خُرد باید لات‌ها مشخص شوند.")
+
+        with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=settings,
+        ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=0)), patch(
+            "core.services.trade_service.validate_quantity",
+            return_value=(True, None),
+        ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
+            "core.services.trade_service.validate_lot_sizes",
+            return_value=(False, "bad lots", [5, 5]),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_offer(
+                    make_offer(is_wholesale=False, lot_sizes=[4, 6]),
+                    db=FakeDB(scalar_result=0, get_result=commodity),
+                    current_user=current_user,
+                )
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "bad lots")
+
 
 if __name__ == "__main__":
     unittest.main()

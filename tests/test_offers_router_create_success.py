@@ -209,6 +209,66 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         response_mock.assert_called_once_with(reloaded_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
         self.assertEqual(result, {"id": 88, "channel_message_id": 555})
 
+    async def test_create_offer_tolerates_sse_expiry_calculation_failures(self):
+        commodity = SimpleNamespace(id=1)
+        reloaded_offer = make_reloaded_offer(offer_id=99)
+        reloaded_offer.created_at = SimpleNamespace(timestamp=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        db = FakeDB(
+            get_results=[commodity],
+            execute_results=[FakeExecuteResult(reloaded_offer)],
+        )
+        current_user = make_user()
+        settings = SimpleNamespace(max_active_offers=5)
+        async_settings = SimpleNamespace(offer_expiry_minutes=15)
+
+        with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=settings,
+        ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=0)), patch(
+            "core.services.trade_service.validate_quantity",
+            return_value=(True, None),
+        ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch("api.routers.offers.current_server", return_value="foreign"), patch(
+            "api.routers.offers.send_offer_to_channel",
+            new=AsyncMock(return_value=None),
+        ), patch("core.cache.incr_active_offer_count", new=AsyncMock()), patch(
+            "api.routers.offers.increment_user_counter",
+            new=AsyncMock(),
+        ), patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=async_settings),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "api.routers.offers.offer_to_response",
+            return_value={"id": 99},
+        ), patch("api.routers.offers.to_jalali_str", return_value=""):
+            result = await create_offer(make_offer(), db=db, current_user=current_user)
+
+        publish_mock.assert_awaited_once_with(
+            "offer:created",
+            {
+                "id": 99,
+                "user_id": None,
+                "offer_type": "buy",
+                "commodity_id": 1,
+                "commodity_name": "Gold",
+                "quantity": 10,
+                "remaining_quantity": 10,
+                "price": 123456,
+                "status": "active",
+                "created_at": "",
+                "user_account_name": "",
+                "is_own_offer": False,
+                "notes": "urgent",
+                "is_wholesale": True,
+                "lot_sizes": None,
+                "original_lot_sizes": None,
+                "expires_at_ts": None,
+            },
+        )
+        self.assertEqual(result, {"id": 99})
+
 
 if __name__ == "__main__":
     unittest.main()
