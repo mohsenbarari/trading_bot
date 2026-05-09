@@ -72,7 +72,11 @@
   .btn-primary {
     width: 100%;
     padding: 0.75rem 1rem;
-    background: linear-gradient(to right, var(--color-primary-500), var(--color-primary-600));
+    background: linear-gradient(
+      to right,
+      var(--color-primary-500, #f59e0b),
+      var(--color-primary-600, #d97706)
+    );
     color: white;
     font-weight: 700;
     border-radius: 0.75rem;
