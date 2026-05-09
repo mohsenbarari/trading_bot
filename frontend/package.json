@@ -55,6 +55,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
+    "@vitejs/plugin-legacy": "^7.2.1",
     "@prettier/plugin-oxc": "^0.0.4",
     "@tsconfig/node22": "^22.0.2",
     "@types/jsdom": "^21.1.7",

@@ -1,10 +1,18 @@
 import { defineConfig } from 'vite'
+import legacy from '@vitejs/plugin-legacy'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
+    legacy({
+      // Some mobile/incognito browsers support ES modules but still fail to
+      // parse newer syntax like optional chaining/private fields in our modern
+      // bundle. Keep the main module output conservative and provide a
+      // dedicated legacy fallback for older engines.
+      targets: ['defaults', 'not IE 11'],
+    }),
     vue(),
     VitePWA({
       registerType: 'autoUpdate',
@@ -80,7 +88,7 @@ export default defineConfig({
   build: {
     outDir: '../mini_app_dist',
     emptyOutDir: true,
-    target: 'es2020',
+    target: 'es2018',
   },
   server: {
     proxy: {
