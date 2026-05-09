@@ -1,27 +1,19 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
-import { onMounted, ref, watch } from 'vue'
-import BottomNav from './components/BottomNav.vue'
-import SessionApprovalModal from './components/SessionApprovalModal.vue'
-import PWAInstallOverlay from './components/PWAInstallOverlay.vue'
-import AppToasts from './components/AppToasts.vue'
-import { setupExpiryTimer, apiFetch, isAppConnecting } from './utils/auth'
-import { useWebSocket } from './composables/useWebSocket'
-import { useNotificationRuntime } from './composables/useNotificationRuntime'
-import { initChatUploadBackground } from './services/chatUploadBackground'
-import { initChatDocumentDownloadBackground } from './services/chatDocumentDownloadBackground'
-import { initChatFileDebugOverlay } from './composables/chat/useChatFileHandler'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { isAppConnecting } from './utils/auth'
 
 
 const route = useRoute()
 const router = useRouter()
-const { on, off, connect } = useWebSocket()
+const AuthenticatedShell = defineAsyncComponent(() => import('./components/AppAuthenticatedShell.vue'))
 
 // Track whether the router's FIRST navigation (which includes loading the
 // lazy-loaded route component chunk from the network) has completed.
 // Until then we show a full-screen spinner instead of a blank white page.
 const isFirstRouteReady = ref(false)
 router.isReady().then(() => { isFirstRouteReady.value = true })
+const shouldRenderAuthenticatedShell = computed(() => isFirstRouteReady.value && route.name !== 'login')
 
 watch(isFirstRouteReady, (ready) => {
   if (!ready) return
@@ -35,50 +27,6 @@ watch(isFirstRouteReady, (ready) => {
     delete (window as any).__appBootTimeoutId
   }
 }, { immediate: true })
-
-const ensureSessionValidation = async () => {
-  const refreshToken = localStorage.getItem('refresh_token')
-  if (!refreshToken) return
-  try {
-    await apiFetch('/api/sessions/verify', {
-      method: 'POST',
-      body: JSON.stringify({ refresh_token: refreshToken })
-    })
-  } catch (e) {
-    // If 401, apiFetch will automatically log the user out
-  }
-}
-
-onMounted(() => {
-  // راه‌اندازی تایمر انقضای توکن — ریدایرکت خودکار به لاگین
-  setupExpiryTimer()
-
-  // Show the on-screen [chat-file] diagnostic overlay when ?chatFileDebug=1
-  // is set (or persisted in localStorage). No-op otherwise.
-  initChatFileDebugOverlay()
-
-  // Initialize the background chat upload service. This restores any
-  // pending uploads saved to IndexedDB from a previous session and resumes
-  // them in the background — so media sends continue across page reloads
-  // and in-app navigation away from the messenger.
-  void initChatUploadBackground({
-    apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
-    getAuthToken: () => localStorage.getItem('auth_token'),
-  })
-
-  void initChatDocumentDownloadBackground({
-    apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
-    getAuthToken: () => localStorage.getItem('auth_token'),
-  })
-
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    (window as any).deferredPrompt = e;
-    window.dispatchEvent(new Event('pwa-install-ready'));
-  });
-})
-
-useNotificationRuntime({ connect, on, off, ensureSessionValidation })
 </script>
 
 
@@ -109,17 +57,7 @@ useNotificationRuntime({ connect, on, off, ensureSessionValidation })
       </RouterView>
     </div>
 
-    <!-- Bottom Navigation (Hidden on Login) -->
-    <BottomNav v-if="route.name !== 'login'" />
-
-    <!-- Session Approval Modal (always mounted for logged-in users) -->
-    <SessionApprovalModal v-if="route.name !== 'login'" />
-
-    <!-- Global In-App Toast Notifications -->
-    <AppToasts v-if="route.name !== 'login'" />
-
-    <!-- PWA Install Overlay -->
-    <PWAInstallOverlay />
+    <AuthenticatedShell v-if="shouldRenderAuthenticatedShell" />
     
   </div>
 </template>
