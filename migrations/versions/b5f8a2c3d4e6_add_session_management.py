@@ -9,7 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ENUM, UUID
 
 
 # revision identifiers, used by Alembic.
@@ -20,6 +20,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    platform_enum = ENUM('telegram_mini_app', 'web', 'android', name='platform', create_type=False)
+    login_request_status_enum = ENUM('pending', 'approved', 'rejected', 'expired', name='loginrequeststatus', create_type=False)
+
     # ===== 1. Add max_sessions to users =====
     op.add_column('users', sa.Column('max_sessions', sa.Integer(), nullable=False, server_default='1'))
 
@@ -30,6 +34,8 @@ def upgrade() -> None:
 
     # Drop old enum type
     op.execute("DROP TYPE IF EXISTS platform CASCADE;")
+    platform_enum.create(bind, checkfirst=True)
+    login_request_status_enum.create(bind, checkfirst=True)
 
     # ===== 3. Create new user_sessions table =====
     op.create_table(
@@ -38,7 +44,7 @@ def upgrade() -> None:
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('device_name', sa.String(255), nullable=False, server_default='Unknown Device'),
         sa.Column('device_ip', sa.String(45), nullable=True),
-        sa.Column('platform', sa.Enum('telegram_mini_app', 'web', 'android', name='platform'), nullable=False, server_default='web'),
+        sa.Column('platform', platform_enum, nullable=False, server_default='web'),
         sa.Column('refresh_token_hash', sa.String(255), nullable=True),
         sa.Column('is_primary', sa.Boolean(), nullable=False, server_default='false'),
         sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'),
@@ -59,7 +65,7 @@ def upgrade() -> None:
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('requester_device_name', sa.String(255), nullable=False, server_default='Unknown Device'),
         sa.Column('requester_ip', sa.String(45), nullable=True),
-        sa.Column('status', sa.Enum('pending', 'approved', 'rejected', 'expired', name='loginrequeststatus'), nullable=False, server_default='pending'),
+        sa.Column('status', login_request_status_enum, nullable=False, server_default='pending'),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('resolved_by_session_id', UUID(as_uuid=True), nullable=True),
