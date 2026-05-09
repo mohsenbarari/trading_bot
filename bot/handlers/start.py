@@ -17,6 +17,7 @@ from models.user import User
 from bot.states import Registration
 from bot.keyboards import get_share_contact_keyboard, get_persistent_menu_keyboard
 from bot.handlers.link_account import prompt_contact_for_account_link
+from bot.utils.channel_invites import build_channel_join_request_line
 from bot.message_manager import (
     set_anchor, 
     delete_previous_anchor,
@@ -276,17 +277,22 @@ async def handle_address(message: types.Message, state: FSMContext):
         invitation.is_used = True
         session.add(new_user)
         await session.commit()
-        
-        # ساخت پیام خوش‌آمدگویی با لینک کانال
+
         welcome_text = (
             f"✅ خوش آمدید، {message.from_user.full_name}!\n"
             f"ثبت‌نام شما با موفقیت انجام شد.\n\n"
-            f"از لینک زیر جهت عضویت در کانال معاملات استفاده کنید:\n"
-            
         )
-        
-        if settings.channel_invite_link:
-            welcome_text += f"🔗 [عضویت در کانال معاملات]({settings.channel_invite_link})\n\n"
+
+        join_request_line = await build_channel_join_request_line(
+            message.bot,
+            user_id=new_user.id,
+        )
+        if join_request_line:
+            welcome_text += (
+                "از لینک زیر برای ثبت درخواست عضویت در کانال معاملات استفاده کنید:\n"
+                f"{join_request_line}\n"
+                "پس از ثبت درخواست، عضویت شما به صورت خودکار تایید می‌شود.\n\n"
+            )
         
         welcome_text += "برای دسترسی به امکانات، از دکمه‌های زیر استفاده کنید."
         
@@ -296,6 +302,48 @@ async def handle_address(message: types.Message, state: FSMContext):
             reply_markup=get_persistent_menu_keyboard(invitation.role, settings.frontend_url)
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
+
+
+@router.chat_join_request()
+async def handle_channel_join_request(join_request: types.ChatJoinRequest):
+    if not settings.channel_id or join_request.chat.id != settings.channel_id:
+        return
+
+    async with AsyncSessionLocal() as session:
+        stmt = select(User).where(
+            User.telegram_id == join_request.from_user.id,
+            User.is_deleted == False,
+        )
+        user = (await session.execute(stmt)).scalar_one_or_none()
+
+    if not user or not user.has_bot_access:
+        await join_request.bot.decline_chat_join_request(
+            chat_id=join_request.chat.id,
+            user_id=join_request.from_user.id,
+        )
+        try:
+            await join_request.bot.send_message(
+                chat_id=join_request.user_chat_id,
+                text=(
+                    "❌ درخواست عضویت شما تایید نشد.\n\n"
+                    "ابتدا ثبت‌نام یا لینک‌کردن حساب خود در ربات را کامل کنید و سپس دوباره تلاش کنید."
+                ),
+            )
+        except Exception:
+            logger.exception("Failed to notify declined channel join request user")
+        return
+
+    await join_request.bot.approve_chat_join_request(
+        chat_id=join_request.chat.id,
+        user_id=join_request.from_user.id,
+    )
+    try:
+        await join_request.bot.send_message(
+            chat_id=join_request.user_chat_id,
+            text="✅ درخواست عضویت شما به صورت خودکار تایید شد. اکنون می‌توانید از کانال معاملات استفاده کنید.",
+        )
+    except Exception:
+        logger.exception("Failed to notify approved channel join request user")
 
 
 # --- تایید معامله ---

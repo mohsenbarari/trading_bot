@@ -133,14 +133,15 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         state = FakeState()
         await state.update_data(link_user_id=99)
         message = SimpleNamespace(
+            bot=SimpleNamespace(),
             text="تهران خیابان آزادی پلاک ۱۰",
             from_user=SimpleNamespace(id=10, username="u", full_name="Linked User"),
             answer=AsyncMock(),
         )
 
         with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
-            "bot.handlers.link_account.settings",
-            SimpleNamespace(channel_invite_link="https://t.me/join"),
+            "bot.handlers.link_account.build_channel_join_request_line",
+            new=AsyncMock(return_value="🔗 [درخواست عضویت در کانال معاملات](https://t.me/joinreq)"),
         ):
             await handle_address_completion(message, state)
 
@@ -150,7 +151,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(user.has_bot_access)
         self.assertEqual(db.commits, 1)
         self.assertEqual(state.cleared, 1)
-        self.assertIn("عضویت در کانال معاملات", message.answer.await_args.args[0])
+        self.assertIn("درخواست عضویت در کانال معاملات", message.answer.await_args.args[0])
 
 
 if __name__ == "__main__":

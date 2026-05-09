@@ -102,7 +102,10 @@ class BotStartRegistrationAddressTests(unittest.IsolatedAsyncioTestCase):
             return_value=FakeSessionContext(session),
         ), patch("bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"), patch(
             "bot.handlers.start.set_anchor"
-        ) as set_anchor, patch("bot.handlers.start.settings", SimpleNamespace(channel_invite_link="https://t.me/join", frontend_url="https://app")):
+        ) as set_anchor, patch(
+            "bot.handlers.start.build_channel_join_request_line",
+            new=AsyncMock(return_value="🔗 [درخواست عضویت در کانال معاملات](https://t.me/joinreq)"),
+        ), patch("bot.handlers.start.settings", SimpleNamespace(frontend_url="https://app")):
             await handle_address(message, state)
 
         self.assertEqual(state.cleared, 1)
@@ -112,7 +115,7 @@ class BotStartRegistrationAddressTests(unittest.IsolatedAsyncioTestCase):
         new_user = session.added[0]
         self.assertEqual(new_user.telegram_id, 5)
         self.assertEqual(new_user.account_name, "acc")
-        self.assertIn("عضویت در کانال معاملات", message.answer.await_args.args[0])
+        self.assertIn("درخواست عضویت در کانال معاملات", message.answer.await_args.args[0])
         set_anchor.assert_called_once_with(21, 66)
 
 
