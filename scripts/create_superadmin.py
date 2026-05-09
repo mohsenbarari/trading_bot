@@ -32,7 +32,7 @@ async def create_superadmin(mobile: str, account_name: str, temp_password: str):
             role=UserRole.SUPER_ADMIN,
             full_name=account_name,
             address="System Default",
-            has_bot_access=True,
+            has_bot_access=False,
             telegram_id=None,
             must_change_password=True,
             admin_password_hash=get_password_hash(temp_password)
@@ -46,7 +46,7 @@ async def create_superadmin(mobile: str, account_name: str, temp_password: str):
                 f"You can now login with:\n"
                 f"Mobile: {mobile}\n"
                 f"OTP: (via SMS, and then must enter the temporary password to set a new one)\n"
-                f"Bot activation: open the bot and send /start or /link, then share the same mobile number to link Telegram."
+                f"Bot activation: open the bot and send /start or /link, then share the same mobile number and complete the address step to finish registration."
             )
         except Exception as e:
             await db.rollback()
