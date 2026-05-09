@@ -2,11 +2,10 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Home, Store, User, MessageCircle, Shield, Menu, X } from 'lucide-vue-next'
-import { apiFetch } from '../utils/auth'
+import { currentUserSummary, isAdminRole, primeCurrentUserSummary } from '../utils/currentUser'
 import { useNotificationStore } from '../stores/notifications'
 
 const route = useRoute()
-const userRole = ref<string>('')
 const isExpanded = ref(false)
 const notificationStore = useNotificationStore()
 
@@ -20,20 +19,13 @@ watch(() => route.name, () => {
 })
 
 onMounted(async () => {
-  try {
-    const token = localStorage.getItem('auth_token')
-    if (!token) return
-    const res = await apiFetch('/api/auth/me')
-    if (res.ok) {
-      const data = await res.json()
-      userRole.value = data.role
-    }
-  } catch (e) {
-    // silent
-  }
+  const token = localStorage.getItem('auth_token')
+  if (!token) return
+  void primeCurrentUserSummary()
 })
 
-const isAdmin = computed(() => ['مدیر ارشد', 'مدیر میانی'].includes(userRole.value))
+const userRole = computed(() => currentUserSummary.value?.role || '')
+const isAdmin = computed(() => isAdminRole(userRole.value))
 
 const baseItems = [
   { name: 'dashboard', label: 'خانه', icon: Home, path: '/' },
