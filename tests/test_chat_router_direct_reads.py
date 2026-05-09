@@ -91,6 +91,10 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
             chat_id=20,
             can_send=True,
             member_role="admin",
+            member_count=4,
+            max_members=50,
+            is_system=False,
+            is_mandatory=False,
         )
         channel_row = SimpleNamespace(
             id=-30,
@@ -106,6 +110,10 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
             chat_id=30,
             can_send=False,
             member_role="member",
+            member_count=12,
+            max_members=None,
+            is_system=True,
+            is_mandatory=True,
         )
         db = FakeDB(execute_results=[FakeExecuteResult(mappings=direct_rows)])
 
@@ -122,6 +130,14 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         groups_mock.assert_awaited_once_with(db, current_user_id=5)
         channels_mock.assert_awaited_once_with(db, current_user_id=5)
         self.assertEqual([item.other_user_name for item in result], ["Channel", "Group", "Direct"])
+        self.assertEqual(result[0].member_count, 12)
+        self.assertIsNone(result[0].max_members)
+        self.assertTrue(result[0].is_system)
+        self.assertTrue(result[0].is_mandatory)
+        self.assertEqual(result[1].member_count, 4)
+        self.assertEqual(result[1].max_members, 50)
+        self.assertFalse(result[1].is_system)
+        self.assertFalse(result[1].is_mandatory)
 
     async def test_search_messages_builds_query_and_serializes(self):
         current_user = SimpleNamespace(id=5)
