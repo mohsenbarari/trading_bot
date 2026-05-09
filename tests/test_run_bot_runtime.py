@@ -1,0 +1,85 @@
+import asyncio
+import runpy
+import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import run_bot
+
+
+async def _listener_forever(_bot):
+    await asyncio.sleep(3600)
+
+
+class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_main_returns_early_without_bot_token(self):
+        with patch.object(run_bot.settings, 'bot_token', None), patch('run_bot.init_db', AsyncMock()) as init_db:
+            await run_bot.main()
+
+        init_db.assert_not_awaited()
+
+    async def test_main_initializes_and_registers_all_routers(self):
+        fake_bot = MagicMock()
+        fake_bot.session.close = AsyncMock()
+        fake_dp = MagicMock()
+        fake_dp.include_router = MagicMock()
+        fake_dp.start_polling = AsyncMock()
+        fake_dp.update.outer_middleware = MagicMock()
+        auth_middleware = object()
+
+        with patch.object(run_bot.settings, 'bot_token', 'token'), patch.object(
+            run_bot.settings, 'redis_url', 'redis://localhost:6379/0'
+        ), patch('run_bot.init_db', AsyncMock()) as init_db, patch(
+            'run_bot.setup_event_listeners'
+        ) as setup_event_listeners, patch('run_bot.Bot', return_value=fake_bot), patch(
+            'run_bot.RedisStorage.from_url', return_value='storage'
+        ) as storage_from_url, patch('run_bot.Dispatcher', return_value=fake_dp), patch(
+            'run_bot.AuthMiddleware', return_value=auth_middleware
+        ) as auth_ctor, patch('run_bot.listen_trade_suggestion_events', _listener_forever):
+            await run_bot.main()
+
+        init_db.assert_awaited_once()
+        setup_event_listeners.assert_called_once_with()
+        storage_from_url.assert_called_once_with('redis://localhost:6379/0')
+        auth_ctor.assert_called_once_with(run_bot.AsyncSessionLocal)
+        fake_dp.update.outer_middleware.assert_called_once_with(auth_middleware)
+        self.assertEqual(fake_dp.include_router.call_count, 12)
+        fake_dp.start_polling.assert_awaited_once_with(fake_bot)
+        fake_bot.session.close.assert_awaited_once()
+
+    async def test_main_logs_polling_errors_and_still_closes_bot(self):
+        fake_bot = MagicMock()
+        fake_bot.session.close = AsyncMock()
+        fake_dp = MagicMock()
+        fake_dp.include_router = MagicMock()
+        fake_dp.start_polling = AsyncMock(side_effect=RuntimeError('boom'))
+        fake_dp.update.outer_middleware = MagicMock()
+
+        with patch.object(run_bot.settings, 'bot_token', 'token'), patch.object(
+            run_bot.settings, 'redis_url', 'redis://localhost:6379/0'
+        ), patch('run_bot.init_db', AsyncMock()), patch('run_bot.setup_event_listeners'), patch(
+            'run_bot.Bot', return_value=fake_bot
+        ), patch('run_bot.RedisStorage.from_url', return_value='storage'), patch(
+            'run_bot.Dispatcher', return_value=fake_dp
+        ), patch('run_bot.AuthMiddleware', return_value=object()), patch(
+            'run_bot.listen_trade_suggestion_events', _listener_forever
+        ), patch.object(run_bot, 'logger') as logger:
+            await run_bot.main()
+
+        logger.error.assert_called_once()
+        fake_bot.session.close.assert_awaited_once()
+
+    async def test_main_module_logs_stop_message_on_keyboard_interrupt(self):
+        fake_logger = MagicMock()
+
+        def interrupting_run(coro):
+            coro.close()
+            raise KeyboardInterrupt
+
+        with patch('asyncio.run', side_effect=interrupting_run), patch('logging.getLogger', return_value=fake_logger):
+            runpy.run_module('run_bot', run_name='__main__')
+
+        fake_logger.info.assert_called_with('Bot stopped!')
+
+
+if __name__ == '__main__':
+    unittest.main()

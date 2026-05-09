@@ -182,6 +182,91 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         response_mock.assert_called_once_with(reloaded_trade)
         self.assertEqual(result, {"id": 88, "trade_number": 10000})
 
+    async def test_execute_trade_authoritatively_updates_retail_lots_and_tolerates_side_effect_failures(self):
+        locked_user = make_user()
+        offer = make_offer(
+            offer_type=OfferType.BUY,
+            is_wholesale=False,
+            lot_sizes=[3, 1],
+            quantity=4,
+            remaining_quantity=4,
+        )
+        reloaded_trade = SimpleNamespace(id=89)
+        user_for_counter = make_user()
+        db = FakeDB(
+            get_results=[offer, user_for_counter],
+            execute_results=[
+                FakeExecuteResult(single=locked_user),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=10001,
+        )
+        background_tasks = BackgroundTasks()
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 3, []),
+        ), patch("sqlalchemy.orm.attributes.flag_modified") as flag_modified, patch(
+            "api.routers.trades.update_channel_buttons",
+            new=AsyncMock(side_effect=RuntimeError("button failure")),
+        ), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(side_effect=RuntimeError("notif failure")),
+        ) as notif_mock, patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ) as counter_mock, patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "api.routers.trades.trade_to_response",
+            return_value={"id": 89, "trade_number": 10001},
+        ) as response_mock, patch("api.routers.trades.logger") as logger:
+            result = await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=3),
+                background_tasks,
+                db=db,
+                current_user=locked_user,
+            )
+
+        self.assertEqual(offer.remaining_quantity, 1)
+        self.assertEqual(offer.lot_sizes, [1])
+        flag_modified.assert_called_once_with(offer, "lot_sizes")
+        self.assertEqual(len(background_tasks.tasks), 2)
+        notif_mock.assert_awaited_once()
+        counter_mock.assert_awaited_once_with(db, user_for_counter, "trade", 3)
+        self.assertEqual(publish_mock.await_count, 2)
+        logger.error.assert_called_once()
+        response_mock.assert_called_once_with(reloaded_trade)
+        self.assertEqual(result, {"id": 89, "trade_number": 10001})
+
+    async def test_execute_trade_authoritatively_reraises_non_stale_commit_errors(self):
+        locked_user = make_user()
+        offer = make_offer()
+        db = FakeDB(
+            get_results=[offer],
+            execute_results=[FakeExecuteResult(single=locked_user), FakeExecuteResult(single_or_none=None)],
+            commit_side_effect=RuntimeError("db boom"),
+            scalar_result=10002,
+        )
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ):
+            with self.assertRaises(RuntimeError) as exc_info:
+                await _execute_trade_authoritatively(
+                    TradeCreate(offer_id=7, quantity=4),
+                    BackgroundTasks(),
+                    db=db,
+                    current_user=locked_user,
+                )
+
+        self.assertEqual(str(exc_info.exception), "db boom")
+
 
 if __name__ == "__main__":
     unittest.main()

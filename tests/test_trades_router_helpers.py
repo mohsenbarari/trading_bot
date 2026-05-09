@@ -1,0 +1,364 @@
+import json
+import asyncio
+import unittest
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
+
+from api.routers import trades
+from core.enums import NotificationCategory, NotificationLevel
+from models.offer import OfferStatus
+
+
+class FakeHttpClientContext:
+    def __init__(self, *, response=None, error=None):
+        self.response = response
+        self.error = error
+        self.post = AsyncMock(side_effect=self._post)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def _post(self, *_args, **_kwargs):
+        if self.error is not None:
+            raise self.error
+        return self.response
+
+
+class FakeLoop:
+    def __init__(self, *, result=True, error=None):
+        self.result = result
+        self.error = error
+        self.closed = False
+
+    def run_until_complete(self, coro):
+        coro.close()
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+    def close(self):
+        self.closed = True
+
+
+class _AsyncSessionContext:
+    def __init__(self, session):
+        self.session = session
+
+    async def __aenter__(self):
+        return self.session
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
+    async def test_trade_to_response_and_telegram_helpers(self):
+        trade = SimpleNamespace(
+            id=1,
+            trade_number=10001,
+            offer_id=10,
+            trade_type=SimpleNamespace(value="buy"),
+            commodity_id=5,
+            commodity=SimpleNamespace(name="Gold"),
+            quantity=7,
+            price=75000,
+            status=SimpleNamespace(value="pending"),
+            offer_user_id=11,
+            offer_user=SimpleNamespace(account_name="seller"),
+            responder_user_id=22,
+            responder_user=SimpleNamespace(account_name="buyer"),
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        )
+
+        with patch("api.routers.trades.to_jalali_str", return_value="1403/10/12"):
+            response = trades.trade_to_response(trade)
+        self.assertEqual(response.trade_type, "buy")
+        self.assertEqual(response.commodity_name, "Gold")
+        self.assertEqual(response.offer_user_name, "seller")
+        self.assertEqual(response.responder_user_name, "buyer")
+        self.assertEqual(response.created_at, "1403/10/12")
+
+        with patch("api.routers.trades.os.getenv", return_value=None):
+            self.assertFalse(await trades.send_telegram_message(1, "hello"))
+
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch(
+            "api.routers.trades.httpx.AsyncClient",
+            return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
+        ):
+            self.assertTrue(await trades.send_telegram_message(1, "hello"))
+
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch(
+            "api.routers.trades.httpx.AsyncClient",
+            return_value=FakeHttpClientContext(error=RuntimeError("telegram down")),
+        ), patch.object(trades, "logger") as logger:
+            self.assertFalse(await trades.send_telegram_message(1, "hello"))
+        logger.error.assert_called_once()
+
+        with patch("api.routers.trades.os.getenv", return_value=None):
+            self.assertFalse(trades.send_telegram_message_sync(1, "hello"))
+
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch(
+            "api.routers.trades.httpx.post",
+            return_value=SimpleNamespace(status_code=200),
+        ):
+            self.assertTrue(trades.send_telegram_message_sync(1, "hello"))
+
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch(
+            "api.routers.trades.httpx.post",
+            side_effect=RuntimeError("telegram down"),
+        ), patch.object(trades, "logger") as logger:
+            self.assertFalse(trades.send_telegram_message_sync(1, "hello"))
+        logger.error.assert_called_once()
+
+    async def test_update_channel_button_helpers(self):
+        offer = SimpleNamespace(
+            id=9,
+            quantity=30,
+            remaining_quantity=0,
+            is_wholesale=True,
+            lot_sizes=None,
+            channel_message_id=123,
+            status=OfferStatus.ACTIVE,
+        )
+
+        with patch("api.routers.trades.os.getenv", return_value=None):
+            self.assertFalse(await trades.update_channel_buttons(offer))
+
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
+            trades.settings, "channel_id", -100
+        ), patch(
+            "api.routers.trades.httpx.AsyncClient",
+            return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
+        ) as client_ctor:
+            self.assertTrue(await trades.update_channel_buttons(offer))
+
+        posted_payload = client_ctor.return_value.post.await_args.kwargs["json"]
+        self.assertEqual(posted_payload, {"chat_id": -100, "message_id": 123})
+
+        wholesale_offer = SimpleNamespace(
+            id=11,
+            quantity=30,
+            remaining_quantity=12,
+            is_wholesale=True,
+            lot_sizes=None,
+            channel_message_id=125,
+            status=OfferStatus.ACTIVE,
+        )
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
+            trades.settings, "channel_id", -100
+        ), patch(
+            "api.routers.trades.httpx.AsyncClient",
+            return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
+        ) as client_ctor:
+            self.assertTrue(await trades.update_channel_buttons(wholesale_offer))
+
+        self.assertEqual(
+            client_ctor.return_value.post.await_args.kwargs["json"]["reply_markup"]["inline_keyboard"][0][0]["text"],
+            "12 عدد",
+        )
+
+        active_offer = SimpleNamespace(
+            id=10,
+            quantity=30,
+            remaining_quantity=18,
+            is_wholesale=False,
+            lot_sizes=[10, 8],
+            channel_message_id=124,
+            status=OfferStatus.ACTIVE,
+        )
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
+            trades.settings, "channel_id", -100
+        ), patch("api.routers.trades.get_available_trade_amounts", return_value=[10, 8]), patch(
+            "api.routers.trades.httpx.AsyncClient",
+            return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
+        ) as client_ctor:
+            self.assertTrue(await trades.update_channel_buttons(active_offer))
+
+        buttons = client_ctor.return_value.post.await_args.kwargs["json"]["reply_markup"]["inline_keyboard"][0]
+        self.assertEqual([button["text"] for button in buttons], ["10 عدد", "8 عدد"])
+
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
+            trades.settings, "channel_id", -100
+        ), patch("api.routers.trades.get_available_trade_amounts", return_value=[]), patch(
+            "api.routers.trades.httpx.AsyncClient",
+            return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
+        ) as client_ctor:
+            self.assertTrue(await trades.update_channel_buttons(active_offer))
+
+        self.assertNotIn("reply_markup", client_ctor.return_value.post.await_args.kwargs["json"])
+
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
+            trades.settings, "channel_id", -100
+        ), patch(
+            "api.routers.trades.httpx.AsyncClient",
+            return_value=FakeHttpClientContext(error=RuntimeError("telegram down")),
+        ), patch.object(trades, "logger") as logger:
+            self.assertFalse(await trades.update_channel_buttons(active_offer))
+        logger.error.assert_called_once()
+
+    async def test_sync_channel_update_and_expiry_helpers(self):
+        with patch("api.routers.trades.os.getenv", return_value=None):
+            self.assertFalse(trades.update_channel_buttons_sync(1, 5, OfferStatus.ACTIVE, None))
+
+        fake_loop = FakeLoop(result=True)
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
+            trades.settings, "channel_id", -100
+        ), patch("asyncio.new_event_loop", return_value=fake_loop), patch(
+            "asyncio.set_event_loop"
+        ):
+            self.assertTrue(trades.update_channel_buttons_sync(1, 5, OfferStatus.ACTIVE, None))
+        self.assertTrue(fake_loop.closed)
+
+        fake_loop = FakeLoop(error=RuntimeError("loop down"))
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
+            trades.settings, "channel_id", -100
+        ), patch("asyncio.new_event_loop", return_value=fake_loop), patch(
+            "asyncio.set_event_loop"
+        ), patch.object(trades, "logger") as logger:
+            self.assertFalse(trades.update_channel_buttons_sync(1, 5, OfferStatus.ACTIVE, None))
+        logger.error.assert_called_once()
+
+        session = SimpleNamespace(get=AsyncMock(return_value=None))
+        with patch("api.routers.trades.os.getenv", return_value=None), patch.object(trades.settings, "channel_id", -100):
+            self.assertFalse(await trades._update_channel_buttons_async(1, 5, OfferStatus.ACTIVE, None))
+
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
+            trades.settings, "channel_id", -100
+        ), patch("core.db.AsyncSessionLocal", return_value=_AsyncSessionContext(session)):
+            self.assertFalse(await trades._update_channel_buttons_async(1, 5, OfferStatus.ACTIVE, None))
+
+        offer = SimpleNamespace(
+            id=1,
+            quantity=30,
+            remaining_quantity=18,
+            is_wholesale=True,
+            channel_message_id=321,
+        )
+        session = SimpleNamespace(get=AsyncMock(return_value=offer))
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
+            trades.settings, "channel_id", -100
+        ), patch("core.db.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
+            "api.routers.trades.httpx.AsyncClient",
+            return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
+        ) as client_ctor:
+            self.assertTrue(await trades._update_channel_buttons_async(1, 18, OfferStatus.ACTIVE, None))
+
+        payload = client_ctor.return_value.post.await_args.kwargs["json"]
+        self.assertEqual(payload["reply_markup"]["inline_keyboard"][0][0]["text"], "18 عدد")
+
+        retail_offer = SimpleNamespace(
+            id=2,
+            quantity=30,
+            remaining_quantity=18,
+            is_wholesale=False,
+            channel_message_id=322,
+        )
+        session = SimpleNamespace(get=AsyncMock(return_value=retail_offer))
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
+            trades.settings, "channel_id", -100
+        ), patch("core.db.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
+            "api.routers.trades.get_available_trade_amounts", return_value=[]
+        ), patch(
+            "api.routers.trades.httpx.AsyncClient",
+            return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
+        ) as client_ctor:
+            self.assertTrue(await trades._update_channel_buttons_async(2, 18, OfferStatus.ACTIVE, [10, 8]))
+        self.assertEqual(client_ctor.return_value.post.await_args.kwargs["json"], {"chat_id": -100, "message_id": 322})
+
+        session = SimpleNamespace(get=AsyncMock(return_value=retail_offer))
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
+            trades.settings, "channel_id", -100
+        ), patch("core.db.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
+            "api.routers.trades.get_available_trade_amounts", return_value=[10, 8]
+        ), patch(
+            "api.routers.trades.httpx.AsyncClient",
+            return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
+        ) as client_ctor:
+            self.assertTrue(await trades._update_channel_buttons_async(2, 18, OfferStatus.ACTIVE, [10, 8]))
+        self.assertEqual(
+            [button["text"] for button in client_ctor.return_value.post.await_args.kwargs["json"]["reply_markup"]["inline_keyboard"][0]],
+            ["10 عدد", "8 عدد"],
+        )
+
+        session = SimpleNamespace(get=AsyncMock(return_value=retail_offer))
+        with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
+            trades.settings, "channel_id", -100
+        ), patch("core.db.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
+            "api.routers.trades.httpx.AsyncClient",
+            return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
+        ) as client_ctor:
+            self.assertTrue(await trades._update_channel_buttons_async(2, 18, OfferStatus.COMPLETED, [10, 8]))
+        self.assertEqual(client_ctor.return_value.post.await_args.kwargs["json"], {"chat_id": -100, "message_id": 322})
+
+        aware = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
+        naive = datetime(2025, 1, 1, 12, 0)
+        self.assertIsNone(trades._normalize_naive_utc(None))
+        self.assertEqual(trades._normalize_naive_utc(aware), naive)
+        self.assertEqual(trades._normalize_naive_utc(naive), naive)
+
+        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=0))):
+            self.assertFalse(await trades._is_offer_expired_for_trade(SimpleNamespace(created_at=naive), None))
+
+        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=10))), patch.object(
+            trades.settings, "trade_forward_grace_seconds", 120
+        ), patch("api.routers.trades.datetime") as datetime_mock:
+            datetime_mock.utcnow.side_effect = [datetime(2025, 1, 1, 12, 20), datetime(2025, 1, 1, 12, 20)]
+            expired = await trades._is_offer_expired_for_trade(
+                SimpleNamespace(created_at=datetime(2025, 1, 1, 12, 0)),
+                edge_received_at=datetime(2025, 1, 1, 12, 9),
+            )
+        self.assertTrue(expired)
+
+        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=10))), patch.object(
+            trades.settings, "trade_forward_grace_seconds", 120
+        ), patch("api.routers.trades.datetime") as datetime_mock:
+            datetime_mock.utcnow.side_effect = [datetime(2025, 1, 1, 12, 10, 30), datetime(2025, 1, 1, 12, 10, 30)]
+            expired = await trades._is_offer_expired_for_trade(
+                SimpleNamespace(created_at=datetime(2025, 1, 1, 12, 0)),
+                edge_received_at=datetime(2025, 1, 1, 12, 9, 45),
+            )
+        self.assertFalse(expired)
+
+    async def test_forward_trade_remote_home_and_notification_fallbacks(self):
+        trade_data = SimpleNamespace(offer_id=7, quantity=4, idempotency_key="idem-1")
+        current_user = SimpleNamespace(id=99)
+        edge_received_at = datetime(2025, 1, 1, 12, 0)
+
+        db = SimpleNamespace(get=AsyncMock(return_value=None))
+        self.assertIsNone(await trades._forward_trade_if_remote_home(db, trade_data, current_user, edge_received_at))
+
+        remote_offer = SimpleNamespace(home_server="iran")
+        db = SimpleNamespace(get=AsyncMock(return_value=remote_offer))
+        with patch("api.routers.trades.is_remote_home", return_value=False):
+            self.assertIsNone(await trades._forward_trade_if_remote_home(db, trade_data, current_user, edge_received_at))
+
+        db = SimpleNamespace(get=AsyncMock(return_value=remote_offer))
+        with patch("api.routers.trades.is_remote_home", return_value=True), patch(
+            "api.routers.trades.current_server", return_value="foreign"
+        ), patch(
+            "api.routers.trades.forward_trade_to_home_server",
+            AsyncMock(return_value=(202, {"ok": True})),
+        ) as forward_mock:
+            response = await trades._forward_trade_if_remote_home(db, trade_data, current_user, edge_received_at)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(json.loads(response.body), {"ok": True})
+        forward_mock.assert_awaited_once_with(
+            "iran",
+            {
+                "offer_id": 7,
+                "quantity": 4,
+                "responder_user_id": 99,
+                "edge_received_at": edge_received_at.isoformat(),
+                "source_server": "foreign",
+                "idempotency_key": "idem-1",
+            },
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

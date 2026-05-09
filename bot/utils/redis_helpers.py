@@ -260,6 +260,8 @@ async def invalidate_commodity_cache():
         except Exception as e:
             logger.debug(f"Failed to invalidate commodity cache: {e}")
 
+    _memory_fallback["cache"].pop(key, None)
+
 
 async def mark_deleted_telegram_user(telegram_id: int):
     """Remember that a Telegram user was removed so the bot can stay silent afterwards."""
