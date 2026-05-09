@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.user import User
 from core.config import settings
 from core.db import get_db
+from bot.utils.channel_invites import build_channel_join_request_line
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -46,8 +47,13 @@ async def finalize_account_link(
     success_lines = [f"✅ حساب کاربری **{user.account_name}** با موفقیت به تلگرام متصل شد."]
     if address is not None:
         success_lines.append("📍 آدرس شما ثبت شد و ثبت‌نامتان تکمیل شد.")
-    if settings.channel_invite_link:
-        success_lines.append(f"🔗 [عضویت در کانال معاملات]({settings.channel_invite_link})")
+    join_request_line = await build_channel_join_request_line(
+        getattr(message, "bot", None),
+        user_id=getattr(user, "id", None),
+    )
+    if join_request_line:
+        success_lines.append(join_request_line)
+        success_lines.append("پس از ثبت درخواست، عضویت شما در کانال به صورت خودکار تایید می‌شود.")
     success_lines.append("اکنون می‌توانید از تمام امکانات ربات استفاده کنید.")
 
     await message.answer(
