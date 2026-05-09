@@ -27,9 +27,10 @@ import { registerSW } from 'virtual:pwa-register'
 try {
   const updateSW = registerSW({
     onNeedRefresh() {
-      console.log('New content available, refreshing...')
-      // Auto-refresh to avoid stale cache issues (especially on iOS)
-      window.location.reload()
+      // autoUpdate mode handles the reload automatically via controllerchange.
+      // Do NOT call window.location.reload() here — it would trigger a double
+      // reload that causes a blank white page on first incognito install.
+      console.log('New SW content available — will apply on next navigation.')
     },
     onOfflineReady() {
       console.log('App ready to work offline')
@@ -54,14 +55,14 @@ if ('serviceWorker' in navigator) {
   setTimeout(() => {
     const app = document.getElementById('app')
     if (app && app.children.length === 0) {
-      console.warn('App did not render in 3s — clearing SW cache')
+      console.warn('App did not render in 10s — clearing SW cache')
       caches.keys().then(names => names.forEach(n => caches.delete(n)))
       navigator.serviceWorker.getRegistrations().then(regs => {
         regs.forEach(r => r.unregister())
         window.location.reload()
       })
     }
-  }, 3000)
+  }, 10000)
 }
 
 // --- Telegram WebApp Theme Handling ---

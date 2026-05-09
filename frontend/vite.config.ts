@@ -10,7 +10,6 @@ export default defineConfig({
       registerType: 'autoUpdate',
       workbox: {
         cleanupOutdatedCaches: true,
-        clientsClaim: true,
         skipWaiting: true,
         importScripts: ['share-target-sw.js'],
         // Don't intercept POST navigations — let our share-target handler
