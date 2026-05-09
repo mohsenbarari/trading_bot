@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 const routerPushMock = vi.fn()
 const setupExpiryTimerMock = vi.fn()
+const apiFetchMock = vi.fn()
 const pushBackStateMock = vi.fn()
 const popBackStateMock = vi.fn()
 const clearBackStackMock = vi.fn()
@@ -15,6 +16,7 @@ vi.mock('vue-router', () => ({
 
 vi.mock('../utils/auth', () => ({
   setupExpiryTimer: setupExpiryTimerMock,
+  apiFetch: apiFetchMock,
 }))
 
 vi.mock('../composables/useBackButton', () => ({
@@ -36,6 +38,7 @@ describe('LoginView.vue', () => {
     vi.resetModules()
     routerPushMock.mockReset()
     setupExpiryTimerMock.mockReset()
+    apiFetchMock.mockReset()
     pushBackStateMock.mockReset()
     popBackStateMock.mockReset()
     clearBackStackMock.mockReset()
@@ -99,6 +102,44 @@ describe('LoginView.vue', () => {
     )
     expect(wrapper.text()).toContain('در انتظار تایید')
     expect(wrapper.text()).toContain('درخواست ورود شما به دستگاه اصلی ارسال شد')
+    wrapper.unmount()
+  })
+
+  it('primes the current user cache before routing after a successful OTP verification', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          access_token: 'access-token',
+          refresh_token: 'refresh-token',
+          token_type: 'bearer',
+        }) as any,
+      )
+    apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        id: 1,
+        role: 'مدیر ارشد',
+        full_name: 'محسن',
+        account_name: 'mohsen',
+      }) as any,
+    )
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/auth/me')
+    expect(JSON.parse(localStorage.getItem('current_user_summary') || '{}')).toMatchObject({
+      role: 'مدیر ارشد',
+      account_name: 'mohsen',
+    })
+    expect(routerPushMock).toHaveBeenCalledWith('/')
     wrapper.unmount()
   })
 })

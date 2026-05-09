@@ -3,6 +3,7 @@ import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Smartphone, Lock, Loader2, Download, Clock } from 'lucide-vue-next'
 import { setupExpiryTimer } from '../utils/auth'
+import { primeCurrentUserSummary } from '../utils/currentUser'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
 const router = useRouter()
@@ -30,6 +31,24 @@ const approvalExpiresAt = ref<string | null>(null)
 const approvalCountdown = ref(0)
 let approvalTimerInterval: any = null
 let approvalPollInterval: any = null
+
+async function completeAuthenticatedLogin(data: { access_token: string; refresh_token?: string | null }) {
+  localStorage.setItem('auth_token', data.access_token)
+  if (data.refresh_token) {
+    localStorage.setItem('refresh_token', data.refresh_token)
+  }
+  localStorage.removeItem('suspended_refresh_token')
+
+  try {
+    await primeCurrentUserSummary(true)
+  } catch {
+    // Do not block the login transition on a best-effort current-user prefetch.
+  }
+
+  setupExpiryTimer()
+  clearBackStack()
+  router.push('/')
+}
 
 function startTimer(seconds: number) {
   if (timerInterval) clearInterval(timerInterval)
@@ -191,16 +210,7 @@ async function verifyOtp() {
       return
     }
     
-    localStorage.setItem('auth_token', data.access_token)
-    localStorage.setItem('refresh_token', data.refresh_token)
-    
-    // راه‌اندازی تایمر انقضای توکن
-    setupExpiryTimer()
-    
-    // پاک کردن هیستوری دستی مربوط به مدال لاگین برای جلوگیری از برگشت به مرحله موبایل
-    clearBackStack()
-    
-    router.push('/')
+    await completeAuthenticatedLogin(data)
   } catch (e: any) {
     error.value = e.message
   } finally {
@@ -234,10 +244,7 @@ function startApprovalPolling() {
       
       if (data.status === 'approved' && data.access_token) {
         stopApprovalPolling()
-        localStorage.setItem('auth_token', data.access_token)
-        if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token)
-        setupExpiryTimer()
-        router.push('/')
+        await completeAuthenticatedLogin(data)
       } else if (data.status === 'rejected') {
         stopApprovalPolling()
         error.value = 'درخواست ورود شما رد شد.'
@@ -295,14 +302,7 @@ async function startDevLogin() {
         throw new Error(err.detail || 'دسترسی مجاز نیست')
     }
     const data = await res.json()
-    localStorage.setItem('auth_token', data.access_token)
-    localStorage.setItem('refresh_token', data.refresh_token)
-    localStorage.removeItem('suspended_refresh_token')
-    
-    // پاک کردن تاریخچه برای جلوگیری از برگشت به صفحه لاگین
-    clearBackStack()
-    
-    router.push('/')
+    await completeAuthenticatedLogin(data)
   } catch (e: any) {
     error.value = e.message
   } finally {
