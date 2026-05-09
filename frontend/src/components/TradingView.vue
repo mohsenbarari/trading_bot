@@ -197,6 +197,18 @@ function getLotButtons(offer: Offer): number[] {
   return uniqueLots.sort((a, b) => a - b)
 }
 
+function formatLotSummary(amounts: number[]): string {
+  return [...amounts].sort((a, b) => b - a).join(' + ')
+}
+
+function getDraftLotSummary(): string {
+  if (newOffer.value.is_wholesale || !newOffer.value.lot_sizes?.length || !newOffer.value.quantity) {
+    return ''
+  }
+  const uniqueLots = [...new Set([newOffer.value.quantity, ...newOffer.value.lot_sizes].filter((amount) => amount > 0))]
+  return formatLotSummary(uniqueLots)
+}
+
 function buildOfferSignature(offer: Offer | null): string | null {
   if (!offer) return null
   const availableLots = getLotButtons(offer)
@@ -484,7 +496,7 @@ async function executeTrade() {
           commodityName: data.commodity_name || selectedOffer.value.commodity_name || 'کالا',
           price: Number(data.price || selectedOffer.value.price || 0),
           remainingQuantity: Number(data.remaining_quantity || selectedOffer.value.remaining_quantity || tradeQuantity.value),
-          lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? data.available_lots.join(' + ') : ''),
+          lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? formatLotSummary(data.available_lots) : ''),
           availableLots: data.available_lots,
           expiresAtTs: selectedOffer.value.expires_at_ts ?? null,
           sourceSignature: buildOfferSignature(selectedOffer.value),
@@ -542,7 +554,7 @@ function syncTradeSuggestionFromOffers() {
     commodityName: sourceOffer.commodity_name,
     price: Number(sourceOffer.price),
     remainingQuantity: remaining,
-    lotSummary: availableLots.join(' + '),
+    lotSummary: formatLotSummary(availableLots),
     availableLots,
     expiresAtTs: sourceOffer.expires_at_ts ?? null,
     sourceSignature: currentSourceSignature,
@@ -1101,7 +1113,7 @@ watch(activeTab, (val) => {
             <p><strong>قیمت:</strong> {{ (newOffer.price || 0).toLocaleString() }} تومان</p>
             <p><strong>نوع فروش:</strong> {{ newOffer.is_wholesale ? 'یکجا' : 'خُرد' }}</p>
             <p v-if="!newOffer.is_wholesale && newOffer.lot_sizes">
-              <strong>ترکیب:</strong> {{ newOffer.lot_sizes.join(' + ') }}
+              <strong>ترکیب:</strong> {{ getDraftLotSummary() }}
             </p>
             <p v-if="newOffer.notes"><strong>توضیحات:</strong> {{ newOffer.notes }}</p>
           </div>

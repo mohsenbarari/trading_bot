@@ -128,6 +128,14 @@ function getLotButtons(offer: any): number[] {
   return unique.sort((a, b) => a - b);
 }
 
+function formatLotSummary(amounts: number[]): string {
+  return [...amounts].sort((a, b) => b - a).join(' + ');
+}
+
+function getLotSummary(offer: any): string {
+  return formatLotSummary(getLotButtons(offer));
+}
+
 function isOwnOffer(offer: any): boolean {
   if (typeof offer?.is_own_offer === 'boolean') {
     return offer.is_own_offer;
@@ -176,7 +184,7 @@ function createTradeSuggestionState(data: any, fallbackOffer?: any): TradeLotSug
     commodityName: data.commodity_name || sourceOffer?.commodity_name || 'کالا',
     price: Number(data.price || sourceOffer?.price || 0),
     remainingQuantity: Number(data.remaining_quantity || sourceOffer?.remaining_quantity || sourceOffer?.quantity || 0),
-    lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? data.available_lots.join(' + ') : ''),
+    lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? formatLotSummary(data.available_lots) : ''),
     availableLots: Array.isArray(data.available_lots) ? data.available_lots : [],
     expiresAtTs: sourceOffer?.expires_at_ts ?? null,
     sourceSignature: buildOfferSignature(sourceOffer),
@@ -215,7 +223,7 @@ function syncTradeSuggestionFromOffers() {
     commodityName: sourceOffer.commodity_name || tradeSuggestion.value.commodityName,
     price: Number(sourceOffer.price || tradeSuggestion.value.price),
     remainingQuantity: remaining,
-    lotSummary: availableLots.join(' + '),
+    lotSummary: formatLotSummary(availableLots),
     availableLots,
     expiresAtTs: sourceOffer.expires_at_ts ?? null,
     sourceSignature: currentSourceSignature,
@@ -344,7 +352,7 @@ function closeTradeSuggestion() {
             </div>
             <!-- Lot info indicator -->
             <div v-if="!offer.is_wholesale && offer.lot_sizes && offer.lot_sizes.length > 0" class="lot-info">
-              🔢 خُرد: {{ offer.lot_sizes.join(' + ') }}
+              🔢 خُرد: {{ getLotSummary(offer) }}
             </div>
             <div v-else-if="offer.is_wholesale" class="lot-info wholesale">
               📦 یکجا
