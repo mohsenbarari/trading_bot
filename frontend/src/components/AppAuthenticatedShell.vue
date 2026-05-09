@@ -2,7 +2,6 @@
 import { onMounted } from 'vue'
 import BottomNav from './BottomNav.vue'
 import SessionApprovalModal from './SessionApprovalModal.vue'
-import PWAInstallOverlay from './PWAInstallOverlay.vue'
 import AppToasts from './AppToasts.vue'
 import { setupExpiryTimer, apiFetch } from '../utils/auth'
 import { useWebSocket } from '../composables/useWebSocket'
@@ -56,5 +55,4 @@ useNotificationRuntime({ connect, on, off, ensureSessionValidation })
   <BottomNav />
   <SessionApprovalModal />
   <AppToasts />
-  <PWAInstallOverlay />
 </template>
