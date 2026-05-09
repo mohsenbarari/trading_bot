@@ -31,10 +31,16 @@ class BotStartWithoutTokenTests(unittest.IsolatedAsyncioTestCase):
             answer=AsyncMock(),
         )
 
-        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()) as delete_anchor:
+        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()) as delete_anchor, patch(
+            "bot.handlers.start.prompt_contact_for_account_link",
+            new=AsyncMock(return_value=SimpleNamespace(message_id=77)),
+        ) as prompt_link, patch("bot.handlers.start.set_anchor") as set_anchor:
             await handle_start_without_token(message, state=SimpleNamespace(), user=None)
 
         delete_anchor.assert_awaited_once()
+        prompt_link.assert_awaited_once()
+        self.assertIn("نیازی به لینک دعوت جدید ندارید", prompt_link.await_args.kwargs["prompt_text"])
+        set_anchor.assert_called_once_with(10, 77)
         message.answer.assert_not_awaited()
 
 

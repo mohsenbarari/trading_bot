@@ -14,5 +14,9 @@ async def handle_unauthorized_messages(message: types.Message, user: Optional[Us
     if not user:
         if message.from_user and await is_deleted_telegram_user(message.from_user.id):
             return
-        await message.answer("⛔️ بات برای شما غیرفعال است. لطفاً از طریق لینک دعوت معتبر ثبت‌نام کنید.")
+        await message.answer(
+            "⛔️ بات برای شما هنوز فعال نشده است. "
+            "اگر حساب شما قبلاً در وب یا با خط فرمان ساخته شده، دستور /link را بزنید و شماره همان حساب را ارسال کنید. "
+            "در غیر این صورت با لینک دعوت معتبر ثبت‌نام کنید."
+        )
     # اگر کاربر `user` وجود داشته باشد (یعنی مجاز باشد)، به پیام او پاسخی نمی‌دهیم.

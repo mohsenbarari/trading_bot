@@ -20,7 +20,9 @@ class BotDefaultUnauthorizedTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.default.is_deleted_telegram_user", new=AsyncMock(return_value=False)):
             await handle_unauthorized_messages(message, user=None)
 
-        self.assertIn("غیرفعال است", message.answer.await_args.args[0])
+        self.assertIn("فعال نشده", message.answer.await_args.args[0])
+        self.assertIn("/link", message.answer.await_args.args[0])
+        self.assertIn("لینک دعوت", message.answer.await_args.args[0])
 
         message = SimpleNamespace(from_user=SimpleNamespace(id=10), answer=AsyncMock())
         await handle_unauthorized_messages(message, user=SimpleNamespace(id=5))

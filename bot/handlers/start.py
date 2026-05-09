@@ -16,6 +16,7 @@ from models.invitation import Invitation
 from models.user import User
 from bot.states import Registration
 from bot.keyboards import get_share_contact_keyboard, get_persistent_menu_keyboard
+from bot.handlers.link_account import prompt_contact_for_account_link
 from bot.message_manager import (
     set_anchor, 
     delete_previous_anchor,
@@ -188,7 +189,16 @@ async def handle_start_without_token(message: types.Message, state: FSMContext, 
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
     else:
-        pass  # اجازه می‌دهیم هندلر default اجرا شود
+        anchor_msg = await prompt_contact_for_account_link(
+            message,
+            state,
+            prompt_text=(
+                "سلام! اگر حساب شما قبلاً در وب یا با خط فرمان ساخته شده، "
+                "برای فعال شدن ربات نیازی به لینک دعوت جدید ندارید. "
+                "شماره همراه همان حساب را ارسال کنید تا تلگرام شما متصل شود."
+            ),
+        )
+        set_anchor(message.chat.id, anchor_msg.message_id)
 
 
 @router.message(Registration.awaiting_contact, F.contact)

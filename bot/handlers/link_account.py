@@ -16,14 +16,18 @@ logger = logging.getLogger(__name__)
 class LinkState(StatesGroup):
     waiting_for_contact = State()
 
-@router.message(Command("link"))
-async def cmd_link(message: types.Message, state: FSMContext):
-    """
-    Start account linking process.
-    """
-    await message.answer(
+
+async def prompt_contact_for_account_link(
+    message: types.Message,
+    state: FSMContext,
+    prompt_text: str | None = None,
+) -> types.Message:
+    text = prompt_text or (
         "🔗 برای اتصال حساب کاربری وب به تلگرام، لطفاً شماره موبایل خود را ارسال کنید.\n"
-        "روی دکمه زیر کلیک کنید:",
+        "روی دکمه زیر کلیک کنید:"
+    )
+    sent_message = await message.answer(
+        text,
         reply_markup=types.ReplyKeyboardMarkup(
             keyboard=[
                 [types.KeyboardButton(text="📱 ارسال شماره همراه", request_contact=True)]
@@ -33,6 +37,14 @@ async def cmd_link(message: types.Message, state: FSMContext):
         )
     )
     await state.set_state(LinkState.waiting_for_contact)
+    return sent_message
+
+@router.message(Command("link"))
+async def cmd_link(message: types.Message, state: FSMContext):
+    """
+    Start account linking process.
+    """
+    await prompt_contact_for_account_link(message, state)
 
 @router.message(LinkState.waiting_for_contact, F.contact)
 async def handle_contact(message: types.Message, state: FSMContext):
