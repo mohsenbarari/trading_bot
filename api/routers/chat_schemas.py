@@ -137,6 +137,10 @@ class ConversationRead(BaseModel):
     chat_id: Optional[int] = None
     can_send: bool = True
     member_role: Optional[str] = None
+    member_count: Optional[int] = None
+    max_members: Optional[int] = None
+    is_system: bool = False
+    is_mandatory: bool = False
 
     class Config:
         from_attributes = True

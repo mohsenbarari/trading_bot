@@ -11,6 +11,7 @@ import ChatSearchGlobalList from './chat/ChatSearchGlobalList.vue'
 import ChatEmptyState from './chat/ChatEmptyState.vue'
 import ChatConversationList from './chat/ChatConversationList.vue'
 import ChatNewConversationModal from './chat/ChatNewConversationModal.vue'
+import ChatGroupManagerModal from './chat/ChatGroupManagerModal.vue'
 import AttachmentMenu from './chat/AttachmentMenu.vue'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
@@ -558,6 +559,10 @@ const selectedRoomKind = computed<'direct' | 'channel' | 'group'>(() => {
   const roomKind = selectedConversation.value?.room_kind
   return roomKind === 'channel' || roomKind === 'group' ? roomKind : 'direct'
 })
+
+const selectedRoomMemberCount = computed(() => selectedConversation.value?.member_count ?? null)
+const selectedRoomIsMandatory = computed(() => !!selectedConversation.value?.is_mandatory)
+const selectedRoomIsSystem = computed(() => !!selectedConversation.value?.is_system)
 
 const canSendToSelectedRoom = computed(() => {
   if (selectedRoomKind.value === 'direct') return true
@@ -1432,10 +1437,61 @@ const startNewChat = (userId: number, userName: string) => {
 }
 
 const showNewChatModal = ref(false)
+const showGroupManagerModal = ref(false)
+const groupManagerChatId = ref<number | null>(null)
 
 const handleNewChatSearch = (userId: number, userName: string) => {
     showNewChatModal.value = false
     startNewChat(userId, userName)
+}
+
+function openGroupCreation() {
+  showNewChatModal.value = false
+  groupManagerChatId.value = null
+  showGroupManagerModal.value = true
+}
+
+function openSelectedGroupManager() {
+  if (selectedRoomKind.value !== 'group' || !selectedConversation.value?.chat_id) return
+  groupManagerChatId.value = selectedConversation.value.chat_id
+  showGroupManagerModal.value = true
+}
+
+async function handleGroupCreated(group: { id: number; title: string }) {
+  showGroupManagerModal.value = false
+  groupManagerChatId.value = null
+  const conversationKey = resolveRoomConversationKey('group', group.id) ?? -Math.abs(group.id)
+  await loadConversations()
+  selectedUserId.value = conversationKey
+  selectedUserName.value = group.title
+  showAttachmentMenu.value = false
+  showStickerPicker.value = false
+  void loadMessages(conversationKey)
+  pushBackState(() => {
+    selectedUserId.value = null
+    selectedUserName.value = ''
+    messages.value = []
+  })
+}
+
+async function handleGroupUpdated(group: { id: number; title: string }) {
+  await loadConversations()
+  const conversationKey = resolveRoomConversationKey('group', group.id) ?? -Math.abs(group.id)
+  if (selectedUserId.value === conversationKey) {
+    selectedUserName.value = group.title
+  }
+}
+
+async function handleGroupLeft(chatId: number) {
+  showGroupManagerModal.value = false
+  groupManagerChatId.value = null
+  const conversationKey = resolveRoomConversationKey('group', chatId) ?? -Math.abs(chatId)
+  if (selectedUserId.value === conversationKey) {
+    selectedUserId.value = null
+    selectedUserName.value = ''
+    messages.value = []
+  }
+  await loadConversations()
 }
 
 const showContextMenu = (event: Event, msg: Message) => {
@@ -2384,6 +2440,9 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :searchResults="searchResults"
       :currentSearchIndex="currentSearchIndex"
       :selectedMessagesCount="selectedMessages.length"
+      :roomMemberCount="selectedRoomMemberCount"
+      :isRoomMandatory="selectedRoomIsMandatory"
+      :isRoomSystem="selectedRoomIsSystem"
       @back="goBack"
       @view-profile="viewProfile"
       @toggle-search="toggleSearch"
@@ -2391,6 +2450,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @result-click="handleSearchResultClick"
       @call="handleCall"
       @clear-selection="clearSelection"
+      @manage-room="openSelectedGroupManager"
       :isDeleted="isSelectedUserDeleted"
     />
 
@@ -2691,6 +2751,17 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :show="showNewChatModal"
       @close="showNewChatModal = false"
       @start-chat="handleNewChatSearch"
+      @create-group="openGroupCreation"
+    />
+
+    <ChatGroupManagerModal
+      :show="showGroupManagerModal"
+      :groupId="groupManagerChatId"
+      :currentUserId="props.currentUserId"
+      @close="showGroupManagerModal = false"
+      @created="handleGroupCreated"
+      @updated="handleGroupUpdated"
+      @left="handleGroupLeft"
     />
     </div>
 </template>

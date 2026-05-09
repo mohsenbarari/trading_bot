@@ -145,7 +145,8 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
             kind: 'chat',
         })
 
-        if (document.hidden) {
+        const shouldShowBrowserNotification = document.hidden && payload.room_kind !== 'channel'
+        if (shouldShowBrowserNotification) {
             showBrowserNotification(senderName, body, { route: routePath })
         }
     }

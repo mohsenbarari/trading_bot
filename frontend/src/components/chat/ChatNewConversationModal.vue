@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import LoadingSkeleton from '../LoadingSkeleton.vue'
+import { UsersRound } from 'lucide-vue-next'
 
 const props = defineProps<{
   show: boolean
@@ -9,6 +10,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'start-chat', userId: number, userName: string): void
+  (e: 'create-group'): void
 }>()
 
 const token = localStorage.getItem('auth_token') || ''
@@ -87,6 +89,10 @@ const getAvatarInitial = (name: string) => {
 
       <!-- Search Input -->
       <div class="search-area">
+        <button type="button" class="new-group-action" v-ripple @click="$emit('create-group')">
+          <span class="new-group-icon"><UsersRound :size="20" /></span>
+          <span>ساخت گروه جدید</span>
+        </button>
         <input 
           v-model="searchQuery" 
           type="text" 
@@ -177,6 +183,41 @@ const getAvatarInitial = (name: string) => {
   padding: 12px 16px;
   background: white;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.new-group-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(51, 144, 236, 0.08);
+  color: #2586e8;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 12px;
+  text-align: right;
+}
+
+.new-group-action:hover {
+  background: rgba(51, 144, 236, 0.14);
+}
+
+.new-group-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #3390ec;
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .new-chat-search-input {
