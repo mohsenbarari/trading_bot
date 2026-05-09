@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, TypeVar
+from typing import Callable, Sequence, TypeVar
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
@@ -16,7 +16,7 @@ from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType, MessageTy
 from models.chat import Chat
 from models.chat_member import ChatMember
 from models.message import Message
-from models.user import User
+from models.user import User, UserRole
 
 SerializedMessageT = TypeVar("SerializedMessageT")
 RoomEventPublisher = Callable[[int, str, dict], object]
@@ -164,6 +164,158 @@ def _clean_text(value: str | None) -> str | None:
 
 
 GROUP_MAX_MEMBERS = 50
+MANDATORY_CHANNEL_TITLE = "اطلاعرسانی"
+MANDATORY_CHANNEL_DESCRIPTION = "کانال اجباری اطلاعرسانی سامانه"
+
+
+def _membership_status_for_user(user: User) -> ChatMembershipStatus:
+    return ChatMembershipStatus.INACTIVE if getattr(user, "is_deleted", False) else ChatMembershipStatus.ACTIVE
+
+
+async def get_mandatory_channel(db: AsyncSession) -> Chat | None:
+    stmt = select(Chat).where(
+        Chat.type == ChatType.CHANNEL,
+        Chat.is_system.is_(True),
+        Chat.is_mandatory.is_(True),
+        Chat.is_deleted.is_(False),
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def ensure_mandatory_channel(db: AsyncSession) -> Chat:
+    chat = await get_mandatory_channel(db)
+    if chat is not None:
+        return chat
+
+    chat = Chat(
+        type=ChatType.CHANNEL,
+        title=MANDATORY_CHANNEL_TITLE,
+        description=MANDATORY_CHANNEL_DESCRIPTION,
+        created_by_id=None,
+        is_system=True,
+        is_mandatory=True,
+        updated_at=_utcnow(),
+    )
+    db.add(chat)
+    await db.flush()
+    return chat
+
+
+async def _get_primary_super_admin_user_id(db: AsyncSession) -> int | None:
+    stmt = (
+        select(User.id)
+        .where(
+            User.role == UserRole.SUPER_ADMIN,
+            User.is_deleted.is_(False),
+        )
+        .order_by(User.id.asc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def _get_latest_chat_member(db: AsyncSession, *, chat_id: int, user_id: int) -> ChatMember | None:
+    stmt = (
+        select(ChatMember)
+        .where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id == user_id,
+        )
+        .order_by(ChatMember.id.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+def _sync_mandatory_channel_member(
+    member: ChatMember | None,
+    *,
+    chat_id: int,
+    user: User,
+    make_admin: bool,
+    now: datetime,
+) -> ChatMember:
+    expected_status = _membership_status_for_user(user)
+
+    if member is None:
+        return ChatMember(
+            chat_id=chat_id,
+            user_id=user.id,
+            role=ChatMemberRole.ADMIN if make_admin else ChatMemberRole.MEMBER,
+            membership_status=expected_status,
+            joined_at=now,
+            left_at=None if expected_status == ChatMembershipStatus.ACTIVE else now,
+            updated_at=now,
+        )
+
+    changed = False
+
+    if member.membership_status != expected_status:
+        member.membership_status = expected_status
+        changed = True
+
+    if expected_status == ChatMembershipStatus.ACTIVE:
+        if member.left_at is not None:
+            member.left_at = None
+            changed = True
+        if make_admin and member.role != ChatMemberRole.ADMIN:
+            member.role = ChatMemberRole.ADMIN
+            changed = True
+    else:
+        if member.left_at is None:
+            member.left_at = now
+            changed = True
+        if member.role != ChatMemberRole.MEMBER:
+            member.role = ChatMemberRole.MEMBER
+            changed = True
+
+    if changed:
+        member.updated_at = now
+
+    return member
+
+
+async def ensure_mandatory_channel_membership(
+    db: AsyncSession,
+    *,
+    user: User,
+) -> Chat:
+    return await ensure_mandatory_channel_rollout(db, users=[user])
+
+
+async def ensure_mandatory_channel_rollout(
+    db: AsyncSession,
+    *,
+    users: Sequence[User] | None = None,
+) -> Chat:
+    chat = await ensure_mandatory_channel(db)
+    now = _utcnow()
+
+    if users is None:
+        result = await db.execute(select(User).order_by(User.id.asc()))
+        users = list(result.scalars().all())
+
+    primary_super_admin_user_id = await _get_primary_super_admin_user_id(db)
+    seen_user_ids: set[int] = set()
+    for user in users:
+        if getattr(user, "id", None) is None or user.id in seen_user_ids:
+            continue
+        seen_user_ids.add(user.id)
+        member = await _get_latest_chat_member(db, chat_id=chat.id, user_id=user.id)
+        synced_member = _sync_mandatory_channel_member(
+            member,
+            chat_id=chat.id,
+            user=user,
+            make_admin=user.id == primary_super_admin_user_id,
+            now=now,
+        )
+        if member is None:
+            db.add(synced_member)
+
+    return chat
 
 
 async def _reload_channel_message(db: AsyncSession, message_id: int) -> Message | None:

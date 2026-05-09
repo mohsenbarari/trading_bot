@@ -33,6 +33,7 @@ from models.session import Platform, UserSession
 import uuid
 from core.utils import utc_now
 from core.server_routing import SERVER_FOREIGN, server_from_request
+from core.services.chat_room_service import ensure_mandatory_channel_membership
 
 
 router = APIRouter()
@@ -199,6 +200,8 @@ async def register_complete(
     inv.is_used = True
     
     try:
+        await db.flush()
+        await ensure_mandatory_channel_membership(db, user=new_user)
         await db.commit()
         await db.refresh(new_user)
     except Exception as e:
@@ -332,6 +335,7 @@ async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
     dev_mobile = "09999999999"
     stmt = select(User).where(User.mobile_number == dev_mobile)
     user = (await db.execute(stmt)).scalar_one_or_none()
+    login_home_server = _login_home_server(raw_request)
     
     if not user:
         user = User(
@@ -342,13 +346,17 @@ async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
             role=UserRole.SUPER_ADMIN,
         )
         db.add(user)
+        await db.flush()
+        user.home_server = login_home_server
+        await ensure_mandatory_channel_membership(db, user=user)
         await db.commit()
         await db.refresh(user)
+    else:
+        user.home_server = login_home_server
+        await ensure_mandatory_channel_membership(db, user=user)
         
     refresh_token = create_refresh_token(subject=user.id)
     device_info = _extract_device_info(raw_request)
-    login_home_server = _login_home_server(raw_request)
-    user.home_server = login_home_server
     
     session = UserSession(
         id=uuid.uuid4(),

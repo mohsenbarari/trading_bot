@@ -8,11 +8,14 @@ from fastapi import HTTPException
 from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType
 from core.services.chat_room_service import (
     GROUP_MAX_MEMBERS,
+    MANDATORY_CHANNEL_DESCRIPTION,
+    MANDATORY_CHANNEL_TITLE,
     _reload_channel_message,
     count_active_chat_admins,
     count_active_chat_members,
     create_group_chat,
     create_optional_channel,
+    ensure_mandatory_channel_rollout,
     get_channel_or_404,
     get_group_or_404,
     get_room_or_404,
@@ -240,6 +243,108 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(channel.updated_at, now)
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(channel)
+
+    async def test_ensure_mandatory_channel_rollout_creates_channel_and_memberships(self):
+        admin_user = SimpleNamespace(id=7, is_deleted=False)
+        normal_user = SimpleNamespace(id=8, is_deleted=False)
+        deleted_user = SimpleNamespace(id=9, is_deleted=True)
+        db = FakeDB(
+            [
+                FakeExecuteResult(scalar_one_or_none_value=None),
+                FakeExecuteResult(scalar_one_or_none_value=7),
+                FakeExecuteResult(scalar_one_or_none_value=None),
+                FakeExecuteResult(scalar_one_or_none_value=None),
+                FakeExecuteResult(scalar_one_or_none_value=None),
+            ]
+        )
+
+        chat = await ensure_mandatory_channel_rollout(db, users=[admin_user, normal_user, deleted_user])
+
+        self.assertEqual(chat.id, 501)
+        self.assertEqual(chat.title, MANDATORY_CHANNEL_TITLE)
+        self.assertEqual(chat.description, MANDATORY_CHANNEL_DESCRIPTION)
+        self.assertTrue(chat.is_system)
+        self.assertTrue(chat.is_mandatory)
+        self.assertEqual(len(db.added), 4)
+
+        admin_member = db.added[1]
+        self.assertEqual(admin_member.user_id, 7)
+        self.assertEqual(admin_member.role, ChatMemberRole.ADMIN)
+        self.assertEqual(admin_member.membership_status, ChatMembershipStatus.ACTIVE)
+        self.assertIsNone(admin_member.left_at)
+
+        normal_member = db.added[2]
+        self.assertEqual(normal_member.user_id, 8)
+        self.assertEqual(normal_member.role, ChatMemberRole.MEMBER)
+        self.assertEqual(normal_member.membership_status, ChatMembershipStatus.ACTIVE)
+        self.assertIsNone(normal_member.left_at)
+
+        deleted_member = db.added[3]
+        self.assertEqual(deleted_member.user_id, 9)
+        self.assertEqual(deleted_member.role, ChatMemberRole.MEMBER)
+        self.assertEqual(deleted_member.membership_status, ChatMembershipStatus.INACTIVE)
+        self.assertIsNotNone(deleted_member.left_at)
+
+    async def test_ensure_mandatory_channel_rollout_updates_existing_memberships(self):
+        now = datetime(2026, 5, 8, 3, 0, 0)
+        chat = SimpleNamespace(id=44)
+        admin_user = SimpleNamespace(id=7, is_deleted=False)
+        normal_user = SimpleNamespace(id=8, is_deleted=False)
+        deleted_user = SimpleNamespace(id=9, is_deleted=True)
+        admin_member = SimpleNamespace(
+            id=100,
+            chat_id=44,
+            user_id=7,
+            role=ChatMemberRole.MEMBER,
+            membership_status=ChatMembershipStatus.ACTIVE,
+            left_at=None,
+            updated_at=None,
+        )
+        reactivated_member = SimpleNamespace(
+            id=101,
+            chat_id=44,
+            user_id=8,
+            role=ChatMemberRole.MEMBER,
+            membership_status=ChatMembershipStatus.LEFT,
+            left_at=datetime(2026, 5, 1, 0, 0, 0),
+            updated_at=None,
+        )
+        deleted_member = SimpleNamespace(
+            id=102,
+            chat_id=44,
+            user_id=9,
+            role=ChatMemberRole.ADMIN,
+            membership_status=ChatMembershipStatus.ACTIVE,
+            left_at=None,
+            updated_at=None,
+        )
+        db = FakeDB(
+            [
+                FakeExecuteResult(scalar_one_or_none_value=chat),
+                FakeExecuteResult(scalar_one_or_none_value=7),
+                FakeExecuteResult(scalar_one_or_none_value=admin_member),
+                FakeExecuteResult(scalar_one_or_none_value=reactivated_member),
+                FakeExecuteResult(scalar_one_or_none_value=deleted_member),
+            ]
+        )
+
+        with patch("core.services.chat_room_service._utcnow", return_value=now):
+            result = await ensure_mandatory_channel_rollout(db, users=[admin_user, normal_user, deleted_user])
+
+        self.assertIs(result, chat)
+        self.assertEqual(admin_member.role, ChatMemberRole.ADMIN)
+        self.assertEqual(admin_member.membership_status, ChatMembershipStatus.ACTIVE)
+        self.assertEqual(admin_member.updated_at, now)
+
+        self.assertEqual(reactivated_member.membership_status, ChatMembershipStatus.ACTIVE)
+        self.assertIsNone(reactivated_member.left_at)
+        self.assertEqual(reactivated_member.updated_at, now)
+
+        self.assertEqual(deleted_member.membership_status, ChatMembershipStatus.INACTIVE)
+        self.assertEqual(deleted_member.role, ChatMemberRole.MEMBER)
+        self.assertEqual(deleted_member.left_at, now)
+        self.assertEqual(deleted_member.updated_at, now)
+        self.assertEqual(db.added, [])
 
 
 if __name__ == "__main__":

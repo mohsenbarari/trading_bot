@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.user import User
 from core.config import settings
 from core.db import get_db
+from core.services.chat_room_service import ensure_mandatory_channel_membership
 from bot.keyboards import get_persistent_menu_keyboard
 from bot.utils.channel_invites import build_channel_join_request_line
 
@@ -50,6 +51,7 @@ async def finalize_account_link(
         user.address = address
     user.has_bot_access = True
 
+    await ensure_mandatory_channel_membership(db, user=user)
     await db.commit()
 
     success_lines = [f"✅ حساب کاربری **{user.account_name}** با موفقیت به تلگرام متصل شد."]

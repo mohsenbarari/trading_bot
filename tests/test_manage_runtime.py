@@ -85,11 +85,12 @@ class ManageRuntimeTests(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock()
         session.execute = AsyncMock(side_effect=[_ResultStub(None), _ResultStub(None), _ResultStub(None)])
         session.add = MagicMock()
+        session.flush = AsyncMock()
         session.commit = AsyncMock()
 
         with patch('manage.input', side_effect=['Demo User', 'Demo', '۰۹۱۲۰۰۰۰۰۰۰', '1234']), patch.object(
             manage, 'AsyncSessionLocal', return_value=_AsyncSessionContext(session)
-        ):
+        ), patch('manage.ensure_mandatory_channel_membership', new=AsyncMock()) as mandatory_mock:
             await manage.create_super_admin_async()
 
         created_user = session.add.call_args.args[0]
@@ -97,7 +98,10 @@ class ManageRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(created_user.account_name, 'demo')
         self.assertEqual(created_user.mobile_number, '09120000000')
         self.assertEqual(created_user.telegram_id, 1234)
+        self.assertEqual(created_user.address, 'System Default')
         self.assertEqual(created_user.role, UserRole.SUPER_ADMIN)
+        session.flush.assert_awaited_once()
+        self.assertIs(mandatory_mock.await_args.kwargs['user'], created_user)
         session.commit.assert_awaited_once()
 
     async def test_create_super_admin_async_rejects_duplicate_records(self):

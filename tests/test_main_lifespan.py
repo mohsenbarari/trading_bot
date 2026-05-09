@@ -5,6 +5,17 @@ from unittest.mock import AsyncMock, patch
 import main
 
 
+class _AsyncSessionContext:
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
 class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
     async def test_lifespan_starts_expected_tasks_on_iran_and_closes_redis(self):
         created = []
@@ -16,11 +27,15 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
                 coro.close()
             return SimpleNamespace()
 
+        session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+
         with patch.object(main.settings, "server_mode", "iran"), patch("main.init_db", new=AsyncMock()) as init_db_mock, patch(
             "main.init_redis", new=AsyncMock()
         ) as init_redis_mock, patch("main.close_redis", new=AsyncMock()) as close_redis_mock, patch(
             "main.setup_event_listeners"
-        ) as setup_mock, patch("main.connectivity_monitor_loop", new=AsyncMock()), patch(
+        ) as setup_mock, patch("main.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
+            "main.ensure_mandatory_channel_rollout", new=AsyncMock()
+        ) as rollout_mock, patch("main.connectivity_monitor_loop", new=AsyncMock()), patch(
             "main.offer_expiry_loop", new=AsyncMock()
         ), patch("main.session_expiry_loop", new=AsyncMock()), patch("main.asyncio.create_task", side_effect=fake_create_task):
             async with main.lifespan(main.app):
@@ -29,6 +44,8 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         init_db_mock.assert_awaited_once()
         init_redis_mock.assert_awaited_once()
         setup_mock.assert_called_once_with()
+        rollout_mock.assert_awaited_once_with(session)
+        session.commit.assert_awaited_once()
         close_redis_mock.assert_awaited_once()
         self.assertEqual(len(created), 3)
 
@@ -42,9 +59,13 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
                 coro.close()
             return SimpleNamespace()
 
+        session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+
         with patch.object(main.settings, "server_mode", "foreign"), patch("main.init_db", new=AsyncMock()), patch(
             "main.init_redis", new=AsyncMock()
         ), patch("main.close_redis", new=AsyncMock()), patch("main.setup_event_listeners"), patch(
+            "main.AsyncSessionLocal", return_value=_AsyncSessionContext(session)
+        ), patch("main.ensure_mandatory_channel_rollout", new=AsyncMock()) as rollout_mock, patch(
             "main.connectivity_monitor_loop", new=AsyncMock()
         ), patch("main.offer_expiry_loop", new=AsyncMock()), patch(
             "main.session_expiry_loop", new=AsyncMock()
@@ -52,6 +73,8 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
             async with main.lifespan(main.app):
                 pass
 
+        rollout_mock.assert_awaited_once_with(session)
+        session.commit.assert_awaited_once()
         self.assertEqual(len(created), 2)
 
 

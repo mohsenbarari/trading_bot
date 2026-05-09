@@ -28,6 +28,7 @@ class FakeDB:
     def __init__(self, execute_results=None):
         self.execute_results = list(execute_results or [])
         self.commit = AsyncMock()
+        self.flush = AsyncMock(side_effect=self._flush)
         self.refresh = AsyncMock(side_effect=self._refresh)
         self.added = []
 
@@ -38,6 +39,11 @@ class FakeDB:
 
     def add(self, item):
         self.added.append(item)
+
+    async def _flush(self):
+        for item in self.added:
+            if getattr(item, "id", None) is None:
+                item.id = 77
 
     async def _refresh(self, item):
         if getattr(item, "id", None) is None:
@@ -84,6 +90,9 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.auth.create_refresh_token",
             return_value="refresh-token",
         ) as refresh_mock, patch(
+            "api.routers.auth.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ) as mandatory_mock, patch(
             "api.routers.auth.hash_token",
             return_value="hashed-refresh",
         ), patch("api.routers.auth.uuid.uuid4", return_value="session-uuid"), patch(
@@ -105,6 +114,8 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user.mobile_number, "09999999999")
         self.assertEqual(user.role, UserRole.SUPER_ADMIN)
         self.assertEqual(user.home_server, "foreign")
+        db.flush.assert_awaited_once()
+        self.assertIs(mandatory_mock.await_args.kwargs["user"], user)
         self.assertEqual(session.user_id, 77)
         self.assertEqual(session.device_name, "Dev Bypass Terminal")
         self.assertEqual(session.device_ip, "127.0.0.1")
