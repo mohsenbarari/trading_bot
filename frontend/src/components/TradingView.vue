@@ -192,8 +192,9 @@ function getLotButtons(offer: Offer): number[] {
     return []
   }
 
-  const uniqueLots = [...new Set((offer.lot_sizes || []).filter((amount) => amount > 0))]
-  return uniqueLots.filter((amount) => amount <= remaining)
+  const uniqueLots = [...new Set([remaining, ...(offer.lot_sizes || [])].filter((amount) => amount > 0 && amount <= remaining))]
+  // Keep ascending data order so the largest amount renders on the left in RTL.
+  return uniqueLots.sort((a, b) => a - b)
 }
 
 function buildOfferSignature(offer: Offer | null): string | null {
@@ -813,9 +814,7 @@ watch(activeTab, (val) => {
               </template>
               <template v-else>
                 <button 
-                  v-for="amount in [...new Set(offer.lot_sizes || [])]
-                    .filter(a => a > 0 && a <= offer.remaining_quantity)
-                    .sort((a, b) => a - b)"
+                  v-for="amount in getLotButtons(offer)"
                   :key="offer.id + '-' + amount"
                   class="trade-btn"
                   @click="openTradeModal(offer, amount)"

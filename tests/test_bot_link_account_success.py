@@ -72,7 +72,10 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         state = FakeState()
         message = make_message()
 
-        with patch("bot.handlers.link_account.get_db", new=db_factory(db)):
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.settings",
+            SimpleNamespace(frontend_url="https://app.example"),
+        ):
             await handle_contact(message, state)
 
         self.assertEqual(user.telegram_id, 10)
@@ -82,6 +85,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.commits, 1)
         self.assertEqual(state.cleared, 1)
         self.assertIn("با موفقیت", message.answer.await_args.args[0])
+        self.assertIn("ورود به وب اپ", message.answer.await_args.args[0])
 
     async def test_handle_contact_rolls_back_and_reports_commit_error(self):
         user = SimpleNamespace(telegram_id=None, username=None, full_name="acc", account_name="acc", has_bot_access=False, address="تهران خیابان آزادی پلاک ۱۰")
@@ -89,7 +93,10 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         state = FakeState()
         message = make_message()
 
-        with patch("bot.handlers.link_account.get_db", new=db_factory(db)):
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.settings",
+            SimpleNamespace(frontend_url="https://app.example"),
+        ):
             await handle_contact(message, state)
 
         self.assertEqual(db.rollbacks, 1)
@@ -142,6 +149,9 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
             "bot.handlers.link_account.build_channel_join_request_line",
             new=AsyncMock(return_value="🔗 [درخواست عضویت در کانال معاملات](https://t.me/joinreq)"),
+        ), patch(
+            "bot.handlers.link_account.settings",
+            SimpleNamespace(frontend_url="https://app.example"),
         ):
             await handle_address_completion(message, state)
 
@@ -152,6 +162,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.commits, 1)
         self.assertEqual(state.cleared, 1)
         self.assertIn("درخواست عضویت در کانال معاملات", message.answer.await_args.args[0])
+        self.assertIn("ورود به وب اپ", message.answer.await_args.args[0])
 
 
 if __name__ == "__main__":

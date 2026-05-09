@@ -240,6 +240,58 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         response_mock.assert_called_once_with(reloaded_trade)
         self.assertEqual(result, {"id": 89, "trade_number": 10001})
 
+    async def test_execute_trade_authoritatively_allows_full_remaining_retail_trade_and_clears_lots(self):
+        locked_user = make_user()
+        offer = make_offer(
+            offer_type=OfferType.BUY,
+            is_wholesale=False,
+            lot_sizes=[20, 15, 10],
+            quantity=45,
+            remaining_quantity=25,
+        )
+        reloaded_trade = SimpleNamespace(id=90)
+        user_for_counter = make_user()
+        db = FakeDB(
+            get_results=[offer, user_for_counter],
+            execute_results=[
+                FakeExecuteResult(single=locked_user),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=10002,
+        )
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 25, [25, 15, 10]),
+        ), patch("sqlalchemy.orm.attributes.flag_modified") as flag_modified, patch(
+            "api.routers.trades.update_channel_buttons",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
+            "api.routers.trades.trade_to_response",
+            return_value={"id": 90, "trade_number": 10003},
+        ):
+            result = await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=25),
+                BackgroundTasks(),
+                db=db,
+                current_user=locked_user,
+            )
+
+        self.assertEqual(offer.remaining_quantity, 0)
+        self.assertEqual(offer.status, OfferStatus.COMPLETED)
+        self.assertIsNone(offer.lot_sizes)
+        flag_modified.assert_called_once_with(offer, "lot_sizes")
+        self.assertEqual(result, {"id": 90, "trade_number": 10003})
+
     async def test_execute_trade_authoritatively_reraises_non_stale_commit_errors(self):
         locked_user = make_user()
         offer = make_offer()

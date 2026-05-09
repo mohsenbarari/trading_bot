@@ -63,7 +63,7 @@ class TradeServiceValidationAndPayloadTests(unittest.TestCase):
         self.assertEqual(get_available_trade_amounts(20, 0, False, [5]), [])
         self.assertEqual(get_available_trade_amounts(20, 12, True, [5, 7]), [12])
         self.assertEqual(get_available_trade_amounts(20, 12, False, "bad"), [])
-        self.assertEqual(get_available_trade_amounts(20, 12, False, [10, 10, 0, 15, 5]), [10, 5])
+        self.assertEqual(get_available_trade_amounts(20, 12, False, [10, 10, 0, 15, 5]), [12, 10, 5])
 
     def test_validate_offer_trade_amount_covers_error_paths_and_success(self):
         self.assertEqual(
@@ -88,12 +88,12 @@ class TradeServiceValidationAndPayloadTests(unittest.TestCase):
 
         self.assertEqual(
             validate_offer_trade_amount(20, 10, False, [4, 6], 5),
-            (False, "این لات دیگر موجود نیست.", 5, [4, 6]),
+            (False, "این لات دیگر موجود نیست.", 5, [10, 6, 4]),
         )
 
         self.assertEqual(
             validate_offer_trade_amount(20, 10, False, [6, 4], 6),
-            (True, "", 6, [6, 4]),
+            (True, "", 6, [10, 6, 4]),
         )
 
     def test_build_lot_unavailable_suggestion_payload_formats_sell_payload(self):

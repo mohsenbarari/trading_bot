@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.user import User
 from core.config import settings
 from core.db import get_db
+from bot.keyboards import get_persistent_menu_keyboard
 from bot.utils.channel_invites import build_channel_join_request_line
 
 router = Router()
@@ -20,6 +21,13 @@ INCOMPLETE_ADDRESS_SENTINELS = {"System Default", "REGISTRATION_PENDING"}
 class LinkState(StatesGroup):
     waiting_for_contact = State()
     waiting_for_address = State()
+
+
+def build_webapp_link_line() -> str | None:
+    frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
+    if not frontend_url:
+        return None
+    return f"🌐 [ورود به وب اپ]({frontend_url})"
 
 
 def user_requires_address_completion(user: User) -> bool:
@@ -54,6 +62,9 @@ async def finalize_account_link(
     if join_request_line:
         success_lines.append(join_request_line)
         success_lines.append("پس از ثبت درخواست، عضویت شما در کانال به صورت خودکار تایید می‌شود.")
+    webapp_link_line = build_webapp_link_line()
+    if webapp_link_line:
+        success_lines.append(webapp_link_line)
     success_lines.append("اکنون می‌توانید از تمام امکانات ربات استفاده کنید.")
 
     await message.answer(
@@ -107,10 +118,20 @@ async def prompt_contact_for_account_link(
     return sent_message
 
 @router.message(Command("link"))
-async def cmd_link(message: types.Message, state: FSMContext):
+async def cmd_link(message: types.Message, state: FSMContext, user: User | None = None):
     """
     Start account linking process.
     """
+    if user:
+        if user_requires_address_completion(user):
+            await prompt_address_completion(message, state, user.id, already_linked=True)
+            return
+        await message.answer(
+            "✅ حساب شما قبلاً به تلگرام متصل شده است و نیازی به اشتراک‌گذاری دوباره شماره موبایل ندارید.",
+            reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url),
+        )
+        return
+
     await prompt_contact_for_account_link(message, state)
 
 @router.message(LinkState.waiting_for_contact, F.contact)
