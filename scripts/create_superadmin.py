@@ -42,7 +42,12 @@ async def create_superadmin(mobile: str, account_name: str, temp_password: str):
         try:
             await db.commit()
             print("✅ Super Admin successfully created!")
-            print(f"You can now login with:\nMobile: {mobile}\nOTP: (via SMS, and then must enter the temporary password to set a new one)")
+            print(
+                f"You can now login with:\n"
+                f"Mobile: {mobile}\n"
+                f"OTP: (via SMS, and then must enter the temporary password to set a new one)\n"
+                f"Bot activation: open the bot and send /start or /link, then share the same mobile number to link Telegram."
+            )
         except Exception as e:
             await db.rollback()
             print(f"❌ Failed to create super admin: {e}")
