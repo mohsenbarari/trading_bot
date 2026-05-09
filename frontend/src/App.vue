@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router'
-import { onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { onMounted, ref } from 'vue'
 import BottomNav from './components/BottomNav.vue'
 import SessionApprovalModal from './components/SessionApprovalModal.vue'
 import PWAInstallOverlay from './components/PWAInstallOverlay.vue'
@@ -14,7 +14,14 @@ import { initChatFileDebugOverlay } from './composables/chat/useChatFileHandler'
 
 
 const route = useRoute()
+const router = useRouter()
 const { on, off, connect } = useWebSocket()
+
+// Track whether the router's FIRST navigation (which includes loading the
+// lazy-loaded route component chunk from the network) has completed.
+// Until then we show a full-screen spinner instead of a blank white page.
+const isFirstRouteReady = ref(false)
+router.isReady().then(() => { isFirstRouteReady.value = true })
 
 const ensureSessionValidation = async () => {
   const refreshToken = localStorage.getItem('refresh_token')
@@ -76,7 +83,13 @@ useNotificationRuntime({ connect, on, off, ensureSessionValidation })
 
     <!-- Page Content Container -->
     <div class="flex-1 relative overflow-y-auto overflow-x-hidden min-h-0 bg-transparent">
-      <RouterView v-slot="{ Component }">
+      <!-- Full-screen spinner shown while the first route's JS chunk loads from
+           the network (only visible on first incognito/cold load). Without this,
+           the RouterView renders nothing during the async component download → blank white page. -->
+      <div v-if="!isFirstRouteReady" class="flex items-center justify-center h-full min-h-screen">
+        <div class="w-10 h-10 border-4 border-amber-400 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+      <RouterView v-else v-slot="{ Component }">
         <transition name="fade" mode="out-in">
           <component :is="Component" />
         </transition>
