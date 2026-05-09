@@ -116,6 +116,7 @@ class BotStartRegistrationAddressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_user.telegram_id, 5)
         self.assertEqual(new_user.account_name, "acc")
         self.assertIn("درخواست عضویت در کانال معاملات", message.answer.await_args.args[0])
+        self.assertIn("ورود به وب اپ", message.answer.await_args.args[0])
         set_anchor.assert_called_once_with(21, 66)
 
 

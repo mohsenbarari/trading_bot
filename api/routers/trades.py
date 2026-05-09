@@ -465,7 +465,12 @@ async def _execute_trade_authoritatively(
     offer.remaining_quantity -= trade_quantity
     
     # بروزرسانی لات‌ها - حذف مقدار معامله شده از لیست
-    if offer.lot_sizes:
+    if offer.remaining_quantity <= 0:
+        if offer.lot_sizes is not None:
+            from sqlalchemy.orm.attributes import flag_modified
+            offer.lot_sizes = None
+            flag_modified(offer, "lot_sizes")
+    elif offer.lot_sizes:
         from sqlalchemy.orm.attributes import flag_modified
         new_lot_sizes = list(offer.lot_sizes)
         if trade_quantity in new_lot_sizes:

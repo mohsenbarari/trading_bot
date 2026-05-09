@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+def build_webapp_link_line() -> str | None:
+    frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
+    if not frontend_url:
+        return None
+    return f"🌐 [ورود به وب اپ]({frontend_url})"
+
+
 @router.message(CommandStart(deep_link=True))
 async def handle_start_with_token(message: types.Message, command: CommandObject, state: FSMContext, user: Optional[User]):
     
@@ -293,6 +300,10 @@ async def handle_address(message: types.Message, state: FSMContext):
                 f"{join_request_line}\n"
                 "پس از ثبت درخواست، عضویت شما به صورت خودکار تایید می‌شود.\n\n"
             )
+
+        webapp_link_line = build_webapp_link_line()
+        if webapp_link_line:
+            welcome_text += f"{webapp_link_line}\n\n"
         
         welcome_text += "برای دسترسی به امکانات، از دکمه‌های زیر استفاده کنید."
         

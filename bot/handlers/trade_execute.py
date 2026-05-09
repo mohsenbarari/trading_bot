@@ -301,10 +301,13 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
             offer.remaining_quantity = new_remaining
             
             # بروزرسانی لات‌ها
-            new_lot_sizes = list(offer.lot_sizes) if offer.lot_sizes else []
-            if actual_amount in new_lot_sizes:
-                new_lot_sizes.remove(actual_amount)
-            offer.lot_sizes = new_lot_sizes if new_lot_sizes else None
+            if new_remaining <= 0:
+                offer.lot_sizes = None
+            else:
+                new_lot_sizes = list(offer.lot_sizes) if offer.lot_sizes else []
+                if actual_amount in new_lot_sizes:
+                    new_lot_sizes.remove(actual_amount)
+                offer.lot_sizes = new_lot_sizes if new_lot_sizes else None
             
             # اگر باقیمانده صفر شد، لفظ تکمیل شود
             if new_remaining <= 0:

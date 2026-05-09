@@ -237,8 +237,9 @@ def get_available_trade_amounts(
     Return the exact amounts that can currently be traded for an offer.
 
     Wholesale offers are traded as the full remaining quantity. Retail offers
-    must be traded only through the still-active lot sizes defined by the offer
-    owner; the aggregate remaining quantity is not an implicit lot.
+    expose both the full remaining quantity and the still-active owner-defined
+    lot sizes so responders can either consume the remainder in one trade or
+    pick one of the explicit lots.
     """
     try:
         total = _ensure_int(quantity, "quantity")
@@ -257,15 +258,15 @@ def get_available_trade_amounts(
     except TypeError:
         return []
 
-    seen = set()
-    available: List[int] = []
+    seen = {remaining}
+    available: List[int] = [remaining]
     for lot in normalized_lots:
         if lot <= 0 or lot > remaining or lot in seen:
             continue
         seen.add(lot)
         available.append(lot)
 
-    return available
+    return sorted(available, reverse=True)
 
 
 def validate_offer_trade_amount(

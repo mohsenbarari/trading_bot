@@ -46,14 +46,14 @@ class ManualOfferValidationTests(unittest.TestCase):
             self.assertTrue(validate_quantity(75)[0])
             self.assertFalse(validate_quantity(76)[0])
 
-    def test_retail_trade_must_match_active_registered_lot(self):
+    def test_retail_trade_buttons_include_total_remaining_and_registered_lots(self):
         available = get_available_trade_amounts(
             quantity=34,
             remaining_quantity=34,
             is_wholesale=False,
             lot_sizes=[16, 10, 8],
         )
-        self.assertEqual(available, [16, 10, 8])
+        self.assertEqual(available, [34, 16, 10, 8])
 
         valid, error, amount, _ = validate_offer_trade_amount(34, 34, False, [16, 10, 8], 10)
         self.assertTrue(valid)
@@ -70,9 +70,9 @@ class ManualOfferValidationTests(unittest.TestCase):
 
         self.assertFalse(valid_after_first_trade)
         self.assertEqual(error_after_first_trade, "این لات دیگر موجود نیست.")
-        self.assertEqual(available_after_first_trade, [16, 8])
+        self.assertEqual(available_after_first_trade, [24, 16, 8])
 
-    def test_retail_trade_does_not_create_implicit_remaining_lot(self):
+    def test_retail_trade_allows_full_remaining_quantity_button(self):
         available = get_available_trade_amounts(
             quantity=34,
             remaining_quantity=18,
@@ -80,12 +80,14 @@ class ManualOfferValidationTests(unittest.TestCase):
             lot_sizes=[10, 8],
         )
 
-        self.assertEqual(available, [10, 8])
-        self.assertNotIn(18, available)
+        self.assertEqual(available, [18, 10, 8])
+        self.assertIn(18, available)
 
-        valid, error, _, _ = validate_offer_trade_amount(34, 18, False, [10, 8], 16)
-        self.assertFalse(valid)
-        self.assertEqual(error, "این لات دیگر موجود نیست.")
+        valid, error, amount, available_amounts = validate_offer_trade_amount(34, 18, False, [10, 8], 18)
+        self.assertTrue(valid)
+        self.assertEqual(error, "")
+        self.assertEqual(amount, 18)
+        self.assertEqual(available_amounts, [18, 10, 8])
 
     def test_lot_unavailable_payload_contains_remaining_buttons(self):
         payload = build_lot_unavailable_suggestion_payload(
@@ -95,18 +97,18 @@ class ManualOfferValidationTests(unittest.TestCase):
             commodity_name="سکه امامی",
             price=75800,
             remaining_quantity=24,
-            available_amounts=[16, 8],
+            available_amounts=[24, 16, 8],
         )
 
         self.assertEqual(payload["error_code"], "TRADE_LOT_UNAVAILABLE")
         self.assertEqual(payload["offer_id"], 77)
         self.assertEqual(payload["offer_type"], "sell")
         self.assertEqual(payload["offer_type_label"], "فروش")
-        self.assertEqual(payload["available_lots"], [16, 8])
-        self.assertEqual(payload["lot_summary"], "16 + 8")
+        self.assertEqual(payload["available_lots"], [24, 16, 8])
+        self.assertEqual(payload["lot_summary"], "24 + 16 + 8")
         self.assertIn("لات 10 عددی", payload["message"])
         self.assertIn("🔴فروش سکه امامی 24 عدد 75,800", payload["message"])
-        self.assertIn("16 + 8", payload["message"])
+        self.assertIn("24 + 16 + 8", payload["message"])
 
     def test_lot_unavailable_payload_handles_empty_available_lots(self):
         payload = build_lot_unavailable_suggestion_payload(
