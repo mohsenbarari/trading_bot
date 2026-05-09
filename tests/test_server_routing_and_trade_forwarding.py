@@ -15,6 +15,22 @@ class ServerRoutingTests(unittest.TestCase):
         self.assertEqual(server_routing.normalize_server("IR"), server_routing.SERVER_IRAN)
         self.assertEqual(server_routing.normalize_server("unknown", default=server_routing.SERVER_IRAN), server_routing.SERVER_IRAN)
 
+    def test_current_and_peer_server_helpers_follow_normalized_server_mode(self):
+        with patch.object(server_routing.settings, "server_mode", "IR"):
+            self.assertEqual(server_routing.current_server(), server_routing.SERVER_IRAN)
+            self.assertEqual(server_routing.peer_server_name(), server_routing.SERVER_FOREIGN)
+
+        with patch.object(server_routing.settings, "server_mode", "foreign"):
+            self.assertEqual(server_routing.current_server(), server_routing.SERVER_FOREIGN)
+            self.assertEqual(server_routing.peer_server_name(), server_routing.SERVER_IRAN)
+
+    def test_host_from_request_handles_missing_headers_original_host_and_normalization(self):
+        self.assertEqual(server_routing._host_from_request(None), "")
+        self.assertEqual(server_routing._host_from_request(SimpleNamespace()), "")
+
+        request = SimpleNamespace(headers={"x-original-host": "Mini-App.362514.ir:443, proxy", "host": "ignored"})
+        self.assertEqual(server_routing._host_from_request(request), "mini-app.362514.ir")
+
     def test_server_from_request_prefers_forwarded_host_and_telegram_override(self):
         request = SimpleNamespace(headers={"x-forwarded-host": "coin.gold-trade.ir:443", "host": "coin.362514.ir"})
 
@@ -23,6 +39,20 @@ class ServerRoutingTests(unittest.TestCase):
             server_routing.server_from_request(request, force_telegram_foreign=True),
             server_routing.SERVER_FOREIGN,
         )
+
+    def test_server_from_request_uses_configured_domains_builtin_hosts_and_current_server_fallback(self):
+        request_iran = SimpleNamespace(headers={"host": "iran.custom.example"})
+        request_foreign = SimpleNamespace(headers={"host": "foreign.custom.example"})
+        request_builtin_foreign = SimpleNamespace(headers={"host": "coin.362514.ir:8443"})
+        request_unknown = SimpleNamespace(headers={"host": "unknown.internal"})
+
+        with patch.object(server_routing.settings, "iran_server_domain", "iran.custom.example"), \
+             patch.object(server_routing.settings, "foreign_server_domain", "foreign.custom.example"), \
+             patch.object(server_routing.settings, "server_mode", "IRAN"):
+            self.assertEqual(server_routing.server_from_request(request_iran), server_routing.SERVER_IRAN)
+            self.assertEqual(server_routing.server_from_request(request_foreign), server_routing.SERVER_FOREIGN)
+            self.assertEqual(server_routing.server_from_request(request_builtin_foreign), server_routing.SERVER_FOREIGN)
+            self.assertEqual(server_routing.server_from_request(request_unknown), server_routing.SERVER_IRAN)
 
     def test_peer_server_url_for_uses_specific_urls_and_legacy_fallback(self):
         with patch.object(server_routing.settings, "server_mode", "foreign"), \
@@ -34,10 +64,36 @@ class ServerRoutingTests(unittest.TestCase):
             self.assertIsNone(server_routing.peer_server_url_for("foreign"))
 
         with patch.object(server_routing.settings, "server_mode", "iran"), \
+             patch.object(server_routing.settings, "germany_server_url", "https://germany.example/"), \
+             patch.object(server_routing.settings, "peer_server_url", None), \
+             patch.object(server_routing.settings, "foreign_server_url", None):
+            self.assertEqual(server_routing.peer_server_url_for("foreign"), "https://germany.example")
+
+        with patch.object(server_routing.settings, "server_mode", "iran"), \
              patch.object(server_routing.settings, "germany_server_url", None), \
              patch.object(server_routing.settings, "peer_server_url", "https://legacy-peer.example/"), \
              patch.object(server_routing.settings, "foreign_server_url", None):
             self.assertEqual(server_routing.peer_server_url_for("foreign"), "https://legacy-peer.example")
+
+        with patch.object(server_routing.settings, "server_mode", "iran"), \
+             patch.object(server_routing.settings, "germany_server_url", None), \
+             patch.object(server_routing.settings, "peer_server_url", None), \
+             patch.object(server_routing.settings, "foreign_server_url", "https://legacy-foreign.example/"):
+            self.assertEqual(server_routing.peer_server_url_for("unknown-target"), "https://legacy-foreign.example")
+
+        with patch.object(server_routing.settings, "server_mode", "iran"), \
+             patch.object(server_routing.settings, "germany_server_url", None), \
+             patch.object(server_routing.settings, "peer_server_url", None), \
+             patch.object(server_routing.settings, "foreign_server_url", None):
+            self.assertIsNone(server_routing.peer_server_url_for("foreign"))
+
+    def test_default_peer_server_url_and_is_remote_home_follow_current_server(self):
+        with patch.object(server_routing.settings, "server_mode", "foreign"), \
+             patch.object(server_routing.settings, "iran_server_url", "https://iran.example/"):
+            self.assertEqual(server_routing.default_peer_server_url(), "https://iran.example")
+            self.assertFalse(server_routing.is_remote_home(None))
+            self.assertFalse(server_routing.is_remote_home("germany"))
+            self.assertTrue(server_routing.is_remote_home("iran"))
 
 
 class TradeForwardingSignatureTests(unittest.TestCase):
