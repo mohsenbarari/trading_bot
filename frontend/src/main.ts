@@ -24,45 +24,35 @@ window.addEventListener('vite:preloadError', (event) => {
 // --- PWA Service Worker Registration (with iOS error recovery) ---
 import { registerSW } from 'virtual:pwa-register'
 
-try {
-  const updateSW = registerSW({
-    onNeedRefresh() {
-      // autoUpdate mode handles the reload automatically via controllerchange.
-      // Do NOT call window.location.reload() here — it would trigger a double
-      // reload that causes a blank white page on first incognito install.
-      console.log('New SW content available — will apply on next navigation.')
-    },
-    onOfflineReady() {
-      console.log('App ready to work offline')
-    },
-    onRegisterError(error: any) {
-      console.error('SW registration failed:', error)
-      // If SW fails, unregister all SWs and reload to ensure app works
-      navigator.serviceWorker?.getRegistrations().then(registrations => {
-        registrations.forEach(r => r.unregister())
-        console.log('Unregistered broken service workers, reloading...')
-        window.location.reload()
-      })
-    }
-  })
-} catch (e) {
-  console.error('SW setup error:', e)
-}
+let didRegisterPwa = false
 
-// --- iOS Safari SW stale-cache recovery ---
-// If the page is blank after 3s (SW served bad cache), force-reload without SW
-if ('serviceWorker' in navigator) {
-  setTimeout(() => {
-    const app = document.getElementById('app')
-    if (app && app.children.length === 0) {
-      console.warn('App did not render in 10s — clearing SW cache')
-      caches.keys().then(names => names.forEach(n => caches.delete(n)))
-      navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(r => r.unregister())
-        window.location.reload()
-      })
-    }
-  }, 10000)
+function registerPwaWhenStable() {
+  if (didRegisterPwa) return
+  didRegisterPwa = true
+
+  try {
+    registerSW({
+      onNeedRefresh() {
+        // autoUpdate mode handles the reload automatically via controllerchange.
+        // Do NOT call window.location.reload() here — it would trigger a double
+        // reload that causes a blank white page on first incognito install.
+        console.log('New SW content available — will apply on next navigation.')
+      },
+      onOfflineReady() {
+        console.log('App ready to work offline')
+      },
+      onRegisterError(error: any) {
+        console.error('SW registration failed:', error)
+        navigator.serviceWorker?.getRegistrations().then(registrations => {
+          registrations.forEach(registration => registration.unregister())
+          console.log('Unregistered broken service workers, reloading...')
+          window.location.reload()
+        })
+      }
+    })
+  } catch (error) {
+    console.error('SW setup error:', error)
+  }
 }
 
 // --- Telegram WebApp Theme Handling ---
@@ -96,3 +86,18 @@ if (!(window as any).Telegram?.WebApp) {
 }
 
 app.mount('#app')
+
+try {
+  sessionStorage.removeItem('app_boot_recovery_attempted')
+  document.documentElement.removeAttribute('data-app-boot-recovering')
+} catch (error) {
+  // Ignore storage failures in stricter privacy contexts.
+}
+
+if (document.readyState === 'complete') {
+  window.setTimeout(registerPwaWhenStable, 1500)
+} else {
+  window.addEventListener('load', () => {
+    window.setTimeout(registerPwaWhenStable, 1500)
+  }, { once: true })
+}

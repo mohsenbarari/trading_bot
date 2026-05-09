@@ -94,6 +94,14 @@
       display: block;
     }
 
+    html[data-app-boot-recovering='1'] #boot-loader-note {
+      display: block;
+    }
+
+    html[data-app-boot-recovering='1'] #boot-loader-refresh {
+      display: none;
+    }
+
     html[data-app-mounted='1'] #boot-loader {
       opacity: 0;
       visibility: hidden;
@@ -122,9 +130,53 @@
   </div>
   <div id="app"></div>
   <script>
-    window.__appBootTimeoutId = window.setTimeout(function () {
-      document.documentElement.setAttribute('data-app-boot-timeout', '1')
-    }, 8000)
+    (function () {
+      const root = document.documentElement
+      const BOOT_RECOVERY_KEY = 'app_boot_recovery_attempted'
+
+      async function clearCachesAndServiceWorkers() {
+        try {
+          if ('caches' in window) {
+            const names = await caches.keys()
+            await Promise.all(names.map(name => caches.delete(name)))
+          }
+
+          if ('serviceWorker' in navigator) {
+            const registrations = await navigator.serviceWorker.getRegistrations()
+            await Promise.all(registrations.map(registration => registration.unregister()))
+          }
+        } catch (error) {
+          console.warn('Boot recovery cleanup failed', error)
+        }
+      }
+
+      window.__appBootTimeoutId = window.setTimeout(async function () {
+        if (root.getAttribute('data-app-mounted') === '1') return
+
+        let hasRecoveredAlready = false
+        try {
+          hasRecoveredAlready = sessionStorage.getItem(BOOT_RECOVERY_KEY) === '1'
+        } catch (error) {
+          hasRecoveredAlready = false
+        }
+
+        if (!hasRecoveredAlready) {
+          try {
+            sessionStorage.setItem(BOOT_RECOVERY_KEY, '1')
+          } catch (error) {
+            // ignore storage failures and still attempt recovery
+          }
+
+          root.setAttribute('data-app-boot-recovering', '1')
+          await clearCachesAndServiceWorkers()
+          window.location.reload()
+          return
+        }
+
+        root.removeAttribute('data-app-boot-recovering')
+        root.setAttribute('data-app-boot-timeout', '1')
+      }, 10000)
+    })()
   </script>
   <script type="module" src="/src/main.ts"></script>
 </body>
