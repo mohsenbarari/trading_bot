@@ -18,6 +18,7 @@ from models.chat import Chat
 from models.chat_member import ChatMember
 from models.message import Message
 from models.user import User, UserRole
+from core.services.chat_service import get_next_chat_member_pin_order
 
 SerializedMessageT = TypeVar("SerializedMessageT")
 RoomEventPublisher = Callable[[int, str, dict], object]
@@ -98,6 +99,7 @@ class ChannelConversationSummary:
     is_muted: bool = False
     is_pinned: bool = False
     pinned_at: datetime | None = None
+    pin_order: int | None = None
 
 
 @dataclass
@@ -175,6 +177,18 @@ def _has_disallowed_control_chars(value: str | None) -> bool:
     if not value:
         return False
     return any(unicodedata.category(ch) == "Cc" and ch not in {"\n", "\r", "\t"} for ch in value)
+
+
+def _unpack_conversation_projection_row(row):
+    if len(row) == 10:
+        return row
+    if len(row) == 6:
+        chat, member_role, last_content, last_type, unread, member_count = row
+        return chat, member_role, False, False, None, None, last_content, last_type, unread, member_count
+    if len(row) == 9:
+        chat, member_role, is_muted, is_pinned, pinned_at, last_content, last_type, unread, member_count = row
+        return chat, member_role, is_muted, is_pinned, pinned_at, None, last_content, last_type, unread, member_count
+    raise ValueError(f"Unexpected conversation projection row size: {len(row)}")
 
 
 GROUP_MAX_MEMBERS = 50
@@ -789,6 +803,7 @@ async def list_group_conversations(
             current_member.is_muted.label("is_muted"),
             current_member.is_pinned.label("is_pinned"),
             current_member.pinned_at.label("pinned_at"),
+            current_member.pin_order.label("pin_order"),
             last_message_content,
             last_message_alias.message_type.label("last_message_type"),
             func.greatest(func.coalesce(unread_count, 0), manual_unread_count).label("unread_count"),
@@ -810,7 +825,8 @@ async def list_group_conversations(
     result = await db.execute(stmt)
 
     rows: list[ChannelConversationSummary] = []
-    for chat, member_role, is_muted, is_pinned, pinned_at, last_content, last_type, unread, member_count in result.all():
+    for row in result.all():
+        chat, member_role, is_muted, is_pinned, pinned_at, pin_order, last_content, last_type, unread, member_count = _unpack_conversation_projection_row(row)
         synthetic_room_id = -int(chat.id)
         rows.append(
             ChannelConversationSummary(
@@ -834,6 +850,7 @@ async def list_group_conversations(
                 is_muted=bool(is_muted),
                 is_pinned=bool(is_pinned),
                 pinned_at=pinned_at,
+                pin_order=pin_order,
             )
         )
     return rows
@@ -1104,6 +1121,7 @@ async def remove_group_member(
     member.left_at = now
     member.is_pinned = False
     member.pinned_at = None
+    member.pin_order = None
     member.is_hidden = False
     member.hidden_at = None
     member.updated_at = now
@@ -1139,6 +1157,7 @@ async def leave_group_chat(
     member.left_at = now
     member.is_pinned = False
     member.pinned_at = None
+    member.pin_order = None
     member.is_hidden = False
     member.hidden_at = None
     member.updated_at = now
@@ -1205,6 +1224,7 @@ async def list_channel_conversations(
             current_member.is_muted.label("is_muted"),
             current_member.is_pinned.label("is_pinned"),
             current_member.pinned_at.label("pinned_at"),
+            current_member.pin_order.label("pin_order"),
             last_message_content,
             last_message_alias.message_type.label("last_message_type"),
             func.greatest(func.coalesce(unread_count, 0), manual_unread_count).label("unread_count"),
@@ -1226,7 +1246,8 @@ async def list_channel_conversations(
     result = await db.execute(stmt)
 
     rows: list[ChannelConversationSummary] = []
-    for chat, member_role, is_muted, is_pinned, pinned_at, last_content, last_type, unread, member_count in result.all():
+    for row in result.all():
+        chat, member_role, is_muted, is_pinned, pinned_at, pin_order, last_content, last_type, unread, member_count = _unpack_conversation_projection_row(row)
         synthetic_room_id = -int(chat.id)
         rows.append(
             ChannelConversationSummary(
@@ -1250,6 +1271,7 @@ async def list_channel_conversations(
                 is_muted=bool(is_muted),
                 is_pinned=bool(is_pinned),
                 pinned_at=pinned_at,
+                pin_order=pin_order,
             )
         )
     return rows
@@ -1681,6 +1703,7 @@ async def update_channel_member(
         member.left_at = now
         member.is_pinned = False
         member.pinned_at = None
+        member.pin_order = None
         member.is_hidden = False
         member.hidden_at = None
         member.updated_at = now
@@ -1748,6 +1771,7 @@ async def leave_channel_chat(
     member.left_at = now
     member.is_pinned = False
     member.pinned_at = None
+    member.pin_order = None
     member.is_hidden = False
     member.hidden_at = None
     member.updated_at = now
@@ -1790,8 +1814,12 @@ async def set_room_pin_state(
     member.is_pinned = pinned
     member.pinned_at = now if pinned else None
     if pinned:
+        if member.pin_order is None:
+            member.pin_order = await get_next_chat_member_pin_order(db, user_id=user_id)
         member.is_hidden = False
         member.hidden_at = None
+    else:
+        member.pin_order = None
     member.updated_at = now
     chat.updated_at = now
     await db.commit()

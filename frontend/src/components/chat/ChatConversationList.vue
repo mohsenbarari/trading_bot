@@ -4,6 +4,8 @@ import type { Component } from 'vue'
 import { type Conversation } from '../../types/chat'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import {
+  ArrowDown,
+  ArrowUp,
   Bell,
   BellOff,
   CircleDot,
@@ -17,7 +19,7 @@ import {
   UsersRound,
 } from 'lucide-vue-next'
 
-type ConversationListAction = 'pin' | 'unpin' | 'mute' | 'unmute' | 'mark-unread' | 'delete' | 'leave' | 'unfollow'
+type ConversationListAction = 'pin' | 'unpin' | 'move-pin-up' | 'move-pin-down' | 'mute' | 'unmute' | 'mark-unread' | 'delete' | 'leave' | 'unfollow'
 type MenuActionTone = 'accent' | 'danger' | 'warning'
 
 type ConversationMenuAction = {
@@ -76,6 +78,22 @@ function isConversationPinned(conv: Conversation) {
 
 function isConversationMuted(conv: Conversation) {
   return conv.is_muted === true
+}
+
+const reorderablePinnedConversations = computed(() => {
+  return displayedConversations.value.filter((conversation) => {
+    return isConversationPinned(conversation) && !isMandatoryPinnedConversation(conversation)
+  })
+})
+
+function canMoveConversationPinUp(conv: Conversation) {
+  const index = reorderablePinnedConversations.value.findIndex((conversation) => conversation.id === conv.id)
+  return index > 0
+}
+
+function canMoveConversationPinDown(conv: Conversation) {
+  const index = reorderablePinnedConversations.value.findIndex((conversation) => conversation.id === conv.id)
+  return index !== -1 && index < reorderablePinnedConversations.value.length - 1
 }
 
 function canMarkConversationUnread(conv: Conversation) {
@@ -185,6 +203,28 @@ const activeMenuActions = computed<ConversationMenuAction[]>(() => {
             icon: Pin,
           }
     )
+
+    if (isConversationPinned(conv)) {
+      if (canMoveConversationPinUp(conv)) {
+        actions.push({
+          key: 'move-pin-up',
+          label: 'جابجایی به بالا',
+          description: 'این گفتگوی سنجاق‌شده یک پله بالاتر می‌رود.',
+          tone: 'accent',
+          icon: ArrowUp,
+        })
+      }
+
+      if (canMoveConversationPinDown(conv)) {
+        actions.push({
+          key: 'move-pin-down',
+          label: 'جابجایی به پایین',
+          description: 'این گفتگوی سنجاق‌شده یک پله پایین‌تر می‌رود.',
+          tone: 'accent',
+          icon: ArrowDown,
+        })
+      }
+    }
   }
 
     if (canMarkConversationUnread(conv)) {
@@ -327,6 +367,7 @@ onBeforeUnmount(() => {
                 conv.is_muted,
                 conv.is_pinned,
                 conv.pinned_at,
+                conv.pin_order,
                 selectedUserId === conv.other_user_id,
                 !isRoomConversation(conv) && !!typingUsers[conv.other_user_id],
               ]"
@@ -617,7 +658,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--line-soft);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
   cursor: pointer;
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.065), 0 1px 0 rgba(255, 255, 255, 0.72) inset;
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
   user-select: none;
   -webkit-user-select: none;
@@ -626,7 +667,7 @@ onBeforeUnmount(() => {
 
 .conversation-card:hover {
   transform: translateY(-1px);
-  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.09), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
 }
 
 .conversation-card--pinned {
@@ -636,7 +677,7 @@ onBeforeUnmount(() => {
 
 .conversation-card--mandatory {
   border-color: rgba(245, 158, 11, 0.28);
-  box-shadow: 0 14px 30px rgba(180, 83, 9, 0.1);
+  box-shadow: 0 16px 32px rgba(180, 83, 9, 0.11), 0 1px 0 rgba(255, 255, 255, 0.74) inset;
 }
 
 .conversation-card--active {

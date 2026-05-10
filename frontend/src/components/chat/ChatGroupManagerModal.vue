@@ -551,13 +551,13 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 .candidate-search {
   flex: 1;
   min-width: 0;
-  height: 48px;
+  height: 52px;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
-  padding: 0 16px;
+  padding: 0 18px;
   font: inherit;
-  font-size: 0.95rem;
-  line-height: 1.2;
+  font-size: 0.98rem;
+  line-height: 1.25;
   outline: none;
   box-sizing: border-box;
   background: #f8fafc;
@@ -578,7 +578,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
   border: 0;
   border-radius: 14px;
   padding: 0 14px;
-  min-height: 48px;
+  min-height: 52px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

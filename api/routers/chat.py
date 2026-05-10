@@ -16,6 +16,7 @@ from jose import jwt, JWTError
 from core.db import get_db
 from core.config import settings
 from models.chat import Chat
+from models.message import Message
 from models.user import User
 from models.chat_file import ChatFile
 from api.deps import get_current_user, verify_super_admin
@@ -34,6 +35,8 @@ from api.routers.chat_schemas import (
     ChannelUpdateRequest,
     ConversationHideResponse,
     ConversationPinResponse,
+    ConversationPinReorderResponse,
+    ConversationPinReorderUpdateRequest,
     ConversationPinUpdateRequest,
     ConversationRead,
     ConversationUnreadResponse,
@@ -48,8 +51,10 @@ from api.routers.chat_schemas import (
     GroupUpdateRequest,
     MessageRead,
     MessageReactionToggle,
+    MessagePinUpdateRequest,
     MessageSend,
     MessageUpdate,
+    PinnedMessageStateResponse,
     PollResponse,
     RoomMessageSend,
     StickerPack,
@@ -105,12 +110,15 @@ from core.services.chat_room_service import (
 from core.services.chat_service import (
     apply_direct_message_delete,
     apply_direct_message_edit,
+    apply_message_pin_state,
     apply_direct_message_reaction_toggle,
     build_direct_conversation_list_stmt,
     build_direct_message_history_statements,
     build_direct_message_search_stmt,
     build_direct_unread_poll_stmt,
     commit_direct_read_state,
+    get_existing_direct_chat,
+    get_pinned_message_for_chat,
     hide_direct_conversation,
     persist_sent_direct_message,
     publish_direct_message_event,
@@ -118,6 +126,7 @@ from core.services.chat_service import (
     publish_direct_reaction_event,
     publish_direct_typing_event,
     prepare_direct_message_send,
+    reorder_chat_member_pin_order,
     set_direct_chat_mark_unread_state,
     set_direct_chat_mute_state,
     set_direct_chat_pin_state,
@@ -135,6 +144,28 @@ CHAT_MEDIA_MAX_UPLOAD_LABEL = "50MB"
 router = APIRouter(
     tags=["Chat"]
 )
+
+
+def _serialize_pinned_message_state(
+    *,
+    room_kind: str,
+    chat: Chat | None,
+    message: Message | None,
+) -> PinnedMessageStateResponse:
+    return PinnedMessageStateResponse(
+        chat_id=chat.id if chat is not None else None,
+        room_kind=room_kind,
+        pinned_at=getattr(chat, "pinned_message_at", None) if chat is not None else None,
+        pinned_by_user_id=getattr(chat, "pinned_message_by_id", None) if chat is not None else None,
+        message=(
+            serialize_direct_message_for_response(
+                message,
+                serializer=MessageRead.from_orm_with_forwarding,
+            )
+            if message is not None
+            else None
+        ),
+    )
 
 
 # ===== Endpoints =====
@@ -224,7 +255,49 @@ async def pin_direct_conversation(
         chat_id=member.chat_id,
         is_pinned=bool(member.is_pinned),
         pinned_at=member.pinned_at,
+        pin_order=getattr(member, "pin_order", None),
     )
+
+
+@router.post("/direct/{user_id}/pin-order", response_model=ConversationPinReorderResponse)
+async def reorder_direct_conversation_pin(
+    user_id: int,
+    data: ConversationPinReorderUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    member = await set_direct_chat_pin_state(
+        db,
+        actor=current_user,
+        other_user_id=user_id,
+        pinned=True,
+    )
+    reordered_member = await reorder_chat_member_pin_order(
+        db,
+        user_id=current_user.id,
+        chat_id=member.chat_id,
+        direction=data.direction,
+    )
+    return ConversationPinReorderResponse(
+        target_id=user_id,
+        chat_id=reordered_member.chat_id,
+        pin_order=reordered_member.pin_order,
+    )
+
+
+@router.get("/direct/{user_id}/pinned-message", response_model=PinnedMessageStateResponse)
+async def get_direct_pinned_message(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    target = await db.get(User, user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    chat = await get_existing_direct_chat(db, current_user.id, user_id)
+    message = await get_pinned_message_for_chat(db, chat) if chat is not None else None
+    return _serialize_pinned_message_state(room_kind="direct", chat=chat, message=message)
 
 
 @router.post("/direct/{user_id}/mute", response_model=ConversationMuteResponse)
@@ -621,7 +694,56 @@ async def pin_room_conversation(
         chat_id=room.id,
         is_pinned=bool(member.is_pinned),
         pinned_at=member.pinned_at,
+        pin_order=getattr(member, "pin_order", None),
     )
+
+
+@router.post("/rooms/{chat_id}/pin-order", response_model=ConversationPinReorderResponse)
+async def reorder_room_conversation_pin(
+    chat_id: int,
+    data: ConversationPinReorderUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    room = await get_room_or_404(db, chat_id)
+    if room.type == ChatType.DIRECT:
+        raise HTTPException(status_code=400, detail="Use the direct pin-order endpoint for personal chats")
+
+    member = await set_room_pin_state(
+        db,
+        chat=room,
+        user_id=current_user.id,
+        pinned=True,
+    )
+    reordered_member = await reorder_chat_member_pin_order(
+        db,
+        user_id=current_user.id,
+        chat_id=member.chat_id,
+        direction=data.direction,
+    )
+    return ConversationPinReorderResponse(
+        target_id=-int(room.id),
+        chat_id=room.id,
+        pin_order=reordered_member.pin_order,
+    )
+
+
+@router.get("/rooms/{chat_id}/pinned-message", response_model=PinnedMessageStateResponse)
+async def get_room_pinned_message(
+    chat_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    room = await get_room_or_404(db, chat_id)
+    if room.type == ChatType.GROUP:
+        await get_active_group_member_or_403(db, chat=room, user_id=current_user.id)
+    elif room.type == ChatType.CHANNEL:
+        await get_active_channel_member_or_403(db, chat=room, user_id=current_user.id)
+    else:
+        raise HTTPException(status_code=400, detail="Use the direct pinned-message endpoint for personal chats")
+
+    message = await get_pinned_message_for_chat(db, room)
+    return _serialize_pinned_message_state(room_kind=room.type.value, chat=room, message=message)
 
 
 @router.post("/rooms/{chat_id}/mute", response_model=ConversationMuteResponse)
@@ -1117,6 +1239,26 @@ async def toggle_message_reaction(
         )
 
     return reaction_payload
+
+
+@router.post("/messages/{message_id}/pin", response_model=PinnedMessageStateResponse)
+async def toggle_message_pin(
+    message_id: int,
+    data: MessagePinUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    chat, pinned_message = await apply_message_pin_state(
+        db,
+        message_id=message_id,
+        actor_id=current_user.id,
+        pinned=data.pinned,
+    )
+    return _serialize_pinned_message_state(
+        room_kind=chat.type.value,
+        chat=chat,
+        message=pinned_message,
+    )
 
 
 @router.delete("/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)

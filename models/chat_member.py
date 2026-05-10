@@ -33,6 +33,7 @@ class ChatMember(Base):
     is_marked_unread = Column(Boolean, nullable=False, default=False)
     is_pinned = Column(Boolean, nullable=False, default=False)
     pinned_at = Column(DateTime(timezone=True), nullable=True)
+    pin_order = Column(Integer, nullable=True)
     is_hidden = Column(Boolean, nullable=False, default=False)
     hidden_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -58,6 +59,12 @@ class ChatMember(Base):
             is_hidden,
             is_pinned,
             updated_at,
+        ),
+        Index(
+            "ix_chat_members_user_pinned_order",
+            user_id,
+            is_pinned,
+            pin_order,
         ),
         Index(
             "ix_chat_members_chat_status_role",

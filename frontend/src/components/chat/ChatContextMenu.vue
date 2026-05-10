@@ -118,6 +118,16 @@
               <span style="flex:1;">ویرایش</span>
             </div>
         </template>
+        <template v-if="canPin && !isAlbumSelection">
+            <div class="menu-item is-warning" v-ripple @click="$emit('pin-message')" role="menuitem">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 17v5"></path>
+                <path d="M5 7V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"></path>
+                <path d="M4 7h16l-3 6H7z"></path>
+              </svg>
+              <span style="flex:1;">{{ isPinnedMessage ? 'برداشتن پیام سنجاق‌شده' : 'سنجاق کردن پیام' }}</span>
+            </div>
+        </template>
         <template v-if="canDelete">
             <div class="menu-divider"></div>
             <div class="menu-item is-danger" v-ripple @click="$emit('delete')" role="menuitem">
@@ -153,6 +163,8 @@ const props = defineProps<{
   currentUserId: number | null
   canEdit: boolean
   canDelete: boolean
+  canPin: boolean
+  isPinnedMessage: boolean
   availableReactions: string[]
 }>()
 
@@ -163,6 +175,7 @@ const _emit = defineEmits<{
   (e: 'copy'): void
   (e: 'edit'): void
   (e: 'delete'): void
+  (e: 'pin-message'): void
   (e: 'close'): void
   (e: 'save-media'): void
   (e: 'save-album'): void
@@ -214,6 +227,7 @@ const menuPosition = computed(() => {
     !props.isAlbumSelection && (props.menuState.message?.message_type === 'image' || props.menuState.message?.message_type === 'video'),
     supportsFileShare && !props.isAlbumSelection && shareableType.value,
     props.canEdit,
+    props.canPin && !props.isAlbumSelection,
     props.canDelete,
   ].filter(Boolean).length
   const menuW = showReactionRow.value ? reactionPanelW : actionPanelW

@@ -2,6 +2,7 @@ export type ChatKind = 'direct' | 'channel' | 'group'
 
 export interface Conversation {
     id: number
+    chat_id?: number | null
     other_user_id: number
     other_user_name: string
     other_user_is_deleted?: boolean
@@ -11,7 +12,6 @@ export interface Conversation {
     unread_count: number
     other_user_last_seen_at?: string | null
     room_kind?: ChatKind
-    chat_id?: number | null
     can_send?: boolean
     member_role?: 'admin' | 'member' | null
     member_count?: number | null
@@ -21,6 +21,7 @@ export interface Conversation {
     is_muted?: boolean
     is_pinned?: boolean
     pinned_at?: string | null
+    pin_order?: number | null
 }
 
 export type ChatListItem = Conversation
@@ -48,6 +49,9 @@ export interface Message {
     is_deleted?: boolean
     updated_at?: string
     created_at: string
+    forwarded_from_id?: number | null
+    forwarded_from_name?: string | null
+    sender_name?: string | null
     reactions?: MessageReaction[]
     reply_to_message?: {
         id: number
@@ -55,6 +59,14 @@ export interface Message {
         content: string
         message_type: string
     }
+}
+
+export interface PinnedMessageState {
+    chat_id?: number | null
+    room_kind: ChatKind
+    pinned_at?: string | null
+    pinned_by_user_id?: number | null
+    message?: Message | null
 }
 
 export interface ChatForwardTarget {

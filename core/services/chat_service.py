@@ -162,6 +162,7 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
             func.max(case((ChatMember.is_marked_unread.is_(True), 1), else_=0)).label("is_marked_unread_flag"),
             func.max(case((ChatMember.is_pinned.is_(True), 1), else_=0)).label("is_pinned_flag"),
             func.max(ChatMember.pinned_at).label("pinned_at"),
+            func.max(ChatMember.pin_order).label("pin_order"),
             func.max(case((ChatMember.is_hidden.is_(True), 1), else_=0)).label("is_hidden_flag"),
         )
         .where(
@@ -236,6 +237,7 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         else_=False,
     ).label("is_pinned")
     pinned_at = current_member_lookup.c.pinned_at.label("pinned_at")
+    pin_order = current_member_lookup.c.pin_order.label("pin_order")
     last_message_content = case(
         (last_message_alias.is_deleted.is_(True), "پیام حذف شد"),
         (last_message_alias.message_type == MessageType.TEXT, last_message_alias.content),
@@ -245,6 +247,7 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
     stmt = (
         select(
             Conversation.id.label("id"),
+            direct_chat_lookup.c.chat_id.label("chat_id"),
             other_user_id,
             other_user_name,
             other_user_is_deleted,
@@ -256,6 +259,7 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
             is_muted,
             is_pinned,
             pinned_at,
+            pin_order,
         )
         .select_from(Conversation)
         .join(user1_alias, Conversation.user1_id == user1_alias.id)
@@ -498,6 +502,92 @@ async def _find_existing_direct_chat_id(
     return result.scalar_one_or_none()
 
 
+async def get_existing_direct_chat(
+    db: AsyncSession,
+    user1_id: int,
+    user2_id: int,
+) -> Chat | None:
+    chat_id = await _find_existing_direct_chat_id(db, user1_id, user2_id)
+    if chat_id is None:
+        return None
+    return await db.get(Chat, chat_id)
+
+
+async def get_next_chat_member_pin_order(
+    db: AsyncSession,
+    *,
+    user_id: int,
+) -> int:
+    result = await db.execute(
+        select(func.max(ChatMember.pin_order))
+        .select_from(ChatMember)
+        .join(Chat, Chat.id == ChatMember.chat_id)
+        .where(
+            ChatMember.user_id == user_id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+            ChatMember.is_pinned.is_(True),
+            Chat.is_deleted.is_(False),
+            Chat.is_mandatory.is_(False),
+        )
+    )
+    current_max = result.scalar_one_or_none()
+    return int(current_max or 0) + 1
+
+
+async def reorder_chat_member_pin_order(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    chat_id: int,
+    direction: str,
+) -> ChatMember:
+    normalized_direction = direction.strip().lower()
+    if normalized_direction not in {"up", "down"}:
+        raise HTTPException(status_code=400, detail="Direction must be up or down")
+
+    result = await db.execute(
+        select(ChatMember, Chat)
+        .join(Chat, Chat.id == ChatMember.chat_id)
+        .where(
+            ChatMember.user_id == user_id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+            ChatMember.is_pinned.is_(True),
+            Chat.is_deleted.is_(False),
+            Chat.is_mandatory.is_(False),
+        )
+        .order_by(
+            ChatMember.pin_order.desc().nullslast(),
+            ChatMember.pinned_at.desc().nullslast(),
+            ChatMember.id.desc(),
+        )
+    )
+    rows = result.all()
+    members = [member for member, _chat in rows]
+    target_index = next((index for index, member in enumerate(members) if member.chat_id == chat_id), -1)
+    if target_index == -1:
+        raise HTTPException(status_code=404, detail="Pinned conversation not found")
+
+    if normalized_direction == "up" and target_index > 0:
+        members[target_index - 1], members[target_index] = members[target_index], members[target_index - 1]
+    elif normalized_direction == "down" and target_index < len(members) - 1:
+        members[target_index + 1], members[target_index] = members[target_index], members[target_index + 1]
+
+    now = datetime.now(timezone.utc)
+    next_pin_order = len(members)
+    for member in members:
+        if member.pin_order != next_pin_order:
+            member.pin_order = next_pin_order
+            member.updated_at = now
+        next_pin_order -= 1
+
+    await db.commit()
+
+    target_member = next((member for member in members if member.chat_id == chat_id), None)
+    if target_member is None:
+        raise HTTPException(status_code=404, detail="Pinned conversation not found")
+    return target_member
+
+
 async def _load_direct_chat_members(
     db: AsyncSession,
     chat_id: int,
@@ -643,8 +733,12 @@ async def set_direct_chat_pin_state(
     actor_member.is_pinned = pinned
     actor_member.pinned_at = now if pinned else None
     if pinned:
+        if actor_member.pin_order is None:
+            actor_member.pin_order = await get_next_chat_member_pin_order(db, user_id=actor.id)
         actor_member.is_hidden = False
         actor_member.hidden_at = None
+    else:
+        actor_member.pin_order = None
     actor_member.updated_at = now
     await db.commit()
     return actor_member
@@ -666,6 +760,7 @@ async def hide_direct_conversation(
     actor_member.hidden_at = now
     actor_member.is_pinned = False
     actor_member.pinned_at = None
+    actor_member.pin_order = None
     actor_member.updated_at = now
     await db.commit()
     return actor_member
@@ -1058,6 +1153,94 @@ async def reload_direct_message(
     return result.scalars().first()
 
 
+async def get_pinned_message_for_chat(
+    db: AsyncSession,
+    chat: Chat,
+) -> Message | None:
+    pinned_message_id = getattr(chat, "pinned_message_id", None)
+    if not pinned_message_id:
+        return None
+    message = await reload_direct_message(db, pinned_message_id, include_sender=True)
+    if message is None or message.is_deleted:
+        return None
+    return message
+
+
+async def get_pinnable_message(
+    db: AsyncSession,
+    *,
+    message_id: int,
+    actor_id: int,
+) -> tuple[Message, Chat]:
+    message = await db.get(Message, message_id)
+    if message is None or message.is_deleted:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if message.chat_id is None:
+        if actor_id not in (message.sender_id, message.receiver_id):
+            raise HTTPException(status_code=403, detail="You can only pin messages in your own conversations")
+        await ensure_direct_message_chat_link(db, message)
+
+    chat = await db.get(Chat, message.chat_id) if message.chat_id is not None else None
+    if chat is None or chat.is_deleted:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if chat.type == ChatType.DIRECT:
+        if actor_id not in (message.sender_id, message.receiver_id):
+            raise HTTPException(status_code=403, detail="You can only pin messages in your own conversations")
+        return message, chat
+
+    member_result = await db.execute(
+        select(ChatMember)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.user_id == actor_id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .order_by(ChatMember.id.desc())
+    )
+    member = member_result.scalars().first()
+    if member is None:
+        raise HTTPException(status_code=403, detail="Room membership not found")
+
+    if chat.type in (ChatType.GROUP, ChatType.CHANNEL) and member.role != ChatMemberRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only room admins can pin messages")
+
+    return message, chat
+
+
+async def apply_message_pin_state(
+    db: AsyncSession,
+    *,
+    message_id: int,
+    actor_id: int,
+    pinned: bool,
+) -> tuple[Chat, Message | None]:
+    message, chat = await get_pinnable_message(
+        db,
+        message_id=message_id,
+        actor_id=actor_id,
+    )
+
+    now = datetime.now(timezone.utc)
+    if pinned:
+        chat.pinned_message_id = message.id
+        chat.pinned_message_at = now
+        chat.pinned_message_by_id = actor_id
+    else:
+        if chat.pinned_message_id != message.id:
+            raise HTTPException(status_code=400, detail="Only the current pinned message can be unpinned")
+        chat.pinned_message_id = None
+        chat.pinned_message_at = None
+        chat.pinned_message_by_id = None
+    chat.updated_at = now
+    await db.commit()
+
+    if chat.pinned_message_id is None:
+        return chat, None
+    return chat, await get_pinned_message_for_chat(db, chat)
+
+
 async def persist_sent_direct_message(
     db: AsyncSession,
     *,
@@ -1252,5 +1435,13 @@ async def apply_direct_message_delete(
         actor_id=actor_id,
         now=now,
     )
+    message_chat_id = getattr(message, "chat_id", None)
+    if message_chat_id:
+        chat = await db.get(Chat, message_chat_id)
+        if chat is not None and chat.pinned_message_id == message.id:
+            chat.pinned_message_id = None
+            chat.pinned_message_at = None
+            chat.pinned_message_by_id = None
+            chat.updated_at = now
     mark_direct_message_deleted(message, deleted_at=now)
     await persist_direct_message_change(db, message)
