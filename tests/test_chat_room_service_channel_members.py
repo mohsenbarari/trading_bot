@@ -317,6 +317,50 @@ class ChatRoomServiceChannelMembersTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(member.is_marked_unread)
         db.commit.assert_awaited_once()
 
+    async def test_leave_channel_chat_deletes_optional_channel_when_creator_leaves(self):
+        now = datetime(2026, 5, 10, 9, 15, 0)
+        creator_member = ChatMember(
+            chat_id=9,
+            user_id=1,
+            role=ChatMemberRole.ADMIN,
+            membership_status=ChatMembershipStatus.ACTIVE,
+        )
+        other_member = ChatMember(
+            chat_id=9,
+            user_id=2,
+            role=ChatMemberRole.MEMBER,
+            membership_status=ChatMembershipStatus.ACTIVE,
+        )
+        chat = SimpleNamespace(
+            id=9,
+            is_system=False,
+            is_mandatory=False,
+            created_by_id=1,
+            is_deleted=False,
+            deleted_at=None,
+            updated_at=None,
+        )
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[creator_member]),
+                FakeExecuteResult(values=[creator_member, other_member]),
+            ]
+        )
+
+        with patch("core.services.chat_room_service._utcnow", return_value=now):
+            summary = await leave_channel_chat(db, chat=chat, user_id=1)
+
+        self.assertTrue(summary.removed)
+        self.assertFalse(summary.left)
+        self.assertEqual(summary.member_count, 0)
+        self.assertTrue(chat.is_deleted)
+        self.assertEqual(chat.deleted_at, now)
+        self.assertEqual(creator_member.membership_status, ChatMembershipStatus.REMOVED)
+        self.assertEqual(other_member.membership_status, ChatMembershipStatus.REMOVED)
+        self.assertEqual(creator_member.left_at, now)
+        self.assertEqual(other_member.left_at, now)
+        db.commit.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()

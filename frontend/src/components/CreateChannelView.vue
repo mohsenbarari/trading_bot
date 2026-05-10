@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import ChatUserListRow from './chat/ChatUserListRow.vue'
 import { apiFetch, apiFetchJson } from '../utils/auth'
 import { popBackState, pushBackState } from '../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles'
@@ -137,6 +138,15 @@ const canOpenCurrentChannelInMessenger = computed(() => {
 const currentUserCanPostInCurrentChannel = computed(() => currentUserMembership.value?.role === 'admin')
 const activeAdminCount = computed(() => members.value.filter((member) => member.role === 'admin').length)
 const channelAvatarUrl = computed(() => buildChatFileUrl(avatarFileId.value))
+const isCurrentUserChannelCreator = computed(() => Boolean(currentUserMembership.value?.is_channel_creator))
+const canEditOverviewAvatar = computed(() => Boolean(activeChannel.value && currentUserMembership.value?.role === 'admin' && !isMembershipManagementLocked.value))
+const currentChannelExitLabel = computed(() => isCurrentUserChannelCreator.value ? 'حذف کانال' : 'خروج از کانال')
+const currentChannelExitSubtitle = computed(() => {
+  if (isCurrentUserChannelCreator.value) {
+    return 'با این کار کانال برای همه اعضا حذف می‌شود.'
+  }
+  return 'از این کانال خارج شوید'
+})
 
 function normalizeSearch(value: string) {
   return value.trim().toLowerCase()
@@ -333,6 +343,23 @@ function getChannelKindLabel(channel: ChannelRoom) {
   if (channel.is_mandatory) return 'اجباری'
   if (channel.is_system) return 'سیستمی'
   return 'اختیاری'
+}
+
+function getChannelMemberBadges(member: ChannelMember) {
+  const badges: Array<{ label: string; tone: 'admin' | 'member' | 'creator' }> = [
+    { label: member.role === 'admin' ? 'ادمین' : 'عضو', tone: member.role === 'admin' ? 'admin' : 'member' },
+  ]
+  if (member.is_channel_creator) {
+    badges.push({ label: 'سازنده', tone: 'creator' })
+  }
+  return badges
+}
+
+function getPromotableMemberBadges() {
+  return [
+    { label: 'عضو', tone: 'member' as const },
+    { label: 'قابل ارتقا', tone: 'target' as const },
+  ]
 }
 
 function canDemoteMember(member: ChannelMember) {
@@ -590,6 +617,7 @@ async function unfollowCurrentChannel() {
   if (!activeChannel.value || isMembershipManagementLocked.value) return
   isSaving.value = true
   clearFlashMessages()
+  const shouldDeleteChannel = isCurrentUserChannelCreator.value
   try {
     const response = await apiFetch(`/api/chat/channels/${activeChannel.value.id}/unfollow`, { method: 'POST' })
     const data = await response.json().catch(() => ({})) as ChannelMemberMutationResponse | { detail?: string }
@@ -601,10 +629,10 @@ async function unfollowCurrentChannel() {
     members.value = []
     pageHistory.value = []
     applyPage('home')
-    successMessage.value = 'عضویت شما در کانال لغو شد.'
+    successMessage.value = shouldDeleteChannel ? 'کانال حذف شد.' : 'از کانال خارج شدید.'
     await loadExistingChannels()
   } catch (error) {
-    setError(error, 'خطا در ترک کانال')
+    setError(error, shouldDeleteChannel ? 'خطا در حذف کانال' : 'خطا در ترک کانال')
   } finally {
     isSaving.value = false
   }
@@ -771,13 +799,29 @@ void loadExistingChannels()
 
       <template v-else-if="page === 'overview' && activeChannel">
         <section class="hero-card">
-          <div class="hero-avatar">
+          <button
+            type="button"
+            class="hero-avatar"
+            :class="{ 'editable-avatar': canEditOverviewAvatar }"
+            :disabled="!canEditOverviewAvatar || avatarBusy"
+            @click="canEditOverviewAvatar ? triggerAvatarPicker() : undefined"
+          >
             <img v-if="channelAvatarUrl" :src="channelAvatarUrl" :alt="activeChannel.title" class="hero-avatar-image" />
             <template v-else>{{ getAvatarInitial(activeChannel.title) }}</template>
-          </div>
+            <div v-if="avatarBusy" class="avatar-busy-overlay"><Loader2 :size="20" class="spin" /></div>
+            <span v-else-if="canEditOverviewAvatar" class="avatar-edit-badge">ویرایش</span>
+          </button>
           <div class="hero-title">{{ activeChannel.title }}</div>
           <div class="hero-meta">{{ getChannelKindLabel(activeChannel) }} • {{ activeChannel.member_count.toLocaleString('fa-IR') }} عضو</div>
           <p class="hero-description">{{ activeChannel.description || 'توضیحی برای این کانال ثبت نشده است.' }}</p>
+          <div v-if="canEditOverviewAvatar" class="avatar-tool-row compact centered-overview-tools">
+            <button type="button" class="secondary-btn compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
+              {{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}
+            </button>
+            <button v-if="avatarFileId" type="button" class="ghost-action danger" :disabled="avatarBusy" @click="clearAvatar">
+              حذف عکس
+            </button>
+          </div>
           <div v-if="canOpenCurrentChannelInMessenger" class="hero-actions">
             <button type="button" class="secondary-btn compact" @click="openCurrentChannelInMessenger">باز کردن در پیام‌رسان</button>
           </div>
@@ -829,8 +873,8 @@ void loadExistingChannels()
           <button v-if="currentUserMembership && !isMembershipManagementLocked" type="button" class="telegram-row nav danger" :disabled="isSaving" @click="unfollowCurrentChannel">
             <div class="row-icon danger"><Info :size="18" /></div>
             <div class="row-copy">
-              <div class="row-title">لغو عضویت در کانال</div>
-              <div class="row-subtitle">خروج از کانال اختیاری</div>
+              <div class="row-title">{{ currentChannelExitLabel }}</div>
+              <div class="row-subtitle">{{ currentChannelExitSubtitle }}</div>
             </div>
           </button>
         </section>
@@ -846,20 +890,17 @@ void loadExistingChannels()
           <span>در حال دریافت اعضای کانال...</span>
         </div>
         <div v-else class="telegram-list">
-          <div v-for="member in filteredMembers" :key="member.user_id" class="telegram-row member-row">
-            <div class="row-avatar">
-              <img v-if="getUserAvatarUrl(member.avatar_file_id)" :src="getUserAvatarUrl(member.avatar_file_id)" :alt="member.account_name" class="row-avatar-image" />
-              <template v-else>{{ getAvatarInitial(member.account_name) }}</template>
-            </div>
-            <div class="row-copy">
-              <div class="row-title with-badges">
-                <span>{{ member.account_name }}</span>
-                <span class="badge" :class="member.role">{{ member.role === 'admin' ? 'ادمین' : 'عضو' }}</span>
-                <span v-if="member.is_channel_creator" class="badge creator">سازنده</span>
-              </div>
-              <div class="row-subtitle">{{ member.full_name }} • {{ member.mobile_number }}</div>
-            </div>
-            <div v-if="!isMembershipManagementLocked" class="row-actions">
+          <ChatUserListRow
+            v-for="member in filteredMembers"
+            :key="member.user_id"
+            :name="member.account_name"
+            :avatar-file-id="member.avatar_file_id || null"
+            :badges="getChannelMemberBadges(member)"
+          >
+            <template #subtitle>
+              {{ member.full_name }} • <span dir="ltr">{{ member.mobile_number }}</span>
+            </template>
+            <template v-if="!isMembershipManagementLocked" #actions>
               <button
                 v-if="member.role === 'member'"
                 type="button"
@@ -879,8 +920,8 @@ void loadExistingChannels()
                 حذف
               </button>
               <span v-else-if="getMemberGuardReason(member)" class="guard-text">{{ getMemberGuardReason(member) }}</span>
-            </div>
-          </div>
+            </template>
+          </ChatUserListRow>
         </div>
       </template>
 
@@ -892,20 +933,17 @@ void loadExistingChannels()
         <section class="section-shell">
           <div class="section-heading">ادمین‌های فعلی</div>
           <div class="telegram-list compact">
-            <div v-for="member in filteredAdmins" :key="member.user_id" class="telegram-row member-row">
-              <div class="row-avatar">
-                <img v-if="getUserAvatarUrl(member.avatar_file_id)" :src="getUserAvatarUrl(member.avatar_file_id)" :alt="member.account_name" class="row-avatar-image" />
-                <template v-else>{{ getAvatarInitial(member.account_name) }}</template>
-              </div>
-              <div class="row-copy">
-                <div class="row-title with-badges">
-                  <span>{{ member.account_name }}</span>
-                  <span class="badge admin">ادمین</span>
-                  <span v-if="member.is_channel_creator" class="badge creator">سازنده</span>
-                </div>
-                <div class="row-subtitle">{{ member.full_name }} • {{ member.mobile_number }}</div>
-              </div>
-              <div class="row-actions">
+            <ChatUserListRow
+              v-for="member in filteredAdmins"
+              :key="member.user_id"
+              :name="member.account_name"
+              :avatar-file-id="member.avatar_file_id || null"
+              :badges="getChannelMemberBadges(member)"
+            >
+              <template #subtitle>
+                {{ member.full_name }} • <span dir="ltr">{{ member.mobile_number }}</span>
+              </template>
+              <template #actions>
                 <button
                   v-if="canDemoteMember(member)"
                   type="button"
@@ -916,8 +954,8 @@ void loadExistingChannels()
                   حذف ادمین
                 </button>
                 <span v-else class="guard-text">{{ getMemberGuardReason(member) || 'ادمین فعال' }}</span>
-              </div>
-            </div>
+              </template>
+            </ChatUserListRow>
           </div>
         </section>
 
@@ -925,24 +963,27 @@ void loadExistingChannels()
           <div class="section-heading">اعضای قابل ارتقا</div>
           <div v-if="promotableMembers.length === 0" class="state-box muted">عضوی برای ارتقا باقی نمانده است.</div>
           <div v-else class="telegram-list compact">
-            <div v-for="member in promotableMembers" :key="member.user_id" class="telegram-row member-row">
-              <div class="row-avatar">
-                <img v-if="getUserAvatarUrl(member.avatar_file_id)" :src="getUserAvatarUrl(member.avatar_file_id)" :alt="member.account_name" class="row-avatar-image" />
-                <template v-else>{{ getAvatarInitial(member.account_name) }}</template>
-              </div>
-              <div class="row-copy">
-                <div class="row-title">{{ member.account_name }}</div>
-                <div class="row-subtitle">{{ member.full_name }} • {{ member.mobile_number }}</div>
-              </div>
-              <button
-                type="button"
-                class="ghost-action primary"
-                :disabled="mutatingUserId === member.user_id"
-                @click="promoteMember(member)"
-              >
-                ارتقا به ادمین
-              </button>
-            </div>
+            <ChatUserListRow
+              v-for="member in promotableMembers"
+              :key="member.user_id"
+              :name="member.account_name"
+              :avatar-file-id="member.avatar_file_id || null"
+              :badges="getPromotableMemberBadges()"
+            >
+              <template #subtitle>
+                {{ member.full_name }} • <span dir="ltr">{{ member.mobile_number }}</span>
+              </template>
+              <template #actions>
+                <button
+                  type="button"
+                  class="ghost-action primary"
+                  :disabled="mutatingUserId === member.user_id"
+                  @click="promoteMember(member)"
+                >
+                  ارتقا به ادمین
+                </button>
+              </template>
+            </ChatUserListRow>
           </div>
         </section>
       </template>
@@ -970,26 +1011,25 @@ void loadExistingChannels()
         </div>
         <div v-else-if="!selectAllActiveUsers && candidates.length === 0" class="state-box muted">کاربری برای دعوت باقی نمانده است.</div>
         <div v-else-if="!selectAllActiveUsers" class="telegram-list">
-          <button
+          <ChatUserListRow
             v-for="candidate in candidates"
             :key="candidate.user_id"
-            type="button"
-            class="telegram-row selectable"
-            :class="{ selected: selectedUserIds.has(candidate.user_id) }"
+            tag="button"
+            :interactive="true"
+            :selected="selectedUserIds.has(candidate.user_id)"
+            :name="candidate.account_name"
+            :avatar-file-id="candidate.avatar_file_id || null"
             @click="toggleUser(candidate.user_id)"
           >
-            <div class="row-avatar">
-              <img v-if="getUserAvatarUrl(candidate.avatar_file_id)" :src="getUserAvatarUrl(candidate.avatar_file_id)" :alt="candidate.account_name" class="row-avatar-image" />
-              <template v-else>{{ getAvatarInitial(candidate.account_name) }}</template>
-            </div>
-            <div class="row-copy">
-              <div class="row-title">{{ candidate.account_name }}</div>
-              <div class="row-subtitle">{{ candidate.full_name }} • {{ candidate.mobile_number }}</div>
-            </div>
-            <div class="row-check" :class="{ active: selectedUserIds.has(candidate.user_id) }">
-              <Check v-if="selectedUserIds.has(candidate.user_id)" :size="16" />
-            </div>
-          </button>
+            <template #subtitle>
+              {{ candidate.full_name }} • <span dir="ltr">{{ candidate.mobile_number }}</span>
+            </template>
+            <template #trailing>
+              <div class="row-check" :class="{ active: selectedUserIds.has(candidate.user_id) }">
+                <Check v-if="selectedUserIds.has(candidate.user_id)" :size="16" />
+              </div>
+            </template>
+          </ChatUserListRow>
         </div>
       </template>
 
@@ -1320,8 +1360,30 @@ void loadExistingChannels()
   overflow: hidden;
   width: 86px;
   height: 86px;
+  border: 0;
+  padding: 0;
   border-radius: 50%;
   font-size: 2rem;
+}
+
+.hero-avatar.editable-avatar {
+  cursor: pointer;
+}
+
+.avatar-edit-badge {
+  position: absolute;
+  inset-inline-start: 6px;
+  bottom: 6px;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #fff;
+  font-size: 0.64rem;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .row-avatar {
@@ -1363,6 +1425,10 @@ void loadExistingChannels()
 
 .avatar-tool-row.compact {
   justify-content: flex-start;
+}
+
+.avatar-tool-row.centered-overview-tools {
+  justify-content: center;
 }
 
 .avatar-editor-block {
