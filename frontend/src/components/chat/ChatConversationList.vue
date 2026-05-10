@@ -15,7 +15,6 @@ import {
   Shield,
   Trash2,
   UsersRound,
-  X,
 } from 'lucide-vue-next'
 
 type ConversationListAction = 'pin' | 'unpin' | 'mute' | 'unmute' | 'mark-unread' | 'delete' | 'leave' | 'unfollow'
@@ -159,6 +158,7 @@ function handlePointerMove(event: PointerEvent) {
 
 function handleContextMenu(conv: Conversation, event: MouseEvent) {
   event.preventDefault()
+  pointerOrigin.value = { x: event.clientX, y: event.clientY }
   openConversationMenu(conv)
 }
 
@@ -252,10 +252,29 @@ const activeMenuActions = computed<ConversationMenuAction[]>(() => {
   return actions
 })
 
-const menuHint = computed(() => {
-  const conv = menuConversation.value
-  if (!conv) return ''
-  return ''
+const menuPosition = computed(() => {
+  const menuW = 236
+  const actions = activeMenuActions.value
+  const dividerCount = actions.reduce((count, _action, index) => count + (shouldShowActionDivider(index) ? 1 : 0), 0)
+  const actionCount = Math.max(actions.length, 1)
+  const menuH = actionCount * 44 + dividerCount + 8
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 400
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+  const boundedMenuW = Math.min(menuW, vw - 16)
+
+  let x = pointerOrigin.value.x - (boundedMenuW / 2)
+  let y = pointerOrigin.value.y - 8
+
+  if (x + boundedMenuW > vw - 8) x = vw - boundedMenuW - 8
+  if (x < 8) x = 8
+  if (y + menuH > vh - 8) y = vh - menuH - 8
+  if (y < 8) y = 8
+
+  return {
+    top: `${y}px`,
+    left: `${x}px`,
+    width: `${boundedMenuW}px`,
+  }
 })
 
 function emitConversationAction(action: ConversationListAction) {
@@ -383,57 +402,32 @@ onBeforeUnmount(() => {
       <MessageCirclePlus :size="28" />
     </button>
 
-    <transition name="sheet-fade">
+    <transition name="zoom-fade">
       <div v-if="menuConversation" class="conversation-menu-overlay" @click.self="closeConversationMenu">
-        <div class="conversation-menu-sheet">
-          <button class="conversation-menu-close" @click="closeConversationMenu">
-            <X :size="18" />
-          </button>
-
-          <div class="conversation-menu-header">
-            <div
-              class="conv-avatar conversation-menu-avatar"
-              :class="{
-                'room-avatar': isRoomConversation(menuConversation),
-                'channel-avatar': isChannelConversation(menuConversation),
-                'group-avatar': isGroupConversation(menuConversation),
-              }"
-            >
-              <Megaphone v-if="isChannelConversation(menuConversation)" :size="22" />
-              <UsersRound v-else-if="isGroupConversation(menuConversation)" :size="22" />
-              <template v-else>{{ getConversationInitial(menuConversation) }}</template>
+        <div class="conversation-menu-popover" :style="menuPosition" role="menu" aria-label="Conversation actions">
+          <div class="conversation-menu-panel" @click.stop>
+            <div v-if="activeMenuActions.length > 0" class="conversation-menu-actions">
+              <template v-for="(action, index) in activeMenuActions" :key="action.key">
+                <div v-if="shouldShowActionDivider(index)" class="menu-action-divider"></div>
+                <button
+                  class="menu-action"
+                  :class="[`tone-${action.tone}`]"
+                  @click="emitConversationAction(action.key)"
+                >
+                  <div class="menu-action-icon">
+                    <component :is="action.icon" :size="20" />
+                  </div>
+                  <div class="menu-action-copy">
+                    <strong>{{ action.label }}</strong>
+                  </div>
+                </button>
+              </template>
             </div>
 
-            <div class="conversation-menu-copy">
-              <strong>{{ menuConversation.other_user_name }}</strong>
-              <span>{{ getPreviewText(menuConversation) }}</span>
+            <div v-else class="conversation-menu-empty">
+              <Shield :size="20" />
+              <span>برای این گفتگو عملیاتی در دسترس نیست.</span>
             </div>
-          </div>
-
-          <p v-if="menuHint" class="conversation-menu-hint">{{ menuHint }}</p>
-
-          <div v-if="activeMenuActions.length > 0" class="conversation-menu-actions">
-            <template v-for="(action, index) in activeMenuActions" :key="action.key">
-              <div v-if="shouldShowActionDivider(index)" class="menu-action-divider"></div>
-              <button
-                class="menu-action"
-                :class="[`tone-${action.tone}`]"
-                @click="emitConversationAction(action.key)"
-              >
-                <div class="menu-action-icon">
-                  <component :is="action.icon" :size="20" />
-                </div>
-                <div class="menu-action-copy">
-                  <strong>{{ action.label }}</strong>
-                  <span>{{ action.description }}</span>
-                </div>
-              </button>
-            </template>
-          </div>
-
-          <div v-else class="conversation-menu-empty">
-            <Shield :size="20" />
-            <span>برای این گفتگو عملیاتی در دسترس نیست.</span>
           </div>
         </div>
       </div>
@@ -925,97 +919,39 @@ onBeforeUnmount(() => {
 }
 
 .conversation-menu-overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 6;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 20px 16px 24px;
-  background: rgba(17, 24, 39, 0.28);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  z-index: 2000;
+  background: rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
-.conversation-menu-sheet {
-  width: min(100%, 380px);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.97);
-  border: 1px solid rgba(226, 232, 240, 0.92);
-  box-shadow: 0 24px 54px rgba(15, 23, 42, 0.2);
-  padding: 14px;
+.conversation-menu-popover {
+  position: fixed;
+  z-index: 2001;
+  direction: rtl;
+}
+
+.conversation-menu-panel {
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-}
-
-.conversation-menu-close {
-  width: 32px;
-  height: 32px;
-  margin-right: auto;
-  margin-bottom: 10px;
-  border: none;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.14);
-  color: #475569;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.conversation-menu-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
-  padding: 2px 2px 0;
-}
-
-.conversation-menu-avatar {
-  border-radius: 18px;
-}
-
-.conversation-menu-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.conversation-menu-copy strong {
-  color: var(--text-strong);
-  font-size: 0.98rem;
-}
-
-.conversation-menu-copy span,
-.conversation-menu-hint,
-.menu-action-copy span,
-.conversation-menu-empty span {
-  color: var(--text-muted);
-  font-size: 0.78rem;
-  line-height: 1.5;
-}
-
-.conversation-menu-hint {
-  margin: 0 0 14px;
-  padding: 12px 14px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.8);
-  border: 1px solid rgba(217, 119, 6, 0.1);
 }
 
 .conversation-menu-actions {
   display: flex;
   flex-direction: column;
-  gap: 0;
-  border-radius: 18px;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(226, 232, 240, 0.86);
+  padding: 4px 0;
 }
 
 .menu-action-divider {
   height: 1px;
-  margin: 0 14px;
+  margin: 0 16px;
   background: rgba(226, 232, 240, 0.92);
 }
 
@@ -1024,11 +960,18 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 12px 14px;
+  padding: 10px 16px;
+  box-sizing: border-box;
   border: 0;
   background: transparent;
   text-align: right;
+  font: inherit;
+  cursor: pointer;
   transition: background 0.12s ease;
+}
+
+.menu-action:active {
+  background: rgba(15, 23, 42, 0.08);
 }
 
 .menu-action:hover {
@@ -1036,9 +979,7 @@ onBeforeUnmount(() => {
 }
 
 .menu-action-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
+  display: inline-flex;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1047,14 +988,15 @@ onBeforeUnmount(() => {
 
 .menu-action-copy {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .menu-action-copy strong {
-  color: var(--text-strong);
-  font-size: 0.9rem;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .menu-action.tone-accent {
@@ -1062,8 +1004,7 @@ onBeforeUnmount(() => {
 }
 
 .menu-action.tone-accent .menu-action-icon {
-  background: rgba(51, 144, 236, 0.12);
-  color: var(--accent);
+  color: #64748b;
 }
 
 .menu-action.tone-warning {
@@ -1071,11 +1012,6 @@ onBeforeUnmount(() => {
 }
 
 .menu-action.tone-warning .menu-action-icon {
-  background: rgba(249, 115, 22, 0.12);
-  color: var(--warning);
-}
-
-.menu-action.tone-warning .menu-action-copy strong {
   color: var(--warning);
 }
 
@@ -1084,11 +1020,6 @@ onBeforeUnmount(() => {
 }
 
 .menu-action.tone-danger .menu-action-icon {
-  background: rgba(220, 38, 38, 0.12);
-  color: var(--danger);
-}
-
-.menu-action.tone-danger .menu-action-copy strong {
   color: var(--danger);
 }
 
@@ -1096,30 +1027,33 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px;
-  border-radius: 18px;
-  background: rgba(248, 250, 252, 0.96);
+  padding: 14px 16px;
   color: var(--accent);
 }
 
-.sheet-fade-enter-active,
-.sheet-fade-leave-active {
+.conversation-menu-empty span {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.zoom-fade-enter-active,
+.zoom-fade-leave-active {
   transition: opacity 0.2s ease;
 }
 
-.sheet-fade-enter-active .conversation-menu-sheet,
-.sheet-fade-leave-active .conversation-menu-sheet {
-  transition: transform 0.24s ease, opacity 0.24s ease;
+.zoom-fade-enter-active .conversation-menu-popover,
+.zoom-fade-leave-active .conversation-menu-popover {
+  transition: transform 0.16s cubic-bezier(0.2, 0, 0, 1), opacity 0.16s cubic-bezier(0.2, 0, 0, 1);
 }
 
-.sheet-fade-enter-from,
-.sheet-fade-leave-to {
+.zoom-fade-enter-from,
+.zoom-fade-leave-to {
   opacity: 0;
 }
 
-.sheet-fade-enter-from .conversation-menu-sheet,
-.sheet-fade-leave-to .conversation-menu-sheet {
-  transform: translateY(16px);
+.zoom-fade-enter-from .conversation-menu-popover,
+.zoom-fade-leave-to .conversation-menu-popover {
+  transform: scale(0.92);
   opacity: 0;
 }
 
@@ -1141,11 +1075,6 @@ onBeforeUnmount(() => {
     padding: 13px 14px;
     border-radius: 22px;
   }
-
-  .conversation-menu-sheet {
-    width: min(100%, 100%);
-  }
-
   .fab-new-chat {
     right: 18px;
     bottom: 22px;
