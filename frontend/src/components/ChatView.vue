@@ -2559,30 +2559,30 @@ function goBack() {
   }
 }
 
-function viewProfile() {
-  if (selectedUserId.value && selectedRoomKind.value === 'direct') {
-    emit('navigate', 'public_profile', { 
-        id: selectedUserId.value, 
-        account_name: selectedUserName.value 
-    })
+function navigateToPublicProfile(userId: number | null | undefined, accountName = '') {
+  const normalizedId = Number(userId)
+  if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
     return
   }
 
-  emit('navigate', 'public_profile', {
-    id: props.currentUserId,
-    account_name: '',
+  void router.push({
+    name: 'public-profile',
+    params: { id: String(normalizedId) },
+    query: accountName ? { account_name: accountName } : undefined,
   })
 }
 
-function openPublicProfile(payload?: { id?: number; account_name?: string }) {
-  if (!payload?.id) {
+function viewProfile() {
+  if (selectedUserId.value && selectedRoomKind.value === 'direct') {
+    navigateToPublicProfile(selectedUserId.value, selectedUserName.value)
     return
   }
 
-  emit('navigate', 'public_profile', {
-    id: payload.id,
-    account_name: payload.account_name || '',
-  })
+  navigateToPublicProfile(props.currentUserId)
+}
+
+function openPublicProfile(payload?: { id?: number; account_name?: string }) {
+  navigateToPublicProfile(payload?.id, payload?.account_name || '')
 }
 
 const handleCall = () => alert('قابلیت تماس به زودی اضافه می‌شود')

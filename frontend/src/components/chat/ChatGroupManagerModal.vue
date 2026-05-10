@@ -263,25 +263,24 @@ function clearAvatar() {
   avatarFileId.value = null
 }
 
-function getGroupMemberBadges(member: GroupMember) {
-  const badges: Array<{ label: string; tone: 'admin' | 'member' | 'creator' }> = [
-    { label: member.role === 'admin' ? 'ادمین' : 'عضو', tone: member.role === 'admin' ? 'admin' : 'member' },
-  ]
-  if (member.is_group_creator) {
-    badges.push({ label: 'سازنده', tone: 'creator' })
-  }
-  return badges
+function getPrimaryUserName(accountName: string, fullName?: string | null) {
+  const normalizedFullName = (fullName || '').trim()
+  return normalizedFullName || accountName
 }
 
-function getPromotableMemberBadges() {
-  return [
-    { label: 'عضو', tone: 'member' as const },
-    { label: 'قابل ارتقا', tone: 'target' as const },
-  ]
+function getGroupMemberBadges(member: GroupMember): Array<{ label: string; tone: 'admin' | 'member' | 'creator' }> {
+  if (member.is_group_creator) {
+    return [{ label: 'owner', tone: 'creator' as const }]
+  }
+  return [{ label: member.role === 'admin' ? 'admin' : 'member', tone: member.role === 'admin' ? 'admin' : 'member' as const }]
+}
+
+function getPromotableMemberBadges(member: GroupMember): Array<{ label: string; tone: 'admin' | 'member' | 'creator' }> {
+  return getGroupMemberBadges(member)
 }
 
 function canDemote(member: GroupMember) {
-  return isAdmin.value && member.role === 'admin' && !member.is_group_creator && activeAdminCount.value > 1
+  return isAdmin.value && member.role === 'admin' && !member.is_group_creator && member.user_id !== props.currentUserId && activeAdminCount.value > 1
 }
 
 function canRemove(member: GroupMember) {
@@ -736,33 +735,23 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                 <ChatUserListRow
                   v-for="member in filteredMembers"
                   :key="member.user_id"
-                  :name="member.account_name"
+                  :name="getPrimaryUserName(member.account_name, member.full_name)"
                   :avatar-file-id="member.avatar_file_id || null"
                   :badges="getGroupMemberBadges(member)"
                 >
                   <template #subtitle>
-                    {{ member.full_name }} • <span dir="ltr">{{ member.mobile_number }}</span>
+                    <span dir="ltr">{{ member.mobile_number }}</span>
                   </template>
                   <template v-if="isAdmin" #actions>
                     <button
-                      v-if="member.role === 'member'"
-                      type="button"
-                      class="ghost-action"
-                      :disabled="mutatingUserId === member.user_id"
-                      @click="promote(member)"
-                    >
-                      ادمین
-                    </button>
-                    <button
                       v-if="canRemove(member)"
                       type="button"
-                      class="ghost-action danger"
+                      class="chat-user-row__action-btn chat-user-row__action-btn--danger"
                       :disabled="mutatingUserId === member.user_id"
                       @click="removeMember(member)"
                     >
                       حذف
                     </button>
-                    <span v-else-if="getMemberGuardReason(member)" class="guard-text">{{ getMemberGuardReason(member) }}</span>
                   </template>
                 </ChatUserListRow>
               </div>
@@ -779,24 +768,23 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   <ChatUserListRow
                     v-for="member in filteredAdmins"
                     :key="member.user_id"
-                    :name="member.account_name"
+                    :name="getPrimaryUserName(member.account_name, member.full_name)"
                     :avatar-file-id="member.avatar_file_id || null"
                     :badges="getGroupMemberBadges(member)"
                   >
                     <template #subtitle>
-                      {{ member.full_name }} • <span dir="ltr">{{ member.mobile_number }}</span>
+                      <span dir="ltr">{{ member.mobile_number }}</span>
                     </template>
                     <template #actions>
                       <button
                         v-if="canDemote(member)"
                         type="button"
-                        class="ghost-action"
+                        class="chat-user-row__action-btn"
                         :disabled="mutatingUserId === member.user_id"
                         @click="demote(member)"
                       >
                         حذف ادمین
                       </button>
-                      <span v-else class="guard-text">{{ getMemberGuardReason(member) || 'ادمین فعال' }}</span>
                     </template>
                   </ChatUserListRow>
                 </div>
@@ -809,17 +797,17 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   <ChatUserListRow
                     v-for="member in promotableMembers"
                     :key="member.user_id"
-                    :name="member.account_name"
+                    :name="getPrimaryUserName(member.account_name, member.full_name)"
                     :avatar-file-id="member.avatar_file_id || null"
-                    :badges="getPromotableMemberBadges()"
+                    :badges="getPromotableMemberBadges(member)"
                   >
                     <template #subtitle>
-                      {{ member.full_name }} • <span dir="ltr">{{ member.mobile_number }}</span>
+                      <span dir="ltr">{{ member.mobile_number }}</span>
                     </template>
                     <template #actions>
                       <button
                         type="button"
-                        class="ghost-action primary"
+                        class="chat-user-row__action-btn chat-user-row__action-btn--primary"
                         :disabled="mutatingUserId === member.user_id"
                         @click="promote(member)"
                       >
@@ -855,12 +843,12 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   tag="button"
                   :interactive="true"
                   :selected="selectedUserIds.has(user.id)"
-                  :name="user.account_name"
+                  :name="getPrimaryUserName(user.account_name, user.full_name)"
                   :avatar-file-id="user.avatar_file_id || null"
                   @click="toggleCandidate(user.id)"
                 >
                   <template #subtitle>
-                    {{ user.full_name }} • <span dir="ltr">{{ user.mobile_number }}</span>
+                    <span dir="ltr">{{ user.mobile_number }}</span>
                   </template>
                   <template #trailing>
                     <div class="row-check" :class="{ active: selectedUserIds.has(user.id) }">

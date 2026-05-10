@@ -17,8 +17,13 @@ const emit = defineEmits<{
 const token = localStorage.getItem('auth_token') || ''
 
 const searchQuery = ref('')
-const users = ref<Array<{ id: number; account_name: string; mobile_number: string; avatar_file_id?: string | null }>>([])
+const users = ref<Array<{ id: number; account_name: string; full_name?: string | null; mobile_number: string; avatar_file_id?: string | null }>>([])
 const isLoading = ref(false)
+
+function getPrimaryUserName(accountName: string, fullName?: string | null) {
+  const normalizedFullName = (fullName || '').trim()
+  return normalizedFullName || accountName
+}
 
 const searchUsers = async (query: string = '') => {
   isLoading.value = true
@@ -119,9 +124,9 @@ onMounted(() => {
           :key="user.id"
           tag="button"
           :interactive="true"
-          :name="user.account_name"
+          :name="getPrimaryUserName(user.account_name, user.full_name)"
           :avatar-file-id="user.avatar_file_id || null"
-          @click="$emit('start-chat', user.id, user.account_name)"
+          @click="$emit('start-chat', user.id, getPrimaryUserName(user.account_name, user.full_name))"
         >
           <template #subtitle>
             <span dir="ltr">{{ user.mobile_number }}</span>
