@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.utils.redis_helpers import mark_deleted_telegram_user
 from core.config import settings
+from core.services.chat_room_service import ensure_mandatory_channel_membership
 from core.services.session_service import deactivate_active_sessions, publish_session_revocation
 from core.utils import send_telegram_notification
 from models.invitation import Invitation
@@ -86,6 +87,7 @@ async def delete_user_account(db: AsyncSession, user: User) -> DeletedUserResult
 
         revoked_sessions = await deactivate_active_sessions(db, user.id)
         user.soft_delete()
+        await ensure_mandatory_channel_membership(db, user=user)
         await db.commit()
     except Exception:
         await db.rollback()
