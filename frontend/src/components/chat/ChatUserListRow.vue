@@ -183,10 +183,13 @@ function handleClick(event: MouseEvent) {
 
 .chat-user-row__name {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-user-row__subtitle {
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   color: #64748b;
   line-height: 1.7;
   white-space: nowrap;
@@ -198,12 +201,13 @@ function handleClick(event: MouseEvent) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 20px;
-  padding: 0 8px;
+  min-height: 18px;
+  padding: 0 7px;
   border-radius: 999px;
-  font-size: 0.66rem;
-  font-weight: 900;
+  font-size: 0.58rem;
+  font-weight: 800;
   line-height: 1;
+  direction: ltr;
 }
 
 .chat-user-row__badge.admin {
@@ -252,6 +256,45 @@ function handleClick(event: MouseEvent) {
   justify-content: flex-end;
 }
 
+:deep(.chat-user-row__action-btn) {
+  min-width: 82px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(226, 232, 240, 0.92);
+  color: #334155;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+:deep(.chat-user-row__action-btn:hover) {
+  transform: translateY(-1px);
+}
+
+:deep(.chat-user-row__action-btn--primary) {
+  background: rgba(219, 234, 254, 0.96);
+  color: #1d4ed8;
+}
+
+:deep(.chat-user-row__action-btn--danger) {
+  background: rgba(254, 226, 226, 0.96);
+  color: #b91c1c;
+}
+
+:deep(.chat-user-row__action-btn:disabled) {
+  opacity: 0.66;
+  cursor: default;
+  transform: none;
+}
+
 @media (max-width: 520px) {
   .chat-user-row.has-actions {
     flex-wrap: wrap;
@@ -260,6 +303,10 @@ function handleClick(event: MouseEvent) {
   .chat-user-row__actions {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  :deep(.chat-user-row__action-btn) {
+    min-width: 76px;
   }
 }
 </style>

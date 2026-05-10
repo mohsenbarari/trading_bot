@@ -275,6 +275,11 @@ function clearAvatar() {
   avatarFileId.value = null
 }
 
+function getPrimaryUserName(accountName: string, fullName?: string | null) {
+  const normalizedFullName = (fullName || '').trim()
+  return normalizedFullName || accountName
+}
+
 function applyPage(nextPage: ChannelManagerPage) {
   page.value = nextPage
 }
@@ -345,30 +350,26 @@ function getChannelKindLabel(channel: ChannelRoom) {
   return 'اختیاری'
 }
 
-function getChannelMemberBadges(member: ChannelMember) {
-  const badges: Array<{ label: string; tone: 'admin' | 'member' | 'creator' }> = [
-    { label: member.role === 'admin' ? 'ادمین' : 'عضو', tone: member.role === 'admin' ? 'admin' : 'member' },
-  ]
+function getChannelMemberBadges(member: ChannelMember): Array<{ label: string; tone: 'admin' | 'member' | 'creator' }> {
   if (member.is_channel_creator) {
-    badges.push({ label: 'سازنده', tone: 'creator' })
+    return [{ label: 'owner', tone: 'creator' as const }]
   }
-  return badges
+  return [{ label: member.role === 'admin' ? 'admin' : 'member', tone: member.role === 'admin' ? 'admin' : 'member' as const }]
 }
 
-function getPromotableMemberBadges() {
-  return [
-    { label: 'عضو', tone: 'member' as const },
-    { label: 'قابل ارتقا', tone: 'target' as const },
-  ]
+function getPromotableMemberBadges(member: ChannelMember): Array<{ label: string; tone: 'admin' | 'member' | 'creator' }> {
+  return getChannelMemberBadges(member)
 }
 
 function canDemoteMember(member: ChannelMember) {
+  if (typeof props.currentUserId === 'number' && member.user_id === props.currentUserId) return false
   if (member.role !== 'admin') return false
   if (member.is_channel_creator) return false
   return activeAdminCount.value > 1
 }
 
 function canRemoveMember(member: ChannelMember) {
+  if (typeof props.currentUserId === 'number' && member.user_id === props.currentUserId) return false
   if (member.is_channel_creator) return false
   if (member.role === 'admin') return activeAdminCount.value > 1
   return true
@@ -893,33 +894,23 @@ void loadExistingChannels()
           <ChatUserListRow
             v-for="member in filteredMembers"
             :key="member.user_id"
-            :name="member.account_name"
+            :name="getPrimaryUserName(member.account_name, member.full_name)"
             :avatar-file-id="member.avatar_file_id || null"
             :badges="getChannelMemberBadges(member)"
           >
             <template #subtitle>
-              {{ member.full_name }} • <span dir="ltr">{{ member.mobile_number }}</span>
+              <span dir="ltr">{{ member.mobile_number }}</span>
             </template>
             <template v-if="!isMembershipManagementLocked" #actions>
               <button
-                v-if="member.role === 'member'"
-                type="button"
-                class="ghost-action"
-                :disabled="mutatingUserId === member.user_id"
-                @click="promoteMember(member)"
-              >
-                ادمین
-              </button>
-              <button
                 v-if="canRemoveMember(member)"
                 type="button"
-                class="ghost-action danger"
+                class="chat-user-row__action-btn chat-user-row__action-btn--danger"
                 :disabled="mutatingUserId === member.user_id"
                 @click="removeMember(member)"
               >
                 حذف
               </button>
-              <span v-else-if="getMemberGuardReason(member)" class="guard-text">{{ getMemberGuardReason(member) }}</span>
             </template>
           </ChatUserListRow>
         </div>
@@ -936,24 +927,23 @@ void loadExistingChannels()
             <ChatUserListRow
               v-for="member in filteredAdmins"
               :key="member.user_id"
-              :name="member.account_name"
+              :name="getPrimaryUserName(member.account_name, member.full_name)"
               :avatar-file-id="member.avatar_file_id || null"
               :badges="getChannelMemberBadges(member)"
             >
               <template #subtitle>
-                {{ member.full_name }} • <span dir="ltr">{{ member.mobile_number }}</span>
+                <span dir="ltr">{{ member.mobile_number }}</span>
               </template>
               <template #actions>
                 <button
                   v-if="canDemoteMember(member)"
                   type="button"
-                  class="ghost-action"
+                  class="chat-user-row__action-btn"
                   :disabled="mutatingUserId === member.user_id"
                   @click="demoteMember(member)"
                 >
                   حذف ادمین
                 </button>
-                <span v-else class="guard-text">{{ getMemberGuardReason(member) || 'ادمین فعال' }}</span>
               </template>
             </ChatUserListRow>
           </div>
@@ -966,17 +956,17 @@ void loadExistingChannels()
             <ChatUserListRow
               v-for="member in promotableMembers"
               :key="member.user_id"
-              :name="member.account_name"
+              :name="getPrimaryUserName(member.account_name, member.full_name)"
               :avatar-file-id="member.avatar_file_id || null"
-              :badges="getPromotableMemberBadges()"
+              :badges="getPromotableMemberBadges(member)"
             >
               <template #subtitle>
-                {{ member.full_name }} • <span dir="ltr">{{ member.mobile_number }}</span>
+                <span dir="ltr">{{ member.mobile_number }}</span>
               </template>
               <template #actions>
                 <button
                   type="button"
-                  class="ghost-action primary"
+                  class="chat-user-row__action-btn chat-user-row__action-btn--primary"
                   :disabled="mutatingUserId === member.user_id"
                   @click="promoteMember(member)"
                 >
@@ -1017,12 +1007,12 @@ void loadExistingChannels()
             tag="button"
             :interactive="true"
             :selected="selectedUserIds.has(candidate.user_id)"
-            :name="candidate.account_name"
+            :name="getPrimaryUserName(candidate.account_name, candidate.full_name)"
             :avatar-file-id="candidate.avatar_file_id || null"
             @click="toggleUser(candidate.user_id)"
           >
             <template #subtitle>
-              {{ candidate.full_name }} • <span dir="ltr">{{ candidate.mobile_number }}</span>
+              <span dir="ltr">{{ candidate.mobile_number }}</span>
             </template>
             <template #trailing>
               <div class="row-check" :class="{ active: selectedUserIds.has(candidate.user_id) }">
