@@ -1659,6 +1659,30 @@ function closeChannelManager() {
   void loadConversations()
 }
 
+function clearActiveConversationState() {
+  selectedUserId.value = null
+  selectedUserName.value = ''
+  messages.value = []
+  error.value = ''
+  unreadNewMessagesCount.value = 0
+  showAttachmentMenu.value = false
+  showStickerPicker.value = false
+}
+
+function clearMissingNamedRoomSelection() {
+  const activeConversationId = selectedUserId.value
+  if (!activeConversationId || activeConversationId >= 0) {
+    return
+  }
+
+  const stillExists = conversations.value.some((conversation) => conversation.other_user_id === activeConversationId)
+  if (stillExists) {
+    return
+  }
+
+  clearActiveConversationState()
+}
+
 async function handleChannelManagerOpenChannel(payload: { chatId: number; title: string }) {
   channelManagerChatId.value = null
   const conversationKey = resolveRoomConversationKey('channel', payload.chatId) ?? -Math.abs(payload.chatId)
@@ -1730,9 +1754,17 @@ async function handleGroupLeft(chatId: number) {
   groupManagerChatId.value = null
   const conversationKey = resolveRoomConversationKey('group', chatId) ?? -Math.abs(chatId)
   if (selectedUserId.value === conversationKey) {
-    selectedUserId.value = null
-    selectedUserName.value = ''
-    messages.value = []
+    clearActiveConversationState()
+  }
+  await loadConversations()
+}
+
+async function handleChannelLeft(chatId: number) {
+  showChannelManagerModal.value = false
+  channelManagerChatId.value = null
+  const conversationKey = resolveRoomConversationKey('channel', chatId) ?? -Math.abs(chatId)
+  if (selectedUserId.value === conversationKey) {
+    clearActiveConversationState()
   }
   await loadConversations()
 }
@@ -1741,11 +1773,7 @@ type ConversationListAction = 'pin' | 'unpin' | 'move-pin-up' | 'move-pin-down' 
 
 function clearSelectedConversationIfMatches(conv: Conversation) {
   if (selectedUserId.value !== conv.other_user_id) return
-  selectedUserId.value = null
-  selectedUserName.value = ''
-  messages.value = []
-  showAttachmentMenu.value = false
-  showStickerPicker.value = false
+  clearActiveConversationState()
 }
 
 async function handleConversationAction(payload: { action: ConversationListAction; conv: Conversation }) {
@@ -2565,11 +2593,13 @@ function navigateToPublicProfile(userId: number | null | undefined, accountName 
     return
   }
 
-  void router.push({
-    name: 'public-profile',
-    params: { id: String(normalizedId) },
-    query: accountName ? { account_name: accountName } : undefined,
-  })
+  window.setTimeout(() => {
+    void router.push({
+      name: 'public-profile',
+      params: { id: String(normalizedId) },
+      query: accountName ? { account_name: accountName } : undefined,
+    })
+  }, 0)
 }
 
 function viewProfile() {
@@ -2697,6 +2727,10 @@ watch(() => props.targetUserId, (newId) => {
       messages.value = []
     })
   }
+})
+
+watch(conversations, () => {
+  clearMissingNamedRoomSelection()
 })
 
 watch(isSelectionMode, (isEnabled) => {
@@ -3197,6 +3231,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
           @close="closeChannelManager"
           @refresh-conversations="handleChannelManagerConversationRefresh"
           @open-channel="handleChannelManagerOpenChannel"
+          @left="handleChannelLeft"
         />
       </div>
     </div>

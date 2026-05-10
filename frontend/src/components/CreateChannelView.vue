@@ -94,6 +94,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'refresh-conversations'): void
   (e: 'open-channel', payload: { chatId: number; title: string }): void
+  (e: 'left', chatId: number): void
   (e: 'close'): void
 }>()
 
@@ -619,13 +620,18 @@ async function unfollowCurrentChannel() {
   isSaving.value = true
   clearFlashMessages()
   const shouldDeleteChannel = isCurrentUserChannelCreator.value
+  const activeChannelId = activeChannel.value.id
   try {
-    const response = await apiFetch(`/api/chat/channels/${activeChannel.value.id}/unfollow`, { method: 'POST' })
+    const response = await apiFetch(`/api/chat/channels/${activeChannelId}/unfollow`, { method: 'POST' })
     const data = await response.json().catch(() => ({})) as ChannelMemberMutationResponse | { detail?: string }
     if (!response.ok) {
       throw new Error((data as { detail?: string }).detail || 'خطا در ترک کانال')
     }
     emit('refresh-conversations')
+    emit('left', activeChannelId)
+    if (props.showCloseButton) {
+      return
+    }
     activeChannel.value = null
     members.value = []
     pageHistory.value = []
