@@ -1519,7 +1519,7 @@ async function handleGroupLeft(chatId: number) {
   await loadConversations()
 }
 
-type ConversationListAction = 'pin' | 'unpin' | 'delete' | 'leave' | 'unfollow'
+type ConversationListAction = 'pin' | 'unpin' | 'mute' | 'unmute' | 'mark-unread' | 'delete' | 'leave' | 'unfollow'
 
 async function readConversationActionError(response: Response, fallback: string) {
   if (response.ok) return
@@ -1563,6 +1563,24 @@ async function handleConversationAction(payload: { action: ConversationListActio
         body: JSON.stringify({ pinned: action === 'pin' }),
       })
       await readConversationActionError(response, 'خطا در تغییر وضعیت سنجاق گفتگو')
+    } else if (action === 'mute' || action === 'unmute') {
+      const endpoint = conv.room_kind === 'direct'
+        ? `/api/chat/direct/${conv.other_user_id}/mute`
+        : `/api/chat/rooms/${conv.chat_id}/mute`
+      const response = await apiFetch(endpoint, {
+        method: 'POST',
+        body: JSON.stringify({ muted: action === 'mute' }),
+      })
+      await readConversationActionError(response, 'خطا در تغییر وضعیت بی‌صدا')
+    } else if (action === 'mark-unread') {
+      const endpoint = conv.room_kind === 'direct'
+        ? `/api/chat/direct/${conv.other_user_id}/mark-unread`
+        : `/api/chat/rooms/${conv.chat_id}/mark-unread`
+      const response = await apiFetch(endpoint, {
+        method: 'POST',
+        body: JSON.stringify({ unread: true }),
+      })
+      await readConversationActionError(response, 'خطا در علامت‌گذاری گفتگو به‌عنوان خوانده‌نشده')
     } else if (action === 'delete') {
       const response = await apiFetch(`/api/chat/direct/${conv.other_user_id}`, { method: 'DELETE' })
       await readConversationActionError(response, 'خطا در حذف گفتگو')

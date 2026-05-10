@@ -167,6 +167,7 @@ def _chat_member_sync_payload(connection, target) -> Dict[str, Any]:
         "left_at": _isoformat_or_none(getattr(target, "left_at", None)),
         "last_read_at": _isoformat_or_none(getattr(target, "last_read_at", None)),
         "is_muted": target.is_muted,
+        "is_marked_unread": target.is_marked_unread,
         "is_pinned": target.is_pinned,
         "pinned_at": _isoformat_or_none(getattr(target, "pinned_at", None)),
         "is_hidden": target.is_hidden,

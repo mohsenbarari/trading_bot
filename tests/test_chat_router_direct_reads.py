@@ -10,6 +10,8 @@ from api.routers.chat import (
     get_conversations,
     get_messages,
     mark_messages_read,
+    mark_direct_conversation_unread,
+    mute_direct_conversation,
     pin_direct_conversation,
     poll_messages,
     search_messages,
@@ -215,18 +217,42 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_poll_messages_shapes_unread_summary(self):
         current_user = SimpleNamespace(id=5)
         rows = [
-            {"other_user_id": 9, "other_user_name": "A", "unread_count": 2, "other_user_is_deleted": False},
-            {"other_user_id": 10, "other_user_name": "B", "unread_count": 3, "other_user_is_deleted": True},
+            {"other_user_id": 9, "other_user_name": "A", "unread_count": 2, "other_user_is_deleted": False, "is_muted": True},
+            {"other_user_id": 10, "other_user_name": "B", "unread_count": 0, "other_user_is_deleted": True, "is_muted": False},
         ]
         db = FakeDB(execute_results=[FakeExecuteResult(mappings=rows)])
+        group_row = SimpleNamespace(
+            other_user_id=-20,
+            other_user_name="Group",
+            unread_count=1,
+            other_user_is_deleted=False,
+            is_muted=False,
+        )
+        channel_row = SimpleNamespace(
+            other_user_id=-30,
+            other_user_name="Channel",
+            unread_count=4,
+            other_user_is_deleted=False,
+            is_muted=True,
+        )
 
-        with patch("api.routers.chat.build_direct_unread_poll_stmt", return_value="stmt") as stmt_mock:
+        with patch("api.routers.chat.build_direct_conversation_list_stmt", return_value="stmt") as stmt_mock, patch(
+            "api.routers.chat.list_group_conversations",
+            new=AsyncMock(return_value=[group_row]),
+        ) as groups_mock, patch(
+            "api.routers.chat.list_channel_conversations",
+            new=AsyncMock(return_value=[channel_row]),
+        ) as channels_mock:
             result = await poll_messages(current_user=current_user, db=db)
 
         stmt_mock.assert_called_once_with(5)
-        self.assertEqual(result.total_unread, 5)
-        self.assertEqual(result.unread_chats_count, 2)
-        self.assertEqual(result.conversations_with_unread[1]["is_deleted"], True)
+        groups_mock.assert_awaited_once_with(db, current_user_id=5)
+        channels_mock.assert_awaited_once_with(db, current_user_id=5)
+        self.assertEqual(result.total_unread, 7)
+        self.assertEqual(result.unread_chats_count, 3)
+        self.assertEqual(result.conversations_with_unread[1]["user_id"], -20)
+        self.assertEqual(result.conversations_with_unread[2]["user_id"], -30)
+        self.assertEqual(result.muted_conversation_ids, [-30, 9])
 
     async def test_direct_conversation_pin_and_hide_routes_serialize_service_state(self):
         current_user = SimpleNamespace(id=5)
@@ -261,6 +287,43 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(hide_result.target_id, 9)
         self.assertEqual(hide_result.chat_id, 44)
         self.assertTrue(hide_result.hidden)
+
+    async def test_direct_conversation_mute_and_mark_unread_routes_serialize_state(self):
+        current_user = SimpleNamespace(id=5)
+        db = object()
+        member = SimpleNamespace(chat_id=45, is_muted=True)
+
+        with patch(
+            "api.routers.chat.set_direct_chat_mute_state",
+            new=AsyncMock(return_value=member),
+        ) as mute_mock:
+            mute_result = await mute_direct_conversation(
+                user_id=9,
+                data=SimpleNamespace(muted=True),
+                current_user=current_user,
+                db=db,
+            )
+
+        mute_mock.assert_awaited_once_with(db, actor=current_user, other_user_id=9, muted=True)
+        self.assertEqual(mute_result.target_id, 9)
+        self.assertTrue(mute_result.is_muted)
+
+        unread_member = SimpleNamespace(chat_id=46, is_marked_unread=True)
+        with patch(
+            "api.routers.chat.set_direct_chat_mark_unread_state",
+            new=AsyncMock(return_value=unread_member),
+        ) as unread_mock:
+            unread_result = await mark_direct_conversation_unread(
+                user_id=9,
+                data=SimpleNamespace(unread=True),
+                current_user=current_user,
+                db=db,
+            )
+
+        unread_mock.assert_awaited_once_with(db, actor=current_user, other_user_id=9, unread=True)
+        self.assertEqual(unread_result.target_id, 9)
+        self.assertEqual(unread_result.chat_id, 46)
+        self.assertEqual(unread_result.unread_count, 1)
 
 
 if __name__ == "__main__":

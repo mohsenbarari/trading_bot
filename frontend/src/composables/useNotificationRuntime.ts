@@ -127,12 +127,13 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
         const currentChatId = route.query.user_id ? Number(route.query.user_id) : null
         const isViewingSameChat = isChatOpen && currentChatId !== null && currentChatId === conversationKey && !document.hidden
         const shouldTreatAsUnread = !isViewingSameChat
+        const isMutedConversation = notificationStore.isConversationMuted(conversationKey)
 
         if (shouldTreatAsUnread) {
             notificationStore.incrementChatUnread(conversationKey)
         }
 
-        if (!shouldTreatAsUnread) return
+        if (!shouldTreatAsUnread || isMutedConversation) return
 
         const senderName = buildRealtimeConversationLabel(payload)
         const body = buildChatNotificationBody(payload)

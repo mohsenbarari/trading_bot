@@ -92,6 +92,8 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("conversations.user2_id = 7", scope_sql)
         self.assertIn("DESC NULLS LAST", list_sql)
         self.assertIn("> 0", unread_sql)
+        self.assertIn("is_muted", projection_sql)
+        self.assertIn("greatest", projection_sql.lower())
         self.assertIn("is_pinned", projection_sql)
         self.assertIn("coalesce(", unread_sql)
         self.assertIn("messages.sender_id = 10", legacy_sql)

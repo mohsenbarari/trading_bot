@@ -247,6 +247,11 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     async function loadConversations() {
         try {
             conversations.value = await apiFetch('/chat/conversations')
+            notificationStore.syncMutedConversationIds(
+                conversations.value
+                    .filter((conversation) => conversation.is_muted)
+                    .map((conversation) => conversation.other_user_id)
+            )
         } catch (e: any) {
             error.value = e.message
         }

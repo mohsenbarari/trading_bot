@@ -25,6 +25,8 @@ from api.routers.chat_schemas import (
     ChannelCreateRequest,
     ChannelCreateResponse,
     ChannelInviteCandidateListResponse,
+    ConversationMuteResponse,
+    ConversationMuteUpdateRequest,
     ChannelMemberMutationResponse,
     ChannelMemberRead,
     ChannelMemberUpdateRequest,
@@ -34,6 +36,8 @@ from api.routers.chat_schemas import (
     ConversationPinResponse,
     ConversationPinUpdateRequest,
     ConversationRead,
+    ConversationUnreadResponse,
+    ConversationUnreadUpdateRequest,
     GroupCreateRequest,
     GroupCreateResponse,
     GroupDetailRead,
@@ -90,6 +94,8 @@ from core.services.chat_room_service import (
     remove_group_member,
     send_group_message,
     send_channel_message,
+    set_room_mark_unread_state,
+    set_room_mute_state,
     set_room_pin_state,
     update_group_admin_status,
     update_group_chat,
@@ -112,6 +118,8 @@ from core.services.chat_service import (
     publish_direct_reaction_event,
     publish_direct_typing_event,
     prepare_direct_message_send,
+    set_direct_chat_mark_unread_state,
+    set_direct_chat_mute_state,
     set_direct_chat_pin_state,
     serialize_direct_message_for_response,
     serialize_direct_messages_for_response,
@@ -159,6 +167,7 @@ async def get_conversations(
             max_members=row.max_members,
             is_system=row.is_system,
             is_mandatory=row.is_mandatory,
+            is_muted=getattr(row, "is_muted", False),
             is_pinned=getattr(row, "is_pinned", False),
             pinned_at=getattr(row, "pinned_at", None),
         )
@@ -183,6 +192,7 @@ async def get_conversations(
             max_members=row.max_members,
             is_system=row.is_system,
             is_mandatory=row.is_mandatory,
+            is_muted=getattr(row, "is_muted", False),
             is_pinned=getattr(row, "is_pinned", False),
             pinned_at=getattr(row, "pinned_at", None),
         )
@@ -214,6 +224,46 @@ async def pin_direct_conversation(
         chat_id=member.chat_id,
         is_pinned=bool(member.is_pinned),
         pinned_at=member.pinned_at,
+    )
+
+
+@router.post("/direct/{user_id}/mute", response_model=ConversationMuteResponse)
+async def mute_direct_conversation(
+    user_id: int,
+    data: ConversationMuteUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    member = await set_direct_chat_mute_state(
+        db,
+        actor=current_user,
+        other_user_id=user_id,
+        muted=data.muted,
+    )
+    return ConversationMuteResponse(
+        target_id=user_id,
+        chat_id=member.chat_id,
+        is_muted=bool(member.is_muted),
+    )
+
+
+@router.post("/direct/{user_id}/mark-unread", response_model=ConversationUnreadResponse)
+async def mark_direct_conversation_unread(
+    user_id: int,
+    data: ConversationUnreadUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    member = await set_direct_chat_mark_unread_state(
+        db,
+        actor=current_user,
+        other_user_id=user_id,
+        unread=data.unread,
+    )
+    return ConversationUnreadResponse(
+        target_id=user_id,
+        chat_id=member.chat_id,
+        unread_count=1 if data.unread else 0,
     )
 
 
@@ -571,6 +621,54 @@ async def pin_room_conversation(
         chat_id=room.id,
         is_pinned=bool(member.is_pinned),
         pinned_at=member.pinned_at,
+    )
+
+
+@router.post("/rooms/{chat_id}/mute", response_model=ConversationMuteResponse)
+async def mute_room_conversation(
+    chat_id: int,
+    data: ConversationMuteUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    room = await get_room_or_404(db, chat_id)
+    if room.type == ChatType.DIRECT:
+        raise HTTPException(status_code=400, detail="Use the direct mute endpoint for personal chats")
+
+    member = await set_room_mute_state(
+        db,
+        chat=room,
+        user_id=current_user.id,
+        muted=data.muted,
+    )
+    return ConversationMuteResponse(
+        target_id=-int(room.id),
+        chat_id=room.id,
+        is_muted=bool(member.is_muted),
+    )
+
+
+@router.post("/rooms/{chat_id}/mark-unread", response_model=ConversationUnreadResponse)
+async def mark_room_conversation_unread(
+    chat_id: int,
+    data: ConversationUnreadUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    room = await get_room_or_404(db, chat_id)
+    if room.type == ChatType.DIRECT:
+        raise HTTPException(status_code=400, detail="Use the direct unread endpoint for personal chats")
+
+    member = await set_room_mark_unread_state(
+        db,
+        chat=room,
+        user_id=current_user.id,
+        unread=data.unread,
+    )
+    return ConversationUnreadResponse(
+        target_id=-int(room.id),
+        chat_id=room.id,
+        unread_count=1 if data.unread or getattr(member, "is_marked_unread", False) else 0,
     )
 
 
@@ -1064,26 +1162,49 @@ async def poll_messages(
     db: AsyncSession = Depends(get_db)
 ):
     """پولینگ برای پیام‌های جدید"""
-    conv_stmt = build_direct_unread_poll_stmt(current_user.id)
+    conv_stmt = build_direct_conversation_list_stmt(current_user.id)
     result = await db.execute(conv_stmt)
-    convs = result.mappings().all()
+    direct_convs = result.mappings().all()
+    group_convs = await list_group_conversations(db, current_user_id=current_user.id)
+    channel_convs = await list_channel_conversations(db, current_user_id=current_user.id)
+    all_convs = [*direct_convs, *group_convs, *channel_convs]
 
-    unread_chats_count = len(convs)
-    total_unread = sum((row["unread_count"] or 0) for row in convs)
+    def read_field(row, key, default=None):
+        if hasattr(row, key):
+            return getattr(row, key)
+        if isinstance(row, dict):
+            return row.get(key, default)
+        return default
+
+    unread_convs = [
+        row for row in all_convs
+        if int(read_field(row, "unread_count", 0) or 0) > 0
+    ]
+    muted_conversation_ids = sorted(
+        {
+            int(read_field(row, "other_user_id", 0) or 0)
+            for row in all_convs
+            if bool(read_field(row, "is_muted", False))
+        }
+    )
+
+    unread_chats_count = len(unread_convs)
+    total_unread = sum(int(read_field(row, "unread_count", 0) or 0) for row in unread_convs)
     conversations_with_unread = [
         {
-            "user_id": row["other_user_id"],
-            "user_name": row["other_user_name"],
-            "unread_count": row["unread_count"],
-            "is_deleted": row["other_user_is_deleted"],
+            "user_id": int(read_field(row, "other_user_id", 0) or 0),
+            "user_name": read_field(row, "other_user_name", "") or "",
+            "unread_count": int(read_field(row, "unread_count", 0) or 0),
+            "is_deleted": bool(read_field(row, "other_user_is_deleted", False)),
         }
-        for row in convs
+        for row in unread_convs
     ]
     
     return PollResponse(
         total_unread=total_unread,
         unread_chats_count=unread_chats_count,
-        conversations_with_unread=conversations_with_unread
+        conversations_with_unread=conversations_with_unread,
+        muted_conversation_ids=muted_conversation_ids,
     )
 
 

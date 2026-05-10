@@ -158,6 +158,8 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
             ChatMember.chat_id.label("chat_id"),
             func.max(ChatMember.last_read_message_id).label("last_read_message_id"),
             func.max(ChatMember.last_read_at).label("last_read_at"),
+            func.max(case((ChatMember.is_muted.is_(True), 1), else_=0)).label("is_muted_flag"),
+            func.max(case((ChatMember.is_marked_unread.is_(True), 1), else_=0)).label("is_marked_unread_flag"),
             func.max(case((ChatMember.is_pinned.is_(True), 1), else_=0)).label("is_pinned_flag"),
             func.max(ChatMember.pinned_at).label("pinned_at"),
             func.max(case((ChatMember.is_hidden.is_(True), 1), else_=0)).label("is_hidden_flag"),
@@ -201,7 +203,7 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         .correlate(direct_chat_lookup, current_member_lookup)
         .scalar_subquery()
     )
-    unread_count = case(
+    computed_unread_count = case(
         (
             sa.and_(
                 direct_chat_lookup.c.chat_id.is_not(None),
@@ -210,7 +212,25 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
             generic_unread_count,
         ),
         else_=legacy_unread_count,
+    )
+    manual_unread_count = case(
+        (
+            sa.and_(
+                current_member_lookup.c.is_marked_unread_flag > 0,
+                resolved_last_message_id.is_not(None),
+            ),
+            1,
+        ),
+        else_=0,
+    )
+    unread_count = func.greatest(
+        func.coalesce(computed_unread_count, 0),
+        manual_unread_count,
     ).label("unread_count")
+    is_muted = case(
+        (current_member_lookup.c.is_muted_flag > 0, True),
+        else_=False,
+    ).label("is_muted")
     is_pinned = case(
         (current_member_lookup.c.is_pinned_flag > 0, True),
         else_=False,
@@ -233,6 +253,7 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
             resolved_last_message_at,
             unread_count,
             other_user_last_seen_at,
+            is_muted,
             is_pinned,
             pinned_at,
         )
@@ -566,6 +587,7 @@ async def sync_direct_message_threading(
     if sender_member is not None:
         sender_member.last_read_message_id = message.id
         sender_member.last_read_at = message.created_at or datetime.now(timezone.utc)
+        sender_member.is_marked_unread = False
 
     conversation.last_message_id = message.id
     conversation.last_message_at = message.created_at
@@ -581,16 +603,12 @@ async def sync_direct_message_threading(
     return conversation
 
 
-async def set_direct_chat_pin_state(
+async def _get_direct_state_member(
     db: AsyncSession,
     *,
     actor: User,
     other_user_id: int,
-    pinned: bool,
-) -> ChatMember:
-    if other_user_id == actor.id:
-        raise HTTPException(status_code=400, detail="Cannot pin a conversation with yourself")
-
+) -> tuple[User, ChatMember]:
     other_user = await db.get(User, other_user_id)
     if other_user is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -605,6 +623,21 @@ async def set_direct_chat_pin_state(
 
     if actor_member is None:
         raise HTTPException(status_code=500, detail="Failed to update direct conversation state")
+
+    return other_user, actor_member
+
+
+async def set_direct_chat_pin_state(
+    db: AsyncSession,
+    *,
+    actor: User,
+    other_user_id: int,
+    pinned: bool,
+) -> ChatMember:
+    if other_user_id == actor.id:
+        raise HTTPException(status_code=400, detail="Cannot pin a conversation with yourself")
+
+    _, actor_member = await _get_direct_state_member(db, actor=actor, other_user_id=other_user_id)
 
     now = datetime.now(timezone.utc)
     actor_member.is_pinned = pinned
@@ -626,20 +659,7 @@ async def hide_direct_conversation(
     if other_user_id == actor.id:
         raise HTTPException(status_code=400, detail="Cannot delete a conversation with yourself")
 
-    other_user = await db.get(User, other_user_id)
-    if other_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    direct_chat = await get_or_create_direct_chat(db, actor, other_user)
-    members = await _load_direct_chat_members(db, direct_chat.id, actor.id, other_user.id)
-    actor_member = members.get(actor.id)
-    if actor_member is None:
-        direct_chat = await get_or_create_direct_chat(db, actor, other_user)
-        members = await _load_direct_chat_members(db, direct_chat.id, actor.id, other_user.id)
-        actor_member = members.get(actor.id)
-
-    if actor_member is None:
-        raise HTTPException(status_code=500, detail="Failed to update direct conversation state")
+    _, actor_member = await _get_direct_state_member(db, actor=actor, other_user_id=other_user_id)
 
     now = datetime.now(timezone.utc)
     actor_member.is_hidden = True
@@ -647,6 +667,46 @@ async def hide_direct_conversation(
     actor_member.is_pinned = False
     actor_member.pinned_at = None
     actor_member.updated_at = now
+    await db.commit()
+    return actor_member
+
+
+async def set_direct_chat_mute_state(
+    db: AsyncSession,
+    *,
+    actor: User,
+    other_user_id: int,
+    muted: bool,
+) -> ChatMember:
+    if other_user_id == actor.id:
+        raise HTTPException(status_code=400, detail="Cannot mute a conversation with yourself")
+
+    _, actor_member = await _get_direct_state_member(db, actor=actor, other_user_id=other_user_id)
+
+    actor_member.is_muted = muted
+    actor_member.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return actor_member
+
+
+async def set_direct_chat_mark_unread_state(
+    db: AsyncSession,
+    *,
+    actor: User,
+    other_user_id: int,
+    unread: bool,
+) -> ChatMember:
+    if other_user_id == actor.id:
+        raise HTTPException(status_code=400, detail="Cannot mark your own conversation unread")
+
+    _, actor_member = await _get_direct_state_member(db, actor=actor, other_user_id=other_user_id)
+
+    latest_message = await _get_latest_direct_message(db, actor.id, other_user_id)
+    if unread and latest_message is None:
+        raise HTTPException(status_code=400, detail="Conversation has no messages to mark unread")
+
+    actor_member.is_marked_unread = unread
+    actor_member.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return actor_member
 
@@ -702,6 +762,7 @@ async def sync_direct_read_state(
     if reader_member is not None:
         reader_member.last_read_message_id = latest_message.id
         reader_member.last_read_at = datetime.now(timezone.utc)
+        reader_member.is_marked_unread = False
 
     return conversation
 
