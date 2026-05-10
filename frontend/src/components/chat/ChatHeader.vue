@@ -26,25 +26,13 @@
         <div class="header-user-info" @click="handleTitleClick">
           <span class="header-name">
             {{ selectedUserName }}
-            <span v-if="selectedRoomKind === 'channel'" class="room-badge-small channel">کانال</span>
-            <span v-else-if="selectedRoomKind === 'group'" class="room-badge-small group">گروه</span>
             <span v-if="isDeleted" class="deleted-badge-small">غیرفعال</span>
           </span>
           <span class="header-status" :class="{ 'online': selectedRoomKind === 'direct' && ((targetUserStatus.includes('آنلاین') && !isDeleted) || isTyping) }">
             <template v-if="isDeleted">
               حساب کاربری غیرفعال است
             </template>
-            <template v-else-if="selectedRoomKind === 'channel'">
-              <span>{{ targetUserStatus }}</span>
-              <span v-if="roomMemberCountText" class="header-room-meta">{{ roomMemberCountText }}</span>
-              <span v-if="isRoomMandatory" class="header-room-meta mandatory">اجباری</span>
-              <span v-if="isRoomSystem" class="header-room-meta system">سیستمی</span>
-            </template>
-            <template v-else-if="selectedRoomKind === 'group'">
-              <span>{{ targetUserStatus }}</span>
-              <span v-if="roomMemberCountText" class="header-room-meta">{{ roomMemberCountText }}</span>
-            </template>
-            <template v-else-if="isTyping">
+            <template v-else-if="selectedRoomKind === 'direct' && isTyping">
               در حال نوشتن<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
             </template>
             <template v-else>
@@ -140,6 +128,22 @@
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
         </button>
+        <div class="header-menu-container" style="position: relative;">
+          <button class="header-btn" v-ripple @click.stop="toggleMenu">
+            <MoreVertical :size="22" />
+          </button>
+          <div v-if="isMenuOpen" class="header-dropdown-menu" v-click-outside="closeMenu">
+            <div class="header-menu-item" @click="handleMenuCreateGroup">
+              <span>ساخت گروه جدید</span>
+              <UsersRound :size="18" />
+            </div>
+            <div v-if="canCreateChannel" class="header-menu-item" @click="handleMenuCreateChannel">
+              <span>ساخت کانال اختیاری</span>
+              <Megaphone :size="18" />
+            </div>
+          </div>
+          <div v-if="isMenuOpen" class="menu-overlay" @click="closeMenu"></div>
+        </div>
       </template>
     </template>
     
@@ -179,6 +183,7 @@ const props = defineProps<{
   roomMemberCount?: number | null
   isRoomMandatory?: boolean
   isRoomSystem?: boolean
+  canCreateChannel?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -190,6 +195,8 @@ const emit = defineEmits<{
   (e: 'call'): void
   (e: 'clear-selection'): void
   (e: 'manage-room'): void
+  (e: 'create-group'): void
+  (e: 'create-channel'): void
 }>()
 
 const isMenuOpen = ref(false)
@@ -230,6 +237,16 @@ const handleMenuViewProfile = () => {
 const handleMenuManageRoom = () => {
   closeMenu()
   emit('manage-room')
+}
+
+const handleMenuCreateGroup = () => {
+  closeMenu()
+  emit('create-group')
+}
+
+const handleMenuCreateChannel = () => {
+  closeMenu()
+  emit('create-channel')
 }
 
 const handleTitleClick = () => {

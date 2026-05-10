@@ -13,10 +13,6 @@ defineEmits(['navigate']);
         <button class="admin-action-btn primary" @click="$emit('navigate', 'create_invitation')">
           ➕ ارسال لینک دعوت
         </button>
-
-        <button class="admin-action-btn primary-alt" @click="$emit('navigate', 'create_channel')">
-          📣 ساخت کانال اختیاری
-        </button>
         
         <button class="admin-action-btn secondary" @click="$emit('navigate', 'manage_commodities')">
           📦 مدیریت کالاها

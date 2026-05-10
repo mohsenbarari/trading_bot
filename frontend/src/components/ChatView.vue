@@ -12,6 +12,7 @@ import ChatEmptyState from './chat/ChatEmptyState.vue'
 import ChatConversationList from './chat/ChatConversationList.vue'
 import ChatNewConversationModal from './chat/ChatNewConversationModal.vue'
 import ChatGroupManagerModal from './chat/ChatGroupManagerModal.vue'
+import CreateChannelView from './CreateChannelView.vue'
 import AttachmentMenu from './chat/AttachmentMenu.vue'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
@@ -33,12 +34,14 @@ import {
   isNamedRoomKind,
   resolveRoomConversationKey,
 } from '../utils/chatRoomRouting'
+import { isAdminRole } from '../utils/currentUser'
 
 // Props
 const props = defineProps<{
   apiBaseUrl: string
   jwtToken: string | null
   currentUserId: number
+  currentUserRole?: string | null
   targetUserId?: number
   targetUserName?: string
 }>()
@@ -246,6 +249,7 @@ const messagesLogic = useChatMessages({
   isUserAtBottom,
   isViewingReply,
   targetUserStatus,
+  selectedUserName,
   messageInput,
   editingMessage,
   replyingToMessage,
@@ -563,6 +567,7 @@ const selectedRoomKind = computed<'direct' | 'channel' | 'group'>(() => {
 const selectedRoomMemberCount = computed(() => selectedConversation.value?.member_count ?? null)
 const selectedRoomIsMandatory = computed(() => !!selectedConversation.value?.is_mandatory)
 const selectedRoomIsSystem = computed(() => !!selectedConversation.value?.is_system)
+const canCreateOptionalChannel = computed(() => isAdminRole(props.currentUserRole ?? null))
 
 const canSendToSelectedRoom = computed(() => {
   if (selectedRoomKind.value === 'direct') return true
@@ -577,12 +582,7 @@ const selectedRoomStatusText = computed(() => {
   if (selectedRoomKind.value === 'direct') {
     return targetUserStatus.value
   }
-  if (selectedRoomKind.value === 'group') {
-    return selectedConversation.value?.member_role === 'admin'
-      ? 'گروه • شما مدیر هستید'
-      : 'گروه • عضو گروه هستید'
-  }
-  return canSendToSelectedRoom.value ? 'کانال • شما مدیر هستید' : 'کانال • فقط مدیران امکان ارسال دارند'
+  return selectedRoomKind.value === 'group' ? 'گروه' : 'کانال'
 })
 
 function isMandatoryPinnedConversation(conv: Conversation) {
@@ -1451,6 +1451,19 @@ const selectConversation = (conv: Conversation) => {
 }
 
 const startNewChat = (userId: number, userName: string) => {
+  const existingConversation = conversations.value.find((conversation) => conversation.other_user_id === userId)
+  if (!existingConversation) {
+    conversations.value.unshift({
+      id: userId,
+      other_user_id: userId,
+      other_user_name: userName,
+      last_message_content: null,
+      last_message_type: null,
+      last_message_at: null,
+      unread_count: 0,
+      room_kind: 'direct',
+    })
+  }
   selectedUserId.value = userId
   selectedUserName.value = userName
   loadMessages(userId)
@@ -1463,6 +1476,7 @@ const startNewChat = (userId: number, userName: string) => {
 
 const showNewChatModal = ref(false)
 const showGroupManagerModal = ref(false)
+const showChannelManagerModal = ref(false)
 const groupManagerChatId = ref<number | null>(null)
 
 const handleNewChatSearch = (userId: number, userName: string) => {
@@ -1474,6 +1488,17 @@ function openGroupCreation() {
   showNewChatModal.value = false
   groupManagerChatId.value = null
   showGroupManagerModal.value = true
+}
+
+function openChannelCreation() {
+  if (!canCreateOptionalChannel.value) return
+  showNewChatModal.value = false
+  showChannelManagerModal.value = true
+}
+
+function closeChannelManager() {
+  showChannelManagerModal.value = false
+  void loadConversations()
 }
 
 function openSelectedGroupManager() {
@@ -2551,6 +2576,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :roomMemberCount="selectedRoomMemberCount"
       :isRoomMandatory="selectedRoomIsMandatory"
       :isRoomSystem="selectedRoomIsSystem"
+      :canCreateChannel="canCreateOptionalChannel"
       @back="goBack"
       @view-profile="viewProfile"
       @toggle-search="toggleSearch"
@@ -2559,6 +2585,8 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @call="handleCall"
       @clear-selection="clearSelection"
       @manage-room="openSelectedGroupManager"
+      @create-group="openGroupCreation"
+      @create-channel="openChannelCreation"
       :isDeleted="isSelectedUserDeleted"
     />
 
@@ -2872,6 +2900,16 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @updated="handleGroupUpdated"
       @left="handleGroupLeft"
     />
+
+    <div v-if="showChannelManagerModal" class="channel-manager-overlay" @click.self="closeChannelManager">
+      <div class="channel-manager-sheet">
+        <button class="channel-manager-close" @click="closeChannelManager">×</button>
+        <CreateChannelView
+          :apiBaseUrl="props.apiBaseUrl"
+          :jwtToken="props.jwtToken"
+        />
+      </div>
+    </div>
     </div>
 </template>
 
@@ -3017,6 +3055,47 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
   font-size: 12px;
   padding: 2px 8px;
   border-radius: 10px;
+}
+
+.channel-manager-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2200;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 16px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+}
+
+.channel-manager-sheet {
+  position: relative;
+  width: min(720px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.22);
+  padding: 18px 16px 20px;
+}
+
+.channel-manager-close {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+  color: #0f172a;
+  font-size: 1.6rem;
+  line-height: 1;
 }
 
 /* Loading & Empty States */
