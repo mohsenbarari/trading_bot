@@ -16,14 +16,16 @@ logger = logging.getLogger(__name__)
 # Table processing order: dependencies first
 TABLE_ORDER = {
     "users": 0,
-    "invitations": 1,
-    "notifications": 2,
-    "user_blocks": 3,
-    "commodities": 4,
-    "commodity_aliases": 5,
-    "trading_settings": 6,
-    "offers": 7,
-    "trades": 8,
+    "chats": 1,
+    "chat_members": 2,
+    "invitations": 3,
+    "notifications": 4,
+    "user_blocks": 5,
+    "commodities": 6,
+    "commodity_aliases": 7,
+    "trading_settings": 8,
+    "offers": 9,
+    "trades": 10,
 }
 
 async def verify_signature(request: Request):
@@ -71,12 +73,15 @@ from sqlalchemy import insert, update, delete, select, text as sa_text
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
+from core.enums import ChatType
 from models.user import User
 from models.invitation import Invitation
 from models.notification import Notification
 from models.offer import Offer
 from models.trade import Trade
 from models.commodity import Commodity, CommodityAlias
+from models.chat import Chat
+from models.chat_member import ChatMember
 from models.trading_setting import TradingSetting
 from models.user_block import UserBlock
 from datetime import datetime
@@ -94,9 +99,24 @@ NATURAL_KEYS = {
     "trades": "trade_number",
 }
 
+SEQUENCE_MAP = {
+    "users": ("users_id_seq", "users"),
+    "chats": ("chats_id_seq", "chats"),
+    "chat_members": ("chat_members_id_seq", "chat_members"),
+    "offers": ("offers_id_seq", "offers"),
+    "trades": ("trades_id_seq", "trades"),
+    "invitations": ("invitations_id_seq", "invitations"),
+    "notifications": ("notifications_id_seq", "notifications"),
+    "commodities": ("commodities_id_seq", "commodities"),
+    "commodity_aliases": ("commodity_aliases_id_seq", "commodity_aliases"),
+    "user_blocks": ("user_blocks_id_seq", "user_blocks"),
+}
+
 def get_model_class(table_name: str):
     mapping = {
         "users": User,
+        "chats": Chat,
+        "chat_members": ChatMember,
         "invitations": Invitation,
         "notifications": Notification,
         "offers": Offer,
@@ -107,6 +127,46 @@ def get_model_class(table_name: str):
         "user_blocks": UserBlock
     }
     return mapping.get(table_name)
+
+
+def _is_mandatory_channel_record(data: dict) -> bool:
+    return (
+        data.get("type") == "channel"
+        and bool(data.get("is_system"))
+        and bool(data.get("is_mandatory"))
+    )
+
+
+def _is_mandatory_chat_member_record(data: dict) -> bool:
+    return (
+        data.get("chat_type") == "channel"
+        and bool(data.get("chat_is_system"))
+        and bool(data.get("chat_is_mandatory"))
+    )
+
+
+async def _resolve_existing_mandatory_chat_id(db: AsyncSession) -> int | None:
+    stmt = select(Chat.id).where(
+        Chat.type == ChatType.CHANNEL,
+        Chat.is_system.is_(True),
+        Chat.is_mandatory.is_(True),
+        Chat.is_deleted.is_(False),
+    ).order_by(Chat.id.asc()).limit(1)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def _resolve_existing_chat_member_id(db: AsyncSession, *, chat_id: int | None, user_id: int | None) -> int | None:
+    if not chat_id or not user_id:
+        return None
+    stmt = (
+        select(ChatMember.id)
+        .where(ChatMember.chat_id == chat_id, ChatMember.user_id == user_id)
+        .order_by(ChatMember.id.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 def _build_upsert_stmt(model, table, data):
@@ -146,6 +206,29 @@ async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, d
         return 'ok'
 
     if operation in ("INSERT", "UPDATE"):
+        if table == "chats" and _is_mandatory_channel_record(data):
+            existing_mandatory_chat_id = await _resolve_existing_mandatory_chat_id(db)
+            if existing_mandatory_chat_id is not None:
+                record_id = existing_mandatory_chat_id
+
+        if table == "chat_members":
+            if _is_mandatory_chat_member_record(data):
+                existing_mandatory_chat_id = await _resolve_existing_mandatory_chat_id(db)
+                if existing_mandatory_chat_id is not None:
+                    data["chat_id"] = existing_mandatory_chat_id
+
+            existing_chat_member_id = await _resolve_existing_chat_member_id(
+                db,
+                chat_id=data.get("chat_id"),
+                user_id=data.get("user_id"),
+            )
+            if existing_chat_member_id is not None:
+                record_id = existing_chat_member_id
+
+            data.pop("chat_type", None)
+            data.pop("chat_is_system", None)
+            data.pop("chat_is_mandatory", None)
+
         data['id'] = record_id
 
         # Never overwrite channel_message_id from sync — it's set locally by channel-send
@@ -202,6 +285,25 @@ async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, d
     elif operation == "DELETE":
         try:
             async with db.begin_nested():
+                if table == "chats" and _is_mandatory_channel_record(data):
+                    existing_mandatory_chat_id = await _resolve_existing_mandatory_chat_id(db)
+                    if existing_mandatory_chat_id is not None:
+                        record_id = existing_mandatory_chat_id
+
+                if table == "chat_members":
+                    if _is_mandatory_chat_member_record(data):
+                        existing_mandatory_chat_id = await _resolve_existing_mandatory_chat_id(db)
+                        if existing_mandatory_chat_id is not None:
+                            data["chat_id"] = existing_mandatory_chat_id
+
+                    chat_member_id = await _resolve_existing_chat_member_id(
+                        db,
+                        chat_id=data.get("chat_id"),
+                        user_id=data.get("user_id"),
+                    )
+                    if chat_member_id is not None:
+                        record_id = chat_member_id
+
                 stmt = delete(model).where(model.id == record_id)
                 await db.execute(stmt, execution_options={"is_sync": True})
             return 'ok'
@@ -367,16 +469,6 @@ async def receive_sync_data(
         # Synced records use explicit IDs which don't advance PostgreSQL sequences.
         # Without this fix, next local INSERT may try an ID that already exists.
         items_tables = {i.get('table') for i in sorted_items}
-        SEQUENCE_MAP = {
-            "users": ("users_id_seq", "users"),
-            "offers": ("offers_id_seq", "offers"),
-            "trades": ("trades_id_seq", "trades"),
-            "invitations": ("invitations_id_seq", "invitations"),
-            "notifications": ("notifications_id_seq", "notifications"),
-            "commodities": ("commodities_id_seq", "commodities"),
-            "commodity_aliases": ("commodity_aliases_id_seq", "commodity_aliases"),
-            "user_blocks": ("user_blocks_id_seq", "user_blocks"),
-        }
         for tbl_name in items_tables:
             seq_info = SEQUENCE_MAP.get(tbl_name)
             if seq_info:

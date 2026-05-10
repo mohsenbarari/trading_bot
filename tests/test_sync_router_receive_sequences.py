@@ -37,17 +37,21 @@ class SyncRouterReceiveSequencesTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB()
         items = [
             {"table": "users", "operation": "INSERT", "id": 1, "data": {"full_name": "U"}},
-            {"table": "offers", "operation": "INSERT", "id": 2, "data": {"price": 100}},
+            {"table": "chats", "operation": "INSERT", "id": 2, "data": {"title": "اطلاع‌رسانی"}},
+            {"table": "chat_members", "operation": "INSERT", "id": 3, "data": {"chat_id": 2, "user_id": 1}},
+            {"table": "offers", "operation": "INSERT", "id": 4, "data": {"price": 100}},
         ]
 
         with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")), patch(
             "api.routers.sync.settings.server_mode", "iran"
-        ):
+        ), patch("api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
-        self.assertEqual(result, {"status": "success", "processed": 2})
+        self.assertEqual(result, {"status": "success", "processed": 4})
         statements = [call[0] for call in db.execute_calls]
         self.assertTrue(any("users_id_seq" in stmt for stmt in statements))
+        self.assertTrue(any("chats_id_seq" in stmt for stmt in statements))
+        self.assertTrue(any("chat_members_id_seq" in stmt for stmt in statements))
         self.assertTrue(any("offers_id_seq" in stmt for stmt in statements))
 
     async def test_receive_sync_data_survives_sequence_repair_failures(self):
@@ -64,7 +68,7 @@ class SyncRouterReceiveSequencesTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")), patch(
             "api.routers.sync.settings.server_mode", "iran"
-        ):
+        ), patch("api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
         self.assertEqual(result, {"status": "success", "processed": 1})

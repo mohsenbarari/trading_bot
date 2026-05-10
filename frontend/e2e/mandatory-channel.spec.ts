@@ -267,7 +267,7 @@ test.describe('Mandatory channel smoke', () => {
 
     await page.goto('/chat')
 
-    const mandatoryTitlePattern = /اطلاع.*رسانی/
+    const mandatoryTitlePattern = 'اطلاع‌رسانی'
     const conversationRow = page.locator('.conversation-item').filter({ hasText: mandatoryTitlePattern })
     await expect(conversationRow).toBeVisible()
 

@@ -7,7 +7,7 @@ from core.enums import ChatMemberRole, ChatType
 from core.services.chat_room_service import (
     list_channel_invite_candidates,
     list_channel_members,
-    list_optional_channels,
+    list_manageable_channels,
 )
 
 
@@ -46,8 +46,18 @@ class FakeDB:
 
 
 class ChatRoomServiceChannelReadModelsTests(unittest.IsolatedAsyncioTestCase):
-    async def test_list_optional_channels_shapes_channel_summaries(self):
+    async def test_list_manageable_channels_shapes_channel_summaries(self):
         created_at = datetime(2026, 5, 1, 10, 0, 0)
+        mandatory = SimpleNamespace(
+            id=4,
+            type=ChatType.CHANNEL,
+            title="اطلاع‌رسانی",
+            description="کانال اجباری اطلاع‌رسانی سامانه",
+            created_by_id=None,
+            is_system=True,
+            is_mandatory=True,
+            created_at=created_at,
+        )
         chat = SimpleNamespace(
             id=5,
             type=ChatType.CHANNEL,
@@ -58,17 +68,31 @@ class ChatRoomServiceChannelReadModelsTests(unittest.IsolatedAsyncioTestCase):
             is_mandatory=False,
             created_at=created_at,
         )
-        db = FakeDB(execute_results=[FakeExecuteResult(rows=[(chat, 12), (SimpleNamespace(**{**chat.__dict__, "id": 6, "title": None}), None)])])
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(
+                    rows=[
+                        (mandatory, 120),
+                        (chat, 12),
+                        (SimpleNamespace(**{**chat.__dict__, "id": 6, "title": None}), None),
+                    ]
+                )
+            ]
+        )
 
-        summaries = await list_optional_channels(db)
+        summaries = await list_manageable_channels(db)
 
-        self.assertEqual(len(summaries), 2)
-        self.assertEqual(summaries[0].id, 5)
-        self.assertEqual(summaries[0].title, "VIP")
-        self.assertEqual(summaries[0].member_count, 12)
-        self.assertEqual(summaries[1].id, 6)
-        self.assertEqual(summaries[1].title, "")
-        self.assertEqual(summaries[1].member_count, 0)
+        self.assertEqual(len(summaries), 3)
+        self.assertEqual(summaries[0].id, 4)
+        self.assertTrue(summaries[0].is_mandatory)
+        self.assertEqual(summaries[0].title, "اطلاع‌رسانی")
+        self.assertEqual(summaries[0].member_count, 120)
+        self.assertEqual(summaries[1].id, 5)
+        self.assertEqual(summaries[1].title, "VIP")
+        self.assertEqual(summaries[1].member_count, 12)
+        self.assertEqual(summaries[2].id, 6)
+        self.assertEqual(summaries[2].title, "")
+        self.assertEqual(summaries[2].member_count, 0)
 
     async def test_list_channel_members_shapes_current_members(self):
         joined_at = datetime(2026, 5, 2, 11, 0, 0)

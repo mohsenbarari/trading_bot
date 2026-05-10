@@ -73,7 +73,7 @@ from core.services.chat_room_service import (
     list_channel_invite_candidates,
     list_channel_members,
     list_channel_messages,
-    list_optional_channels,
+    list_manageable_channels,
     mark_channel_messages_read,
     mark_channel_messages_read_with_broadcast,
     mark_group_messages_read_with_broadcast,
@@ -88,7 +88,7 @@ from core.services.chat_room_service import (
     send_channel_message,
     update_group_admin_status,
     update_group_chat,
-    update_optional_channel,
+    update_manageable_channel_metadata,
     update_channel_member,
 )
 from core.services.chat_service import (
@@ -504,9 +504,9 @@ async def get_channels(
     current_user: User = Depends(verify_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """لیست کانال‌های اختیاری موجود برای مدیریت ادمین"""
+    """لیست کانال‌های قابل مدیریت برای مدیر ارشد"""
     _ = current_user
-    channels = await list_optional_channels(db)
+    channels = await list_manageable_channels(db)
     return [
         ChannelRoomRead(
             id=channel.id,
@@ -560,10 +560,10 @@ async def update_channel(
     current_user: User = Depends(verify_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """ویرایش مشخصات کانال اختیاری برای مدیر ارشد"""
+    """ویرایش نام و توضیحات کانال برای مدیر ارشد"""
     _ = current_user
     channel = await get_channel_or_404(db, chat_id)
-    channel = await update_optional_channel(
+    channel = await update_manageable_channel_metadata(
         db,
         chat=channel,
         title=data.title,

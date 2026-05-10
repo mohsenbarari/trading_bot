@@ -49,6 +49,37 @@ class CoreEventsTests(unittest.TestCase):
         events._sync_redis = None
 
     def _build_listener_targets(self, now):
+        chat = SimpleNamespace(
+            id=6,
+            type=SimpleNamespace(value='channel'),
+            title='اطلاع‌رسانی',
+            description='کانال اجباری اطلاع‌رسانی سامانه',
+            created_by_id=None,
+            is_system=True,
+            is_mandatory=True,
+            is_deleted=False,
+            deleted_at=None,
+            max_members=None,
+            last_message_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        chat_member = SimpleNamespace(
+            id=7,
+            chat_id=6,
+            user_id=3,
+            role=SimpleNamespace(value='admin'),
+            membership_status=SimpleNamespace(value='ACTIVE'),
+            chat_type='channel',
+            chat_is_system=True,
+            chat_is_mandatory=True,
+            joined_at=now,
+            left_at=None,
+            last_read_at=now,
+            is_muted=False,
+            created_at=now,
+            updated_at=now,
+        )
         offer = SimpleNamespace(
             id=1,
             version_id=2,
@@ -142,6 +173,12 @@ class CoreEventsTests(unittest.TestCase):
         notification = SimpleNamespace(id=5, user_id=1, message='hi', is_read=False, created_at=None, level='INFO', category='SYSTEM')
 
         return {
+            ('Chat', 'after_insert'): chat,
+            ('Chat', 'after_update'): chat,
+            ('Chat', 'after_delete'): chat,
+            ('ChatMember', 'after_insert'): chat_member,
+            ('ChatMember', 'after_update'): chat_member,
+            ('ChatMember', 'after_delete'): chat_member,
             ('Offer', 'after_insert'): offer,
             ('Offer', 'after_update'): offer,
             ('Offer', 'after_delete'): offer,
@@ -340,6 +377,8 @@ class CoreEventsTests(unittest.TestCase):
         with patch('core.events.event.listens_for', side_effect=_capture_listeners(registry)), patch.object(
             events, 'logger'
         ) as logger:
+            events.setup_chat_events()
+            events.setup_chat_member_events()
             events.setup_commodity_events()
             events.setup_commodity_alias_events()
             events.setup_user_block_events()
@@ -349,6 +388,45 @@ class CoreEventsTests(unittest.TestCase):
 
         connection = _FakeConnection()
         with patch('core.events.log_change') as log_change:
+            chat = SimpleNamespace(
+                id=6,
+                type=SimpleNamespace(value='channel'),
+                title='اطلاع‌رسانی',
+                description='کانال اجباری اطلاع‌رسانی سامانه',
+                created_by_id=None,
+                is_system=True,
+                is_mandatory=True,
+                is_deleted=False,
+                deleted_at=None,
+                max_members=None,
+                last_message_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+            registry[('Chat', 'after_insert')](None, connection, chat)
+            registry[('Chat', 'after_update')](None, connection, chat)
+            registry[('Chat', 'after_delete')](None, connection, chat)
+
+            chat_member = SimpleNamespace(
+                id=7,
+                chat_id=6,
+                user_id=3,
+                role=SimpleNamespace(value='admin'),
+                membership_status=SimpleNamespace(value='ACTIVE'),
+                chat_type='channel',
+                chat_is_system=True,
+                chat_is_mandatory=True,
+                joined_at=now,
+                left_at=None,
+                last_read_at=now,
+                is_muted=False,
+                created_at=now,
+                updated_at=now,
+            )
+            registry[('ChatMember', 'after_insert')](None, connection, chat_member)
+            registry[('ChatMember', 'after_update')](None, connection, chat_member)
+            registry[('ChatMember', 'after_delete')](None, connection, chat_member)
+
             commodity = SimpleNamespace(id=1, name='Gold')
             registry[('Commodity', 'after_insert')](None, connection, commodity)
             registry[('Commodity', 'after_update')](None, connection, commodity)
@@ -388,7 +466,9 @@ class CoreEventsTests(unittest.TestCase):
             registry[('Notification', 'after_update')](None, connection, notification)
             registry[('Notification', 'after_delete')](None, connection, notification)
 
-        self.assertGreaterEqual(log_change.call_count, 16)
+        self.assertGreaterEqual(log_change.call_count, 22)
+        logger.info.assert_any_call('✅ Chat event listeners registered')
+        logger.info.assert_any_call('✅ ChatMember event listeners registered')
         logger.info.assert_any_call('✅ Commodity event listeners registered')
         logger.info.assert_any_call('✅ CommodityAlias event listeners registered')
         logger.info.assert_any_call('✅ UserBlock event listeners registered')
@@ -397,6 +477,10 @@ class CoreEventsTests(unittest.TestCase):
         logger.info.assert_any_call('✅ Notification event listeners registered')
 
         with patch('core.events.setup_user_events') as setup_user_events, patch(
+            'core.events.setup_chat_events'
+        ) as setup_chat_events, patch(
+            'core.events.setup_chat_member_events'
+        ) as setup_chat_member_events, patch(
             'core.events.setup_invitation_events'
         ) as setup_invitation_events, patch('core.events.setup_offer_events') as setup_offer_events, patch(
             'core.events.setup_trade_events'
@@ -410,6 +494,8 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_all_events()
 
         setup_user_events.assert_called_once()
+        setup_chat_events.assert_called_once()
+        setup_chat_member_events.assert_called_once()
         setup_invitation_events.assert_called_once()
         setup_offer_events.assert_called_once()
         setup_trade_events.assert_called_once()
@@ -428,6 +514,8 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_offer_events()
             events.setup_trade_events()
             events.setup_user_events()
+            events.setup_chat_events()
+            events.setup_chat_member_events()
             events.setup_commodity_events()
             events.setup_commodity_alias_events()
             events.setup_user_block_events()

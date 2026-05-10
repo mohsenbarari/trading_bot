@@ -43,7 +43,7 @@ class ChatRouterChannelEndpointTests(unittest.IsolatedAsyncioTestCase):
             )
         ]
 
-        with patch("api.routers.chat.list_optional_channels", new=AsyncMock(return_value=channels)) as list_mock:
+        with patch("api.routers.chat.list_manageable_channels", new=AsyncMock(return_value=channels)) as list_mock:
             result = await get_channels(current_user=current_user, db=db)
 
         list_mock.assert_awaited_once_with(db)
@@ -95,7 +95,7 @@ class ChatRouterChannelEndpointTests(unittest.IsolatedAsyncioTestCase):
         data = SimpleNamespace(title="Renamed", description="desk")
 
         with patch("api.routers.chat.get_channel_or_404", new=AsyncMock(return_value=channel)) as get_mock, patch(
-            "api.routers.chat.update_optional_channel",
+            "api.routers.chat.update_manageable_channel_metadata",
             new=AsyncMock(return_value=channel),
         ) as update_mock, patch(
             "api.routers.chat.count_active_chat_members",

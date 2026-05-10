@@ -31,17 +31,17 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         revoked_sessions = [SimpleNamespace(id="s1"), SimpleNamespace(id="s2")]
 
         with patch("core.services.user_deletion_service.deactivate_active_sessions", AsyncMock(return_value=revoked_sessions)) as deactivate_sessions, \
-               patch("core.services.user_deletion_service.ensure_mandatory_channel_membership", AsyncMock()) as mandatory_membership, \
-             patch("core.services.user_deletion_service.mark_deleted_telegram_user", AsyncMock()) as mark_deleted_telegram_user, \
-             patch("core.services.user_deletion_service.send_telegram_notification", AsyncMock(return_value=True)) as send_telegram_notification, \
-             patch("core.services.user_deletion_service.publish_session_revocation", AsyncMock()) as publish_session_revocation, \
-             patch("core.services.user_deletion_service.remove_user_from_telegram_channel", AsyncMock()) as remove_user_from_channel:
+            patch("core.services.user_deletion_service.sync_mandatory_channel_for_user_state_change", AsyncMock()) as mandatory_sync, \
+            patch("core.services.user_deletion_service.mark_deleted_telegram_user", AsyncMock()) as mark_deleted_telegram_user, \
+            patch("core.services.user_deletion_service.send_telegram_notification", AsyncMock(return_value=True)) as send_telegram_notification, \
+            patch("core.services.user_deletion_service.publish_session_revocation", AsyncMock()) as publish_session_revocation, \
+            patch("core.services.user_deletion_service.remove_user_from_telegram_channel", AsyncMock()) as remove_user_from_channel:
             result = await delete_user_account(db, user)
 
         self.assertEqual(db.execute.await_count, 4)
         self.assertEqual(db.delete.await_count, 2)
         deactivate_sessions.assert_awaited_once_with(db, user.id)
-        mandatory_membership.assert_awaited_once_with(db, user=user)
+        mandatory_sync.assert_awaited_once_with(db, user=user, previous_is_deleted=False, previous_deleted_at=None)
         db.commit.assert_awaited_once()
         db.rollback.assert_not_awaited()
         user.soft_delete.assert_called_once_with()
@@ -73,15 +73,15 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         revoked_sessions = [SimpleNamespace(id="s3")]
 
         with patch("core.services.user_deletion_service.deactivate_active_sessions", AsyncMock(return_value=revoked_sessions)), \
-             patch("core.services.user_deletion_service.ensure_mandatory_channel_membership", AsyncMock()) as mandatory_membership, \
-             patch("core.services.user_deletion_service.mark_deleted_telegram_user", AsyncMock()) as mark_deleted_telegram_user, \
-             patch("core.services.user_deletion_service.send_telegram_notification", AsyncMock(return_value=True)) as send_telegram_notification, \
-             patch("core.services.user_deletion_service.publish_session_revocation", AsyncMock()) as publish_session_revocation, \
-             patch("core.services.user_deletion_service.remove_user_from_telegram_channel", AsyncMock()) as remove_user_from_channel:
+            patch("core.services.user_deletion_service.sync_mandatory_channel_for_user_state_change", AsyncMock()) as mandatory_sync, \
+            patch("core.services.user_deletion_service.mark_deleted_telegram_user", AsyncMock()) as mark_deleted_telegram_user, \
+            patch("core.services.user_deletion_service.send_telegram_notification", AsyncMock(return_value=True)) as send_telegram_notification, \
+            patch("core.services.user_deletion_service.publish_session_revocation", AsyncMock()) as publish_session_revocation, \
+            patch("core.services.user_deletion_service.remove_user_from_telegram_channel", AsyncMock()) as remove_user_from_channel:
             result = await delete_user_account(db, user)
 
         user.soft_delete.assert_called_once_with()
-        mandatory_membership.assert_awaited_once_with(db, user=user)
+        mandatory_sync.assert_awaited_once_with(db, user=user, previous_is_deleted=False, previous_deleted_at=None)
         db.delete.assert_not_awaited()
         mark_deleted_telegram_user.assert_not_awaited()
         send_telegram_notification.assert_not_awaited()
@@ -126,18 +126,18 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("core.services.user_deletion_service.deactivate_active_sessions", AsyncMock(side_effect=RuntimeError("session revoke failed"))), \
-             patch("core.services.user_deletion_service.ensure_mandatory_channel_membership", AsyncMock()) as mandatory_membership, \
-             patch("core.services.user_deletion_service.mark_deleted_telegram_user", AsyncMock()) as mark_deleted_telegram_user, \
-             patch("core.services.user_deletion_service.send_telegram_notification", AsyncMock()) as send_telegram_notification, \
-             patch("core.services.user_deletion_service.publish_session_revocation", AsyncMock()) as publish_session_revocation, \
-             patch("core.services.user_deletion_service.remove_user_from_telegram_channel", AsyncMock()) as remove_user_from_channel:
+            patch("core.services.user_deletion_service.sync_mandatory_channel_for_user_state_change", AsyncMock()) as mandatory_sync, \
+            patch("core.services.user_deletion_service.mark_deleted_telegram_user", AsyncMock()) as mark_deleted_telegram_user, \
+            patch("core.services.user_deletion_service.send_telegram_notification", AsyncMock()) as send_telegram_notification, \
+            patch("core.services.user_deletion_service.publish_session_revocation", AsyncMock()) as publish_session_revocation, \
+            patch("core.services.user_deletion_service.remove_user_from_telegram_channel", AsyncMock()) as remove_user_from_channel:
             with self.assertRaisesRegex(RuntimeError, "session revoke failed"):
                 await delete_user_account(db, user)
 
         db.commit.assert_not_awaited()
         db.rollback.assert_awaited_once()
         user.soft_delete.assert_not_called()
-        mandatory_membership.assert_not_awaited()
+        mandatory_sync.assert_not_awaited()
         mark_deleted_telegram_user.assert_not_awaited()
         send_telegram_notification.assert_not_awaited()
         publish_session_revocation.assert_not_awaited()
@@ -161,17 +161,17 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         revoked_sessions = [SimpleNamespace(id="s10")]
 
         with patch("core.services.user_deletion_service.deactivate_active_sessions", AsyncMock(return_value=revoked_sessions)), \
-             patch("core.services.user_deletion_service.ensure_mandatory_channel_membership", AsyncMock()) as mandatory_membership, \
-             patch("core.services.user_deletion_service.mark_deleted_telegram_user", AsyncMock(side_effect=RuntimeError("redis write failed"))) as mark_deleted_telegram_user, \
-             patch("core.services.user_deletion_service.send_telegram_notification", AsyncMock(side_effect=RuntimeError("telegram send failed"))) as send_telegram_notification, \
-             patch("core.services.user_deletion_service.publish_session_revocation", AsyncMock()) as publish_session_revocation, \
-             patch("core.services.user_deletion_service.remove_user_from_telegram_channel", AsyncMock(side_effect=RuntimeError("channel cleanup failed"))) as remove_user_from_channel:
+            patch("core.services.user_deletion_service.sync_mandatory_channel_for_user_state_change", AsyncMock()) as mandatory_sync, \
+            patch("core.services.user_deletion_service.mark_deleted_telegram_user", AsyncMock(side_effect=RuntimeError("redis write failed"))) as mark_deleted_telegram_user, \
+            patch("core.services.user_deletion_service.send_telegram_notification", AsyncMock(side_effect=RuntimeError("telegram send failed"))) as send_telegram_notification, \
+            patch("core.services.user_deletion_service.publish_session_revocation", AsyncMock()) as publish_session_revocation, \
+            patch("core.services.user_deletion_service.remove_user_from_telegram_channel", AsyncMock(side_effect=RuntimeError("channel cleanup failed"))) as remove_user_from_channel:
             result = await delete_user_account(db, user)
 
         db.commit.assert_awaited_once()
         db.rollback.assert_not_awaited()
         user.soft_delete.assert_called_once_with()
-        mandatory_membership.assert_awaited_once_with(db, user=user)
+        mandatory_sync.assert_awaited_once_with(db, user=user, previous_is_deleted=False, previous_deleted_at=None)
         mark_deleted_telegram_user.assert_awaited_once_with(user.telegram_id)
         send_telegram_notification.assert_awaited_once_with(user.telegram_id, unittest.mock.ANY)
         publish_session_revocation.assert_awaited_once_with(user.id, revoked_sessions)

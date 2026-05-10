@@ -101,6 +101,7 @@ const selectAllActiveUsers = ref(false)
 const selectedUserIds = ref<Set<number>>(new Set())
 
 const isPickerActive = computed(() => Boolean(createdChannel.value))
+const isMembershipManagementLocked = computed(() => Boolean(createdChannel.value?.is_mandatory || createdChannel.value?.is_system))
 const canSubmitMembers = computed(() => {
   return !!createdChannel.value && (selectAllActiveUsers.value || selectedUserIds.value.size > 0)
 })
@@ -165,6 +166,16 @@ function getAvatarInitial(name: string) {
   return name ? name.charAt(0).toUpperCase() : '?'
 }
 
+function getChannelKindLabel(channel: ChannelRoom) {
+  if (channel.is_mandatory) return 'اجباری'
+  if (channel.is_system) return 'سیستمی'
+  return 'اختیاری'
+}
+
+function getChannelActionLabel(channel: ChannelRoom) {
+  return channel.is_mandatory || channel.is_system ? 'ویرایش کانال' : 'ادامه دعوت اعضا'
+}
+
 function canDemoteMember(member: ChannelMember) {
   if (member.role !== 'admin') return false
   if (member.is_channel_creator) return false
@@ -205,7 +216,14 @@ function handleToggleSelectAll() {
 }
 
 async function loadCandidates(query = '') {
-  if (!createdChannel.value) return
+  if (!createdChannel.value || isMembershipManagementLocked.value) {
+    candidates.value = []
+    candidateTotal.value = 0
+    activeTotal.value = 0
+    selectAllActiveUsers.value = false
+    selectedUserIds.value = new Set()
+    return
+  }
   isLoadingCandidates.value = true
   errorMessage.value = ''
   try {
@@ -298,7 +316,7 @@ async function createChannel() {
 }
 
 async function submitMembers() {
-  if (!createdChannel.value || !canSubmitMembers.value) return
+  if (!createdChannel.value || isMembershipManagementLocked.value || !canSubmitMembers.value) return
   isSubmittingMembers.value = true
   errorMessage.value = ''
   successMessage.value = ''
@@ -362,7 +380,7 @@ async function updateChannelDetails() {
 }
 
 async function mutateMember(member: ChannelMember, payload: { role?: 'admin' | 'member'; remove_member?: boolean }, successText: string) {
-  if (!createdChannel.value) return
+  if (!createdChannel.value || isMembershipManagementLocked.value) return
   mutatingMemberId.value = member.user_id
   errorMessage.value = ''
   successMessage.value = ''
@@ -409,11 +427,13 @@ void loadExistingChannels()
 <template>
   <div class="channel-card">
     <div class="header-block">
-      <h2>{{ isPickerActive ? 'مدیریت اعضای کانال' : 'ساخت کانال اختیاری' }}</h2>
+      <h2>{{ isPickerActive ? 'مدیریت کانال' : 'ساخت و مدیریت کانال‌ها' }}</h2>
       <p>
         {{ isPickerActive
-          ? 'اعضای فعلی کانال را مدیریت کنید و سپس کاربران فعال پروژه را به‌صورت invite-only به آن اضافه کنید.'
-          : 'فقط مدیر ارشد می‌تواند کانال اختیاری بسازد. بعد از ساخت، member picker بلافاصله باز می‌شود.' }}
+          ? (isMembershipManagementLocked
+              ? 'برای این کانال فقط تغییر نام و توضیحات از این بخش مجاز است.'
+              : 'اعضای فعلی کانال را مدیریت کنید و سپس کاربران فعال پروژه را به‌صورت invite-only به آن اضافه کنید.')
+          : 'مدیر ارشد می‌تواند کانال اختیاری بسازد و کانال‌های موجود را از همین بخش مدیریت کند.' }}
       </p>
     </div>
 
@@ -435,11 +455,11 @@ void loadExistingChannels()
         <button type="button" class="secondary-btn" :disabled="isCreating" @click="resetAll">بازنشانی</button>
       </div>
 
-      <div v-if="isLoadingChannels" class="picker-state">در حال دریافت کانال‌های اختیاری موجود...</div>
+      <div v-if="isLoadingChannels" class="picker-state">در حال دریافت کانال‌های قابل مدیریت...</div>
 
       <div v-else-if="existingChannels.length > 0" class="existing-shell">
         <div class="existing-title-row">
-          <h3>کانال‌های اختیاری موجود</h3>
+          <h3>کانال‌های موجود</h3>
           <span>{{ existingChannels.length }} کانال</span>
         </div>
 
@@ -454,11 +474,11 @@ void loadExistingChannels()
           <div class="existing-channel-copy">
             <span class="existing-channel-name">{{ channel.title }}</span>
             <span class="existing-channel-meta">
-              اعضای فعال: {{ channel.member_count }}
+              {{ getChannelKindLabel(channel) }} • اعضای فعال: {{ channel.member_count }}
               <template v-if="channel.description"> • {{ channel.description }}</template>
             </span>
           </div>
-          <span class="existing-channel-action">ادامه دعوت اعضا</span>
+          <span class="existing-channel-action">{{ getChannelActionLabel(channel) }}</span>
         </button>
       </div>
     </div>
@@ -467,7 +487,10 @@ void loadExistingChannels()
       <div class="channel-summary">
         <div>
           <div class="summary-title">{{ createdChannel?.title }}</div>
-          <div class="summary-meta">اعضای فعال: {{ createdChannel?.member_count ?? 0 }}</div>
+          <div class="summary-meta">
+            {{ createdChannel ? getChannelKindLabel(createdChannel) : '' }}
+            <template v-if="createdChannel"> • اعضای فعال: {{ createdChannel.member_count }}</template>
+          </div>
         </div>
         <button type="button" class="secondary-btn compact" @click="resetAll">کانال جدید</button>
       </div>
@@ -496,6 +519,10 @@ void loadExistingChannels()
           <span>{{ createdChannel?.member_count ?? 0 }} عضو فعال</span>
         </div>
 
+        <div v-if="isMembershipManagementLocked" class="picker-state info">
+          برای این کانال فقط تغییر نام و توضیحات مجاز است. مدیریت عضویت از این بخش غیرفعال است.
+        </div>
+
         <div v-if="isLoadingMembers" class="picker-state">در حال دریافت اعضای فعلی کانال...</div>
 
         <div v-else class="member-list">
@@ -509,7 +536,7 @@ void loadExistingChannels()
               </div>
               <span class="member-details">{{ member.full_name }} • {{ member.mobile_number }}</span>
             </div>
-            <div class="member-actions">
+            <div v-if="!isMembershipManagementLocked" class="member-actions">
               <button
                 v-if="member.role === 'member'"
                 type="button"
@@ -543,7 +570,7 @@ void loadExistingChannels()
         </div>
       </div>
 
-      <div class="picker-toolbar">
+      <div v-if="!isMembershipManagementLocked" class="picker-toolbar">
         <label class="select-all-toggle" :class="{ active: selectAllActiveUsers }">
           <input type="checkbox" :checked="selectAllActiveUsers" @change="handleToggleSelectAll" />
           <span>انتخاب همه کاربران فعال ({{ activeTotal }})</span>
@@ -558,32 +585,34 @@ void loadExistingChannels()
         />
       </div>
 
-      <div class="picker-state" v-if="isLoadingCandidates">در حال دریافت کاربران فعال...</div>
-      <div class="picker-state empty" v-else-if="!selectAllActiveUsers && candidates.length === 0">کاربری برای دعوت باقی نمانده است.</div>
+      <template v-if="!isMembershipManagementLocked">
+        <div v-if="isLoadingCandidates" class="picker-state">در حال دریافت کاربران فعال...</div>
+        <div v-else-if="!selectAllActiveUsers && candidates.length === 0" class="picker-state empty">کاربری برای دعوت باقی نمانده است.</div>
 
-      <div v-else-if="!selectAllActiveUsers" class="candidate-list">
-        <button
-          v-for="candidate in candidates"
-          :key="candidate.user_id"
-          type="button"
-          class="candidate-row"
-          :class="{ selected: selectedUserIds.has(candidate.user_id) }"
-          @click="toggleUser(candidate.user_id)"
-        >
-          <div class="candidate-check" :class="{ checked: selectedUserIds.has(candidate.user_id) }">
-            <svg v-if="selectedUserIds.has(candidate.user_id)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          </div>
-          <div class="candidate-avatar">{{ getAvatarInitial(candidate.account_name) }}</div>
-          <div class="candidate-copy">
-            <span class="candidate-name">{{ candidate.account_name }}</span>
-            <span class="candidate-details">{{ candidate.full_name }} • {{ candidate.mobile_number }}</span>
-          </div>
-        </button>
-      </div>
+        <div v-else-if="!selectAllActiveUsers" class="candidate-list">
+          <button
+            v-for="candidate in candidates"
+            :key="candidate.user_id"
+            type="button"
+            class="candidate-row"
+            :class="{ selected: selectedUserIds.has(candidate.user_id) }"
+            @click="toggleUser(candidate.user_id)"
+          >
+            <div class="candidate-check" :class="{ checked: selectedUserIds.has(candidate.user_id) }">
+              <svg v-if="selectedUserIds.has(candidate.user_id)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </div>
+            <div class="candidate-avatar">{{ getAvatarInitial(candidate.account_name) }}</div>
+            <div class="candidate-copy">
+              <span class="candidate-name">{{ candidate.account_name }}</span>
+              <span class="candidate-details">{{ candidate.full_name }} • {{ candidate.mobile_number }}</span>
+            </div>
+          </button>
+        </div>
+      </template>
 
-      <div class="picker-footer">
+      <div v-if="!isMembershipManagementLocked" class="picker-footer">
         <div class="picker-count">انتخاب‌شده: {{ selectedCount }} از {{ activeTotal }}</div>
         <button type="button" class="primary-btn" :disabled="!canSubmitMembers || isSubmittingMembers" @click="submitMembers">
           {{ isSubmittingMembers ? 'در حال ثبت...' : 'ثبت اعضای انتخاب‌شده' }}
@@ -663,6 +692,12 @@ void loadExistingChannels()
 .member-shell-header span {
   font-size: 0.8rem;
   color: #6b7280;
+}
+
+.picker-state.info {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.14);
+  color: #1d4ed8;
 }
 
 .member-list {
