@@ -7,7 +7,7 @@ import asyncio
 import pytz
 
 from core.db import get_db
-from core.services.chat_room_service import ensure_mandatory_channel_membership, ensure_mandatory_channel_rollout
+from core.services.chat_room_service import sync_mandatory_channel_for_user_state_change
 from core.services.user_deletion_service import delete_user_account
 from models.user import User
 from api.deps import verify_super_admin_or_dev_key
@@ -269,16 +269,13 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
         val = update_data['max_sessions']
         user.max_sessions = max(1, min(val, 3)) if val else 1
 
-    mandatory_room_rollout_needed = old_role != user.role
-    mandatory_room_membership_needed = (
-        getattr(user, "is_deleted", False) != old_is_deleted
-        or getattr(user, "deleted_at", None) != old_deleted_at
+    await sync_mandatory_channel_for_user_state_change(
+        db,
+        user=user,
+        previous_role=old_role,
+        previous_is_deleted=old_is_deleted,
+        previous_deleted_at=old_deleted_at,
     )
-
-    if mandatory_room_rollout_needed:
-        await ensure_mandatory_channel_rollout(db)
-    elif mandatory_room_membership_needed:
-        await ensure_mandatory_channel_membership(db, user=user)
     
     # --- 5. Commit Changes ---
     await db.commit()

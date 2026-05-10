@@ -31,6 +31,14 @@ class FakeDB:
         return SimpleNamespace()
 
 
+class ScalarOneOrNoneResult:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
 class FakeInsertBuilder:
     def __init__(self):
         self.values_payload = None
@@ -126,6 +134,61 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "ok")
         self.assertEqual(update_builder.values_payload, {"full_name": "User Name"})
         self.assertEqual(db.execute_calls[1], ("MERGE_UPDATE", {"is_sync": True}))
+
+    async def test_apply_item_merges_mandatory_chat_and_membership_to_local_singletons(self):
+        chat_data = {
+            "type": "channel",
+            "title": "اطلاع‌رسانی",
+            "description": "کانال اجباری اطلاع‌رسانی سامانه",
+            "is_system": True,
+            "is_mandatory": True,
+        }
+        db = FakeDB([ScalarOneOrNoneResult(44)])
+        with patch("api.routers.sync._build_upsert_stmt", return_value="CHAT_UPSERT") as builder:
+            result = await _apply_item(
+                db,
+                "chats",
+                "INSERT",
+                9,
+                chat_data,
+                model=object,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(chat_data["id"], 44)
+        builder.assert_called_once_with(object, "chats", chat_data)
+        self.assertEqual(db.execute_calls[-1], ("CHAT_UPSERT", {"is_sync": True}))
+
+        member_data = {
+            "chat_id": 9,
+            "user_id": 5,
+            "role": "member",
+            "membership_status": "active",
+            "chat_type": "channel",
+            "chat_is_system": True,
+            "chat_is_mandatory": True,
+        }
+        db = FakeDB([ScalarOneOrNoneResult(44), ScalarOneOrNoneResult(77)])
+        with patch("api.routers.sync._build_upsert_stmt", return_value="MEMBER_UPSERT") as builder:
+            result = await _apply_item(
+                db,
+                "chat_members",
+                "INSERT",
+                12,
+                member_data,
+                model=object,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(member_data["chat_id"], 44)
+        self.assertEqual(member_data["id"], 77)
+        self.assertNotIn("chat_type", member_data)
+        self.assertNotIn("chat_is_system", member_data)
+        self.assertNotIn("chat_is_mandatory", member_data)
+        builder.assert_called_once_with(object, "chat_members", member_data)
+        self.assertEqual(db.execute_calls[-1], ("MEMBER_UPSERT", {"is_sync": True}))
 
 
 if __name__ == "__main__":

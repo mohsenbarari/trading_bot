@@ -6,6 +6,8 @@ from api.routers.sync import (
     _parse_item,
     get_model_class,
 )
+from models.chat import Chat
+from models.chat_member import ChatMember
 from models.notification import Notification
 from models.user import User
 
@@ -13,6 +15,8 @@ from models.user import User
 class SyncRouterParsingTests(unittest.TestCase):
     def test_get_model_class_resolves_known_models_and_none_for_unknown(self):
         self.assertIs(get_model_class("users"), User)
+        self.assertIs(get_model_class("chats"), Chat)
+        self.assertIs(get_model_class("chat_members"), ChatMember)
         self.assertIs(get_model_class("notifications"), Notification)
         self.assertIsNone(get_model_class("missing_table"))
 

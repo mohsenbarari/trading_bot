@@ -192,7 +192,7 @@ test.describe('Admin smoke regressions', () => {
     await openAdmin(page)
 
     await page.getByRole('button', { name: /ساخت کانال اختیاری/ }).click()
-    await expect(page.getByRole('heading', { name: 'ساخت کانال اختیاری' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'ساخت و مدیریت کانال‌ها' })).toBeVisible()
 
     await page.locator('#channel-title').fill(channelTitle)
     await page.locator('#channel-description').fill('Playwright admin smoke channel')

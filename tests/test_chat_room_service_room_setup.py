@@ -22,7 +22,7 @@ from core.services.chat_room_service import (
     list_active_channel_member_user_ids,
     list_active_room_member_user_ids,
     update_group_chat,
-    update_optional_channel,
+    update_manageable_channel_metadata,
 )
 
 
@@ -207,7 +207,7 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(chat)
 
-    async def test_update_group_and_optional_channel_validate_and_refresh(self):
+    async def test_update_group_and_manageable_channel_validate_and_refresh(self):
         now = datetime(2026, 5, 8, 2, 20, 0)
         db = FakeDB()
         group_chat = SimpleNamespace(title="Old", updated_at=None)
@@ -225,18 +225,24 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         db.refresh.assert_awaited_once_with(group_chat)
 
         db = FakeDB()
-        channel = SimpleNamespace(is_system=True, is_mandatory=False, title="Old", description=None, updated_at=None)
-        with self.assertRaises(HTTPException) as exc_info:
-            await update_optional_channel(db, chat=channel, title="Name")
-        self.assertEqual(exc_info.exception.detail, "Only optional channels can be updated")
+        channel = SimpleNamespace(is_system=True, is_mandatory=True, title="اطلاع\u001dرسانی", description="کانال اجباری اطلاع\u001dرسانی سامانه", updated_at=None)
+        with patch("core.services.chat_room_service._utcnow", return_value=now):
+            result = await update_manageable_channel_metadata(db, chat=channel, title="  اطلاع‌رسانی رسمی  ", description="  شرح تازه  ")
+        self.assertIs(result, channel)
+        self.assertEqual(channel.title, "اطلاع‌رسانی رسمی")
+        self.assertEqual(channel.description, "شرح تازه")
+        self.assertEqual(channel.updated_at, now)
+        db.commit.assert_awaited_once()
+        db.refresh.assert_awaited_once_with(channel)
 
+        db = FakeDB()
         channel = SimpleNamespace(is_system=False, is_mandatory=False, title="Old", description=None, updated_at=None)
         with self.assertRaises(HTTPException) as exc_info:
-            await update_optional_channel(db, chat=channel, title="   ")
+            await update_manageable_channel_metadata(db, chat=channel, title="   ")
         self.assertEqual(exc_info.exception.detail, "Channel title is required")
 
         with patch("core.services.chat_room_service._utcnow", return_value=now):
-            result = await update_optional_channel(db, chat=channel, title="  News  ", description="  desk ")
+            result = await update_manageable_channel_metadata(db, chat=channel, title="  News  ", description="  desk ")
         self.assertIs(result, channel)
         self.assertEqual(channel.title, "News")
         self.assertEqual(channel.description, "desk")
@@ -287,7 +293,12 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ensure_mandatory_channel_rollout_updates_existing_memberships(self):
         now = datetime(2026, 5, 8, 3, 0, 0)
-        chat = SimpleNamespace(id=44)
+        chat = SimpleNamespace(
+            id=44,
+            title="اطلاع\u001dرسانی",
+            description="کانال اجباری اطلاع\u001dرسانی سامانه",
+            updated_at=None,
+        )
         admin_user = SimpleNamespace(id=7, is_deleted=False)
         normal_user = SimpleNamespace(id=8, is_deleted=False)
         deleted_user = SimpleNamespace(id=9, is_deleted=True)
@@ -332,6 +343,9 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
             result = await ensure_mandatory_channel_rollout(db, users=[admin_user, normal_user, deleted_user])
 
         self.assertIs(result, chat)
+        self.assertEqual(chat.title, MANDATORY_CHANNEL_TITLE)
+        self.assertEqual(chat.description, MANDATORY_CHANNEL_DESCRIPTION)
+        self.assertEqual(chat.updated_at, now)
         self.assertEqual(admin_member.role, ChatMemberRole.ADMIN)
         self.assertEqual(admin_member.membership_status, ChatMembershipStatus.ACTIVE)
         self.assertEqual(admin_member.updated_at, now)
@@ -345,6 +359,7 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(deleted_member.left_at, now)
         self.assertEqual(deleted_member.updated_at, now)
         self.assertEqual(db.added, [])
+        db.flush.assert_awaited_once()
 
 
 if __name__ == "__main__":

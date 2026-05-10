@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, Sequence, TypeVar
+import unicodedata
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
@@ -159,13 +160,21 @@ def _utcnow() -> datetime:
 def _clean_text(value: str | None) -> str | None:
     if value is None:
         return None
-    cleaned = value.strip()
+    cleaned = "".join(
+        ch for ch in value if unicodedata.category(ch) != "Cc" or ch in {"\n", "\r", "\t"}
+    ).strip()
     return cleaned or None
 
 
+def _has_disallowed_control_chars(value: str | None) -> bool:
+    if not value:
+        return False
+    return any(unicodedata.category(ch) == "Cc" and ch not in {"\n", "\r", "\t"} for ch in value)
+
+
 GROUP_MAX_MEMBERS = 50
-MANDATORY_CHANNEL_TITLE = "اطلاعرسانی"
-MANDATORY_CHANNEL_DESCRIPTION = "کانال اجباری اطلاعرسانی سامانه"
+MANDATORY_CHANNEL_TITLE = "اطلاع‌رسانی"
+MANDATORY_CHANNEL_DESCRIPTION = "کانال اجباری اطلاع‌رسانی سامانه"
 
 
 def _membership_status_for_user(user: User) -> ChatMembershipStatus:
@@ -183,9 +192,35 @@ async def get_mandatory_channel(db: AsyncSession) -> Chat | None:
     return result.scalar_one_or_none()
 
 
+def _normalize_mandatory_channel_metadata(chat: Chat) -> bool:
+    normalized_title = (
+        MANDATORY_CHANNEL_TITLE if _has_disallowed_control_chars(chat.title) else _clean_text(chat.title) or MANDATORY_CHANNEL_TITLE
+    )
+    normalized_description = (
+        MANDATORY_CHANNEL_DESCRIPTION
+        if _has_disallowed_control_chars(chat.description)
+        else _clean_text(chat.description) or MANDATORY_CHANNEL_DESCRIPTION
+    )
+    changed = False
+
+    if chat.title != normalized_title:
+        chat.title = normalized_title
+        changed = True
+    if chat.description != normalized_description:
+        chat.description = normalized_description
+        changed = True
+
+    if changed:
+        chat.updated_at = _utcnow()
+
+    return changed
+
+
 async def ensure_mandatory_channel(db: AsyncSession) -> Chat:
     chat = await get_mandatory_channel(db)
     if chat is not None:
+        if _normalize_mandatory_channel_metadata(chat):
+            await db.flush()
         return chat
 
     chat = Chat(
@@ -284,6 +319,29 @@ async def ensure_mandatory_channel_membership(
     user: User,
 ) -> Chat:
     return await ensure_mandatory_channel_rollout(db, users=[user])
+
+
+async def sync_mandatory_channel_for_user_state_change(
+    db: AsyncSession,
+    *,
+    user: User,
+    previous_role: UserRole | None = None,
+    previous_is_deleted: bool | None = None,
+    previous_deleted_at: datetime | None = None,
+) -> Chat | None:
+    if previous_role is not None and previous_role != user.role:
+        return await ensure_mandatory_channel_rollout(db)
+
+    membership_state_changed = False
+    if previous_is_deleted is not None and previous_is_deleted != getattr(user, "is_deleted", False):
+        membership_state_changed = True
+    if previous_deleted_at is not None and previous_deleted_at != getattr(user, "deleted_at", None):
+        membership_state_changed = True
+
+    if membership_state_changed:
+        return await ensure_mandatory_channel_membership(db, user=user)
+
+    return None
 
 
 async def ensure_mandatory_channel_rollout(
@@ -540,17 +598,14 @@ async def update_group_chat(
     return chat
 
 
-async def update_optional_channel(
+async def update_manageable_channel_metadata(
     db: AsyncSession,
     *,
     chat: Chat,
     title: str,
     description: str | None = None,
 ) -> Chat:
-    """Update one optional channel title/description for admin-side management."""
-    if chat.is_system or chat.is_mandatory:
-        raise HTTPException(status_code=400, detail="Only optional channels can be updated")
-
+    """Update one admin-manageable channel title/description."""
     cleaned_title = _clean_text(title)
     if not cleaned_title:
         raise HTTPException(status_code=400, detail="Channel title is required")
@@ -563,8 +618,8 @@ async def update_optional_channel(
     return chat
 
 
-async def list_optional_channels(db: AsyncSession) -> list[ChannelRoomSummary]:
-    """List active optional channels for admin-side management."""
+async def list_manageable_channels(db: AsyncSession) -> list[ChannelRoomSummary]:
+    """List active channels that the admin UI can manage."""
     member_count_expr = func.count(ChatMember.id).filter(
         ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
     )
@@ -574,10 +629,14 @@ async def list_optional_channels(db: AsyncSession) -> list[ChannelRoomSummary]:
         .where(
             Chat.type == ChatType.CHANNEL,
             Chat.is_deleted.is_(False),
-            Chat.is_mandatory.is_(False),
         )
         .group_by(Chat.id)
-        .order_by(Chat.created_at.desc(), Chat.id.desc())
+        .order_by(
+            Chat.is_mandatory.desc(),
+            Chat.is_system.desc(),
+            Chat.created_at.desc(),
+            Chat.id.desc(),
+        )
     )
     result = await db.execute(stmt)
 
@@ -597,6 +656,25 @@ async def list_optional_channels(db: AsyncSession) -> list[ChannelRoomSummary]:
             )
         )
     return summaries
+
+
+async def update_optional_channel(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    title: str,
+    description: str | None = None,
+) -> Chat:
+    return await update_manageable_channel_metadata(
+        db,
+        chat=chat,
+        title=title,
+        description=description,
+    )
+
+
+async def list_optional_channels(db: AsyncSession) -> list[ChannelRoomSummary]:
+    return await list_manageable_channels(db)
 
 
 async def list_groups_for_user(

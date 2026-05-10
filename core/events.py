@@ -111,6 +111,135 @@ def publish_event_sync(event_type: str, data: Dict[str, Any]) -> None:
         logger.error(f"❌ Error publishing event {event_type}: {e}")
 
 
+def _isoformat_or_none(value):
+    return value.isoformat() if value else None
+
+
+def _chat_sync_payload(target) -> Dict[str, Any]:
+    return {
+        "id": target.id,
+        "type": target.type.value if getattr(target, "type", None) else None,
+        "title": target.title,
+        "description": target.description,
+        "created_by_id": target.created_by_id,
+        "is_system": target.is_system,
+        "is_mandatory": target.is_mandatory,
+        "is_deleted": target.is_deleted,
+        "deleted_at": _isoformat_or_none(getattr(target, "deleted_at", None)),
+        "max_members": target.max_members,
+        "last_message_at": _isoformat_or_none(getattr(target, "last_message_at", None)),
+        "created_at": _isoformat_or_none(getattr(target, "created_at", None)),
+        "updated_at": _isoformat_or_none(getattr(target, "updated_at", None)),
+    }
+
+
+def _lookup_chat_sync_flags(connection, chat_id: int):
+    try:
+        result = connection.execute(
+            text("SELECT type, is_system, is_mandatory FROM chats WHERE id = :chat_id"),
+            {"chat_id": chat_id},
+        )
+        row = result.mappings().first()
+        if row is None:
+            return None, None, None
+        return row.get("type"), row.get("is_system"), row.get("is_mandatory")
+    except Exception:
+        return None, None, None
+
+
+def _chat_member_sync_payload(connection, target) -> Dict[str, Any]:
+    chat_type = getattr(target, "chat_type", None)
+    chat_is_system = getattr(target, "chat_is_system", None)
+    chat_is_mandatory = getattr(target, "chat_is_mandatory", None)
+    if chat_type is None or chat_is_system is None or chat_is_mandatory is None:
+        chat_type, chat_is_system, chat_is_mandatory = _lookup_chat_sync_flags(connection, target.chat_id)
+
+    return {
+        "id": target.id,
+        "chat_id": target.chat_id,
+        "user_id": target.user_id,
+        "role": target.role.value if getattr(target, "role", None) else None,
+        "membership_status": target.membership_status.value if getattr(target, "membership_status", None) else None,
+        "chat_type": chat_type,
+        "chat_is_system": chat_is_system,
+        "chat_is_mandatory": chat_is_mandatory,
+        "joined_at": _isoformat_or_none(getattr(target, "joined_at", None)),
+        "left_at": _isoformat_or_none(getattr(target, "left_at", None)),
+        "last_read_at": _isoformat_or_none(getattr(target, "last_read_at", None)),
+        "is_muted": target.is_muted,
+        "created_at": _isoformat_or_none(getattr(target, "created_at", None)),
+        "updated_at": _isoformat_or_none(getattr(target, "updated_at", None)),
+    }
+
+
+def setup_chat_events():
+    """Setup event listeners for Chat model."""
+    from models.chat import Chat
+
+    @event.listens_for(Chat, 'after_insert')
+    def on_chat_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "chats", target.id, "INSERT", _chat_sync_payload(target))
+        except Exception as e:
+            logger.error(f"Error in chat after_insert event: {e}")
+
+    @event.listens_for(Chat, 'after_update')
+    def on_chat_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "chats", target.id, "UPDATE", _chat_sync_payload(target))
+        except Exception as e:
+            logger.error(f"Error in chat after_update event: {e}")
+
+    @event.listens_for(Chat, 'after_delete')
+    def on_chat_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "chats", target.id, "DELETE", _chat_sync_payload(target))
+        except Exception as e:
+            logger.error(f"Error in chat after_delete event: {e}")
+
+    logger.info("✅ Chat event listeners registered")
+
+
+def setup_chat_member_events():
+    """Setup event listeners for ChatMember model."""
+    from models.chat_member import ChatMember
+
+    @event.listens_for(ChatMember, 'after_insert')
+    def on_chat_member_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "chat_members", target.id, "INSERT", _chat_member_sync_payload(connection, target))
+        except Exception as e:
+            logger.error(f"Error in chat_member after_insert event: {e}")
+
+    @event.listens_for(ChatMember, 'after_update')
+    def on_chat_member_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "chat_members", target.id, "UPDATE", _chat_member_sync_payload(connection, target))
+        except Exception as e:
+            logger.error(f"Error in chat_member after_update event: {e}")
+
+    @event.listens_for(ChatMember, 'after_delete')
+    def on_chat_member_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "chat_members", target.id, "DELETE", _chat_member_sync_payload(connection, target))
+        except Exception as e:
+            logger.error(f"Error in chat_member after_delete event: {e}")
+
+    logger.info("✅ ChatMember event listeners registered")
+
+
 def setup_offer_events():
     """Setup event listeners for Offer model"""
     from models.offer import Offer
@@ -622,6 +751,8 @@ def setup_notification_events():
 def setup_all_events():
     """Setup all event listeners"""
     setup_user_events()
+    setup_chat_events()
+    setup_chat_member_events()
     setup_invitation_events()
     setup_offer_events()
     setup_trade_events()
