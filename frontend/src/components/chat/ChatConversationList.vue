@@ -80,10 +80,28 @@ function isConversationMuted(conv: Conversation) {
   return conv.is_muted === true
 }
 
+function comparePinnedConversationOrder(left: Conversation, right: Conversation) {
+  const leftOrder = Number(left.pin_order ?? 0)
+  const rightOrder = Number(right.pin_order ?? 0)
+  if (rightOrder !== leftOrder) return rightOrder - leftOrder
+
+  const leftPinnedAt = left.pinned_at || ''
+  const rightPinnedAt = right.pinned_at || ''
+  if (rightPinnedAt > leftPinnedAt) return 1
+  if (rightPinnedAt < leftPinnedAt) return -1
+
+  const leftLastMessageAt = left.last_message_at || ''
+  const rightLastMessageAt = right.last_message_at || ''
+  if (rightLastMessageAt > leftLastMessageAt) return 1
+  if (rightLastMessageAt < leftLastMessageAt) return -1
+
+  return Number(right.id) - Number(left.id)
+}
+
 const reorderablePinnedConversations = computed(() => {
   return displayedConversations.value.filter((conversation) => {
     return isConversationPinned(conversation) && !isMandatoryPinnedConversation(conversation)
-  })
+  }).slice().sort(comparePinnedConversationOrder)
 })
 
 function canMoveConversationPinUp(conv: Conversation) {

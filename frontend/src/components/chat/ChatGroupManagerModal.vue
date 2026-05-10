@@ -551,15 +551,17 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 .candidate-search {
   flex: 1;
   min-width: 0;
-  height: 52px;
+  min-height: 56px;
   border: 1px solid #e2e8f0;
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 0 18px;
   font: inherit;
-  font-size: 0.98rem;
-  line-height: 1.25;
+  font-size: 1rem;
+  line-height: 1.35;
   outline: none;
   box-sizing: border-box;
+  appearance: none;
+  -webkit-appearance: none;
   background: #f8fafc;
   box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
   transition: border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
@@ -576,9 +578,9 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 .secondary-btn,
 .danger-text-btn {
   border: 0;
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 0 14px;
-  min-height: 52px;
+  min-height: 56px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

@@ -1628,6 +1628,31 @@ function closeChannelManager() {
   void loadConversations()
 }
 
+async function handleChannelManagerOpenChannel(payload: { chatId: number; title: string }) {
+  const conversationKey = resolveRoomConversationKey('channel', payload.chatId) ?? -Math.abs(payload.chatId)
+  showChannelManagerModal.value = false
+  await loadConversations()
+
+  const existingConversation = conversations.value.find((conversation) => (
+    conversation.room_kind === 'channel' && conversation.chat_id === payload.chatId
+  ))
+
+  if (existingConversation) {
+    selectConversation(existingConversation)
+    return
+  }
+
+  selectedUserId.value = conversationKey
+  selectedUserName.value = payload.title
+  showAttachmentMenu.value = false
+  showStickerPicker.value = false
+  void loadMessages(conversationKey)
+}
+
+function handleChannelManagerConversationRefresh() {
+  void loadConversations()
+}
+
 function openSelectedGroupManager() {
   if (selectedRoomKind.value !== 'group' || !selectedConversation.value?.chat_id) return
   groupManagerChatId.value = selectedConversation.value.chat_id
@@ -3085,6 +3110,9 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         <CreateChannelView
           :apiBaseUrl="props.apiBaseUrl"
           :jwtToken="props.jwtToken"
+          :currentUserId="props.currentUserId"
+          @refresh-conversations="handleChannelManagerConversationRefresh"
+          @open-channel="handleChannelManagerOpenChannel"
         />
       </div>
     </div>

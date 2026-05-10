@@ -627,6 +627,7 @@ async def get_or_create_direct_chat(
         await db.flush()
 
     existing_members = await _load_direct_chat_members(db, chat.id, user1.id, user2.id)
+    created_member = False
     for user in (user1, user2):
         expected_status = _membership_status_for_user(user)
         expected_left_at = user.deleted_at if user.is_deleted else None
@@ -642,12 +643,16 @@ async def get_or_create_direct_chat(
                     left_at=expected_left_at,
                 )
             )
+            created_member = True
             continue
 
         if member.membership_status != expected_status:
             member.membership_status = expected_status
         if not _same_datetime(member.left_at, expected_left_at):
             member.left_at = expected_left_at
+
+    if created_member:
+        await db.flush()
 
     return chat
 
