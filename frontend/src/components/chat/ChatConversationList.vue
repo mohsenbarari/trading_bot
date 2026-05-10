@@ -89,27 +89,9 @@ function getConversationInitial(conv: Conversation) {
   return (conv.other_user_name || '?').charAt(0)
 }
 
-function formatMemberCount(conv: Conversation) {
-  const count = Number(conv.member_count || 0)
-  if (!isRoomConversation(conv) || count <= 0) return ''
-  return `${count.toLocaleString('fa-IR')} عضو`
-}
-
-function formatEmptyRoomPreview(conv: Conversation) {
-  const members = formatMemberCount(conv)
-  if (isGroupConversation(conv)) {
-    return members || 'گروه'
-  }
-  if (isChannelConversation(conv)) {
-    if (conv.is_mandatory) return members ? `کانال اجباری • ${members}` : 'کانال اجباری'
-    return members || 'کانال'
-  }
-  return '...'
-}
-
 function getPreviewText(conv: Conversation) {
   if (!conv.last_message_type) {
-    return isRoomConversation(conv) ? formatEmptyRoomPreview(conv) : 'گفتگو هنوز شروع نشده است'
+    return ''
   }
   if (conv.last_message_type === 'image') return 'تصویر'
   if (conv.last_message_type === 'video') return 'ویدئو'
@@ -127,34 +109,7 @@ function isUserOnline(lastSeen: string | null | undefined): boolean {
   return (new Date().getTime() - date.getTime()) < 180000
 }
 
-const pinnedConversations = computed(() => props.conversations.filter((conv) => isConversationPinned(conv)))
-const regularConversations = computed(() => props.conversations.filter((conv) => !isConversationPinned(conv)))
-
-const conversationSections = computed(() => {
-  const sections: Array<{ key: string; title: string; subtitle: string; items: Conversation[] }> = []
-
-  if (pinnedConversations.value.length > 0) {
-    sections.push({
-      key: 'pinned',
-      title: 'سنجاق‌شده',
-      subtitle: isMandatoryPinnedConversation(pinnedConversations.value[0] || {} as Conversation)
-        ? 'کانال اجباری همیشه ابتدای این بخش باقی می‌ماند.'
-        : 'گفتگوهای مهم شما اینجا بالای فهرست می‌مانند.',
-      items: pinnedConversations.value,
-    })
-  }
-
-  if (regularConversations.value.length > 0) {
-    sections.push({
-      key: 'regular',
-      title: pinnedConversations.value.length > 0 ? 'گفتگوهای دیگر' : 'همه گفتگوها',
-      subtitle: 'برای مدیریت هر گفتگو روی آن کمی نگه دارید.',
-      items: regularConversations.value,
-    })
-  }
-
-  return sections
-})
+const displayedConversations = computed(() => props.conversations)
 
 function cancelLongPress() {
   if (longPressTimer.value !== null) {
@@ -300,12 +255,6 @@ const activeMenuActions = computed<ConversationMenuAction[]>(() => {
 const menuHint = computed(() => {
   const conv = menuConversation.value
   if (!conv) return ''
-  if (isMandatoryPinnedConversation(conv)) {
-    return 'این کانال اجباری همیشه در ابتدای گفتگوهای سنجاق‌شده می‌ماند و امکان بی‌صدا یا لغو دنبال‌کردن آن وجود ندارد.'
-  }
-  if (!isRoomConversation(conv)) {
-    return 'حذف در این بخش فقط گفتگو را از فهرست شما پنهان می‌کند و پیام‌ها را برای همیشه پاک نمی‌کند.'
-  }
   return ''
 })
 
@@ -326,39 +275,15 @@ onBeforeUnmount(() => {
     <div class="conversation-atmosphere" aria-hidden="true"></div>
 
     <div class="conversation-panel">
-      <div class="conversation-summary-strip">
-        <div class="summary-copy">
-          <span class="summary-kicker">پیام‌رسان</span>
-          <h2>گفتگوها</h2>
-          <p>برای بازکردن گفتگو لمس کنید و برای مدیریت، کمی نگه دارید.</p>
-        </div>
-        <div class="summary-stats">
-          <span class="summary-pill accent">{{ conversations.length.toLocaleString('fa-IR') }} گفتگو</span>
-          <span v-if="pinnedConversations.length > 0" class="summary-pill warm">
-            {{ pinnedConversations.length.toLocaleString('fa-IR') }} سنجاق‌شده
-          </span>
-        </div>
-      </div>
-
       <div class="conversations-list" v-auto-animate>
         <div v-if="conversations.length === 0" class="empty-state">
           <span>💬</span>
-          <p>هنوز گفتگویی ندارید</p>
-          <small>از دکمه پایین می‌توانید یک گفتگوی جدید شروع کنید.</small>
+          <p>گفتگویی وجود ندارد</p>
         </div>
 
-        <section v-for="section in conversationSections" :key="section.key" class="conversation-section">
-          <div class="section-header">
-            <div>
-              <h3>{{ section.title }}</h3>
-              <p>{{ section.subtitle }}</p>
-            </div>
-            <span class="section-count">{{ section.items.length.toLocaleString('fa-IR') }}</span>
-          </div>
-
-          <div class="section-items" v-auto-animate>
+        <div class="conversation-items" v-auto-animate>
             <div
-              v-for="conv in section.items"
+              v-for="conv in displayedConversations"
               :key="conv.id"
               v-memo="[
                 conv.id,
@@ -372,9 +297,6 @@ onBeforeUnmount(() => {
                 conv.last_message_type,
                 conv.last_message_content,
                 conv.unread_count,
-                conv.member_count,
-                conv.is_mandatory,
-                conv.is_system,
                 conv.is_muted,
                 conv.is_pinned,
                 conv.pinned_at,
@@ -418,23 +340,9 @@ onBeforeUnmount(() => {
                   <div class="conv-title-block">
                     <div class="conv-name-row">
                       <span class="conv-name">{{ conv.other_user_name }}</span>
-                      <span v-if="isConversationPinned(conv)" class="pin-chip">
-                        <Pin :size="12" />
-                        <span>{{ isMandatoryPinnedConversation(conv) ? 'ثابت' : 'سنجاق' }}</span>
-                      </span>
                     </div>
                     <span class="conv-time" v-if="conv.last_message_at">{{ formatTime(conv.last_message_at) }}</span>
                   </div>
-                </div>
-
-                <div class="conv-meta-row">
-                  <span v-if="isChannelConversation(conv)" class="room-badge-list channel">کانال</span>
-                  <span v-else-if="isGroupConversation(conv)" class="room-badge-list group">گروه</span>
-                  <span v-if="isChannelConversation(conv) && conv.is_mandatory" class="room-badge-list mandatory">اجباری</span>
-                  <span v-if="isChannelConversation(conv) && conv.is_system" class="room-badge-list system">سیستمی</span>
-                  <span v-if="isConversationMuted(conv)" class="room-badge-list muted">بی‌صدا</span>
-                  <span v-if="formatMemberCount(conv)" class="member-count-list">{{ formatMemberCount(conv) }}</span>
-                  <span v-if="conv.other_user_is_deleted" class="deleted-badge-list">غیرفعال</span>
                 </div>
 
                 <div class="conv-preview-row">
@@ -459,8 +367,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
-          </div>
-        </section>
+        </div>
       </div>
     </div>
 

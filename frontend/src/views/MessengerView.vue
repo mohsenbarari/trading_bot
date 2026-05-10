@@ -76,6 +76,7 @@ function handleBack() {
         :apiBaseUrl="apiBaseUrl"
         :jwtToken="jwtToken"
         :currentUserId="user.id"
+        :currentUserRole="user.role || null"
         :targetUserId="targetUserId"
         :targetUserName="targetUserName"
         @navigate="handleNavigate"

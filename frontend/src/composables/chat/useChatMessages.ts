@@ -33,6 +33,7 @@ export interface UseChatMessagesOptions {
     isUserAtBottom: Ref<boolean>
     isViewingReply: Ref<boolean>
     targetUserStatus: Ref<string>
+    selectedUserName: Ref<string>
     messageInput: Ref<string>
     editingMessage: Ref<Message | null>
     replyingToMessage: Ref<Message | null>
@@ -61,6 +62,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         isUserAtBottom,
         isViewingReply,
         targetUserStatus,
+        selectedUserName,
         messageInput,
         editingMessage,
         replyingToMessage,
@@ -134,6 +136,43 @@ export function useChatMessages(options: UseChatMessagesOptions) {
 
     function getPendingOptimisticMessages(userId: number) {
         return backgroundGetPendingForUser(userId).map(buildOptimisticMessageFromUpload)
+    }
+
+    function getConversationPreviewContent(messageType: Message['message_type'], content: string) {
+        if (messageType === 'image') return 'تصویر'
+        if (messageType === 'video') return 'ویدئو'
+        if (messageType === 'voice') return 'پیام صوتی'
+        if (messageType === 'sticker') return 'استیکر'
+        if (messageType === 'location') return 'موقعیت'
+        if (messageType === 'document') return 'فایل'
+        return content
+    }
+
+    function upsertConversationPreview(userId: number, patch: Partial<Conversation>) {
+        const existingConversation = conversations.value.find(conversation => conversation.other_user_id === userId)
+        if (existingConversation) {
+            Object.assign(existingConversation, patch)
+            return existingConversation
+        }
+
+        if (userId <= 0) {
+            return null
+        }
+
+        const newConversation: Conversation = {
+            id: userId,
+            other_user_id: userId,
+            other_user_name: selectedUserName.value || 'گفتگوی جدید',
+            last_message_content: null,
+            last_message_type: null,
+            last_message_at: null,
+            unread_count: 0,
+            room_kind: 'direct',
+            ...patch,
+        }
+
+        conversations.value.unshift(newConversation)
+        return newConversation
     }
 
     function mergeOptimisticMessages(baseMessages: Message[], optimisticMessages: Message[]) {
@@ -456,6 +495,14 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 messages.value.push(hydratedMsg)
             }
 
+            upsertConversationPreview(selectedUserId.value, {
+                last_message_at: hydratedMsg.created_at,
+                last_message_type: hydratedMsg.message_type,
+                last_message_content: getConversationPreviewContent(hydratedMsg.message_type, hydratedMsg.content || ''),
+                unread_count: 0,
+            })
+            void loadConversations()
+
             showStickerPicker.value = false
             scrollToBottom()
             return hydratedMsg
@@ -553,6 +600,14 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             if (idx !== -1) {
                 messages.value[idx] = serverMsg;
             }
+
+            upsertConversationPreview(selectedUserId.value, {
+                last_message_at: serverMsg.created_at,
+                last_message_type: serverMsg.message_type,
+                last_message_content: getConversationPreviewContent(serverMsg.message_type, serverMsg.content || ''),
+                unread_count: 0,
+            })
+            void loadConversations()
 
             nextTick(() => {
                 if (!showStickerPicker.value) {
