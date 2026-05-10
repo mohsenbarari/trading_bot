@@ -6,9 +6,11 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 from api.routers.chat import (
+    delete_direct_conversation,
     get_conversations,
     get_messages,
     mark_messages_read,
+    pin_direct_conversation,
     poll_messages,
     search_messages,
     send_typing_signal,
@@ -225,6 +227,40 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.total_unread, 5)
         self.assertEqual(result.unread_chats_count, 2)
         self.assertEqual(result.conversations_with_unread[1]["is_deleted"], True)
+
+    async def test_direct_conversation_pin_and_hide_routes_serialize_service_state(self):
+        current_user = SimpleNamespace(id=5)
+        db = object()
+        pinned_at = datetime(2026, 5, 10, 7, 20, 0)
+        member = SimpleNamespace(chat_id=44, is_pinned=True, pinned_at=pinned_at, is_hidden=True)
+
+        with patch(
+            "api.routers.chat.set_direct_chat_pin_state",
+            new=AsyncMock(return_value=member),
+        ) as pin_mock:
+            pin_result = await pin_direct_conversation(
+                user_id=9,
+                data=SimpleNamespace(pinned=True),
+                current_user=current_user,
+                db=db,
+            )
+
+        pin_mock.assert_awaited_once_with(db, actor=current_user, other_user_id=9, pinned=True)
+        self.assertEqual(pin_result.target_id, 9)
+        self.assertEqual(pin_result.chat_id, 44)
+        self.assertTrue(pin_result.is_pinned)
+        self.assertEqual(pin_result.pinned_at, pinned_at)
+
+        with patch(
+            "api.routers.chat.hide_direct_conversation",
+            new=AsyncMock(return_value=member),
+        ) as hide_mock:
+            hide_result = await delete_direct_conversation(user_id=9, current_user=current_user, db=db)
+
+        hide_mock.assert_awaited_once_with(db, actor=current_user, other_user_id=9)
+        self.assertEqual(hide_result.target_id, 9)
+        self.assertEqual(hide_result.chat_id, 44)
+        self.assertTrue(hide_result.hidden)
 
 
 if __name__ == "__main__":

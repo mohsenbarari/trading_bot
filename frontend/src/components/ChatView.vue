@@ -585,18 +585,43 @@ const selectedRoomStatusText = computed(() => {
   return canSendToSelectedRoom.value ? 'کانال • شما مدیر هستید' : 'کانال • فقط مدیران امکان ارسال دارند'
 })
 
+function isMandatoryPinnedConversation(conv: Conversation) {
+  return conv.room_kind === 'channel' && conv.is_mandatory === true
+}
+
+function isConversationPinned(conv: Conversation) {
+  return isMandatoryPinnedConversation(conv) || conv.is_pinned === true
+}
+
+function compareConversationActivity(a: Conversation, b: Conversation) {
+  if (!a.last_message_at) return 1
+  if (!b.last_message_at) return -1
+  if (b.last_message_at > a.last_message_at) return 1
+  if (b.last_message_at < a.last_message_at) return -1
+  return 0
+}
+
 const sortedConversations = computed(() => {
   return [...conversations.value].sort((a, b) => {
-    if (!a.last_message_at) return 1
-    if (!b.last_message_at) return -1
+    const mandatoryPinDelta = Number(isMandatoryPinnedConversation(b)) - Number(isMandatoryPinnedConversation(a))
+    if (mandatoryPinDelta !== 0) return mandatoryPinDelta
+
+    const pinDelta = Number(isConversationPinned(b)) - Number(isConversationPinned(a))
+    if (pinDelta !== 0) return pinDelta
+
+    if (isConversationPinned(a) && isConversationPinned(b) && !isMandatoryPinnedConversation(a) && !isMandatoryPinnedConversation(b)) {
+      const aPinnedAt = a.pinned_at || ''
+      const bPinnedAt = b.pinned_at || ''
+      if (bPinnedAt > aPinnedAt) return 1
+      if (bPinnedAt < aPinnedAt) return -1
+    }
+
     // Lexicographic compare on ISO-8601 strings matches chronological
     // order for same-timezone suffix strings (the backend emits consistent
     // `YYYY-MM-DDTHH:MM:SS[.ffffff]` values). This avoids constructing
     // two `Date` objects in the comparator on every WS-triggered re-sort,
     // which is O(n log n) object churn on busy chats.
-    if (b.last_message_at > a.last_message_at) return 1
-    if (b.last_message_at < a.last_message_at) return -1
-    return 0
+    return compareConversationActivity(a, b)
   })
 })
 
@@ -1492,6 +1517,71 @@ async function handleGroupLeft(chatId: number) {
     messages.value = []
   }
   await loadConversations()
+}
+
+type ConversationListAction = 'pin' | 'unpin' | 'delete' | 'leave' | 'unfollow'
+
+async function readConversationActionError(response: Response, fallback: string) {
+  if (response.ok) return
+
+  let detail = fallback
+  try {
+    const payload = await response.json()
+    if (typeof payload?.detail === 'string' && payload.detail.trim()) {
+      detail = payload.detail
+    }
+  } catch {
+    // ignore malformed/non-json bodies and use fallback message
+  }
+
+  throw new Error(detail)
+}
+
+function clearSelectedConversationIfMatches(conv: Conversation) {
+  if (selectedUserId.value !== conv.other_user_id) return
+  selectedUserId.value = null
+  selectedUserName.value = ''
+  messages.value = []
+  showAttachmentMenu.value = false
+  showStickerPicker.value = false
+}
+
+async function handleConversationAction(payload: { action: ConversationListAction; conv: Conversation }) {
+  const { action, conv } = payload
+
+  try {
+    if (conv.room_kind !== 'direct' && !conv.chat_id) {
+      throw new Error('اطلاعات این گفتگو کامل نیست. لطفا دوباره تلاش کنید.')
+    }
+
+    if (action === 'pin' || action === 'unpin') {
+      const endpoint = conv.room_kind === 'direct'
+        ? `/api/chat/direct/${conv.other_user_id}/pin`
+        : `/api/chat/rooms/${conv.chat_id}/pin`
+      const response = await apiFetch(endpoint, {
+        method: 'POST',
+        body: JSON.stringify({ pinned: action === 'pin' }),
+      })
+      await readConversationActionError(response, 'خطا در تغییر وضعیت سنجاق گفتگو')
+    } else if (action === 'delete') {
+      const response = await apiFetch(`/api/chat/direct/${conv.other_user_id}`, { method: 'DELETE' })
+      await readConversationActionError(response, 'خطا در حذف گفتگو')
+      clearSelectedConversationIfMatches(conv)
+    } else if (action === 'leave') {
+      const response = await apiFetch(`/api/chat/groups/${conv.chat_id}/leave`, { method: 'POST' })
+      await readConversationActionError(response, 'خطا در ترک گروه')
+      clearSelectedConversationIfMatches(conv)
+    } else if (action === 'unfollow') {
+      const response = await apiFetch(`/api/chat/channels/${conv.chat_id}/unfollow`, { method: 'POST' })
+      await readConversationActionError(response, 'خطا در لغو دنبال‌کردن کانال')
+      clearSelectedConversationIfMatches(conv)
+    }
+
+    await loadConversations()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'عملیات گفتگو انجام نشد'
+    showInlineToast(message)
+  }
 }
 
 const showContextMenu = (event: Event, msg: Message) => {
@@ -2486,6 +2576,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :selectedUserId="selectedUserId"
       :typingUsers="typingUsers"
       @select-conversation="selectConversation"
+      @conversation-action="handleConversationAction"
       @new-conversation="showNewChatModal = true"
     />
 

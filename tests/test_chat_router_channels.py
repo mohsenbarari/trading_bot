@@ -11,6 +11,8 @@ from api.routers.chat import (
     get_channel_members,
     get_channels,
     patch_channel_member,
+    pin_room_conversation,
+    unfollow_channel,
     update_channel,
 )
 
@@ -247,6 +249,45 @@ class ChatRouterChannelEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bulk_result.processed_user_ids, [5, 6])
         self.assertEqual(bulk_result.added_count, 1)
         self.assertEqual(bulk_result.reactivated_count, 1)
+
+    async def test_pin_room_and_unfollow_channel_routes_serialize_summaries(self):
+        current_user = SimpleNamespace(id=1)
+        db = object()
+        room = SimpleNamespace(id=88, type=ChatType.CHANNEL)
+        member = SimpleNamespace(is_pinned=True, pinned_at=datetime(2026, 5, 10, 7, 30, 0))
+        summary = channel_summary(role=None, removed=False, user_id=1, member_count=6)
+        summary.left = True
+        summary.unchanged = False
+
+        with patch("api.routers.chat.get_room_or_404", new=AsyncMock(return_value=room)) as get_room_mock, patch(
+            "api.routers.chat.set_room_pin_state",
+            new=AsyncMock(return_value=member),
+        ) as pin_mock:
+            pin_result = await pin_room_conversation(
+                chat_id=88,
+                data=SimpleNamespace(pinned=True),
+                current_user=current_user,
+                db=db,
+            )
+
+        get_room_mock.assert_awaited_once_with(db, 88)
+        pin_mock.assert_awaited_once_with(db, chat=room, user_id=1, pinned=True)
+        self.assertEqual(pin_result.target_id, -88)
+        self.assertEqual(pin_result.chat_id, 88)
+        self.assertTrue(pin_result.is_pinned)
+
+        channel = SimpleNamespace(id=88)
+        with patch("api.routers.chat.get_channel_or_404", new=AsyncMock(return_value=channel)) as get_channel_mock, patch(
+            "api.routers.chat.leave_channel_chat",
+            new=AsyncMock(return_value=summary),
+        ) as unfollow_mock:
+            unfollow_result = await unfollow_channel(chat_id=88, current_user=current_user, db=db)
+
+        get_channel_mock.assert_awaited_once_with(db, 88)
+        unfollow_mock.assert_awaited_once_with(db, chat=channel, user_id=1)
+        self.assertEqual(unfollow_result.user_id, 1)
+        self.assertEqual(unfollow_result.member_count, 6)
+        self.assertTrue(unfollow_result.left)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType
-from core.services.chat_service import get_or_create_direct_chat
+from core.services.chat_service import get_or_create_direct_chat, hide_direct_conversation, set_direct_chat_pin_state
 from models.chat import Chat
 from models.chat_member import ChatMember
 
@@ -15,6 +15,7 @@ class FakeDB:
         self._new_chat_id = new_chat_id
         self.added = []
         self.flush = AsyncMock(side_effect=self._flush)
+        self.commit = AsyncMock()
 
     def add(self, obj):
         self.added.append(obj)
@@ -146,6 +147,55 @@ class GetOrCreateDirectChatTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.added[0].user_id, 20)
         self.assertEqual(db.added[0].membership_status, ChatMembershipStatus.ACTIVE)
         self.assertIsNone(db.added[0].left_at)
+
+    async def test_set_direct_chat_pin_state_updates_actor_membership(self):
+        actor = SimpleNamespace(id=10)
+        other_user = SimpleNamespace(id=20)
+        actor_member = ChatMember(chat_id=77, user_id=10, membership_status=ChatMembershipStatus.ACTIVE)
+        db = FakeDB(get_result=other_user)
+
+        with patch(
+            "core.services.chat_service.get_or_create_direct_chat",
+            new=AsyncMock(return_value=SimpleNamespace(id=77)),
+        ), patch(
+            "core.services.chat_service._load_direct_chat_members",
+            new=AsyncMock(return_value={10: actor_member}),
+        ):
+            member = await set_direct_chat_pin_state(db, actor=actor, other_user_id=20, pinned=True)
+
+        self.assertIs(member, actor_member)
+        self.assertTrue(actor_member.is_pinned)
+        self.assertIsNotNone(actor_member.pinned_at)
+        self.assertFalse(actor_member.is_hidden)
+        db.commit.assert_awaited_once()
+
+    async def test_hide_direct_conversation_marks_member_hidden_and_clears_pin(self):
+        actor = SimpleNamespace(id=10)
+        other_user = SimpleNamespace(id=20)
+        actor_member = ChatMember(
+            chat_id=91,
+            user_id=10,
+            membership_status=ChatMembershipStatus.ACTIVE,
+            is_pinned=True,
+            pinned_at=datetime(2026, 5, 10, 7, 25, tzinfo=timezone.utc),
+        )
+        db = FakeDB(get_result=other_user)
+
+        with patch(
+            "core.services.chat_service.get_or_create_direct_chat",
+            new=AsyncMock(return_value=SimpleNamespace(id=91)),
+        ), patch(
+            "core.services.chat_service._load_direct_chat_members",
+            new=AsyncMock(return_value={10: actor_member}),
+        ):
+            member = await hide_direct_conversation(db, actor=actor, other_user_id=20)
+
+        self.assertIs(member, actor_member)
+        self.assertTrue(actor_member.is_hidden)
+        self.assertIsNotNone(actor_member.hidden_at)
+        self.assertFalse(actor_member.is_pinned)
+        self.assertIsNone(actor_member.pinned_at)
+        db.commit.assert_awaited_once()
 
 
 if __name__ == "__main__":

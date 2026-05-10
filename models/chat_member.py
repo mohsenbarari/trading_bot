@@ -30,6 +30,10 @@ class ChatMember(Base):
     )
     last_read_at = Column(DateTime(timezone=True), nullable=True)
     is_muted = Column(Boolean, nullable=False, default=False)
+    is_pinned = Column(Boolean, nullable=False, default=False)
+    pinned_at = Column(DateTime(timezone=True), nullable=True)
+    is_hidden = Column(Boolean, nullable=False, default=False)
+    hidden_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -45,6 +49,13 @@ class ChatMember(Base):
             "ix_chat_members_user_status_updated",
             user_id,
             membership_status,
+            updated_at,
+        ),
+        Index(
+            "ix_chat_members_user_hidden_pinned",
+            user_id,
+            is_hidden,
+            is_pinned,
             updated_at,
         ),
         Index(
