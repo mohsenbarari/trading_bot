@@ -17,11 +17,12 @@ import AttachmentMenu from './chat/AttachmentMenu.vue'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
-import type { ChatForwardTarget, Conversation, Message, MessageReaction } from '../types/chat'
+import type { ChatForwardTarget, Conversation, Message, MessageReaction, PinnedMessageState } from '../types/chat'
 import { useChatMedia } from '../composables/chat/useChatMedia'
 import { useChatWebSocket } from '../composables/chat/useChatWebSocket'
 import { useChatMessages } from '../composables/chat/useChatMessages'
 import { useChatScroll } from '../composables/chat/useChatScroll'
+import { useNotificationStore } from '../stores/notifications'
 import {
   seedFileCache,
   shareMultipleFiles,
@@ -48,6 +49,7 @@ const props = defineProps<{
 
 const router = useRouter()
 const route = useRoute()
+const notificationStore = useNotificationStore()
 
 // Emits
 const emit = defineEmits<{
@@ -64,6 +66,7 @@ const conversations = ref<Conversation[]>([])
 const selectedUserId = ref<number | null>(null)
 const selectedUserName = ref('')
 const messages = ref<Message[]>([])
+const pinnedMessageState = ref<PinnedMessageState | null>(null)
 
 // Selection State
 const selectedMessages = ref<number[]>([])
@@ -559,6 +562,8 @@ const selectedConversation = computed(() => {
   return conversations.value.find(c => c.other_user_id === selectedUserId.value) ?? null
 })
 
+const pinnedMessage = computed(() => pinnedMessageState.value?.message ?? null)
+
 const selectedRoomKind = computed<'direct' | 'channel' | 'group'>(() => {
   const roomKind = selectedConversation.value?.room_kind
   return roomKind === 'channel' || roomKind === 'group' ? roomKind : 'direct'
@@ -578,6 +583,25 @@ const isSelectedRoomReadOnly = computed(() => {
   return selectedRoomKind.value !== 'direct' && !canSendToSelectedRoom.value
 })
 
+const canManagePinnedMessages = computed(() => {
+  if (!selectedUserId.value) return false
+  if (selectedRoomKind.value === 'direct') return true
+  return selectedConversation.value?.member_role === 'admin'
+})
+
+const isContextMessagePinned = computed(() => {
+  return Boolean(pinnedMessage.value && contextMenu.value.message && pinnedMessage.value.id === contextMenu.value.message.id)
+})
+
+const canPinContextMessage = computed(() => {
+  const msg = contextMenu.value.message
+  if (!msg) return false
+  if (contextMenu.value.messageIds.length !== 1) return false
+  if (msg.is_deleted) return false
+  if (!isPersistedMessageId(msg.id)) return false
+  return canManagePinnedMessages.value
+})
+
 const selectedRoomStatusText = computed(() => {
   if (selectedRoomKind.value === 'direct') {
     return targetUserStatus.value
@@ -593,12 +617,111 @@ function isConversationPinned(conv: Conversation) {
   return isMandatoryPinnedConversation(conv) || conv.is_pinned === true
 }
 
+function getNextLocalPinOrder() {
+  return conversations.value.reduce((maxOrder, conversation) => {
+    if (isMandatoryPinnedConversation(conversation) || !isConversationPinned(conversation)) {
+      return maxOrder
+    }
+
+    const currentOrder = Number(conversation.pin_order ?? 0)
+    return Number.isFinite(currentOrder) ? Math.max(maxOrder, currentOrder) : maxOrder
+  }, 0) + 1
+}
+
 function compareConversationActivity(a: Conversation, b: Conversation) {
   if (!a.last_message_at) return 1
   if (!b.last_message_at) return -1
   if (b.last_message_at > a.last_message_at) return 1
   if (b.last_message_at < a.last_message_at) return -1
   return 0
+}
+
+function isSameConversation(left: Conversation, right: Conversation) {
+  if (left.room_kind === 'direct' || right.room_kind === 'direct') {
+    return left.room_kind === right.room_kind && Number(left.other_user_id) === Number(right.other_user_id)
+  }
+  return left.room_kind === right.room_kind && Number(left.chat_id) === Number(right.chat_id)
+}
+
+function patchConversationState(target: Conversation, patch: Partial<Conversation>) {
+  conversations.value = conversations.value.map((conversation) => (
+    isSameConversation(conversation, target)
+      ? { ...conversation, ...patch }
+      : conversation
+  ))
+}
+
+function getPinnedMessagePreview(msg: Message | null | undefined) {
+  if (!msg) return ''
+  if (msg.is_deleted) return 'پیام حذف شد'
+  if (msg.message_type === 'image') return 'تصویر'
+  if (msg.message_type === 'video') return 'ویدئو'
+  if (msg.message_type === 'voice') return 'پیام صوتی'
+  if (msg.message_type === 'sticker') return 'استیکر'
+  if (msg.message_type === 'location') return 'موقعیت'
+  if (msg.message_type === 'document') {
+    try {
+      const parsed = JSON.parse(msg.content)
+      if (typeof parsed?.file_name === 'string' && parsed.file_name.trim()) {
+        return parsed.file_name
+      }
+    } catch {
+      // noop
+    }
+    return 'فایل'
+  }
+  return msg.content || 'پیام سنجاق‌شده'
+}
+
+const pinnedMessageMetaText = computed(() => {
+  const msg = pinnedMessage.value
+  if (!msg) return ''
+  if (selectedRoomKind.value === 'direct') return 'برای رفتن به پیام ضربه بزنید'
+  return msg.sender_name || 'پیام سنجاق‌شده'
+})
+
+let pinnedMessageRequestId = 0
+
+async function loadPinnedMessageState() {
+  const conversation = selectedConversation.value
+  const conversationKey = selectedUserId.value
+  const requestId = ++pinnedMessageRequestId
+
+  if (!conversation || !conversationKey) {
+    pinnedMessageState.value = null
+    return
+  }
+
+  try {
+    const nextState = conversation.room_kind === 'direct'
+      ? await apiFetch(`/chat/direct/${conversationKey}/pinned-message`)
+      : await apiFetch(`/chat/rooms/${conversation.chat_id}/pinned-message`)
+
+    if (requestId !== pinnedMessageRequestId || selectedUserId.value !== conversationKey) {
+      return
+    }
+
+    pinnedMessageState.value = nextState?.message ? nextState : { ...nextState, message: null }
+  } catch {
+    if (requestId === pinnedMessageRequestId && selectedUserId.value === conversationKey) {
+      pinnedMessageState.value = null
+    }
+  }
+}
+
+async function handlePinnedMessageToggle(targetMessage: Message, pinned: boolean) {
+  if (!isPersistedMessageId(targetMessage.id)) return
+
+  try {
+    const nextState = await apiFetch(`/chat/messages/${targetMessage.id}/pin`, {
+      method: 'POST',
+      body: JSON.stringify({ pinned }),
+    })
+    pinnedMessageState.value = nextState?.message ? nextState : { ...nextState, message: null }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'عملیات سنجاق پیام انجام نشد'
+    showInlineToast(message)
+  }
 }
 
 const sortedConversations = computed(() => {
@@ -610,6 +733,10 @@ const sortedConversations = computed(() => {
     if (pinDelta !== 0) return pinDelta
 
     if (isConversationPinned(a) && isConversationPinned(b) && !isMandatoryPinnedConversation(a) && !isMandatoryPinnedConversation(b)) {
+      const aPinOrder = Number(a.pin_order ?? 0)
+      const bPinOrder = Number(b.pin_order ?? 0)
+      if (bPinOrder !== aPinOrder) return bPinOrder - aPinOrder
+
       const aPinnedAt = a.pinned_at || ''
       const bPinnedAt = b.pinned_at || ''
       if (bPinnedAt > aPinnedAt) return 1
@@ -1544,7 +1671,7 @@ async function handleGroupLeft(chatId: number) {
   await loadConversations()
 }
 
-type ConversationListAction = 'pin' | 'unpin' | 'mute' | 'unmute' | 'mark-unread' | 'delete' | 'leave' | 'unfollow'
+type ConversationListAction = 'pin' | 'unpin' | 'move-pin-up' | 'move-pin-down' | 'mute' | 'unmute' | 'mark-unread' | 'delete' | 'leave' | 'unfollow'
 
 function clearSelectedConversationIfMatches(conv: Conversation) {
   if (selectedUserId.value !== conv.other_user_id) return
@@ -1571,6 +1698,19 @@ async function handleConversationAction(payload: { action: ConversationListActio
         method: 'POST',
         body: JSON.stringify({ pinned: action === 'pin' }),
       })
+      patchConversationState(conv, {
+        is_pinned: action === 'pin',
+        pinned_at: action === 'pin' ? new Date().toISOString() : null,
+        pin_order: action === 'pin' ? getNextLocalPinOrder() : null,
+      })
+    } else if (action === 'move-pin-up' || action === 'move-pin-down') {
+      const endpoint = conv.room_kind === 'direct'
+        ? `/chat/direct/${conv.other_user_id}/pin-order`
+        : `/chat/rooms/${conv.chat_id}/pin-order`
+      await apiFetch(endpoint, {
+        method: 'POST',
+        body: JSON.stringify({ direction: action === 'move-pin-up' ? 'up' : 'down' }),
+      })
     } else if (action === 'mute' || action === 'unmute') {
       const endpoint = conv.room_kind === 'direct'
         ? `/chat/direct/${conv.other_user_id}/mute`
@@ -1579,6 +1719,8 @@ async function handleConversationAction(payload: { action: ConversationListActio
         method: 'POST',
         body: JSON.stringify({ muted: action === 'mute' }),
       })
+      patchConversationState(conv, { is_muted: action === 'mute' })
+      notificationStore.setConversationMuted(conv.other_user_id, action === 'mute')
     } else if (action === 'mark-unread') {
       const endpoint = conv.room_kind === 'direct'
         ? `/chat/direct/${conv.other_user_id}/mark-unread`
@@ -1722,8 +1864,32 @@ const handleDeleteMessage = async () => {
   )
 
   if (deleted) {
+    if (pinnedMessage.value && messageIds.includes(pinnedMessage.value.id)) {
+      pinnedMessageState.value = null
+    }
     closeContextMenu()
   }
+}
+
+async function handlePinMessage() {
+  const msg = contextMenu.value.message
+  if (!msg) {
+    closeContextMenu()
+    return
+  }
+  closeContextMenu()
+  await handlePinnedMessageToggle(msg, !isContextMessagePinned.value)
+}
+
+async function handlePinnedBannerUnpin() {
+  const msg = pinnedMessage.value
+  if (!msg) return
+  await handlePinnedMessageToggle(msg, false)
+}
+
+function handlePinnedBannerClick() {
+  if (!pinnedMessage.value) return
+  void scrollToMessage(pinnedMessage.value.id)
 }
 
 const handleCopyMessage = () => {
@@ -2403,6 +2569,8 @@ watch(selectedUserId, (newVal) => {
   groupWrapperCache.clear()
   dateSeparatorLabelCache.clear()
   if (newVal) {
+    pinnedMessageState.value = null
+    void loadPinnedMessageState()
     if (selectedRoomKind.value === 'direct') {
       startStatusPolling(newVal)
     } else {
@@ -2414,6 +2582,7 @@ watch(selectedUserId, (newVal) => {
   } else {
     stopStatusPolling()
     previousMessagesContainerMetrics = null
+    pinnedMessageState.value = null
   }
 })
 
@@ -2568,6 +2737,34 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :isDeleted="isSelectedUserDeleted"
     />
 
+    <div
+      v-if="selectedUserId && pinnedMessage"
+      class="pinned-message-banner"
+      role="button"
+      tabindex="0"
+      @click="handlePinnedBannerClick"
+      @keydown.enter.prevent="handlePinnedBannerClick"
+      @keydown.space.prevent="handlePinnedBannerClick"
+    >
+      <span class="pinned-message-accent" aria-hidden="true"></span>
+      <div class="pinned-message-copy">
+        <span class="pinned-message-label">پیام سنجاق‌شده</span>
+        <span class="pinned-message-meta">{{ pinnedMessageMetaText }}</span>
+        <span class="pinned-message-preview">{{ getPinnedMessagePreview(pinnedMessage) }}</span>
+      </div>
+      <button
+        v-if="canManagePinnedMessages"
+        class="pinned-message-dismiss"
+        type="button"
+        @click.stop="handlePinnedBannerUnpin"
+      >
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+
     <!-- Loading -->
     <div v-if="isLoading" class="loading-state">
       <MessengerLoadingScreen
@@ -2627,7 +2824,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
           />
         </div>
         
-        <div v-else class="messages-container" ref="messagesContainer" @scroll.passive="handleMessagesScroll">
+        <div v-else :class="['messages-container', { 'has-pinned-message': !!pinnedMessage }]" ref="messagesContainer" @scroll.passive="handleMessagesScroll">
           <div v-if="isLoadingOlderMessages" class="history-loading-indicator">
             <span class="history-loading-dot"></span>
             <span>در حال بارگذاری پیام‌های قبلی...</span>
@@ -2827,6 +3024,8 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :currentUserId="props.currentUserId"
       :canEdit="canEdit"
       :canDelete="canDelete"
+      :canPin="canPinContextMessage"
+      :isPinnedMessage="isContextMessagePinned"
       :availableReactions="[...AVAILABLE_MESSAGE_REACTIONS]"
       @react="handleContextMenuReaction"
       @reply="handleReplyMessage"
@@ -2834,6 +3033,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @copy="handleCopyMessage"
       @edit="handleEditMessage"
       @delete="handleDeleteMessage"
+      @pin-message="handlePinMessage"
       @close="closeContextMenu"
       @save-media="handleSaveMedia"
       @save-album="handleSaveAlbum"
@@ -2903,6 +3103,72 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
   /* Telegram classic light background color */
   background-color: #e4eaef;
   z-index: 100;
+}
+
+.pinned-message-banner {
+  position: absolute;
+  top: 60px;
+  left: 12px;
+  right: 12px;
+  z-index: 980;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.1);
+  backdrop-filter: blur(18px);
+  text-align: right;
+}
+
+.pinned-message-accent {
+  width: 4px;
+  align-self: stretch;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #f59e0b, #f97316);
+}
+
+.pinned-message-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.pinned-message-label {
+  color: #b45309;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.pinned-message-meta {
+  color: #0f172a;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.pinned-message-preview {
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pinned-message-dismiss {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  background: rgba(241, 245, 249, 0.92);
 }
 
 /* Header - Telegram Style Glass */
@@ -3195,6 +3461,10 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.messages-container.has-pinned-message {
+  padding-top: 126px;
 }
 
 .history-loading-indicator {

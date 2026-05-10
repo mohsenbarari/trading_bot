@@ -121,6 +121,18 @@ class MessageReactionToggle(BaseModel):
         return emoji
 
 
+class MessagePinUpdateRequest(BaseModel):
+    pinned: bool = True
+
+
+class PinnedMessageStateResponse(BaseModel):
+    chat_id: Optional[int] = None
+    room_kind: str
+    pinned_at: Optional[datetime] = None
+    pinned_by_user_id: Optional[int] = None
+    message: Optional[MessageRead] = None
+
+
 class ConversationRead(BaseModel):
     """خواندن مکالمه"""
 
@@ -144,6 +156,7 @@ class ConversationRead(BaseModel):
     is_muted: bool = False
     is_pinned: bool = False
     pinned_at: Optional[datetime] = None
+    pin_order: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -187,6 +200,25 @@ class ConversationPinResponse(BaseModel):
     chat_id: Optional[int] = None
     is_pinned: bool = False
     pinned_at: Optional[datetime] = None
+    pin_order: Optional[int] = None
+
+
+class ConversationPinReorderUpdateRequest(BaseModel):
+    direction: str = Field(..., min_length=2, max_length=4)
+
+    @field_validator("direction")
+    @classmethod
+    def validate_direction(cls, value: str) -> str:
+        direction = value.strip().lower()
+        if direction not in {"up", "down"}:
+            raise ValueError("Direction must be up or down")
+        return direction
+
+
+class ConversationPinReorderResponse(BaseModel):
+    target_id: int
+    chat_id: Optional[int] = None
+    pin_order: Optional[int] = None
 
 
 class ConversationHideResponse(BaseModel):
