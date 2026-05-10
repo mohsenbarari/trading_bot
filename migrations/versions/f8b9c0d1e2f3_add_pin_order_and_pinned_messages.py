@@ -46,7 +46,7 @@ def upgrade() -> None:
             FROM chat_members cm
             JOIN chats c ON c.id = cm.chat_id
             WHERE cm.is_pinned = true
-              AND cm.membership_status = 'active'
+                            AND cm.membership_status = 'ACTIVE'
               AND COALESCE(c.is_mandatory, false) = false
               AND COALESCE(c.is_deleted, false) = false
         )
