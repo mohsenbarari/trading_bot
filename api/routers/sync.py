@@ -80,6 +80,7 @@ from models.commodity import Commodity, CommodityAlias
 from models.trading_setting import TradingSetting
 from models.user_block import UserBlock
 from datetime import datetime
+from core.services.chat_room_service import ensure_mandatory_channel_rollout
 
 # Counter fields that should use MAX logic (greatest value wins) to avoid losing increments
 USER_COUNTER_FIELDS = {"trades_count", "commodities_traded_count", "channel_messages_count"}
@@ -296,6 +297,7 @@ async def receive_sync_data(
     errors = []
     deferred_items = []
     new_offers = []
+    user_changes_applied = False
     notification_user_ids = _notification_user_ids_from_items(sorted_items)
 
     try:
@@ -327,6 +329,8 @@ async def receive_sync_data(
                 result = await _apply_item(db, table, operation, record_id, data, model, new_offers)
                 if result == 'ok':
                     processed_count += 1
+                    if table == "users":
+                        user_changes_applied = True
                     logger.info(f"✅ Sync Item Applied: {table}:{record_id} ({operation})")
                 elif result == 'deferred':
                     deferred_items.append((table, operation, model, data, record_id))
@@ -344,6 +348,8 @@ async def receive_sync_data(
                     result = await _apply_item(db, table, operation, record_id, data, model, new_offers)
                     if result == 'ok':
                         processed_count += 1
+                        if table == "users":
+                            user_changes_applied = True
                         logger.info(f"✅ Deferred item applied: {table}:{record_id}")
                     else:
                         errors.append(f"{table}:{record_id} (deferred)")
@@ -351,6 +357,9 @@ async def receive_sync_data(
                 except Exception as e:
                     logger.error(f"Deferred retry error {table}:{record_id}: {e}")
                     errors.append(f"{table}:{record_id}")
+
+        if user_changes_applied:
+            await ensure_mandatory_channel_rollout(db)
 
         await db.commit()
 

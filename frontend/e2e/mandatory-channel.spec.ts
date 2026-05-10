@@ -1,7 +1,9 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+
+const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 
 interface MandatoryChannelFixture {
   accountName: string
@@ -10,6 +12,19 @@ interface MandatoryChannelFixture {
   channelId: number
   channelTitle: string
   seedMessage: string
+}
+
+interface AuthTokens {
+  access_token: string
+  refresh_token: string
+}
+
+interface InvitationFixture {
+  accountName: string
+  mobileNumber: string
+  token: string
+  shortLinkPath: string
+  otpCode: string
 }
 
 function runPythonInApp<T>(script: string): T {
@@ -128,6 +143,62 @@ asyncio.run(main())
 `)
 }
 
+async function fetchDevLoginTokens(request: APIRequestContext): Promise<AuthTokens> {
+  const response = await request.post(`${BACKEND_BASE_URL}/api/auth/dev-login`, {
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  expect(response.ok()).toBeTruthy()
+  return response.json() as Promise<AuthTokens>
+}
+
+async function createInvitation(request: APIRequestContext): Promise<InvitationFixture> {
+  const tokens = await fetchDevLoginTokens(request)
+  const suffix = Date.now()
+  const accountName = `pw_activation_${suffix}`
+  const mobileNumber = `09${String(suffix).slice(-9)}`
+  const otpCode = '12345'
+
+  const response = await request.post(`${BACKEND_BASE_URL}/api/invitations/`, {
+    headers: {
+      Authorization: `Bearer ${tokens.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    data: {
+      account_name: accountName,
+      mobile_number: mobileNumber,
+      role: 'عادی',
+    },
+  })
+
+  expect(response.ok()).toBeTruthy()
+  const payload = await response.json() as { token: string; short_link: string | null }
+  const shortLinkPath = payload.short_link
+    ? (() => {
+        const url = new URL(payload.short_link)
+        return `${url.pathname}${url.search}`
+      })()
+    : `/register?token=${payload.token}`
+
+  execFileSync('docker', [
+    'exec',
+    'trading_bot_redis',
+    'redis-cli',
+    'SETEX',
+    `reg_otp:${payload.token}`,
+    '300',
+    otpCode,
+  ], { encoding: 'utf8' })
+
+  return {
+    accountName,
+    mobileNumber,
+    token: payload.token,
+    shortLinkPath,
+    otpCode,
+  }
+}
+
 async function loginWithSeededSession(page: Page, fixture: MandatoryChannelFixture) {
   await page.goto('/login')
   await page.evaluate(({ accessToken, refreshToken }) => {
@@ -158,5 +229,51 @@ test.describe('Mandatory channel smoke', () => {
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
     await expect(page.locator('.chat-header').getByText(fixture.channelTitle)).toBeVisible()
     await expect(page.getByText(fixture.seedMessage)).toBeVisible()
+  })
+
+  test('freshly activated web user immediately sees the mandatory room in messenger', async ({ page, request }) => {
+    const invitation = await createInvitation(request)
+
+    await page.route('**/api/auth/register-otp-request', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'کد تایید ارسال شد', expires_in: 120 }),
+      })
+    })
+
+    await page.goto(invitation.shortLinkPath)
+    await page.getByRole('button', { name: '🌐 ثبت‌نام از طریق وب' }).click()
+
+    await expect(page).toHaveURL(new RegExp(`/register\\?token=${invitation.token}$`))
+    await expect(page.getByText(invitation.accountName)).toBeVisible()
+    await expect(page.getByText(invitation.mobileNumber)).toBeVisible()
+
+    await page.getByRole('button', { name: 'ارسال کد تایید' }).click()
+    await expect(page.getByText('کد تایید ۵ رقمی را وارد کنید:')).toBeVisible()
+
+    await page.locator('.otp-input').fill(invitation.otpCode)
+    await page.getByRole('button', { name: 'تایید کد' }).click()
+    await expect(page.getByText('آدرس دقیق پستی:')).toBeVisible()
+
+    await page.locator('.address-input').fill('تهران، خیابان تست، پلاک ۱۲، واحد ۳')
+    await page.getByRole('button', { name: 'تکمیل ثبت‌نام' }).click()
+
+    await expect.poll(
+      () => page.evaluate(() => Boolean(localStorage.getItem('auth_token'))),
+      { timeout: 30000 },
+    ).toBe(true)
+    await page.waitForURL('**/')
+
+    await page.goto('/chat')
+
+    const mandatoryTitlePattern = /اطلاع.*رسانی/
+    const conversationRow = page.locator('.conversation-item').filter({ hasText: mandatoryTitlePattern })
+    await expect(conversationRow).toBeVisible()
+
+    await conversationRow.click()
+
+    await expect.poll(() => page.url(), { timeout: 30000 }).toContain('/chat?user_id=-')
+    await expect(page.locator('.chat-header').getByText(mandatoryTitlePattern)).toBeVisible()
   })
 })

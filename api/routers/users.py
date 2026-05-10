@@ -7,6 +7,7 @@ import asyncio
 import pytz
 
 from core.db import get_db
+from core.services.chat_room_service import ensure_mandatory_channel_membership, ensure_mandatory_channel_rollout
 from core.services.user_deletion_service import delete_user_account
 from models.user import User
 from api.deps import verify_super_admin_or_dev_key
@@ -231,6 +232,9 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
         raise HTTPException(status_code=404, detail="User not found")
     
     update_data = user_update.model_dump(exclude_unset=True)
+    old_role = user.role
+    old_is_deleted = getattr(user, "is_deleted", False)
+    old_deleted_at = getattr(user, "deleted_at", None)
     
     # --- 1. Role Update ---
     if 'role' in update_data:
@@ -264,6 +268,17 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
     if 'max_sessions' in update_data:
         val = update_data['max_sessions']
         user.max_sessions = max(1, min(val, 3)) if val else 1
+
+    mandatory_room_rollout_needed = old_role != user.role
+    mandatory_room_membership_needed = (
+        getattr(user, "is_deleted", False) != old_is_deleted
+        or getattr(user, "deleted_at", None) != old_deleted_at
+    )
+
+    if mandatory_room_rollout_needed:
+        await ensure_mandatory_channel_rollout(db)
+    elif mandatory_room_membership_needed:
+        await ensure_mandatory_channel_membership(db, user=user)
     
     # --- 5. Commit Changes ---
     await db.commit()
