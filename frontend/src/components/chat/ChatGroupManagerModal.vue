@@ -1,7 +1,19 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { apiFetch, apiFetchJson } from '../../utils/auth'
-import { Check, Loader2, LogOut, Shield, Trash2, UserPlus, UsersRound, X } from 'lucide-vue-next'
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Info,
+  Loader2,
+  LogOut,
+  PencilLine,
+  Shield,
+  UserPlus,
+  UsersRound,
+  X,
+} from 'lucide-vue-next'
 
 type PublicUser = {
   id: number
@@ -22,6 +34,7 @@ type GroupMember = {
 type GroupRoom = {
   id: number
   title: string
+  description?: string | null
   member_count: number
   max_members: number
   current_user_role?: 'admin' | 'member' | null
@@ -31,6 +44,8 @@ type GroupDetail = {
   group: GroupRoom
   members: GroupMember[]
 }
+
+type GroupManagerPage = 'select-members' | 'details' | 'overview' | 'members' | 'admins' | 'add-members' | 'edit'
 
 const props = defineProps<{
   show: boolean
@@ -45,8 +60,12 @@ const emit = defineEmits<{
   (e: 'left', chatId: number): void
 }>()
 
+const page = ref<GroupManagerPage>('select-members')
 const title = ref('')
-const searchQuery = ref('')
+const description = ref('')
+const directoryQuery = ref('')
+const memberQuery = ref('')
+const adminQuery = ref('')
 const candidates = ref<PublicUser[]>([])
 const members = ref<GroupMember[]>([])
 const group = ref<GroupRoom | null>(null)
@@ -61,19 +80,125 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 const isCreateMode = computed(() => !props.groupId)
 const isAdmin = computed(() => isCreateMode.value || group.value?.current_user_role === 'admin')
-const activeAdminCount = computed(() => members.value.filter(member => member.role === 'admin').length)
-const memberIds = computed(() => new Set(members.value.map(member => member.user_id)))
-
-const availableCandidates = computed(() => {
-  return candidates.value.filter(user => user.id !== props.currentUserId && !memberIds.value.has(user.id))
+const memberIds = computed(() => new Set(members.value.map((member) => member.user_id)))
+const activeAdminCount = computed(() => members.value.filter((member) => member.role === 'admin').length)
+const selectedCount = computed(() => selectedUserIds.value.size)
+const canContinueCreate = computed(() => selectedCount.value > 0)
+const canSubmitAddMembers = computed(() => selectedCount.value > 0 && isAdmin.value)
+const canSaveDetails = computed(() => title.value.trim().length > 0)
+const overviewTitle = computed(() => title.value.trim() || group.value?.title || 'گروه جدید')
+const overviewDescription = computed(() => {
+  const nextDescription = description.value.trim() || group.value?.description || ''
+  return nextDescription || 'توضیحی برای این گروه ثبت نشده است.'
 })
 
-const selectedCount = computed(() => selectedUserIds.value.size)
-const canSaveTitle = computed(() => title.value.trim().length > 0 && !isSaving.value)
+const availableCandidates = computed(() => {
+  return candidates.value.filter((user) => user.id !== props.currentUserId && !memberIds.value.has(user.id))
+})
+
+function normalizeSearch(value: string) {
+  return value.trim().toLowerCase()
+}
+
+function compareMemberOrder(left: GroupMember, right: GroupMember) {
+  if (left.is_group_creator !== right.is_group_creator) return left.is_group_creator ? -1 : 1
+  if (left.role !== right.role) return left.role === 'admin' ? -1 : 1
+  return left.account_name.localeCompare(right.account_name, 'fa')
+}
+
+const filteredMembers = computed(() => {
+  const query = normalizeSearch(memberQuery.value)
+  return members.value
+    .slice()
+    .sort(compareMemberOrder)
+    .filter((member) => {
+      if (!query) return true
+      const haystack = [member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
+})
+
+const filteredAdmins = computed(() => {
+  const query = normalizeSearch(adminQuery.value)
+  return members.value
+    .filter((member) => member.role === 'admin')
+    .slice()
+    .sort(compareMemberOrder)
+    .filter((member) => {
+      if (!query) return true
+      const haystack = [member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
+})
+
+const promotableMembers = computed(() => {
+  const query = normalizeSearch(adminQuery.value)
+  return members.value
+    .filter((member) => member.role === 'member')
+    .slice()
+    .sort(compareMemberOrder)
+    .filter((member) => {
+      if (!query) return true
+      const haystack = [member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
+})
+
+const pageTitle = computed(() => {
+  if (isCreateMode.value) {
+    if (page.value === 'details') return 'اطلاعات گروه'
+    return 'افزودن اعضا'
+  }
+
+  switch (page.value) {
+    case 'members':
+      return 'اعضای گروه'
+    case 'admins':
+      return 'مدیریت ادمین‌ها'
+    case 'add-members':
+      return 'افزودن عضو'
+    case 'edit':
+      return 'ویرایش اطلاعات گروه'
+    default:
+      return 'مدیریت گروه'
+  }
+})
+
+const pageSubtitle = computed(() => {
+  if (isCreateMode.value) {
+    return page.value === 'details'
+      ? `${selectedCount.value.toLocaleString('fa-IR')} عضو انتخاب شده`
+      : 'اعضایی را که می‌خواهید در گروه باشند انتخاب کنید.'
+  }
+
+  switch (page.value) {
+    case 'members':
+      return `${filteredMembers.value.length.toLocaleString('fa-IR')} عضو نمایش داده می‌شود`
+    case 'admins':
+      return `${filteredAdmins.value.length.toLocaleString('fa-IR')} ادمین فعال`
+    case 'add-members':
+      return 'کاربران پروژه را انتخاب و به گروه اضافه کنید.'
+    case 'edit':
+      return 'نام و توضیحات گروه را دقیقاً از همین صفحه مدیریت کنید.'
+    default:
+      return group.value
+        ? `${(group.value.member_count || 0).toLocaleString('fa-IR')} عضو`
+        : 'در حال آماده‌سازی...'
+  }
+})
+
+const canGoBack = computed(() => {
+  if (isCreateMode.value) return page.value !== 'select-members'
+  return page.value !== 'overview'
+})
 
 function resetState() {
+  page.value = isCreateMode.value ? 'select-members' : 'overview'
   title.value = ''
-  searchQuery.value = ''
+  description.value = ''
+  directoryQuery.value = ''
+  memberQuery.value = ''
+  adminQuery.value = ''
   candidates.value = []
   members.value = []
   group.value = null
@@ -94,6 +219,58 @@ function setError(error: unknown, fallback: string) {
   errorMessage.value = error instanceof Error ? error.message : fallback
 }
 
+function clearFlashMessages() {
+  errorMessage.value = ''
+  successMessage.value = ''
+}
+
+function canDemote(member: GroupMember) {
+  return isAdmin.value && member.role === 'admin' && !member.is_group_creator && activeAdminCount.value > 1
+}
+
+function canRemove(member: GroupMember) {
+  if (!isAdmin.value) return false
+  if (member.user_id === props.currentUserId) return false
+  if (member.is_group_creator) return false
+  if (member.role === 'admin') return activeAdminCount.value > 1
+  return true
+}
+
+function getMemberGuardReason(member: GroupMember) {
+  if (member.is_group_creator) return 'سازنده گروه باید همیشه عضو و ادمین بماند.'
+  if (member.user_id === props.currentUserId) return 'برای خروج از گروه از گزینه خروج استفاده کنید.'
+  if (member.role === 'admin' && activeAdminCount.value <= 1) return 'گروه باید حداقل یک ادمین فعال داشته باشد.'
+  return ''
+}
+
+function setPage(nextPage: GroupManagerPage) {
+  clearFlashMessages()
+  page.value = nextPage
+  if (nextPage === 'add-members' || nextPage === 'select-members') {
+    void loadUsers(directoryQuery.value)
+  }
+}
+
+function handleBack() {
+  clearFlashMessages()
+  if (!canGoBack.value) {
+    emit('close')
+    return
+  }
+  if (isCreateMode.value) {
+    page.value = 'select-members'
+    return
+  }
+  page.value = 'overview'
+}
+
+function toggleCandidate(userId: number) {
+  const next = new Set(selectedUserIds.value)
+  if (next.has(userId)) next.delete(userId)
+  else next.add(userId)
+  selectedUserIds.value = next
+}
+
 async function loadUsers(query = '') {
   isLoadingUsers.value = true
   try {
@@ -112,12 +289,12 @@ async function loadUsers(query = '') {
 async function loadGroupDetail() {
   if (!props.groupId) return
   isLoadingDetail.value = true
-  errorMessage.value = ''
   try {
     const data = await apiFetchJson(`/api/chat/groups/${props.groupId}`) as GroupDetail
     group.value = data.group
     members.value = Array.isArray(data.members) ? data.members : []
     title.value = data.group.title || ''
+    description.value = data.group.description || ''
   } catch (error) {
     setError(error, 'خطا در دریافت گروه')
   } finally {
@@ -125,23 +302,16 @@ async function loadGroupDetail() {
   }
 }
 
-function toggleCandidate(userId: number) {
-  const next = new Set(selectedUserIds.value)
-  if (next.has(userId)) next.delete(userId)
-  else next.add(userId)
-  selectedUserIds.value = next
-}
-
 async function createGroup() {
-  if (!canSaveTitle.value) return
+  if (!canSaveDetails.value || !canContinueCreate.value) return
   isSaving.value = true
-  errorMessage.value = ''
-  successMessage.value = ''
+  clearFlashMessages()
   try {
     const response = await apiFetch('/api/chat/groups', {
       method: 'POST',
       body: JSON.stringify({
         title: title.value.trim(),
+        description: description.value.trim() || undefined,
         member_ids: Array.from(selectedUserIds.value),
       }),
     })
@@ -157,35 +327,37 @@ async function createGroup() {
   }
 }
 
-async function updateTitle() {
-  if (!props.groupId || !canSaveTitle.value || !isAdmin.value) return
+async function updateGroupSettings() {
+  if (!props.groupId || !canSaveDetails.value || !isAdmin.value) return
   isSaving.value = true
-  errorMessage.value = ''
-  successMessage.value = ''
+  clearFlashMessages()
   try {
     const response = await apiFetch(`/api/chat/groups/${props.groupId}`, {
       method: 'PATCH',
-      body: JSON.stringify({ title: title.value.trim() }),
+      body: JSON.stringify({
+        title: title.value.trim(),
+        description: description.value.trim() || undefined,
+      }),
     })
     const data = await response.json() as GroupRoom | { detail?: string }
     if (!response.ok) {
-      throw new Error((data as { detail?: string }).detail || 'خطا در ویرایش گروه')
+      throw new Error((data as { detail?: string }).detail || 'خطا در ذخیره اطلاعات گروه')
     }
     group.value = data as GroupRoom
-    successMessage.value = 'نام گروه ذخیره شد.'
+    successMessage.value = 'اطلاعات گروه ذخیره شد.'
     emit('updated', group.value)
+    page.value = 'overview'
   } catch (error) {
-    setError(error, 'خطا در ویرایش گروه')
+    setError(error, 'خطا در ذخیره اطلاعات گروه')
   } finally {
     isSaving.value = false
   }
 }
 
 async function addSelectedMembers() {
-  if (!props.groupId || selectedUserIds.value.size === 0 || !isAdmin.value) return
+  if (!props.groupId || !canSubmitAddMembers.value) return
   isSaving.value = true
-  errorMessage.value = ''
-  successMessage.value = ''
+  clearFlashMessages()
   try {
     for (const userId of selectedUserIds.value) {
       const response = await apiFetch(`/api/chat/groups/${props.groupId}/members`, {
@@ -199,8 +371,9 @@ async function addSelectedMembers() {
     }
     selectedUserIds.value = new Set()
     successMessage.value = 'اعضای انتخاب‌شده اضافه شدند.'
-    await Promise.all([loadGroupDetail(), loadUsers(searchQuery.value)])
+    await Promise.all([loadGroupDetail(), loadUsers(directoryQuery.value)])
     if (group.value) emit('updated', group.value)
+    page.value = 'members'
   } catch (error) {
     setError(error, 'خطا در افزودن عضو')
   } finally {
@@ -211,8 +384,7 @@ async function addSelectedMembers() {
 async function mutateMember(member: GroupMember, endpoint: string, method: string, successText: string) {
   if (!props.groupId || !isAdmin.value) return
   mutatingUserId.value = member.user_id
-  errorMessage.value = ''
-  successMessage.value = ''
+  clearFlashMessages()
   try {
     const response = await apiFetch(endpoint, { method })
     const data = await response.json().catch(() => ({})) as { detail?: string }
@@ -220,7 +392,7 @@ async function mutateMember(member: GroupMember, endpoint: string, method: strin
       throw new Error(data.detail || 'خطا در تغییر عضو')
     }
     successMessage.value = successText
-    await Promise.all([loadGroupDetail(), loadUsers(searchQuery.value)])
+    await Promise.all([loadGroupDetail(), loadUsers(directoryQuery.value)])
     if (group.value) emit('updated', group.value)
   } catch (error) {
     setError(error, 'خطا در تغییر عضو')
@@ -229,22 +401,12 @@ async function mutateMember(member: GroupMember, endpoint: string, method: strin
   }
 }
 
-function canDemote(member: GroupMember) {
-  return isAdmin.value && member.role === 'admin' && activeAdminCount.value > 1
-}
-
-function canRemove(member: GroupMember) {
-  if (!isAdmin.value || member.user_id === props.currentUserId) return false
-  if (member.role === 'admin') return activeAdminCount.value > 1
-  return true
-}
-
 async function promote(member: GroupMember) {
   await mutateMember(member, `/api/chat/groups/${props.groupId}/admins/${member.user_id}`, 'POST', `${member.account_name} ادمین شد.`)
 }
 
 async function demote(member: GroupMember) {
-  await mutateMember(member, `/api/chat/groups/${props.groupId}/admins/${member.user_id}`, 'DELETE', `نقش ادمین ${member.account_name} برداشته شد.`)
+  await mutateMember(member, `/api/chat/groups/${props.groupId}/admins/${member.user_id}`, 'DELETE', `نقش ادمینی ${member.account_name} برداشته شد.`)
 }
 
 async function removeMember(member: GroupMember) {
@@ -254,7 +416,7 @@ async function removeMember(member: GroupMember) {
 async function leaveGroup() {
   if (!props.groupId) return
   isSaving.value = true
-  errorMessage.value = ''
+  clearFlashMessages()
   try {
     const response = await apiFetch(`/api/chat/groups/${props.groupId}/leave`, { method: 'POST' })
     const data = await response.json().catch(() => ({})) as { detail?: string }
@@ -269,135 +431,331 @@ async function leaveGroup() {
   }
 }
 
-watch(searchQuery, (query) => {
+watch(directoryQuery, (query) => {
   if (!props.show) return
+  if (page.value !== 'select-members' && page.value !== 'add-members') return
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
     void loadUsers(query)
-  }, 250)
+  }, 220)
 })
 
 watch(() => [props.show, props.groupId] as const, ([show]) => {
   if (!show) return
   resetState()
-  void loadUsers()
-  if (props.groupId) void loadGroupDetail()
+  if (isCreateMode.value) {
+    void loadUsers()
+    return
+  }
+  void loadGroupDetail()
 }, { immediate: true })
 </script>
 
 <template>
   <Teleport to="body">
-    <Transition name="group-manager-slide">
+    <Transition name="group-manager-fade">
       <div v-if="show" class="group-manager-overlay" @click="emit('close')">
         <section class="group-manager-shell" @click.stop>
-          <header class="group-manager-header">
-            <button type="button" class="icon-btn" v-ripple @click="emit('close')">
-              <X :size="22" />
+          <header class="manager-header">
+            <button type="button" class="header-icon-btn" @click="handleBack">
+              <ChevronRight :size="22" />
             </button>
             <div class="header-copy">
-              <h3>{{ isCreateMode ? 'ساخت گروه' : 'مدیریت گروه' }}</h3>
-              <span v-if="!isCreateMode && group">{{ group.member_count.toLocaleString('fa-IR') }} عضو</span>
+              <h3>{{ pageTitle }}</h3>
+              <span>{{ pageSubtitle }}</span>
             </div>
+            <button type="button" class="header-icon-btn" @click="emit('close')">
+              <X :size="20" />
+            </button>
           </header>
 
-          <main class="group-manager-body">
-            <div v-if="errorMessage" class="message-box error">{{ errorMessage }}</div>
-            <div v-if="successMessage" class="message-box success">{{ successMessage }}</div>
+          <main class="manager-body">
+            <div v-if="errorMessage" class="flash-box error">{{ errorMessage }}</div>
+            <div v-if="successMessage" class="flash-box success">{{ successMessage }}</div>
 
-            <div class="title-row">
-              <label for="group-title">نام گروه</label>
-              <div class="title-controls">
-                <input id="group-title" v-model="title" type="text" maxlength="255" :disabled="!isCreateMode && !isAdmin" />
-                <button v-if="isCreateMode" type="button" class="primary-btn" :disabled="!canSaveTitle" @click="createGroup">
-                  <Loader2 v-if="isSaving" :size="18" class="spin" />
-                  <UsersRound v-else :size="18" />
-                  <span>ساخت</span>
-                </button>
-                <button v-else-if="isAdmin" type="button" class="secondary-btn" :disabled="!canSaveTitle" @click="updateTitle">
-                  <Loader2 v-if="isSaving" :size="18" class="spin" />
-                  <Check v-else :size="18" />
-                  <span>ذخیره</span>
-                </button>
-              </div>
-            </div>
-
-            <div v-if="!isCreateMode" class="members-section">
-              <div class="section-title">
-                <span>اعضا</span>
-                <span>{{ members.length.toLocaleString('fa-IR') }}</span>
+            <template v-if="isCreateMode && page === 'select-members'">
+              <div class="search-shell">
+                <input v-model="directoryQuery" type="text" class="search-input" placeholder="جستجو با نام، اکانت یا موبایل..." />
               </div>
 
-              <div v-if="isLoadingDetail" class="loading-row">
+              <div class="selection-banner">
+                <span>{{ selectedCount.toLocaleString('fa-IR') }} عضو انتخاب شده</span>
+                <button type="button" class="primary-chip" :disabled="!canContinueCreate" @click="setPage('details')">
+                  ادامه
+                </button>
+              </div>
+
+              <div v-if="isLoadingUsers" class="state-box">
                 <Loader2 :size="18" class="spin" />
-                <span>در حال دریافت...</span>
+                <span>در حال دریافت کاربران...</span>
+              </div>
+              <div v-else-if="candidates.length === 0" class="state-box muted">کاربری برای نمایش پیدا نشد.</div>
+              <div v-else class="telegram-list">
+                <button
+                  v-for="user in candidates.filter(candidate => candidate.id !== currentUserId)"
+                  :key="user.id"
+                  type="button"
+                  class="telegram-row selectable"
+                  :class="{ selected: selectedUserIds.has(user.id) }"
+                  @click="toggleCandidate(user.id)"
+                >
+                  <div class="row-avatar">{{ getAvatarInitial(user.account_name) }}</div>
+                  <div class="row-copy">
+                    <div class="row-title">{{ user.account_name }}</div>
+                    <div class="row-subtitle">{{ user.full_name }} • {{ user.mobile_number }}</div>
+                  </div>
+                  <div class="row-check" :class="{ active: selectedUserIds.has(user.id) }">
+                    <Check v-if="selectedUserIds.has(user.id)" :size="16" />
+                  </div>
+                </button>
+              </div>
+            </template>
+
+            <template v-else-if="isCreateMode && page === 'details'">
+              <section class="hero-card preview">
+                <div class="hero-avatar">{{ getAvatarInitial(overviewTitle) }}</div>
+                <div class="hero-title">{{ overviewTitle }}</div>
+                <div class="hero-meta">{{ selectedCount.toLocaleString('fa-IR') }} عضو اولیه</div>
+                <p class="hero-description">{{ overviewDescription }}</p>
+              </section>
+
+              <section class="editor-card">
+                <label class="field-label" for="group-title">نام گروه</label>
+                <input id="group-title" v-model="title" class="editor-input" type="text" maxlength="255" placeholder="مثلاً تیم فروش" />
+
+                <label class="field-label" for="group-description">توضیحات گروه</label>
+                <textarea id="group-description" v-model="description" class="editor-textarea" rows="4" maxlength="2000" placeholder="چند خط کوتاه درباره موضوع گروه"></textarea>
+              </section>
+            </template>
+
+            <template v-else-if="!isCreateMode && page === 'overview'">
+              <section v-if="isLoadingDetail" class="state-box">
+                <Loader2 :size="18" class="spin" />
+                <span>در حال دریافت اطلاعات گروه...</span>
+              </section>
+
+              <template v-else>
+                <section class="hero-card">
+                  <div class="hero-avatar">{{ getAvatarInitial(overviewTitle) }}</div>
+                  <div class="hero-title">{{ overviewTitle }}</div>
+                  <div class="hero-meta">{{ (group?.member_count || 0).toLocaleString('fa-IR') }} عضو</div>
+                  <p class="hero-description">{{ overviewDescription }}</p>
+                </section>
+
+                <section class="telegram-list nav-list">
+                  <button type="button" class="telegram-row nav" @click="setPage('members')">
+                    <div class="row-icon soft"><UsersRound :size="18" /></div>
+                    <div class="row-copy">
+                      <div class="row-title">اعضای گروه</div>
+                      <div class="row-subtitle">فهرست کامل اعضا و وضعیت نقش‌ها</div>
+                    </div>
+                    <div class="row-meta">{{ (group?.member_count || 0).toLocaleString('fa-IR') }}</div>
+                    <ChevronLeft :size="18" class="row-chevron" />
+                  </button>
+
+                  <button v-if="isAdmin" type="button" class="telegram-row nav" @click="setPage('admins')">
+                    <div class="row-icon amber"><Shield :size="18" /></div>
+                    <div class="row-copy">
+                      <div class="row-title">مدیریت ادمین‌ها</div>
+                      <div class="row-subtitle">تعیین، تغییر و حذف دسترسی ادمین‌ها</div>
+                    </div>
+                    <div class="row-meta">{{ activeAdminCount.toLocaleString('fa-IR') }}</div>
+                    <ChevronLeft :size="18" class="row-chevron" />
+                  </button>
+
+                  <button v-if="isAdmin" type="button" class="telegram-row nav" @click="setPage('add-members')">
+                    <div class="row-icon blue"><UserPlus :size="18" /></div>
+                    <div class="row-copy">
+                      <div class="row-title">افزودن عضو</div>
+                      <div class="row-subtitle">کاربران پروژه را به گروه دعوت کنید</div>
+                    </div>
+                    <ChevronLeft :size="18" class="row-chevron" />
+                  </button>
+
+                  <button v-if="isAdmin" type="button" class="telegram-row nav" @click="setPage('edit')">
+                    <div class="row-icon muted"><PencilLine :size="18" /></div>
+                    <div class="row-copy">
+                      <div class="row-title">تنظیمات گروه</div>
+                      <div class="row-subtitle">نام و توضیحات گروه را ویرایش کنید</div>
+                    </div>
+                    <ChevronLeft :size="18" class="row-chevron" />
+                  </button>
+
+                  <button type="button" class="telegram-row nav danger" :disabled="isSaving" @click="leaveGroup">
+                    <div class="row-icon danger"><LogOut :size="18" /></div>
+                    <div class="row-copy">
+                      <div class="row-title">خروج از گروه</div>
+                      <div class="row-subtitle">از این گفتگو خارج شوید</div>
+                    </div>
+                  </button>
+                </section>
+              </template>
+            </template>
+
+            <template v-else-if="page === 'members'">
+              <div class="search-shell slim">
+                <input v-model="memberQuery" type="text" class="search-input" placeholder="جستجو در اعضای گروه..." />
               </div>
 
-              <div v-else class="member-list">
-                <div v-for="member in members" :key="member.user_id" class="member-row">
-                  <div class="avatar">{{ getAvatarInitial(member.account_name) }}</div>
-                  <div class="member-copy">
-                    <div class="member-name-row">
-                      <span class="member-name">{{ member.account_name }}</span>
-                      <span class="role-chip" :class="member.role">{{ member.role === 'admin' ? 'ادمین' : 'عضو' }}</span>
-                      <span v-if="member.is_group_creator" class="role-chip creator">سازنده</span>
+              <div class="telegram-list">
+                <div v-for="member in filteredMembers" :key="member.user_id" class="telegram-row member-row">
+                  <div class="row-avatar">{{ getAvatarInitial(member.account_name) }}</div>
+                  <div class="row-copy">
+                    <div class="row-title with-badges">
+                      <span>{{ member.account_name }}</span>
+                      <span class="badge" :class="member.role">{{ member.role === 'admin' ? 'ادمین' : 'عضو' }}</span>
+                      <span v-if="member.is_group_creator" class="badge creator">سازنده</span>
                     </div>
-                    <span class="member-details">{{ member.full_name }} • {{ member.mobile_number }}</span>
+                    <div class="row-subtitle">{{ member.full_name }} • {{ member.mobile_number }}</div>
                   </div>
-                  <div v-if="isAdmin" class="member-actions">
-                    <button v-if="member.role === 'member'" type="button" class="member-action" :disabled="mutatingUserId === member.user_id" @click="promote(member)">
-                      <Shield :size="16" />
+                  <div v-if="isAdmin" class="row-actions">
+                    <button
+                      v-if="member.role === 'member'"
+                      type="button"
+                      class="ghost-action"
+                      :disabled="mutatingUserId === member.user_id"
+                      @click="promote(member)"
+                    >
+                      ادمین
                     </button>
-                    <button v-else type="button" class="member-action" :disabled="mutatingUserId === member.user_id || !canDemote(member)" @click="demote(member)">
-                      <Shield :size="16" />
+                    <button
+                      v-if="canRemove(member)"
+                      type="button"
+                      class="ghost-action danger"
+                      :disabled="mutatingUserId === member.user_id"
+                      @click="removeMember(member)"
+                    >
+                      حذف
                     </button>
-                    <button type="button" class="member-action danger" :disabled="mutatingUserId === member.user_id || !canRemove(member)" @click="removeMember(member)">
-                      <Trash2 :size="16" />
-                    </button>
+                    <span v-else-if="getMemberGuardReason(member)" class="guard-text">{{ getMemberGuardReason(member) }}</span>
                   </div>
                 </div>
               </div>
-            </div>
+            </template>
 
-            <div v-if="isCreateMode || isAdmin" class="candidate-section">
-              <div class="section-title">
-                <span>{{ isCreateMode ? 'اعضای اولیه' : 'افزودن عضو' }}</span>
-                <span>{{ selectedCount.toLocaleString('fa-IR') }} انتخاب</span>
+            <template v-else-if="page === 'admins'">
+              <div class="search-shell slim">
+                <input v-model="adminQuery" type="text" class="search-input" placeholder="جستجو در ادمین‌ها و اعضا..." />
               </div>
-              <input v-model="searchQuery" class="candidate-search" type="text" placeholder="جستجو با نام، اکانت یا موبایل..." />
 
-              <div v-if="isLoadingUsers" class="loading-row">
+              <section class="section-shell">
+                <div class="section-heading">ادمین‌های فعلی</div>
+                <div class="telegram-list compact">
+                  <div v-for="member in filteredAdmins" :key="member.user_id" class="telegram-row member-row">
+                    <div class="row-avatar">{{ getAvatarInitial(member.account_name) }}</div>
+                    <div class="row-copy">
+                      <div class="row-title with-badges">
+                        <span>{{ member.account_name }}</span>
+                        <span class="badge admin">ادمین</span>
+                        <span v-if="member.is_group_creator" class="badge creator">سازنده</span>
+                      </div>
+                      <div class="row-subtitle">{{ member.full_name }} • {{ member.mobile_number }}</div>
+                    </div>
+                    <div class="row-actions">
+                      <button
+                        v-if="canDemote(member)"
+                        type="button"
+                        class="ghost-action"
+                        :disabled="mutatingUserId === member.user_id"
+                        @click="demote(member)"
+                      >
+                        حذف ادمین
+                      </button>
+                      <span v-else class="guard-text">{{ getMemberGuardReason(member) || 'ادمین فعال' }}</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="section-shell">
+                <div class="section-heading">اعضای قابل ارتقا</div>
+                <div v-if="promotableMembers.length === 0" class="state-box muted">عضوی برای ارتقا باقی نمانده است.</div>
+                <div v-else class="telegram-list compact">
+                  <div v-for="member in promotableMembers" :key="member.user_id" class="telegram-row member-row">
+                    <div class="row-avatar">{{ getAvatarInitial(member.account_name) }}</div>
+                    <div class="row-copy">
+                      <div class="row-title">{{ member.account_name }}</div>
+                      <div class="row-subtitle">{{ member.full_name }} • {{ member.mobile_number }}</div>
+                    </div>
+                    <button
+                      type="button"
+                      class="ghost-action primary"
+                      :disabled="mutatingUserId === member.user_id"
+                      @click="promote(member)"
+                    >
+                      ارتقا به ادمین
+                    </button>
+                  </div>
+                </div>
+              </section>
+            </template>
+
+            <template v-else-if="page === 'add-members'">
+              <div class="search-shell">
+                <input v-model="directoryQuery" type="text" class="search-input" placeholder="جستجو با نام، اکانت یا موبایل..." />
+              </div>
+
+              <div class="selection-banner">
+                <span>{{ selectedCount.toLocaleString('fa-IR') }} عضو انتخاب شده</span>
+                <button type="button" class="primary-chip" :disabled="!canSubmitAddMembers || isSaving" @click="addSelectedMembers">
+                  افزودن
+                </button>
+              </div>
+
+              <div v-if="isLoadingUsers" class="state-box">
                 <Loader2 :size="18" class="spin" />
-                <span>در حال جستجو...</span>
+                <span>در حال دریافت کاربران...</span>
               </div>
-              <div v-else-if="availableCandidates.length === 0" class="empty-row">کاربری برای نمایش نیست.</div>
-              <div v-else class="candidate-list">
+              <div v-else-if="availableCandidates.length === 0" class="state-box muted">کاربری برای افزودن باقی نمانده است.</div>
+              <div v-else class="telegram-list">
                 <button
                   v-for="user in availableCandidates"
                   :key="user.id"
                   type="button"
-                  class="candidate-row"
+                  class="telegram-row selectable"
                   :class="{ selected: selectedUserIds.has(user.id) }"
                   @click="toggleCandidate(user.id)"
                 >
-                  <span class="candidate-check"><Check v-if="selectedUserIds.has(user.id)" :size="16" /></span>
-                  <span class="avatar">{{ getAvatarInitial(user.account_name) }}</span>
-                  <span class="candidate-copy">
-                    <span class="candidate-name">{{ user.account_name }}</span>
-                    <span class="candidate-details">{{ user.full_name }} • {{ user.mobile_number }}</span>
-                  </span>
+                  <div class="row-avatar">{{ getAvatarInitial(user.account_name) }}</div>
+                  <div class="row-copy">
+                    <div class="row-title">{{ user.account_name }}</div>
+                    <div class="row-subtitle">{{ user.full_name }} • {{ user.mobile_number }}</div>
+                  </div>
+                  <div class="row-check" :class="{ active: selectedUserIds.has(user.id) }">
+                    <Check v-if="selectedUserIds.has(user.id)" :size="16" />
+                  </div>
                 </button>
               </div>
-            </div>
+            </template>
+
+            <template v-else-if="page === 'edit'">
+              <section class="editor-card">
+                <div class="info-strip">
+                  <Info :size="16" />
+                  <span>این صفحه رفتار تنظیمات گروه را مثل Telegram به‌صورت متمرکز نگه می‌دارد.</span>
+                </div>
+
+                <label class="field-label" for="group-edit-title">نام گروه</label>
+                <input id="group-edit-title" v-model="title" class="editor-input" type="text" maxlength="255" placeholder="نام گروه" />
+
+                <label class="field-label" for="group-edit-description">توضیحات گروه</label>
+                <textarea id="group-edit-description" v-model="description" class="editor-textarea" rows="5" maxlength="2000" placeholder="توضیحات گروه برای اعضا"></textarea>
+
+                <button type="button" class="primary-btn" :disabled="!canSaveDetails || isSaving" @click="updateGroupSettings">
+                  <Loader2 v-if="isSaving" :size="18" class="spin" />
+                  <Check v-else :size="18" />
+                  <span>ذخیره تغییرات</span>
+                </button>
+              </section>
+            </template>
           </main>
 
-          <footer class="group-manager-footer">
-            <button v-if="!isCreateMode" type="button" class="danger-text-btn" :disabled="isSaving" @click="leaveGroup">
-              <LogOut :size="18" />
-              <span>خروج از گروه</span>
-            </button>
-            <button v-if="!isCreateMode && isAdmin" type="button" class="primary-btn" :disabled="selectedCount === 0 || isSaving" @click="addSelectedMembers">
-              <UserPlus :size="18" />
-              <span>افزودن {{ selectedCount.toLocaleString('fa-IR') }} عضو</span>
+          <footer v-if="isCreateMode && page === 'details'" class="manager-footer">
+            <button type="button" class="secondary-btn" @click="page = 'select-members'">بازگشت به انتخاب اعضا</button>
+            <button type="button" class="primary-btn" :disabled="!canSaveDetails || !canContinueCreate || isSaving" @click="createGroup">
+              <Loader2 v-if="isSaving" :size="18" class="spin" />
+              <UsersRound v-else :size="18" />
+              <span>ساخت گروه</span>
             </button>
           </footer>
         </section>
@@ -411,69 +769,57 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
   position: fixed;
   inset: 0;
   z-index: 2200;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(8px);
   display: flex;
+  align-items: stretch;
   justify-content: center;
-  align-items: flex-end;
-  background: rgba(15, 23, 42, 0.34);
 }
 
 .group-manager-shell {
   width: min(100vw, 560px);
-  max-height: min(92vh, 780px);
+  height: 100vh;
+  background: linear-gradient(180deg, #f7fafc 0%, #edf3f8 100%);
   display: flex;
   flex-direction: column;
-  background: #ffffff;
-  border-radius: 18px 18px 0 0;
-  overflow: hidden;
-  box-shadow: 0 -18px 48px rgba(15, 23, 42, 0.22);
   direction: rtl;
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.08), 0 24px 60px rgba(15, 23, 42, 0.28);
 }
 
-.group-manager-header,
-.group-manager-footer {
+.manager-header,
+.manager-footer {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 14px;
-  border-bottom: 1px solid #eef2f7;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
-.group-manager-footer {
-  justify-content: space-between;
-  border-top: 1px solid #eef2f7;
+.manager-footer {
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
   border-bottom: 0;
+  justify-content: space-between;
 }
 
-.icon-btn,
-.member-action {
-  width: 38px;
-  height: 38px;
+.header-icon-btn {
+  width: 40px;
+  height: 40px;
   border: 0;
   border-radius: 50%;
+  background: rgba(226, 232, 240, 0.72);
+  color: #334155;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  color: #64748b;
   cursor: pointer;
-}
-
-.icon-btn:hover,
-.member-action:hover:not(:disabled) {
-  background: #f1f5f9;
-}
-
-.member-action:disabled {
-  opacity: 0.36;
-  cursor: default;
-}
-
-.member-action.danger {
-  color: #dc2626;
+  flex-shrink: 0;
 }
 
 .header-copy {
   min-width: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -482,266 +828,432 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 .header-copy h3 {
   margin: 0;
   font-size: 1rem;
-  font-weight: 800;
-  color: #111827;
+  font-weight: 900;
+  color: #0f172a;
 }
 
-.header-copy span,
-.section-title span:last-child {
-  font-size: 0.78rem;
+.header-copy span {
   color: #64748b;
+  font-size: 0.78rem;
 }
 
-.group-manager-body {
+.manager-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px;
+  padding: 18px 16px 28px;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.message-box {
-  border-radius: 12px;
-  padding: 10px 12px;
-  font-size: 0.84rem;
-  font-weight: 700;
-}
-
-.message-box.error {
-  background: #fef2f2;
-  color: #b91c1c;
-}
-
-.message-box.success {
-  background: #ecfdf5;
-  color: #047857;
-}
-
-.title-row,
-.members-section,
-.candidate-section {
+.flash-box,
+.state-box,
+.selection-banner,
+.info-strip {
+  border-radius: 18px;
+  padding: 12px 14px;
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 10px;
 }
 
-.title-row label,
-.section-title {
-  font-size: 0.86rem;
-  font-weight: 800;
-  color: #334155;
+.flash-box.error {
+  background: rgba(254, 242, 242, 0.95);
+  color: #b91c1c;
+  border: 1px solid rgba(248, 113, 113, 0.18);
 }
 
-.section-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.flash-box.success {
+  background: rgba(236, 253, 245, 0.94);
+  color: #047857;
+  border: 1px solid rgba(52, 211, 153, 0.18);
 }
 
-.title-controls {
-  display: flex;
-  gap: 8px;
-  align-items: stretch;
-  flex-wrap: wrap;
+.state-box {
+  justify-content: center;
+  min-height: 58px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  color: #475569;
 }
 
-.title-controls input,
-.candidate-search {
-  flex: 1;
-  min-width: 0;
-  min-height: 56px;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  padding: 0 18px;
+.state-box.muted {
+  color: #64748b;
+}
+
+.search-shell {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.search-shell.slim {
+  position: static;
+}
+
+.search-input,
+.editor-input,
+.editor-textarea {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+  color: #0f172a;
   font: inherit;
-  font-size: 1rem;
-  line-height: 1.35;
+  font-size: 0.98rem;
   outline: none;
-  box-sizing: border-box;
-  appearance: none;
-  -webkit-appearance: none;
-  background: #f8fafc;
-  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
-  transition: border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
-.title-controls input:focus,
-.candidate-search:focus {
+.search-input,
+.editor-input {
+  min-height: 56px;
+  padding: 0 18px;
+}
+
+.editor-textarea {
+  min-height: 132px;
+  resize: vertical;
+  padding: 14px 16px;
+  line-height: 1.8;
+}
+
+.search-input:focus,
+.editor-input:focus,
+.editor-textarea:focus {
   border-color: #3390ec;
-  background: #ffffff;
   box-shadow: 0 0 0 4px rgba(51, 144, 236, 0.12);
 }
 
+.selection-banner {
+  justify-content: space-between;
+  background: linear-gradient(135deg, rgba(51, 144, 236, 0.16), rgba(14, 165, 233, 0.08));
+  border: 1px solid rgba(51, 144, 236, 0.16);
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.primary-chip,
 .primary-btn,
 .secondary-btn,
-.danger-text-btn {
+.ghost-action {
   border: 0;
   border-radius: 16px;
-  padding: 0 14px;
-  min-height: 56px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  font: inherit;
-  font-weight: 800;
-  cursor: pointer;
-  white-space: nowrap;
+}
+
+.primary-chip {
+  min-height: 38px;
+  padding: 0 16px;
+  background: #3390ec;
+  color: #fff;
+}
+
+.primary-btn,
+.secondary-btn {
+  min-height: 52px;
+  padding: 0 18px;
 }
 
 .primary-btn {
   background: #3390ec;
-  color: white;
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(51, 144, 236, 0.24);
 }
 
 .secondary-btn {
-  background: #e0f2fe;
-  color: #0369a1;
+  background: rgba(226, 232, 240, 0.86);
+  color: #0f172a;
 }
 
-.danger-text-btn {
-  background: transparent;
-  color: #dc2626;
-}
-
+.primary-chip:disabled,
 .primary-btn:disabled,
 .secondary-btn:disabled,
-.danger-text-btn:disabled {
-  opacity: 0.5;
+.ghost-action:disabled,
+.header-icon-btn:disabled {
+  opacity: 0.55;
   cursor: default;
 }
 
-.member-list,
-.candidate-list {
+.hero-card,
+.editor-card,
+.section-shell {
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.hero-card {
+  padding: 26px 20px 22px;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  text-align: center;
   gap: 8px;
 }
 
-.member-row,
-.candidate-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 56px;
-  border-radius: 14px;
-  background: #f8fafc;
-  border: 1px solid #eef2f7;
-  padding: 8px 10px;
+.hero-card.preview {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(236, 245, 255, 0.94));
 }
 
-.candidate-row {
-  width: 100%;
-  text-align: right;
-  cursor: pointer;
-}
-
-.candidate-row.selected {
-  border-color: #3390ec;
-  background: rgba(51, 144, 236, 0.08);
-}
-
-.avatar {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #2563eb, #06b6d4);
-  color: white;
+.hero-avatar,
+.row-avatar {
+  background: linear-gradient(135deg, #3390ec, #0ea5e9 58%, #22c55e 100%);
+  color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-weight: 800;
+  font-weight: 900;
   flex-shrink: 0;
 }
 
-.member-copy,
-.candidate-copy {
+.hero-avatar {
+  width: 86px;
+  height: 86px;
+  border-radius: 50%;
+  font-size: 2rem;
+}
+
+.row-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  font-size: 1rem;
+}
+
+.hero-title {
+  font-size: 1.18rem;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.hero-meta,
+.hero-description {
+  color: #64748b;
+}
+
+.hero-description {
+  margin: 0;
+  max-width: 36ch;
+  line-height: 1.85;
+}
+
+.telegram-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.telegram-list.compact {
+  gap: 8px;
+}
+
+.telegram-row {
+  width: 100%;
+  border: 0;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: right;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.telegram-row.selectable,
+.telegram-row.nav {
+  cursor: pointer;
+}
+
+.telegram-row.selectable.selected {
+  border-color: rgba(51, 144, 236, 0.28);
+  background: rgba(240, 248, 255, 0.96);
+}
+
+.row-copy {
   min-width: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 
-.member-name-row {
+.row-title {
+  font-size: 0.96rem;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.row-title.with-badges {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
-.member-name,
-.candidate-name {
-  font-weight: 800;
-  color: #111827;
-}
-
-.member-details,
-.candidate-details {
+.row-subtitle {
+  font-size: 0.8rem;
   color: #64748b;
-  font-size: 0.78rem;
+  line-height: 1.7;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.role-chip {
-  border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 0.7rem;
-  font-weight: 800;
-}
-
-.role-chip.admin {
-  background: rgba(245, 158, 11, 0.16);
-  color: #b45309;
-}
-
-.role-chip.member {
-  background: rgba(148, 163, 184, 0.14);
-  color: #475569;
-}
-
-.role-chip.creator {
-  background: rgba(16, 185, 129, 0.12);
-  color: #047857;
-}
-
-.member-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.candidate-check {
+.row-check {
   width: 24px;
   height: 24px;
   border-radius: 50%;
   border: 2px solid #cbd5e1;
-  color: #3390ec;
+  color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 
-.candidate-row.selected .candidate-check {
+.row-check.active {
   border-color: #3390ec;
   background: #3390ec;
-  color: white;
 }
 
-.loading-row,
-.empty-row {
-  display: flex;
+.row-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 16px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 52px;
+  flex-shrink: 0;
+}
+
+.row-icon.soft {
+  background: rgba(226, 232, 240, 0.82);
+  color: #334155;
+}
+
+.row-icon.amber {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.row-icon.blue {
+  background: rgba(51, 144, 236, 0.14);
+  color: #0369a1;
+}
+
+.row-icon.muted {
+  background: rgba(148, 163, 184, 0.14);
+  color: #475569;
+}
+
+.row-icon.danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+.row-meta {
   color: #64748b;
-  font-size: 0.86rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.row-chevron {
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.editor-card,
+.section-shell {
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field-label,
+.section-heading {
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: #475569;
+}
+
+.info-strip {
+  background: rgba(241, 245, 249, 0.92);
+  color: #475569;
+  font-size: 0.82rem;
+  line-height: 1.8;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.badge.admin {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.badge.member {
+  background: rgba(148, 163, 184, 0.16);
+  color: #475569;
+}
+
+.badge.creator {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ghost-action {
+  min-height: 36px;
+  padding: 0 12px;
+  background: rgba(241, 245, 249, 0.96);
+  color: #334155;
+}
+
+.ghost-action.primary {
+  background: rgba(51, 144, 236, 0.12);
+  color: #0369a1;
+}
+
+.ghost-action.danger,
+.telegram-row.nav.danger .row-title,
+.telegram-row.nav.danger .row-subtitle {
+  color: #b91c1c;
+}
+
+.guard-text {
+  color: #94a3b8;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.6;
+  max-width: 18ch;
 }
 
 .spin {
@@ -749,50 +1261,52 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-.group-manager-slide-enter-active,
-.group-manager-slide-leave-active {
-  transition: opacity 0.2s ease;
+.group-manager-fade-enter-active,
+.group-manager-fade-leave-active {
+  transition: opacity 0.22s ease;
 }
 
-.group-manager-slide-enter-active .group-manager-shell,
-.group-manager-slide-leave-active .group-manager-shell {
-  transition: transform 0.24s ease;
-}
-
-.group-manager-slide-enter-from,
-.group-manager-slide-leave-to {
+.group-manager-fade-enter-from,
+.group-manager-fade-leave-to {
   opacity: 0;
-}
-
-.group-manager-slide-enter-from .group-manager-shell,
-.group-manager-slide-leave-to .group-manager-shell {
-  transform: translateY(100%);
 }
 
 @media (min-width: 700px) {
   .group-manager-overlay {
+    padding: 24px;
     align-items: center;
   }
 
   .group-manager-shell {
-    border-radius: 18px;
+    height: min(94vh, 920px);
+    border-radius: 34px;
+    overflow: hidden;
   }
 }
 
 @media (max-width: 520px) {
-  .title-controls,
-  .group-manager-footer {
+  .manager-footer {
     flex-direction: column;
     align-items: stretch;
   }
 
   .primary-btn,
-  .secondary-btn,
-  .danger-text-btn {
+  .secondary-btn {
     width: 100%;
+  }
+
+  .row-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .telegram-row.member-row {
+    flex-wrap: wrap;
   }
 }
 </style>

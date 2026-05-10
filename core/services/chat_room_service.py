@@ -525,6 +525,7 @@ async def create_group_chat(
     *,
     creator: User,
     title: str,
+    description: str | None = None,
     member_ids: list[int],
 ) -> Chat:
     """Create one group chat with the creator as admin and initial active members."""
@@ -563,7 +564,7 @@ async def create_group_chat(
     chat = Chat(
         type=ChatType.GROUP,
         title=cleaned_title,
-        description=None,
+        description=_clean_text(description),
         created_by_id=creator.id,
         is_system=False,
         is_mandatory=False,
@@ -605,12 +606,14 @@ async def update_group_chat(
     *,
     chat: Chat,
     title: str,
+    description: str | None = None,
 ) -> Chat:
     cleaned_title = _clean_text(title)
     if not cleaned_title:
         raise HTTPException(status_code=400, detail="Group title is required")
 
     chat.title = cleaned_title
+    chat.description = _clean_text(description)
     chat.updated_at = _utcnow()
     await db.commit()
     await db.refresh(chat)

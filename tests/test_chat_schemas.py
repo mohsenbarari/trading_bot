@@ -74,12 +74,14 @@ class ChatSchemasTests(unittest.TestCase):
         self.assertEqual(chat_schemas.GroupMemberAddRequest(user_id=4).user_id, 4)
 
     def test_group_request_normalization(self):
-        request = chat_schemas.GroupCreateRequest(title='  My Group  ', member_ids=[0, 2, 2, 3, -1])
+        request = chat_schemas.GroupCreateRequest(title='  My Group  ', description='  hello  ', member_ids=[0, 2, 2, 3, -1])
         self.assertEqual(request.title, 'My Group')
+        self.assertEqual(request.description, 'hello')
         self.assertEqual(request.member_ids, [2, 3])
 
-        update_request = chat_schemas.GroupUpdateRequest(title='  Updated  ')
+        update_request = chat_schemas.GroupUpdateRequest(title='  Updated  ', description='   ')
         self.assertEqual(update_request.title, 'Updated')
+        self.assertIsNone(update_request.description)
 
         with self.assertRaises(ValidationError):
             chat_schemas.GroupCreateRequest(title='   ', member_ids=[])
