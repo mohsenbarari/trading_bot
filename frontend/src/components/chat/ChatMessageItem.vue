@@ -38,7 +38,8 @@
         'sending': isSending,
         'error': isError,
         'selected-message': isSelected,
-        'album-bubble': props.isAlbum
+        'album-bubble': props.isAlbum,
+        'full-width-bubble': isFullWidthBubble
       }"
       @touchstart="handleTouchStart($event)"
       @touchmove="handleTouchMove($event)"
@@ -803,6 +804,12 @@ const isMediaMessage = computed(() =>
   props.msg.message_type === 'video' ||
   props.msg.message_type === 'voice',
 )
+
+const isFullWidthBubble = computed(() => (
+  !props.isAlbum
+  && props.msg.message_type !== 'image'
+  && props.msg.message_type !== 'video'
+))
 
 const showMediaShare = computed(() => (
   supportsFileShare &&
@@ -1611,6 +1618,9 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 .message-bubble.sent { align-self: flex-start; background: #eeffde; color: #000000; border-radius: 12px 12px 4px 12px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
 .message-bubble.received { align-self: flex-end; background: #FFFFFF; color: #000000; border-radius: 12px 12px 12px 4px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
+.message-bubble.full-width-bubble { width: 100%; max-width: 100%; }
+.message-bubble.full-width-bubble.sent,
+.message-bubble.full-width-bubble.received { align-self: stretch; }
 .message-bubble p { margin: 0; }
 
 .message-reactions {
