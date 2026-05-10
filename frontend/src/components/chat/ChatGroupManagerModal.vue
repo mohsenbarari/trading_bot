@@ -779,6 +779,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 .group-manager-shell {
   width: min(100vw, 560px);
   height: 100vh;
+  min-height: 0;
   background: linear-gradient(180deg, #f7fafc 0%, #edf3f8 100%);
   display: flex;
   flex-direction: column;
@@ -841,6 +842,9 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 18px 16px 28px;
   display: flex;
   flex-direction: column;

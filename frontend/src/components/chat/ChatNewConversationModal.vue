@@ -139,7 +139,15 @@ const getAvatarInitial = (name: string) => {
   z-index: 1000;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   animation: slideUp 0.3s ease-out;
+}
+
+.new-chat-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 @keyframes slideUp {
@@ -240,6 +248,10 @@ const getAvatarInitial = (name: string) => {
 .users-list {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   background: white;
 }
 

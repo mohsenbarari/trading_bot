@@ -111,8 +111,8 @@
               <span>جستجو</span>
               <Search :size="18" />
             </div>
-            <div v-if="selectedRoomKind === 'group'" class="header-menu-item" @click="handleMenuManageRoom">
-              <span>مدیریت گروه</span>
+            <div class="header-menu-item" @click="handleMenuManageRoom">
+              <span>{{ selectedRoomKind === 'group' ? 'مدیریت گروه' : 'تنظیمات کانال' }}</span>
               <UsersRound :size="18" />
             </div>
           </div>
@@ -254,7 +254,7 @@ const handleTitleClick = () => {
     emit('view-profile')
     return
   }
-  if (props.selectedRoomKind === 'group') {
+  if (props.selectedRoomKind === 'group' || props.selectedRoomKind === 'channel') {
     emit('manage-room')
   }
 }
@@ -325,7 +325,7 @@ function formatDateForSeparator(dateString: string) {
 }
 
 .header-avatar.room-avatar {
-  cursor: default;
+  cursor: pointer;
 }
 
 .header-avatar.channel-avatar {
