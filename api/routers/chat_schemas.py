@@ -141,6 +141,7 @@ class ConversationRead(BaseModel):
     max_members: Optional[int] = None
     is_system: bool = False
     is_mandatory: bool = False
+    is_muted: bool = False
     is_pinned: bool = False
     pinned_at: Optional[datetime] = None
 
@@ -154,6 +155,27 @@ class PollResponse(BaseModel):
     total_unread: int
     unread_chats_count: int
     conversations_with_unread: List[dict]
+    muted_conversation_ids: List[int] = Field(default_factory=list)
+
+
+class ConversationMuteUpdateRequest(BaseModel):
+    muted: bool
+
+
+class ConversationMuteResponse(BaseModel):
+    target_id: int
+    chat_id: Optional[int] = None
+    is_muted: bool = False
+
+
+class ConversationUnreadUpdateRequest(BaseModel):
+    unread: bool = True
+
+
+class ConversationUnreadResponse(BaseModel):
+    target_id: int
+    chat_id: Optional[int] = None
+    unread_count: int = 0
 
 
 class ConversationPinUpdateRequest(BaseModel):

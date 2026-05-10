@@ -18,6 +18,7 @@ export interface Conversation {
     max_members?: number | null
     is_system?: boolean
     is_mandatory?: boolean
+    is_muted?: boolean
     is_pinned?: boolean
     pinned_at?: string | null
 }

@@ -4,7 +4,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType
-from core.services.chat_service import get_or_create_direct_chat, hide_direct_conversation, set_direct_chat_pin_state
+from core.services.chat_service import (
+    get_or_create_direct_chat,
+    hide_direct_conversation,
+    set_direct_chat_mark_unread_state,
+    set_direct_chat_mute_state,
+    set_direct_chat_pin_state,
+)
 from models.chat import Chat
 from models.chat_member import ChatMember
 
@@ -195,6 +201,43 @@ class GetOrCreateDirectChatTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(actor_member.hidden_at)
         self.assertFalse(actor_member.is_pinned)
         self.assertIsNone(actor_member.pinned_at)
+        db.commit.assert_awaited_once()
+
+    async def test_set_direct_chat_mute_and_mark_unread_state_update_actor_membership(self):
+        actor = SimpleNamespace(id=10)
+        other_user = SimpleNamespace(id=20)
+        actor_member = ChatMember(chat_id=77, user_id=10, membership_status=ChatMembershipStatus.ACTIVE)
+        latest_message = SimpleNamespace(id=301)
+        db = FakeDB(get_result=other_user)
+
+        with patch(
+            "core.services.chat_service.get_or_create_direct_chat",
+            new=AsyncMock(return_value=SimpleNamespace(id=77)),
+        ), patch(
+            "core.services.chat_service._load_direct_chat_members",
+            new=AsyncMock(return_value={10: actor_member}),
+        ):
+            muted_member = await set_direct_chat_mute_state(db, actor=actor, other_user_id=20, muted=True)
+
+        self.assertIs(muted_member, actor_member)
+        self.assertTrue(actor_member.is_muted)
+        db.commit.assert_awaited_once()
+
+        db.commit.reset_mock()
+        with patch(
+            "core.services.chat_service.get_or_create_direct_chat",
+            new=AsyncMock(return_value=SimpleNamespace(id=77)),
+        ), patch(
+            "core.services.chat_service._load_direct_chat_members",
+            new=AsyncMock(return_value={10: actor_member}),
+        ), patch(
+            "core.services.chat_service._get_latest_direct_message",
+            new=AsyncMock(return_value=latest_message),
+        ):
+            unread_member = await set_direct_chat_mark_unread_state(db, actor=actor, other_user_id=20, unread=True)
+
+        self.assertIs(unread_member, actor_member)
+        self.assertTrue(actor_member.is_marked_unread)
         db.commit.assert_awaited_once()
 
 

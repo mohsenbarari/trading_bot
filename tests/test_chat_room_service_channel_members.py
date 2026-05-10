@@ -6,7 +6,14 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 from core.enums import ChatMemberRole, ChatMembershipStatus
-from core.services.chat_room_service import bulk_add_channel_members, leave_channel_chat, set_room_pin_state, update_channel_member
+from core.services.chat_room_service import (
+    bulk_add_channel_members,
+    leave_channel_chat,
+    set_room_mark_unread_state,
+    set_room_mute_state,
+    set_room_pin_state,
+    update_channel_member,
+)
 from models.chat_member import ChatMember
 
 
@@ -30,6 +37,9 @@ class FakeExecuteResult:
         return FakeScalarResult(self._values)
 
     def scalar_one(self):
+        return self._scalar_one_value
+
+    def scalar_one_or_none(self):
         return self._scalar_one_value
 
 
@@ -276,6 +286,35 @@ class ChatRoomServiceChannelMembersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(pinned_member, member)
         self.assertTrue(member.is_pinned)
         self.assertEqual(member.pinned_at, now)
+        db.commit.assert_awaited_once()
+
+        member = ChatMember(
+            chat_id=5,
+            user_id=3,
+            role=ChatMemberRole.MEMBER,
+            membership_status=ChatMembershipStatus.ACTIVE,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[member])])
+        muted_member = await set_room_mute_state(db, chat=chat, user_id=3, muted=True)
+        self.assertIs(muted_member, member)
+        self.assertTrue(member.is_muted)
+        db.commit.assert_awaited_once()
+
+        member = ChatMember(
+            chat_id=5,
+            user_id=3,
+            role=ChatMemberRole.MEMBER,
+            membership_status=ChatMembershipStatus.ACTIVE,
+        )
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[member]),
+                FakeExecuteResult(scalar_one_value=22),
+            ]
+        )
+        unread_member = await set_room_mark_unread_state(db, chat=chat, user_id=3, unread=True)
+        self.assertIs(unread_member, member)
+        self.assertTrue(member.is_marked_unread)
         db.commit.assert_awaited_once()
 
 

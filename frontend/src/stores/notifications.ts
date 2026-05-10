@@ -16,11 +16,18 @@ import {
 export const useNotificationStore = defineStore('notifications', () => {
     const chatUnreadCount = ref(0)
     const unreadChatUserIds = ref<number[]>([])
+    const mutedConversationIds = ref<number[]>([])
     const appNotifications = ref<NormalizedAppNotification[]>([])
     const activeToasts = ref<ToastNotification[]>([])
     const isLoadingHistory = ref(false)
     const MAX_IN_MEMORY_NOTIFICATIONS = 100
     const TOAST_LIFETIME_MS = 5000
+
+    const normalizeConversationKey = (value: unknown): number | null => {
+        const conversationKey = Number(value)
+        if (!Number.isFinite(conversationKey) || conversationKey === 0) return null
+        return conversationKey
+    }
 
     const trimNotificationList = (notifications: NormalizedAppNotification[]) =>
         notifications.slice(0, MAX_IN_MEMORY_NOTIFICATIONS)
@@ -109,14 +116,42 @@ export const useNotificationStore = defineStore('notifications', () => {
     const syncUnreadChatIds = (conversations: Array<{ user_id?: unknown }> = [], fallbackCount = 0) => {
         const nextIds = Array.from(new Set(
             conversations
-                .map((conversation) => Number(conversation?.user_id))
-                .filter((userId) => Number.isFinite(userId) && userId > 0)
+                .map((conversation) => normalizeConversationKey(conversation?.user_id))
+                .filter((userId): userId is number => userId !== null)
         ))
 
         unreadChatUserIds.value = nextIds
         chatUnreadCount.value = nextIds.length > 0 || fallbackCount === 0
             ? nextIds.length
             : fallbackCount
+    }
+
+    const syncMutedConversationIds = (conversationIds: unknown[] = []) => {
+        mutedConversationIds.value = Array.from(new Set(
+            conversationIds
+                .map((conversationId) => normalizeConversationKey(conversationId))
+                .filter((conversationId): conversationId is number => conversationId !== null)
+        ))
+    }
+
+    const setConversationMuted = (conversationId: unknown, muted: boolean) => {
+        const normalizedConversationId = normalizeConversationKey(conversationId)
+        if (normalizedConversationId === null) return
+
+        if (muted) {
+            if (!mutedConversationIds.value.includes(normalizedConversationId)) {
+                mutedConversationIds.value = [...mutedConversationIds.value, normalizedConversationId]
+            }
+            return
+        }
+
+        mutedConversationIds.value = mutedConversationIds.value.filter((id) => id !== normalizedConversationId)
+    }
+
+    const isConversationMuted = (conversationId: unknown) => {
+        const normalizedConversationId = normalizeConversationKey(conversationId)
+        if (normalizedConversationId === null) return false
+        return mutedConversationIds.value.includes(normalizedConversationId)
     }
 
 
@@ -130,6 +165,7 @@ export const useNotificationStore = defineStore('notifications', () => {
             if (response.ok) {
                 const data = await response.json()
                 syncUnreadChatIds(data.conversations_with_unread || [], data.unread_chats_count || 0)
+                syncMutedConversationIds(data.muted_conversation_ids || [])
             }
         } catch (error) {
             console.error('Failed to fetch initial notification counts:', error)
@@ -144,20 +180,22 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
 
     const incrementChatUnread = (userId?: number | null) => {
-        if (!Number.isFinite(userId) || !userId || userId <= 0) {
+        const normalizedConversationId = normalizeConversationKey(userId)
+        if (normalizedConversationId === null) {
             void fetchInitialCounts()
             return
         }
 
-        if (!unreadChatUserIds.value.includes(userId)) {
-            unreadChatUserIds.value = [...unreadChatUserIds.value, userId]
+        if (!unreadChatUserIds.value.includes(normalizedConversationId)) {
+            unreadChatUserIds.value = [...unreadChatUserIds.value, normalizedConversationId]
             chatUnreadCount.value = unreadChatUserIds.value.length
         }
     }
 
     const markChatAsRead = (userId?: number | null) => {
-        if (!Number.isFinite(userId) || !userId || userId <= 0) return
-        unreadChatUserIds.value = unreadChatUserIds.value.filter((id) => id !== userId)
+        const normalizedConversationId = normalizeConversationKey(userId)
+        if (normalizedConversationId === null) return
+        unreadChatUserIds.value = unreadChatUserIds.value.filter((id) => id !== normalizedConversationId)
         chatUnreadCount.value = unreadChatUserIds.value.length
     }
 
@@ -275,12 +313,18 @@ export const useNotificationStore = defineStore('notifications', () => {
 
     return {
         chatUnreadCount,
+        unreadChatUserIds,
+        mutedConversationIds,
         appNotifications,
         activeToasts,
         fetchInitialCounts,
         setChatUnreadCount,
         incrementChatUnread,
         markChatAsRead,
+        syncUnreadChatIds,
+        syncMutedConversationIds,
+        setConversationMuted,
+        isConversationMuted,
         addAppNotification,
         addToast,
         removeToast,

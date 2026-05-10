@@ -30,6 +30,7 @@ class ChatMember(Base):
     )
     last_read_at = Column(DateTime(timezone=True), nullable=True)
     is_muted = Column(Boolean, nullable=False, default=False)
+    is_marked_unread = Column(Boolean, nullable=False, default=False)
     is_pinned = Column(Boolean, nullable=False, default=False)
     pinned_at = Column(DateTime(timezone=True), nullable=True)
     is_hidden = Column(Boolean, nullable=False, default=False)

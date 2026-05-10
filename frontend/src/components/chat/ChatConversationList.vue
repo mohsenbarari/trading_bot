@@ -4,7 +4,9 @@ import type { Component } from 'vue'
 import { type Conversation } from '../../types/chat'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import {
+  Bell,
   BellOff,
+  CircleDot,
   LogOut,
   Megaphone,
   MessageCirclePlus,
@@ -16,7 +18,7 @@ import {
   X,
 } from 'lucide-vue-next'
 
-type ConversationListAction = 'pin' | 'unpin' | 'delete' | 'leave' | 'unfollow'
+type ConversationListAction = 'pin' | 'unpin' | 'mute' | 'unmute' | 'mark-unread' | 'delete' | 'leave' | 'unfollow'
 type MenuActionTone = 'accent' | 'danger' | 'warning'
 
 type ConversationMenuAction = {
@@ -71,6 +73,16 @@ function isOptionalChannelConversation(conv: Conversation) {
 
 function isConversationPinned(conv: Conversation) {
   return isMandatoryPinnedConversation(conv) || conv.is_pinned === true
+}
+
+function isConversationMuted(conv: Conversation) {
+  return conv.is_muted === true
+}
+
+function canMarkConversationUnread(conv: Conversation) {
+  if (!conv.last_message_at) return false
+  if ((conv.unread_count || 0) > 0) return false
+  return props.selectedUserId !== conv.other_user_id
 }
 
 function getConversationInitial(conv: Conversation) {
@@ -220,6 +232,36 @@ const activeMenuActions = computed<ConversationMenuAction[]>(() => {
     )
   }
 
+    if (canMarkConversationUnread(conv)) {
+      actions.push({
+        key: 'mark-unread',
+        label: 'علامت‌گذاری به‌عنوان خوانده‌نشده',
+        description: 'این گفتگو دوباره با یک نشان نخوانده در فهرست دیده می‌شود.',
+        tone: 'accent',
+        icon: CircleDot,
+      })
+    }
+
+    if (!isMandatoryPinnedConversation(conv)) {
+      actions.push(
+        isConversationMuted(conv)
+          ? {
+              key: 'unmute',
+              label: 'خروج از حالت بی‌صدا',
+              description: 'اعلان‌های این گفتگو دوباره نمایش داده می‌شود.',
+              tone: 'accent',
+              icon: Bell,
+            }
+          : {
+              key: 'mute',
+              label: 'بی‌صدا کردن گفتگو',
+              description: 'پیام‌های جدید همچنان می‌رسند اما اعلان ارسال نمی‌شود.',
+              tone: 'accent',
+              icon: BellOff,
+            }
+      )
+    }
+
   if (!isRoomConversation(conv)) {
     actions.push({
       key: 'delete',
@@ -259,7 +301,7 @@ const menuHint = computed(() => {
   const conv = menuConversation.value
   if (!conv) return ''
   if (isMandatoryPinnedConversation(conv)) {
-    return 'این کانال اجباری همیشه در ابتدای گفتگوهای سنجاق‌شده می‌ماند و امکان لغو دنبال‌کردن آن وجود ندارد.'
+    return 'این کانال اجباری همیشه در ابتدای گفتگوهای سنجاق‌شده می‌ماند و امکان بی‌صدا یا لغو دنبال‌کردن آن وجود ندارد.'
   }
   if (!isRoomConversation(conv)) {
     return 'حذف در این بخش فقط گفتگو را از فهرست شما پنهان می‌کند و پیام‌ها را برای همیشه پاک نمی‌کند.'
@@ -333,6 +375,7 @@ onBeforeUnmount(() => {
                 conv.member_count,
                 conv.is_mandatory,
                 conv.is_system,
+                conv.is_muted,
                 conv.is_pinned,
                 conv.pinned_at,
                 selectedUserId === conv.other_user_id,
@@ -389,6 +432,7 @@ onBeforeUnmount(() => {
                   <span v-else-if="isGroupConversation(conv)" class="room-badge-list group">گروه</span>
                   <span v-if="isChannelConversation(conv) && conv.is_mandatory" class="room-badge-list mandatory">اجباری</span>
                   <span v-if="isChannelConversation(conv) && conv.is_system" class="room-badge-list system">سیستمی</span>
+                  <span v-if="isConversationMuted(conv)" class="room-badge-list muted">بی‌صدا</span>
                   <span v-if="formatMemberCount(conv)" class="member-count-list">{{ formatMemberCount(conv) }}</span>
                   <span v-if="conv.other_user_is_deleted" class="deleted-badge-list">غیرفعال</span>
                 </div>
@@ -406,6 +450,9 @@ onBeforeUnmount(() => {
               <div class="conversation-side">
                 <div v-if="conv.unread_count > 0" class="unread-badge">
                   {{ conv.unread_count.toLocaleString('fa-IR') }}
+                </div>
+                <div v-else-if="isConversationMuted(conv)" class="side-muted-indicator" aria-label="بی‌صدا">
+                  <BellOff :size="14" />
                 </div>
                 <div v-else-if="isConversationPinned(conv)" class="side-pin-indicator">
                   <Pin :size="14" />
@@ -846,6 +893,11 @@ onBeforeUnmount(() => {
   background: rgba(124, 58, 237, 0.1);
 }
 
+.room-badge-list.muted {
+  color: #475569;
+  background: rgba(148, 163, 184, 0.16);
+}
+
 .member-count-list {
   color: #475569;
   background: rgba(148, 163, 184, 0.14);
@@ -880,7 +932,8 @@ onBeforeUnmount(() => {
 }
 
 .unread-badge,
-.side-pin-indicator {
+.side-pin-indicator,
+.side-muted-indicator {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -906,6 +959,11 @@ onBeforeUnmount(() => {
 .side-pin-indicator {
   background: rgba(217, 119, 6, 0.08);
   color: var(--accent);
+}
+
+.side-muted-indicator {
+  background: rgba(148, 163, 184, 0.14);
+  color: #475569;
 }
 
 .empty-state {

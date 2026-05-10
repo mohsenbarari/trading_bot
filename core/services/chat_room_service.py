@@ -95,6 +95,7 @@ class ChannelConversationSummary:
     max_members: int | None = None
     is_system: bool = False
     is_mandatory: bool = False
+    is_muted: bool = False
     is_pinned: bool = False
     pinned_at: datetime | None = None
 
@@ -759,6 +760,13 @@ async def list_group_conversations(
         .correlate(Chat, current_member)
         .scalar_subquery()
     )
+    manual_unread_count = case(
+        (
+            (current_member.is_marked_unread.is_(True)) & (Chat.last_message_id.is_not(None)),
+            1,
+        ),
+        else_=0,
+    )
     active_member_count = (
         select(func.count(ChatMember.id))
         .where(
@@ -778,11 +786,12 @@ async def list_group_conversations(
         select(
             Chat,
             current_member.role.label("member_role"),
+            current_member.is_muted.label("is_muted"),
             current_member.is_pinned.label("is_pinned"),
             current_member.pinned_at.label("pinned_at"),
             last_message_content,
             last_message_alias.message_type.label("last_message_type"),
-            unread_count.label("unread_count"),
+            func.greatest(func.coalesce(unread_count, 0), manual_unread_count).label("unread_count"),
             active_member_count.label("member_count"),
         )
         .join(
@@ -801,7 +810,7 @@ async def list_group_conversations(
     result = await db.execute(stmt)
 
     rows: list[ChannelConversationSummary] = []
-    for chat, member_role, is_pinned, pinned_at, last_content, last_type, unread, member_count in result.all():
+    for chat, member_role, is_muted, is_pinned, pinned_at, last_content, last_type, unread, member_count in result.all():
         synthetic_room_id = -int(chat.id)
         rows.append(
             ChannelConversationSummary(
@@ -822,6 +831,7 @@ async def list_group_conversations(
                 max_members=int(chat.max_members or GROUP_MAX_MEMBERS),
                 is_system=bool(chat.is_system),
                 is_mandatory=bool(chat.is_mandatory),
+                is_muted=bool(is_muted),
                 is_pinned=bool(is_pinned),
                 pinned_at=pinned_at,
             )
@@ -1166,6 +1176,13 @@ async def list_channel_conversations(
         .correlate(Chat, current_member)
         .scalar_subquery()
     )
+    manual_unread_count = case(
+        (
+            (current_member.is_marked_unread.is_(True)) & (Chat.last_message_id.is_not(None)),
+            1,
+        ),
+        else_=0,
+    )
     active_member_count = (
         select(func.count(ChatMember.id))
         .where(
@@ -1185,11 +1202,12 @@ async def list_channel_conversations(
         select(
             Chat,
             current_member.role.label("member_role"),
+            current_member.is_muted.label("is_muted"),
             current_member.is_pinned.label("is_pinned"),
             current_member.pinned_at.label("pinned_at"),
             last_message_content,
             last_message_alias.message_type.label("last_message_type"),
-            unread_count.label("unread_count"),
+            func.greatest(func.coalesce(unread_count, 0), manual_unread_count).label("unread_count"),
             active_member_count.label("member_count"),
         )
         .join(
@@ -1208,7 +1226,7 @@ async def list_channel_conversations(
     result = await db.execute(stmt)
 
     rows: list[ChannelConversationSummary] = []
-    for chat, member_role, is_pinned, pinned_at, last_content, last_type, unread, member_count in result.all():
+    for chat, member_role, is_muted, is_pinned, pinned_at, last_content, last_type, unread, member_count in result.all():
         synthetic_room_id = -int(chat.id)
         rows.append(
             ChannelConversationSummary(
@@ -1229,6 +1247,7 @@ async def list_channel_conversations(
                 max_members=None,
                 is_system=bool(chat.is_system),
                 is_mandatory=bool(chat.is_mandatory),
+                is_muted=bool(is_muted),
                 is_pinned=bool(is_pinned),
                 pinned_at=pinned_at,
             )
@@ -1818,6 +1837,7 @@ async def send_channel_message(
     chat.updated_at = now
     member.last_read_message_id = message.id
     member.last_read_at = now
+    member.is_marked_unread = False
     member.updated_at = now
 
     await db.commit()
@@ -1864,6 +1884,7 @@ async def send_group_message(
     chat.updated_at = now
     member.last_read_message_id = message.id
     member.last_read_at = now
+    member.is_marked_unread = False
     member.updated_at = now
 
     await db.commit()
@@ -1890,6 +1911,7 @@ async def mark_channel_messages_read(
     now = _utcnow()
     member.last_read_message_id = latest_message_id
     member.last_read_at = now
+    member.is_marked_unread = False
     member.updated_at = now
     await db.commit()
 
@@ -1925,8 +1947,78 @@ async def mark_group_messages_read(
     now = _utcnow()
     member.last_read_message_id = latest_message_id
     member.last_read_at = now
+    member.is_marked_unread = False
     member.updated_at = now
     await db.commit()
+
+
+async def set_room_mute_state(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+    muted: bool,
+) -> ChatMember:
+    stmt = (
+        select(ChatMember)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.user_id == user_id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .order_by(ChatMember.id.desc())
+    )
+    result = await db.execute(stmt)
+    member = result.scalars().first()
+    if member is None:
+        raise HTTPException(status_code=403, detail="Room membership not found")
+
+    now = _utcnow()
+    member.is_muted = muted
+    member.updated_at = now
+    chat.updated_at = now
+    await db.commit()
+    return member
+
+
+async def set_room_mark_unread_state(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+    unread: bool,
+) -> ChatMember:
+    stmt = (
+        select(ChatMember)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.user_id == user_id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .order_by(ChatMember.id.desc())
+    )
+    result = await db.execute(stmt)
+    member = result.scalars().first()
+    if member is None:
+        raise HTTPException(status_code=403, detail="Room membership not found")
+
+    if unread:
+        latest_message_id_result = await db.execute(
+            select(func.max(Message.id)).where(
+                Message.chat_id == chat.id,
+                Message.is_deleted.is_(False),
+            )
+        )
+        latest_message_id = latest_message_id_result.scalar_one_or_none()
+        if latest_message_id is None:
+            raise HTTPException(status_code=400, detail="Conversation has no messages to mark unread")
+
+    now = _utcnow()
+    member.is_marked_unread = unread
+    member.updated_at = now
+    chat.updated_at = now
+    await db.commit()
+    return member
 
 
 async def mark_group_messages_read_with_broadcast(

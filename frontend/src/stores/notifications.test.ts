@@ -112,19 +112,55 @@ describe('notification store', () => {
     expect(store.activeToasts).toHaveLength(0)
   })
 
-  it('tracks unique unread chats and clears them per user', async () => {
+  it('tracks unique unread conversations and clears them for direct chats and rooms', async () => {
     const { useNotificationStore } = await import('./notifications')
     const store = useNotificationStore()
 
     store.incrementChatUnread(5)
     store.incrementChatUnread(5)
-    store.incrementChatUnread(7)
+    store.incrementChatUnread(-77)
     expect(store.chatUnreadCount).toBe(2)
 
     store.markChatAsRead(5)
     expect(store.chatUnreadCount).toBe(1)
 
+    store.markChatAsRead(-77)
+    expect(store.chatUnreadCount).toBe(0)
+
     store.setChatUnreadCount(0)
     expect(store.chatUnreadCount).toBe(0)
+  })
+
+  it('syncs and mutates muted conversation ids from poll/list state', async () => {
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+
+    store.syncMutedConversationIds([5, -77, -77, 0, null])
+    expect(store.mutedConversationIds).toEqual([5, -77])
+    expect(store.isConversationMuted(-77)).toBe(true)
+
+    store.setConversationMuted(9, true)
+    expect(store.isConversationMuted(9)).toBe(true)
+
+    store.setConversationMuted(-77, false)
+    expect(store.isConversationMuted(-77)).toBe(false)
+  })
+
+  it('fetchInitialCounts syncs both unread and muted conversation ids from poll', async () => {
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+
+    localStorage.setItem('auth_token', 'token')
+    apiFetchMock.mockResolvedValueOnce(makeResponse({
+      unread_chats_count: 2,
+      conversations_with_unread: [{ user_id: 5 }, { user_id: -22 }],
+      muted_conversation_ids: [-22, 9],
+    }))
+
+    await store.fetchInitialCounts()
+
+    expect(store.chatUnreadCount).toBe(2)
+    expect(store.unreadChatUserIds).toEqual([5, -22])
+    expect(store.mutedConversationIds).toEqual([-22, 9])
   })
 })

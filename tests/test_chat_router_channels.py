@@ -10,6 +10,8 @@ from api.routers.chat import (
     get_channel_invite_candidates,
     get_channel_members,
     get_channels,
+    mark_room_conversation_unread,
+    mute_room_conversation,
     patch_channel_member,
     pin_room_conversation,
     unfollow_channel,
@@ -288,6 +290,45 @@ class ChatRouterChannelEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(unfollow_result.user_id, 1)
         self.assertEqual(unfollow_result.member_count, 6)
         self.assertTrue(unfollow_result.left)
+
+    async def test_room_mute_and_mark_unread_routes_serialize_state(self):
+        current_user = SimpleNamespace(id=1)
+        db = object()
+        room = SimpleNamespace(id=88, type=ChatType.GROUP)
+        muted_member = SimpleNamespace(is_muted=True)
+        unread_member = SimpleNamespace(is_marked_unread=True)
+
+        with patch("api.routers.chat.get_room_or_404", new=AsyncMock(return_value=room)) as get_room_mock, patch(
+            "api.routers.chat.set_room_mute_state",
+            new=AsyncMock(return_value=muted_member),
+        ) as mute_mock:
+            mute_result = await mute_room_conversation(
+                chat_id=88,
+                data=SimpleNamespace(muted=True),
+                current_user=current_user,
+                db=db,
+            )
+
+        get_room_mock.assert_awaited_once_with(db, 88)
+        mute_mock.assert_awaited_once_with(db, chat=room, user_id=1, muted=True)
+        self.assertEqual(mute_result.target_id, -88)
+        self.assertTrue(mute_result.is_muted)
+
+        with patch("api.routers.chat.get_room_or_404", new=AsyncMock(return_value=room)) as get_room_unread_mock, patch(
+            "api.routers.chat.set_room_mark_unread_state",
+            new=AsyncMock(return_value=unread_member),
+        ) as unread_mock:
+            unread_result = await mark_room_conversation_unread(
+                chat_id=88,
+                data=SimpleNamespace(unread=True),
+                current_user=current_user,
+                db=db,
+            )
+
+        get_room_unread_mock.assert_awaited_once_with(db, 88)
+        unread_mock.assert_awaited_once_with(db, chat=room, user_id=1, unread=True)
+        self.assertEqual(unread_result.target_id, -88)
+        self.assertEqual(unread_result.unread_count, 1)
 
 
 if __name__ == "__main__":
