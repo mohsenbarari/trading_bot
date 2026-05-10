@@ -1,6 +1,18 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { apiFetch, apiFetchJson } from '../utils/auth'
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Info,
+  Loader2,
+  PencilLine,
+  Shield,
+  UserPlus,
+  UsersRound,
+  X,
+} from 'lucide-vue-next'
 
 type ChannelRoom = {
   id: number
@@ -17,11 +29,6 @@ type ChannelRoom = {
 type ChannelCreateResponse = {
   channel: ChannelRoom
   member_picker_required: boolean
-}
-
-type ChannelUpdatePayload = {
-  title: string
-  description: string
 }
 
 type ChannelInviteCandidate = {
@@ -64,135 +71,184 @@ type ChannelMemberMutationResponse = {
   role: 'admin' | 'member' | null
   removed: boolean
   member_count: number
+  left?: boolean
+  unchanged?: boolean
 }
+
+type ChannelManagerPage = 'home' | 'create' | 'overview' | 'members' | 'admins' | 'add-members' | 'edit'
 
 const props = defineProps<{
   apiBaseUrl: string
   jwtToken: string | null
   currentUserId?: number
+  showCloseButton?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'refresh-conversations'): void
   (e: 'open-channel', payload: { chatId: number; title: string }): void
+  (e: 'close'): void
 }>()
 
-const form = reactive({
-  title: '',
-  description: '',
-})
-
-const editForm = reactive<ChannelUpdatePayload>({
-  title: '',
-  description: '',
-})
-
-const searchQuery = ref('')
-const isCreating = ref(false)
-const isLoadingChannels = ref(false)
-const isLoadingCandidates = ref(false)
-const isSubmittingMembers = ref(false)
-const isUpdatingChannel = ref(false)
-const isLoadingMembers = ref(false)
-const mutatingMemberId = ref<number | null>(null)
-const errorMessage = ref('')
-const successMessage = ref('')
-const createdChannel = ref<ChannelRoom | null>(null)
+const page = ref<ChannelManagerPage>('home')
+const title = ref('')
+const description = ref('')
+const candidateQuery = ref('')
+const memberQuery = ref('')
+const adminQuery = ref('')
+const activeChannel = ref<ChannelRoom | null>(null)
 const existingChannels = ref<ChannelRoom[]>([])
 const members = ref<ChannelMember[]>([])
 const candidates = ref<ChannelInviteCandidate[]>([])
-const candidateTotal = ref(0)
 const activeTotal = ref(0)
+const isLoadingChannels = ref(false)
+const isLoadingMembers = ref(false)
+const isLoadingCandidates = ref(false)
+const isSaving = ref(false)
+const isSubmittingMembers = ref(false)
+const mutatingUserId = ref<number | null>(null)
+const errorMessage = ref('')
+const successMessage = ref('')
 const selectAllActiveUsers = ref(false)
 const selectedUserIds = ref<Set<number>>(new Set())
+let searchTimer: ReturnType<typeof setTimeout> | null = null
 
-const isPickerActive = computed(() => Boolean(createdChannel.value))
-const isMembershipManagementLocked = computed(() => Boolean(createdChannel.value?.is_mandatory || createdChannel.value?.is_system))
-const canSubmitMembers = computed(() => {
-  return !!createdChannel.value && (selectAllActiveUsers.value || selectedUserIds.value.size > 0)
-})
-const canUpdateChannel = computed(() => {
-  const current = createdChannel.value
-  if (!current) return false
-  const nextTitle = editForm.title.trim()
-  const nextDescription = editForm.description.trim()
-  const currentDescription = current.description ?? ''
-  return nextTitle.length > 0 && (nextTitle !== current.title || nextDescription !== currentDescription)
-})
-const selectedCount = computed(() => {
-  return selectAllActiveUsers.value ? activeTotal.value : selectedUserIds.value.size
-})
-
-const activeAdminCount = computed(() => {
-  return members.value.filter((member) => member.role === 'admin').length
-})
-
+const isMembershipManagementLocked = computed(() => Boolean(activeChannel.value?.is_mandatory || activeChannel.value?.is_system))
+const selectedCount = computed(() => (selectAllActiveUsers.value ? activeTotal.value : selectedUserIds.value.size))
+const canSaveDetails = computed(() => title.value.trim().length > 0)
 const currentUserMembership = computed(() => {
   if (typeof props.currentUserId !== 'number') return null
   return members.value.find((member) => member.user_id === props.currentUserId) ?? null
 })
-
 const canOpenCurrentChannelInMessenger = computed(() => {
-  return typeof props.currentUserId === 'number' && Boolean(createdChannel.value && currentUserMembership.value)
+  return typeof props.currentUserId === 'number' && Boolean(activeChannel.value && currentUserMembership.value)
+})
+const currentUserCanPostInCurrentChannel = computed(() => currentUserMembership.value?.role === 'admin')
+const activeAdminCount = computed(() => members.value.filter((member) => member.role === 'admin').length)
+
+function normalizeSearch(value: string) {
+  return value.trim().toLowerCase()
+}
+
+function compareMemberOrder(left: ChannelMember, right: ChannelMember) {
+  if (left.is_channel_creator !== right.is_channel_creator) return left.is_channel_creator ? -1 : 1
+  if (left.role !== right.role) return left.role === 'admin' ? -1 : 1
+  return left.account_name.localeCompare(right.account_name, 'fa')
+}
+
+const filteredMembers = computed(() => {
+  const query = normalizeSearch(memberQuery.value)
+  return members.value
+    .slice()
+    .sort(compareMemberOrder)
+    .filter((member) => {
+      if (!query) return true
+      const haystack = [member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
 })
 
-const currentUserCanPostInCurrentChannel = computed(() => {
-  return currentUserMembership.value?.role === 'admin'
+const filteredAdmins = computed(() => {
+  const query = normalizeSearch(adminQuery.value)
+  return members.value
+    .filter((member) => member.role === 'admin')
+    .slice()
+    .sort(compareMemberOrder)
+    .filter((member) => {
+      if (!query) return true
+      const haystack = [member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
 })
 
-function resetFormState() {
-  searchQuery.value = ''
-  members.value = []
-  candidates.value = []
-  candidateTotal.value = 0
-  activeTotal.value = 0
-  selectAllActiveUsers.value = false
-  selectedUserIds.value = new Set()
-}
+const promotableMembers = computed(() => {
+  const query = normalizeSearch(adminQuery.value)
+  return members.value
+    .filter((member) => member.role === 'member')
+    .slice()
+    .sort(compareMemberOrder)
+    .filter((member) => {
+      if (!query) return true
+      const haystack = [member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
+})
 
-function upsertExistingChannel(channel: ChannelRoom) {
-  const next = existingChannels.value.filter((item) => item.id !== channel.id)
-  next.unshift(channel)
-  existingChannels.value = next
-}
+const pageTitle = computed(() => {
+  switch (page.value) {
+    case 'create':
+      return 'ساخت کانال'
+    case 'overview':
+      return 'مدیریت کانال'
+    case 'members':
+      return 'اعضای کانال'
+    case 'admins':
+      return 'مدیریت ادمین‌ها'
+    case 'add-members':
+      return 'افزودن عضو'
+    case 'edit':
+      return 'تنظیمات کانال'
+    default:
+      return 'کانال‌ها'
+  }
+})
 
-function resetAll() {
-  form.title = ''
-  form.description = ''
-  editForm.title = ''
-  editForm.description = ''
-  errorMessage.value = ''
-  successMessage.value = ''
-  createdChannel.value = null
-  resetFormState()
-}
+const pageSubtitle = computed(() => {
+  switch (page.value) {
+    case 'create':
+      return 'کانال را بسازید و بعد اعضا و ادمین‌ها را مثل Telegram مدیریت کنید.'
+    case 'overview':
+      return activeChannel.value
+        ? `${activeChannel.value.member_count.toLocaleString('fa-IR')} عضو فعال`
+        : 'یک کانال را برای مدیریت انتخاب کنید.'
+    case 'members':
+      return `${filteredMembers.value.length.toLocaleString('fa-IR')} عضو نمایش داده می‌شود`
+    case 'admins':
+      return `${filteredAdmins.value.length.toLocaleString('fa-IR')} ادمین فعال`
+    case 'add-members':
+      return 'کاربران پروژه را به کانال invite-only اضافه کنید.'
+    case 'edit':
+      return 'نام و توضیحات کانال را در یک صفحه متمرکز ویرایش کنید.'
+    default:
+      return `${existingChannels.value.length.toLocaleString('fa-IR')} کانال قابل مدیریت`
+  }
+})
 
-function openExistingChannel(channel: ChannelRoom) {
-  errorMessage.value = ''
-  successMessage.value = `✅ مدیریت کانال «${channel.title}» فعال شد.`
-  createdChannel.value = channel
-  resetFormState()
-  void loadMembers()
-  void loadCandidates()
-}
-
-function syncEditForm(channel: ChannelRoom | null) {
-  editForm.title = channel?.title ?? ''
-  editForm.description = channel?.description ?? ''
-}
+const canGoBack = computed(() => page.value !== 'home')
 
 function getAvatarInitial(name: string) {
   return name ? name.charAt(0).toUpperCase() : '?'
+}
+
+function clearFlashMessages() {
+  errorMessage.value = ''
+  successMessage.value = ''
+}
+
+function setError(error: unknown, fallback: string) {
+  errorMessage.value = error instanceof Error ? error.message : fallback
+}
+
+function resetSelection() {
+  selectAllActiveUsers.value = false
+  selectedUserIds.value = new Set()
+  candidateQuery.value = ''
+}
+
+function resetCreateForm() {
+  title.value = ''
+  description.value = ''
+}
+
+function syncEditorWithActiveChannel(channel: ChannelRoom | null) {
+  title.value = channel?.title ?? ''
+  description.value = channel?.description ?? ''
 }
 
 function getChannelKindLabel(channel: ChannelRoom) {
   if (channel.is_mandatory) return 'اجباری'
   if (channel.is_system) return 'سیستمی'
   return 'اختیاری'
-}
-
-function getChannelActionLabel(channel: ChannelRoom) {
-  return channel.is_mandatory || channel.is_system ? 'ویرایش کانال' : 'ادامه دعوت اعضا'
 }
 
 function canDemoteMember(member: ChannelMember) {
@@ -203,20 +259,34 @@ function canDemoteMember(member: ChannelMember) {
 
 function canRemoveMember(member: ChannelMember) {
   if (member.is_channel_creator) return false
-  if (member.role === 'admin') {
-    return activeAdminCount.value > 1
-  }
+  if (member.role === 'admin') return activeAdminCount.value > 1
   return true
 }
 
 function getMemberGuardReason(member: ChannelMember) {
-  if (member.is_channel_creator) {
-    return 'سازنده کانال باید عضو و ادمین باقی بماند.'
-  }
-  if (member.role === 'admin' && activeAdminCount.value <= 1) {
-    return 'کانال باید حداقل یک ادمین فعال داشته باشد.'
-  }
+  if (member.is_channel_creator) return 'سازنده کانال باید عضو و ادمین باقی بماند.'
+  if (member.role === 'admin' && activeAdminCount.value <= 1) return 'کانال باید حداقل یک ادمین فعال داشته باشد.'
   return ''
+}
+
+function upsertExistingChannel(channel: ChannelRoom) {
+  const next = existingChannels.value.filter((item) => item.id !== channel.id)
+  next.unshift(channel)
+  existingChannels.value = next
+}
+
+function handleBack() {
+  clearFlashMessages()
+  if (!canGoBack.value) return
+  const previousPage = page.value
+  if (page.value === 'overview' || page.value === 'create') {
+    activeChannel.value = null
+    page.value = 'home'
+    resetSelection()
+    if (previousPage === 'create') resetCreateForm()
+    return
+  }
+  page.value = 'overview'
 }
 
 function toggleUser(userId: number) {
@@ -234,46 +304,21 @@ function handleToggleSelectAll() {
   }
 }
 
-async function loadCandidates(query = '') {
-  if (!createdChannel.value || isMembershipManagementLocked.value) {
-    candidates.value = []
-    candidateTotal.value = 0
-    activeTotal.value = 0
-    selectAllActiveUsers.value = false
-    selectedUserIds.value = new Set()
-    return
-  }
-  isLoadingCandidates.value = true
-  errorMessage.value = ''
-  try {
-    const params = new URLSearchParams({
-      limit: '100',
-      exclude_chat_id: String(createdChannel.value.id),
-    })
-    const trimmed = query.trim()
-    if (trimmed) params.set('q', trimmed)
-    const data = await apiFetchJson(`/api/chat/channels/invite-candidates?${params.toString()}`) as ChannelInviteCandidateResponse
-    candidates.value = Array.isArray(data.items) ? data.items : []
-    candidateTotal.value = Number(data.total || 0)
-    activeTotal.value = Number(data.active_total || 0)
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'خطا در دریافت کاربران فعال'
-  } finally {
-    isLoadingCandidates.value = false
-  }
+function openCreatePage() {
+  clearFlashMessages()
+  activeChannel.value = null
+  resetSelection()
+  resetCreateForm()
+  page.value = 'create'
 }
 
-async function loadMembers() {
-  if (!createdChannel.value) return
-  isLoadingMembers.value = true
-  try {
-    const data = await apiFetchJson(`/api/chat/channels/${createdChannel.value.id}/members`) as ChannelMember[]
-    members.value = Array.isArray(data) ? data : []
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'خطا در دریافت اعضای کانال'
-  } finally {
-    isLoadingMembers.value = false
-  }
+function openChannel(channel: ChannelRoom) {
+  clearFlashMessages()
+  activeChannel.value = channel
+  syncEditorWithActiveChannel(channel)
+  resetSelection()
+  page.value = 'overview'
+  void loadMembers()
 }
 
 async function loadExistingChannels() {
@@ -282,70 +327,117 @@ async function loadExistingChannels() {
     const data = await apiFetchJson('/api/chat/channels') as ChannelRoom[]
     existingChannels.value = Array.isArray(data) ? data : []
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'خطا در دریافت فهرست کانال‌ها'
+    setError(error, 'خطا در دریافت فهرست کانال‌ها')
   } finally {
     isLoadingChannels.value = false
   }
 }
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-watch(searchQuery, (value) => {
-  if (!createdChannel.value) return
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => {
-    void loadCandidates(value)
-  }, 250)
-})
+async function loadMembers() {
+  if (!activeChannel.value) return
+  isLoadingMembers.value = true
+  try {
+    const data = await apiFetchJson(`/api/chat/channels/${activeChannel.value.id}/members`) as ChannelMember[]
+    members.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    setError(error, 'خطا در دریافت اعضای کانال')
+  } finally {
+    isLoadingMembers.value = false
+  }
+}
 
-watch(createdChannel, (channel) => {
-  syncEditForm(channel)
-}, { immediate: true })
-
-async function createChannel() {
-  if (!props.jwtToken) {
-    errorMessage.value = '❌ شما احراز هویت نشده‌اید.'
+async function loadCandidates(query = '') {
+  if (!activeChannel.value || isMembershipManagementLocked.value) {
+    candidates.value = []
+    activeTotal.value = 0
     return
   }
+  isLoadingCandidates.value = true
+  try {
+    const params = new URLSearchParams({
+      limit: '100',
+      exclude_chat_id: String(activeChannel.value.id),
+    })
+    const trimmed = query.trim()
+    if (trimmed) params.set('q', trimmed)
+    const data = await apiFetchJson(`/api/chat/channels/invite-candidates?${params.toString()}`) as ChannelInviteCandidateResponse
+    candidates.value = Array.isArray(data.items) ? data.items : []
+    activeTotal.value = Number(data.active_total || 0)
+  } catch (error) {
+    setError(error, 'خطا در دریافت کاربران فعال')
+  } finally {
+    isLoadingCandidates.value = false
+  }
+}
 
-  isCreating.value = true
-  errorMessage.value = ''
-  successMessage.value = ''
+async function createChannel() {
+  if (!canSaveDetails.value) return
+  isSaving.value = true
+  clearFlashMessages()
   try {
     const response = await apiFetch('/api/chat/channels', {
       method: 'POST',
       body: JSON.stringify({
-        title: form.title,
-        description: form.description || undefined,
+        title: title.value.trim(),
+        description: description.value.trim() || undefined,
       }),
     })
     const data = await response.json() as ChannelCreateResponse | { detail?: string }
-    if (!response.ok) {
+    if (!response.ok || !(data as ChannelCreateResponse).channel) {
       throw new Error((data as { detail?: string }).detail || 'خطا در ساخت کانال')
     }
-    createdChannel.value = (data as ChannelCreateResponse).channel
-    upsertExistingChannel((data as ChannelCreateResponse).channel)
+    activeChannel.value = (data as ChannelCreateResponse).channel
+    upsertExistingChannel(activeChannel.value)
+    syncEditorWithActiveChannel(activeChannel.value)
     emit('refresh-conversations')
-    successMessage.value = '✅ کانال ساخته شد. حالا اعضای اولیه را انتخاب کنید.'
-    resetFormState()
+    successMessage.value = 'کانال ساخته شد. حالا اعضا و ادمین‌ها را مدیریت کنید.'
+    page.value = isMembershipManagementLocked.value ? 'overview' : 'add-members'
+    resetSelection()
     await Promise.all([loadMembers(), loadCandidates()])
   } catch (error) {
-    errorMessage.value = `❌ ${error instanceof Error ? error.message : 'خطا در ساخت کانال'}`
+    setError(error, 'خطا در ساخت کانال')
   } finally {
-    isCreating.value = false
+    isSaving.value = false
+  }
+}
+
+async function updateChannelDetails() {
+  if (!activeChannel.value || !canSaveDetails.value) return
+  isSaving.value = true
+  clearFlashMessages()
+  try {
+    const response = await apiFetch(`/api/chat/channels/${activeChannel.value.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        title: title.value.trim(),
+        description: description.value.trim() || undefined,
+      }),
+    })
+    const data = await response.json() as ChannelRoom | { detail?: string }
+    if (!response.ok) {
+      throw new Error((data as { detail?: string }).detail || 'خطا در ذخیره تنظیمات کانال')
+    }
+    activeChannel.value = data as ChannelRoom
+    upsertExistingChannel(activeChannel.value)
+    emit('refresh-conversations')
+    successMessage.value = 'تنظیمات کانال ذخیره شد.'
+    page.value = 'overview'
+  } catch (error) {
+    setError(error, 'خطا در ذخیره تنظیمات کانال')
+  } finally {
+    isSaving.value = false
   }
 }
 
 async function submitMembers() {
-  if (!createdChannel.value || isMembershipManagementLocked.value || !canSubmitMembers.value) return
+  if (!activeChannel.value || isMembershipManagementLocked.value || selectedCount.value === 0) return
   isSubmittingMembers.value = true
-  errorMessage.value = ''
-  successMessage.value = ''
+  clearFlashMessages()
   try {
     const payload = selectAllActiveUsers.value
       ? { select_all_active_users: true }
       : { user_ids: Array.from(selectedUserIds.value) }
-
-    const response = await apiFetch(`/api/chat/channels/${createdChannel.value.id}/members/bulk`, {
+    const response = await apiFetch(`/api/chat/channels/${activeChannel.value.id}/members/bulk`, {
       method: 'POST',
       body: JSON.stringify(payload),
     })
@@ -353,61 +445,27 @@ async function submitMembers() {
     if (!response.ok) {
       throw new Error((data as { detail?: string }).detail || 'خطا در افزودن اعضا')
     }
-
     const summary = data as ChannelBulkMemberAddResponse
-    createdChannel.value = {
-      ...createdChannel.value,
-      member_count: summary.member_count,
-    }
-    upsertExistingChannel(createdChannel.value)
+    activeChannel.value = { ...activeChannel.value, member_count: summary.member_count }
+    upsertExistingChannel(activeChannel.value)
     emit('refresh-conversations')
-    successMessage.value = `✅ اعضا با موفقیت افزوده شدند. اعضای فعال کانال: ${summary.member_count}`
-    selectAllActiveUsers.value = false
-    selectedUserIds.value = new Set()
-    await Promise.all([loadMembers(), loadCandidates(searchQuery.value)])
+    successMessage.value = 'اعضای انتخاب‌شده به کانال اضافه شدند.'
+    resetSelection()
+    await Promise.all([loadMembers(), loadCandidates()])
+    page.value = 'members'
   } catch (error) {
-    errorMessage.value = `❌ ${error instanceof Error ? error.message : 'خطا در افزودن اعضا'}`
+    setError(error, 'خطا در افزودن اعضا')
   } finally {
     isSubmittingMembers.value = false
   }
 }
 
-async function updateChannelDetails() {
-  if (!createdChannel.value || !canUpdateChannel.value) return
-  isUpdatingChannel.value = true
-  errorMessage.value = ''
-  successMessage.value = ''
-  try {
-    const response = await apiFetch(`/api/chat/channels/${createdChannel.value.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        title: editForm.title,
-        description: editForm.description || undefined,
-      }),
-    })
-    const data = await response.json() as ChannelRoom | { detail?: string }
-    if (!response.ok) {
-      throw new Error((data as { detail?: string }).detail || 'خطا در ویرایش کانال')
-    }
-
-    createdChannel.value = data as ChannelRoom
-    upsertExistingChannel(createdChannel.value)
-    emit('refresh-conversations')
-    successMessage.value = `✅ مشخصات کانال «${createdChannel.value.title}» ذخیره شد.`
-  } catch (error) {
-    errorMessage.value = `❌ ${error instanceof Error ? error.message : 'خطا در ویرایش کانال'}`
-  } finally {
-    isUpdatingChannel.value = false
-  }
-}
-
 async function mutateMember(member: ChannelMember, payload: { role?: 'admin' | 'member'; remove_member?: boolean }, successText: string) {
-  if (!createdChannel.value || isMembershipManagementLocked.value) return
-  mutatingMemberId.value = member.user_id
-  errorMessage.value = ''
-  successMessage.value = ''
+  if (!activeChannel.value || isMembershipManagementLocked.value) return
+  mutatingUserId.value = member.user_id
+  clearFlashMessages()
   try {
-    const response = await apiFetch(`/api/chat/channels/${createdChannel.value.id}/members/${member.user_id}`, {
+    const response = await apiFetch(`/api/chat/channels/${activeChannel.value.id}/members/${member.user_id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
     })
@@ -415,397 +473,753 @@ async function mutateMember(member: ChannelMember, payload: { role?: 'admin' | '
     if (!response.ok) {
       throw new Error((data as { detail?: string }).detail || 'خطا در تغییر عضو کانال')
     }
-
     const summary = data as ChannelMemberMutationResponse
-    createdChannel.value = {
-      ...createdChannel.value,
-      member_count: summary.member_count,
-    }
-    upsertExistingChannel(createdChannel.value)
+    activeChannel.value = { ...activeChannel.value, member_count: summary.member_count }
+    upsertExistingChannel(activeChannel.value)
     emit('refresh-conversations')
     successMessage.value = successText
-    await Promise.all([loadMembers(), loadCandidates(searchQuery.value)])
+    await Promise.all([loadMembers(), loadCandidates(candidateQuery.value)])
   } catch (error) {
-    errorMessage.value = `❌ ${error instanceof Error ? error.message : 'خطا در تغییر عضو کانال'}`
+    setError(error, 'خطا در تغییر عضو کانال')
   } finally {
-    mutatingMemberId.value = null
+    mutatingUserId.value = null
+  }
+}
+
+async function unfollowCurrentChannel() {
+  if (!activeChannel.value || isMembershipManagementLocked.value) return
+  isSaving.value = true
+  clearFlashMessages()
+  try {
+    const response = await apiFetch(`/api/chat/channels/${activeChannel.value.id}/unfollow`, { method: 'POST' })
+    const data = await response.json().catch(() => ({})) as ChannelMemberMutationResponse | { detail?: string }
+    if (!response.ok) {
+      throw new Error((data as { detail?: string }).detail || 'خطا در ترک کانال')
+    }
+    emit('refresh-conversations')
+    activeChannel.value = null
+    members.value = []
+    page.value = 'home'
+    successMessage.value = 'عضویت شما در کانال لغو شد.'
+    await loadExistingChannels()
+  } catch (error) {
+    setError(error, 'خطا در ترک کانال')
+  } finally {
+    isSaving.value = false
   }
 }
 
 async function promoteMember(member: ChannelMember) {
-  await mutateMember(member, { role: 'admin' }, `✅ ${member.account_name} به ادمین کانال تبدیل شد.`)
+  await mutateMember(member, { role: 'admin' }, `${member.account_name} به ادمین کانال تبدیل شد.`)
 }
 
 async function demoteMember(member: ChannelMember) {
-  await mutateMember(member, { role: 'member' }, `✅ نقش ادمینی ${member.account_name} برداشته شد.`)
+  await mutateMember(member, { role: 'member' }, `نقش ادمینی ${member.account_name} برداشته شد.`)
 }
 
 async function removeMember(member: ChannelMember) {
-  await mutateMember(member, { remove_member: true }, `✅ ${member.account_name} از کانال حذف شد.`)
+  await mutateMember(member, { remove_member: true }, `${member.account_name} از کانال حذف شد.`)
 }
 
 function openCurrentChannelInMessenger() {
-  if (!createdChannel.value) return
+  if (!activeChannel.value) return
   emit('open-channel', {
-    chatId: createdChannel.value.id,
-    title: createdChannel.value.title,
+    chatId: activeChannel.value.id,
+    title: activeChannel.value.title,
   })
 }
+
+watch(candidateQuery, (value) => {
+  if (page.value !== 'add-members' || !activeChannel.value) return
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    void loadCandidates(value)
+  }, 220)
+})
+
+watch(activeChannel, (channel) => {
+  syncEditorWithActiveChannel(channel)
+})
+
+watch(page, (nextPage) => {
+  if (nextPage === 'members' || nextPage === 'admins' || nextPage === 'overview') {
+    void loadMembers()
+  }
+  if (nextPage === 'add-members') {
+    void loadCandidates(candidateQuery.value)
+  }
+})
 
 void loadExistingChannels()
 </script>
 
 <template>
-  <div class="channel-card">
-    <div class="header-block">
-      <h2>{{ isPickerActive ? 'مدیریت کانال' : 'ساخت و مدیریت کانال‌ها' }}</h2>
-      <p>
-        {{ isPickerActive
-          ? (isMembershipManagementLocked
-              ? 'برای این کانال فقط تغییر نام و توضیحات از این بخش مجاز است.'
-              : 'اعضای فعلی کانال را مدیریت کنید و سپس کاربران فعال پروژه را به‌صورت invite-only به آن اضافه کنید.')
-          : 'مدیر ارشد می‌تواند کانال اختیاری بسازد و کانال‌های موجود را از همین بخش مدیریت کند.' }}
-      </p>
-    </div>
-
-    <div v-if="!isPickerActive" class="form-shell">
-      <div class="form-group">
-        <label for="channel-title">نام کانال</label>
-        <input id="channel-title" v-model="form.title" type="text" maxlength="255" placeholder="مثلاً اطلاعیه‌های ویژه" />
+  <section class="channel-manager-root">
+    <header class="manager-header">
+      <button type="button" class="header-icon-btn" :disabled="!canGoBack" @click="handleBack">
+        <ChevronRight :size="22" />
+      </button>
+      <div class="header-copy">
+        <h2>{{ pageTitle }}</h2>
+        <span>{{ pageSubtitle }}</span>
       </div>
+      <button v-if="showCloseButton" type="button" class="header-icon-btn" @click="emit('close')">
+        <X :size="20" />
+      </button>
+      <div v-else class="header-spacer"></div>
+    </header>
 
-      <div class="form-group">
-        <label for="channel-description">توضیحات</label>
-        <textarea id="channel-description" v-model="form.description" rows="4" maxlength="2000" placeholder="توضیح کوتاه برای ادمین‌ها"></textarea>
-      </div>
+    <main class="manager-body">
+      <div v-if="errorMessage" class="flash-box error">{{ errorMessage }}</div>
+      <div v-if="successMessage" class="flash-box success">{{ successMessage }}</div>
 
-      <div class="form-actions">
-        <button type="button" class="primary-btn" :disabled="isCreating" @click="createChannel">
-          {{ isCreating ? 'در حال ساخت...' : 'ساخت کانال و ادامه' }}
-        </button>
-        <button type="button" class="secondary-btn" :disabled="isCreating" @click="resetAll">بازنشانی</button>
-      </div>
-
-      <div v-if="isLoadingChannels" class="picker-state">در حال دریافت کانال‌های قابل مدیریت...</div>
-
-      <div v-else-if="existingChannels.length > 0" class="existing-shell">
-        <div class="existing-title-row">
-          <h3>کانال‌های موجود</h3>
-          <span>{{ existingChannels.length }} کانال</span>
-        </div>
-
-        <button
-          v-for="channel in existingChannels"
-          :key="channel.id"
-          type="button"
-          class="existing-channel-row"
-          @click="openExistingChannel(channel)"
-        >
-          <div class="existing-channel-avatar">{{ getAvatarInitial(channel.title) }}</div>
-          <div class="existing-channel-copy">
-            <span class="existing-channel-name">{{ channel.title }}</span>
-            <span class="existing-channel-meta">
-              {{ getChannelKindLabel(channel) }} • اعضای فعال: {{ channel.member_count }}
-              <template v-if="channel.description"> • {{ channel.description }}</template>
-            </span>
-          </div>
-          <span class="existing-channel-action">{{ getChannelActionLabel(channel) }}</span>
-        </button>
-      </div>
-    </div>
-
-    <div v-else class="picker-shell">
-      <div class="channel-summary">
-        <div>
-          <div class="summary-title">{{ createdChannel?.title }}</div>
-          <div class="summary-meta">
-            {{ createdChannel ? getChannelKindLabel(createdChannel) : '' }}
-            <template v-if="createdChannel"> • اعضای فعال: {{ createdChannel.member_count }}</template>
-          </div>
-        </div>
-        <div class="summary-actions">
-          <button
-            v-if="canOpenCurrentChannelInMessenger"
-            type="button"
-            class="secondary-btn compact"
-            @click="openCurrentChannelInMessenger"
-          >
-            باز کردن در پیام‌رسان
+      <template v-if="page === 'home'">
+        <section class="hero-card create-card">
+          <div class="hero-avatar">{{ getAvatarInitial('کانال') }}</div>
+          <div class="hero-title">ساخت کانال جدید</div>
+          <p class="hero-description">کانال اختیاری را بسازید، اعضا را دعوت کنید و نقش ادمین‌ها را با flowی شبیه Telegram مدیریت کنید.</p>
+          <button type="button" class="primary-btn" @click="openCreatePage">
+            <UsersRound :size="18" />
+            <span>کانال جدید</span>
           </button>
-          <button type="button" class="secondary-btn compact" @click="resetAll">کانال جدید</button>
-        </div>
-      </div>
+        </section>
 
-      <div v-if="createdChannel && typeof currentUserId === 'number' && !currentUserMembership" class="membership-hint warning">
-        شما هنوز عضو فعال این کانال نیستید. تا قبل از اضافه شدن، این کانال در لیست گفتگوهای شما دیده نمی‌شود.
-      </div>
-
-      <div v-else-if="createdChannel && typeof currentUserId === 'number' && currentUserMembership && !currentUserCanPostInCurrentChannel" class="membership-hint info">
-        شما عضو این کانال هستید اما فقط ادمین‌های کانال امکان ارسال پست دارند.
-      </div>
-
-      <div class="channel-edit-shell">
-        <div class="form-group">
-          <label for="edit-channel-title">نام کانال</label>
-          <input id="edit-channel-title" v-model="editForm.title" type="text" maxlength="255" placeholder="نام کانال" />
-        </div>
-
-        <div class="form-group">
-          <label for="edit-channel-description">توضیحات</label>
-          <textarea id="edit-channel-description" v-model="editForm.description" rows="3" maxlength="2000" placeholder="توضیح کوتاه برای ادمین‌ها"></textarea>
-        </div>
-
-        <div class="edit-actions">
-          <button type="button" class="secondary-btn compact" :disabled="!canUpdateChannel || isUpdatingChannel" @click="updateChannelDetails">
-            {{ isUpdatingChannel ? 'در حال ذخیره...' : 'ذخیره مشخصات کانال' }}
-          </button>
-        </div>
-      </div>
-
-      <div class="member-shell">
-        <div class="member-shell-header">
-          <h3>اعضای فعلی کانال</h3>
-          <span>{{ createdChannel?.member_count ?? 0 }} عضو فعال</span>
-        </div>
-
-        <div v-if="isMembershipManagementLocked" class="picker-state info">
-          برای این کانال فقط تغییر نام و توضیحات مجاز است. مدیریت عضویت از این بخش غیرفعال است.
-        </div>
-
-        <div v-if="isLoadingMembers" class="picker-state">در حال دریافت اعضای فعلی کانال...</div>
-
-        <div v-else class="member-list">
-          <div v-for="member in members" :key="member.user_id" class="member-row">
-            <div class="member-avatar">{{ getAvatarInitial(member.account_name) }}</div>
-            <div class="member-copy">
-              <div class="member-name-row">
-                <span class="member-name">{{ member.account_name }}</span>
-                <span class="member-role" :class="member.role">{{ member.role === 'admin' ? 'ادمین' : 'عضو' }}</span>
-                <span v-if="member.is_channel_creator" class="member-creator">سازنده</span>
+        <section class="section-shell">
+          <div class="section-heading">کانال‌های موجود</div>
+          <div v-if="isLoadingChannels" class="state-box">
+            <Loader2 :size="18" class="spin" />
+            <span>در حال دریافت کانال‌ها...</span>
+          </div>
+          <div v-else-if="existingChannels.length === 0" class="state-box muted">هنوز کانالی برای مدیریت ساخته نشده است.</div>
+          <div v-else class="telegram-list">
+            <button
+              v-for="channel in existingChannels"
+              :key="channel.id"
+              type="button"
+              class="telegram-row nav"
+              @click="openChannel(channel)"
+            >
+              <div class="row-avatar">{{ getAvatarInitial(channel.title) }}</div>
+              <div class="row-copy">
+                <div class="row-title">{{ channel.title }}</div>
+                <div class="row-subtitle">
+                  {{ getChannelKindLabel(channel) }} • {{ channel.member_count.toLocaleString('fa-IR') }} عضو
+                  <template v-if="channel.description"> • {{ channel.description }}</template>
+                </div>
               </div>
-              <span class="member-details">{{ member.full_name }} • {{ member.mobile_number }}</span>
+              <ChevronLeft :size="18" class="row-chevron" />
+            </button>
+          </div>
+        </section>
+      </template>
+
+      <template v-else-if="page === 'create'">
+        <section class="hero-card preview">
+          <div class="hero-avatar">{{ getAvatarInitial(title || 'کانال') }}</div>
+          <div class="hero-title">{{ title || 'کانال جدید' }}</div>
+          <div class="hero-meta">{{ description.trim() ? 'آماده برای ساخت' : 'بدون توضیحات' }}</div>
+          <p class="hero-description">{{ description.trim() || 'یک نام و توضیح روشن ثبت کنید تا صفحه تنظیمات و معرفی کانال مثل Telegram کامل باشد.' }}</p>
+        </section>
+
+        <section class="editor-card">
+          <label class="field-label" for="channel-title">نام کانال</label>
+          <input id="channel-title" v-model="title" class="editor-input" type="text" maxlength="255" placeholder="مثلاً اطلاعیه‌های ویژه" />
+
+          <label class="field-label" for="channel-description">توضیحات کانال</label>
+          <textarea id="channel-description" v-model="description" class="editor-textarea" rows="5" maxlength="2000" placeholder="چند خط کوتاه درباره موضوع کانال"></textarea>
+
+          <button type="button" class="primary-btn" :disabled="!canSaveDetails || isSaving" @click="createChannel">
+            <Loader2 v-if="isSaving" :size="18" class="spin" />
+            <Check v-else :size="18" />
+            <span>ساخت کانال</span>
+          </button>
+        </section>
+      </template>
+
+      <template v-else-if="page === 'overview' && activeChannel">
+        <section class="hero-card">
+          <div class="hero-avatar">{{ getAvatarInitial(activeChannel.title) }}</div>
+          <div class="hero-title">{{ activeChannel.title }}</div>
+          <div class="hero-meta">{{ getChannelKindLabel(activeChannel) }} • {{ activeChannel.member_count.toLocaleString('fa-IR') }} عضو</div>
+          <p class="hero-description">{{ activeChannel.description || 'توضیحی برای این کانال ثبت نشده است.' }}</p>
+          <div v-if="canOpenCurrentChannelInMessenger" class="hero-actions">
+            <button type="button" class="secondary-btn compact" @click="openCurrentChannelInMessenger">باز کردن در پیام‌رسان</button>
+          </div>
+        </section>
+
+        <div v-if="typeof currentUserId === 'number' && !currentUserMembership" class="flash-box warning">شما عضو فعال این کانال نیستید. تا قبل از اضافه شدن، این کانال در فهرست گفتگوهای شما دیده نمی‌شود.</div>
+        <div v-else-if="typeof currentUserId === 'number' && currentUserMembership && !currentUserCanPostInCurrentChannel" class="flash-box info">شما عضو این کانال هستید اما فقط ادمین‌های کانال امکان ارسال پست دارند.</div>
+        <div v-else-if="typeof currentUserId === 'number' && currentUserMembership && currentUserCanPostInCurrentChannel" class="flash-box info">شما ادمین این کانال هستید و می‌توانید مستقیماً از پیام‌رسان در آن پست بگذارید.</div>
+
+        <section class="telegram-list nav-list">
+          <button type="button" class="telegram-row nav" @click="page = 'members'">
+            <div class="row-icon soft"><UsersRound :size="18" /></div>
+            <div class="row-copy">
+              <div class="row-title">اعضای کانال</div>
+              <div class="row-subtitle">فهرست کامل اعضا و نقش‌ها</div>
             </div>
-            <div v-if="!isMembershipManagementLocked" class="member-actions">
+            <div class="row-meta">{{ activeChannel.member_count.toLocaleString('fa-IR') }}</div>
+            <ChevronLeft :size="18" class="row-chevron" />
+          </button>
+
+          <button v-if="!isMembershipManagementLocked" type="button" class="telegram-row nav" @click="page = 'admins'">
+            <div class="row-icon amber"><Shield :size="18" /></div>
+            <div class="row-copy">
+              <div class="row-title">مدیریت ادمین‌ها</div>
+              <div class="row-subtitle">تعیین و تغییر ادمین‌های کانال</div>
+            </div>
+            <div class="row-meta">{{ activeAdminCount.toLocaleString('fa-IR') }}</div>
+            <ChevronLeft :size="18" class="row-chevron" />
+          </button>
+
+          <button v-if="!isMembershipManagementLocked" type="button" class="telegram-row nav" @click="page = 'add-members'">
+            <div class="row-icon blue"><UserPlus :size="18" /></div>
+            <div class="row-copy">
+              <div class="row-title">افزودن عضو</div>
+              <div class="row-subtitle">دعوت اعضای جدید به کانال</div>
+            </div>
+            <ChevronLeft :size="18" class="row-chevron" />
+          </button>
+
+          <button type="button" class="telegram-row nav" @click="page = 'edit'">
+            <div class="row-icon muted"><PencilLine :size="18" /></div>
+            <div class="row-copy">
+              <div class="row-title">تنظیمات کانال</div>
+              <div class="row-subtitle">نام و توضیحات کانال را ویرایش کنید</div>
+            </div>
+            <ChevronLeft :size="18" class="row-chevron" />
+          </button>
+
+          <button v-if="currentUserMembership && !isMembershipManagementLocked" type="button" class="telegram-row nav danger" :disabled="isSaving" @click="unfollowCurrentChannel">
+            <div class="row-icon danger"><Info :size="18" /></div>
+            <div class="row-copy">
+              <div class="row-title">لغو عضویت در کانال</div>
+              <div class="row-subtitle">خروج از کانال اختیاری</div>
+            </div>
+          </button>
+        </section>
+      </template>
+
+      <template v-else-if="page === 'members'">
+        <div class="search-shell slim">
+          <input v-model="memberQuery" type="text" class="search-input" placeholder="جستجو در اعضای کانال..." />
+        </div>
+
+        <div v-if="isLoadingMembers" class="state-box">
+          <Loader2 :size="18" class="spin" />
+          <span>در حال دریافت اعضای کانال...</span>
+        </div>
+        <div v-else class="telegram-list">
+          <div v-for="member in filteredMembers" :key="member.user_id" class="telegram-row member-row">
+            <div class="row-avatar">{{ getAvatarInitial(member.account_name) }}</div>
+            <div class="row-copy">
+              <div class="row-title with-badges">
+                <span>{{ member.account_name }}</span>
+                <span class="badge" :class="member.role">{{ member.role === 'admin' ? 'ادمین' : 'عضو' }}</span>
+                <span v-if="member.is_channel_creator" class="badge creator">سازنده</span>
+              </div>
+              <div class="row-subtitle">{{ member.full_name }} • {{ member.mobile_number }}</div>
+            </div>
+            <div v-if="!isMembershipManagementLocked" class="row-actions">
               <button
                 v-if="member.role === 'member'"
                 type="button"
-                class="member-action-btn"
-                :disabled="mutatingMemberId === member.user_id"
+                class="ghost-action"
+                :disabled="mutatingUserId === member.user_id"
                 @click="promoteMember(member)"
               >
-                ادمین کردن
+                ادمین
               </button>
               <button
-                v-else
+                v-if="canRemoveMember(member)"
                 type="button"
-                class="member-action-btn"
-                :disabled="mutatingMemberId === member.user_id || !canDemoteMember(member)"
-                :title="getMemberGuardReason(member)"
-                @click="demoteMember(member)"
-              >
-                برداشتن ادمین
-              </button>
-              <button
-                type="button"
-                class="member-action-btn danger"
-                :disabled="mutatingMemberId === member.user_id || !canRemoveMember(member)"
-                :title="getMemberGuardReason(member)"
+                class="ghost-action danger"
+                :disabled="mutatingUserId === member.user_id"
                 @click="removeMember(member)"
               >
                 حذف
               </button>
+              <span v-else-if="getMemberGuardReason(member)" class="guard-text">{{ getMemberGuardReason(member) }}</span>
             </div>
           </div>
         </div>
-      </div>
+      </template>
 
-      <div v-if="!isMembershipManagementLocked" class="picker-toolbar">
+      <template v-else-if="page === 'admins' && !isMembershipManagementLocked">
+        <div class="search-shell slim">
+          <input v-model="adminQuery" type="text" class="search-input" placeholder="جستجو در ادمین‌ها و اعضا..." />
+        </div>
+
+        <section class="section-shell">
+          <div class="section-heading">ادمین‌های فعلی</div>
+          <div class="telegram-list compact">
+            <div v-for="member in filteredAdmins" :key="member.user_id" class="telegram-row member-row">
+              <div class="row-avatar">{{ getAvatarInitial(member.account_name) }}</div>
+              <div class="row-copy">
+                <div class="row-title with-badges">
+                  <span>{{ member.account_name }}</span>
+                  <span class="badge admin">ادمین</span>
+                  <span v-if="member.is_channel_creator" class="badge creator">سازنده</span>
+                </div>
+                <div class="row-subtitle">{{ member.full_name }} • {{ member.mobile_number }}</div>
+              </div>
+              <div class="row-actions">
+                <button
+                  v-if="canDemoteMember(member)"
+                  type="button"
+                  class="ghost-action"
+                  :disabled="mutatingUserId === member.user_id"
+                  @click="demoteMember(member)"
+                >
+                  حذف ادمین
+                </button>
+                <span v-else class="guard-text">{{ getMemberGuardReason(member) || 'ادمین فعال' }}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section-shell">
+          <div class="section-heading">اعضای قابل ارتقا</div>
+          <div v-if="promotableMembers.length === 0" class="state-box muted">عضوی برای ارتقا باقی نمانده است.</div>
+          <div v-else class="telegram-list compact">
+            <div v-for="member in promotableMembers" :key="member.user_id" class="telegram-row member-row">
+              <div class="row-avatar">{{ getAvatarInitial(member.account_name) }}</div>
+              <div class="row-copy">
+                <div class="row-title">{{ member.account_name }}</div>
+                <div class="row-subtitle">{{ member.full_name }} • {{ member.mobile_number }}</div>
+              </div>
+              <button
+                type="button"
+                class="ghost-action primary"
+                :disabled="mutatingUserId === member.user_id"
+                @click="promoteMember(member)"
+              >
+                ارتقا به ادمین
+              </button>
+            </div>
+          </div>
+        </section>
+      </template>
+
+      <template v-else-if="page === 'add-members' && !isMembershipManagementLocked && activeChannel">
+        <div class="search-shell">
+          <input v-model="candidateQuery" type="text" class="search-input" placeholder="جستجو با نام، اکانت یا موبایل..." :disabled="selectAllActiveUsers" />
+        </div>
+
         <label class="select-all-toggle" :class="{ active: selectAllActiveUsers }">
           <input type="checkbox" :checked="selectAllActiveUsers" @change="handleToggleSelectAll" />
-          <span>انتخاب همه کاربران فعال ({{ activeTotal }})</span>
+          <span>انتخاب همه کاربران فعال ({{ activeTotal.toLocaleString('fa-IR') }})</span>
         </label>
 
-        <input
-          v-model="searchQuery"
-          type="text"
-          class="picker-search"
-          placeholder="جستجو با نام، اکانت یا موبایل..."
-          :disabled="selectAllActiveUsers"
-        />
-      </div>
+        <div class="selection-banner">
+          <span>{{ selectedCount.toLocaleString('fa-IR') }} عضو انتخاب شده</span>
+          <button type="button" class="primary-chip" :disabled="selectedCount === 0 || isSubmittingMembers" @click="submitMembers">
+            افزودن
+          </button>
+        </div>
 
-      <template v-if="!isMembershipManagementLocked">
-        <div v-if="isLoadingCandidates" class="picker-state">در حال دریافت کاربران فعال...</div>
-        <div v-else-if="!selectAllActiveUsers && candidates.length === 0" class="picker-state empty">کاربری برای دعوت باقی نمانده است.</div>
-
-        <div v-else-if="!selectAllActiveUsers" class="candidate-list">
+        <div v-if="isLoadingCandidates" class="state-box">
+          <Loader2 :size="18" class="spin" />
+          <span>در حال دریافت کاربران فعال...</span>
+        </div>
+        <div v-else-if="!selectAllActiveUsers && candidates.length === 0" class="state-box muted">کاربری برای دعوت باقی نمانده است.</div>
+        <div v-else-if="!selectAllActiveUsers" class="telegram-list">
           <button
             v-for="candidate in candidates"
             :key="candidate.user_id"
             type="button"
-            class="candidate-row"
+            class="telegram-row selectable"
             :class="{ selected: selectedUserIds.has(candidate.user_id) }"
             @click="toggleUser(candidate.user_id)"
           >
-            <div class="candidate-check" :class="{ checked: selectedUserIds.has(candidate.user_id) }">
-              <svg v-if="selectedUserIds.has(candidate.user_id)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
+            <div class="row-avatar">{{ getAvatarInitial(candidate.account_name) }}</div>
+            <div class="row-copy">
+              <div class="row-title">{{ candidate.account_name }}</div>
+              <div class="row-subtitle">{{ candidate.full_name }} • {{ candidate.mobile_number }}</div>
             </div>
-            <div class="candidate-avatar">{{ getAvatarInitial(candidate.account_name) }}</div>
-            <div class="candidate-copy">
-              <span class="candidate-name">{{ candidate.account_name }}</span>
-              <span class="candidate-details">{{ candidate.full_name }} • {{ candidate.mobile_number }}</span>
+            <div class="row-check" :class="{ active: selectedUserIds.has(candidate.user_id) }">
+              <Check v-if="selectedUserIds.has(candidate.user_id)" :size="16" />
             </div>
           </button>
         </div>
       </template>
 
-      <div v-if="!isMembershipManagementLocked" class="picker-footer">
-        <div class="picker-count">انتخاب‌شده: {{ selectedCount }} از {{ activeTotal }}</div>
-        <button type="button" class="primary-btn" :disabled="!canSubmitMembers || isSubmittingMembers" @click="submitMembers">
-          {{ isSubmittingMembers ? 'در حال ثبت...' : 'ثبت اعضای انتخاب‌شده' }}
-        </button>
-      </div>
-    </div>
+      <template v-else-if="page === 'edit' && activeChannel">
+        <section class="editor-card">
+          <div class="info-strip">
+            <Info :size="16" />
+            <span>صفحه تنظیمات کانال با رفتار متمرکز و شبیه Telegram برای ویرایش مشخصات کانال.</span>
+          </div>
 
-    <div v-if="errorMessage" class="message-box error">{{ errorMessage }}</div>
-    <div v-if="successMessage" class="message-box success">{{ successMessage }}</div>
-  </div>
+          <label class="field-label" for="edit-channel-title">نام کانال</label>
+          <input id="edit-channel-title" v-model="title" class="editor-input" type="text" maxlength="255" placeholder="نام کانال" />
+
+          <label class="field-label" for="edit-channel-description">توضیحات کانال</label>
+          <textarea id="edit-channel-description" v-model="description" class="editor-textarea" rows="5" maxlength="2000" placeholder="توضیحات کانال برای اعضا"></textarea>
+
+          <button type="button" class="primary-btn" :disabled="!canSaveDetails || isSaving" @click="updateChannelDetails">
+            <Loader2 v-if="isSaving" :size="18" class="spin" />
+            <Check v-else :size="18" />
+            <span>ذخیره تغییرات</span>
+          </button>
+        </section>
+      </template>
+    </main>
+  </section>
 </template>
 
 <style scoped>
-.channel-card {
-  background: rgba(255, 255, 255, 0.74);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(245, 158, 11, 0.14);
-  border-radius: 24px;
-  padding: 20px;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
-}
-
-.header-block h2 {
-  margin: 0;
-  font-size: 1.12rem;
-  font-weight: 900;
-  color: #1f2937;
-}
-
-.header-block p {
-  margin: 8px 0 0;
-  color: #6b7280;
-  font-size: 0.85rem;
-  line-height: 1.8;
-}
-
-.channel-edit-shell {
+.channel-manager-root {
+  width: 100%;
+  min-height: min(88vh, 880px);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px;
-  border-radius: 18px;
-  background: rgba(255, 251, 235, 0.55);
-  border: 1px solid rgba(245, 158, 11, 0.14);
+  direction: rtl;
+  background: linear-gradient(180deg, #f7fafc 0%, #edf3f8 100%);
+  border-radius: 28px;
 }
 
-.edit-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.summary-actions {
+.manager-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.membership-hint {
-  border-radius: 16px;
-  padding: 12px 14px;
-  font-size: 0.84rem;
-  font-weight: 700;
-  line-height: 1.8;
-}
-
-.membership-hint.warning {
-  background: rgba(255, 247, 237, 0.86);
-  border: 1px solid rgba(245, 158, 11, 0.24);
-  color: #9a3412;
-}
-
-.membership-hint.info {
-  background: rgba(239, 246, 255, 0.9);
-  border: 1px solid rgba(59, 130, 246, 0.18);
-  color: #1d4ed8;
-}
-
-.member-shell {
-  display: flex;
-  flex-direction: column;
   gap: 12px;
-  padding: 14px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(245, 158, 11, 0.12);
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
-.member-shell-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.member-shell-header h3 {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 800;
-  color: #1f2937;
-}
-
-.member-shell-header span {
-  font-size: 0.8rem;
-  color: #6b7280;
-}
-
-.picker-state.info {
-  background: rgba(59, 130, 246, 0.08);
-  border: 1px solid rgba(59, 130, 246, 0.14);
-  color: #1d4ed8;
-}
-
-.member-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.member-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 16px;
-  background: rgba(255, 251, 235, 0.52);
-  border: 1px solid rgba(245, 158, 11, 0.12);
-}
-
-.member-avatar {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #f59e0b, #f97316);
-  color: white;
-  display: flex;
+.header-icon-btn {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(226, 232, 240, 0.72);
+  color: #334155;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-weight: 800;
+  cursor: pointer;
   flex-shrink: 0;
 }
 
-.member-copy {
+.header-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.header-copy h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.header-copy span {
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.header-spacer {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.manager-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 16px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.flash-box,
+.state-box,
+.selection-banner,
+.info-strip,
+.select-all-toggle {
+  border-radius: 18px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.flash-box.error {
+  background: rgba(254, 242, 242, 0.95);
+  color: #b91c1c;
+  border: 1px solid rgba(248, 113, 113, 0.18);
+}
+
+.flash-box.success {
+  background: rgba(236, 253, 245, 0.94);
+  color: #047857;
+  border: 1px solid rgba(52, 211, 153, 0.18);
+}
+
+.flash-box.warning {
+  background: rgba(255, 247, 237, 0.96);
+  color: #9a3412;
+  border: 1px solid rgba(245, 158, 11, 0.18);
+}
+
+.flash-box.info,
+.info-strip {
+  background: rgba(239, 246, 255, 0.96);
+  color: #1d4ed8;
+  border: 1px solid rgba(59, 130, 246, 0.16);
+}
+
+.state-box {
+  justify-content: center;
+  min-height: 58px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  color: #475569;
+}
+
+.state-box.muted {
+  color: #64748b;
+}
+
+.search-shell {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.search-shell.slim {
+  position: static;
+}
+
+.search-input,
+.editor-input,
+.editor-textarea {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+  color: #0f172a;
+  font: inherit;
+  font-size: 0.98rem;
+  outline: none;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.search-input,
+.editor-input {
+  min-height: 56px;
+  padding: 0 18px;
+}
+
+.editor-textarea {
+  min-height: 132px;
+  resize: vertical;
+  padding: 14px 16px;
+  line-height: 1.8;
+}
+
+.search-input:focus,
+.editor-input:focus,
+.editor-textarea:focus {
+  border-color: #3390ec;
+  box-shadow: 0 0 0 4px rgba(51, 144, 236, 0.12);
+}
+
+.selection-banner {
+  justify-content: space-between;
+  background: linear-gradient(135deg, rgba(51, 144, 236, 0.16), rgba(14, 165, 233, 0.08));
+  border: 1px solid rgba(51, 144, 236, 0.16);
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.select-all-toggle {
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  color: #334155;
+  cursor: pointer;
+}
+
+.select-all-toggle input {
+  margin: 0;
+}
+
+.select-all-toggle.active {
+  border-color: rgba(51, 144, 236, 0.24);
+  box-shadow: 0 0 0 4px rgba(51, 144, 236, 0.08);
+}
+
+.primary-chip,
+.primary-btn,
+.secondary-btn,
+.ghost-action {
+  border: 0;
+  border-radius: 16px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.primary-chip {
+  min-height: 38px;
+  padding: 0 16px;
+  background: #3390ec;
+  color: #fff;
+}
+
+.primary-btn,
+.secondary-btn {
+  min-height: 52px;
+  padding: 0 18px;
+}
+
+.primary-btn {
+  background: #3390ec;
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(51, 144, 236, 0.24);
+}
+
+.secondary-btn {
+  background: rgba(226, 232, 240, 0.86);
+  color: #0f172a;
+}
+
+.secondary-btn.compact {
+  min-height: 42px;
+  padding: 0 14px;
+}
+
+.primary-chip:disabled,
+.primary-btn:disabled,
+.secondary-btn:disabled,
+.ghost-action:disabled,
+.header-icon-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.hero-card,
+.editor-card,
+.section-shell {
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.hero-card {
+  padding: 26px 20px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+
+.hero-card.preview,
+.hero-card.create-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(236, 245, 255, 0.94));
+}
+
+.hero-avatar,
+.row-avatar {
+  background: linear-gradient(135deg, #3390ec, #0ea5e9 58%, #f59e0b 100%);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  flex-shrink: 0;
+}
+
+.hero-avatar {
+  width: 86px;
+  height: 86px;
+  border-radius: 50%;
+  font-size: 2rem;
+}
+
+.row-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  font-size: 1rem;
+}
+
+.hero-title {
+  font-size: 1.18rem;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.hero-meta,
+.hero-description {
+  color: #64748b;
+}
+
+.hero-description {
+  margin: 0;
+  max-width: 40ch;
+  line-height: 1.85;
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.telegram-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.telegram-list.compact {
+  gap: 8px;
+}
+
+.telegram-row {
+  width: 100%;
+  border: 0;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: right;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.telegram-row.selectable,
+.telegram-row.nav {
+  cursor: pointer;
+}
+
+.telegram-row.selectable.selected {
+  border-color: rgba(51, 144, 236, 0.28);
+  background: rgba(240, 248, 255, 0.96);
+}
+
+.row-copy {
   min-width: 0;
   flex: 1;
   display: flex;
@@ -813,53 +1227,133 @@ void loadExistingChannels()
   gap: 4px;
 }
 
-.member-name-row {
+.row-title {
+  font-size: 0.96rem;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.row-title.with-badges {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.member-name {
-  font-weight: 800;
-  color: #111827;
-}
-
-.member-role,
-.member-creator {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  padding: 3px 8px;
-  font-size: 0.72rem;
-  font-weight: 700;
-}
-
-.member-role.admin {
-  background: rgba(245, 158, 11, 0.16);
-  color: #b45309;
-}
-
-.member-role.member {
-  background: rgba(148, 163, 184, 0.16);
-  color: #475569;
-}
-
-.member-creator {
-  background: rgba(16, 185, 129, 0.12);
-  color: #047857;
-}
-
-.member-details {
-  color: #6b7280;
+.row-subtitle {
   font-size: 0.8rem;
+  color: #64748b;
+  line-height: 1.7;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.member-actions {
+.row-check {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid #cbd5e1;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.row-check.active {
+  border-color: #3390ec;
+  background: #3390ec;
+}
+
+.row-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.row-icon.soft {
+  background: rgba(226, 232, 240, 0.82);
+  color: #334155;
+}
+
+.row-icon.amber {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.row-icon.blue {
+  background: rgba(51, 144, 236, 0.14);
+  color: #0369a1;
+}
+
+.row-icon.muted {
+  background: rgba(148, 163, 184, 0.14);
+  color: #475569;
+}
+
+.row-icon.danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+.row-meta {
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.row-chevron {
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.editor-card,
+.section-shell {
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field-label,
+.section-heading {
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: #475569;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.badge.admin {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.badge.member {
+  background: rgba(148, 163, 184, 0.16);
+  color: #475569;
+}
+
+.badge.creator {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+}
+
+.row-actions {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -867,377 +1361,50 @@ void loadExistingChannels()
   justify-content: flex-end;
 }
 
-.member-action-btn {
-  border: 0;
-  border-radius: 12px;
-  padding: 9px 12px;
-  font: inherit;
-  font-size: 0.8rem;
-  font-weight: 700;
-  background: rgba(245, 158, 11, 0.12);
-  color: #b45309;
-  cursor: pointer;
+.ghost-action {
+  min-height: 36px;
+  padding: 0 12px;
+  background: rgba(241, 245, 249, 0.96);
+  color: #334155;
 }
 
-.member-action-btn:disabled {
-  opacity: 0.55;
-  cursor: default;
+.ghost-action.primary {
+  background: rgba(51, 144, 236, 0.12);
+  color: #0369a1;
 }
 
-.member-action-btn.danger {
-  background: rgba(239, 68, 68, 0.12);
+.ghost-action.danger,
+.telegram-row.nav.danger .row-title,
+.telegram-row.nav.danger .row-subtitle {
   color: #b91c1c;
 }
 
-.form-shell,
-.picker-shell {
-  margin-top: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.form-group label {
-  font-size: 0.85rem;
+.guard-text {
+  color: #94a3b8;
+  font-size: 0.74rem;
   font-weight: 700;
-  color: #374151;
-}
-
-.form-group input,
-.form-group textarea,
-.picker-search {
-  width: 100%;
-  border: 1px solid rgba(245, 158, 11, 0.18);
-  background: rgba(255, 251, 235, 0.55);
-  border-radius: 16px;
-  padding: 12px 14px;
-  font: inherit;
-  color: #111827;
-  outline: none;
-  transition: border-color 0.2s ease, background 0.2s ease;
-}
-
-.form-group input:focus,
-.form-group textarea:focus,
-.picker-search:focus {
-  border-color: #f59e0b;
-  background: #fff;
-}
-
-.form-group textarea {
-  resize: vertical;
-  min-height: 110px;
-}
-
-.form-actions,
-.picker-footer {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.primary-btn,
-.secondary-btn {
-  border: none;
-  border-radius: 999px;
-  font: inherit;
-  font-weight: 800;
-  cursor: pointer;
-  transition: transform 0.08s ease, opacity 0.15s ease, background 0.2s ease;
-}
-
-.primary-btn {
-  background: linear-gradient(135deg, #d97706, #f59e0b);
-  color: white;
-  padding: 12px 18px;
-  min-width: 168px;
-}
-
-.secondary-btn {
-  background: #fff7ed;
-  color: #9a3412;
-  padding: 11px 16px;
-  border: 1px solid rgba(249, 115, 22, 0.18);
-}
-
-.secondary-btn.compact {
-  min-width: auto;
-}
-
-.primary-btn:disabled,
-.secondary-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.primary-btn:not(:disabled):active,
-.secondary-btn:not(:disabled):active {
-  transform: scale(0.98);
-}
-
-.channel-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-  background: linear-gradient(135deg, rgba(255, 247, 237, 0.95), rgba(254, 243, 199, 0.88));
-  border-radius: 18px;
-  border: 1px solid rgba(245, 158, 11, 0.14);
-}
-
-.summary-title {
-  font-size: 1rem;
-  font-weight: 900;
-  color: #7c2d12;
-}
-
-.summary-meta,
-.picker-count {
-  font-size: 0.82rem;
-  color: #92400e;
-}
-
-.picker-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.select-all-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  border-radius: 16px;
-  background: rgba(255, 251, 235, 0.75);
-  border: 1px solid rgba(245, 158, 11, 0.14);
-  font-size: 0.88rem;
-  font-weight: 700;
-  color: #78350f;
-  cursor: pointer;
-}
-
-.select-all-toggle.active {
-  background: rgba(254, 243, 199, 0.9);
-  border-color: rgba(245, 158, 11, 0.28);
-}
-
-.candidate-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 420px;
-  overflow-y: auto;
-  padding-left: 2px;
-}
-
-.candidate-row {
-  width: 100%;
-  border: 1px solid rgba(245, 158, 11, 0.12);
-  background: rgba(255, 255, 255, 0.82);
-  border-radius: 18px;
-  padding: 12px 14px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  text-align: right;
-  cursor: pointer;
-}
-
-.candidate-row.selected {
-  background: rgba(254, 243, 199, 0.78);
-  border-color: rgba(245, 158, 11, 0.34);
-}
-
-.candidate-check {
-  width: 24px;
-  height: 24px;
-  min-width: 24px;
-  border-radius: 50%;
-  border: 2px solid #d1d5db;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  background: #fff;
-}
-
-.candidate-check.checked {
-  background: #f59e0b;
-  border-color: #f59e0b;
-}
-
-.candidate-check svg {
-  width: 14px;
-  height: 14px;
-}
-
-.candidate-avatar {
-  width: 44px;
-  height: 44px;
-  min-width: 44px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #d97706, #f59e0b);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1rem;
-  font-weight: 800;
-}
-
-.candidate-copy {
-  min-width: 0;
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.candidate-name {
-  font-size: 0.95rem;
-  font-weight: 800;
-  color: #111827;
-}
-
-.candidate-details {
-  font-size: 0.78rem;
-  color: #6b7280;
   line-height: 1.6;
+  max-width: 18ch;
 }
 
-.picker-state,
-.message-box {
-  margin-top: 16px;
-  border-radius: 16px;
-  padding: 12px 14px;
-  font-size: 0.86rem;
-  line-height: 1.8;
+.spin {
+  animation: spin 0.9s linear infinite;
 }
 
-.picker-state {
-  background: rgba(255, 251, 235, 0.72);
-  color: #92400e;
-}
-
-.picker-state.empty {
-  background: rgba(243, 244, 246, 0.9);
-  color: #6b7280;
-}
-
-.message-box.success {
-  background: rgba(236, 253, 245, 0.96);
-  color: #065f46;
-}
-
-.message-box.error {
-  background: rgba(254, 242, 242, 0.96);
-  color: #b91c1c;
-}
-
-.existing-shell {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.existing-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.existing-title-row h3 {
-  margin: 0;
-  font-size: 0.94rem;
-  font-weight: 900;
-  color: #1f2937;
-}
-
-.existing-title-row span {
-  font-size: 0.78rem;
-  color: #92400e;
-}
-
-.existing-channel-row {
-  width: 100%;
-  border: 1px solid rgba(245, 158, 11, 0.14);
-  background: rgba(255, 255, 255, 0.82);
-  border-radius: 18px;
-  padding: 12px 14px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  text-align: right;
-  cursor: pointer;
-}
-
-.existing-channel-avatar {
-  width: 42px;
-  height: 42px;
-  min-width: 42px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #0f766e, #10b981);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.95rem;
-  font-weight: 900;
-}
-
-.existing-channel-copy {
-  min-width: 0;
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.existing-channel-name {
-  font-size: 0.92rem;
-  font-weight: 800;
-  color: #111827;
-}
-
-.existing-channel-meta {
-  font-size: 0.76rem;
-  color: #6b7280;
-  line-height: 1.6;
-}
-
-.existing-channel-action {
-  flex: none;
-  color: #0f766e;
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
-@media (max-width: 640px) {
-  .channel-card {
-    padding: 16px;
-    border-radius: 20px;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
+}
 
-  .form-actions,
-  .picker-footer,
-  .channel-summary {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .primary-btn,
-  .secondary-btn {
+@media (max-width: 520px) {
+  .row-actions {
     width: 100%;
+    justify-content: flex-start;
+  }
+
+  .telegram-row.member-row {
+    flex-wrap: wrap;
   }
 }
 </style>

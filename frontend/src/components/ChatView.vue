@@ -3106,11 +3106,12 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 
     <div v-if="showChannelManagerModal" class="channel-manager-overlay" @click.self="closeChannelManager">
       <div class="channel-manager-sheet">
-        <button class="channel-manager-close" @click="closeChannelManager">×</button>
         <CreateChannelView
           :apiBaseUrl="props.apiBaseUrl"
           :jwtToken="props.jwtToken"
           :currentUserId="props.currentUserId"
+          :showCloseButton="true"
+          @close="closeChannelManager"
           @refresh-conversations="handleChannelManagerConversationRefresh"
           @open-channel="handleChannelManagerOpenChannel"
         />
@@ -3338,36 +3339,27 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
   display: flex;
   align-items: stretch;
   justify-content: center;
-  padding: 16px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+  padding: 0;
 }
 
 .channel-manager-sheet {
-  position: relative;
-  width: min(720px, 100%);
-  max-height: 100%;
-  overflow-y: auto;
-  border-radius: 24px;
-  background: linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(255, 255, 255, 0.98));
-  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.22);
-  padding: 18px 16px 20px;
+  width: min(100vw, 560px);
+  height: 100vh;
+  overflow: hidden;
+  background: linear-gradient(180deg, #f7fafc 0%, #edf3f8 100%);
 }
 
-.channel-manager-close {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  margin-inline-start: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border: none;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.18);
-  color: #0f172a;
-  font-size: 1.6rem;
-  line-height: 1;
+@media (min-width: 700px) {
+  .channel-manager-overlay {
+    padding: 24px;
+    align-items: center;
+  }
+
+  .channel-manager-sheet {
+    height: min(94vh, 920px);
+    border-radius: 34px;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+  }
 }
 
 /* Loading & Empty States */

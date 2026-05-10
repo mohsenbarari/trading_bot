@@ -271,6 +271,7 @@ class GroupMemberRead(BaseModel):
 
 class GroupCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=2000)
     member_ids: List[int] = Field(default_factory=list)
 
     @field_validator("title")
@@ -280,6 +281,14 @@ class GroupCreateRequest(BaseModel):
         if not cleaned:
             raise ValueError("Group title is required")
         return cleaned
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
     @field_validator("member_ids")
     @classmethod
@@ -305,6 +314,7 @@ class GroupDetailRead(BaseModel):
 
 class GroupUpdateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=2000)
 
     @field_validator("title")
     @classmethod
@@ -313,6 +323,14 @@ class GroupUpdateRequest(BaseModel):
         if not cleaned:
             raise ValueError("Group title is required")
         return cleaned
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
 
 class GroupMemberAddRequest(BaseModel):

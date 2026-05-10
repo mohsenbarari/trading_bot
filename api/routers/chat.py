@@ -485,6 +485,7 @@ async def create_group(
         db,
         creator=current_user,
         title=data.title,
+        description=data.description,
         member_ids=data.member_ids,
     )
     member_count = await count_active_chat_members(db, group.id)
@@ -548,10 +549,10 @@ async def patch_group(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """تغییر نام گروه توسط یکی از adminهای فعال"""
+    """تغییر نام و توضیحات گروه توسط یکی از adminهای فعال"""
     group = await get_group_or_404(db, chat_id)
     admin_member = await get_active_group_admin_or_403(db, chat=group, user_id=current_user.id)
-    group = await update_group_chat(db, chat=group, title=data.title)
+    group = await update_group_chat(db, chat=group, title=data.title, description=data.description)
     member_count = await count_active_chat_members(db, group.id)
     return GroupRoomRead(
         id=group.id,

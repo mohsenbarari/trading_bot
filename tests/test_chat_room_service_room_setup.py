@@ -188,12 +188,14 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
                 db,
                 creator=creator,
                 title="  Team Alpha  ",
+                description="  Product launch room  ",
                 member_ids=[10, 10, -3, creator.id, 11],
             )
 
         self.assertEqual(chat.id, 501)
         self.assertEqual(chat.type, ChatType.GROUP)
         self.assertEqual(chat.title, "Team Alpha")
+        self.assertEqual(chat.description, "Product launch room")
         self.assertEqual(chat.max_members, GROUP_MAX_MEMBERS)
         self.assertEqual(len(db.added), 4)
         creator_member = db.added[1]
@@ -217,9 +219,10 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.detail, "Group title is required")
 
         with patch("core.services.chat_room_service._utcnow", return_value=now):
-            result = await update_group_chat(db, chat=group_chat, title="  New Group  ")
+            result = await update_group_chat(db, chat=group_chat, title="  New Group  ", description="  Refined bio  ")
         self.assertIs(result, group_chat)
         self.assertEqual(group_chat.title, "New Group")
+        self.assertEqual(group_chat.description, "Refined bio")
         self.assertEqual(group_chat.updated_at, now)
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(group_chat)
