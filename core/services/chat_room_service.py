@@ -95,6 +95,8 @@ class ChannelConversationSummary:
     max_members: int | None = None
     is_system: bool = False
     is_mandatory: bool = False
+    is_pinned: bool = False
+    pinned_at: datetime | None = None
 
 
 @dataclass
@@ -137,6 +139,8 @@ class ChannelMemberMutationSummary:
     role: ChatMemberRole | None
     removed: bool
     member_count: int
+    left: bool = False
+    unchanged: bool = False
 
 
 @dataclass
@@ -774,6 +778,8 @@ async def list_group_conversations(
         select(
             Chat,
             current_member.role.label("member_role"),
+            current_member.is_pinned.label("is_pinned"),
+            current_member.pinned_at.label("pinned_at"),
             last_message_content,
             last_message_alias.message_type.label("last_message_type"),
             unread_count.label("unread_count"),
@@ -795,7 +801,7 @@ async def list_group_conversations(
     result = await db.execute(stmt)
 
     rows: list[ChannelConversationSummary] = []
-    for chat, member_role, last_content, last_type, unread, member_count in result.all():
+    for chat, member_role, is_pinned, pinned_at, last_content, last_type, unread, member_count in result.all():
         synthetic_room_id = -int(chat.id)
         rows.append(
             ChannelConversationSummary(
@@ -816,6 +822,8 @@ async def list_group_conversations(
                 max_members=int(chat.max_members or GROUP_MAX_MEMBERS),
                 is_system=bool(chat.is_system),
                 is_mandatory=bool(chat.is_mandatory),
+                is_pinned=bool(is_pinned),
+                pinned_at=pinned_at,
             )
         )
     return rows
@@ -1084,6 +1092,10 @@ async def remove_group_member(
     now = _utcnow()
     member.membership_status = ChatMembershipStatus.REMOVED
     member.left_at = now
+    member.is_pinned = False
+    member.pinned_at = None
+    member.is_hidden = False
+    member.hidden_at = None
     member.updated_at = now
     chat.updated_at = now
     await db.commit()
@@ -1115,6 +1127,10 @@ async def leave_group_chat(
     now = _utcnow()
     member.membership_status = ChatMembershipStatus.LEFT
     member.left_at = now
+    member.is_pinned = False
+    member.pinned_at = None
+    member.is_hidden = False
+    member.hidden_at = None
     member.updated_at = now
     chat.updated_at = now
     await db.commit()
@@ -1169,6 +1185,8 @@ async def list_channel_conversations(
         select(
             Chat,
             current_member.role.label("member_role"),
+            current_member.is_pinned.label("is_pinned"),
+            current_member.pinned_at.label("pinned_at"),
             last_message_content,
             last_message_alias.message_type.label("last_message_type"),
             unread_count.label("unread_count"),
@@ -1190,7 +1208,7 @@ async def list_channel_conversations(
     result = await db.execute(stmt)
 
     rows: list[ChannelConversationSummary] = []
-    for chat, member_role, last_content, last_type, unread, member_count in result.all():
+    for chat, member_role, is_pinned, pinned_at, last_content, last_type, unread, member_count in result.all():
         synthetic_room_id = -int(chat.id)
         rows.append(
             ChannelConversationSummary(
@@ -1211,6 +1229,8 @@ async def list_channel_conversations(
                 max_members=None,
                 is_system=bool(chat.is_system),
                 is_mandatory=bool(chat.is_mandatory),
+                is_pinned=bool(is_pinned),
+                pinned_at=pinned_at,
             )
         )
     return rows
@@ -1640,6 +1660,10 @@ async def update_channel_member(
     if remove_member:
         member.membership_status = ChatMembershipStatus.REMOVED
         member.left_at = now
+        member.is_pinned = False
+        member.pinned_at = None
+        member.is_hidden = False
+        member.hidden_at = None
         member.updated_at = now
         removed = True
         next_role = None
@@ -1659,6 +1683,100 @@ async def update_channel_member(
         removed=removed,
         member_count=member_count,
     )
+
+
+async def leave_channel_chat(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+) -> ChannelMemberMutationSummary:
+    if chat.is_system or chat.is_mandatory:
+        raise HTTPException(status_code=400, detail="Mandatory/system channels cannot be unfollowed")
+
+    stmt = (
+        select(ChatMember)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.user_id == user_id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .order_by(ChatMember.id.desc())
+    )
+    result = await db.execute(stmt)
+    member = result.scalars().first()
+    if member is None:
+        raise HTTPException(status_code=404, detail="Channel member not found")
+
+    is_admin_leave = member.role == ChatMemberRole.ADMIN
+    if member.user_id == chat.created_by_id and is_admin_leave:
+        raise HTTPException(status_code=400, detail="Channel creator must remain an active admin")
+
+    if is_admin_leave:
+        admin_count_result = await db.execute(
+            select(func.count(ChatMember.id)).where(
+                ChatMember.chat_id == chat.id,
+                ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+                ChatMember.role == ChatMemberRole.ADMIN,
+            )
+        )
+        admin_count = int(admin_count_result.scalar_one() or 0)
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Channel must keep at least one active admin")
+
+    now = _utcnow()
+    member.membership_status = ChatMembershipStatus.LEFT
+    member.left_at = now
+    member.is_pinned = False
+    member.pinned_at = None
+    member.is_hidden = False
+    member.hidden_at = None
+    member.updated_at = now
+    chat.updated_at = now
+    await db.commit()
+
+    member_count = await count_active_chat_members(db, chat.id)
+    return ChannelMemberMutationSummary(
+        chat_id=chat.id,
+        user_id=user_id,
+        role=None,
+        removed=False,
+        member_count=member_count,
+        left=True,
+    )
+
+
+async def set_room_pin_state(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    user_id: int,
+    pinned: bool,
+) -> ChatMember:
+    stmt = (
+        select(ChatMember)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.user_id == user_id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .order_by(ChatMember.id.desc())
+    )
+    result = await db.execute(stmt)
+    member = result.scalars().first()
+    if member is None:
+        raise HTTPException(status_code=403, detail="Room membership not found")
+
+    now = _utcnow()
+    member.is_pinned = pinned
+    member.pinned_at = now if pinned else None
+    if pinned:
+        member.is_hidden = False
+        member.hidden_at = None
+    member.updated_at = now
+    chat.updated_at = now
+    await db.commit()
+    return member
 
 
 async def send_channel_message(

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 from core.enums import ChatMemberRole, ChatMembershipStatus
-from core.services.chat_room_service import bulk_add_channel_members, update_channel_member
+from core.services.chat_room_service import bulk_add_channel_members, leave_channel_chat, set_room_pin_state, update_channel_member
 from models.chat_member import ChatMember
 
 
@@ -238,6 +238,45 @@ class ChatRoomServiceChannelMembersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(summary.role)
         self.assertEqual(member.membership_status, ChatMembershipStatus.REMOVED)
         self.assertEqual(member.left_at, now)
+
+    async def test_leave_channel_chat_and_set_room_pin_state_commit_membership_changes(self):
+        now = datetime(2026, 5, 8, 1, 40, 0)
+        member = ChatMember(
+            chat_id=5,
+            user_id=3,
+            role=ChatMemberRole.MEMBER,
+            membership_status=ChatMembershipStatus.ACTIVE,
+        )
+        chat = SimpleNamespace(id=5, is_system=False, is_mandatory=False, created_by_id=1, updated_at=None)
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[member])])
+
+        with patch("core.services.chat_room_service._utcnow", return_value=now), patch(
+            "core.services.chat_room_service.count_active_chat_members",
+            new=AsyncMock(return_value=4),
+        ):
+            summary = await leave_channel_chat(db, chat=chat, user_id=3)
+
+        self.assertTrue(summary.left)
+        self.assertEqual(summary.member_count, 4)
+        self.assertEqual(member.membership_status, ChatMembershipStatus.LEFT)
+        self.assertFalse(member.is_pinned)
+        self.assertIsNone(member.pinned_at)
+        db.commit.assert_awaited_once()
+
+        member = ChatMember(
+            chat_id=5,
+            user_id=3,
+            role=ChatMemberRole.MEMBER,
+            membership_status=ChatMembershipStatus.ACTIVE,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[member])])
+        with patch("core.services.chat_room_service._utcnow", return_value=now):
+            pinned_member = await set_room_pin_state(db, chat=chat, user_id=3, pinned=True)
+
+        self.assertIs(pinned_member, member)
+        self.assertTrue(member.is_pinned)
+        self.assertEqual(member.pinned_at, now)
+        db.commit.assert_awaited_once()
 
 
 if __name__ == "__main__":

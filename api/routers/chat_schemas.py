@@ -141,6 +141,8 @@ class ConversationRead(BaseModel):
     max_members: Optional[int] = None
     is_system: bool = False
     is_mandatory: bool = False
+    is_pinned: bool = False
+    pinned_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -152,6 +154,23 @@ class PollResponse(BaseModel):
     total_unread: int
     unread_chats_count: int
     conversations_with_unread: List[dict]
+
+
+class ConversationPinUpdateRequest(BaseModel):
+    pinned: bool
+
+
+class ConversationPinResponse(BaseModel):
+    target_id: int
+    chat_id: Optional[int] = None
+    is_pinned: bool = False
+    pinned_at: Optional[datetime] = None
+
+
+class ConversationHideResponse(BaseModel):
+    target_id: int
+    chat_id: Optional[int] = None
+    hidden: bool = True
 
 
 class StickerPack(BaseModel):
@@ -391,3 +410,5 @@ class ChannelMemberMutationResponse(BaseModel):
     role: Optional[str] = None
     removed: bool = False
     member_count: int
+    left: bool = False
+    unchanged: bool = False

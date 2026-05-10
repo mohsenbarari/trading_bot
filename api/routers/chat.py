@@ -30,6 +30,9 @@ from api.routers.chat_schemas import (
     ChannelMemberUpdateRequest,
     ChannelRoomRead,
     ChannelUpdateRequest,
+    ConversationHideResponse,
+    ConversationPinResponse,
+    ConversationPinUpdateRequest,
     ConversationRead,
     GroupCreateRequest,
     GroupCreateResponse,
@@ -63,6 +66,7 @@ from core.services.chat_room_service import (
     get_group_or_404,
     get_channel_or_404,
     leave_group_chat,
+    leave_channel_chat,
     list_group_conversations,
     list_group_members,
     list_group_messages,
@@ -86,6 +90,7 @@ from core.services.chat_room_service import (
     remove_group_member,
     send_group_message,
     send_channel_message,
+    set_room_pin_state,
     update_group_admin_status,
     update_group_chat,
     update_manageable_channel_metadata,
@@ -100,12 +105,14 @@ from core.services.chat_service import (
     build_direct_message_search_stmt,
     build_direct_unread_poll_stmt,
     commit_direct_read_state,
+    hide_direct_conversation,
     persist_sent_direct_message,
     publish_direct_message_event,
     publish_direct_read_event,
     publish_direct_reaction_event,
     publish_direct_typing_event,
     prepare_direct_message_send,
+    set_direct_chat_pin_state,
     serialize_direct_message_for_response,
     serialize_direct_messages_for_response,
 )
@@ -152,6 +159,8 @@ async def get_conversations(
             max_members=row.max_members,
             is_system=row.is_system,
             is_mandatory=row.is_mandatory,
+            is_pinned=getattr(row, "is_pinned", False),
+            pinned_at=getattr(row, "pinned_at", None),
         )
         for row in await list_group_conversations(db, current_user_id=current_user.id)
     ]
@@ -174,6 +183,8 @@ async def get_conversations(
             max_members=row.max_members,
             is_system=row.is_system,
             is_mandatory=row.is_mandatory,
+            is_pinned=getattr(row, "is_pinned", False),
+            pinned_at=getattr(row, "pinned_at", None),
         )
         for row in await list_channel_conversations(db, current_user_id=current_user.id)
     ]
@@ -183,6 +194,45 @@ async def get_conversations(
         reverse=True,
     )
     return conversations
+
+
+@router.post("/direct/{user_id}/pin", response_model=ConversationPinResponse)
+async def pin_direct_conversation(
+    user_id: int,
+    data: ConversationPinUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    member = await set_direct_chat_pin_state(
+        db,
+        actor=current_user,
+        other_user_id=user_id,
+        pinned=data.pinned,
+    )
+    return ConversationPinResponse(
+        target_id=user_id,
+        chat_id=member.chat_id,
+        is_pinned=bool(member.is_pinned),
+        pinned_at=member.pinned_at,
+    )
+
+
+@router.delete("/direct/{user_id}", response_model=ConversationHideResponse)
+async def delete_direct_conversation(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    member = await hide_direct_conversation(
+        db,
+        actor=current_user,
+        other_user_id=user_id,
+    )
+    return ConversationHideResponse(
+        target_id=user_id,
+        chat_id=member.chat_id,
+        hidden=bool(member.is_hidden),
+    )
 
 
 @router.get("/search", response_model=List[MessageRead])
@@ -495,6 +545,50 @@ async def post_group_leave(
         removed=summary.removed,
         left=summary.left,
         member_count=summary.member_count,
+        unchanged=summary.unchanged,
+    )
+
+
+@router.post("/rooms/{chat_id}/pin", response_model=ConversationPinResponse)
+async def pin_room_conversation(
+    chat_id: int,
+    data: ConversationPinUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    room = await get_room_or_404(db, chat_id)
+    if room.type == ChatType.DIRECT:
+        raise HTTPException(status_code=400, detail="Use the direct pin endpoint for personal chats")
+
+    member = await set_room_pin_state(
+        db,
+        chat=room,
+        user_id=current_user.id,
+        pinned=data.pinned,
+    )
+    return ConversationPinResponse(
+        target_id=-int(room.id),
+        chat_id=room.id,
+        is_pinned=bool(member.is_pinned),
+        pinned_at=member.pinned_at,
+    )
+
+
+@router.post("/channels/{chat_id}/unfollow", response_model=ChannelMemberMutationResponse)
+async def unfollow_channel(
+    chat_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    channel = await get_channel_or_404(db, chat_id)
+    summary = await leave_channel_chat(db, chat=channel, user_id=current_user.id)
+    return ChannelMemberMutationResponse(
+        chat_id=summary.chat_id,
+        user_id=summary.user_id,
+        role=summary.role.value if summary.role is not None else None,
+        removed=summary.removed,
+        member_count=summary.member_count,
+        left=summary.left,
         unchanged=summary.unchanged,
     )
 

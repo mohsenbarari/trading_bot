@@ -74,7 +74,7 @@ class FakeHttpClientContext:
 
 class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
     async def test_direct_conversation_projection_builders(self):
-        projection_stmt, unread_count, resolved_last_message_at = chat_service.build_direct_conversation_projection_stmt(7)
+        projection_stmt, unread_count, resolved_last_message_at, hidden_flag = chat_service.build_direct_conversation_projection_stmt(7)
         projection_sql = compile_sql(projection_stmt)
         scope_sql = compile_sql(
             chat_service.build_direct_conversation_scope_condition(7).self_group()
@@ -92,10 +92,13 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("conversations.user2_id = 7", scope_sql)
         self.assertIn("DESC NULLS LAST", list_sql)
         self.assertIn("> 0", unread_sql)
+        self.assertIn("is_pinned", projection_sql)
+        self.assertIn("coalesce(", unread_sql)
         self.assertIn("messages.sender_id = 10", legacy_sql)
         self.assertIn("messages.receiver_id = 20", legacy_sql)
         self.assertIsNotNone(unread_count)
         self.assertIsNotNone(resolved_last_message_at)
+        self.assertIsNotNone(hidden_flag)
 
     async def test_direct_conversation_lookup_and_member_helpers(self):
         existing_conversation = SimpleNamespace(id=9)
