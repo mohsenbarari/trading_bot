@@ -1,8 +1,8 @@
 <template>
-  <div class="chat-header">
+  <div class="chat-header" data-testid="messenger-header">
     <template v-if="!isSelectionMode">
       <!-- Back Button -->
-      <button class="header-btn back-btn" v-ripple @click="$emit('back')" v-if="!isSearchActive">
+      <button class="header-btn back-btn" v-ripple @click="$emit('back')" v-if="!isSearchActive" data-testid="chat-header-back-button" aria-label="بازگشت از گفتگو">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M19 12H5M12 19l-7-7 7-7"/>
         </svg>
@@ -45,15 +45,15 @@
       
       <!-- Title (for conversation list) -->
       <template v-else>
-        <div v-if="!isSearchActive" class="header-title">
+        <div v-if="!isSearchActive" class="header-title" data-testid="messenger-header-title">
           پیام‌ها
           <span v-if="totalUnread > 0" class="badge">{{ totalUnread }}</span>
         </div>
       </template>
       
       <!-- Search Bar Overlay -->
-      <div v-if="isSearchActive" class="search-bar-container">
-         <button class="header-btn mobile-back-btn" v-ripple @click="$emit('toggle-search')">
+      <div v-if="isSearchActive" class="search-bar-container" data-testid="messenger-search-bar">
+        <button class="header-btn mobile-back-btn" v-ripple @click="$emit('toggle-search')" data-testid="messenger-search-close-button" aria-label="بستن جستجو">
            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
              <line x1="19" y1="12" x2="5" y2="12"></line>
              <polyline points="12 19 5 12 12 5"></polyline>
@@ -65,6 +65,7 @@
             @input="onSearchInput" 
             placeholder="جستجو..." 
             class="header-search-input full-width-search"
+            data-testid="messenger-search-input"
          />
       </div>
       
@@ -123,26 +124,26 @@
       
       <!-- Conversation List Actions -->
       <template v-else-if="!selectedUserId && !isSearchActive">
-         <button class="header-btn" v-ripple @click="$emit('toggle-search')">
+         <button class="header-btn" v-ripple @click="$emit('toggle-search')" data-testid="messenger-open-search-button" aria-label="باز کردن جستجو">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
         </button>
         <div class="header-menu-container" style="position: relative;">
-          <button class="header-btn" v-ripple @click.stop="toggleMenu">
+          <button class="header-btn" v-ripple @click.stop="toggleMenu" data-testid="messenger-header-menu-button" aria-label="باز کردن منوی پیام‌ها">
             <MoreVertical :size="22" />
           </button>
-          <div v-if="isMenuOpen" class="header-dropdown-menu" v-click-outside="closeMenu">
-            <div class="header-menu-item" @click="handleMenuViewProfile">
+          <div v-if="isMenuOpen" class="header-dropdown-menu" v-click-outside="closeMenu" data-testid="messenger-header-menu">
+            <div class="header-menu-item" @click="handleMenuViewProfile" data-testid="messenger-menu-self-profile">
               <span>پروفایل عمومی من</span>
               <UsersRound :size="18" />
             </div>
-            <div class="header-menu-item" @click="handleMenuCreateGroup">
+            <div class="header-menu-item" @click="handleMenuCreateGroup" data-testid="messenger-menu-create-group">
               <span>ساخت گروه جدید</span>
               <UsersRound :size="18" />
             </div>
-            <div v-if="canCreateChannel" class="header-menu-item" @click="handleMenuCreateChannel">
+            <div v-if="canCreateChannel" class="header-menu-item" @click="handleMenuCreateChannel" data-testid="messenger-menu-create-channel">
               <span>ساخت کانال</span>
               <Megaphone :size="18" />
             </div>
