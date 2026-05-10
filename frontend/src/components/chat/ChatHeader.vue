@@ -138,7 +138,7 @@
               <UsersRound :size="18" />
             </div>
             <div v-if="canCreateChannel" class="header-menu-item" @click="handleMenuCreateChannel">
-              <span>ساخت کانال اختیاری</span>
+              <span>ساخت کانال</span>
               <Megaphone :size="18" />
             </div>
           </div>
@@ -505,24 +505,31 @@ function formatDateForSeparator(dateString: string) {
   position: absolute;
   top: 100%;
   right: 0;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  min-width: 180px;
-  padding: 4px 0;
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 16px;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+  min-width: 196px;
+  padding: 6px;
   z-index: 1001;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 .header-menu-item {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 12px;
-  padding: 12px 16px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 12px;
   cursor: pointer;
   color: #111827;
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: 700;
 }
-.header-menu-item:hover { background: #f3f4f6; }
+.header-menu-item:hover { background: rgba(15, 23, 42, 0.05); }
+.header-menu-item svg { color: #64748b; }
 .menu-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;

@@ -120,7 +120,7 @@
         </template>
         <template v-if="canDelete">
             <div class="menu-divider"></div>
-            <div class="menu-item delete" v-ripple @click="$emit('delete')" role="menuitem">
+            <div class="menu-item is-danger" v-ripple @click="$emit('delete')" role="menuitem">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
               <span style="flex:1;">حذف</span>
             </div>
@@ -312,12 +312,22 @@ const menuPosition = computed(() => {
   background: rgba(0,0,0,0.04);
 }
 
-.menu-item.delete {
+.menu-item.is-danger {
   color: #ef4444;
+  background: linear-gradient(180deg, rgba(254, 242, 242, 0.78), rgba(254, 242, 242, 0.36));
 }
 
-.menu-item.delete:hover {
+.menu-item.is-danger:hover {
   background: rgba(239, 68, 68, 0.06);
+}
+
+.menu-item.is-warning {
+  color: #c2410c;
+  background: linear-gradient(180deg, rgba(255, 247, 237, 0.82), rgba(255, 247, 237, 0.38));
+}
+
+.menu-item.is-warning:hover {
+  background: rgba(249, 115, 22, 0.08);
 }
 
 .reaction-picker-shell {

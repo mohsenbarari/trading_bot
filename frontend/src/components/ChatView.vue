@@ -1546,22 +1546,6 @@ async function handleGroupLeft(chatId: number) {
 
 type ConversationListAction = 'pin' | 'unpin' | 'mute' | 'unmute' | 'mark-unread' | 'delete' | 'leave' | 'unfollow'
 
-async function readConversationActionError(response: Response, fallback: string) {
-  if (response.ok) return
-
-  let detail = fallback
-  try {
-    const payload = await response.json()
-    if (typeof payload?.detail === 'string' && payload.detail.trim()) {
-      detail = payload.detail
-    }
-  } catch {
-    // ignore malformed/non-json bodies and use fallback message
-  }
-
-  throw new Error(detail)
-}
-
 function clearSelectedConversationIfMatches(conv: Conversation) {
   if (selectedUserId.value !== conv.other_user_id) return
   selectedUserId.value = null
@@ -1581,42 +1565,36 @@ async function handleConversationAction(payload: { action: ConversationListActio
 
     if (action === 'pin' || action === 'unpin') {
       const endpoint = conv.room_kind === 'direct'
-        ? `/api/chat/direct/${conv.other_user_id}/pin`
-        : `/api/chat/rooms/${conv.chat_id}/pin`
-      const response = await apiFetch(endpoint, {
+        ? `/chat/direct/${conv.other_user_id}/pin`
+        : `/chat/rooms/${conv.chat_id}/pin`
+      await apiFetch(endpoint, {
         method: 'POST',
         body: JSON.stringify({ pinned: action === 'pin' }),
       })
-      await readConversationActionError(response, 'خطا در تغییر وضعیت سنجاق گفتگو')
     } else if (action === 'mute' || action === 'unmute') {
       const endpoint = conv.room_kind === 'direct'
-        ? `/api/chat/direct/${conv.other_user_id}/mute`
-        : `/api/chat/rooms/${conv.chat_id}/mute`
-      const response = await apiFetch(endpoint, {
+        ? `/chat/direct/${conv.other_user_id}/mute`
+        : `/chat/rooms/${conv.chat_id}/mute`
+      await apiFetch(endpoint, {
         method: 'POST',
         body: JSON.stringify({ muted: action === 'mute' }),
       })
-      await readConversationActionError(response, 'خطا در تغییر وضعیت بی‌صدا')
     } else if (action === 'mark-unread') {
       const endpoint = conv.room_kind === 'direct'
-        ? `/api/chat/direct/${conv.other_user_id}/mark-unread`
-        : `/api/chat/rooms/${conv.chat_id}/mark-unread`
-      const response = await apiFetch(endpoint, {
+        ? `/chat/direct/${conv.other_user_id}/mark-unread`
+        : `/chat/rooms/${conv.chat_id}/mark-unread`
+      await apiFetch(endpoint, {
         method: 'POST',
         body: JSON.stringify({ unread: true }),
       })
-      await readConversationActionError(response, 'خطا در علامت‌گذاری گفتگو به‌عنوان خوانده‌نشده')
     } else if (action === 'delete') {
-      const response = await apiFetch(`/api/chat/direct/${conv.other_user_id}`, { method: 'DELETE' })
-      await readConversationActionError(response, 'خطا در حذف گفتگو')
+      await apiFetch(`/chat/direct/${conv.other_user_id}`, { method: 'DELETE' })
       clearSelectedConversationIfMatches(conv)
     } else if (action === 'leave') {
-      const response = await apiFetch(`/api/chat/groups/${conv.chat_id}/leave`, { method: 'POST' })
-      await readConversationActionError(response, 'خطا در ترک گروه')
+      await apiFetch(`/chat/groups/${conv.chat_id}/leave`, { method: 'POST' })
       clearSelectedConversationIfMatches(conv)
     } else if (action === 'unfollow') {
-      const response = await apiFetch(`/api/chat/channels/${conv.chat_id}/unfollow`, { method: 'POST' })
-      await readConversationActionError(response, 'خطا در لغو دنبال‌کردن کانال')
+      await apiFetch(`/chat/channels/${conv.chat_id}/unfollow`, { method: 'POST' })
       clearSelectedConversationIfMatches(conv)
     }
 
