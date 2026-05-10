@@ -15,6 +15,8 @@ def make_user(**overrides):
         "id": 5,
         "telegram_id": 999,
         "role": UserRole.WATCH,
+        "is_deleted": False,
+        "deleted_at": None,
         "has_bot_access": True,
         "trading_restricted_until": None,
         "max_daily_trades": None,
@@ -58,6 +60,10 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         update = schemas.UserUpdate(role=UserRole.STANDARD, has_bot_access=False, max_sessions=99)
 
         with patch("api.routers.users.track_limitation_changes", return_value=([], False, False)), patch(
+            "api.routers.users.ensure_mandatory_channel_rollout", new=AsyncMock()
+        ) as rollout_mock, patch(
+            "api.routers.users.ensure_mandatory_channel_membership", new=AsyncMock()
+        ) as membership_mock, patch(
             "api.routers.users.invalidate_user_cache", new=AsyncMock(), create=True
         ) as invalidate_mock, patch("core.cache.invalidate_user_cache", new=AsyncMock()) as cache_mock, patch(
             "api.routers.users.send_bot_access_notification", new=AsyncMock()
@@ -72,6 +78,8 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user.max_sessions, 3)
         self.assertEqual(db.commits, 1)
         self.assertEqual(db.refreshes, 1)
+        rollout_mock.assert_awaited_once_with(db)
+        membership_mock.assert_not_awaited()
         cache_mock.assert_awaited_once_with(999)
         bot_notify_mock.assert_awaited_once_with(db, user, False)
         block_mock.assert_not_awaited()

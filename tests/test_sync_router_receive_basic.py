@@ -43,15 +43,31 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.notifications.send_telegram_message", new=AsyncMock()) as send_mock, patch(
             "api.routers.sync._apply_item", new=AsyncMock(return_value="ok")
         ) as apply_mock, patch(
+            "api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()
+        ) as rollout_mock, patch(
             "api.routers.sync._refresh_notification_unread_counts", new=AsyncMock()
         ) as refresh_mock, patch("api.routers.sync.settings.server_mode", "iran"):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
         send_mock.assert_awaited_once_with(chat_id=123, text="hi", parse_mode="HTML")
         apply_mock.assert_awaited_once()
+        rollout_mock.assert_not_awaited()
         refresh_mock.assert_awaited_once_with(db, {5})
         self.assertEqual(result, {"status": "success", "processed": 2})
         self.assertGreaterEqual(db.commits, 2)
+
+    async def test_receive_sync_data_rolls_out_mandatory_channel_after_user_sync(self):
+        db = FakeDB()
+        items = [{"table": "users", "operation": "UPDATE", "id": 4, "data": {"telegram_id": 1234, "role": "عادی"}}]
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")) as apply_mock, patch(
+            "api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()
+        ) as rollout_mock, patch("api.routers.sync.settings.server_mode", "iran"):
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        apply_mock.assert_awaited_once()
+        rollout_mock.assert_awaited_once_with(db)
+        self.assertEqual(result, {"status": "success", "processed": 1})
 
     async def test_receive_sync_data_retries_deferred_items_and_invalidates_commodity_caches(self):
         db = FakeDB()
@@ -59,12 +75,14 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=["deferred", "ok"])) as apply_mock, patch(
             "api.routers.sync.settings.server_mode", "iran"
-        ), patch("core.cache.invalidate_commodities_cache", new=AsyncMock()) as invalidate_cache, patch(
+        ), patch("api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()) as rollout_mock, patch(
+            "core.cache.invalidate_commodities_cache", new=AsyncMock()) as invalidate_cache, patch(
             "bot.utils.redis_helpers.invalidate_commodity_cache", new=AsyncMock()
         ) as invalidate_bot_cache:
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
         self.assertEqual(apply_mock.await_count, 2)
+        rollout_mock.assert_not_awaited()
         invalidate_cache.assert_awaited_once()
         invalidate_bot_cache.assert_awaited_once()
         self.assertEqual(result, {"status": "success", "processed": 1})

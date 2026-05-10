@@ -12,6 +12,8 @@ def make_user(**overrides):
         "id": 5,
         "telegram_id": 999,
         "role": None,
+        "is_deleted": False,
+        "deleted_at": None,
         "has_bot_access": True,
         "trading_restricted_until": None,
         "max_daily_trades": None,
@@ -50,13 +52,17 @@ class UsersRouterUpdateLimitsTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.users.convert_to_utc", return_value=until), patch(
             "api.routers.users.track_limitation_changes", return_value=(["A: 1"], True, False)
-        ), patch("core.cache.invalidate_user_cache", new=AsyncMock()), patch(
+        ), patch("api.routers.users.ensure_mandatory_channel_rollout", new=AsyncMock()) as rollout_mock, patch(
+            "api.routers.users.ensure_mandatory_channel_membership", new=AsyncMock()
+        ) as membership_mock, patch("core.cache.invalidate_user_cache", new=AsyncMock()), patch(
             "api.routers.users.send_block_notification", new=AsyncMock()
         ) as block_mock, patch("api.routers.users.send_limitation_notification", new=AsyncMock()) as limit_mock, patch(
             "api.routers.users.send_bot_access_notification", new=AsyncMock()
         ) as bot_mock, patch("api.routers.users.asyncio.create_task") as create_task_mock:
             await update_user(5, schemas.UserUpdate(trading_restricted_until=until), db=db)
 
+        rollout_mock.assert_not_awaited()
+        membership_mock.assert_not_awaited()
         block_mock.assert_awaited_once_with(db, user, until)
         limit_mock.assert_awaited_once_with(db, user, ["A: 1"])
         bot_mock.assert_not_awaited()
@@ -74,13 +80,17 @@ class UsersRouterUpdateLimitsTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.users.convert_to_utc", return_value=None), patch(
             "api.routers.users.track_limitation_changes", return_value=([], False, True)
-        ), patch("core.cache.invalidate_user_cache", new=AsyncMock()), patch(
+        ), patch("api.routers.users.ensure_mandatory_channel_rollout", new=AsyncMock()) as rollout_mock, patch(
+            "api.routers.users.ensure_mandatory_channel_membership", new=AsyncMock()
+        ) as membership_mock, patch("core.cache.invalidate_user_cache", new=AsyncMock()), patch(
             "api.routers.users.send_block_notification", new=AsyncMock()
         ), patch("api.routers.users.send_limitation_notification", new=AsyncMock()), patch(
             "api.routers.users.send_bot_access_notification", new=AsyncMock()
         ), patch("api.routers.users.asyncio.create_task", side_effect=fake_create_task) as create_task_mock:
             await update_user(5, schemas.UserUpdate(trading_restricted_until=None), db=db)
 
+        rollout_mock.assert_not_awaited()
+        membership_mock.assert_not_awaited()
         self.assertEqual(create_task_mock.call_count, 2)
 
 
