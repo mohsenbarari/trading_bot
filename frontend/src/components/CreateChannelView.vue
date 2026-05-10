@@ -69,6 +69,12 @@ type ChannelMemberMutationResponse = {
 const props = defineProps<{
   apiBaseUrl: string
   jwtToken: string | null
+  currentUserId?: number
+}>()
+
+const emit = defineEmits<{
+  (e: 'refresh-conversations'): void
+  (e: 'open-channel', payload: { chatId: number; title: string }): void
 }>()
 
 const form = reactive({
@@ -119,6 +125,19 @@ const selectedCount = computed(() => {
 
 const activeAdminCount = computed(() => {
   return members.value.filter((member) => member.role === 'admin').length
+})
+
+const currentUserMembership = computed(() => {
+  if (typeof props.currentUserId !== 'number') return null
+  return members.value.find((member) => member.user_id === props.currentUserId) ?? null
+})
+
+const canOpenCurrentChannelInMessenger = computed(() => {
+  return typeof props.currentUserId === 'number' && Boolean(createdChannel.value && currentUserMembership.value)
+})
+
+const currentUserCanPostInCurrentChannel = computed(() => {
+  return currentUserMembership.value?.role === 'admin'
 })
 
 function resetFormState() {
@@ -305,6 +324,7 @@ async function createChannel() {
     }
     createdChannel.value = (data as ChannelCreateResponse).channel
     upsertExistingChannel((data as ChannelCreateResponse).channel)
+    emit('refresh-conversations')
     successMessage.value = '✅ کانال ساخته شد. حالا اعضای اولیه را انتخاب کنید.'
     resetFormState()
     await Promise.all([loadMembers(), loadCandidates()])
@@ -340,6 +360,7 @@ async function submitMembers() {
       member_count: summary.member_count,
     }
     upsertExistingChannel(createdChannel.value)
+    emit('refresh-conversations')
     successMessage.value = `✅ اعضا با موفقیت افزوده شدند. اعضای فعال کانال: ${summary.member_count}`
     selectAllActiveUsers.value = false
     selectedUserIds.value = new Set()
@@ -371,6 +392,7 @@ async function updateChannelDetails() {
 
     createdChannel.value = data as ChannelRoom
     upsertExistingChannel(createdChannel.value)
+    emit('refresh-conversations')
     successMessage.value = `✅ مشخصات کانال «${createdChannel.value.title}» ذخیره شد.`
   } catch (error) {
     errorMessage.value = `❌ ${error instanceof Error ? error.message : 'خطا در ویرایش کانال'}`
@@ -400,6 +422,7 @@ async function mutateMember(member: ChannelMember, payload: { role?: 'admin' | '
       member_count: summary.member_count,
     }
     upsertExistingChannel(createdChannel.value)
+    emit('refresh-conversations')
     successMessage.value = successText
     await Promise.all([loadMembers(), loadCandidates(searchQuery.value)])
   } catch (error) {
@@ -419,6 +442,14 @@ async function demoteMember(member: ChannelMember) {
 
 async function removeMember(member: ChannelMember) {
   await mutateMember(member, { remove_member: true }, `✅ ${member.account_name} از کانال حذف شد.`)
+}
+
+function openCurrentChannelInMessenger() {
+  if (!createdChannel.value) return
+  emit('open-channel', {
+    chatId: createdChannel.value.id,
+    title: createdChannel.value.title,
+  })
 }
 
 void loadExistingChannels()
@@ -492,7 +523,25 @@ void loadExistingChannels()
             <template v-if="createdChannel"> • اعضای فعال: {{ createdChannel.member_count }}</template>
           </div>
         </div>
-        <button type="button" class="secondary-btn compact" @click="resetAll">کانال جدید</button>
+        <div class="summary-actions">
+          <button
+            v-if="canOpenCurrentChannelInMessenger"
+            type="button"
+            class="secondary-btn compact"
+            @click="openCurrentChannelInMessenger"
+          >
+            باز کردن در پیام‌رسان
+          </button>
+          <button type="button" class="secondary-btn compact" @click="resetAll">کانال جدید</button>
+        </div>
+      </div>
+
+      <div v-if="createdChannel && typeof currentUserId === 'number' && !currentUserMembership" class="membership-hint warning">
+        شما هنوز عضو فعال این کانال نیستید. تا قبل از اضافه شدن، این کانال در لیست گفتگوهای شما دیده نمی‌شود.
+      </div>
+
+      <div v-else-if="createdChannel && typeof currentUserId === 'number' && currentUserMembership && !currentUserCanPostInCurrentChannel" class="membership-hint info">
+        شما عضو این کانال هستید اما فقط ادمین‌های کانال امکان ارسال پست دارند.
       </div>
 
       <div class="channel-edit-shell">
@@ -663,6 +712,33 @@ void loadExistingChannels()
 .edit-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.membership-hint {
+  border-radius: 16px;
+  padding: 12px 14px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.8;
+}
+
+.membership-hint.warning {
+  background: rgba(255, 247, 237, 0.86);
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  color: #9a3412;
+}
+
+.membership-hint.info {
+  background: rgba(239, 246, 255, 0.9);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  color: #1d4ed8;
 }
 
 .member-shell {

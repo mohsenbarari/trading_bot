@@ -201,6 +201,7 @@ async def get_conversations(
             is_muted=getattr(row, "is_muted", False),
             is_pinned=getattr(row, "is_pinned", False),
             pinned_at=getattr(row, "pinned_at", None),
+            pin_order=getattr(row, "pin_order", None),
         )
         for row in await list_group_conversations(db, current_user_id=current_user.id)
     ]
@@ -226,6 +227,7 @@ async def get_conversations(
             is_muted=getattr(row, "is_muted", False),
             is_pinned=getattr(row, "is_pinned", False),
             pinned_at=getattr(row, "pinned_at", None),
+            pin_order=getattr(row, "pin_order", None),
         )
         for row in await list_channel_conversations(db, current_user_id=current_user.id)
     ]

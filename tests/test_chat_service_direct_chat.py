@@ -48,7 +48,7 @@ class GetOrCreateDirectChatTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chat.id, 55)
         self.assertEqual(chat.type, ChatType.DIRECT)
         db.get.assert_not_awaited()
-        db.flush.assert_awaited_once()
+        self.assertEqual(db.flush.await_count, 2)
 
         self.assertEqual(len(db.added), 3)
         self.assertIsInstance(db.added[0], Chat)
@@ -153,6 +153,7 @@ class GetOrCreateDirectChatTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.added[0].user_id, 20)
         self.assertEqual(db.added[0].membership_status, ChatMembershipStatus.ACTIVE)
         self.assertIsNone(db.added[0].left_at)
+        db.flush.assert_awaited_once()
 
     async def test_set_direct_chat_pin_state_updates_actor_membership(self):
         actor = SimpleNamespace(id=10)
@@ -166,6 +167,9 @@ class GetOrCreateDirectChatTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.services.chat_service._load_direct_chat_members",
             new=AsyncMock(return_value={10: actor_member}),
+        ), patch(
+            "core.services.chat_service.get_next_chat_member_pin_order",
+            new=AsyncMock(return_value=3),
         ):
             member = await set_direct_chat_pin_state(db, actor=actor, other_user_id=20, pinned=True)
 
