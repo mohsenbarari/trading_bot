@@ -543,34 +543,42 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 .title-controls {
   display: flex;
   gap: 8px;
+  align-items: stretch;
+  flex-wrap: wrap;
 }
 
 .title-controls input,
 .candidate-search {
   flex: 1;
   min-width: 0;
-  height: 42px;
+  height: 48px;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 0 12px;
+  border-radius: 14px;
+  padding: 0 16px;
   font: inherit;
+  font-size: 0.95rem;
+  line-height: 1.2;
   outline: none;
+  box-sizing: border-box;
   background: #f8fafc;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
 }
 
 .title-controls input:focus,
 .candidate-search:focus {
   border-color: #3390ec;
   background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(51, 144, 236, 0.12);
 }
 
 .primary-btn,
 .secondary-btn,
 .danger-text-btn {
   border: 0;
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 0 14px;
-  min-height: 42px;
+  min-height: 48px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

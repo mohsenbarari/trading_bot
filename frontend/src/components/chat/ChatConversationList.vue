@@ -265,6 +265,14 @@ function emitConversationAction(action: ConversationListAction) {
   emit('conversation-action', { action, conv })
 }
 
+function shouldShowActionDivider(index: number) {
+  if (index <= 0) return false
+  const current = activeMenuActions.value[index]
+  const previous = activeMenuActions.value[index - 1]
+  if (!current || !previous) return false
+  return current.tone !== previous.tone && (current.tone === 'warning' || current.tone === 'danger')
+}
+
 onBeforeUnmount(() => {
   cancelLongPress()
 })
@@ -405,21 +413,22 @@ onBeforeUnmount(() => {
           <p v-if="menuHint" class="conversation-menu-hint">{{ menuHint }}</p>
 
           <div v-if="activeMenuActions.length > 0" class="conversation-menu-actions">
-            <button
-              v-for="action in activeMenuActions"
-              :key="action.key"
-              class="menu-action"
-              :class="[`tone-${action.tone}`]"
-              @click="emitConversationAction(action.key)"
-            >
-              <div class="menu-action-icon">
-                <component :is="action.icon" :size="20" />
-              </div>
-              <div class="menu-action-copy">
-                <strong>{{ action.label }}</strong>
-                <span>{{ action.description }}</span>
-              </div>
-            </button>
+            <template v-for="(action, index) in activeMenuActions" :key="action.key">
+              <div v-if="shouldShowActionDivider(index)" class="menu-action-divider"></div>
+              <button
+                class="menu-action"
+                :class="[`tone-${action.tone}`]"
+                @click="emitConversationAction(action.key)"
+              >
+                <div class="menu-action-icon">
+                  <component :is="action.icon" :size="20" />
+                </div>
+                <div class="menu-action-copy">
+                  <strong>{{ action.label }}</strong>
+                  <span>{{ action.description }}</span>
+                </div>
+              </button>
+            </template>
           </div>
 
           <div v-else class="conversation-menu-empty">
@@ -434,13 +443,13 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .conversation-list-wrapper {
-  --surface: rgba(255, 250, 240, 0.92);
+  --surface: rgba(255, 255, 255, 0.76);
   --surface-strong: rgba(255, 255, 255, 0.96);
-  --line-soft: rgba(217, 119, 6, 0.14);
-  --text-strong: #1f2937;
-  --text-muted: #6b7280;
-  --accent: #d97706;
-  --accent-soft: #fbbf24;
+  --line-soft: rgba(203, 213, 225, 0.82);
+  --text-strong: #0f172a;
+  --text-muted: #64748b;
+  --accent: #3390ec;
+  --accent-soft: #93c5fd;
   --teal: #0f766e;
   --blue: #2563eb;
   --danger: #dc2626;
@@ -451,9 +460,9 @@ onBeforeUnmount(() => {
   flex-direction: column;
   overflow: hidden;
   background:
-    radial-gradient(circle at top right, rgba(251, 191, 36, 0.22), transparent 26%),
-    radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 24%),
-    linear-gradient(180deg, #fff9ef 0%, #fffefb 52%, #fef6e8 100%);
+    radial-gradient(circle at top right, rgba(51, 144, 236, 0.16), transparent 26%),
+    radial-gradient(circle at top left, rgba(245, 158, 11, 0.1), transparent 22%),
+    linear-gradient(180deg, #edf2f7 0%, #f8fafc 54%, #eef4f8 100%);
 }
 
 .conversation-atmosphere {
@@ -461,8 +470,8 @@ onBeforeUnmount(() => {
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at 18% 14%, rgba(217, 119, 6, 0.09), transparent 18%),
-    radial-gradient(circle at 82% 10%, rgba(37, 99, 235, 0.08), transparent 16%);
+    radial-gradient(circle at 18% 14%, rgba(255, 255, 255, 0.28), transparent 18%),
+    radial-gradient(circle at 82% 12%, rgba(255, 255, 255, 0.2), transparent 16%);
 }
 
 .conversation-panel {
@@ -474,13 +483,13 @@ onBeforeUnmount(() => {
   margin: 10px 12px 0;
   overflow: hidden;
   border-radius: 28px 28px 0 0;
-  border: 1px solid rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.72);
   background: var(--surface);
   box-shadow:
-    0 18px 45px rgba(161, 98, 7, 0.12),
+    0 18px 45px rgba(15, 23, 42, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .conversation-summary-strip {
@@ -547,7 +556,7 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   padding: 10px 12px 112px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(180, 83, 9, 0.24) transparent;
+  scrollbar-color: rgba(51, 144, 236, 0.24) transparent;
 }
 
 .conversations-list::-webkit-scrollbar {
@@ -555,7 +564,7 @@ onBeforeUnmount(() => {
 }
 
 .conversations-list::-webkit-scrollbar-thumb {
-  background: rgba(180, 83, 9, 0.24);
+  background: rgba(51, 144, 236, 0.24);
   border-radius: 999px;
 }
 
@@ -608,13 +617,13 @@ onBeforeUnmount(() => {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
-  border-radius: 24px;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 22px;
   border: 1px solid var(--line-soft);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 249, 240, 0.92));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
   cursor: pointer;
-  box-shadow: 0 10px 22px rgba(120, 53, 15, 0.06);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
   user-select: none;
   -webkit-user-select: none;
@@ -623,23 +632,23 @@ onBeforeUnmount(() => {
 
 .conversation-card:hover {
   transform: translateY(-1px);
-  box-shadow: 0 14px 28px rgba(120, 53, 15, 0.09);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
 }
 
 .conversation-card--pinned {
-  border-color: rgba(217, 119, 6, 0.2);
-  background: linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(255, 246, 228, 0.95));
+  border-color: rgba(245, 158, 11, 0.22);
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(255, 255, 255, 0.96));
 }
 
 .conversation-card--mandatory {
-  border-color: rgba(245, 158, 11, 0.26);
-  box-shadow: 0 14px 30px rgba(180, 83, 9, 0.12);
+  border-color: rgba(245, 158, 11, 0.28);
+  box-shadow: 0 14px 30px rgba(180, 83, 9, 0.1);
 }
 
 .conversation-card--active {
-  background: linear-gradient(135deg, #d97706, #f59e0b);
+  background: linear-gradient(135deg, #3390ec, #2563eb);
   border-color: rgba(255, 255, 255, 0.28);
-  box-shadow: 0 18px 34px rgba(217, 119, 6, 0.25);
+  box-shadow: 0 18px 34px rgba(37, 99, 235, 0.22);
 }
 
 .conversation-card--active .conv-name,
@@ -665,7 +674,7 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: radial-gradient(circle at top right, rgba(251, 191, 36, 0.18), transparent 34%);
+  background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.22), transparent 36%);
   pointer-events: none;
 }
 
@@ -675,7 +684,7 @@ onBeforeUnmount(() => {
   width: 54px;
   height: 54px;
   min-width: 54px;
-  border-radius: 18px;
+  border-radius: 20px;
   background: linear-gradient(135deg, #10b981, #059669);
   color: #fff;
   display: flex;
@@ -683,7 +692,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   font-size: 1.1rem;
   font-weight: 800;
-  box-shadow: 0 10px 20px rgba(15, 118, 110, 0.16);
+  box-shadow: 0 10px 22px rgba(15, 118, 110, 0.14);
 }
 
 .conv-avatar.channel-avatar {
@@ -751,7 +760,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   color: var(--text-muted);
   font-size: 0.72rem;
-  font-weight: 700;
+  font-weight: 800;
 }
 
 .pin-chip,
@@ -853,19 +862,19 @@ onBeforeUnmount(() => {
 }
 
 .unread-badge {
-  background: linear-gradient(135deg, #0f766e, #14b8a6);
+  background: linear-gradient(135deg, #3390ec, #2563eb);
   color: #fff;
-  box-shadow: 0 10px 18px rgba(15, 118, 110, 0.2);
+  box-shadow: 0 10px 18px rgba(37, 99, 235, 0.2);
 }
 
 .conversation-card--active .unread-badge {
   background: #fff;
-  color: var(--accent);
+  color: var(--blue);
 }
 
 .side-pin-indicator {
-  background: rgba(217, 119, 6, 0.08);
-  color: var(--accent);
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
 }
 
 .side-muted-indicator {
@@ -902,12 +911,12 @@ onBeforeUnmount(() => {
   height: 58px;
   border: none;
   border-radius: 22px;
-  background: linear-gradient(135deg, #d97706, #f59e0b);
+  background: linear-gradient(135deg, #3390ec, #2563eb);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 18px 30px rgba(217, 119, 6, 0.28);
+  box-shadow: 0 18px 30px rgba(37, 99, 235, 0.28);
   transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
@@ -924,24 +933,26 @@ onBeforeUnmount(() => {
   justify-content: center;
   padding: 20px 16px 24px;
   background: rgba(17, 24, 39, 0.28);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .conversation-menu-sheet {
-  width: min(100%, 460px);
-  border-radius: 28px;
-  background: rgba(255, 250, 241, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  box-shadow: 0 28px 60px rgba(17, 24, 39, 0.24);
-  padding: 18px;
+  width: min(100%, 380px);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  box-shadow: 0 24px 54px rgba(15, 23, 42, 0.2);
+  padding: 14px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .conversation-menu-close {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   margin-right: auto;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   border: none;
   border-radius: 999px;
   background: rgba(148, 163, 184, 0.14);
@@ -955,7 +966,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+  padding: 2px 2px 0;
 }
 
 .conversation-menu-avatar {
@@ -994,7 +1006,17 @@ onBeforeUnmount(() => {
 .conversation-menu-actions {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(226, 232, 240, 0.86);
+}
+
+.menu-action-divider {
+  height: 1px;
+  margin: 0 14px;
+  background: rgba(226, 232, 240, 0.92);
 }
 
 .menu-action {
@@ -1002,17 +1024,21 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 14px 15px;
-  border-radius: 20px;
-  border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.88);
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
   text-align: right;
+  transition: background 0.12s ease;
+}
+
+.menu-action:hover {
+  background: rgba(15, 23, 42, 0.04);
 }
 
 .menu-action-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1028,21 +1054,20 @@ onBeforeUnmount(() => {
 
 .menu-action-copy strong {
   color: var(--text-strong);
-  font-size: 0.88rem;
+  font-size: 0.9rem;
 }
 
 .menu-action.tone-accent {
-  border-color: rgba(217, 119, 6, 0.14);
+  color: var(--text-strong);
 }
 
 .menu-action.tone-accent .menu-action-icon {
-  background: rgba(217, 119, 6, 0.1);
+  background: rgba(51, 144, 236, 0.12);
   color: var(--accent);
 }
 
 .menu-action.tone-warning {
-  border-color: rgba(194, 65, 12, 0.16);
-  background: linear-gradient(180deg, rgba(255, 247, 237, 0.98), rgba(255, 237, 213, 0.92));
+  background: linear-gradient(180deg, rgba(255, 247, 237, 0.88), rgba(255, 247, 237, 0.52));
 }
 
 .menu-action.tone-warning .menu-action-icon {
@@ -1055,8 +1080,7 @@ onBeforeUnmount(() => {
 }
 
 .menu-action.tone-danger {
-  border-color: rgba(220, 38, 38, 0.18);
-  background: linear-gradient(180deg, rgba(254, 242, 242, 0.98), rgba(254, 226, 226, 0.92));
+  background: linear-gradient(180deg, rgba(254, 242, 242, 0.9), rgba(254, 242, 242, 0.58));
 }
 
 .menu-action.tone-danger .menu-action-icon {
@@ -1074,7 +1098,7 @@ onBeforeUnmount(() => {
   gap: 10px;
   padding: 14px;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.84);
+  background: rgba(248, 250, 252, 0.96);
   color: var(--accent);
 }
 
@@ -1116,6 +1140,10 @@ onBeforeUnmount(() => {
   .conversation-card {
     padding: 13px 14px;
     border-radius: 22px;
+  }
+
+  .conversation-menu-sheet {
+    width: min(100%, 100%);
   }
 
   .fab-new-chat {
