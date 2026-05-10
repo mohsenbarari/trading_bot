@@ -82,6 +82,7 @@ const props = defineProps<{
   jwtToken: string | null
   currentUserId?: number
   showCloseButton?: boolean
+  initialChannelId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -321,6 +322,17 @@ function openChannel(channel: ChannelRoom) {
   void loadMembers()
 }
 
+async function openChannelById(channelId: number) {
+  if (!existingChannels.value.some((channel) => channel.id === channelId)) {
+    await loadExistingChannels()
+  }
+
+  const channel = existingChannels.value.find((item) => item.id === channelId)
+  if (!channel) return
+
+  openChannel(channel)
+}
+
 async function loadExistingChannels() {
   isLoadingChannels.value = true
   try {
@@ -540,6 +552,11 @@ watch(candidateQuery, (value) => {
 watch(activeChannel, (channel) => {
   syncEditorWithActiveChannel(channel)
 })
+
+watch(() => props.initialChannelId, (channelId) => {
+  if (!channelId) return
+  void openChannelById(channelId)
+}, { immediate: true })
 
 watch(page, (nextPage) => {
   if (nextPage === 'members' || nextPage === 'admins' || nextPage === 'overview') {
@@ -872,7 +889,9 @@ void loadExistingChannels()
 <style scoped>
 .channel-manager-root {
   width: 100%;
-  min-height: min(88vh, 880px);
+  min-height: 0;
+  max-height: min(88vh, 880px);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   direction: rtl;
@@ -934,6 +953,9 @@ void loadExistingChannels()
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 18px 16px 28px;
   display: flex;
   flex-direction: column;

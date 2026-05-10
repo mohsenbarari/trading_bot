@@ -1605,6 +1605,7 @@ const showNewChatModal = ref(false)
 const showGroupManagerModal = ref(false)
 const showChannelManagerModal = ref(false)
 const groupManagerChatId = ref<number | null>(null)
+const channelManagerChatId = ref<number | null>(null)
 
 const handleNewChatSearch = (userId: number, userName: string) => {
     showNewChatModal.value = false
@@ -1620,15 +1621,18 @@ function openGroupCreation() {
 function openChannelCreation() {
   if (!canCreateOptionalChannel.value) return
   showNewChatModal.value = false
+  channelManagerChatId.value = null
   showChannelManagerModal.value = true
 }
 
 function closeChannelManager() {
+  channelManagerChatId.value = null
   showChannelManagerModal.value = false
   void loadConversations()
 }
 
 async function handleChannelManagerOpenChannel(payload: { chatId: number; title: string }) {
+  channelManagerChatId.value = null
   const conversationKey = resolveRoomConversationKey('channel', payload.chatId) ?? -Math.abs(payload.chatId)
   showChannelManagerModal.value = false
   await loadConversations()
@@ -1653,10 +1657,19 @@ function handleChannelManagerConversationRefresh() {
   void loadConversations()
 }
 
-function openSelectedGroupManager() {
-  if (selectedRoomKind.value !== 'group' || !selectedConversation.value?.chat_id) return
-  groupManagerChatId.value = selectedConversation.value.chat_id
-  showGroupManagerModal.value = true
+function openSelectedRoomManager() {
+  if (!selectedConversation.value?.chat_id) return
+
+  if (selectedRoomKind.value === 'group') {
+    groupManagerChatId.value = selectedConversation.value.chat_id
+    showGroupManagerModal.value = true
+    return
+  }
+
+  if (selectedRoomKind.value === 'channel') {
+    channelManagerChatId.value = selectedConversation.value.chat_id
+    showChannelManagerModal.value = true
+  }
 }
 
 async function handleGroupCreated(group: { id: number; title: string }) {
@@ -2756,7 +2769,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @result-click="handleSearchResultClick"
       @call="handleCall"
       @clear-selection="clearSelection"
-      @manage-room="openSelectedGroupManager"
+      @manage-room="openSelectedRoomManager"
       @create-group="openGroupCreation"
       @create-channel="openChannelCreation"
       :isDeleted="isSelectedUserDeleted"
@@ -3111,6 +3124,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
           :jwtToken="props.jwtToken"
           :currentUserId="props.currentUserId"
           :showCloseButton="true"
+          :initialChannelId="channelManagerChatId"
           @close="closeChannelManager"
           @refresh-conversations="handleChannelManagerConversationRefresh"
           @open-channel="handleChannelManagerOpenChannel"
