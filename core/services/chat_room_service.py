@@ -30,6 +30,7 @@ class ChannelInviteCandidate:
     account_name: str
     full_name: str
     mobile_number: str
+    avatar_file_id: str | None = None
     is_already_member: bool = False
 
 
@@ -57,6 +58,7 @@ class ChannelRoomSummary:
     type: ChatType
     title: str
     description: str | None
+    avatar_file_id: str | None
     created_by_id: int | None
     is_system: bool
     is_mandatory: bool
@@ -70,6 +72,7 @@ class GroupRoomSummary:
     type: ChatType
     title: str
     description: str | None
+    avatar_file_id: str | None
     created_by_id: int | None
     member_count: int
     max_members: int
@@ -82,6 +85,7 @@ class ChannelConversationSummary:
     id: int
     other_user_id: int
     other_user_name: str
+    avatar_file_id: str | None
     other_user_is_deleted: bool
     last_message_content: str | None
     last_message_type: MessageType | None
@@ -108,6 +112,7 @@ class ChannelMemberSummary:
     account_name: str
     full_name: str
     mobile_number: str
+    avatar_file_id: str | None
     role: ChatMemberRole
     joined_at: datetime
     is_channel_creator: bool
@@ -119,6 +124,7 @@ class GroupMemberSummary:
     account_name: str
     full_name: str
     mobile_number: str
+    avatar_file_id: str | None
     role: ChatMemberRole
     joined_at: datetime
     is_group_creator: bool
@@ -488,6 +494,7 @@ async def create_optional_channel(
     creator: User,
     title: str,
     description: str | None = None,
+    avatar_file_id: str | None = None,
 ) -> Chat:
     """Create one optional invite-only channel and add the creator as admin."""
     cleaned_title = _clean_text(title)
@@ -499,6 +506,7 @@ async def create_optional_channel(
         type=ChatType.CHANNEL,
         title=cleaned_title,
         description=_clean_text(description),
+        avatar_file_id=avatar_file_id,
         created_by_id=creator.id,
         is_system=False,
         is_mandatory=False,
@@ -526,6 +534,7 @@ async def create_group_chat(
     creator: User,
     title: str,
     description: str | None = None,
+    avatar_file_id: str | None = None,
     member_ids: list[int],
 ) -> Chat:
     """Create one group chat with the creator as admin and initial active members."""
@@ -565,6 +574,7 @@ async def create_group_chat(
         type=ChatType.GROUP,
         title=cleaned_title,
         description=_clean_text(description),
+        avatar_file_id=avatar_file_id,
         created_by_id=creator.id,
         is_system=False,
         is_mandatory=False,
@@ -607,6 +617,7 @@ async def update_group_chat(
     chat: Chat,
     title: str,
     description: str | None = None,
+    avatar_file_id: str | None = None,
 ) -> Chat:
     cleaned_title = _clean_text(title)
     if not cleaned_title:
@@ -614,6 +625,7 @@ async def update_group_chat(
 
     chat.title = cleaned_title
     chat.description = _clean_text(description)
+    chat.avatar_file_id = avatar_file_id
     chat.updated_at = _utcnow()
     await db.commit()
     await db.refresh(chat)
@@ -626,6 +638,7 @@ async def update_manageable_channel_metadata(
     chat: Chat,
     title: str,
     description: str | None = None,
+    avatar_file_id: str | None = None,
 ) -> Chat:
     """Update one admin-manageable channel title/description."""
     cleaned_title = _clean_text(title)
@@ -634,6 +647,7 @@ async def update_manageable_channel_metadata(
 
     chat.title = cleaned_title
     chat.description = _clean_text(description)
+    chat.avatar_file_id = avatar_file_id
     chat.updated_at = _utcnow()
     await db.commit()
     await db.refresh(chat)
@@ -670,6 +684,7 @@ async def list_manageable_channels(db: AsyncSession) -> list[ChannelRoomSummary]
                 type=chat.type,
                 title=chat.title or "",
                 description=chat.description,
+                avatar_file_id=chat.avatar_file_id,
                 created_by_id=chat.created_by_id,
                 is_system=chat.is_system,
                 is_mandatory=chat.is_mandatory,
@@ -686,12 +701,14 @@ async def update_optional_channel(
     chat: Chat,
     title: str,
     description: str | None = None,
+    avatar_file_id: str | None = None,
 ) -> Chat:
     return await update_manageable_channel_metadata(
         db,
         chat=chat,
         title=title,
         description=description,
+        avatar_file_id=avatar_file_id,
     )
 
 
@@ -748,6 +765,7 @@ async def list_groups_for_user(
                 type=chat.type,
                 title=chat.title or "",
                 description=chat.description,
+                avatar_file_id=chat.avatar_file_id,
                 created_by_id=chat.created_by_id,
                 member_count=int(active_member_count or 0),
                 max_members=int(chat.max_members or GROUP_MAX_MEMBERS),
@@ -836,6 +854,7 @@ async def list_group_conversations(
                 id=synthetic_room_id,
                 other_user_id=synthetic_room_id,
                 other_user_name=chat.title or f"گروه {chat.id}",
+                avatar_file_id=chat.avatar_file_id,
                 other_user_is_deleted=False,
                 last_message_content=last_content,
                 last_message_type=last_type,
@@ -880,6 +899,7 @@ async def list_group_members(db: AsyncSession, *, chat: Chat) -> list[GroupMembe
                 account_name=user.account_name,
                 full_name=user.full_name,
                 mobile_number=user.mobile_number,
+                avatar_file_id=user.avatar_file_id,
                 role=member.role,
                 joined_at=member.joined_at,
                 is_group_creator=chat.created_by_id == user.id,
@@ -1257,6 +1277,7 @@ async def list_channel_conversations(
                 id=synthetic_room_id,
                 other_user_id=synthetic_room_id,
                 other_user_name=chat.title or f"کانال {chat.id}",
+                avatar_file_id=chat.avatar_file_id,
                 other_user_is_deleted=False,
                 last_message_content=last_content,
                 last_message_type=last_type,
@@ -1299,6 +1320,7 @@ async def list_channel_members(db: AsyncSession, *, chat: Chat) -> list[ChannelM
                 account_name=user.account_name,
                 full_name=user.full_name,
                 mobile_number=user.mobile_number,
+                avatar_file_id=user.avatar_file_id,
                 role=member.role,
                 joined_at=member.joined_at,
                 is_channel_creator=chat.created_by_id == user.id,
@@ -1545,6 +1567,7 @@ async def list_channel_invite_candidates(
                 account_name=user.account_name,
                 full_name=user.full_name,
                 mobile_number=user.mobile_number,
+                avatar_file_id=user.avatar_file_id,
                 is_already_member=False,
             )
             for user in users

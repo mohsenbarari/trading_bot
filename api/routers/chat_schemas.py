@@ -139,6 +139,7 @@ class ConversationRead(BaseModel):
     id: int
     other_user_id: int
     other_user_name: str
+    avatar_file_id: Optional[str] = None
     other_user_is_deleted: bool = False
     last_message_content: Optional[str] = None
     last_message_type: Optional[MessageType] = None
@@ -240,6 +241,7 @@ class ChannelRoomRead(BaseModel):
     type: ChatType
     title: str
     description: Optional[str] = None
+    avatar_file_id: Optional[str] = None
     created_by_id: Optional[int] = None
     is_system: bool = False
     is_mandatory: bool = False
@@ -252,6 +254,7 @@ class GroupRoomRead(BaseModel):
     type: ChatType
     title: str
     description: Optional[str] = None
+    avatar_file_id: Optional[str] = None
     created_by_id: Optional[int] = None
     member_count: int = 0
     max_members: int = 50
@@ -264,6 +267,7 @@ class GroupMemberRead(BaseModel):
     account_name: str
     full_name: str
     mobile_number: str
+    avatar_file_id: Optional[str] = None
     role: str
     joined_at: datetime
     is_group_creator: bool = False
@@ -272,6 +276,7 @@ class GroupMemberRead(BaseModel):
 class GroupCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=2000)
+    avatar_file_id: Optional[str] = Field(None, max_length=36)
     member_ids: List[int] = Field(default_factory=list)
 
     @field_validator("title")
@@ -285,6 +290,14 @@ class GroupCreateRequest(BaseModel):
     @field_validator("description")
     @classmethod
     def normalize_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator("avatar_file_id")
+    @classmethod
+    def normalize_avatar_file_id(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         cleaned = value.strip()
@@ -315,6 +328,7 @@ class GroupDetailRead(BaseModel):
 class GroupUpdateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=2000)
+    avatar_file_id: Optional[str] = Field(None, max_length=36)
 
     @field_validator("title")
     @classmethod
@@ -327,6 +341,14 @@ class GroupUpdateRequest(BaseModel):
     @field_validator("description")
     @classmethod
     def normalize_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator("avatar_file_id")
+    @classmethod
+    def normalize_avatar_file_id(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         cleaned = value.strip()
@@ -352,6 +374,7 @@ class ChannelMemberRead(BaseModel):
     account_name: str
     full_name: str
     mobile_number: str
+    avatar_file_id: Optional[str] = None
     role: str
     joined_at: datetime
     is_channel_creator: bool = False
@@ -360,6 +383,7 @@ class ChannelMemberRead(BaseModel):
 class ChannelCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=2000)
+    avatar_file_id: Optional[str] = Field(None, max_length=36)
 
     @field_validator("title")
     @classmethod
@@ -372,6 +396,14 @@ class ChannelCreateRequest(BaseModel):
     @field_validator("description")
     @classmethod
     def normalize_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator("avatar_file_id")
+    @classmethod
+    def normalize_avatar_file_id(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         cleaned = value.strip()
@@ -386,6 +418,7 @@ class ChannelCreateResponse(BaseModel):
 class ChannelUpdateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=2000)
+    avatar_file_id: Optional[str] = Field(None, max_length=36)
 
     @field_validator("title")
     @classmethod
@@ -403,12 +436,21 @@ class ChannelUpdateRequest(BaseModel):
         cleaned = value.strip()
         return cleaned or None
 
+    @field_validator("avatar_file_id")
+    @classmethod
+    def normalize_avatar_file_id(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
 
 class ChannelInviteCandidateRead(BaseModel):
     user_id: int
     account_name: str
     full_name: str
     mobile_number: str
+    avatar_file_id: Optional[str] = None
     is_already_member: bool = False
 
 

@@ -92,7 +92,6 @@ let closingContextMenuFromBack = false
 
 // Search State
 const isSearchActive = ref(false)
-const isHeaderMenuOpen = ref(false)
 const searchQuery = ref('')
 const searchResults = ref<any[]>([])
 const isSearching = ref(false)
@@ -213,6 +212,33 @@ function syncSelectedConversationRoute(userId: number | null, userName = '') {
 
 function updateIsMobile() {
   isMobile.value = window.innerWidth < 768
+}
+
+function bindOverlayBackState(source: () => boolean, onBack: () => void) {
+  let backStateActive = false
+  let closingFromBack = false
+
+  watch(source, (isOpen) => {
+    if (isOpen) {
+      if (!backStateActive) {
+        backStateActive = true
+        pushBackState(() => {
+          backStateActive = false
+          closingFromBack = true
+          onBack()
+          closingFromBack = false
+        })
+      }
+      return
+    }
+
+    if (backStateActive) {
+      backStateActive = false
+      if (!closingFromBack) {
+        popBackState()
+      }
+    }
+  })
 }
 
 const {
@@ -572,7 +598,8 @@ const selectedRoomKind = computed<'direct' | 'channel' | 'group'>(() => {
 const selectedRoomMemberCount = computed(() => selectedConversation.value?.member_count ?? null)
 const selectedRoomIsMandatory = computed(() => !!selectedConversation.value?.is_mandatory)
 const selectedRoomIsSystem = computed(() => !!selectedConversation.value?.is_system)
-const canCreateOptionalChannel = computed(() => isAdminRole(props.currentUserRole ?? null))
+const selectedAvatarFileId = computed(() => selectedConversation.value?.avatar_file_id ?? null)
+const canCreateOptionalChannel = computed(() => (props.currentUserRole ?? null) === 'مدیر ارشد')
 
 const canSendToSelectedRoom = computed(() => {
   if (selectedRoomKind.value === 'direct') return true
@@ -1405,6 +1432,7 @@ const toggleSearch = () => {
         searchQuery.value = ''
         searchResults.value = []
         currentSearchIndex.value = 0
+      showInChatSearchList.value = false
     }
 }
 
@@ -2714,6 +2742,38 @@ watch(showAttachmentMenu, (isOpen) => {
   }
 })
 
+bindOverlayBackState(() => showNewChatModal.value, () => {
+  showNewChatModal.value = false
+})
+
+bindOverlayBackState(() => showForwardModal.value, () => {
+  showForwardModal.value = false
+})
+
+bindOverlayBackState(() => showStickerPicker.value, () => {
+  showStickerPicker.value = false
+})
+
+bindOverlayBackState(() => isSearchActive.value, () => {
+  isSearchActive.value = false
+  showInChatSearchList.value = false
+  searchQuery.value = ''
+  searchResults.value = []
+  currentSearchIndex.value = 0
+})
+
+bindOverlayBackState(() => showInChatSearchList.value, () => {
+  showInChatSearchList.value = false
+})
+
+bindOverlayBackState(() => Boolean(selectedLocation.value), () => {
+  closeLocationModal()
+})
+
+bindOverlayBackState(() => Boolean(lightboxMedia.value), () => {
+  closeLightbox()
+})
+
 function handleToggleAttachment() {
   if (selectedRoomKind.value === 'channel' && !canSendToSelectedRoom.value) {
     return
@@ -2749,7 +2809,9 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :isSelectionMode="isSelectionMode"
       :selectedUserId="selectedUserId"
       :selectedUserName="selectedUserName"
+      :selectedAvatarFileId="selectedAvatarFileId"
       :selectedRoomKind="selectedRoomKind"
+      :apiBaseUrl="apiBaseUrl"
       :targetUserStatus="selectedRoomStatusText"
       :isTyping="isTyping"
       :totalUnread="totalUnread"
@@ -2834,6 +2896,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :conversations="sortedConversations"
       :selectedUserId="selectedUserId"
       :typingUsers="typingUsers"
+      :apiBaseUrl="apiBaseUrl"
       @select-conversation="selectConversation"
       @conversation-action="handleConversationAction"
       @new-conversation="showNewChatModal = true"
@@ -3117,7 +3180,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @left="handleGroupLeft"
     />
 
-    <div v-if="showChannelManagerModal" class="channel-manager-overlay" @click.self="closeChannelManager">
+    <div v-if="showChannelManagerModal" class="channel-manager-overlay">
       <div class="channel-manager-sheet">
         <CreateChannelView
           :apiBaseUrl="props.apiBaseUrl"

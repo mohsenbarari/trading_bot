@@ -1593,7 +1593,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .swipe-reply-icon.received-side { left: 16px; }
 
 .message-bubble {
-  max-width: 92%; padding: 8px 12px; border-radius: 12px; position: relative; font-size: 15px; line-height: 1.5;
+  max-width: 100%; padding: 8px 12px; border-radius: 12px; position: relative; font-size: 15px; line-height: 1.5;
   white-space: pre-wrap; word-wrap: break-word; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   animation: slideIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   will-change: transform;
@@ -1607,7 +1607,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .message-bubble.album-bubble {
   padding: 4px 4px 6px;
   width: fit-content;
-  max-width: min(92%, 336px);
+  max-width: min(100%, 336px);
 }
 .message-bubble.sent { align-self: flex-start; background: #eeffde; color: #000000; border-radius: 12px 12px 4px 12px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
 .message-bubble.received { align-self: flex-end; background: #FFFFFF; color: #000000; border-radius: 12px 12px 12px 4px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
@@ -1618,7 +1618,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 4px;
-  max-width: 92%;
+  max-width: 100%;
 }
 
 .message-reactions.sent {

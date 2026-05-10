@@ -74,6 +74,7 @@ class UserRead(UserBase):
     role: UserRole
     has_bot_access: bool
     is_deleted: bool = False
+    avatar_file_id: str | None = None
     created_at: datetime
     trading_restricted_until: datetime | None = None
     
@@ -117,6 +118,7 @@ class UserPublicRead(BaseModel):
     role: UserRole
     mobile_number: str
     address: str
+    avatar_file_id: str | None = None
     created_at: datetime
     trades_count: int = 0
     last_seen_at: datetime | None = None
@@ -143,6 +145,18 @@ class UserUpdate(BaseModel):
     can_block_users: Optional[bool] = None
     max_blocked_users: Optional[int] = None
     max_sessions: Optional[int] = None
+
+
+class UserAvatarUpdate(BaseModel):
+    avatar_file_id: str | None = None
+
+    @field_validator('avatar_file_id')
+    @classmethod
+    def normalize_avatar_file_id(cls, value: str | None):
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
 
 # --- ۳. اعتبارسنج (validator) اضافه شد ---

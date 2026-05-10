@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { type Conversation } from '../../types/chat'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
+import { popBackState, pushBackState } from '../../composables/useBackButton'
+import { buildChatFileUrl, getAvatarInitial } from '../../utils/chatFiles'
 import {
   ArrowDown,
   ArrowUp,
@@ -34,6 +36,7 @@ const props = defineProps<{
   conversations: Conversation[]
   selectedUserId: number | null
   typingUsers: Record<number, boolean>
+  apiBaseUrl?: string
 }>()
 
 const emit = defineEmits<{
@@ -46,6 +49,8 @@ const menuConversation = ref<Conversation | null>(null)
 const suppressClickConversationId = ref<number | null>(null)
 const longPressTimer = ref<number | null>(null)
 const pointerOrigin = ref({ x: 0, y: 0 })
+const conversationMenuBackStateActive = ref(false)
+let closingConversationMenuFromBack = false
 
 function formatTime(dateStr: string) {
   const date = new Date(dateStr)
@@ -121,7 +126,11 @@ function canMarkConversationUnread(conv: Conversation) {
 }
 
 function getConversationInitial(conv: Conversation) {
-  return (conv.other_user_name || '?').charAt(0)
+  return getAvatarInitial(conv.other_user_name)
+}
+
+function getConversationAvatarUrl(conv: Conversation) {
+  return buildChatFileUrl(conv.avatar_file_id ?? null, props.apiBaseUrl ?? '')
 }
 
 function getPreviewText(conv: Conversation) {
@@ -166,6 +175,28 @@ function closeConversationMenu() {
     suppressClickConversationId.value = null
   }, 0)
 }
+
+watch(() => Boolean(menuConversation.value), (isOpen) => {
+  if (isOpen) {
+    if (!conversationMenuBackStateActive.value) {
+      conversationMenuBackStateActive.value = true
+      pushBackState(() => {
+        conversationMenuBackStateActive.value = false
+        closingConversationMenuFromBack = true
+        closeConversationMenu()
+        closingConversationMenuFromBack = false
+      })
+    }
+    return
+  }
+
+  if (conversationMenuBackStateActive.value) {
+    conversationMenuBackStateActive.value = false
+    if (!closingConversationMenuFromBack) {
+      popBackState()
+    }
+  }
+})
 
 function handleConversationClick(conv: Conversation) {
   if (suppressClickConversationId.value === conv.id) {
@@ -415,7 +446,8 @@ onBeforeUnmount(() => {
                   'group-avatar': isGroupConversation(conv),
                 }"
               >
-                <Megaphone v-if="isChannelConversation(conv)" :size="22" />
+                <img v-if="getConversationAvatarUrl(conv)" :src="getConversationAvatarUrl(conv)" :alt="conv.other_user_name" class="conv-avatar-image" />
+                <Megaphone v-else-if="isChannelConversation(conv)" :size="22" />
                 <UsersRound v-else-if="isGroupConversation(conv)" :size="22" />
                 <template v-else>{{ getConversationInitial(conv) }}</template>
                 <div v-if="!isRoomConversation(conv) && isUserOnline(conv.other_user_last_seen_at)" class="online-indicator-dot"></div>
@@ -754,6 +786,13 @@ onBeforeUnmount(() => {
 
 .conv-avatar.group-avatar {
   background: linear-gradient(135deg, #2563eb, #38bdf8);
+}
+
+.conv-avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
 }
 
 .online-indicator-dot {

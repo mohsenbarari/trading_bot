@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
 import LoadingSkeleton from './LoadingSkeleton.vue';
+import { buildChatFileUrl, getAvatarInitial } from '../utils/chatFiles';
 
 const props = defineProps<{
   user: { id: number; account_name: string } | null;
@@ -14,6 +15,7 @@ const emit = defineEmits(['navigate']);
 interface PublicUser {
   id: number;
   account_name: string;
+  avatar_file_id?: string | null;
   mobile_number: string;
   address: string;
   created_at_jalali: string;
@@ -54,6 +56,7 @@ const isOwnProfile = computed(() => {
 });
 const showVisitorSections = computed(() => !isOwnProfile.value);
 const showOwnerSections = computed(() => isOwnProfile.value);
+const profileAvatarUrl = computed(() => buildChatFileUrl(profileData.value?.avatar_file_id ?? null, props.apiBaseUrl));
 const sharedStatCards = computed<ProfileStatCard[]>(() => {
   if (!profileData.value) return [];
 
@@ -179,6 +182,16 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 
     <div v-else-if="profileData" class="profile-content">
       <section class="profile-section shared-profile-section">
+        <div class="profile-hero">
+          <div class="profile-avatar">
+            <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
+            <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
+          </div>
+          <div class="profile-hero-copy">
+            <h3>{{ profileData.account_name }}</h3>
+          </div>
+        </div>
+
         <div class="info-section">
           <div class="info-row">
               <span class="label">📞 موبایل:</span>
@@ -263,6 +276,42 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   gap: 20px;
   align-items: center;
   padding: 10px 0;
+}
+
+.profile-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.profile-avatar {
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #3390ec, #0ea5e9 58%, #f59e0b 100%);
+  color: #fff;
+  font-size: 2rem;
+  font-weight: 900;
+  flex-shrink: 0;
+}
+
+.profile-avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-hero-copy h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  color: var(--text-color);
 }
 
 .profile-section {

@@ -5,6 +5,7 @@ export interface Conversation {
     chat_id?: number | null
     other_user_id: number
     other_user_name: string
+    avatar_file_id?: string | null
     other_user_is_deleted?: boolean
     last_message_content: string | null
     last_message_type: string | null
