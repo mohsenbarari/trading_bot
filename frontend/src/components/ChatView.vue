@@ -2565,7 +2565,13 @@ function viewProfile() {
         id: selectedUserId.value, 
         account_name: selectedUserName.value 
     })
+    return
   }
+
+  emit('navigate', 'public_profile', {
+    id: props.currentUserId,
+    account_name: '',
+  })
 }
 
 function openPublicProfile(payload?: { id?: number; account_name?: string }) {

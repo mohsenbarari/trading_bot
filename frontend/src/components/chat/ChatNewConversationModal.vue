@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import LoadingSkeleton from '../LoadingSkeleton.vue'
+import ChatUserListRow from './ChatUserListRow.vue'
 import { UsersRound } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -16,7 +17,7 @@ const emit = defineEmits<{
 const token = localStorage.getItem('auth_token') || ''
 
 const searchQuery = ref('')
-const users = ref<any[]>([])
+const users = ref<Array<{ id: number; account_name: string; mobile_number: string; avatar_file_id?: string | null }>>([])
 const isLoading = ref(false)
 
 const searchUsers = async (query: string = '') => {
@@ -67,9 +68,6 @@ onMounted(() => {
   }
 })
 
-const getAvatarInitial = (name: string) => {
-  return name ? name.charAt(0).toUpperCase() : '?'
-}
 </script>
 
 <template>
@@ -115,13 +113,20 @@ const getAvatarInitial = (name: string) => {
           <p>کاربری یافت نشد</p>
         </div>
 
-        <div v-else class="user-item" v-for="user in users" :key="user.id" v-ripple @click="$emit('start-chat', user.id, user.account_name)">
-          <div class="user-avatar">{{ getAvatarInitial(user.account_name) }}</div>
-          <div class="user-details">
-            <span class="user-name">{{ user.account_name }}</span>
-            <span class="user-phone" dir="ltr">{{ user.mobile_number }}</span>
-          </div>
-        </div>
+        <ChatUserListRow
+          v-else
+          v-for="user in users"
+          :key="user.id"
+          tag="button"
+          :interactive="true"
+          :name="user.account_name"
+          :avatar-file-id="user.avatar_file_id || null"
+          @click="$emit('start-chat', user.id, user.account_name)"
+        >
+          <template #subtitle>
+            <span dir="ltr">{{ user.mobile_number }}</span>
+          </template>
+        </ChatUserListRow>
       </div>
       
     </div>
@@ -253,56 +258,6 @@ const getAvatarInitial = (name: string) => {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   background: white;
-}
-
-.user-item {
-  display: flex;
-  align-items: center;
-  padding: 10px 16px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.user-item:hover {
-  background: #f5f5f5;
-}
-
-.user-avatar {
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  background: #3390ec;
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 500;
-  flex-shrink: 0;
-  margin-left: 12px;
-}
-
-.user-details {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-}
-
-.user-name {
-  font-size: 16px;
-  font-weight: 500;
-  color: #000;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.user-phone {
-  font-size: 14px;
-  color: #707579;
-  margin-top: 2px;
-  text-align: right;
 }
 
 .empty-state {

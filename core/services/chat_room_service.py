@@ -1753,6 +1753,49 @@ async def update_channel_member(
     )
 
 
+async def delete_optional_channel(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    actor_user_id: int,
+) -> ChannelMemberMutationSummary:
+    if chat.is_system or chat.is_mandatory:
+        raise HTTPException(status_code=400, detail="Mandatory/system channels cannot be deleted here")
+
+    now = _utcnow()
+    members_result = await db.execute(
+        select(ChatMember).where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+    )
+    active_members = members_result.scalars().all()
+
+    for member in active_members:
+        member.membership_status = ChatMembershipStatus.REMOVED
+        member.left_at = now
+        member.is_pinned = False
+        member.pinned_at = None
+        member.pin_order = None
+        member.is_hidden = False
+        member.hidden_at = None
+        member.updated_at = now
+
+    chat.is_deleted = True
+    chat.deleted_at = now
+    chat.updated_at = now
+    await db.commit()
+
+    return ChannelMemberMutationSummary(
+        chat_id=chat.id,
+        user_id=actor_user_id,
+        role=None,
+        removed=True,
+        member_count=0,
+        left=False,
+    )
+
+
 async def leave_channel_chat(
     db: AsyncSession,
     *,
@@ -1778,7 +1821,7 @@ async def leave_channel_chat(
 
     is_admin_leave = member.role == ChatMemberRole.ADMIN
     if member.user_id == chat.created_by_id and is_admin_leave:
-        raise HTTPException(status_code=400, detail="Channel creator must remain an active admin")
+        return await delete_optional_channel(db, chat=chat, actor_user_id=user_id)
 
     if is_admin_leave:
         admin_count_result = await db.execute(

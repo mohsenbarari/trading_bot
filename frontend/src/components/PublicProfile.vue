@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
 import LoadingSkeleton from './LoadingSkeleton.vue';
-import { buildChatFileUrl, getAvatarInitial } from '../utils/chatFiles';
+import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
 
 const props = defineProps<{
   user: { id: number; account_name: string } | null;
@@ -50,6 +50,8 @@ const isLoading = ref(true);
 const error = ref('');
 const isHistoryLoading = ref(false);
 const showHistory = ref(false);
+const avatarBusy = ref(false);
+const avatarInput = ref<HTMLInputElement | null>(null);
 const isOwnProfile = computed(() => {
   if (!profileData.value) return false;
   return Number(profileData.value.id) === Number(props.viewerUserId);
@@ -111,6 +113,77 @@ onMounted(async () => {
   }
 });
 
+function parseApiError(payload: unknown, fallback: string) {
+  if (typeof payload === 'object' && payload && 'detail' in payload) {
+    const detail = (payload as { detail?: unknown }).detail
+    if (typeof detail === 'string' && detail.trim()) {
+      return detail
+    }
+  }
+  return fallback
+}
+
+function triggerAvatarPicker() {
+  if (avatarBusy.value || !isOwnProfile.value) return
+  avatarInput.value?.click()
+}
+
+async function updateOwnAvatar(avatarFileId: string | null) {
+  if (!props.jwtToken) {
+    throw new Error('نشست کاربری معتبر نیست.')
+  }
+
+  const response = await fetch(`${props.apiBaseUrl}/api/auth/me/avatar`, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${props.jwtToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ avatar_file_id: avatarFileId }),
+  })
+
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(parseApiError(payload, 'ذخیره آواتار ناموفق بود.'))
+  }
+
+  if (profileData.value) {
+    profileData.value.avatar_file_id = avatarFileId
+  }
+}
+
+async function handleAvatarSelected(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (!file || !isOwnProfile.value) return
+
+  avatarBusy.value = true
+  error.value = ''
+  try {
+    const uploaded = await uploadAvatarImage(file, props.apiBaseUrl)
+    await updateOwnAvatar(uploaded.file_id)
+  } catch (e: any) {
+    error.value = e?.message || 'آپلود آواتار ناموفق بود.'
+  } finally {
+    avatarBusy.value = false
+    if (input) input.value = ''
+  }
+}
+
+async function clearAvatar() {
+  if (!isOwnProfile.value || avatarBusy.value) return
+
+  avatarBusy.value = true
+  error.value = ''
+  try {
+    await updateOwnAvatar(null)
+  } catch (e: any) {
+    error.value = e?.message || 'حذف آواتار ناموفق بود.'
+  } finally {
+    avatarBusy.value = false
+  }
+}
+
 async function loadMutualTrades() {
     if (!profileData.value || isHistoryLoading.value) return;
     
@@ -151,6 +224,7 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 
 <template>
   <div class="card">
+    <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
     <div class="header-row">
       <div class="header-spacer"></div>
       <div class="header-title">
@@ -186,9 +260,18 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
           <div class="profile-avatar">
             <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
             <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
+            <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
           </div>
           <div class="profile-hero-copy">
             <h3>{{ profileData.account_name }}</h3>
+          </div>
+          <div v-if="showOwnerSections" class="profile-avatar-actions">
+            <button class="profile-avatar-btn primary" :disabled="avatarBusy" @click="triggerAvatarPicker">
+              {{ profileAvatarUrl ? 'تغییر عکس' : 'افزودن عکس' }}
+            </button>
+            <button v-if="profileAvatarUrl" class="profile-avatar-btn" :disabled="avatarBusy" @click="clearAvatar">
+              حذف عکس
+            </button>
           </div>
         </div>
 
@@ -288,6 +371,7 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 }
 
 .profile-avatar {
+  position: relative;
   width: 92px;
   height: 92px;
   border-radius: 50%;
@@ -308,10 +392,56 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   object-fit: cover;
 }
 
+.profile-avatar-busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.38);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .profile-hero-copy h3 {
   margin: 0;
   font-size: 1.15rem;
   color: var(--text-color);
+}
+
+.profile-avatar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.profile-avatar-btn {
+  border: 0;
+  border-radius: 999px;
+  min-height: 36px;
+  padding: 0 14px;
+  background: rgba(241, 245, 249, 0.96);
+  color: #334155;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.profile-avatar-btn.primary {
+  background: rgba(51, 144, 236, 0.12);
+  color: #0369a1;
+}
+
+.profile-avatar-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.hidden-avatar-input {
+  display: none;
 }
 
 .profile-section {

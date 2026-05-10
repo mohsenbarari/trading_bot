@@ -134,6 +134,10 @@
             <MoreVertical :size="22" />
           </button>
           <div v-if="isMenuOpen" class="header-dropdown-menu" v-click-outside="closeMenu">
+            <div class="header-menu-item" @click="handleMenuViewProfile">
+              <span>پروفایل عمومی من</span>
+              <UsersRound :size="18" />
+            </div>
             <div class="header-menu-item" @click="handleMenuCreateGroup">
               <span>ساخت گروه جدید</span>
               <UsersRound :size="18" />
