@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { apiFetch, apiFetchJson } from '../../utils/auth'
+import { popBackState, pushBackState } from '../../composables/useBackButton'
+import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../../utils/chatFiles'
 import {
   Check,
   ChevronLeft,
@@ -20,6 +22,7 @@ type PublicUser = {
   account_name: string
   full_name?: string
   mobile_number?: string
+  avatar_file_id?: string | null
 }
 
 type GroupMember = {
@@ -27,6 +30,7 @@ type GroupMember = {
   account_name: string
   full_name: string
   mobile_number: string
+  avatar_file_id?: string | null
   role: 'admin' | 'member'
   is_group_creator: boolean
 }
@@ -35,6 +39,7 @@ type GroupRoom = {
   id: number
   title: string
   description?: string | null
+  avatar_file_id?: string | null
   member_count: number
   max_members: number
   current_user_role?: 'admin' | 'member' | null
@@ -76,6 +81,11 @@ const isSaving = ref(false)
 const mutatingUserId = ref<number | null>(null)
 const errorMessage = ref('')
 const successMessage = ref('')
+const pageHistory = ref<GroupManagerPage[]>([])
+const managerBackStateActive = ref(false)
+const avatarFileId = ref<string | null>(null)
+const avatarBusy = ref(false)
+const avatarInput = ref<HTMLInputElement | null>(null)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 const isCreateMode = computed(() => !props.groupId)
@@ -91,6 +101,7 @@ const overviewDescription = computed(() => {
   const nextDescription = description.value.trim() || group.value?.description || ''
   return nextDescription || 'توضیحی برای این گروه ثبت نشده است.'
 })
+const groupAvatarUrl = computed(() => buildChatFileUrl(avatarFileId.value))
 
 const availableCandidates = computed(() => {
   return candidates.value.filter((user) => user.id !== props.currentUserId && !memberIds.value.has(user.id))
@@ -209,10 +220,9 @@ function resetState() {
   mutatingUserId.value = null
   errorMessage.value = ''
   successMessage.value = ''
-}
-
-function getAvatarInitial(name: string) {
-  return name ? name.charAt(0).toUpperCase() : '?'
+  pageHistory.value = []
+  avatarFileId.value = null
+  avatarBusy.value = false
 }
 
 function setError(error: unknown, fallback: string) {
@@ -222,6 +232,37 @@ function setError(error: unknown, fallback: string) {
 function clearFlashMessages() {
   errorMessage.value = ''
   successMessage.value = ''
+}
+
+function getUserAvatarUrl(fileId?: string | null) {
+  return buildChatFileUrl(fileId ?? null)
+}
+
+function triggerAvatarPicker() {
+  if (avatarBusy.value) return
+  avatarInput.value?.click()
+}
+
+async function handleAvatarSelected(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (!file) return
+
+  avatarBusy.value = true
+  try {
+    const uploaded = await uploadAvatarImage(file)
+    avatarFileId.value = uploaded.file_id
+  } catch (error) {
+    setError(error, 'آپلود آواتار گروه ناموفق بود')
+  } finally {
+    avatarBusy.value = false
+    if (input) input.value = ''
+  }
+}
+
+function clearAvatar() {
+  if (avatarBusy.value) return
+  avatarFileId.value = null
 }
 
 function canDemote(member: GroupMember) {
@@ -243,25 +284,57 @@ function getMemberGuardReason(member: GroupMember) {
   return ''
 }
 
-function setPage(nextPage: GroupManagerPage) {
-  clearFlashMessages()
+function applyPage(nextPage: GroupManagerPage) {
   page.value = nextPage
   if (nextPage === 'add-members' || nextPage === 'select-members') {
     void loadUsers(directoryQuery.value)
   }
 }
 
-function handleBack() {
+function setPage(nextPage: GroupManagerPage) {
   clearFlashMessages()
-  if (!canGoBack.value) {
-    emit('close')
-    return
+  if (nextPage === page.value) return
+  pageHistory.value.push(page.value)
+  applyPage(nextPage)
+}
+
+function setPageDirect(nextPage: GroupManagerPage) {
+  clearFlashMessages()
+  applyPage(nextPage)
+  while (pageHistory.value.length > 0 && pageHistory.value[pageHistory.value.length - 1] === nextPage) {
+    pageHistory.value.pop()
   }
-  if (isCreateMode.value) {
-    page.value = 'select-members'
-    return
+}
+
+function requestClose(fromBack = false) {
+  if (!fromBack && managerBackStateActive.value) {
+    managerBackStateActive.value = false
+    popBackState()
   }
-  page.value = 'overview'
+  emit('close')
+}
+
+function pushManagerBackState() {
+  if (!props.show || managerBackStateActive.value) return
+  managerBackStateActive.value = true
+  pushBackState(() => {
+    managerBackStateActive.value = false
+    const stillOpen = handleBack(true)
+    if (stillOpen && props.show) {
+      pushManagerBackState()
+    }
+  })
+}
+
+function handleBack(fromBack = false) {
+  clearFlashMessages()
+  const previousPage = pageHistory.value.pop()
+  if (previousPage) {
+    applyPage(previousPage)
+    return true
+  }
+  requestClose(fromBack)
+  return false
 }
 
 function toggleCandidate(userId: number) {
@@ -295,6 +368,7 @@ async function loadGroupDetail() {
     members.value = Array.isArray(data.members) ? data.members : []
     title.value = data.group.title || ''
     description.value = data.group.description || ''
+    avatarFileId.value = data.group.avatar_file_id || null
   } catch (error) {
     setError(error, 'خطا در دریافت گروه')
   } finally {
@@ -312,6 +386,7 @@ async function createGroup() {
       body: JSON.stringify({
         title: title.value.trim(),
         description: description.value.trim() || undefined,
+        avatar_file_id: avatarFileId.value || null,
         member_ids: Array.from(selectedUserIds.value),
       }),
     })
@@ -337,6 +412,7 @@ async function updateGroupSettings() {
       body: JSON.stringify({
         title: title.value.trim(),
         description: description.value.trim() || undefined,
+        avatar_file_id: avatarFileId.value || null,
       }),
     })
     const data = await response.json() as GroupRoom | { detail?: string }
@@ -344,9 +420,10 @@ async function updateGroupSettings() {
       throw new Error((data as { detail?: string }).detail || 'خطا در ذخیره اطلاعات گروه')
     }
     group.value = data as GroupRoom
+    avatarFileId.value = group.value.avatar_file_id || null
     successMessage.value = 'اطلاعات گروه ذخیره شد.'
     emit('updated', group.value)
-    page.value = 'overview'
+    setPageDirect('overview')
   } catch (error) {
     setError(error, 'خطا در ذخیره اطلاعات گروه')
   } finally {
@@ -373,7 +450,7 @@ async function addSelectedMembers() {
     successMessage.value = 'اعضای انتخاب‌شده اضافه شدند.'
     await Promise.all([loadGroupDetail(), loadUsers(directoryQuery.value)])
     if (group.value) emit('updated', group.value)
-    page.value = 'members'
+    setPageDirect('members')
   } catch (error) {
     setError(error, 'خطا در افزودن عضو')
   } finally {
@@ -441,8 +518,17 @@ watch(directoryQuery, (query) => {
 })
 
 watch(() => [props.show, props.groupId] as const, ([show]) => {
-  if (!show) return
+  if (!show) {
+    if (managerBackStateActive.value) {
+      managerBackStateActive.value = false
+      popBackState()
+    }
+    resetState()
+    return
+  }
+
   resetState()
+  pushManagerBackState()
   if (isCreateMode.value) {
     void loadUsers()
     return
@@ -454,17 +540,18 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 <template>
   <Teleport to="body">
     <Transition name="group-manager-fade">
-      <div v-if="show" class="group-manager-overlay" @click="emit('close')">
+      <div v-if="show" class="group-manager-overlay" @click="requestClose()">
         <section class="group-manager-shell" @click.stop>
+          <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
           <header class="manager-header">
-            <button type="button" class="header-icon-btn" @click="handleBack">
+            <button type="button" class="header-icon-btn" @click="handleBack()">
               <ChevronRight :size="22" />
             </button>
             <div class="header-copy">
               <h3>{{ pageTitle }}</h3>
               <span>{{ pageSubtitle }}</span>
             </div>
-            <button type="button" class="header-icon-btn" @click="emit('close')">
+            <button type="button" class="header-icon-btn" @click="requestClose()">
               <X :size="20" />
             </button>
           </header>
@@ -499,7 +586,10 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   :class="{ selected: selectedUserIds.has(user.id) }"
                   @click="toggleCandidate(user.id)"
                 >
-                  <div class="row-avatar">{{ getAvatarInitial(user.account_name) }}</div>
+                  <div class="row-avatar">
+                    <img v-if="getUserAvatarUrl(user.avatar_file_id)" :src="getUserAvatarUrl(user.avatar_file_id)" :alt="user.account_name" class="row-avatar-image" />
+                    <template v-else>{{ getAvatarInitial(user.account_name) }}</template>
+                  </div>
                   <div class="row-copy">
                     <div class="row-title">{{ user.account_name }}</div>
                     <div class="row-subtitle">{{ user.full_name }} • {{ user.mobile_number }}</div>
@@ -513,10 +603,22 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 
             <template v-else-if="isCreateMode && page === 'details'">
               <section class="hero-card preview">
-                <div class="hero-avatar">{{ getAvatarInitial(overviewTitle) }}</div>
+                <div class="hero-avatar">
+                  <img v-if="groupAvatarUrl" :src="groupAvatarUrl" :alt="overviewTitle" class="hero-avatar-image" />
+                  <template v-else>{{ getAvatarInitial(overviewTitle) }}</template>
+                  <div v-if="avatarBusy" class="avatar-busy-overlay"><Loader2 :size="20" class="spin" /></div>
+                </div>
                 <div class="hero-title">{{ overviewTitle }}</div>
                 <div class="hero-meta">{{ selectedCount.toLocaleString('fa-IR') }} عضو اولیه</div>
                 <p class="hero-description">{{ overviewDescription }}</p>
+                <div class="avatar-tool-row">
+                  <button type="button" class="secondary-btn compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
+                    {{ avatarFileId ? 'تغییر عکس گروه' : 'افزودن عکس گروه' }}
+                  </button>
+                  <button v-if="avatarFileId" type="button" class="ghost-action danger" :disabled="avatarBusy" @click="clearAvatar">
+                    حذف عکس
+                  </button>
+                </div>
               </section>
 
               <section class="editor-card">
@@ -536,7 +638,10 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 
               <template v-else>
                 <section class="hero-card">
-                  <div class="hero-avatar">{{ getAvatarInitial(overviewTitle) }}</div>
+                  <div class="hero-avatar">
+                    <img v-if="groupAvatarUrl" :src="groupAvatarUrl" :alt="overviewTitle" class="hero-avatar-image" />
+                    <template v-else>{{ getAvatarInitial(overviewTitle) }}</template>
+                  </div>
                   <div class="hero-title">{{ overviewTitle }}</div>
                   <div class="hero-meta">{{ (group?.member_count || 0).toLocaleString('fa-IR') }} عضو</div>
                   <p class="hero-description">{{ overviewDescription }}</p>
@@ -599,7 +704,10 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 
               <div class="telegram-list">
                 <div v-for="member in filteredMembers" :key="member.user_id" class="telegram-row member-row">
-                  <div class="row-avatar">{{ getAvatarInitial(member.account_name) }}</div>
+                  <div class="row-avatar">
+                    <img v-if="getUserAvatarUrl(member.avatar_file_id)" :src="getUserAvatarUrl(member.avatar_file_id)" :alt="member.account_name" class="row-avatar-image" />
+                    <template v-else>{{ getAvatarInitial(member.account_name) }}</template>
+                  </div>
                   <div class="row-copy">
                     <div class="row-title with-badges">
                       <span>{{ member.account_name }}</span>
@@ -642,7 +750,10 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                 <div class="section-heading">ادمین‌های فعلی</div>
                 <div class="telegram-list compact">
                   <div v-for="member in filteredAdmins" :key="member.user_id" class="telegram-row member-row">
-                    <div class="row-avatar">{{ getAvatarInitial(member.account_name) }}</div>
+                    <div class="row-avatar">
+                      <img v-if="getUserAvatarUrl(member.avatar_file_id)" :src="getUserAvatarUrl(member.avatar_file_id)" :alt="member.account_name" class="row-avatar-image" />
+                      <template v-else>{{ getAvatarInitial(member.account_name) }}</template>
+                    </div>
                     <div class="row-copy">
                       <div class="row-title with-badges">
                         <span>{{ member.account_name }}</span>
@@ -672,7 +783,10 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                 <div v-if="promotableMembers.length === 0" class="state-box muted">عضوی برای ارتقا باقی نمانده است.</div>
                 <div v-else class="telegram-list compact">
                   <div v-for="member in promotableMembers" :key="member.user_id" class="telegram-row member-row">
-                    <div class="row-avatar">{{ getAvatarInitial(member.account_name) }}</div>
+                    <div class="row-avatar">
+                      <img v-if="getUserAvatarUrl(member.avatar_file_id)" :src="getUserAvatarUrl(member.avatar_file_id)" :alt="member.account_name" class="row-avatar-image" />
+                      <template v-else>{{ getAvatarInitial(member.account_name) }}</template>
+                    </div>
                     <div class="row-copy">
                       <div class="row-title">{{ member.account_name }}</div>
                       <div class="row-subtitle">{{ member.full_name }} • {{ member.mobile_number }}</div>
@@ -716,7 +830,10 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   :class="{ selected: selectedUserIds.has(user.id) }"
                   @click="toggleCandidate(user.id)"
                 >
-                  <div class="row-avatar">{{ getAvatarInitial(user.account_name) }}</div>
+                  <div class="row-avatar">
+                    <img v-if="getUserAvatarUrl(user.avatar_file_id)" :src="getUserAvatarUrl(user.avatar_file_id)" :alt="user.account_name" class="row-avatar-image" />
+                    <template v-else>{{ getAvatarInitial(user.account_name) }}</template>
+                  </div>
                   <div class="row-copy">
                     <div class="row-title">{{ user.account_name }}</div>
                     <div class="row-subtitle">{{ user.full_name }} • {{ user.mobile_number }}</div>
@@ -730,9 +847,20 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 
             <template v-else-if="page === 'edit'">
               <section class="editor-card">
-                <div class="info-strip">
-                  <Info :size="16" />
-                  <span>این صفحه رفتار تنظیمات گروه را مثل Telegram به‌صورت متمرکز نگه می‌دارد.</span>
+                <div class="avatar-editor-block">
+                  <div class="hero-avatar small-editor">
+                    <img v-if="groupAvatarUrl" :src="groupAvatarUrl" :alt="overviewTitle" class="hero-avatar-image" />
+                    <template v-else>{{ getAvatarInitial(overviewTitle) }}</template>
+                    <div v-if="avatarBusy" class="avatar-busy-overlay"><Loader2 :size="20" class="spin" /></div>
+                  </div>
+                  <div class="avatar-tool-row compact">
+                    <button type="button" class="secondary-btn compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
+                      {{ avatarFileId ? 'تغییر عکس گروه' : 'افزودن عکس گروه' }}
+                    </button>
+                    <button v-if="avatarFileId" type="button" class="ghost-action danger" :disabled="avatarBusy" @click="clearAvatar">
+                      حذف عکس
+                    </button>
+                  </div>
                 </div>
 
                 <label class="field-label" for="group-edit-title">نام گروه</label>
@@ -751,7 +879,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
           </main>
 
           <footer v-if="isCreateMode && page === 'details'" class="manager-footer">
-            <button type="button" class="secondary-btn" @click="page = 'select-members'">بازگشت به انتخاب اعضا</button>
+            <button type="button" class="secondary-btn" @click="handleBack()">بازگشت به انتخاب اعضا</button>
             <button type="button" class="primary-btn" :disabled="!canSaveDetails || !canContinueCreate || isSaving" @click="createGroup">
               <Loader2 v-if="isSaving" :size="18" class="spin" />
               <UsersRound v-else :size="18" />
@@ -1021,6 +1149,8 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 }
 
 .hero-avatar {
+  position: relative;
+  overflow: hidden;
   width: 86px;
   height: 86px;
   border-radius: 50%;
@@ -1028,10 +1158,58 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 }
 
 .row-avatar {
+  overflow: hidden;
   width: 48px;
   height: 48px;
   border-radius: 50%;
   font-size: 1rem;
+}
+
+.hero-avatar-image,
+.row-avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hidden-avatar-input {
+  display: none;
+}
+
+.avatar-busy-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.34);
+  color: #fff;
+}
+
+.avatar-tool-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.avatar-tool-row.compact {
+  justify-content: flex-start;
+}
+
+.avatar-editor-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.hero-avatar.small-editor {
+  width: 74px;
+  height: 74px;
+  font-size: 1.65rem;
 }
 
 .hero-title {

@@ -181,6 +181,10 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         (Conversation.user1_id == current_user_id, user2_alias.account_name),
         else_=user1_alias.account_name,
     ).label("other_user_name")
+    other_user_avatar_file_id = case(
+        (Conversation.user1_id == current_user_id, user2_alias.avatar_file_id),
+        else_=user1_alias.avatar_file_id,
+    ).label("avatar_file_id")
     other_user_is_deleted = case(
         (Conversation.user1_id == current_user_id, user2_alias.is_deleted),
         else_=user1_alias.is_deleted,
@@ -250,6 +254,7 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
             direct_chat_lookup.c.chat_id.label("chat_id"),
             other_user_id,
             other_user_name,
+            other_user_avatar_file_id,
             other_user_is_deleted,
             last_message_content,
             last_message_alias.message_type.label("last_message_type"),

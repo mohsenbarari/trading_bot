@@ -3,11 +3,14 @@ import { ref, onMounted, computed } from 'vue'
 import { User, Phone, Shield, Smartphone, Trash2, Loader2, HardDrive } from 'lucide-vue-next'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { useChatFileHandler } from '../composables/chat/useChatFileHandler'
+import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles'
 
 const { getCacheSize, clearFileCache } = useChatFileHandler()
 const cacheSize = ref('0.00 MB')
 const cacheBusy = ref(false)
 const cacheFeedback = ref<string | null>(null)
+const avatarBusy = ref(false)
+const avatarInput = ref<HTMLInputElement | null>(null)
 
 async function refreshCacheSize() {
   try {
@@ -33,7 +36,17 @@ async function clearCache() {
     setTimeout(() => { cacheFeedback.value = null }, 3500)
   }
 }
-const user = ref<any>(null)
+type ProfileUser = {
+  id: number
+  full_name?: string | null
+  account_name?: string | null
+  mobile_number?: string | null
+  role?: string | null
+  created_at?: string | null
+  avatar_file_id?: string | null
+}
+
+const user = ref<ProfileUser | null>(null)
 const loading = ref(true)
 const sessions = ref<any[]>([])
 const sessionsLoading = ref(false)
@@ -41,8 +54,10 @@ const sessionsLoading = ref(false)
 const userInitial = computed(() => {
   if (!user.value) return '?'
   const name = user.value.full_name || user.value.account_name
-  return name ? name[0] : '?'
+  return getAvatarInitial(name)
 })
+
+const avatarUrl = computed(() => buildChatFileUrl(user.value?.avatar_file_id ?? null))
 
 const memberSince = computed(() => {
   if (!user.value?.created_at) return ''
@@ -60,6 +75,58 @@ async function fetchUser() {
     console.error(e)
   } finally {
     loading.value = false
+  }
+}
+
+async function parseApiError(response: Response, fallback: string) {
+  const data = await response.json().catch(() => ({})) as { detail?: string }
+  return data.detail || fallback
+}
+
+function triggerAvatarPicker() {
+  if (avatarBusy.value) return
+  avatarInput.value?.click()
+}
+
+async function saveAvatar(avatarFileId: string | null) {
+  const response = await apiFetch('/api/auth/me/avatar', {
+    method: 'PUT',
+    body: JSON.stringify({ avatar_file_id: avatarFileId }),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, 'ذخیره آواتار ناموفق بود.'))
+  }
+  user.value = await response.json()
+}
+
+async function handleAvatarSelected(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (!file) return
+
+  avatarBusy.value = true
+  try {
+    const uploaded = await uploadAvatarImage(file)
+    await saveAvatar(uploaded.file_id)
+  } catch (error) {
+    console.error(error)
+    alert(error instanceof Error ? error.message : 'آپلود آواتار ناموفق بود.')
+  } finally {
+    avatarBusy.value = false
+    if (input) input.value = ''
+  }
+}
+
+async function clearAvatar() {
+  if (!user.value?.avatar_file_id || avatarBusy.value) return
+  avatarBusy.value = true
+  try {
+    await saveAvatar(null)
+  } catch (error) {
+    console.error(error)
+    alert(error instanceof Error ? error.message : 'حذف آواتار ناموفق بود.')
+  } finally {
+    avatarBusy.value = false
   }
 }
 
@@ -132,7 +199,20 @@ onMounted(() => {
       <!-- Avatar Section -->
       <div class="avatar-section">
         <div class="avatar-large">
-          <span>{{ userInitial }}</span>
+          <img v-if="avatarUrl" :src="avatarUrl" :alt="user?.full_name || user?.account_name || 'آواتار کاربر'" class="avatar-image" />
+          <span v-else>{{ userInitial }}</span>
+          <div v-if="avatarBusy" class="avatar-busy-overlay">
+            <Loader2 :size="22" class="animate-spin" />
+          </div>
+        </div>
+        <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
+        <div class="avatar-actions">
+          <button type="button" class="avatar-action-btn" :disabled="avatarBusy" @click="triggerAvatarPicker">
+            {{ user?.avatar_file_id ? 'تغییر عکس' : 'افزودن عکس' }}
+          </button>
+          <button v-if="user?.avatar_file_id" type="button" class="avatar-action-btn danger" :disabled="avatarBusy" @click="clearAvatar">
+            حذف عکس
+          </button>
         </div>
         <h2 class="profile-name">{{ user.full_name || user.account_name || 'کاربر' }}</h2>
         <span v-if="user.role === 'admin'" class="role-badge">مدیر سیستم</span>
@@ -309,6 +389,8 @@ onMounted(() => {
 }
 
 .avatar-large {
+  position: relative;
+  overflow: hidden;
   width: 80px;
   height: 80px;
   background: linear-gradient(135deg, #f59e0b, #d97706);
@@ -321,6 +403,66 @@ onMounted(() => {
   font-size: 2rem;
   box-shadow: 0 8px 24px rgba(245, 158, 11, 0.3);
   margin-bottom: 1rem;
+}
+
+.avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-busy-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.34);
+  color: #fff;
+}
+
+.hidden-avatar-input {
+  display: none;
+}
+
+.avatar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: -0.1rem 0 0.9rem;
+}
+
+.avatar-action-btn {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+  padding: 0.45rem 0.9rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+
+.avatar-action-btn:hover {
+  background: rgba(245, 158, 11, 0.18);
+}
+
+.avatar-action-btn.danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+}
+
+.avatar-action-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.16);
+}
+
+.avatar-action-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .profile-name {

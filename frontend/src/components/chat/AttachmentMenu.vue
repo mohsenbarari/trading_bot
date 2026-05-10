@@ -415,6 +415,7 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import 'leaflet/dist/leaflet.css'
 import { LCircle, LCircleMarker, LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
+import { popBackState, pushBackState } from '../../composables/useBackButton'
 
 // Lazy-load the image editor so Cropper.js (~40KB) and its CSS are only
 // downloaded when the user actually edits an image. Keeps the main Messenger
@@ -516,6 +517,8 @@ const cameraStream = ref<MediaStream | null>(null)
 let mediaRecorder: MediaRecorder | null = null
 let recordedChunks: BlobPart[] = []
 let recordingTimer: number | null = null
+const stageBackStateActive = ref(false)
+let closingStageFromBack = false
 
 // Default: Tehran
 const DEFAULT_LOCATION_CENTER: [number, number] = [35.6892, 51.3890]
@@ -1231,6 +1234,58 @@ function close() {
   emit('update:modelValue', false)
 }
 
+function hasOpenStage() {
+  return Boolean(
+    props.modelValue
+    || showCameraCapture.value
+    || editingFile.value
+    || multiPreviewFiles.value
+    || cameraEditingItemId.value,
+  )
+}
+
+function pushStageBackState() {
+  if (stageBackStateActive.value || !hasOpenStage()) return
+  stageBackStateActive.value = true
+  pushBackState(() => {
+    stageBackStateActive.value = false
+    closingStageFromBack = true
+    const stillOpen = handleStageBack(true)
+    closingStageFromBack = false
+    if (stillOpen || hasOpenStage()) {
+      pushStageBackState()
+    }
+  })
+}
+
+function handleStageBack(fromBack = false) {
+  if (cameraEditingItemId.value) {
+    onCameraEditCancel()
+    return true
+  }
+
+  if (editingFile.value) {
+    onEditorCancel()
+    return true
+  }
+
+  if (multiPreviewFiles.value) {
+    onMultiPreviewCancel()
+    return true
+  }
+
+  if (showCameraCapture.value) {
+    closeCameraCapture()
+    return true
+  }
+
+  if (props.modelValue) {
+    close()
+  }
+
+  return false
+}
+
 function getAutoPinnedLatLng(): [number, number] | null {
   if (hasManualLocationSelection.value) {
     return null
@@ -1306,6 +1361,23 @@ watch(() => props.modelValue, (val) => {
     resetLocationDraft()
   }
 })
+
+watch(
+  () => hasOpenStage(),
+  (isOpen) => {
+    if (isOpen) {
+      pushStageBackState()
+      return
+    }
+
+    if (stageBackStateActive.value) {
+      stageBackStateActive.value = false
+      if (!closingStageFromBack) {
+        popBackState()
+      }
+    }
+  },
+)
 
 watch(() => props.allowLocation, (allowLocation) => {
   if (!allowLocation && activeTab.value === 'location') {

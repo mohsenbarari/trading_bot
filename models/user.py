@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, Enum, BigInteger, Text, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, Enum, BigInteger, Text, DateTime, ForeignKey
 from sqlalchemy.sql import func
 from .database import Base
 
@@ -24,6 +24,7 @@ class User(Base):
     username = Column(String, nullable=True)
     full_name = Column(String, nullable=False)
     address = Column(Text, nullable=False)
+    avatar_file_id = Column(String(36), ForeignKey("chat_files.id"), nullable=True)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.WATCH)
     has_bot_access = Column(Boolean, default=True, nullable=False)
     

@@ -107,6 +107,7 @@ from core.services.chat_room_service import (
     update_manageable_channel_metadata,
     update_channel_member,
 )
+from core.services.avatar_service import resolve_owned_avatar_file_id
 from core.services.chat_service import (
     apply_direct_message_delete,
     apply_direct_message_edit,
@@ -184,6 +185,7 @@ async def get_conversations(
             id=row.id,
             other_user_id=row.other_user_id,
             other_user_name=row.other_user_name,
+            avatar_file_id=getattr(row, "avatar_file_id", None),
             other_user_is_deleted=row.other_user_is_deleted,
             last_message_content=row.last_message_content,
             last_message_type=row.last_message_type,
@@ -210,6 +212,7 @@ async def get_conversations(
             id=row.id,
             other_user_id=row.other_user_id,
             other_user_name=row.other_user_name,
+            avatar_file_id=getattr(row, "avatar_file_id", None),
             other_user_is_deleted=row.other_user_is_deleted,
             last_message_content=row.last_message_content,
             last_message_type=row.last_message_type,
@@ -464,6 +467,7 @@ async def get_groups(
             type=group.type,
             title=group.title,
             description=group.description,
+            avatar_file_id=group.avatar_file_id,
             created_by_id=group.created_by_id,
             member_count=group.member_count,
             max_members=group.max_members,
@@ -486,6 +490,7 @@ async def create_group(
         creator=current_user,
         title=data.title,
         description=data.description,
+        avatar_file_id=await resolve_owned_avatar_file_id(db, actor_id=current_user.id, avatar_file_id=data.avatar_file_id),
         member_ids=data.member_ids,
     )
     member_count = await count_active_chat_members(db, group.id)
@@ -495,6 +500,7 @@ async def create_group(
             type=ChatType.GROUP,
             title=group.title or "",
             description=group.description,
+            avatar_file_id=group.avatar_file_id,
             created_by_id=group.created_by_id,
             member_count=member_count,
             max_members=int(group.max_members or 50),
@@ -521,6 +527,7 @@ async def get_group_detail(
             type=group.type,
             title=group.title or "",
             description=group.description,
+            avatar_file_id=group.avatar_file_id,
             created_by_id=group.created_by_id,
             member_count=member_count,
             max_members=int(group.max_members or 50),
@@ -533,6 +540,7 @@ async def get_group_detail(
                 account_name=item.account_name,
                 full_name=item.full_name,
                 mobile_number=item.mobile_number,
+                avatar_file_id=item.avatar_file_id,
                 role=item.role.value,
                 joined_at=item.joined_at,
                 is_group_creator=item.is_group_creator,
@@ -552,13 +560,20 @@ async def patch_group(
     """تغییر نام و توضیحات گروه توسط یکی از adminهای فعال"""
     group = await get_group_or_404(db, chat_id)
     admin_member = await get_active_group_admin_or_403(db, chat=group, user_id=current_user.id)
-    group = await update_group_chat(db, chat=group, title=data.title, description=data.description)
+    group = await update_group_chat(
+        db,
+        chat=group,
+        title=data.title,
+        description=data.description,
+        avatar_file_id=await resolve_owned_avatar_file_id(db, actor_id=current_user.id, avatar_file_id=data.avatar_file_id),
+    )
     member_count = await count_active_chat_members(db, group.id)
     return GroupRoomRead(
         id=group.id,
         type=group.type,
         title=group.title or "",
         description=group.description,
+        avatar_file_id=group.avatar_file_id,
         created_by_id=group.created_by_id,
         member_count=member_count,
         max_members=int(group.max_members or 50),
@@ -830,6 +845,7 @@ async def get_channels(
             type=channel.type,
             title=channel.title,
             description=channel.description,
+            avatar_file_id=channel.avatar_file_id,
             created_by_id=channel.created_by_id,
             is_system=channel.is_system,
             is_mandatory=channel.is_mandatory,
@@ -852,6 +868,7 @@ async def create_channel(
         creator=current_user,
         title=data.title,
         description=data.description,
+        avatar_file_id=await resolve_owned_avatar_file_id(db, actor_id=current_user.id, avatar_file_id=data.avatar_file_id),
     )
     member_count = await count_active_chat_members(db, channel.id)
     return ChannelCreateResponse(
@@ -860,6 +877,7 @@ async def create_channel(
             type=ChatType.CHANNEL,
             title=channel.title or "",
             description=channel.description,
+            avatar_file_id=channel.avatar_file_id,
             created_by_id=channel.created_by_id,
             is_system=channel.is_system,
             is_mandatory=channel.is_mandatory,
@@ -885,6 +903,7 @@ async def update_channel(
         chat=channel,
         title=data.title,
         description=data.description,
+        avatar_file_id=await resolve_owned_avatar_file_id(db, actor_id=current_user.id, avatar_file_id=data.avatar_file_id),
     )
     member_count = await count_active_chat_members(db, channel.id)
     return ChannelRoomRead(
@@ -892,6 +911,7 @@ async def update_channel(
         type=channel.type,
         title=channel.title or "",
         description=channel.description,
+        avatar_file_id=channel.avatar_file_id,
         created_by_id=channel.created_by_id,
         is_system=channel.is_system,
         is_mandatory=channel.is_mandatory,
@@ -916,6 +936,7 @@ async def get_channel_members(
             account_name=member.account_name,
             full_name=member.full_name,
             mobile_number=member.mobile_number,
+            avatar_file_id=member.avatar_file_id,
             role=member.role.value,
             joined_at=member.joined_at,
             is_channel_creator=member.is_channel_creator,
@@ -978,6 +999,7 @@ async def get_channel_invite_candidates(
                 "account_name": item.account_name,
                 "full_name": item.full_name,
                 "mobile_number": item.mobile_number,
+                "avatar_file_id": item.avatar_file_id,
                 "is_already_member": item.is_already_member,
             }
             for item in candidate_page.items

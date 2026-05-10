@@ -19,9 +19,10 @@
           }"
           @click="handleTitleClick"
         >
-          <Megaphone v-if="selectedRoomKind === 'channel'" :size="21" />
+          <img v-if="headerAvatarUrl" :src="headerAvatarUrl" :alt="selectedUserName" class="header-avatar-image" />
+          <Megaphone v-else-if="selectedRoomKind === 'channel'" :size="21" />
           <UsersRound v-else-if="selectedRoomKind === 'group'" :size="21" />
-          <template v-else>{{ selectedUserName.charAt(0) }}</template>
+          <template v-else>{{ getAvatarInitial(selectedUserName) }}</template>
         </div>
         <div class="header-user-info" @click="handleTitleClick">
           <span class="header-name">
@@ -165,12 +166,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Megaphone, MoreVertical, Search, UsersRound } from 'lucide-vue-next'
+import { popBackState, pushBackState } from '../../composables/useBackButton'
+import { buildChatFileUrl, getAvatarInitial } from '../../utils/chatFiles'
 
 const props = defineProps<{
   isSelectionMode: boolean
   selectedUserId: number | null
   selectedUserName: string
+  selectedAvatarFileId?: string | null
   selectedRoomKind?: 'direct' | 'channel' | 'group' | null
+  apiBaseUrl?: string
   targetUserStatus: string
   isTyping: boolean
   totalUnread: number
@@ -201,6 +206,8 @@ const emit = defineEmits<{
 
 const isMenuOpen = ref(false)
 const internalSearchQuery = ref(props.searchQuery)
+const menuBackStateActive = ref(false)
+let closingMenuFromBack = false
 
 watch(() => props.searchQuery, (newVal) => {
   internalSearchQuery.value = newVal
@@ -211,6 +218,8 @@ const roomMemberCountText = computed(() => {
   if (props.selectedRoomKind === 'direct' || count <= 0) return ''
   return `${count.toLocaleString('fa-IR')} عضو`
 })
+
+const headerAvatarUrl = computed(() => buildChatFileUrl(props.selectedAvatarFileId ?? null, props.apiBaseUrl ?? ''))
 
 const onSearchInput = () => {
   emit('search', internalSearchQuery.value)
@@ -223,6 +232,37 @@ const toggleMenu = () => {
 const closeMenu = () => {
   isMenuOpen.value = false
 }
+
+watch(isMenuOpen, (isOpen) => {
+  if (isOpen) {
+    if (!menuBackStateActive.value) {
+      menuBackStateActive.value = true
+      pushBackState(() => {
+        menuBackStateActive.value = false
+        closingMenuFromBack = true
+        closeMenu()
+        closingMenuFromBack = false
+      })
+    }
+    return
+  }
+
+  if (menuBackStateActive.value) {
+    menuBackStateActive.value = false
+    if (!closingMenuFromBack) {
+      popBackState()
+    }
+  }
+})
+
+watch(
+  () => [props.selectedUserId, props.isSearchActive, props.isSelectionMode] as const,
+  () => {
+    if (isMenuOpen.value) {
+      closeMenu()
+    }
+  },
+)
 
 const handleMenuSearch = () => {
   closeMenu()
@@ -339,6 +379,13 @@ function formatDateForSeparator(dateString: string) {
 
 .header-avatar svg {
   stroke-width: 2.2;
+}
+
+.header-avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
 }
 
 .header-user-info {

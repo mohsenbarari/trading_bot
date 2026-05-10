@@ -29,6 +29,7 @@ import schemas
 
 
 from core.services.session_service import handle_login_session, get_session_by_refresh_token, hash_token, get_active_sessions
+from core.services.avatar_service import resolve_owned_avatar_file_id
 from models.session import Platform, UserSession
 import uuid
 from core.utils import utc_now
@@ -103,6 +104,22 @@ class RefreshTokenRequest(BaseModel):
 @router.get("/me", response_model=schemas.UserRead)
 async def read_users_me(current_user: User = Depends(get_current_user)):
     """دریافت اطلاعات کاربر جاری"""
+    return current_user
+
+
+@router.put("/me/avatar", response_model=schemas.UserRead)
+async def update_my_avatar(
+    payload: schemas.UserAvatarUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    current_user.avatar_file_id = await resolve_owned_avatar_file_id(
+        db,
+        actor_id=current_user.id,
+        avatar_file_id=payload.avatar_file_id,
+    )
+    await db.commit()
+    await db.refresh(current_user)
     return current_user
 
 

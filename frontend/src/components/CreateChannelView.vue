@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { apiFetch, apiFetchJson } from '../utils/auth'
+import { popBackState, pushBackState } from '../composables/useBackButton'
+import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles'
 import {
   Check,
   ChevronLeft,
@@ -19,6 +21,7 @@ type ChannelRoom = {
   type: 'channel'
   title: string
   description: string | null
+  avatar_file_id?: string | null
   created_by_id: number | null
   is_system: boolean
   is_mandatory: boolean
@@ -36,6 +39,7 @@ type ChannelInviteCandidate = {
   account_name: string
   full_name: string
   mobile_number: string
+  avatar_file_id?: string | null
   is_already_member: boolean
 }
 
@@ -60,6 +64,7 @@ type ChannelMember = {
   account_name: string
   full_name: string
   mobile_number: string
+  avatar_file_id?: string | null
   role: 'admin' | 'member'
   joined_at: string
   is_channel_creator: boolean
@@ -112,6 +117,11 @@ const errorMessage = ref('')
 const successMessage = ref('')
 const selectAllActiveUsers = ref(false)
 const selectedUserIds = ref<Set<number>>(new Set())
+const pageHistory = ref<ChannelManagerPage[]>([])
+const managerBackStateActive = ref(false)
+const avatarFileId = ref<string | null>(null)
+const avatarBusy = ref(false)
+const avatarInput = ref<HTMLInputElement | null>(null)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 const isMembershipManagementLocked = computed(() => Boolean(activeChannel.value?.is_mandatory || activeChannel.value?.is_system))
@@ -126,6 +136,7 @@ const canOpenCurrentChannelInMessenger = computed(() => {
 })
 const currentUserCanPostInCurrentChannel = computed(() => currentUserMembership.value?.role === 'admin')
 const activeAdminCount = computed(() => members.value.filter((member) => member.role === 'admin').length)
+const channelAvatarUrl = computed(() => buildChatFileUrl(avatarFileId.value))
 
 function normalizeSearch(value: string) {
   return value.trim().toLowerCase()
@@ -197,7 +208,7 @@ const pageTitle = computed(() => {
 const pageSubtitle = computed(() => {
   switch (page.value) {
     case 'create':
-      return 'کانال را بسازید و بعد اعضا و ادمین‌ها را مثل Telegram مدیریت کنید.'
+      return 'کانال را بسازید و بعد اعضا و ادمین‌ها را مدیریت کنید.'
     case 'overview':
       return activeChannel.value
         ? `${activeChannel.value.member_count.toLocaleString('fa-IR')} عضو فعال`
@@ -207,9 +218,9 @@ const pageSubtitle = computed(() => {
     case 'admins':
       return `${filteredAdmins.value.length.toLocaleString('fa-IR')} ادمین فعال`
     case 'add-members':
-      return 'کاربران پروژه را به کانال invite-only اضافه کنید.'
+      return 'کاربران پروژه را به کانال اضافه کنید.'
     case 'edit':
-      return 'نام و توضیحات کانال را در یک صفحه متمرکز ویرایش کنید.'
+      return 'نام و توضیحات کانال را ویرایش کنید.'
     default:
       return `${existingChannels.value.length.toLocaleString('fa-IR')} کانال قابل مدیریت`
   }
@@ -217,13 +228,83 @@ const pageSubtitle = computed(() => {
 
 const canGoBack = computed(() => page.value !== 'home')
 
-function getAvatarInitial(name: string) {
-  return name ? name.charAt(0).toUpperCase() : '?'
-}
-
 function clearFlashMessages() {
   errorMessage.value = ''
   successMessage.value = ''
+}
+
+function getUserAvatarUrl(fileId?: string | null) {
+  return buildChatFileUrl(fileId ?? null)
+}
+
+function triggerAvatarPicker() {
+  if (avatarBusy.value) return
+  avatarInput.value?.click()
+}
+
+async function handleAvatarSelected(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (!file) return
+
+  avatarBusy.value = true
+  clearFlashMessages()
+  try {
+    const uploaded = await uploadAvatarImage(file, props.apiBaseUrl)
+    avatarFileId.value = uploaded.file_id
+  } catch (error) {
+    setError(error, 'آپلود آواتار کانال ناموفق بود')
+  } finally {
+    avatarBusy.value = false
+    if (input) input.value = ''
+  }
+}
+
+function clearAvatar() {
+  if (avatarBusy.value) return
+  avatarFileId.value = null
+}
+
+function applyPage(nextPage: ChannelManagerPage) {
+  page.value = nextPage
+}
+
+function setPage(nextPage: ChannelManagerPage, options: { recordHistory?: boolean } = {}) {
+  clearFlashMessages()
+  if (nextPage === page.value) return
+  if (options.recordHistory !== false) {
+    pageHistory.value.push(page.value)
+  }
+  applyPage(nextPage)
+}
+
+function setPageDirect(nextPage: ChannelManagerPage) {
+  clearFlashMessages()
+  applyPage(nextPage)
+  while (pageHistory.value.length > 0 && pageHistory.value[pageHistory.value.length - 1] === nextPage) {
+    pageHistory.value.pop()
+  }
+}
+
+function requestClose(fromBack = false) {
+  if (!props.showCloseButton) return
+  if (!fromBack && managerBackStateActive.value) {
+    managerBackStateActive.value = false
+    popBackState()
+  }
+  emit('close')
+}
+
+function pushManagerBackState() {
+  if (!props.showCloseButton || managerBackStateActive.value) return
+  managerBackStateActive.value = true
+  pushBackState(() => {
+    managerBackStateActive.value = false
+    const stillOpen = handleManagerBack(true)
+    if (stillOpen && props.showCloseButton) {
+      pushManagerBackState()
+    }
+  })
 }
 
 function setError(error: unknown, fallback: string) {
@@ -239,11 +320,13 @@ function resetSelection() {
 function resetCreateForm() {
   title.value = ''
   description.value = ''
+  avatarFileId.value = null
 }
 
 function syncEditorWithActiveChannel(channel: ChannelRoom | null) {
   title.value = channel?.title ?? ''
   description.value = channel?.description ?? ''
+  avatarFileId.value = channel?.avatar_file_id ?? null
 }
 
 function getChannelKindLabel(channel: ChannelRoom) {
@@ -276,18 +359,19 @@ function upsertExistingChannel(channel: ChannelRoom) {
   existingChannels.value = next
 }
 
-function handleBack() {
+function handleManagerBack(fromBack = false) {
   clearFlashMessages()
-  if (!canGoBack.value) return
-  const previousPage = page.value
-  if (page.value === 'overview' || page.value === 'create') {
-    activeChannel.value = null
-    page.value = 'home'
-    resetSelection()
-    if (previousPage === 'create') resetCreateForm()
-    return
+  const previousPage = pageHistory.value.pop()
+  if (previousPage) {
+    applyPage(previousPage)
+    if (previousPage === 'home') {
+      activeChannel.value = null
+      resetSelection()
+    }
+    return true
   }
-  page.value = 'overview'
+  requestClose(fromBack)
+  return false
 }
 
 function toggleUser(userId: number) {
@@ -310,15 +394,15 @@ function openCreatePage() {
   activeChannel.value = null
   resetSelection()
   resetCreateForm()
-  page.value = 'create'
+  setPage('create')
 }
 
-function openChannel(channel: ChannelRoom) {
+function openChannel(channel: ChannelRoom, options: { recordHistory?: boolean } = {}) {
   clearFlashMessages()
   activeChannel.value = channel
   syncEditorWithActiveChannel(channel)
   resetSelection()
-  page.value = 'overview'
+  setPage('overview', options)
   void loadMembers()
 }
 
@@ -330,7 +414,7 @@ async function openChannelById(channelId: number) {
   const channel = existingChannels.value.find((item) => item.id === channelId)
   if (!channel) return
 
-  openChannel(channel)
+  openChannel(channel, { recordHistory: false })
 }
 
 async function loadExistingChannels() {
@@ -392,6 +476,7 @@ async function createChannel() {
       body: JSON.stringify({
         title: title.value.trim(),
         description: description.value.trim() || undefined,
+        avatar_file_id: avatarFileId.value || null,
       }),
     })
     const data = await response.json() as ChannelCreateResponse | { detail?: string }
@@ -403,7 +488,8 @@ async function createChannel() {
     syncEditorWithActiveChannel(activeChannel.value)
     emit('refresh-conversations')
     successMessage.value = 'کانال ساخته شد. حالا اعضا و ادمین‌ها را مدیریت کنید.'
-    page.value = isMembershipManagementLocked.value ? 'overview' : 'add-members'
+    pageHistory.value = isMembershipManagementLocked.value ? ['home'] : ['home', 'overview']
+    applyPage(isMembershipManagementLocked.value ? 'overview' : 'add-members')
     resetSelection()
     await Promise.all([loadMembers(), loadCandidates()])
   } catch (error) {
@@ -423,6 +509,7 @@ async function updateChannelDetails() {
       body: JSON.stringify({
         title: title.value.trim(),
         description: description.value.trim() || undefined,
+        avatar_file_id: avatarFileId.value || null,
       }),
     })
     const data = await response.json() as ChannelRoom | { detail?: string }
@@ -430,10 +517,11 @@ async function updateChannelDetails() {
       throw new Error((data as { detail?: string }).detail || 'خطا در ذخیره تنظیمات کانال')
     }
     activeChannel.value = data as ChannelRoom
+    avatarFileId.value = activeChannel.value.avatar_file_id || null
     upsertExistingChannel(activeChannel.value)
     emit('refresh-conversations')
     successMessage.value = 'تنظیمات کانال ذخیره شد.'
-    page.value = 'overview'
+    setPageDirect('overview')
   } catch (error) {
     setError(error, 'خطا در ذخیره تنظیمات کانال')
   } finally {
@@ -464,7 +552,7 @@ async function submitMembers() {
     successMessage.value = 'اعضای انتخاب‌شده به کانال اضافه شدند.'
     resetSelection()
     await Promise.all([loadMembers(), loadCandidates()])
-    page.value = 'members'
+    setPageDirect('members')
   } catch (error) {
     setError(error, 'خطا در افزودن اعضا')
   } finally {
@@ -511,7 +599,8 @@ async function unfollowCurrentChannel() {
     emit('refresh-conversations')
     activeChannel.value = null
     members.value = []
-    page.value = 'home'
+    pageHistory.value = []
+    applyPage('home')
     successMessage.value = 'عضویت شما در کانال لغو شد.'
     await loadExistingChannels()
   } catch (error) {
@@ -567,20 +656,32 @@ watch(page, (nextPage) => {
   }
 })
 
+if (props.showCloseButton) {
+  pushManagerBackState()
+}
+
+onBeforeUnmount(() => {
+  if (managerBackStateActive.value) {
+    managerBackStateActive.value = false
+    popBackState()
+  }
+})
+
 void loadExistingChannels()
 </script>
 
 <template>
   <section class="channel-manager-root">
+    <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
     <header class="manager-header">
-      <button type="button" class="header-icon-btn" :disabled="!canGoBack" @click="handleBack">
+      <button type="button" class="header-icon-btn" :disabled="!canGoBack" @click="handleManagerBack()">
         <ChevronRight :size="22" />
       </button>
       <div class="header-copy">
         <h2>{{ pageTitle }}</h2>
         <span>{{ pageSubtitle }}</span>
       </div>
-      <button v-if="showCloseButton" type="button" class="header-icon-btn" @click="emit('close')">
+      <button v-if="showCloseButton" type="button" class="header-icon-btn" @click="requestClose()">
         <X :size="20" />
       </button>
       <div v-else class="header-spacer"></div>
@@ -594,7 +695,7 @@ void loadExistingChannels()
         <section class="hero-card create-card">
           <div class="hero-avatar">{{ getAvatarInitial('کانال') }}</div>
           <div class="hero-title">ساخت کانال جدید</div>
-          <p class="hero-description">کانال اختیاری را بسازید، اعضا را دعوت کنید و نقش ادمین‌ها را با flowی شبیه Telegram مدیریت کنید.</p>
+          <p class="hero-description">کانال اختیاری را بسازید، اعضا را دعوت کنید و نقش ادمین‌ها را از همین بخش مدیریت کنید.</p>
           <button type="button" class="primary-btn" @click="openCreatePage">
             <UsersRound :size="18" />
             <span>کانال جدید</span>
@@ -616,7 +717,10 @@ void loadExistingChannels()
               class="telegram-row nav"
               @click="openChannel(channel)"
             >
-              <div class="row-avatar">{{ getAvatarInitial(channel.title) }}</div>
+              <div class="row-avatar">
+                <img v-if="getUserAvatarUrl(channel.avatar_file_id)" :src="getUserAvatarUrl(channel.avatar_file_id)" :alt="channel.title" class="row-avatar-image" />
+                <template v-else>{{ getAvatarInitial(channel.title) }}</template>
+              </div>
               <div class="row-copy">
                 <div class="row-title">{{ channel.title }}</div>
                 <div class="row-subtitle">
@@ -632,10 +736,22 @@ void loadExistingChannels()
 
       <template v-else-if="page === 'create'">
         <section class="hero-card preview">
-          <div class="hero-avatar">{{ getAvatarInitial(title || 'کانال') }}</div>
+          <div class="hero-avatar">
+            <img v-if="channelAvatarUrl" :src="channelAvatarUrl" :alt="title || 'کانال جدید'" class="hero-avatar-image" />
+            <template v-else>{{ getAvatarInitial(title || 'کانال') }}</template>
+            <div v-if="avatarBusy" class="avatar-busy-overlay"><Loader2 :size="20" class="spin" /></div>
+          </div>
           <div class="hero-title">{{ title || 'کانال جدید' }}</div>
           <div class="hero-meta">{{ description.trim() ? 'آماده برای ساخت' : 'بدون توضیحات' }}</div>
-          <p class="hero-description">{{ description.trim() || 'یک نام و توضیح روشن ثبت کنید تا صفحه تنظیمات و معرفی کانال مثل Telegram کامل باشد.' }}</p>
+          <p class="hero-description">{{ description.trim() || 'یک نام و توضیح روشن ثبت کنید تا صفحه معرفی کانال کامل باشد.' }}</p>
+          <div class="avatar-tool-row">
+            <button type="button" class="secondary-btn compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
+              {{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}
+            </button>
+            <button v-if="avatarFileId" type="button" class="ghost-action danger" :disabled="avatarBusy" @click="clearAvatar">
+              حذف عکس
+            </button>
+          </div>
         </section>
 
         <section class="editor-card">
@@ -655,7 +771,10 @@ void loadExistingChannels()
 
       <template v-else-if="page === 'overview' && activeChannel">
         <section class="hero-card">
-          <div class="hero-avatar">{{ getAvatarInitial(activeChannel.title) }}</div>
+          <div class="hero-avatar">
+            <img v-if="channelAvatarUrl" :src="channelAvatarUrl" :alt="activeChannel.title" class="hero-avatar-image" />
+            <template v-else>{{ getAvatarInitial(activeChannel.title) }}</template>
+          </div>
           <div class="hero-title">{{ activeChannel.title }}</div>
           <div class="hero-meta">{{ getChannelKindLabel(activeChannel) }} • {{ activeChannel.member_count.toLocaleString('fa-IR') }} عضو</div>
           <p class="hero-description">{{ activeChannel.description || 'توضیحی برای این کانال ثبت نشده است.' }}</p>
@@ -669,7 +788,7 @@ void loadExistingChannels()
         <div v-else-if="typeof currentUserId === 'number' && currentUserMembership && currentUserCanPostInCurrentChannel" class="flash-box info">شما ادمین این کانال هستید و می‌توانید مستقیماً از پیام‌رسان در آن پست بگذارید.</div>
 
         <section class="telegram-list nav-list">
-          <button type="button" class="telegram-row nav" @click="page = 'members'">
+          <button type="button" class="telegram-row nav" @click="setPage('members')">
             <div class="row-icon soft"><UsersRound :size="18" /></div>
             <div class="row-copy">
               <div class="row-title">اعضای کانال</div>
@@ -679,7 +798,7 @@ void loadExistingChannels()
             <ChevronLeft :size="18" class="row-chevron" />
           </button>
 
-          <button v-if="!isMembershipManagementLocked" type="button" class="telegram-row nav" @click="page = 'admins'">
+          <button v-if="!isMembershipManagementLocked" type="button" class="telegram-row nav" @click="setPage('admins')">
             <div class="row-icon amber"><Shield :size="18" /></div>
             <div class="row-copy">
               <div class="row-title">مدیریت ادمین‌ها</div>
@@ -689,7 +808,7 @@ void loadExistingChannels()
             <ChevronLeft :size="18" class="row-chevron" />
           </button>
 
-          <button v-if="!isMembershipManagementLocked" type="button" class="telegram-row nav" @click="page = 'add-members'">
+          <button v-if="!isMembershipManagementLocked" type="button" class="telegram-row nav" @click="setPage('add-members')">
             <div class="row-icon blue"><UserPlus :size="18" /></div>
             <div class="row-copy">
               <div class="row-title">افزودن عضو</div>
@@ -698,7 +817,7 @@ void loadExistingChannels()
             <ChevronLeft :size="18" class="row-chevron" />
           </button>
 
-          <button type="button" class="telegram-row nav" @click="page = 'edit'">
+          <button type="button" class="telegram-row nav" @click="setPage('edit')">
             <div class="row-icon muted"><PencilLine :size="18" /></div>
             <div class="row-copy">
               <div class="row-title">تنظیمات کانال</div>
@@ -728,7 +847,10 @@ void loadExistingChannels()
         </div>
         <div v-else class="telegram-list">
           <div v-for="member in filteredMembers" :key="member.user_id" class="telegram-row member-row">
-            <div class="row-avatar">{{ getAvatarInitial(member.account_name) }}</div>
+            <div class="row-avatar">
+              <img v-if="getUserAvatarUrl(member.avatar_file_id)" :src="getUserAvatarUrl(member.avatar_file_id)" :alt="member.account_name" class="row-avatar-image" />
+              <template v-else>{{ getAvatarInitial(member.account_name) }}</template>
+            </div>
             <div class="row-copy">
               <div class="row-title with-badges">
                 <span>{{ member.account_name }}</span>
@@ -771,7 +893,10 @@ void loadExistingChannels()
           <div class="section-heading">ادمین‌های فعلی</div>
           <div class="telegram-list compact">
             <div v-for="member in filteredAdmins" :key="member.user_id" class="telegram-row member-row">
-              <div class="row-avatar">{{ getAvatarInitial(member.account_name) }}</div>
+              <div class="row-avatar">
+                <img v-if="getUserAvatarUrl(member.avatar_file_id)" :src="getUserAvatarUrl(member.avatar_file_id)" :alt="member.account_name" class="row-avatar-image" />
+                <template v-else>{{ getAvatarInitial(member.account_name) }}</template>
+              </div>
               <div class="row-copy">
                 <div class="row-title with-badges">
                   <span>{{ member.account_name }}</span>
@@ -801,7 +926,10 @@ void loadExistingChannels()
           <div v-if="promotableMembers.length === 0" class="state-box muted">عضوی برای ارتقا باقی نمانده است.</div>
           <div v-else class="telegram-list compact">
             <div v-for="member in promotableMembers" :key="member.user_id" class="telegram-row member-row">
-              <div class="row-avatar">{{ getAvatarInitial(member.account_name) }}</div>
+              <div class="row-avatar">
+                <img v-if="getUserAvatarUrl(member.avatar_file_id)" :src="getUserAvatarUrl(member.avatar_file_id)" :alt="member.account_name" class="row-avatar-image" />
+                <template v-else>{{ getAvatarInitial(member.account_name) }}</template>
+              </div>
               <div class="row-copy">
                 <div class="row-title">{{ member.account_name }}</div>
                 <div class="row-subtitle">{{ member.full_name }} • {{ member.mobile_number }}</div>
@@ -850,7 +978,10 @@ void loadExistingChannels()
             :class="{ selected: selectedUserIds.has(candidate.user_id) }"
             @click="toggleUser(candidate.user_id)"
           >
-            <div class="row-avatar">{{ getAvatarInitial(candidate.account_name) }}</div>
+            <div class="row-avatar">
+              <img v-if="getUserAvatarUrl(candidate.avatar_file_id)" :src="getUserAvatarUrl(candidate.avatar_file_id)" :alt="candidate.account_name" class="row-avatar-image" />
+              <template v-else>{{ getAvatarInitial(candidate.account_name) }}</template>
+            </div>
             <div class="row-copy">
               <div class="row-title">{{ candidate.account_name }}</div>
               <div class="row-subtitle">{{ candidate.full_name }} • {{ candidate.mobile_number }}</div>
@@ -864,9 +995,25 @@ void loadExistingChannels()
 
       <template v-else-if="page === 'edit' && activeChannel">
         <section class="editor-card">
+          <div class="avatar-editor-block">
+            <div class="hero-avatar small-editor">
+              <img v-if="channelAvatarUrl" :src="channelAvatarUrl" :alt="activeChannel.title" class="hero-avatar-image" />
+              <template v-else>{{ getAvatarInitial(activeChannel.title) }}</template>
+              <div v-if="avatarBusy" class="avatar-busy-overlay"><Loader2 :size="20" class="spin" /></div>
+            </div>
+            <div class="avatar-tool-row compact">
+              <button type="button" class="secondary-btn compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
+                {{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}
+              </button>
+              <button v-if="avatarFileId" type="button" class="ghost-action danger" :disabled="avatarBusy" @click="clearAvatar">
+                حذف عکس
+              </button>
+            </div>
+          </div>
+
           <div class="info-strip">
             <Info :size="16" />
-            <span>صفحه تنظیمات کانال با رفتار متمرکز و شبیه Telegram برای ویرایش مشخصات کانال.</span>
+            <span>از این بخش می‌توانید نام و توضیحات کانال را ویرایش کنید.</span>
           </div>
 
           <label class="field-label" for="edit-channel-title">نام کانال</label>
@@ -1169,6 +1316,8 @@ void loadExistingChannels()
 }
 
 .hero-avatar {
+  position: relative;
+  overflow: hidden;
   width: 86px;
   height: 86px;
   border-radius: 50%;
@@ -1176,10 +1325,58 @@ void loadExistingChannels()
 }
 
 .row-avatar {
+  overflow: hidden;
   width: 48px;
   height: 48px;
   border-radius: 50%;
   font-size: 1rem;
+}
+
+.hero-avatar-image,
+.row-avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hidden-avatar-input {
+  display: none;
+}
+
+.avatar-busy-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.34);
+  color: #fff;
+}
+
+.avatar-tool-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.avatar-tool-row.compact {
+  justify-content: flex-start;
+}
+
+.avatar-editor-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.hero-avatar.small-editor {
+  width: 74px;
+  height: 74px;
+  font-size: 1.65rem;
 }
 
 .hero-title {

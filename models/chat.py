@@ -20,6 +20,7 @@ class Chat(Base):
     type = Column(Enum(ChatType), nullable=False, index=True)
     title = Column(String(255), nullable=True)
     description = Column(Text, nullable=True)
+    avatar_file_id = Column(String(36), ForeignKey("chat_files.id"), nullable=True)
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     is_system = Column(Boolean, nullable=False, default=False)
     is_mandatory = Column(Boolean, nullable=False, default=False)
