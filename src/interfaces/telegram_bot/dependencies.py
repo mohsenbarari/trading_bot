@@ -14,14 +14,14 @@ from src.infrastructure.database.repositories.sqlalchemy_user_repo import SQLAlc
 _session_factory = None
 _user_model = None
 _offer_model = None
-_max_active_offers = 3
+_max_active_offers = 4
 
 
 def configure_dependencies(
     session_factory,
     user_model,
     offer_model=None,
-    max_active_offers: int = 3
+    max_active_offers: int = 4
 ):
     """پیکربندی وابستگی‌ها"""
     global _session_factory, _user_model, _offer_model, _max_active_offers

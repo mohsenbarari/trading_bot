@@ -21,7 +21,7 @@ class OfferService:
         self, 
         offer_repo: IOfferRepository,
         user_repo: IUserRepository,
-        max_active_offers: int = 3
+        max_active_offers: int = 4
     ):
         self._offer_repo = offer_repo
         self._user_repo = user_repo

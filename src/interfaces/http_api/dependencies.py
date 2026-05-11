@@ -17,14 +17,14 @@ from src.infrastructure.database.repositories.sqlalchemy_user_repo import SQLAlc
 _get_session = None
 _user_model = None
 _offer_model = None
-_max_active_offers = 3
+_max_active_offers = 4
 
 
 def configure_api_dependencies(
     get_session_func,
     user_model,
     offer_model=None,
-    max_active_offers: int = 3
+    max_active_offers: int = 4
 ):
     """پیکربندی وابستگی‌ها برای API"""
     global _get_session, _user_model, _offer_model, _max_active_offers
