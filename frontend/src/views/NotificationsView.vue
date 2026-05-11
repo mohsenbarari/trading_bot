@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotificationStore } from '../stores/notifications'
-import { Bell, ArrowRight, Trash2 } from 'lucide-vue-next'
+import { Bell, ChevronLeft, Trash2 } from 'lucide-vue-next'
 import { getNotificationIconComponent } from '../utils/notificationUi'
 
 const router = useRouter()
