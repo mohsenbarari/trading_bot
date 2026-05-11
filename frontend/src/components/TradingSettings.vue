@@ -140,8 +140,7 @@ onMounted(() => {
         <div v-show="openSections.invitation" class="ds-accordion-body">
           <div class="ds-form-group">
             <label class="ds-label">مدت اعتبار لینک دعوت (روز)</label>
-            <input type="number" v-model.number="settings.invitation_expiry_days" min="1" class="ds-input" :class="{'is-default': isDefault('invitation_expiry_days')}" />
-            <span class="ds-hint">پیش‌فرض: 2 روز</span>
+            <input type="number" v-model.number="settings.invitation_expiry_days" :placeholder="defaultVals.invitation_expiry_days.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('invitation_expiry_days')}" />
           </div>
         </div>
       </div>
@@ -158,25 +157,21 @@ onMounted(() => {
         <div v-show="openSections.offer" class="ds-accordion-body">
           <div class="ds-form-group">
             <label class="ds-label">مدت اعتبار لفظ (دقیقه)</label>
-            <input type="number" v-model.number="settings.offer_expiry_minutes" min="1" class="ds-input" :class="{'is-default': isDefault('offer_expiry_minutes')}" />
-            <span class="ds-hint">پیش‌فرض: 2 دقیقه</span>
+            <input type="number" v-model.number="settings.offer_expiry_minutes" :placeholder="defaultVals.offer_expiry_minutes.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('offer_expiry_minutes')}" />
           </div>
           <div class="form-row">
             <div class="ds-form-group">
               <label class="ds-label">حداقل تعداد کالا</label>
-              <input type="number" v-model.number="settings.offer_min_quantity" min="1" class="ds-input" :class="{'is-default': isDefault('offer_min_quantity')}" />
-              <span class="ds-hint">پیش‌فرض: 5</span>
+              <input type="number" v-model.number="settings.offer_min_quantity" :placeholder="defaultVals.offer_min_quantity.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('offer_min_quantity')}" />
             </div>
             <div class="ds-form-group">
               <label class="ds-label">حداکثر تعداد کالا</label>
-              <input type="number" v-model.number="settings.offer_max_quantity" min="1" class="ds-input" :class="{'is-default': isDefault('offer_max_quantity')}" />
-              <span class="ds-hint">پیش‌فرض: 50</span>
+              <input type="number" v-model.number="settings.offer_max_quantity" :placeholder="defaultVals.offer_max_quantity.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('offer_max_quantity')}" />
             </div>
           </div>
           <div class="ds-form-group">
             <label class="ds-label">حداکثر لفظ‌های فعال همزمان</label>
-            <input type="number" v-model.number="settings.max_active_offers" min="1" max="20" class="ds-input" :class="{'is-default': isDefault('max_active_offers')}" />
-            <span class="ds-hint">پیش‌فرض: 4</span>
+            <input type="number" v-model.number="settings.max_active_offers" :placeholder="defaultVals.max_active_offers.toString()" min="1" max="20" class="ds-input" :class="{'is-default': isDefault('max_active_offers')}" />
           </div>
         </div>
       </div>
@@ -193,13 +188,11 @@ onMounted(() => {
         <div v-show="openSections.expire" class="ds-accordion-body">
           <div class="ds-form-group">
             <label class="ds-label">حداکثر منقضی شدن در دقیقه</label>
-            <input type="number" v-model.number="settings.offer_expire_rate_per_minute" min="1" max="10" class="ds-input" :class="{'is-default': isDefault('offer_expire_rate_per_minute')}" />
-            <span class="ds-hint">پیش‌فرض: 2 بار</span>
+            <input type="number" v-model.number="settings.offer_expire_rate_per_minute" :placeholder="defaultVals.offer_expire_rate_per_minute.toString()" min="1" max="10" class="ds-input" :class="{'is-default': isDefault('offer_expire_rate_per_minute')}" />
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه منقضی شدن روزانه</label>
-            <input type="number" v-model.number="settings.offer_expire_daily_limit_after_threshold" min="1" class="ds-input" :class="{'is-default': isDefault('offer_expire_daily_limit_after_threshold')}" />
-            <span class="ds-hint">پیش‌فرض: 10 (بعد از این تعداد، محدودیت اعمال می‌شود)</span>
+            <input type="number" v-model.number="settings.offer_expire_daily_limit_after_threshold" :placeholder="defaultVals.offer_expire_daily_limit_after_threshold.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('offer_expire_daily_limit_after_threshold')}" />
           </div>
         </div>
       </div>
@@ -220,18 +213,15 @@ onMounted(() => {
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه روزانه</label>
-            <input type="number" v-model.number="settings.anti_abuse_daily_base" min="1" class="ds-input" :class="{'is-default': isDefault('anti_abuse_daily_base')}" />
-            <span class="ds-hint">تعداد لاگین مجاز در ۲۴ ساعت</span>
+            <input type="number" v-model.number="settings.anti_abuse_daily_base" :placeholder="defaultVals.anti_abuse_daily_base.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('anti_abuse_daily_base')}" />
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه هفتگی</label>
-            <input type="number" v-model.number="settings.anti_abuse_weekly_base" min="1" class="ds-input" :class="{'is-default': isDefault('anti_abuse_weekly_base')}" />
-            <span class="ds-hint">تعداد لاگین مجاز در ۷ روز</span>
+            <input type="number" v-model.number="settings.anti_abuse_weekly_base" :placeholder="defaultVals.anti_abuse_weekly_base.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('anti_abuse_weekly_base')}" />
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه ماهانه</label>
-            <input type="number" v-model.number="settings.anti_abuse_monthly_base" min="1" class="ds-input" :class="{'is-default': isDefault('anti_abuse_monthly_base')}" />
-            <span class="ds-hint">تعداد لاگین مجاز در ۳۰ روز</span>
+            <input type="number" v-model.number="settings.anti_abuse_monthly_base" :placeholder="defaultVals.anti_abuse_monthly_base.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('anti_abuse_monthly_base')}" />
           </div>
         </div>
       </div>
@@ -243,9 +233,9 @@ onMounted(() => {
           <Save v-else :size="18" />
           <span>ذخیره تنظیمات</span>
         </button>
-        <button class="ds-btn secondary-soft action-btn" @click="resetSettings" :disabled="saving">
+        <button class="ds-btn danger action-btn" @click="resetSettings" :disabled="saving">
           <RotateCcw :size="18" />
-          <span>بازنشانی</span>
+          <span>بازنشانی به پیش‌فرض</span>
         </button>
       </div>
     </div>
@@ -318,11 +308,5 @@ onMounted(() => {
   justify-content: center;
   gap: 0.5rem;
   padding: 0.85rem;
-}
-
-.secondary-soft {
-  background: var(--ds-bg-inset);
-  color: var(--ds-text-secondary);
-  border: 1px solid var(--ds-border-light);
 }
 </style>

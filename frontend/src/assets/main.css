@@ -459,5 +459,119 @@
   .ds-icon-btn:active {
     transform: scale(0.9);
   }
+
+  /* ═══ Shared Form Elements ═══ */
+  .ds-form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+    width: 100%;
+  }
+
+  .ds-label {
+    font-size: var(--ds-font-sm);
+    font-weight: 700;
+    color: var(--ds-text-secondary);
+    padding-right: 4px;
+  }
+
+  .ds-input {
+    width: 100%;
+    height: 48px;
+    padding: 0 1rem;
+    background: var(--ds-bg-card);
+    border: 1.5px solid var(--ds-border-medium);
+    border-radius: var(--ds-radius-md);
+    font-size: var(--ds-font-md);
+    font-weight: 600;
+    color: var(--ds-text-primary);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+    text-align: left; /* Numbers are LTR */
+    direction: ltr;   /* For proper placeholder/value align */
+  }
+
+  .ds-input:focus {
+    border-color: var(--ds-primary-500);
+    box-shadow: 0 0 0 4px var(--ds-primary-50);
+    background: #fff;
+  }
+
+  .ds-input::placeholder {
+    color: var(--ds-text-placeholder);
+    font-weight: 400;
+    opacity: 0.6;
+  }
+
+  .ds-input.is-default {
+    color: var(--ds-text-placeholder);
+  }
+
+  /* ═══ Shared Buttons ═══ */
+  .ds-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    height: 48px;
+    border-radius: var(--ds-radius-md);
+    font-size: var(--ds-font-md);
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: none;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    white-space: nowrap;
+  }
+
+  .ds-btn:active {
+    transform: scale(0.98);
+  }
+
+  .ds-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .ds-btn.primary {
+    background: var(--ds-gradient-primary);
+    color: white;
+    box-shadow: 0 4px 12px rgba(217, 119, 6, 0.3);
+  }
+  
+  .ds-btn.primary:hover {
+    box-shadow: 0 6px 16px rgba(217, 119, 6, 0.4);
+    transform: translateY(-1px);
+  }
+
+  .ds-btn.danger {
+    background: var(--ds-danger-500);
+    color: white;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+  }
+
+  .ds-btn.danger:hover {
+    background: var(--ds-danger-600);
+    box-shadow: 0 6px 16px rgba(239, 68, 68, 0.3);
+  }
+
+  .ds-btn.secondary {
+    background: var(--ds-bg-hover);
+    color: var(--ds-text-primary);
+    border: 1px solid var(--ds-border-medium);
+  }
+
+  .ds-btn.secondary:hover {
+    background: var(--ds-border-light);
+  }
+
+  .ds-hint {
+    font-size: var(--ds-font-xs);
+    color: var(--ds-text-muted);
+    padding: 0 4px;
+  }
 }
 
