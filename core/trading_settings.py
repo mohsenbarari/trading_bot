@@ -10,8 +10,10 @@
 import json
 import logging
 import time
+import asyncio
 from datetime import datetime
 from pathlib import Path
+from threading import Thread
 from typing import Any, Optional
 
 from pydantic import BaseModel
@@ -179,6 +181,42 @@ async def load_trading_settings_async() -> TradingSettings:
     return TradingSettings()
 
 
+def _run_async_settings_loader_sync() -> TradingSettings:
+    """
+    Run the async DB-backed settings loader from sync call sites.
+
+    Many hot paths still call `get_trading_settings()` from sync helpers even
+    though settings are persisted in the DB. When those callers run inside an
+    active event loop, we bridge through a short-lived worker thread so we do
+    not fall back to stale JSON defaults.
+    """
+
+    def load_in_new_loop() -> TradingSettings:
+        return asyncio.run(load_trading_settings_async())
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return load_in_new_loop()
+
+    result: dict[str, TradingSettings] = {}
+    error: dict[str, BaseException] = {}
+
+    def runner() -> None:
+        try:
+            result["settings"] = load_in_new_loop()
+        except BaseException as exc:  # pragma: no cover - surfaced to caller
+            error["exc"] = exc
+
+    thread = Thread(target=runner, daemon=True)
+    thread.start()
+    thread.join()
+
+    if "exc" in error:
+        raise error["exc"]
+    return result["settings"]
+
+
 def load_trading_settings() -> TradingSettings:
     """
     خواندن تنظیمات (sync fallback).
@@ -186,7 +224,12 @@ def load_trading_settings() -> TradingSettings:
     توجه: این تابع برای سازگاری با کد قدیمی است.
     در کد جدید از get_trading_settings_async() استفاده کنید.
     """
-    # اول از JSON (غیر blocking)
+    try:
+        return _run_async_settings_loader_sync()
+    except Exception as e:
+        logger.warning(f"Failed to load settings via async bridge: {e}")
+
+    # fallback نهایی برای شرایطی که DB در دسترس نیست
     json_data = _load_from_json()
     if json_data:
         return TradingSettings(**json_data)

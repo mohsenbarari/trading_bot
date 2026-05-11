@@ -107,7 +107,10 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
             loaded = await trading_settings.load_trading_settings_async()
         self.assertEqual(loaded.offer_min_quantity, 4)
 
-        with patch('core.trading_settings._load_from_json', return_value={'offer_min_quantity': 6}):
+        with patch(
+            'core.trading_settings.load_trading_settings_async',
+            AsyncMock(return_value=trading_settings.TradingSettings(offer_min_quantity=6))
+        ), patch('core.trading_settings._load_from_json', return_value={'offer_min_quantity': 99}):
             sync_loaded = trading_settings.load_trading_settings()
         self.assertEqual(sync_loaded.offer_min_quantity, 6)
 
@@ -117,9 +120,22 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
             loaded = await trading_settings.load_trading_settings_async()
         self.assertIsInstance(loaded, trading_settings.TradingSettings)
 
-        with patch('core.trading_settings._load_from_json', return_value={}):
+        with patch(
+            'core.trading_settings.load_trading_settings_async',
+            AsyncMock(return_value=trading_settings.TradingSettings())
+        ), patch('core.trading_settings._load_from_json', return_value={}):
             sync_loaded = trading_settings.load_trading_settings()
         self.assertIsInstance(sync_loaded, trading_settings.TradingSettings)
+
+        with patch(
+            'core.trading_settings.load_trading_settings_async',
+            AsyncMock(side_effect=RuntimeError('db bridge failed'))
+        ), patch('core.trading_settings._load_from_json', return_value={'offer_min_quantity': 4}), patch.object(
+            trading_settings, 'logger'
+        ) as logger:
+            sync_loaded = trading_settings.load_trading_settings()
+        self.assertEqual(sync_loaded.offer_min_quantity, 4)
+        logger.warning.assert_called()
 
         with patch('core.trading_settings._get_from_redis_cache', AsyncMock(return_value=trading_settings.TradingSettings())), patch(
             'core.trading_settings.load_trading_settings_async', AsyncMock()
