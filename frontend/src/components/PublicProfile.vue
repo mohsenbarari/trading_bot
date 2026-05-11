@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
-import { ChevronDown, ChevronLeft, User as UserIcon, Activity, ArrowRight } from 'lucide-vue-next';
+import { ChevronDown, ChevronLeft, User as UserIcon, Activity, ArrowRight, ChevronRight } from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
 
@@ -249,7 +249,7 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
          </h2>
          <h2 v-else>👤 پروفایل</h2>
       </div>
-      <button v-if="!hideBackButton" class="back-button" @click="$emit('navigate', 'home')"><ArrowRight :size="24" /></button>
+      <button class="back-button" @click="$emit('navigate', 'home')"><ChevronLeft :size="24" /></button>
     </div>
 
     <div v-if="isLoading" class="loading-state-skeleton">

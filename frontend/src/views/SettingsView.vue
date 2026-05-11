@@ -194,7 +194,7 @@ onMounted(() => {
       <div class="header-title">
          <h2>⚙️ تنظیمات</h2>
       </div>
-      <button class="back-button" @click="router.back()"><ArrowRight :size="24" /></button>
+      <button class="back-button" @click="router.back()"><ChevronLeft :size="24" /></button>
     </div>
 
     <div class="settings-content">

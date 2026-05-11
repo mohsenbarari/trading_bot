@@ -48,7 +48,6 @@ onMounted(async () => {
       :viewerUserId="currentUser.id"
       :apiBaseUrl="apiBaseUrl"
       :jwtToken="jwtToken"
-      :hideBackButton="true"
       @navigate="handleNavigate"
     />
     <div v-else class="loading-container">

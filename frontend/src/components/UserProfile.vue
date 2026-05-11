@@ -2,7 +2,7 @@
 import { ref, computed, watchEffect, onUnmounted, watch, toRef } from 'vue';
 import moment from 'moment-jalaali';
 import DatePicker from 'vue3-persian-datetime-picker';
-import { ArrowRight } from 'lucide-vue-next';
+import { ArrowRight, ChevronLeft } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
 import { useUserProfileTiming } from '../composables/useUserProfileTiming';
 
@@ -506,7 +506,7 @@ async function deleteUser() {
   <div class="card">
     <div class="header-row">
         <h2>{{ isAdminView ? 'مدیریت کاربر' : 'پروفایل کاربری' }}</h2>
-        <button v-if="isAdminView" class="back-button" @click="$emit('navigate', 'manage_users')"><ArrowRight :size="24" /></button>
+        <button v-if="isAdminView" class="back-button" @click="$emit('navigate', 'manage_users')"><ChevronLeft :size="24" /></button>
     </div>
 
     <div class="profile-details">
