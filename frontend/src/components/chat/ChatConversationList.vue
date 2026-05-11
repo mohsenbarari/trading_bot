@@ -391,8 +391,8 @@ onBeforeUnmount(() => {
     <div class="conversation-atmosphere" aria-hidden="true"></div>
 
     <div class="conversation-panel">
-      <div class="conversations-list" v-auto-animate data-testid="conversation-list">
-        <div v-if="conversations.length === 0" class="empty-state" data-testid="conversation-list-empty-state">
+      <div class="conversations-list" v-auto-animate>
+        <div v-if="conversations.length === 0" class="empty-state">
           <span>💬</span>
           <p>گفتگویی وجود ندارد</p>
         </div>
@@ -421,7 +421,6 @@ onBeforeUnmount(() => {
                 !isRoomConversation(conv) && !!typingUsers[conv.other_user_id],
               ]"
               class="conversation-card"
-              :data-testid="`conversation-card-${conv.other_user_id}`"
               v-ripple
               :class="{
                 'conversation-card--active': selectedUserId === conv.other_user_id,
@@ -475,13 +474,13 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="conversation-side">
-                <div v-if="conv.unread_count > 0" class="unread-badge" :data-testid="`conversation-unread-badge-${conv.other_user_id}`">
+                <div v-if="conv.unread_count > 0" class="unread-badge">
                   {{ conv.unread_count.toLocaleString('fa-IR') }}
                 </div>
-                <div v-else-if="isConversationMuted(conv)" class="side-muted-indicator" aria-label="بی‌صدا" :data-testid="`conversation-muted-indicator-${conv.other_user_id}`">
+                <div v-else-if="isConversationMuted(conv)" class="side-muted-indicator" aria-label="بی‌صدا">
                   <BellOff :size="14" />
                 </div>
-                <div v-else-if="isConversationPinned(conv)" class="side-pin-indicator" :data-testid="`conversation-pin-indicator-${conv.other_user_id}`">
+                <div v-else-if="isConversationPinned(conv)" class="side-pin-indicator">
                   <Pin :size="14" />
                 </div>
               </div>
@@ -490,13 +489,13 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <button class="fab-new-chat" v-ripple @click="emit('new-conversation')" data-testid="messenger-new-chat-button" aria-label="شروع گفتگوی جدید">
+    <button class="fab-new-chat" v-ripple @click="emit('new-conversation')">
       <MessageCirclePlus :size="28" />
     </button>
 
     <transition name="zoom-fade">
       <div v-if="menuConversation" class="conversation-menu-overlay" @click.self="closeConversationMenu">
-        <div class="conversation-menu-popover" :style="menuPosition" role="menu" aria-label="Conversation actions" data-testid="conversation-actions-menu">
+        <div class="conversation-menu-popover" :style="menuPosition" role="menu" aria-label="Conversation actions">
           <div class="conversation-menu-panel" @click.stop>
             <div v-if="activeMenuActions.length > 0" class="conversation-menu-actions">
               <template v-for="(action, index) in activeMenuActions" :key="action.key">
