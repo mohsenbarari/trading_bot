@@ -37,15 +37,25 @@ const defaultVals = {
   anti_abuse_monthly_base: 7
 }
 
-// تنظیمات اصلی که از سرور می‌آیند (برای نمایش در Placeholder)
-const settings = ref<Record<string, any>>({ ...defaultVals })
-// مقادیری که کاربر در حال ویرایش آن‌هاست
-const form = ref<Record<string, any>>({})
+type EditableSettingKey = keyof typeof defaultVals
 
-const isDefault = (key: keyof typeof defaultVals) => {
-  // اگر کاربر مقداری وارد نکرده، مقدار اصلی را چک کن
-  const val = form.value[key] !== undefined && form.value[key] !== '' ? form.value[key] : settings.value[key]
-  return val === defaultVals[key] || val == null || val === ''
+const editableSettingKeys = Object.keys(defaultVals) as EditableSettingKey[]
+
+// تنظیمات اصلی که از سرور می‌آیند (برای نمایش در Placeholder)
+const settings = ref<Record<EditableSettingKey, number>>({ ...defaultVals })
+// مقادیری که کاربر در حال ویرایش آن‌هاست
+const form = ref<Partial<Record<EditableSettingKey, number | ''>>>({})
+
+const getResolvedSettingValue = (key: EditableSettingKey) => {
+  const draftValue = form.value[key]
+  if (typeof draftValue === 'number' && Number.isFinite(draftValue)) {
+    return draftValue
+  }
+  return settings.value[key]
+}
+
+const isDefault = (key: EditableSettingKey) => {
+  return getResolvedSettingValue(key) === defaultVals[key]
 }
 
 const fetchApi = async (method: string, endpoint: string, body: any = null) => {
@@ -65,7 +75,7 @@ const loadSettings = async () => {
   try {
     loading.value = true
     const data = await fetchApi('GET', '/trading-settings/')
-    settings.value = data
+    settings.value = { ...defaultVals, ...data }
     form.value = {} // پاک کردن فرم بعد از لود جدید
   } catch (error) {
     message.value = 'خطا در بارگذاری تنظیمات'
@@ -80,11 +90,14 @@ const saveSettings = async () => {
     saving.value = true
     message.value = ''
     
-    // ترکیب مقادیر تغییر یافته با مقادیر قبلی
-    const payload = { ...settings.value, ...form.value }
+    // فقط کلیدهای قابل ویرایش را بفرست تا به فیلدهای محاسباتی/اضافی تکیه نکنیم.
+    const payload = editableSettingKeys.reduce((acc, key) => {
+      acc[key] = getResolvedSettingValue(key)
+      return acc
+    }, {} as Record<EditableSettingKey, number>)
     
     const data = await fetchApi('PUT', '/trading-settings/', payload)
-    settings.value = data
+    settings.value = { ...defaultVals, ...data }
     form.value = {} // بعد از ذخیره، فرم را خالی کن تا دوباره Placeholderها نمایش داده شوند
     
     message.value = 'تنظیمات با موفقیت ذخیره شد'
@@ -107,7 +120,7 @@ const resetSettings = async () => {
     message.value = ''
     
     const data = await fetchApi('POST', '/trading-settings/reset')
-    settings.value = data
+    settings.value = { ...defaultVals, ...data }
     form.value = {}
     
     message.value = 'تنظیمات به مقادیر پیش‌فرض بازنشانی شد'
