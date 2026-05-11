@@ -36,43 +36,43 @@ defineEmits(['navigate']);
 .admin-panel-container {
   display: flex;
   flex-direction: column;
-  gap: 16px; 
+  gap: var(--ds-page-padding); 
 }
 .card.management-card {
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(245, 158, 11, 0.1);
-  border-radius: 1.25rem;
+  border: 1px solid var(--ds-border-accent);
+  border-radius: var(--ds-radius-xl);
   padding: 1.5rem;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+  box-shadow: var(--ds-shadow-md);
 }
 h2 {
   margin-top: 0;
   margin-bottom: 0.5rem;
   font-weight: 800;
-  font-size: 1.1rem;
-  color: #1f2937;
+  font-size: var(--ds-font-xl);
+  color: var(--ds-text-primary);
 }
 p {
   font-size: 0.8rem;
-  color: #9ca3af;
+  color: var(--ds-text-placeholder);
   margin-bottom: 1.5rem;
 }
 .button-group {
     display: grid;
     grid-template-columns: 1fr; 
-    gap: 0.75rem;
+    gap: var(--ds-section-gap);
 }
 .admin-action-btn {
   width: 100%;
   padding: 1rem 1.25rem;
-  font-size: 0.9rem; /* Standardized size */
-  font-weight: 600; /* Standardized weight */
-  background: white;
-  color: #1f2937;
-  border: 1px solid rgba(245, 158, 11, 0.15);
-  border-radius: 1rem; 
+  font-size: var(--ds-font-md);
+  font-weight: 600;
+  background: var(--ds-bg-card);
+  color: var(--ds-text-primary);
+  border: 1px solid var(--ds-border-accent);
+  border-radius: var(--ds-radius-lg);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -80,53 +80,53 @@ p {
   direction: rtl; 
   gap: 0.75rem;
   transition: all 0.2s ease-in-out;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-  font-family: inherit; /* Ensure font matches div defaults */
+  box-shadow: var(--ds-shadow-xs);
+  font-family: inherit;
 }
 .admin-action-btn:hover {
-  border-color: #f59e0b;
-  color: #b45309;
-  background: #fffbeb;
+  border-color: var(--ds-primary-500);
+  color: var(--ds-primary-700);
+  background: var(--ds-primary-50);
 }
 .admin-action-btn:active {
-  background: #fef3c7;
+  background: var(--ds-primary-100);
   transform: scale(0.98);
 }
 .admin-action-btn.primary {
-  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
-  color: white !important;
-  border-color: transparent !important;
+  background: var(--ds-gradient-primary);
+  color: white;
+  border-color: transparent;
   box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
 }
 .admin-action-btn.primary:hover {
-  background: linear-gradient(135deg, #d97706, #b45309) !important;
-  color: white !important;
+  background: linear-gradient(135deg, var(--ds-primary-600), var(--ds-primary-700));
+  color: white;
 }
 .admin-action-btn.primary-alt {
-  background: linear-gradient(135deg, #0f766e, #10b981) !important;
-  color: white !important;
-  border-color: transparent !important;
+  background: linear-gradient(135deg, #0f766e, var(--ds-success-500));
+  color: white;
+  border-color: transparent;
   box-shadow: 0 4px 12px rgba(16, 185, 129, 0.24);
 }
 .admin-action-btn.primary-alt:hover {
-  background: linear-gradient(135deg, #0b5f59, #059669) !important;
-  color: white !important;
+  background: linear-gradient(135deg, #0b5f59, var(--ds-success-600));
+  color: white;
 }
 .admin-action-btn.secondary {
-  background: white !important; /* Pure white, no gradient */
-  color: #1f2937 !important; /* Dark Gray */
-  border: 1px solid rgba(245, 158, 11, 0.2) !important; /* Match UserManager border (0.2) */
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  background: var(--ds-bg-card);
+  color: var(--ds-text-primary);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  box-shadow: var(--ds-shadow-sm);
 }
 .admin-action-btn.secondary:hover {
-  background: #fffbeb !important; /* Very light amber */
-  border-color: #f59e0b !important;
-  color: #b45309 !important;
+  background: var(--ds-primary-50);
+  border-color: var(--ds-primary-500);
+  color: var(--ds-primary-700);
 }
 .version-tag {
     text-align: center;
-    font-size: 0.7rem;
-    color: #9ca3af;
+    font-size: var(--ds-font-xs);
+    color: var(--ds-text-placeholder);
     margin-top: 1rem;
     opacity: 0.5;
 }

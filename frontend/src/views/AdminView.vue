@@ -64,10 +64,10 @@ onUnmounted(() => clearBackStack())
 </script>
 
 <template>
-  <div class="admin-view min-h-screen flex flex-col">
+  <div class="admin-view ds-page">
      <!-- Top Bar (only when inside a sub-section) -->
-     <div v-if="currentSection !== 'menu'" class="sticky top-0 z-10 bg-white border-bottom border-[#f3f4f6]">
-         <div class="header-row max-w-[480px] mx-auto">
+     <div v-if="currentSection !== 'menu'" class="admin-top-bar">
+         <div class="header-row admin-header">
              <div class="header-spacer"></div>
              <div class="header-title">
                  <h2>
@@ -88,8 +88,8 @@ onUnmounted(() => clearBackStack())
      </div>
 
      <!-- Content Area -->
-     <div class="flex-1 p-4 overflow-y-auto pb-24">
-         <div class="max-w-[480px] mx-auto w-full">
+     <div class="admin-content">
+         <div class="admin-inner">
             
             <transition name="fade" mode="out-in">
                 <AdminPanel v-if="currentSection === 'menu'" @navigate="handleNavigate" />
@@ -142,11 +142,36 @@ onUnmounted(() => clearBackStack())
 </template>
 
 <style scoped>
+.admin-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
 .admin-top-bar {
-  background: rgba(255, 251, 235, 0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(245, 158, 11, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--ds-bg-card);
+  border-bottom: 1px solid var(--ds-border-light);
+}
+
+.admin-header {
+  max-width: var(--ds-page-max-width);
+  margin: 0 auto;
+}
+
+.admin-content {
+  flex: 1;
+  padding: var(--ds-card-padding);
+  overflow-y: auto;
+  padding-bottom: 6rem;
+}
+
+.admin-inner {
+  max-width: var(--ds-page-max-width);
+  margin: 0 auto;
+  width: 100%;
 }
 
 .fade-enter-active,
