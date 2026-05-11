@@ -13,6 +13,9 @@
     "test:unit": "vitest",
     "test:unit:run": "vitest run",
     "test:e2e": "playwright test --project=chromium",
+    "test:e2e:firefox": "playwright test --project=firefox --workers=1",
+    "test:e2e:webkit": "playwright test --project=webkit --workers=1",
+    "test:e2e:matrix": "playwright test --project=chromium --project=firefox --project=webkit --workers=1",
     "test:e2e:all": "playwright test"
   },
   "dependencies": {

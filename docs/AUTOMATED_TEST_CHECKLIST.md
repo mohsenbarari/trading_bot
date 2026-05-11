@@ -148,6 +148,7 @@ Scope rules:
 - [x] Re-sync `frontend/e2e/admin-smoke.spec.ts` and `frontend/e2e/auth.spec.ts` with the current channel-manager entry flow and profile/settings routing.
 - [x] Revalidate the full frontend Playwright suite serially with a clean green pass (`64/64`).
 - [x] Expand the full frontend Playwright matrix beyond Chromium with serial Firefox (`64/64`) and WebKit (`64/64`) passes after the current cross-browser selector/runtime hardening and `MarketView.vue` manual-create restoration.
+- [x] Expose routine frontend browser commands for Chromium / Firefox / WebKit via `npm run test:e2e`, serial `npm run test:e2e:firefox`, serial `npm run test:e2e:webkit`, and `npm run test:e2e:matrix` so the checklist path is executable without ad hoc shell commands and keeps the proven cross-browser worker profile.
 
 ## Phase 7 - Models, Migrations, Startup, and Deployment Smoke Coverage
 
