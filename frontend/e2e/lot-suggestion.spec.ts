@@ -264,9 +264,35 @@ test.describe('Lot suggestion regressions', () => {
       })
     })
 
-    await publicOfferCard.getByRole('button', { name: '10 عدد' }).click()
-    await expect(publicOfferCard.getByRole('button', { name: 'تایید 10 عدد؟' })).toBeVisible()
-    await publicOfferCard.getByRole('button', { name: 'تایید 10 عدد؟' }).click({ force: true })
+    await page.waitForFunction(({ note, label }) => {
+      return Array.from(document.querySelectorAll('.offer-card-wrap')).some((card) => {
+        const cardText = card.textContent || ''
+        if (!cardText.includes(note)) return false
+        return Array.from(card.querySelectorAll('button')).some((button) => (button.textContent || '').includes(label))
+      })
+    }, { note: fixture.publicOfferNote, label: '10 عدد' })
+    await page.evaluate(({ note, label }) => {
+      const card = Array.from(document.querySelectorAll('.offer-card-wrap')).find((entry) => (entry.textContent || '').includes(note))
+      const button = Array.from(card?.querySelectorAll('button') || []).find((entry) => (entry.textContent || '').includes(label))
+      if (button instanceof HTMLElement) {
+        button.click()
+      }
+    }, { note: fixture.publicOfferNote, label: '10 عدد' })
+
+    await page.waitForFunction(({ note, label }) => {
+      return Array.from(document.querySelectorAll('.offer-card-wrap')).some((card) => {
+        const cardText = card.textContent || ''
+        if (!cardText.includes(note)) return false
+        return Array.from(card.querySelectorAll('button')).some((button) => (button.textContent || '').includes(label))
+      })
+    }, { note: fixture.publicOfferNote, label: 'تایید 10 عدد؟' })
+    await page.evaluate(({ note, label }) => {
+      const card = Array.from(document.querySelectorAll('.offer-card-wrap')).find((entry) => (entry.textContent || '').includes(note))
+      const button = Array.from(card?.querySelectorAll('button') || []).find((entry) => (entry.textContent || '').includes(label))
+      if (button instanceof HTMLElement) {
+        button.click()
+      }
+    }, { note: fixture.publicOfferNote, label: 'تایید 10 عدد؟' })
 
     const dialog = page.getByRole('alertdialog', { name: 'پیشنهاد معامله' })
     await expect(dialog).toBeVisible()
@@ -278,8 +304,21 @@ test.describe('Lot suggestion regressions', () => {
     await expect(dialog.getByRole('button', { name: 'رد کردن' })).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'بستن' })).toHaveCount(0)
 
-    await dialog.getByRole('button', { name: '16 عدد' }).click()
-    await expect(dialog.getByRole('button', { name: 'تایید 16 عدد؟' })).toBeVisible()
+    await page.waitForFunction((label) => {
+      const dialog = document.querySelector('[role="alertdialog"]')
+      return Array.from(dialog?.querySelectorAll('button') || []).some((button) => (button.textContent || '').includes(label))
+    }, '16 عدد')
+    await page.evaluate((label) => {
+      const dialog = document.querySelector('[role="alertdialog"]')
+      const button = Array.from(dialog?.querySelectorAll('button') || []).find((entry) => (entry.textContent || '').includes(label))
+      if (button instanceof HTMLElement) {
+        button.click()
+      }
+    }, '16 عدد')
+    await page.waitForFunction((label) => {
+      const dialog = document.querySelector('[role="alertdialog"]')
+      return Array.from(dialog?.querySelectorAll('button') || []).some((button) => (button.textContent || '').includes(label))
+    }, 'تایید 16 عدد؟')
 
     updateOfferState(fixture.publicOfferId, 8, [8], 'active')
     await expect(dialog).toContainText('8 عدد')

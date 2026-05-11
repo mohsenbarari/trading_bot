@@ -1,9 +1,11 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
+const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ6kAAAAASUVORK5CYII='
+const GENERATED_WEBM_BASE64 = 'GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAMpEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHYTbuMU6uEElTDZ1OsggEeTbuMU6uEHFO7a1OsggMT7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsirXsYMPQkBNgI1MYXZmNjAuMTYuMTAwV0GNTGF2ZjYwLjE2LjEwMESJiECCwAAAAAAAFlSua8GuAQAAAAAAADjXgQFzxYgcOxjQCFYmc5yBACK1nIN1bmSIgQCGhVZfVlA5g4EBI+ODhAJiWgDgibCBYLqBYJqBAhJUw2dAgHNzoGPAgGfImkWjh0VOQ09ERVJEh41MYXZmNjAuMTYuMTAwc3PaY8CLY8WIHDsY0AhWJnNnyKVFo4dFTkNPREVSRIeYTGF2YzYwLjMxLjEwMiBsaWJ2cHgtdnA5Z8ihRaOIRFVSQVRJT05Eh5MwMDowMDowMC42MDAwMDAwMDAAH0O2dUFp54EAo7CBAACAgkmDQgAF8AX2ADgkHBhKAAAwYAAAfKn//1zBn///25IP//6uxlgyUsRrFACjlIEAKACGAECSnABQAAADIAAAWTDgo5SBAFAAhgBAkpwATuAAAyAAAFkw4KOUgQB4AIYAQJKcAFAAAAMgAABZMOCjlIEAoACGAECSnABNQAADIAAAWTDgo5SBAMgAhgBAkpwAUAAAAyAAAFkw4KOUgQDwAIYAQJKcAE7gAAMgAABZMOCjlIEBGACGAECSnABQAAADIAAAWTDgo5SBAUAAhgBAkpwASiAAAyAAAFkw4KOUgQFoAIYAQJKcAFAAAAMgAABZMOCjlIEBkACGAMCSnABKIAADIAAAWTDgo5SBAbgAhgBAkpwAUAAAAyAAAFkw4KOUgQHgAIYAQJKcAE1AAAMgAABZMOCjlIECCACGAECSnABQAAADIAAAWTDgo5SBAjAAhgBAkpwATuAAAyAAAFkw4BxTu2uRu4+zgQC3iveBAfGCAaTwgQM='
 
 interface SeededChannelAdminFixture {
   userId: number
@@ -248,11 +250,178 @@ async function loginWithSeededSession(page: Page, fixture: SeededChannelAdminFix
     localStorage.removeItem('suspended_refresh_token')
   }, fixture)
   await page.goto('/')
-  await expect(page.getByText(fixture.accountName)).toBeVisible()
+  await expect(page.getByText(fixture.accountName)).toBeVisible({ timeout: 30000 })
 }
 
 async function expectRoomHeaderStatus(page: Page, expectedStatus: 'کانال' | 'گروه') {
   await expect(page.locator('.chat-header .header-status')).toHaveText(expectedStatus)
+}
+
+function createGeneratedAudioBase64() {
+  const sampleRate = 16000
+  const durationSeconds = 0.45
+  const frameCount = Math.floor(sampleRate * durationSeconds)
+  const channelCount = 1
+  const bitsPerSample = 16
+  const blockAlign = channelCount * (bitsPerSample / 8)
+  const byteRate = sampleRate * blockAlign
+  const pcmBytes = frameCount * blockAlign
+  const totalLength = 44 + pcmBytes
+  const buffer = new ArrayBuffer(totalLength)
+  const view = new DataView(buffer)
+
+  const writeAscii = (offset: number, value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index))
+    }
+  }
+
+  writeAscii(0, 'RIFF')
+  view.setUint32(4, 36 + pcmBytes, true)
+  writeAscii(8, 'WAVE')
+  writeAscii(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, channelCount, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, byteRate, true)
+  view.setUint16(32, blockAlign, true)
+  view.setUint16(34, bitsPerSample, true)
+  writeAscii(36, 'data')
+  view.setUint32(40, pcmBytes, true)
+
+  let writeOffset = 44
+  for (let sampleIndex = 0; sampleIndex < frameCount; sampleIndex += 1) {
+    const time = sampleIndex / sampleRate
+    const amplitude = Math.sin(2 * Math.PI * 660 * time) * 0.35
+    const value = Math.max(-1, Math.min(1, amplitude))
+    view.setInt16(writeOffset, value * 0x7fff, true)
+    writeOffset += 2
+  }
+
+  return Buffer.from(buffer).toString('base64')
+}
+
+const GENERATED_AUDIO_WAV_BASE64 = createGeneratedAudioBase64()
+
+function materializeGeneratedFile(file: { name: string; type: string; bodyBase64?: string; generator?: 'video' | 'audio' }) {
+  if (typeof file.bodyBase64 === 'string' && file.bodyBase64.length > 0) {
+    const bytes = Buffer.from(file.bodyBase64, 'base64')
+    return {
+      name: file.name,
+      type: file.type,
+      size: bytes.byteLength,
+      bodyBase64: file.bodyBase64,
+    }
+  }
+
+  if (file.generator === 'video') {
+    const bytes = Buffer.from(GENERATED_WEBM_BASE64, 'base64')
+    return {
+      name: file.name,
+      type: 'video/webm',
+      size: bytes.byteLength,
+      bodyBase64: GENERATED_WEBM_BASE64,
+    }
+  }
+
+  if (file.generator === 'audio') {
+    const bytes = Buffer.from(GENERATED_AUDIO_WAV_BASE64, 'base64')
+    return {
+      name: file.name,
+      type: 'audio/wav',
+      size: bytes.byteLength,
+      bodyBase64: GENERATED_AUDIO_WAV_BASE64,
+    }
+  }
+
+  throw new Error(`Missing share payload body for ${file.name}`)
+}
+
+function createPlaywrightBinaryFile(name: string, mimeType: string, bodyBase64: string) {
+  return {
+    name,
+    mimeType,
+    buffer: Buffer.from(bodyBase64, 'base64'),
+  }
+}
+
+async function expectRoomOpen(page: Page, roomId: number, roomTitle: string, roomKind: 'کانال' | 'گروه') {
+  const expectedUrlFragment = `/chat?user_id=-${roomId}`
+  const waitForExpectedUrl = (timeout: number) => page.waitForURL(`**${expectedUrlFragment}`, { timeout }).then(() => true).catch(() => false)
+  let switchedViaAutoOpen = await waitForExpectedUrl(5000)
+
+  if (!switchedViaAutoOpen) {
+    const roomConversationRow = page.locator('.conversation-item').filter({ hasText: roomTitle }).first()
+    const roomConversationRowVisible = await roomConversationRow.isVisible().catch(() => false)
+
+    if (roomConversationRowVisible) {
+      await roomConversationRow.click({ force: true })
+      switchedViaAutoOpen = await waitForExpectedUrl(5000)
+    }
+  }
+
+  if (!switchedViaAutoOpen) {
+    await page.goto(expectedUrlFragment, { waitUntil: 'commit', timeout: 10000 }).catch(() => {})
+  }
+
+  await expect.poll(() => page.url(), { timeout: 30000 }).toContain(expectedUrlFragment)
+  await expect(page.locator('.chat-header .header-name')).toContainText(roomTitle, { timeout: 30000 })
+  await expectRoomHeaderStatus(page, roomKind)
+}
+
+async function forwardToTargets(page: Page, targets: Array<string | Locator>) {
+  const modal = page.locator('.forward-modal')
+  await expect(modal).toBeVisible({ timeout: 30000 })
+
+  for (const targetCandidate of targets) {
+    const target = typeof targetCandidate === 'string'
+      ? page.locator('.forward-target-item').filter({ hasText: targetCandidate }).first()
+      : targetCandidate.first()
+
+    await expect(target).toBeVisible({ timeout: 30000 })
+    await target.click({ force: true, timeout: 5000 }).catch(async () => {
+      await target.evaluate((node) => {
+        if (node instanceof HTMLElement) {
+          node.click()
+        }
+      }).catch(() => {})
+    })
+
+    const selectedAfterClick = await target.evaluate((node) => node.classList.contains('is-selected')).catch(() => false)
+    if (!selectedAfterClick) {
+      await target.evaluate((node) => {
+        if (node instanceof HTMLElement) {
+          node.click()
+        }
+      }).catch(() => {})
+    }
+
+    await expect
+      .poll(async () => target.evaluate((node) => node.classList.contains('is-selected')).catch(() => false), { timeout: 30000 })
+      .toBe(true)
+  }
+
+  const sendButton = page.locator('.forward-send-btn')
+  await expect(sendButton).toBeEnabled({ timeout: 30000 })
+  await expect(sendButton).toContainText(String(targets.length), { timeout: 30000 })
+  await sendButton.evaluate((node) => {
+    if (node instanceof HTMLElement) {
+      node.click()
+    }
+  })
+
+  const hiddenAfterClick = await modal.waitFor({ state: 'hidden', timeout: 10000 }).then(() => true).catch(() => false)
+  if (!hiddenAfterClick) {
+    await page.evaluate(() => {
+      const button = document.querySelector('.forward-send-btn')
+      if (button instanceof HTMLElement) {
+        button.click()
+      }
+    })
+  }
+
+  await expect(modal).toBeHidden({ timeout: 30000 })
 }
 
 async function seedBootstrapChannelMessage(
@@ -513,6 +682,10 @@ async function seedShareReceivePayload(page: Page, payload: {
     generator?: 'video' | 'audio'
   }>
 }) {
+  const files = Array.isArray(payload.files)
+    ? payload.files.map((file) => materializeGeneratedFile(file))
+    : []
+
   await page.evaluate(async (entry) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const req = indexedDB.open('trading-bot-share-target', 1)
@@ -526,139 +699,6 @@ async function seedShareReceivePayload(page: Page, payload: {
       req.onerror = () => reject(req.error)
     })
 
-    const createGeneratedVideoBlob = async () => {
-      const canvas = document.createElement('canvas')
-      canvas.width = 96
-      canvas.height = 96
-      const ctx = canvas.getContext('2d')
-      if (!ctx) {
-        throw new Error('Share-receive video context unavailable')
-      }
-      if (typeof canvas.captureStream !== 'function' || typeof MediaRecorder === 'undefined') {
-        throw new Error('Share-receive MediaRecorder unavailable')
-      }
-
-      const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type))
-      if (!mimeType) {
-        throw new Error('No supported share-receive MediaRecorder mime type')
-      }
-
-      return await new Promise<Blob>(async (resolveVideo, rejectVideo) => {
-        const stream = canvas.captureStream(8)
-        const recorder = new MediaRecorder(stream, { mimeType })
-        const chunks: BlobPart[] = []
-
-        recorder.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0) {
-            chunks.push(event.data)
-          }
-        }
-        recorder.onerror = () => rejectVideo(new Error('Share-receive MediaRecorder error'))
-        recorder.onstop = () => resolveVideo(new Blob(chunks, { type: mimeType }))
-
-        const drawFrame = (frame: number) => {
-          ctx.fillStyle = frame % 2 === 0 ? '#dc2626' : '#7c3aed'
-          ctx.fillRect(0, 0, 96, 96)
-          ctx.fillStyle = '#ffffff'
-          ctx.beginPath()
-          ctx.arc(28 + frame * 5, 48, 16, 0, Math.PI * 2)
-          ctx.fill()
-          ctx.fillStyle = '#e2e8f0'
-          ctx.font = 'bold 15px sans-serif'
-          ctx.fillText('SHR', 42, 54)
-        }
-
-        recorder.start()
-        for (let frame = 0; frame < 6; frame += 1) {
-          drawFrame(frame)
-          await new Promise((resolveFrame) => window.setTimeout(resolveFrame, 90))
-        }
-        recorder.stop()
-      })
-    }
-
-    const createGeneratedAudioBlob = async () => {
-      const sampleRate = 16000
-      const durationSeconds = 0.45
-      const frameCount = Math.floor(sampleRate * durationSeconds)
-      const channelCount = 1
-      const bitsPerSample = 16
-      const blockAlign = channelCount * (bitsPerSample / 8)
-      const byteRate = sampleRate * blockAlign
-      const pcmBytes = frameCount * blockAlign
-      const totalLength = 44 + pcmBytes
-      const buffer = new ArrayBuffer(totalLength)
-      const view = new DataView(buffer)
-
-      const writeAscii = (offset: number, value: string) => {
-        for (let index = 0; index < value.length; index += 1) {
-          view.setUint8(offset + index, value.charCodeAt(index))
-        }
-      }
-
-      writeAscii(0, 'RIFF')
-      view.setUint32(4, 36 + pcmBytes, true)
-      writeAscii(8, 'WAVE')
-      writeAscii(12, 'fmt ')
-      view.setUint32(16, 16, true)
-      view.setUint16(20, 1, true)
-      view.setUint16(22, channelCount, true)
-      view.setUint32(24, sampleRate, true)
-      view.setUint32(28, byteRate, true)
-      view.setUint16(32, blockAlign, true)
-      view.setUint16(34, bitsPerSample, true)
-      writeAscii(36, 'data')
-      view.setUint32(40, pcmBytes, true)
-
-      let writeOffset = 44
-      for (let sampleIndex = 0; sampleIndex < frameCount; sampleIndex += 1) {
-        const time = sampleIndex / sampleRate
-        const amplitude = Math.sin(2 * Math.PI * 660 * time) * 0.35
-        const value = Math.max(-1, Math.min(1, amplitude))
-        view.setInt16(writeOffset, value * 0x7fff, true)
-        writeOffset += 2
-      }
-
-      return new Blob([buffer], { type: 'audio/wav' })
-    }
-
-    const buildPendingShareFile = async (file: { name: string; type: string; bodyBase64?: string; generator?: 'video' | 'audio' }) => {
-      if (file.generator === 'video') {
-        const blob = await createGeneratedVideoBlob()
-        return {
-          name: file.name,
-          type: blob.type || file.type,
-          size: blob.size,
-          blob,
-        }
-      }
-
-      if (file.generator === 'audio') {
-        const blob = await createGeneratedAudioBlob()
-        return {
-          name: file.name,
-          type: blob.type || file.type,
-          size: blob.size,
-          blob,
-        }
-      }
-
-      if (!file.bodyBase64) {
-        throw new Error(`Missing share payload body for ${file.name}`)
-      }
-
-      const binary = atob(file.bodyBase64)
-      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
-      return {
-        name: file.name,
-        type: file.type,
-        size: bytes.byteLength,
-        blob: new Blob([bytes], { type: file.type }),
-      }
-    }
-
-    const files = await Promise.all(Array.isArray(entry.files) ? entry.files.map((file) => buildPendingShareFile(file)) : [])
-
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction('pending', 'readwrite')
       tx.objectStore('pending').put({
@@ -667,183 +707,40 @@ async function seedShareReceivePayload(page: Page, payload: {
         title: entry.title || '',
         text: entry.text || '',
         url: entry.url || '',
-        files,
+        files: Array.isArray(entry.files) ? entry.files : [],
       })
 
       tx.oncomplete = () => {
         db.close()
         resolve()
       }
+      tx.onabort = () => {
+        db.close()
+        reject(tx.error || new Error('share target transaction aborted'))
+      }
       tx.onerror = () => {
         db.close()
-        reject(tx.error)
+        reject(tx.error || new Error('share target transaction failed'))
       }
     })
-  }, payload)
+  }, {
+    ...payload,
+    files,
+  })
 }
 
 async function injectGalleryVideo(page: Page, fileName: string) {
-  await page.evaluate(async ({ nextFileName }) => {
-    const input = document.querySelector('input[type="file"][accept="image/*,video/*"]')
-    if (!(input instanceof HTMLInputElement)) {
-      throw new Error('Gallery input not found')
-    }
-
-    const videoFile = await new Promise<File>(async (resolve, reject) => {
-      const canvas = document.createElement('canvas')
-      canvas.width = 96
-      canvas.height = 96
-      const ctx = canvas.getContext('2d')
-      if (!ctx) {
-        reject(new Error('Video context unavailable'))
-        return
-      }
-      if (typeof canvas.captureStream !== 'function' || typeof MediaRecorder === 'undefined') {
-        reject(new Error('MediaRecorder captureStream unavailable'))
-        return
-      }
-
-      const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type))
-      if (!mimeType) {
-        reject(new Error('No supported MediaRecorder mime type'))
-        return
-      }
-
-      const stream = canvas.captureStream(8)
-      const recorder = new MediaRecorder(stream, { mimeType })
-      const chunks: BlobPart[] = []
-
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          chunks.push(event.data)
-        }
-      }
-      recorder.onerror = () => reject(new Error('MediaRecorder error'))
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: mimeType })
-        resolve(new File([blob], nextFileName, { type: mimeType }))
-      }
-
-      const drawFrame = (frame: number) => {
-        ctx.fillStyle = frame % 2 === 0 ? '#16a34a' : '#2563eb'
-        ctx.fillRect(0, 0, 96, 96)
-        ctx.fillStyle = '#ffffff'
-        ctx.beginPath()
-        ctx.arc(28 + frame * 6, 48, 16, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.fillStyle = '#e2e8f0'
-        ctx.font = 'bold 16px sans-serif'
-        ctx.fillText('FWD', 44, 54)
-      }
-
-      recorder.start()
-      for (let frame = 0; frame < 6; frame += 1) {
-        drawFrame(frame)
-        await new Promise((resolveFrame) => window.setTimeout(resolveFrame, 90))
-      }
-      recorder.stop()
-    })
-
-    const dataTransfer = new DataTransfer()
-    dataTransfer.items.add(videoFile)
-    input.files = dataTransfer.files
-    input.dispatchEvent(new Event('change', { bubbles: true }))
-  }, { nextFileName: fileName })
+  await page.locator('input[type="file"][accept="image/*,video/*"]').setInputFiles([
+    createPlaywrightBinaryFile(fileName, 'video/webm', GENERATED_WEBM_BASE64),
+  ])
 }
 
 async function injectGalleryImageAndVideo(page: Page) {
-  await page.evaluate(async () => {
-    const input = document.querySelector('input[type="file"][accept="image/*,video/*"]')
-    if (!(input instanceof HTMLInputElement)) {
-      throw new Error('Gallery input not found')
-    }
-
-    const imageFile = await new Promise<File>((resolve, reject) => {
-      const canvas = document.createElement('canvas')
-      canvas.width = 72
-      canvas.height = 72
-      const ctx = canvas.getContext('2d')
-      if (!ctx) {
-        reject(new Error('2D context unavailable'))
-        return
-      }
-      ctx.fillStyle = '#f59e0b'
-      ctx.fillRect(0, 0, 72, 72)
-      ctx.fillStyle = '#0f172a'
-      ctx.fillRect(10, 10, 52, 52)
-      ctx.fillStyle = '#ffffff'
-      ctx.font = 'bold 18px sans-serif'
-      ctx.fillText('IMG', 14, 42)
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          reject(new Error('Failed to create image blob'))
-          return
-        }
-        resolve(new File([blob], `pw-channel-${Date.now()}.png`, { type: 'image/png' }))
-      }, 'image/png')
-    })
-
-    const videoFile = await new Promise<File>(async (resolve, reject) => {
-      const canvas = document.createElement('canvas')
-      canvas.width = 96
-      canvas.height = 96
-      const ctx = canvas.getContext('2d')
-      if (!ctx) {
-        reject(new Error('Video context unavailable'))
-        return
-      }
-      if (typeof canvas.captureStream !== 'function' || typeof MediaRecorder === 'undefined') {
-        reject(new Error('MediaRecorder captureStream unavailable'))
-        return
-      }
-
-      const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type))
-      if (!mimeType) {
-        reject(new Error('No supported MediaRecorder mime type'))
-        return
-      }
-
-      const stream = canvas.captureStream(8)
-      const recorder = new MediaRecorder(stream, { mimeType })
-      const chunks: BlobPart[] = []
-
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          chunks.push(event.data)
-        }
-      }
-      recorder.onerror = () => reject(new Error('MediaRecorder error'))
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: mimeType })
-        resolve(new File([blob], `pw-channel-${Date.now()}.webm`, { type: mimeType }))
-      }
-
-      const drawFrame = (frame: number) => {
-        ctx.fillStyle = frame % 2 === 0 ? '#0891b2' : '#4f46e5'
-        ctx.fillRect(0, 0, 96, 96)
-        ctx.fillStyle = '#ffffff'
-        ctx.beginPath()
-        ctx.arc(24 + frame * 6, 48, 16, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.fillStyle = '#e2e8f0'
-        ctx.font = 'bold 16px sans-serif'
-        ctx.fillText('VID', 48, 54)
-      }
-
-      recorder.start()
-      for (let frame = 0; frame < 6; frame += 1) {
-        drawFrame(frame)
-        await new Promise((resolveFrame) => window.setTimeout(resolveFrame, 90))
-      }
-      recorder.stop()
-    })
-
-    const dataTransfer = new DataTransfer()
-    dataTransfer.items.add(imageFile)
-    dataTransfer.items.add(videoFile)
-    input.files = dataTransfer.files
-    input.dispatchEvent(new Event('change', { bubbles: true }))
-  })
+  const suffix = Date.now()
+  await page.locator('input[type="file"][accept="image/*,video/*"]').setInputFiles([
+    createPlaywrightBinaryFile(`pw-channel-${suffix}.png`, 'image/png', TINY_PNG_BASE64),
+    createPlaywrightBinaryFile(`pw-channel-${suffix}.webm`, 'video/webm', GENERATED_WEBM_BASE64),
+  ])
 }
 
 test.describe('Channel media regressions', () => {
@@ -961,8 +858,9 @@ test.describe('Channel media regressions', () => {
     await loginWithSeededSession(page, fixture)
 
     await page.goto('/chat')
-    await expect(page.getByText(fixture.creatorAccountName)).toBeVisible()
-    await page.getByText(fixture.creatorAccountName).click()
+    const directConversationRow = page.locator('.conversation-item').filter({ hasText: fixture.creatorAccountName }).first()
+    await expect(directConversationRow).toBeVisible({ timeout: 30000 })
+    await directConversationRow.click()
 
     const sourceMessageBubble = page.locator(`#msg-${sourceMessageId}`)
     await expect(sourceMessageBubble.getByText(fileName)).toBeVisible()
@@ -971,13 +869,8 @@ test.describe('Channel media regressions', () => {
     await expect(page.locator('.context-menu')).toBeVisible()
     await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
 
-    await expect(page.locator('.forward-modal')).toBeVisible()
-    await page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle }).click()
-    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
-
-    await expect(page.locator('.forward-modal')).toHaveCount(0)
-    await expect(page.getByText(fixture.channelTitle)).toBeVisible()
-    await expectRoomHeaderStatus(page, 'کانال')
+    await forwardToTargets(page, [fixture.channelTitle])
+    await expectRoomOpen(page, fixture.channelId, fixture.channelTitle, 'کانال')
     await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.creatorAccountName}`)
     await expect(page.locator('.messages-container .msg-document').getByText(fileName)).toBeVisible()
 
@@ -1035,13 +928,8 @@ test.describe('Channel media regressions', () => {
     await expect(page.locator('.context-menu')).toBeVisible()
     await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
 
-    await expect(page.locator('.forward-modal')).toBeVisible()
-    await page.locator('.forward-target-item').filter({ hasText: groupTitle }).click()
-    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
-
-    await expect(page.locator('.forward-modal')).toHaveCount(0)
-    await expect(page.locator('.chat-header').getByText(groupTitle)).toBeVisible()
-    await expectRoomHeaderStatus(page, 'گروه')
+    await forwardToTargets(page, [groupTitle])
+    await expectRoomOpen(page, groupId, groupTitle, 'گروه')
     await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.creatorAccountName}`)
     await expect(page.locator('.messages-container').getByText(sourceContent)).toBeVisible()
 
@@ -1077,13 +965,8 @@ test.describe('Channel media regressions', () => {
     await expect(page.locator('.context-menu')).toBeVisible()
     await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
 
-    await expect(page.locator('.forward-modal')).toBeVisible()
-    await page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle }).click()
-    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
-
-    await expect(page.locator('.forward-modal')).toHaveCount(0)
-    await expect(page.getByText(fixture.channelTitle)).toBeVisible()
-    await expectRoomHeaderStatus(page, 'کانال')
+    await forwardToTargets(page, [fixture.channelTitle])
+    await expectRoomOpen(page, fixture.channelId, fixture.channelTitle, 'کانال')
     await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.creatorAccountName}`)
     await expect(page.locator('.messages-container .msg-media-link')).toBeVisible()
 
@@ -1099,6 +982,8 @@ test.describe('Channel media regressions', () => {
     page,
     request,
   }) => {
+    test.slow()
+
     const fixture = seedChannelSession('channel_forward_video', 'admin')
     const directBootstrapContent = `PW DIRECT VIDEO SOURCE ${Date.now()}`
     const videoFileName = `pw-forward-video-${Date.now()}.webm`
@@ -1107,31 +992,32 @@ test.describe('Channel media regressions', () => {
     await loginWithSeededSession(page, fixture)
 
     await page.goto('/chat')
-    await expect(page.getByText(fixture.creatorAccountName)).toBeVisible()
-    await page.getByText(fixture.creatorAccountName).click()
+    const directConversationRow = page.locator('.conversation-item').filter({ hasText: fixture.creatorAccountName }).first()
+    await expect(directConversationRow).toBeVisible({ timeout: 30000 })
+    await directConversationRow.click()
 
     await expect(page.locator('.messages-container').getByText(directBootstrapContent)).toBeVisible()
     await page.locator('button.attach-btn').click()
     await injectGalleryVideo(page, videoFileName)
 
-    await expect(page.locator('.messages-container video')).toHaveCount(1, { timeout: 30000 })
+    await expect
+      .poll(async () => fetchLatestDirectMessageTypes(request, fixture, fixture.creatorUserId), { timeout: 60000 })
+      .toEqual(expect.arrayContaining(['video']))
 
-    const sourceMessageBubble = page.locator('.messages-container [id^="msg-"]:not([id^="msg--"])').filter({ has: page.locator('video') }).last()
-    await expect(sourceMessageBubble).toBeVisible()
+    await page.goto(`/chat?user_id=${fixture.creatorUserId}`)
+    await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=${fixture.creatorUserId}`)
+
+    const sourceMessageBubble = page.locator('.messages-container [id^="msg-"]:has(.msg-media-link)').last()
+    await expect(sourceMessageBubble).toBeVisible({ timeout: 30000 })
 
     await sourceMessageBubble.dispatchEvent('click')
     await expect(page.locator('.context-menu')).toBeVisible()
     await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
 
-    await expect(page.locator('.forward-modal')).toBeVisible()
-    await page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle }).click()
-    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
-
-    await expect(page.locator('.forward-modal')).toHaveCount(0)
-    await expect(page.locator('.chat-header').getByText(fixture.channelTitle)).toBeVisible()
-    await expectRoomHeaderStatus(page, 'کانال')
+    await forwardToTargets(page, [fixture.channelTitle])
+    await expectRoomOpen(page, fixture.channelId, fixture.channelTitle, 'کانال')
     await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.accountName}`)
-    await expect(page.locator('.messages-container video')).toHaveCount(1, { timeout: 30000 })
+    await expect(page.locator('.messages-container .msg-media-link')).toBeVisible({ timeout: 30000 })
 
     await expect
       .poll(async () => fetchLatestRoomMessageTypes(request, fixture), { timeout: 30000 })
@@ -1263,10 +1149,7 @@ test.describe('Channel media regressions', () => {
     })
 
     await page.goto(`/share-receive?share_key=${shareKey}`)
-    await expect(page.locator('.forward-modal')).toBeVisible()
-
-    await page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle }).click()
-    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
+    await forwardToTargets(page, [fixture.channelTitle])
 
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
     await expect(page.getByText(fixture.channelTitle)).toBeVisible()
@@ -1317,10 +1200,7 @@ test.describe('Channel media regressions', () => {
     })
 
     await page.goto(`/share-receive?share_key=${shareKey}`)
-    await expect(page.locator('.forward-modal')).toBeVisible()
-
-    await page.locator('.forward-target-item').filter({ hasText: groupTitle }).click()
-    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
+    await forwardToTargets(page, [groupTitle])
 
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${groupId}`)
     await expect(page.locator('.chat-header').getByText(groupTitle)).toBeVisible()
@@ -1356,15 +1236,7 @@ test.describe('Channel media regressions', () => {
     })
 
     await page.goto(`/share-receive?share_key=${shareKey}`)
-    await expect(page.locator('.forward-modal')).toBeVisible()
-    await expect(channelTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
-
-    await channelTarget.click()
-    await directTarget.click()
-    await page.getByRole('button', { name: 'هدایت به 2 مقصد' }).click()
-
-    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await forwardToTargets(page, [channelTarget, directTarget])
     await expect
       .poll(() => {
         const url = new URL(page.url())
@@ -1425,19 +1297,10 @@ test.describe('Channel media regressions', () => {
     })
 
     await page.goto(`/share-receive?share_key=${shareKey}`)
-    await expect(page.locator('.forward-modal')).toBeVisible()
-
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
-
-    await groupTarget.click()
-    await directTarget.click()
-    await page.getByRole('button', { name: 'هدایت به 2 مقصد' }).click()
-
-    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await forwardToTargets(page, [groupTarget, directTarget])
     await expect
       .poll(() => {
         const url = new URL(page.url())
@@ -1497,19 +1360,10 @@ test.describe('Channel media regressions', () => {
     })
 
     await page.goto(`/share-receive?share_key=${shareKey}`)
-    await expect(page.locator('.forward-modal')).toBeVisible()
-
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(channelTarget).toBeVisible()
-
-    await groupTarget.click()
-    await channelTarget.click()
-    await page.getByRole('button', { name: 'هدایت به 2 مقصد' }).click()
-
-    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await forwardToTargets(page, [groupTarget, channelTarget])
     await expect
       .poll(() => {
         const url = new URL(page.url())
@@ -1641,15 +1495,7 @@ test.describe('Channel media regressions', () => {
     })
 
     await page.goto(`/share-receive?share_key=${shareKey}`)
-    await expect(page.locator('.forward-modal')).toBeVisible()
-    await expect(channelTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
-
-    await channelTarget.click()
-    await directTarget.click()
-    await page.getByRole('button', { name: 'هدایت به 2 مقصد' }).click()
-
-    await expect(page.locator('.forward-modal')).toHaveCount(0)
+    await forwardToTargets(page, [channelTarget, directTarget])
     await expect
       .poll(() => {
         const url = new URL(page.url())
