@@ -237,29 +237,44 @@ function handleActionClick(action: ProfileActionCard) {
 }
 
 function getTradeBadgeClass(trade: MutualTradePreview) {
+  const type = trade.trade_type?.toUpperCase();
   if (isOwnProfile.value) {
     const isResponder = Number(trade.responder_user_id) === Number(profileData.value?.id);
-    const type = trade.trade_type;
     if (isResponder) {
       return type === 'BUY' ? 'buy' : 'sell';
     } else {
       return type === 'BUY' ? 'sell' : 'buy';
     }
   }
-  return trade.offer_user_id === profileData.value?.id ? 'sell' : 'buy';
+  // For mutual history: we are viewing someone else's profile (B). 
+  // If B was the responder, they did what trade_type says.
+  const isBResponder = Number(trade.responder_user_id) === Number(profileData.value?.id);
+  if (isBResponder) {
+    return type === 'BUY' ? 'buy' : 'sell';
+  } else {
+    // B was the offer owner. If the trade (responder's action) was BUY, then B SOLD.
+    return type === 'BUY' ? 'sell' : 'buy';
+  }
 }
 
 function getTradeBadgeLabel(trade: MutualTradePreview) {
+  const type = trade.trade_type?.toUpperCase();
   if (isOwnProfile.value) {
     const isResponder = Number(trade.responder_user_id) === Number(profileData.value?.id);
-    const type = trade.trade_type;
     if (isResponder) {
       return type === 'BUY' ? '🟢 خرید' : '🔴 فروش';
     } else {
       return type === 'BUY' ? '🔴 فروش' : '🟢 خرید';
     }
   }
-  return trade.offer_user_id === profileData.value?.id ? '🔴 فروش به شما' : '🟢 خرید از شما';
+  
+  const isBResponder = Number(trade.responder_user_id) === Number(profileData.value?.id);
+  if (isBResponder) {
+    return type === 'BUY' ? '🟢 خرید از شما' : '🔴 فروش به شما';
+  } else {
+    // B was the offer owner. If trade was BUY (other guy bought), then B sold to you.
+    return type === 'BUY' ? '🔴 فروش به شما' : '🟢 خرید از شما';
+  }
 }
 </script>
 
