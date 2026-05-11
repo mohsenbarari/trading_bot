@@ -191,6 +191,23 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(trading_settings._fallback_cache.offer_min_quantity, 12)
         self.assertEqual(trading_settings._fallback_timestamp, 50)
 
+    async def test_sync_getter_prefers_shared_redis_cache_over_stale_fallback(self):
+        stale = trading_settings.TradingSettings(max_active_offers=4)
+        fresh = trading_settings.TradingSettings(max_active_offers=10)
+        trading_settings._fallback_cache = stale
+        trading_settings._fallback_timestamp = 10
+
+        with patch(
+            'core.trading_settings._run_async_settings_loader_sync',
+            return_value=fresh,
+        ) as sync_loader, patch('core.trading_settings.time.time', return_value=20):
+            loaded = trading_settings.get_trading_settings()
+
+        sync_loader.assert_called_once_with(trading_settings._get_from_redis_cache)
+        self.assertIs(loaded, fresh)
+        self.assertIs(trading_settings._fallback_cache, fresh)
+        self.assertEqual(trading_settings._fallback_timestamp, 20)
+
     async def test_refresh_settings_cache_async(self):
         settings = trading_settings.TradingSettings(offer_max_quantity=90)
         with patch('core.trading_settings.load_trading_settings_async', AsyncMock(return_value=settings)), patch(
