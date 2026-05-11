@@ -506,7 +506,7 @@ async function deleteUser() {
   <div class="card">
     <div class="header-row">
         <h2>{{ isAdminView ? 'مدیریت کاربر' : 'پروفایل کاربری' }}</h2>
-        <button v-if="isAdminView" class="back-button" @click="$emit('navigate', 'manage_users')">بازگشت <ArrowRight :size="16" /></button>
+        <button v-if="isAdminView" class="back-button" @click="$emit('navigate', 'manage_users')"><ArrowRight :size="24" /></button>
     </div>
 
     <div class="profile-details">

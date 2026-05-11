@@ -159,27 +159,26 @@
 
 @layer utilities {
   .back-button {
-    background: rgba(243, 244, 246, 0.8);
-    border: 1px solid rgba(229, 231, 235, 0.8);
-    border-radius: 0.5rem;
+    width: 40px;
+    height: 40px;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
     cursor: pointer;
-    font-size: 0.8rem;
     color: #4b5563;
-    padding: 6px 12px;
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 6px;
-    font-weight: 600;
+    justify-content: center;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
   
   .back-button:hover {
-    background: #e5e7eb;
+    background: rgba(0, 0, 0, 0.05);
     color: #1f2937;
-    transform: translateX(-2px);
   }
   
   .back-button:active {
+    background: rgba(0, 0, 0, 0.1);
     transform: scale(0.96);
   }
 }
