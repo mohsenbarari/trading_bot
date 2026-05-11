@@ -418,8 +418,8 @@ function closeTradeSuggestion() {
 .skeleton-card {
   height: 90px;
   background: rgba(255,255,255,0.5);
-  border-radius: 12px;
-  border: 1px solid rgba(245,158,11,0.12);
+  border-radius: var(--ds-radius-md);
+  border: 1px solid var(--ds-border-accent);
   animation: pulse-skeleton 1.5s ease-in-out infinite;
 }
 @keyframes pulse-skeleton {
@@ -431,24 +431,24 @@ function closeTradeSuggestion() {
 .empty-state {
   text-align: center;
   padding: 40px 20px;
-  color: #9ca3af;
+  color: var(--ds-text-placeholder);
 }
 .empty-icon {
   width: 56px;
   height: 56px;
-  background: #fffbeb;
+  background: var(--ds-primary-50);
   border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto 12px;
-  color: #f59e0b;
+  color: var(--ds-primary-500);
 }
 
 /* ── Card wrapper (timer border ring) ── */
 .offer-card-wrap {
   position: relative;
-  border-radius: 12px;
+  border-radius: var(--ds-radius-md);
   border: 3px solid rgba(229, 231, 235, 0.45);
 }
 
@@ -460,7 +460,7 @@ function closeTradeSuggestion() {
   content: '';
   position: absolute;
   inset: -3px;
-  border-radius: 12px;
+  border-radius: var(--ds-radius-md);
   padding: 3px;
   background: conic-gradient(
     from 0deg at 50% 50%,
@@ -492,14 +492,14 @@ function closeTradeSuggestion() {
 /* ── Inner card ── */
 .offer-card-inner {
   position: relative;
-  background: #ffffff;
-  border-radius: calc(12px - 3px);
+  background: var(--ds-bg-card);
+  border-radius: calc(var(--ds-radius-md) - 3px);
   padding: 14px;
   z-index: 0;
   overflow: hidden;
 }
 
-/* Subtle outer shadow for depth (no inset color strip — conflicts with timer ring) */
+/* Subtle outer shadow for depth */
 .offer-card-inner.buy {
   box-shadow: 0 1px 4px 0 rgba(16, 185, 129, 0.18), 0 1px 2px 0 rgba(0,0,0,0.04);
 }
@@ -525,18 +525,18 @@ function closeTradeSuggestion() {
 }
 
 .role-badge.buy {
-  background: #dcfce7;
+  background: var(--ds-success-100);
   color: #16a34a;
 }
 
 .role-badge.sell {
-  background: #fee2e2;
-  color: #dc2626;
+  background: var(--ds-danger-100);
+  color: var(--ds-danger-600);
 }
 
 .offer-time {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--ds-text-placeholder);
 }
 
 /* ── Body ── */
@@ -553,29 +553,29 @@ function closeTradeSuggestion() {
 .commodity {
   font-weight: 700;
   font-size: 14px;
-  color: #1f2937;
+  color: var(--ds-text-primary);
 }
 
 .quantity-badge {
-  background: #f3f4f6;
+  background: var(--ds-bg-hover);
   padding: 4px 10px;
   border-radius: 6px;
   font-size: 13px;
   font-weight: 500;
-  color: #374151;
+  color: var(--ds-text-secondary);
 }
 
 .price {
   font-weight: 800;
   font-size: 14px;
-  color: #f59e0b;
+  color: var(--ds-primary-500);
 }
 
 .offer-notes {
   margin-top: 8px;
   font-size: 12px;
-  color: #6b7280;
-  background: #f9fafb;
+  color: var(--ds-text-muted);
+  background: var(--ds-bg-inset);
   padding: 6px 10px;
   border-radius: 6px;
 }
@@ -584,12 +584,12 @@ function closeTradeSuggestion() {
 .lot-info {
   margin-top: 6px;
   font-size: 12px;
-  color: #d97706;
+  color: var(--ds-primary-600);
   font-weight: 600;
   direction: rtl;
 }
 .lot-info.wholesale {
-  color: #6b7280;
+  color: var(--ds-text-muted);
 }
 
 /* ── Footer ── */
@@ -615,7 +615,7 @@ function closeTradeSuggestion() {
   padding: 8px 12px;
   color: white;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--ds-radius-sm);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -632,15 +632,15 @@ function closeTradeSuggestion() {
 }
 
 .trade-btn.buy {
-  background: linear-gradient(135deg, #10b981, #059669);
+  background: linear-gradient(135deg, var(--ds-success-500), var(--ds-success-600));
 }
 
 .trade-btn.sell {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
+  background: linear-gradient(135deg, var(--ds-danger-500), var(--ds-danger-600));
 }
 
 .trade-btn.pending {
-  background: #f59e0b;
+  background: var(--ds-primary-500);
   animation: pulse-soft 1s ease-in-out infinite;
 }
 
@@ -661,8 +661,8 @@ function closeTradeSuggestion() {
   padding: 6px 12px;
   border-radius: 6px;
   font-size: 12px;
-  color: #9ca3af;
-  background: #f3f4f6;
+  color: var(--ds-text-placeholder);
+  background: var(--ds-bg-hover);
   font-weight: 500;
 }
 
