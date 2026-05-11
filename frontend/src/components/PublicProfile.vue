@@ -238,10 +238,10 @@ function handleActionClick(action: ProfileActionCard) {
 
 function getTradeBadgeClass(trade: MutualTradePreview) {
   const type = trade.trade_type?.toUpperCase();
-  // We always show the perspective of the profile owner
-  const isProfileOwnerResponder = Number(trade.responder_user_id) === Number(profileData.value?.id);
+  // We always show the perspective of the VIEWER (the person logged in)
+  const isViewerResponder = Number(trade.responder_user_id) === Number(props.viewerUserId);
   
-  if (isProfileOwnerResponder) {
+  if (isViewerResponder) {
     return type === 'BUY' ? 'buy' : 'sell';
   } else {
     return type === 'BUY' ? 'sell' : 'buy';
@@ -250,10 +250,10 @@ function getTradeBadgeClass(trade: MutualTradePreview) {
 
 function getTradeBadgeLabel(trade: MutualTradePreview) {
   const type = trade.trade_type?.toUpperCase();
-  // We always show the perspective of the profile owner
-  const isProfileOwnerResponder = Number(trade.responder_user_id) === Number(profileData.value?.id);
+  // We always show the perspective of the VIEWER (the person logged in)
+  const isViewerResponder = Number(trade.responder_user_id) === Number(props.viewerUserId);
   
-  if (isProfileOwnerResponder) {
+  if (isViewerResponder) {
     return type === 'BUY' ? '🟢 خرید' : '🔴 فروش';
   } else {
     return type === 'BUY' ? '🔴 فروش' : '🟢 خرید';
