@@ -31,13 +31,17 @@ onMounted(async () => {
 
 <template>
   <div class="notifications-page">
-    <header class="top-nav">
+    <header class="header-row">
+      <div class="header-spacer">
+        <button class="clear-btn" :disabled="isClearingAll" @click="clearAll" v-if="notificationStore.appNotifications.length > 0">
+          <Trash2 :size="18" />
+        </button>
+      </div>
+      <div class="header-title">
+        <h2>مرکز اعلان‌ها</h2>
+      </div>
       <button class="back-button" @click="goBack">
         <ChevronLeft :size="24" />
-      </button>
-      <h1 class="title">مرکز اعلان‌ها</h1>
-      <button class="clear-btn" :disabled="isClearingAll" @click="clearAll" v-if="notificationStore.appNotifications.length > 0">
-        <Trash2 :size="18" />
       </button>
     </header>
 
@@ -83,35 +87,26 @@ onMounted(async () => {
   background: #f9fafb;
 }
 
-.top-nav {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 1rem;
-  background: white;
-  border-bottom: 1px solid #f3f4f6;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
 .clear-btn {
-  background: none;
-  border: none;
-  color: #6b7280;
+  background: #fef2f2;
+  border: 1px solid #fee2e2;
+  color: #ef4444;
   cursor: pointer;
-  padding: 0.5rem;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: all 0.2s;
 }
 
-.title {
-  flex: 1;
-  font-size: 1.1rem;
-  font-weight: 700;
-  text-align: right;
-  margin: 0;
+.clear-btn:hover {
+  background: #fee2e2;
+}
+
+.clear-btn:active {
+  transform: scale(0.95);
 }
 
 .content {

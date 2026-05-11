@@ -376,26 +376,7 @@ onMounted(() => {
   padding: 16px;
 }
 
-.header-row {
-  display: grid;
-  grid-template-columns: 80px 1fr 80px;
-  align-items: center;
-  margin-bottom: 0px;
-  border-bottom: 1px solid var(--border-color, #e5e7eb);
-  padding-bottom: 12px;
-}
 
-.header-title {
-  display: flex;
-  justify-content: center;
-  white-space: nowrap;
-}
-
-.header-title h2 {
-  font-size: 18px;
-  margin: 0;
-  font-weight: 700;
-}
 
 .settings-content {
   padding: 1.25rem 0;

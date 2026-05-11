@@ -505,7 +505,10 @@ async function deleteUser() {
 <template>
   <div class="card">
     <div class="header-row">
-        <h2>{{ isAdminView ? 'مدیریت کاربر' : 'پروفایل کاربری' }}</h2>
+        <div class="header-spacer"></div>
+        <div class="header-title">
+            <h2>{{ isAdminView ? 'مدیریت کاربر' : 'پروفایل کاربری' }}</h2>
+        </div>
         <button v-if="isAdminView" class="back-button" @click="$emit('navigate', 'manage_users')"><ChevronLeft :size="24" /></button>
     </div>
 
@@ -1055,13 +1058,7 @@ h2 {
   font-family: monospace;
 }
 
-.header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.25rem;
-}
-.header-row h2 { margin: 0; }
+
 
 
 .edit-section {

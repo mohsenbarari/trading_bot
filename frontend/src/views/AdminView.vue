@@ -66,18 +66,21 @@ onUnmounted(() => clearBackStack())
 <template>
   <div class="admin-view min-h-screen flex flex-col">
      <!-- Top Bar (only when inside a sub-section) -->
-     <div v-if="currentSection !== 'menu'" class="admin-top-bar p-4 sticky top-0 z-10">
-         <div class="max-w-[480px] mx-auto flex items-center justify-between">
-             <h1 class="text-lg font-extrabold text-gray-800">
-                 {{ currentSection === 'manage_users' ? 'مدیریت کاربران' :
-                    currentSection === 'manage_commodities' ? 'مدیریت کالاها' :
-                    currentSection === 'settings' ? 'تنظیمات سیستم' : 
-                    currentSection === 'user_profile' ? 'پروفایل کاربر' : 
-                  currentSection === 'create_channel' ? 'ساخت کانال' :
-                    currentSection === 'create_invitation' ? 'ارسال دعوت‌نامه' :
-                    'پنل مدیریت' 
-                 }}
-             </h1>
+     <div v-if="currentSection !== 'menu'" class="sticky top-0 z-10 bg-white border-bottom border-[#f3f4f6]">
+         <div class="header-row max-w-[480px] mx-auto">
+             <div class="header-spacer"></div>
+             <div class="header-title">
+                 <h2>
+                     {{ currentSection === 'manage_users' ? 'مدیریت کاربران' :
+                        currentSection === 'manage_commodities' ? 'مدیریت کالاها' :
+                        currentSection === 'settings' ? 'تنظیمات سیستم' : 
+                        currentSection === 'user_profile' ? 'پروفایل کاربر' : 
+                      currentSection === 'create_channel' ? 'ساخت کانال' :
+                        currentSection === 'create_invitation' ? 'ارسال دعوت‌نامه' :
+                        'پنل مدیریت' 
+                     }}
+                 </h2>
+             </div>
              <button @click="handleNavigate('admin_panel')" class="back-button">
                  <ChevronLeft :size="24" />
              </button>
