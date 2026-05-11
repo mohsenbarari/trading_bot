@@ -46,7 +46,7 @@ interface ProfileStatCard {
 }
 
 interface ProfileActionCard {
-  key: 'message' | 'settings';
+  key: 'message' | 'settings' | 'add_customer' | 'add_accountant';
   icon: string;
   label: string;
 }
