@@ -76,12 +76,12 @@ onMounted(() => {
 </script>
 
 <template>
-  <div v-if="show" class="new-chat-modal-overlay" data-testid="new-chat-modal">
+  <div v-if="show" class="new-chat-modal-overlay">
     <div class="new-chat-container">
       
       <!-- Header -->
-      <div class="new-chat-header" data-testid="new-chat-modal-header">
-        <button class="icon-btn back-btn" v-ripple @click="$emit('close')" data-testid="new-chat-close-button" aria-label="بستن شروع مکالمه جدید">
+      <div class="new-chat-header">
+        <button class="icon-btn back-btn" v-ripple @click="$emit('close')">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="19" y1="12" x2="5" y2="12"></line>
             <polyline points="12 19 5 12 12 5"></polyline>
@@ -92,7 +92,7 @@ onMounted(() => {
 
       <!-- Search Input -->
       <div class="search-area">
-        <button type="button" class="new-group-action" v-ripple @click="$emit('create-group')" data-testid="new-chat-create-group-button">
+        <button type="button" class="new-group-action" v-ripple @click="$emit('create-group')">
           <span class="new-group-icon"><UsersRound :size="20" /></span>
           <span>ساخت گروه جدید</span>
         </button>
@@ -101,17 +101,16 @@ onMounted(() => {
           type="text" 
           placeholder="جستجو (نام، آیدی، موبایل)..." 
           class="new-chat-search-input"
-          data-testid="new-chat-search-input"
         />
       </div>
 
       <!-- Users List -->
-      <div class="users-list" data-testid="new-chat-user-list">
-        <div v-if="isLoading" class="loading-state" data-testid="new-chat-loading-state">
+      <div class="users-list">
+        <div v-if="isLoading" class="loading-state">
            <LoadingSkeleton :count="6" :height="65" />
         </div>
         
-        <div v-else-if="users.length === 0" class="empty-state" data-testid="new-chat-empty-state">
+        <div v-else-if="users.length === 0" class="empty-state">
           <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#ccc" stroke-width="1.5">
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
@@ -127,7 +126,6 @@ onMounted(() => {
           :interactive="true"
           :name="getPrimaryUserName(user.account_name, user.full_name)"
           :avatar-file-id="user.avatar_file_id || null"
-          :data-testid="`new-chat-user-${user.id}`"
           @click="$emit('start-chat', user.id, getPrimaryUserName(user.account_name, user.full_name))"
         >
           <template #subtitle>

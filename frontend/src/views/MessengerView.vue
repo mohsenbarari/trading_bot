@@ -68,10 +68,10 @@ function handleBack() {
 
 <template>
   <div class="messenger-page">
-    <div v-if="loading" class="loading-container" data-testid="messenger-loading-container">
-      <div class="loading-spinner" data-testid="messenger-loading-spinner"></div>
+    <div v-if="loading" class="loading-container">
+      <div class="loading-spinner"></div>
     </div>
-    <div v-else-if="user" class="chat-wrapper" data-testid="messenger-chat-wrapper">
+    <div v-else-if="user" class="chat-wrapper">
       <ChatView 
         :apiBaseUrl="apiBaseUrl"
         :jwtToken="jwtToken"
