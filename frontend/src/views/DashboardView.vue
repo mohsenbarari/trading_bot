@@ -2,9 +2,11 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Bell, Store, LogOut, AlertTriangle, Ban } from 'lucide-vue-next'
+import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
 
 const router = useRouter()
+const notificationStore = useNotificationStore()
 const user = ref<any>(null)
 const loading = ref(true)
 
@@ -79,7 +81,14 @@ onMounted(fetchUser)
 
       <!-- ═══ Top Bar ═══ -->
       <header class="top-bar">
-        <div class="user-info" @click="router.push('/profile')">
+        <!-- Notifications on the far Right (in RTL) -->
+        <button class="icon-btn notif-btn" @click="router.push('/notifications')" aria-label="اعلان‌ها">
+          <Bell :size="22" />
+          <div v-if="notificationStore.appNotifications.length > 0" class="notif-dot"></div>
+        </button>
+
+        <!-- User Info in the Center -->
+        <div class="user-info-center" @click="router.push('/profile')">
           <div class="avatar">
             <span>{{ userInitial }}</span>
           </div>
@@ -88,14 +97,11 @@ onMounted(fetchUser)
             <span class="user-name">{{ user.full_name || user.account_name }}</span>
           </div>
         </div>
-        <div class="top-actions">
-          <button class="icon-btn" @click="router.push('/notifications')" aria-label="اعلان‌ها">
-            <Bell :size="22" />
-          </button>
-          <button class="icon-btn" @click="logout" aria-label="خروج">
-            <LogOut :size="20" />
-          </button>
-        </div>
+
+        <!-- Logout on the far Left (in RTL) -->
+        <button class="icon-btn logout-btn" @click="logout" aria-label="خروج">
+          <LogOut :size="20" />
+        </button>
       </header>
 
       <!-- ═══ Blocked Warning ═══ -->
@@ -193,38 +199,45 @@ onMounted(fetchUser)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
+  background: white;
+  padding: 0.5rem 0.25rem;
+  border-radius: 1rem;
 }
 
-.user-info {
+.user-info-center {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  flex: 1;
 }
 
 .avatar {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   background: linear-gradient(135deg, #f59e0b, #d97706);
-  border-radius: 14px;
+  border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
   font-weight: 800;
-  font-size: 1.25rem;
+  font-size: 1.4rem;
   box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
-  transition: transform 0.2s;
+  transition: all 0.2s;
 }
-.user-info:active .avatar {
+.user-info-center:active .avatar {
   transform: scale(0.95);
 }
 
 .user-text {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  text-align: center;
 }
 .greeting {
   font-size: 0.75rem;
@@ -232,35 +245,53 @@ onMounted(fetchUser)
   font-weight: 500;
 }
 .user-name {
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 700;
   color: #1f2937;
 }
 
-.top-actions {
-  display: flex;
-  gap: 0.25rem;
-}
-
 .icon-btn {
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
-  border: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid #f3f4f6;
   background: white;
-  color: #6b7280;
+  color: #4b5563;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
   transition: all 0.2s;
   position: relative;
   -webkit-tap-highlight-color: transparent;
 }
-.icon-btn:active {
-  transform: scale(0.92);
-  background: #f9fafb;
+
+.logout-btn {
+  color: #ef4444;
+}
+.logout-btn:active {
+  background: #fef2f2;
+  transform: scale(0.9);
+}
+
+.notif-btn {
+  color: #d97706;
+}
+.notif-btn:active {
+  background: #fffbeb;
+  transform: scale(0.9);
+}
+
+.notif-dot {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 8px;
+  height: 8px;
+  background: #ef4444;
+  border-radius: 50%;
+  border: 2px solid white;
 }
 
 /* ═══ Alert Cards ═══ */
