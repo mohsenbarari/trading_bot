@@ -32,8 +32,8 @@ onMounted(async () => {
 <template>
   <div class="notifications-page">
     <header class="top-nav">
-      <button class="back-btn" @click="goBack">
-        <ArrowRight :size="20" />
+      <button class="back-button" @click="goBack">
+        بازگشت <ArrowRight :size="16" />
       </button>
       <h1 class="title">مرکز اعلان‌ها</h1>
       <button class="clear-btn" :disabled="isClearingAll" @click="clearAll" v-if="notificationStore.appNotifications.length > 0">
@@ -95,7 +95,7 @@ onMounted(async () => {
   z-index: 10;
 }
 
-.back-btn, .clear-btn {
+.clear-btn {
   background: none;
   border: none;
   color: #6b7280;

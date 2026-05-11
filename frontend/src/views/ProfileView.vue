@@ -1,358 +1,66 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { User, Phone, Shield, Smartphone, Trash2, Loader2, HardDrive } from 'lucide-vue-next'
-import { apiFetch, forceLogout } from '../utils/auth'
-import { useChatFileHandler } from '../composables/chat/useChatFileHandler'
-import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import PublicProfile from '../components/PublicProfile.vue'
+import { apiFetch } from '../utils/auth'
 
-const { getCacheSize, clearFileCache } = useChatFileHandler()
-const cacheSize = ref('0.00 MB')
-const cacheBusy = ref(false)
-const cacheFeedback = ref<string | null>(null)
-const avatarBusy = ref(false)
-const avatarInput = ref<HTMLInputElement | null>(null)
+const router = useRouter()
+const jwtToken = computed(() => localStorage.getItem('auth_token'))
+const apiBaseUrl = computed(() => import.meta.env.VITE_API_BASE_URL || '')
 
-async function refreshCacheSize() {
+const currentUser = ref<{ id: number; account_name: string } | null>(null)
+
+function handleNavigate(view: string, payload?: any) {
+  if (view === 'settings') {
+    router.push({ name: 'settings' })
+  } else if (view === 'chat' && payload?.userId) {
+    router.push({
+      name: 'messenger',
+      query: { user_id: String(payload.userId), user_name: payload.userName || '' }
+    })
+  } else if (view === 'home') {
+    router.push('/')
+  }
+}
+
+onMounted(async () => {
   try {
-    cacheSize.value = await getCacheSize()
-  } catch {
-    cacheSize.value = '0.00 MB'
-  }
-}
-
-async function clearCache() {
-  if (cacheBusy.value) return
-  cacheBusy.value = true
-  cacheFeedback.value = null
-  try {
-    await clearFileCache()
-    cacheSize.value = '0.00 MB'
-    cacheFeedback.value = 'حافظه با موفقیت پاک شد.'
-  } catch (err) {
-    console.error(err)
-    cacheFeedback.value = 'پاک‌سازی حافظه ناموفق بود.'
-  } finally {
-    cacheBusy.value = false
-    setTimeout(() => { cacheFeedback.value = null }, 3500)
-  }
-}
-type ProfileUser = {
-  id: number
-  full_name?: string | null
-  account_name?: string | null
-  mobile_number?: string | null
-  role?: string | null
-  created_at?: string | null
-  avatar_file_id?: string | null
-}
-
-const user = ref<ProfileUser | null>(null)
-const loading = ref(true)
-const sessions = ref<any[]>([])
-const sessionsLoading = ref(false)
-
-const userInitial = computed(() => {
-  if (!user.value) return '?'
-  const name = user.value.full_name || user.value.account_name
-  return getAvatarInitial(name)
-})
-
-const avatarUrl = computed(() => buildChatFileUrl(user.value?.avatar_file_id ?? null))
-
-const memberSince = computed(() => {
-  if (!user.value?.created_at) return ''
-  const d = new Date(user.value.created_at)
-  return d.toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' })
-})
-
-async function fetchUser() {
-  try {
-    const res = await apiFetch('/api/auth/me')
-    if (res.ok) {
-      user.value = await res.json()
-    }
-  } catch (e) {
-    console.error(e)
-  } finally {
-    loading.value = false
-  }
-}
-
-async function parseApiError(response: Response, fallback: string) {
-  const data = await response.json().catch(() => ({})) as { detail?: string }
-  return data.detail || fallback
-}
-
-function triggerAvatarPicker() {
-  if (avatarBusy.value) return
-  avatarInput.value?.click()
-}
-
-async function saveAvatar(avatarFileId: string | null) {
-  const response = await apiFetch('/api/auth/me/avatar', {
-    method: 'PUT',
-    body: JSON.stringify({ avatar_file_id: avatarFileId }),
-  })
-  if (!response.ok) {
-    throw new Error(await parseApiError(response, 'ذخیره آواتار ناموفق بود.'))
-  }
-  user.value = await response.json()
-}
-
-async function handleAvatarSelected(event: Event) {
-  const input = event.target as HTMLInputElement | null
-  const file = input?.files?.[0]
-  if (!file) return
-
-  avatarBusy.value = true
-  try {
-    const uploaded = await uploadAvatarImage(file)
-    await saveAvatar(uploaded.file_id)
-  } catch (error) {
-    console.error(error)
-    alert(error instanceof Error ? error.message : 'آپلود آواتار ناموفق بود.')
-  } finally {
-    avatarBusy.value = false
-    if (input) input.value = ''
-  }
-}
-
-async function clearAvatar() {
-  if (!user.value?.avatar_file_id || avatarBusy.value) return
-  avatarBusy.value = true
-  try {
-    await saveAvatar(null)
-  } catch (error) {
-    console.error(error)
-    alert(error instanceof Error ? error.message : 'حذف آواتار ناموفق بود.')
-  } finally {
-    avatarBusy.value = false
-  }
-}
-
-async function logout() {
-  const currentSession = sessions.value.find(s => s.is_current)
-  if (currentSession) {
-    try {
-      await apiFetch(`/api/sessions/${currentSession.id}`, { method: 'DELETE' })
-    } catch (e) {
-      console.error(e)
-    }
-  }
-  forceLogout()
-}
-
-async function fetchSessions() {
-  sessionsLoading.value = true
-  try {
-    const res = await apiFetch('/api/sessions/active')
-    if (res.ok) {
-      sessions.value = await res.json()
-    }
-  } catch (e) {
-    console.error(e)
-  } finally {
-    sessionsLoading.value = false
-  }
-}
-
-async function terminateSession(sessionId: string) {
-  try {
-    const res = await apiFetch(`/api/sessions/${sessionId}`, { method: 'DELETE' })
-    if (res.ok) {
-      sessions.value = sessions.value.filter(s => s.id !== sessionId)
+    const response = await apiFetch('/api/auth/me')
+    if (response.ok) {
+      const data = await response.json()
+      currentUser.value = {
+        id: data.id,
+        account_name: data.account_name || data.full_name || 'کاربر'
+      }
     }
   } catch (e) {
     console.error(e)
   }
-}
-
-async function logoutAll() {
-  try {
-    await apiFetch('/api/sessions/logout-all', { method: 'POST' })
-    fetchSessions()
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-onMounted(() => {
-  fetchUser()
-  fetchSessions()
-  refreshCacheSize()
 })
 </script>
 
 <template>
-  <div class="profile-page">
-    
-    <!-- Loading -->
-    <div v-if="loading" class="loading-container">
+  <div class="profile-view">
+    <PublicProfile
+      v-if="currentUser"
+      :key="currentUser.id"
+      :user="currentUser"
+      :viewerUserId="currentUser.id"
+      :apiBaseUrl="apiBaseUrl"
+      :jwtToken="jwtToken"
+      @navigate="handleNavigate"
+    />
+    <div v-else class="loading-container">
       <div class="loading-spinner"></div>
-    </div>
-
-    <div v-else-if="user" class="profile-content">
-
-      <!-- Spacer -->
-      <div style="height: 0.5rem;"></div>
-
-      <!-- Avatar Section -->
-      <div class="avatar-section">
-        <div class="avatar-large">
-          <img v-if="avatarUrl" :src="avatarUrl" :alt="user?.full_name || user?.account_name || 'آواتار کاربر'" class="avatar-image" />
-          <span v-else>{{ userInitial }}</span>
-          <div v-if="avatarBusy" class="avatar-busy-overlay">
-            <Loader2 :size="22" class="animate-spin" />
-          </div>
-        </div>
-        <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
-        <div class="avatar-actions">
-          <button type="button" class="avatar-action-btn" :disabled="avatarBusy" @click="triggerAvatarPicker">
-            {{ user?.avatar_file_id ? 'تغییر عکس' : 'افزودن عکس' }}
-          </button>
-          <button v-if="user?.avatar_file_id" type="button" class="avatar-action-btn danger" :disabled="avatarBusy" @click="clearAvatar">
-            حذف عکس
-          </button>
-        </div>
-        <h2 class="profile-name">{{ user.full_name || user.account_name || 'کاربر' }}</h2>
-        <span v-if="user.role === 'admin'" class="role-badge">مدیر سیستم</span>
-        <span v-else class="role-badge role-user">کاربر</span>
-      </div>
-
-      <!-- Info Cards -->
-      <div class="info-cards">
-
-        <div class="info-card">
-          <div class="info-icon">
-            <Phone :size="20" />
-          </div>
-          <div class="info-body">
-            <span class="info-label">شماره موبایل</span>
-            <span class="info-value" dir="ltr">{{ user.mobile_number || '---' }}</span>
-          </div>
-        </div>
-
-        <div class="info-card">
-          <div class="info-icon">
-            <User :size="20" />
-          </div>
-          <div class="info-body">
-            <span class="info-label">نام حساب</span>
-            <span class="info-value">{{ user.account_name || '---' }}</span>
-          </div>
-        </div>
-
-        <div class="info-card">
-          <div class="info-icon">
-            <Shield :size="20" />
-          </div>
-          <div class="info-body">
-            <span class="info-label">عضویت از</span>
-            <span class="info-value">{{ memberSince || '---' }}</span>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- Active Sessions -->
-      <div class="sessions-section">
-        <h3 class="section-title">
-          <Smartphone :size="18" />
-          <span>نشست‌های فعال</span>
-        </h3>
-        
-        <div v-if="sessionsLoading" class="text-center py-4">
-          <Loader2 class="w-5 h-5 text-amber-500 animate-spin mx-auto" />
-        </div>
-        
-        <div v-else-if="sessions.length === 0" class="text-center text-sm text-gray-400 py-4">
-          هیچ نشست فعالی یافت نشد
-        </div>
-        
-        <div v-else class="space-y-2">
-          <div v-for="session in sessions" :key="session.id" class="session-card">
-            <div class="flex items-center gap-3 flex-1 min-w-0">
-              <div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                   :class="session.is_primary ? 'bg-amber-100 text-amber-600' : 'bg-gray-100 text-gray-500'">
-                <Smartphone :size="18" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-medium text-gray-800 truncate">{{ session.device_name }}</span>
-                  <span v-if="session.is_primary" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold shrink-0">اصلی</span>
-                  <span v-if="session.is_current" class="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold shrink-0">این دستگاه</span>
-                </div>
-                <div class="text-xs text-gray-400 mt-0.5 dir-ltr text-right">
-                  {{ session.platform }} · {{ session.device_ip || '—' }}
-                </div>
-              </div>
-            </div>
-            <button
-              v-if="!session.is_current && !session.is_primary && sessions.some(s => s.is_current && s.is_primary)"
-              @click="terminateSession(session.id)"
-              class="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
-              title="پایان نشست"
-            >
-              <Trash2 :size="16" />
-            </button>
-          </div>
-          
-          <button
-            v-if="sessions.length > 1 && sessions.some(s => s.is_current && s.is_primary)"
-            @click="logoutAll"
-            class="w-full mt-3 py-2.5 text-sm text-red-500 font-bold border border-red-200 rounded-xl hover:bg-red-50 transition-colors"
-          >
-            خروج از همه نشست‌ها
-          </button>
-        </div>
-      </div>
-
-      <!-- Storage Management -->
-      <div class="storage-section">
-        <h3 class="section-title">
-          <HardDrive :size="18" />
-          <span>مدیریت حافظه و داده‌ها</span>
-        </h3>
-
-        <div class="storage-card">
-          <div class="storage-info">
-            <span class="storage-label">فضای اشغال‌شده توسط فایل‌های دانلود‌شده</span>
-            <span class="storage-value" dir="ltr">{{ cacheSize }}</span>
-          </div>
-          <button
-            type="button"
-            class="storage-clear-btn"
-            :disabled="cacheBusy"
-            @click="clearCache"
-          >
-            <Loader2 v-if="cacheBusy" :size="16" class="animate-spin" />
-            <Trash2 v-else :size="16" />
-            <span>حذف فایل‌های دانلود شده</span>
-          </button>
-          <p v-if="cacheFeedback" class="storage-feedback">{{ cacheFeedback }}</p>
-        </div>
-      </div>
-
-      <!-- Logout Button -->
-      <button class="logout-btn" @click="logout">
-        خروج از حساب کاربری
-      </button>
-
-      <!-- Footer -->
-      <footer class="profile-footer">
-        <span>نسخه ۲.۵.۰</span>
-      </footer>
-
     </div>
   </div>
 </template>
 
 <style scoped>
-.profile-page {
-  min-height: 100dvh;
+.profile-view {
+  min-height: 100%;
+  padding: 16px;
 }
-
-/* Loading */
 .loading-container {
   display: flex;
   align-items: center;
@@ -369,281 +77,5 @@ onMounted(() => {
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-/* Content */
-.profile-content {
-  padding: 1.25rem;
-  padding-bottom: 2rem;  width: 100%;  max-width: 480px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Avatar Section */
-.avatar-section {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-bottom: 2rem;
-}
-
-.avatar-large {
-  position: relative;
-  overflow: hidden;
-  width: 80px;
-  height: 80px;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  border-radius: 1.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-weight: 800;
-  font-size: 2rem;
-  box-shadow: 0 8px 24px rgba(245, 158, 11, 0.3);
-  margin-bottom: 1rem;
-}
-
-.avatar-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.avatar-busy-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(15, 23, 42, 0.34);
-  color: #fff;
-}
-
-.hidden-avatar-input {
-  display: none;
-}
-
-.avatar-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  margin: -0.1rem 0 0.9rem;
-}
-
-.avatar-action-btn {
-  border: 0;
-  border-radius: 999px;
-  background: rgba(245, 158, 11, 0.12);
-  color: #b45309;
-  padding: 0.45rem 0.9rem;
-  font: inherit;
-  font-size: 0.8rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease, opacity 0.2s ease;
-}
-
-.avatar-action-btn:hover {
-  background: rgba(245, 158, 11, 0.18);
-}
-
-.avatar-action-btn.danger {
-  background: rgba(239, 68, 68, 0.1);
-  color: #b91c1c;
-}
-
-.avatar-action-btn.danger:hover {
-  background: rgba(239, 68, 68, 0.16);
-}
-
-.avatar-action-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.profile-name {
-  font-size: 1.25rem;
-  font-weight: 800;
-  color: #1f2937;
-  margin: 0 0 0.5rem 0;
-}
-
-.role-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem 0.75rem;
-  font-size: 0.7rem;
-  font-weight: 700;
-  border-radius: 2rem;
-  background: linear-gradient(135deg, #fef3c7, #fde68a);
-  color: #92400e;
-  border: 1px solid rgba(245, 158, 11, 0.2);
-}
-.role-user {
-  background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
-  color: #6b7280;
-  border-color: rgba(107, 114, 128, 0.15);
-}
-
-/* Info Cards */
-.info-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  margin-bottom: 2rem;
-}
-
-.info-card {
-  display: flex;
-  align-items: center;
-  gap: 0.875rem;
-  padding: 1rem 1.25rem;
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(245, 158, 11, 0.1);
-  border-radius: 1rem;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-}
-
-.info-icon {
-  flex-shrink: 0;
-  width: 42px;
-  height: 42px;
-  background: linear-gradient(135deg, #fffbeb, #fef3c7);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #d97706;
-}
-
-.info-body {
-  display: flex;
-  flex-direction: column;
-}
-
-.info-label {
-  font-size: 0.7rem;
-  color: #9ca3af;
-  font-weight: 500;
-  margin-bottom: 0.15rem;
-}
-
-.info-value {
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: #1f2937;
-}
-
-/* Sessions Section */
-.sessions-section {
-  margin-bottom: 1.5rem;
-}
-.section-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.85rem;
-  font-weight: 700;
-  color: #374151;
-  margin-bottom: 0.75rem;
-}
-.session-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem;
-  background: #f9fafb;
-  border: 1px solid #f3f4f6;
-  border-radius: 0.75rem;
-}
-
-/* Storage Section */
-.storage-section {
-  margin-bottom: 1.5rem;
-}
-.storage-card {
-  background: #f9fafb;
-  border: 1px solid #f3f4f6;
-  border-radius: 0.75rem;
-  padding: 0.875rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-.storage-info {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-.storage-label {
-  font-size: 0.8rem;
-  color: #4b5563;
-}
-.storage-value {
-  font-size: 0.85rem;
-  font-weight: 700;
-  color: #111827;
-}
-.storage-clear-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.6rem 0.875rem;
-  border-radius: 0.75rem;
-  border: 1px solid #fecaca;
-  background: #fff5f5;
-  color: #dc2626;
-  font-size: 0.85rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 0.2s, transform 0.15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.storage-clear-btn:hover:not(:disabled) { background: #fee2e2; }
-.storage-clear-btn:active:not(:disabled) { transform: scale(0.98); }
-.storage-clear-btn:disabled { opacity: 0.6; cursor: progress; }
-.storage-feedback {
-  font-size: 0.75rem;
-  color: #059669;
-  margin: 0;
-  text-align: center;
-}
-
-/* Logout Button */
-.logout-btn {
-  width: 100%;
-  padding: 0.875rem;
-  border-radius: 1rem;
-  border: 1px solid #fecaca;
-  background: linear-gradient(135deg, #fef2f2, #fee2e2);
-  color: #dc2626;
-  font-weight: 700;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all 0.2s;
-  -webkit-tap-highlight-color: transparent;
-}
-.logout-btn:active {
-  transform: scale(0.98);
-  background: #fee2e2;
-}
-
-/* Footer */
-.profile-footer {
-  text-align: center;
-  padding: 1.5rem 0 1rem;
-  font-size: 0.7rem;
-  color: #d1d5db;
-  font-weight: 500;
-  margin-top: auto;
 }
 </style>
