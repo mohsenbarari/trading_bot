@@ -178,11 +178,11 @@ onMounted(fetchUser)
 /* ═══ Top Bar ═══ */
 .top-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   margin-bottom: 2rem;
   background: var(--ds-bg-card);
-  padding: 0.5rem 0.25rem;
+  padding: 0.75rem 0.25rem;
   border-radius: var(--ds-radius-lg);
 }
 
