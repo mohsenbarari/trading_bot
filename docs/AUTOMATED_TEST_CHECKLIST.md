@@ -142,6 +142,11 @@ Scope rules:
 - [x] Add market/offer creation E2E coverage.
 - [x] Add direct chat E2E coverage beyond channel/group/share-target paths.
 - [x] Add admin E2E smoke coverage for invitations, users, settings, and optional channels.
+- [x] Re-sync messenger Playwright suites with the current conversation-list, room-header, and context-menu UI after the post-rollback messenger redesign drift.
+- [x] Revalidate `frontend/e2e/channel-media.spec.ts`, `frontend/e2e/direct-chat.spec.ts`, and `frontend/e2e/mandatory-channel.spec.ts` serially with a clean green pass (`49/49`).
+- [x] Revalidate `frontend/e2e/notifications.spec.ts` serially against the current auth/realtime runtime (`4/4`).
+- [x] Re-sync `frontend/e2e/admin-smoke.spec.ts` and `frontend/e2e/auth.spec.ts` with the current channel-manager entry flow and profile/settings routing.
+- [x] Revalidate the full frontend Playwright suite serially with a clean green pass (`64/64`).
 
 ## Phase 7 - Models, Migrations, Startup, and Deployment Smoke Coverage
 
