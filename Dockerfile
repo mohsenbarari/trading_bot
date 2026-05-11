@@ -15,8 +15,12 @@ RUN pip install --upgrade pip setuptools wheel
 # Copy pre-downloaded packages (downloaded on fast German server)
 COPY pip_packages/ /tmp/pip_packages/
 COPY requirements.txt .
-RUN pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages/ -r requirements.txt \
-    && rm -rf /tmp/pip_packages/
+RUN if find /tmp/pip_packages -maxdepth 1 -type f -name '*.whl' | grep -q .; then \
+            pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages/ -r requirements.txt; \
+        else \
+            pip install --no-cache-dir -r requirements.txt; \
+        fi \
+        && rm -rf /tmp/pip_packages/
 COPY api/ ./api/
 COPY bot/ ./bot/
 COPY core/ ./core/
