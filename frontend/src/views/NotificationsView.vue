@@ -166,6 +166,7 @@ onMounted(async () => {
   flex-direction: column;
   gap: 1rem;
   padding: 1rem;
+  padding-bottom: 12rem; /* Ensure space for bottom nav and extra buffer */
 }
 
 .notif-item {
