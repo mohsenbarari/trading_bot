@@ -162,6 +162,7 @@ Scope rules:
 - [x] Normalize and retain nonfunctional scripts in `tests/api_load_test.py`, `tests/load_test.py`, `tests/live_simulation.py`, and `tests/debug_trade.py` as explicit non-regression tools.
 - [x] Add a diff-based regression gate for future product changes via `scripts/report_test_matrix.py --check-diff --base-ref <ref>`.
 - [x] Add repository-wide coverage reporting and breadth gates via `make test-report`, `make test-gate`, and `make test-diff-gate BASE=<ref>`.
+- [x] Codify merge and pre-release CI gates for the frontend browser matrix (Chromium / Firefox / WebKit) plus repository governance checks.
 - [x] Run focused validation for the Phase 8 governance and surface-smoke slice: `/bin/python3 -m unittest tests.test_report_test_matrix tests.test_schemas_smoke tests.test_scripts_surface_smoke tests.test_static_surface_smoke` and `make test-gate`.
 
 ## Directory Coverage Checklist

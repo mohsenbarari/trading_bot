@@ -1,0 +1,140 @@
+name: Pre-release Gate
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: Optional git ref to validate as a release candidate
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pre-release-gate-${{ inputs.git_ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  repository-governance:
+    name: repository-governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run repository breadth gate
+        run: make test-gate
+
+  frontend-browser-matrix:
+    name: frontend-browser-matrix (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    needs: repository-governance
+    timeout-minutes: 75
+
+    strategy:
+      fail-fast: false
+      matrix:
+        browser:
+          - chromium
+          - firefox
+          - webkit
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Write CI environment file
+        shell: bash
+        run: |
+          cat > .env <<'EOF'
+          SERVER_MODE=foreign
+          BOT_USERNAME=ci_test_bot
+          POSTGRES_DB=trading_bot_db
+          POSTGRES_USER=admin
+          POSTGRES_PASSWORD=strongpassword
+          DATABASE_URL=postgresql+asyncpg://admin:strongpassword@db:5432/trading_bot_db
+          SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
+          REDIS_URL=redis://redis:6379/0
+          FRONTEND_URL=http://127.0.0.1:4173
+          DEV_API_KEY=3f7bc530-b8a8-4125-9b79-256dc46bc530
+          JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
+          EOF
+
+      - name: Bootstrap backend stack
+        run: docker compose up -d --build --wait db redis migration app
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Run Playwright browser gate
+        working-directory: frontend
+        env:
+          CI: 'true'
+          PLAYWRIGHT_HTML_OPEN: never
+        shell: bash
+        run: |
+          case "${{ matrix.browser }}" in
+            chromium)
+              npm run test:e2e
+              ;;
+            firefox)
+              npm run test:e2e:firefox
+              ;;
+            webkit)
+              npm run test:e2e:webkit
+              ;;
+            *)
+              echo "Unsupported browser: ${{ matrix.browser }}" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-release-playwright-${{ matrix.browser }}
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          if-no-files-found: ignore
+
+      - name: Print backend logs on failure
+        if: failure()
+        run: docker compose logs --no-color app migration db redis
+
+      - name: Tear down backend stack
+        if: always()
+        run: docker compose down --volumes --remove-orphans
