@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { apiFetch } from '../utils/auth'
-import { Loader2, ChevronLeft, ChevronDown, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
+import { Loader2, ChevronLeft, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -37,10 +37,14 @@ const defaultVals = {
   anti_abuse_monthly_base: 7
 }
 
+// تنظیمات اصلی که از سرور می‌آیند (برای نمایش در Placeholder)
 const settings = ref<Record<string, any>>({ ...defaultVals })
+// مقادیری که کاربر در حال ویرایش آن‌هاست
+const form = ref<Record<string, any>>({})
 
 const isDefault = (key: keyof typeof defaultVals) => {
-  const val = settings.value[key]
+  // اگر کاربر مقداری وارد نکرده، مقدار اصلی را چک کن
+  const val = form.value[key] !== undefined && form.value[key] !== '' ? form.value[key] : settings.value[key]
   return val === defaultVals[key] || val == null || val === ''
 }
 
@@ -62,6 +66,7 @@ const loadSettings = async () => {
     loading.value = true
     const data = await fetchApi('GET', '/trading-settings/')
     settings.value = data
+    form.value = {} // پاک کردن فرم بعد از لود جدید
   } catch (error) {
     message.value = 'خطا در بارگذاری تنظیمات'
     messageType.value = 'danger'
@@ -75,8 +80,12 @@ const saveSettings = async () => {
     saving.value = true
     message.value = ''
     
-    const data = await fetchApi('PUT', '/trading-settings/', settings.value)
+    // ترکیب مقادیر تغییر یافته با مقادیر قبلی
+    const payload = { ...settings.value, ...form.value }
+    
+    const data = await fetchApi('PUT', '/trading-settings/', payload)
     settings.value = data
+    form.value = {} // بعد از ذخیره، فرم را خالی کن تا دوباره Placeholderها نمایش داده شوند
     
     message.value = 'تنظیمات با موفقیت ذخیره شد'
     messageType.value = 'success'
@@ -99,6 +108,7 @@ const resetSettings = async () => {
     
     const data = await fetchApi('POST', '/trading-settings/reset')
     settings.value = data
+    form.value = {}
     
     message.value = 'تنظیمات به مقادیر پیش‌فرض بازنشانی شد'
     messageType.value = 'success'
@@ -140,7 +150,14 @@ onMounted(() => {
         <div v-show="openSections.invitation" class="ds-accordion-body">
           <div class="ds-form-group">
             <label class="ds-label">مدت اعتبار لینک دعوت (روز)</label>
-            <input type="number" v-model.number="settings.invitation_expiry_days" :placeholder="defaultVals.invitation_expiry_days.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('invitation_expiry_days')}" />
+            <input 
+              type="number" 
+              v-model.number="form.invitation_expiry_days" 
+              :placeholder="settings.invitation_expiry_days?.toString()" 
+              min="1" 
+              class="ds-input" 
+              :class="{'is-default': isDefault('invitation_expiry_days')}" 
+            />
           </div>
         </div>
       </div>
@@ -157,21 +174,50 @@ onMounted(() => {
         <div v-show="openSections.offer" class="ds-accordion-body">
           <div class="ds-form-group">
             <label class="ds-label">مدت اعتبار لفظ (دقیقه)</label>
-            <input type="number" v-model.number="settings.offer_expiry_minutes" :placeholder="defaultVals.offer_expiry_minutes.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('offer_expiry_minutes')}" />
+            <input 
+              type="number" 
+              v-model.number="form.offer_expiry_minutes" 
+              :placeholder="settings.offer_expiry_minutes?.toString()" 
+              min="1" 
+              class="ds-input" 
+              :class="{'is-default': isDefault('offer_expiry_minutes')}" 
+            />
           </div>
           <div class="form-row">
             <div class="ds-form-group">
               <label class="ds-label">حداقل تعداد کالا</label>
-              <input type="number" v-model.number="settings.offer_min_quantity" :placeholder="defaultVals.offer_min_quantity.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('offer_min_quantity')}" />
+              <input 
+                type="number" 
+                v-model.number="form.offer_min_quantity" 
+                :placeholder="settings.offer_min_quantity?.toString()" 
+                min="1" 
+                class="ds-input" 
+                :class="{'is-default': isDefault('offer_min_quantity')}" 
+              />
             </div>
             <div class="ds-form-group">
               <label class="ds-label">حداکثر تعداد کالا</label>
-              <input type="number" v-model.number="settings.offer_max_quantity" :placeholder="defaultVals.offer_max_quantity.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('offer_max_quantity')}" />
+              <input 
+                type="number" 
+                v-model.number="form.offer_max_quantity" 
+                :placeholder="settings.offer_max_quantity?.toString()" 
+                min="1" 
+                class="ds-input" 
+                :class="{'is-default': isDefault('offer_max_quantity')}" 
+              />
             </div>
           </div>
           <div class="ds-form-group">
             <label class="ds-label">حداکثر لفظ‌های فعال همزمان</label>
-            <input type="number" v-model.number="settings.max_active_offers" :placeholder="defaultVals.max_active_offers.toString()" min="1" max="20" class="ds-input" :class="{'is-default': isDefault('max_active_offers')}" />
+            <input 
+              type="number" 
+              v-model.number="form.max_active_offers" 
+              :placeholder="settings.max_active_offers?.toString()" 
+              min="1" 
+              max="20" 
+              class="ds-input" 
+              :class="{'is-default': isDefault('max_active_offers')}" 
+            />
           </div>
         </div>
       </div>
@@ -188,11 +234,26 @@ onMounted(() => {
         <div v-show="openSections.expire" class="ds-accordion-body">
           <div class="ds-form-group">
             <label class="ds-label">حداکثر منقضی شدن در دقیقه</label>
-            <input type="number" v-model.number="settings.offer_expire_rate_per_minute" :placeholder="defaultVals.offer_expire_rate_per_minute.toString()" min="1" max="10" class="ds-input" :class="{'is-default': isDefault('offer_expire_rate_per_minute')}" />
+            <input 
+              type="number" 
+              v-model.number="form.offer_expire_rate_per_minute" 
+              :placeholder="settings.offer_expire_rate_per_minute?.toString()" 
+              min="1" 
+              max="10" 
+              class="ds-input" 
+              :class="{'is-default': isDefault('offer_expire_rate_per_minute')}" 
+            />
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه منقضی شدن روزانه</label>
-            <input type="number" v-model.number="settings.offer_expire_daily_limit_after_threshold" :placeholder="defaultVals.offer_expire_daily_limit_after_threshold.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('offer_expire_daily_limit_after_threshold')}" />
+            <input 
+              type="number" 
+              v-model.number="form.offer_expire_daily_limit_after_threshold" 
+              :placeholder="settings.offer_expire_daily_limit_after_threshold?.toString()" 
+              min="1" 
+              class="ds-input" 
+              :class="{'is-default': isDefault('offer_expire_daily_limit_after_threshold')}" 
+            />
           </div>
         </div>
       </div>
@@ -213,15 +274,36 @@ onMounted(() => {
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه روزانه</label>
-            <input type="number" v-model.number="settings.anti_abuse_daily_base" :placeholder="defaultVals.anti_abuse_daily_base.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('anti_abuse_daily_base')}" />
+            <input 
+              type="number" 
+              v-model.number="form.anti_abuse_daily_base" 
+              :placeholder="settings.anti_abuse_daily_base?.toString()" 
+              min="1" 
+              class="ds-input" 
+              :class="{'is-default': isDefault('anti_abuse_daily_base')}" 
+            />
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه هفتگی</label>
-            <input type="number" v-model.number="settings.anti_abuse_weekly_base" :placeholder="defaultVals.anti_abuse_weekly_base.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('anti_abuse_weekly_base')}" />
+            <input 
+              type="number" 
+              v-model.number="form.anti_abuse_weekly_base" 
+              :placeholder="settings.anti_abuse_weekly_base?.toString()" 
+              min="1" 
+              class="ds-input" 
+              :class="{'is-default': isDefault('anti_abuse_weekly_base')}" 
+            />
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه ماهانه</label>
-            <input type="number" v-model.number="settings.anti_abuse_monthly_base" :placeholder="defaultVals.anti_abuse_monthly_base.toString()" min="1" class="ds-input" :class="{'is-default': isDefault('anti_abuse_monthly_base')}" />
+            <input 
+              type="number" 
+              v-model.number="form.anti_abuse_monthly_base" 
+              :placeholder="settings.anti_abuse_monthly_base?.toString()" 
+              min="1" 
+              class="ds-input" 
+              :class="{'is-default': isDefault('anti_abuse_monthly_base')}" 
+            />
           </div>
         </div>
       </div>
