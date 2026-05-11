@@ -28,6 +28,7 @@ interface MutualTradePreview {
   id: number;
   created_at: string;
   offer_user_id: number;
+  responder_user_id: number;
   quantity: number;
   commodity_name: string;
   price: number;
@@ -234,14 +235,26 @@ function handleActionClick(action: ProfileActionCard) {
 
 function getTradeBadgeClass(trade: MutualTradePreview) {
   if (isOwnProfile.value) {
-    return trade.trade_type === 'BUY' ? 'buy' : 'sell';
+    const isResponder = Number(trade.responder_user_id) === Number(profileData.value?.id);
+    const type = trade.trade_type;
+    if (isResponder) {
+      return type === 'BUY' ? 'buy' : 'sell';
+    } else {
+      return type === 'BUY' ? 'sell' : 'buy';
+    }
   }
   return trade.offer_user_id === profileData.value?.id ? 'sell' : 'buy';
 }
 
 function getTradeBadgeLabel(trade: MutualTradePreview) {
   if (isOwnProfile.value) {
-    return trade.trade_type === 'BUY' ? '🟢 خرید' : '🔴 فروش';
+    const isResponder = Number(trade.responder_user_id) === Number(profileData.value?.id);
+    const type = trade.trade_type;
+    if (isResponder) {
+      return type === 'BUY' ? '🟢 خرید' : '🔴 فروش';
+    } else {
+      return type === 'BUY' ? '🔴 فروش' : '🟢 خرید';
+    }
   }
   return trade.offer_user_id === profileData.value?.id ? '🔴 فروش به شما' : '🟢 خرید از شما';
 }
