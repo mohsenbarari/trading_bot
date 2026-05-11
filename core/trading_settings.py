@@ -14,7 +14,7 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 from threading import Thread
-from typing import Any, Optional
+from typing import Any, Optional, Callable
 
 from pydantic import BaseModel
 
@@ -181,9 +181,9 @@ async def load_trading_settings_async() -> TradingSettings:
     return TradingSettings()
 
 
-def _run_async_settings_loader_sync() -> TradingSettings:
+def _run_async_settings_loader_sync(loader: Optional[Callable[[], Any]] = None) -> Any:
     """
-    Run the async DB-backed settings loader from sync call sites.
+    Run an async settings loader from sync call sites.
 
     Many hot paths still call `get_trading_settings()` from sync helpers even
     though settings are persisted in the DB. When those callers run inside an
@@ -191,8 +191,11 @@ def _run_async_settings_loader_sync() -> TradingSettings:
     not fall back to stale JSON defaults.
     """
 
-    def load_in_new_loop() -> TradingSettings:
-        return asyncio.run(load_trading_settings_async())
+    if loader is None:
+        loader = load_trading_settings_async
+
+    def load_in_new_loop() -> Any:
+        return asyncio.run(loader())
 
     try:
         asyncio.get_running_loop()
@@ -262,12 +265,24 @@ def get_trading_settings() -> TradingSettings:
     """
     گرفتن تنظیمات با کش (sync - برای سازگاری).
     
-    این تابع از fallback cache استفاده می‌کند.
+    این تابع ابتدا Redis cache مشترک بین workerها را بررسی می‌کند.
+    fallback cache فقط زمانی استفاده می‌شود که Redis در دسترس نباشد.
     برای بهترین عملکرد، از get_trading_settings_async() استفاده کنید.
     """
     global _fallback_cache, _fallback_timestamp
     
     current_time = time.time()
+
+    # اول Redis cache مشترک را بخوان تا workerها و processهای جدا از هم
+    # بلافاصله مقدار به‌روز را ببینند و روی fallback محلی stale نمانند.
+    try:
+        shared_cached = _run_async_settings_loader_sync(_get_from_redis_cache)
+        if shared_cached is not None:
+            _fallback_cache = shared_cached
+            _fallback_timestamp = current_time
+            return shared_cached
+    except Exception as e:
+        logger.debug(f"Failed to load settings from shared Redis cache: {e}")
     
     # اگر کش معتبر است، از آن استفاده کن
     if _fallback_cache is not None and (current_time - _fallback_timestamp) < CACHE_TTL_SECONDS:
