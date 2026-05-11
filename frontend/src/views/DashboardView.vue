@@ -178,22 +178,21 @@ onMounted(fetchUser)
 /* ═══ Top Bar ═══ */
 .top-bar {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  margin-bottom: 2rem;
+  margin-bottom: 1.25rem;
   background: var(--ds-bg-card);
-  padding: 0.75rem 0.25rem;
+  padding: 0.75rem 0.5rem;
   border-radius: var(--ds-radius-lg);
 }
 
 .user-info-center {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.875rem;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  flex: 1;
 }
 
 .avatar {
@@ -217,8 +216,8 @@ onMounted(fetchUser)
 .user-text {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
+  align-items: flex-start;
+  text-align: right;
 }
 .greeting {
   font-size: var(--ds-font-sm);
@@ -263,7 +262,7 @@ onMounted(fetchUser)
   gap: 0.875rem;
   padding: 1rem 1.25rem;
   border-radius: var(--ds-radius-lg);
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   animation: slideDown 0.4s ease-out;
 }
 @keyframes slideDown {
