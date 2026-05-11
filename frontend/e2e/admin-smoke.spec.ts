@@ -152,7 +152,9 @@ test.describe('Admin smoke regressions', () => {
     await openAdmin(page)
 
     await page.getByRole('button', { name: /مدیریت کاربران/ }).click()
-    await page.getByRole('button', { name: '🔍 جستجوی کاربر' }).click()
+    const searchToggleButton = page.locator('.search-toggle-btn').filter({ hasText: 'جستجوی کاربر' }).first()
+    await expect(searchToggleButton).toBeVisible()
+    await searchToggleButton.click()
     await page.getByPlaceholder('نام، نام کاربری یا موبایل...').fill(seededUser.accountName)
     await page.getByRole('button', { name: /^جستجو$/ }).click()
 
@@ -173,7 +175,9 @@ test.describe('Admin smoke regressions', () => {
     await openAdmin(page)
 
     await page.getByRole('button', { name: /تنظیمات سیستم/ }).click()
-    await page.getByText('📨 دعوت‌نامه').click()
+    const invitationAccordionHeader = page.locator('.ds-accordion-header').filter({ hasText: 'دعوت‌نامه' }).first()
+    await expect(invitationAccordionHeader).toBeVisible()
+    await invitationAccordionHeader.click()
 
     const invitationExpiryInput = page.locator('input[placeholder="2"]').first()
     await invitationExpiryInput.fill(String(currentSettings.invitation_expiry_days))
@@ -208,7 +212,13 @@ test.describe('Admin smoke regressions', () => {
     const candidateRow = page.locator('.chat-user-row').filter({ hasText: seededCandidate.accountName }).first()
     await expect(candidateRow).toBeVisible()
     await candidateRow.click()
-    await page.getByRole('button', { name: 'افزودن' }).click()
+    const addMemberButton = page.locator('.primary-chip').filter({ hasText: 'افزودن' }).first()
+    await expect(addMemberButton).toBeVisible()
+    await addMemberButton.evaluate((node) => {
+      if (node instanceof HTMLElement) {
+        node.click()
+      }
+    })
 
     await expect(page.getByRole('heading', { name: 'اعضای کانال' })).toBeVisible()
     await expect(page.locator('.chat-user-row').filter({ hasText: seededCandidate.accountName }).first()).toBeVisible()

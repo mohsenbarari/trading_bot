@@ -49,7 +49,9 @@ class NotificationHelperTests(unittest.IsolatedAsyncioTestCase):
 class SyncPushHelperTests(unittest.TestCase):
     def setUp(self):
         self.original_client = sync_push._http_client
+        self.original_cooldowns = dict(sync_push._target_cooldowns)
         sync_push._http_client = None
+        sync_push._target_cooldowns.clear()
 
     def tearDown(self):
         existing = sync_push._http_client
@@ -59,6 +61,8 @@ class SyncPushHelperTests(unittest.TestCase):
             except Exception:
                 pass
         sync_push._http_client = self.original_client
+        sync_push._target_cooldowns.clear()
+        sync_push._target_cooldowns.update(self.original_cooldowns)
 
     def test_push_sync_direct_skips_when_configuration_missing(self):
         with patch("core.server_routing.default_peer_server_url", return_value=None), \
@@ -84,6 +88,18 @@ class SyncPushHelperTests(unittest.TestCase):
             sync_push.push_sync_direct(payload)
 
         executor.submit.assert_called_once_with(sync_push._do_push, payload, "https://peer.example", "secret")
+
+    def test_push_sync_direct_skips_targets_in_cooldown(self):
+        payload = {"table": "offers", "id": 9}
+        sync_push._target_cooldowns["https://peer.example"] = 999999999.0
+
+        with patch("core.server_routing.default_peer_server_url", return_value="https://peer.example/"), \
+             patch("core.config.settings.sync_api_key", "secret"), \
+             patch.object(sync_push, "_executor") as executor, \
+             patch("core.sync_push.time.monotonic", return_value=100.0):
+            sync_push.push_sync_direct(payload)
+
+        executor.submit.assert_not_called()
 
     def test_do_push_sends_signed_payload_to_sync_receive(self):
         recorded = {}
@@ -114,6 +130,7 @@ class SyncPushHelperTests(unittest.TestCase):
         self.assertEqual(recorded["headers"]["X-API-Key"], "secret")
         self.assertEqual(recorded["headers"]["X-Timestamp"], str(timestamp))
         self.assertEqual(recorded["headers"]["X-Signature"], expected_signature)
+        self.assertFalse(sync_push._target_is_in_cooldown("https://peer.example"))
 
     def test_do_push_swallows_failed_responses_and_transport_errors(self):
         class FailingResponseClient:
@@ -124,11 +141,19 @@ class SyncPushHelperTests(unittest.TestCase):
             def post(self, url, content, headers):
                 raise RuntimeError("network down")
 
-        with patch("core.sync_push._get_client", return_value=FailingResponseClient()):
+        with patch("core.sync_push._get_client", return_value=FailingResponseClient()), \
+             patch("core.config.settings.sync_direct_push_cooldown_seconds", 60.0), \
+             patch("core.sync_push.time.monotonic", return_value=100.0):
             sync_push._do_push({"id": 1}, "https://peer.example", "secret")
+            self.assertTrue(sync_push._target_is_in_cooldown("https://peer.example"))
 
-        with patch("core.sync_push._get_client", return_value=ExplodingClient()):
+        sync_push._clear_target_cooldown("https://peer.example")
+
+        with patch("core.sync_push._get_client", return_value=ExplodingClient()), \
+             patch("core.config.settings.sync_direct_push_cooldown_seconds", 60.0), \
+             patch("core.sync_push.time.monotonic", return_value=200.0):
             sync_push._do_push({"id": 1}, "https://peer.example", "secret")
+            self.assertTrue(sync_push._target_is_in_cooldown("https://peer.example"))
 
     def test_get_client_reuses_open_client_and_recreates_closed_one(self):
         open_client = SimpleNamespace(is_closed=False)

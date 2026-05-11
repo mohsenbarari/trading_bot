@@ -147,6 +147,7 @@ Scope rules:
 - [x] Revalidate `frontend/e2e/notifications.spec.ts` serially against the current auth/realtime runtime (`4/4`).
 - [x] Re-sync `frontend/e2e/admin-smoke.spec.ts` and `frontend/e2e/auth.spec.ts` with the current channel-manager entry flow and profile/settings routing.
 - [x] Revalidate the full frontend Playwright suite serially with a clean green pass (`64/64`).
+- [x] Expand the full frontend Playwright matrix beyond Chromium with serial Firefox (`64/64`) and WebKit (`64/64`) passes after the current cross-browser selector/runtime hardening and `MarketView.vue` manual-create restoration.
 
 ## Phase 7 - Models, Migrations, Startup, and Deployment Smoke Coverage
 
