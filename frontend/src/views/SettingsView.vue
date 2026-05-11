@@ -187,7 +187,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="settings-page">
+  <div class="ds-page settings-page">
     
     <div class="header-row">
       <div class="header-spacer"></div>
@@ -200,37 +200,36 @@ onMounted(() => {
     <div class="settings-content">
 
       <!-- Active Sessions Accordion -->
-      <div class="accordion-section">
-        <div class="accordion-header" @click="toggleSection('sessions')">
-          <div class="header-info">
-            <Smartphone :size="18" class="text-amber-600" />
+      <div class="ds-accordion">
+        <div class="ds-accordion-header" @click="toggleSection('sessions')">
+          <div class="ds-accordion-header-info">
+            <Smartphone :size="18" class="icon-primary" />
             <h2>نشست‌های فعال</h2>
           </div>
-          <component :is="openSections.sessions ? ChevronDown : ChevronLeft" :size="20" class="accordion-icon" />
+          <component :is="openSections.sessions ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
         </div>
-        <div v-show="openSections.sessions" class="accordion-content">
-          <div v-if="sessionsLoading" class="text-center py-4">
-            <Loader2 class="w-5 h-5 text-amber-500 animate-spin mx-auto" />
+        <div v-show="openSections.sessions" class="ds-accordion-body">
+          <div v-if="sessionsLoading" class="loading-inline">
+            <Loader2 class="spin-icon" :size="20" />
           </div>
           
-          <div v-else-if="sessions.length === 0" class="text-center text-sm text-gray-400 py-4">
+          <div v-else-if="sessions.length === 0" class="empty-inline">
             هیچ نشست فعالی یافت نشد
           </div>
           
-          <div v-else class="space-y-2">
+          <div v-else class="sessions-list">
             <div v-for="session in sessions" :key="session.id" class="session-card">
-              <div class="flex items-center gap-3 flex-1 min-w-0">
-                <div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                     :class="session.is_primary ? 'bg-amber-100 text-amber-600' : 'bg-gray-100 text-gray-500'">
+              <div class="session-info">
+                <div class="session-icon" :class="{ 'session-icon-primary': session.is_primary }">
                   <Smartphone :size="18" />
                 </div>
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-center gap-2">
-                    <span class="text-sm font-medium text-gray-800 truncate">{{ session.device_name }}</span>
-                    <span v-if="session.is_primary" class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold shrink-0">اصلی</span>
-                    <span v-if="session.is_current" class="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold shrink-0">این دستگاه</span>
+                <div class="session-details">
+                  <div class="session-name-row">
+                    <span class="session-name">{{ session.device_name }}</span>
+                    <span v-if="session.is_primary" class="session-tag tag-primary">اصلی</span>
+                    <span v-if="session.is_current" class="session-tag tag-current">این دستگاه</span>
                   </div>
-                  <div class="text-xs text-gray-400 mt-0.5 dir-ltr text-right">
+                  <div class="session-meta">
                     {{ session.platform }} · {{ session.device_ip || '—' }}
                   </div>
                 </div>
@@ -238,7 +237,7 @@ onMounted(() => {
               <button
                 v-if="!session.is_current && !session.is_primary && sessions.some(s => s.is_current && s.is_primary)"
                 @click="terminateSession(session.id)"
-                class="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+                class="session-delete-btn"
                 title="پایان نشست"
               >
                 <Trash2 :size="16" />
@@ -248,7 +247,7 @@ onMounted(() => {
             <button
               v-if="sessions.length > 1 && sessions.some(s => s.is_current && s.is_primary)"
               @click="logoutAll"
-              class="w-full mt-3 py-2.5 text-sm text-red-500 font-bold border border-red-200 rounded-xl hover:bg-red-50 transition-colors"
+              class="logout-all-btn"
             >
               خروج از همه نشست‌ها
             </button>
@@ -257,15 +256,15 @@ onMounted(() => {
       </div>
 
       <!-- Storage Management Accordion -->
-      <div class="accordion-section">
-        <div class="accordion-header" @click="toggleSection('storage')">
-          <div class="header-info">
-            <HardDrive :size="18" class="text-amber-600" />
+      <div class="ds-accordion">
+        <div class="ds-accordion-header" @click="toggleSection('storage')">
+          <div class="ds-accordion-header-info">
+            <HardDrive :size="18" class="icon-primary" />
             <h2>مدیریت حافظه و داده‌ها</h2>
           </div>
-          <component :is="openSections.storage ? ChevronDown : ChevronLeft" :size="20" class="accordion-icon" />
+          <component :is="openSections.storage ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
         </div>
-        <div v-show="openSections.storage" class="accordion-content">
+        <div v-show="openSections.storage" class="ds-accordion-body">
           <div class="storage-card">
             <div class="storage-info">
               <span class="storage-label">فضای اشغال‌شده توسط فایل‌های دانلود‌شده</span>
@@ -277,7 +276,7 @@ onMounted(() => {
               :disabled="cacheBusy"
               @click="clearCache"
             >
-              <Loader2 v-if="cacheBusy" :size="16" class="animate-spin" />
+              <Loader2 v-if="cacheBusy" :size="16" class="spin-icon" />
               <Trash2 v-else :size="16" />
               <span>حذف فایل‌های دانلود شده</span>
             </button>
@@ -287,15 +286,15 @@ onMounted(() => {
       </div>
 
       <!-- Blocked Users Accordion -->
-      <div class="accordion-section">
-        <div class="accordion-header" @click="toggleSection('blocks')">
-          <div class="header-info">
-            <UserX :size="18" class="text-amber-600" />
+      <div class="ds-accordion">
+        <div class="ds-accordion-header" @click="toggleSection('blocks')">
+          <div class="ds-accordion-header-info">
+            <UserX :size="18" class="icon-primary" />
             <h2>لیست مسدودشدگان</h2>
           </div>
-          <component :is="openSections.blocks ? ChevronDown : ChevronLeft" :size="20" class="accordion-icon" />
+          <component :is="openSections.blocks ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
         </div>
-        <div v-show="openSections.blocks" class="accordion-content">
+        <div v-show="openSections.blocks" class="ds-accordion-body">
           
           <div class="block-search-box">
             <p class="section-hint">کاربران مسدود شده تنها از انجام معامله در بازار با شما محروم می‌شوند و هیچ محدودیتی در پیام‌رسان نخواهند داشت. شخص مسدود شده متوجه مسدود شدنش نخواهد شد.</p>
@@ -307,7 +306,7 @@ onMounted(() => {
                 placeholder="جستجوی نام کاربری یا شماره موبایل..." 
                 @input="searchUsersToBlock"
               />
-              <Loader2 v-if="searchLoading" :size="18" class="search-loading animate-spin" />
+              <Loader2 v-if="searchLoading" :size="18" class="search-loading spin-icon" />
             </div>
 
             <!-- Search Results -->
@@ -323,7 +322,7 @@ onMounted(() => {
                   @click="blockUser(user.id)"
                   :disabled="blockLoadingId === user.id"
                 >
-                  <Loader2 v-if="blockLoadingId === user.id" :size="14" class="animate-spin" />
+                  <Loader2 v-if="blockLoadingId === user.id" :size="14" class="spin-icon" />
                   <span v-else>مسدود کن</span>
                 </button>
                 <span v-else class="already-blocked">مسدود شده</span>
@@ -336,10 +335,10 @@ onMounted(() => {
           <!-- Blocked List -->
           <div class="blocked-list">
             <h4 class="list-title">کاربران مسدود شده ({{ blockedUsers.length }})</h4>
-            <div v-if="blockedUsers.length === 0" class="empty-list">
+            <div v-if="blockedUsers.length === 0" class="empty-inline">
               لیست مسدودشدگان شما خالی است.
             </div>
-            <div v-else class="space-y-2">
+            <div v-else class="blocked-list-items">
               <div v-for="user in blockedUsers" :key="user.id" class="user-row blocked-user-row">
                 <div class="user-info">
                   <span class="user-name">{{ user.full_name || user.account_name }}</span>
@@ -350,7 +349,7 @@ onMounted(() => {
                   @click="unblockUser(user.id)"
                   :disabled="blockLoadingId === user.id"
                 >
-                  <Loader2 v-if="blockLoadingId === user.id" :size="14" class="animate-spin" />
+                  <Loader2 v-if="blockLoadingId === user.id" :size="14" class="spin-icon" />
                   <Unlock v-else :size="14" />
                   <span>رفع مسدودیت</span>
                 </button>
@@ -372,90 +371,160 @@ onMounted(() => {
 
 <style scoped>
 .settings-page {
-  min-height: 100dvh;
-  padding: 16px;
+  padding: var(--ds-page-padding);
 }
-
-
 
 .settings-content {
   padding: 1.25rem 0;
   width: 100%;
-  max-width: 480px;
+  max-width: var(--ds-page-max-width);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
 }
 
-/* Accordion Styles */
-.accordion-section {
-  margin-bottom: 0.75rem;
-  background: white;
-  border: 1px solid rgba(245, 158, 11, 0.12);
-  border-radius: 1rem;
-  overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+/* Icon color utility */
+.icon-primary { color: var(--ds-primary-600); }
+.spin-icon { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Inline loading/empty */
+.loading-inline {
+  text-align: center;
+  padding: 1rem 0;
+  display: flex;
+  justify-content: center;
+}
+.loading-inline .spin-icon { color: var(--ds-primary-500); }
+
+.empty-inline {
+  text-align: center;
+  font-size: var(--ds-font-base);
+  color: var(--ds-text-placeholder);
+  padding: 1rem 0;
 }
 
-.accordion-header {
+/* Sessions */
+.sessions-list {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem;
-  background: linear-gradient(135deg, #fffbeb, #fef9f0);
-  cursor: pointer;
-  transition: background 0.2s;
-  -webkit-tap-highlight-color: transparent;
-}
-.accordion-header:active {
-  background: #fef3c7;
-}
-
-.header-info {
-  display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 0.5rem;
 }
 
-.accordion-header h2 {
-  font-size: 0.9rem;
-  font-weight: 700;
-  margin: 0;
-  color: #1f2937;
-}
-
-.accordion-icon {
-  color: #d97706;
-  transition: transform 0.2s;
-}
-
-.accordion-content {
-  padding: 1rem;
-  border-top: 1px solid rgba(245, 158, 11, 0.08);
-  background: white;
-  animation: slideDown 0.2s ease-out;
-}
-@keyframes slideDown {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* Sessions Inside Accordion */
 .session-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem;
-  background: #f9fafb;
-  border: 1px solid #f3f4f6;
-  border-radius: 0.75rem;
+  background: var(--ds-bg-inset);
+  border: 1px solid var(--ds-border-light);
+  border-radius: var(--ds-radius-md);
 }
 
-/* Storage Inside Accordion */
+.session-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.session-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--ds-radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--ds-bg-hover);
+  color: var(--ds-text-muted);
+}
+.session-icon-primary {
+  background: var(--ds-primary-100);
+  color: var(--ds-primary-600);
+}
+
+.session-details {
+  min-width: 0;
+  flex: 1;
+}
+
+.session-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.session-name {
+  font-size: var(--ds-font-base);
+  font-weight: 600;
+  color: var(--ds-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-tag {
+  font-size: 0.625rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.tag-primary {
+  background: var(--ds-primary-100);
+  color: var(--ds-primary-700);
+}
+.tag-current {
+  background: var(--ds-success-100);
+  color: var(--ds-success-700);
+}
+
+.session-meta {
+  font-size: var(--ds-font-xs);
+  color: var(--ds-text-placeholder);
+  margin-top: 2px;
+  direction: ltr;
+  text-align: right;
+}
+
+.session-delete-btn {
+  padding: 0.5rem;
+  color: var(--ds-danger-500);
+  background: transparent;
+  border: none;
+  border-radius: var(--ds-radius-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.session-delete-btn:hover {
+  color: var(--ds-danger-600);
+  background: var(--ds-danger-50);
+}
+
+.logout-all-btn {
+  width: 100%;
+  margin-top: 0.75rem;
+  padding: 0.625rem;
+  font-size: var(--ds-font-base);
+  color: var(--ds-danger-500);
+  font-weight: 700;
+  border: 1px solid var(--ds-danger-200);
+  border-radius: var(--ds-radius-md);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.logout-all-btn:hover {
+  background: var(--ds-danger-50);
+}
+
+/* Storage Card */
 .storage-card {
-  background: #f9fafb;
-  border: 1px solid #f3f4f6;
-  border-radius: 0.75rem;
+  background: var(--ds-bg-inset);
+  border: 1px solid var(--ds-border-light);
+  border-radius: var(--ds-radius-md);
   padding: 0.875rem;
   display: flex;
   flex-direction: column;
@@ -469,12 +538,12 @@ onMounted(() => {
 }
 .storage-label {
   font-size: 0.8rem;
-  color: #4b5563;
+  color: var(--ds-text-secondary);
 }
 .storage-value {
-  font-size: 0.85rem;
+  font-size: var(--ds-font-base);
   font-weight: 700;
-  color: #111827;
+  color: var(--ds-text-primary);
 }
 .storage-clear-btn {
   display: inline-flex;
@@ -483,29 +552,29 @@ onMounted(() => {
   gap: 0.5rem;
   width: 100%;
   padding: 0.6rem 0.875rem;
-  border-radius: 0.75rem;
-  border: 1px solid #fecaca;
+  border-radius: var(--ds-radius-md);
+  border: 1px solid var(--ds-danger-200);
   background: #fff5f5;
-  color: #dc2626;
-  font-size: 0.85rem;
+  color: var(--ds-danger-600);
+  font-size: var(--ds-font-base);
   font-weight: 700;
   cursor: pointer;
   transition: background 0.2s, transform 0.15s;
 }
-.storage-clear-btn:hover:not(:disabled) { background: #fee2e2; }
+.storage-clear-btn:hover:not(:disabled) { background: var(--ds-danger-100); }
 .storage-clear-btn:active:not(:disabled) { transform: scale(0.98); }
 .storage-clear-btn:disabled { opacity: 0.6; cursor: progress; }
 .storage-feedback {
-  font-size: 0.75rem;
-  color: #059669;
+  font-size: var(--ds-font-sm);
+  color: var(--ds-success-600);
   margin: 0;
   text-align: center;
 }
 
 /* Blocks Section */
 .section-hint {
-  font-size: 0.75rem;
-  color: #6b7280;
+  font-size: var(--ds-font-sm);
+  color: var(--ds-text-muted);
   margin-bottom: 0.75rem;
   line-height: 1.5;
 }
@@ -519,31 +588,31 @@ onMounted(() => {
 .search-icon {
   position: absolute;
   right: 0.75rem;
-  color: #9ca3af;
+  color: var(--ds-text-placeholder);
 }
 .search-loading {
   position: absolute;
   left: 0.75rem;
-  color: #f59e0b;
+  color: var(--ds-primary-500);
 }
 .search-input-wrapper input {
   width: 100%;
   padding: 0.6rem 2.25rem 0.6rem 0.75rem;
-  border: 1px solid #d1d5db;
-  border-radius: 0.75rem;
-  font-size: 0.85rem;
+  border: 1px solid var(--ds-border-strong);
+  border-radius: var(--ds-radius-md);
+  font-size: var(--ds-font-base);
   outline: none;
   transition: border-color 0.2s;
 }
 .search-input-wrapper input:focus {
-  border-color: #f59e0b;
+  border-color: var(--ds-primary-500);
   box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.1);
 }
 
 .search-results {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 0.75rem;
+  background: var(--ds-bg-inset);
+  border: 1px solid var(--ds-border-medium);
+  border-radius: var(--ds-radius-md);
   overflow: hidden;
   margin-bottom: 1rem;
 }
@@ -552,7 +621,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--ds-border-light);
 }
 .user-row:last-child {
   border-bottom: none;
@@ -562,24 +631,24 @@ onMounted(() => {
   flex-direction: column;
 }
 .user-name {
-  font-size: 0.85rem;
+  font-size: var(--ds-font-base);
   font-weight: 600;
-  color: #1f2937;
+  color: var(--ds-text-primary);
 }
 .user-phone {
-  font-size: 0.75rem;
-  color: #6b7280;
+  font-size: var(--ds-font-sm);
+  color: var(--ds-text-muted);
   direction: ltr;
   text-align: right;
 }
 
 .btn-block {
   padding: 0.35rem 0.6rem;
-  background: #fef2f2;
-  color: #ef4444;
-  border: 1px solid #fecaca;
-  border-radius: 0.375rem;
-  font-size: 0.7rem;
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-500);
+  border: 1px solid var(--ds-danger-200);
+  border-radius: 6px;
+  font-size: var(--ds-font-xs);
   font-weight: 600;
   cursor: pointer;
   display: flex;
@@ -587,12 +656,12 @@ onMounted(() => {
   justify-content: center;
   white-space: nowrap;
 }
-.btn-block:hover { background: #fee2e2; }
+.btn-block:hover { background: var(--ds-danger-100); }
 .btn-block:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .already-blocked {
-  font-size: 0.7rem;
-  color: #9ca3af;
+  font-size: var(--ds-font-xs);
+  color: var(--ds-text-placeholder);
   font-weight: 500;
 }
 
@@ -607,30 +676,29 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
 }
+.blocked-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
 .list-title {
-  font-size: 0.85rem;
+  font-size: var(--ds-font-base);
   font-weight: 700;
-  color: #374151;
+  color: var(--ds-text-secondary);
   margin: 0 0 0.75rem 0;
 }
-.empty-list {
-  font-size: 0.8rem;
-  color: #9ca3af;
-  text-align: center;
-  padding: 1rem 0;
-}
 .blocked-user-row {
-  background: #fff;
-  border: 1px solid #f3f4f6;
-  border-radius: 0.75rem;
+  background: var(--ds-bg-card);
+  border: 1px solid var(--ds-border-light);
+  border-radius: var(--ds-radius-md);
 }
 .btn-unblock {
   padding: 0.35rem 0.6rem;
-  background: #f3f4f6;
-  color: #4b5563;
-  border: 1px solid #d1d5db;
-  border-radius: 0.375rem;
-  font-size: 0.7rem;
+  background: var(--ds-bg-hover);
+  color: var(--ds-text-secondary);
+  border: 1px solid var(--ds-border-strong);
+  border-radius: 6px;
+  font-size: var(--ds-font-xs);
   font-weight: 600;
   cursor: pointer;
   display: flex;
@@ -638,24 +706,24 @@ onMounted(() => {
   gap: 0.25rem;
   white-space: nowrap;
 }
-.btn-unblock:hover { background: #e5e7eb; }
+.btn-unblock:hover { background: var(--ds-border-medium); }
 .btn-unblock:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .logout-btn {
   width: 100%;
   padding: 0.875rem;
-  border-radius: 1rem;
-  border: 1px solid #fecaca;
-  background: linear-gradient(135deg, #fef2f2, #fee2e2);
-  color: #dc2626;
+  border-radius: var(--ds-radius-lg);
+  border: 1px solid var(--ds-danger-200);
+  background: linear-gradient(135deg, var(--ds-danger-50), var(--ds-danger-100));
+  color: var(--ds-danger-600);
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: var(--ds-font-md);
   cursor: pointer;
   transition: all 0.2s;
   margin-top: 1rem;
 }
 .logout-btn:active {
   transform: scale(0.98);
-  background: #fee2e2;
+  background: var(--ds-danger-100);
 }
 </style>

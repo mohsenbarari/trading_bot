@@ -425,7 +425,7 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 .loading-state, .error-state {
   text-align: center;
   padding: 40px;
-  color: var(--text-secondary);
+  color: var(--ds-text-secondary);
 }
 
 .profile-content {
@@ -454,7 +454,7 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #3390ec, #0ea5e9 58%, #f59e0b 100%);
+  background: linear-gradient(135deg, #3390ec, #0ea5e9 58%, var(--ds-primary-500) 100%);
   color: #fff;
   font-size: 2rem;
   font-weight: 900;
@@ -482,7 +482,7 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 .profile-hero-copy h3 {
   margin: 0;
   font-size: 1.15rem;
-  color: var(--text-color);
+  color: var(--ds-text-primary);
 }
 
 .profile-avatar-actions {
@@ -495,24 +495,23 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 
 .profile-avatar-btn {
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--ds-radius-full);
   min-height: 36px;
   padding: 0 14px;
-  background: rgba(241, 245, 249, 0.96);
-  color: #334155;
-  font: inherit;
-  font-weight: 700;
+  font-size: var(--ds-font-sm);
+  font-weight: 600;
   cursor: pointer;
+  transition: opacity 0.15s;
 }
 
 .profile-avatar-btn.primary {
-  background: rgba(51, 144, 236, 0.12);
-  color: #0369a1;
+  background: var(--ds-primary-500);
+  color: #fff;
 }
 
-.profile-avatar-btn:disabled {
-  opacity: 0.7;
-  cursor: default;
+.profile-avatar-btn.secondary {
+  background: var(--ds-bg-hover);
+  color: var(--ds-danger-500);
 }
 
 .hidden-avatar-input {
@@ -521,27 +520,24 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 
 .profile-section {
   width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  max-width: var(--ds-page-max-width);
 }
 
-.info-section {
+.profile-section.info-section {
   width: 100%;
-  background: #f8fafc;
-  border-radius: 12px;
-  padding: 16px;
-  border: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
 }
 
 .info-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--ds-border-light);
+  gap: 12px;
+}
+
+.info-row:last-child {
+  border-bottom: none;
 }
 
 .address-row {
@@ -551,11 +547,11 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 }
 
 .label {
-    color: var(--text-secondary);
+    color: var(--ds-text-secondary);
 }
 .value {
     font-weight: 600;
-    color: var(--text-color);
+    color: var(--ds-text-primary);
 }
 
 .stats-grid {
@@ -587,22 +583,22 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 }
 
 .stat-card {
-  background: white;
+  background: var(--ds-bg-card);
   padding: 12px;
-  border-radius: 12px;
+  border-radius: var(--ds-radius-md);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  border: 1px solid var(--border-color);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  border: 1px solid var(--ds-border-light);
+  box-shadow: var(--ds-shadow-sm);
 }
 
 .message-btn {
   background: linear-gradient(135deg, #007aff, #0056b3);
   color: white;
   padding: 12px;
-  border-radius: 12px;
+  border-radius: var(--ds-radius-md);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -619,10 +615,10 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 }
 
 .settings-btn {
-  background: linear-gradient(135deg, #4b5563, #374151);
+  background: linear-gradient(135deg, var(--ds-text-secondary), var(--ds-text-primary));
   color: white;
   padding: 12px;
-  border-radius: 12px;
+  border-radius: var(--ds-radius-md);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -654,7 +650,7 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 .stat-value {
   font-weight: 700;
   font-size: 15px;
-  color: var(--primary-color);
+  color: var(--ds-primary-500);
   direction: ltr; /* Fix number direction */
 }
 
@@ -662,11 +658,11 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 
 /* Accordion Styles */
 .accordion-section {
-  background: white;
-  border: 1px solid rgba(245, 158, 11, 0.12);
-  border-radius: 1rem;
+  background: var(--ds-bg-card);
+  border: 1px solid var(--ds-border-accent);
+  border-radius: var(--ds-radius-lg);
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+  box-shadow: var(--ds-shadow-md);
   width: 100%;
 }
 
@@ -674,14 +670,14 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem;
-  background: linear-gradient(135deg, #fffbeb, #fef9f0);
+  padding: var(--ds-card-padding);
+  background: var(--ds-gradient-amber-bg);
   cursor: pointer;
   transition: background 0.2s;
   -webkit-tap-highlight-color: transparent;
 }
 .accordion-header:active {
-  background: #fef3c7;
+  background: var(--ds-primary-100);
 }
 
 .header-info {
@@ -691,21 +687,21 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 }
 
 .accordion-header h2 {
-  font-size: 0.9rem;
+  font-size: var(--ds-font-md);
   font-weight: 700;
   margin: 0;
-  color: #1f2937;
+  color: var(--ds-text-primary);
 }
 
 .accordion-icon {
-  color: #d97706;
+  color: var(--ds-primary-600);
   transition: transform 0.2s;
 }
 
 .accordion-content {
-  padding: 1rem;
+  padding: var(--ds-card-padding);
   border-top: 1px solid rgba(245, 158, 11, 0.08);
-  background: white;
+  background: var(--ds-bg-card);
   animation: slideDown 0.2s ease-out;
 }
 @keyframes slideDown {
@@ -720,14 +716,14 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 .history-list {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: var(--ds-section-gap);
 }
 
 .mini-trade-card {
-    background: #f9fafb;
-    border: 1px solid #f3f4f6;
-    padding: 1rem;
-    border-radius: 12px;
+    background: var(--ds-bg-inset);
+    border: 1px solid var(--ds-border-light);
+    padding: var(--ds-card-padding);
+    border-radius: var(--ds-radius-md);
     transition: transform 0.15s;
 }
 
@@ -739,31 +735,31 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--ds-section-gap);
 }
 
 .trade-date {
-    color: #9ca3af;
-    font-size: 0.75rem;
+    color: var(--ds-text-placeholder);
+    font-size: var(--ds-font-sm);
     font-weight: 500;
 }
 
 .trade-badge {
     padding: 4px 10px;
-    border-radius: 8px;
+    border-radius: var(--ds-radius-sm);
     font-weight: 700;
-    font-size: 0.7rem;
+    font-size: var(--ds-font-xs);
     text-transform: uppercase;
 }
 
 .trade-badge.buy { 
-  background: #ecfdf5; 
-  color: #059669;
+  background: var(--ds-success-50); 
+  color: var(--ds-success-600);
   box-shadow: 0 2px 6px rgba(16, 185, 129, 0.1);
 }
 .trade-badge.sell { 
-  background: #fef2f2; 
-  color: #dc2626;
+  background: var(--ds-danger-50); 
+  color: var(--ds-danger-600);
   box-shadow: 0 2px 6px rgba(239, 68, 68, 0.1);
 }
 
@@ -772,55 +768,55 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
     justify-content: space-between;
     align-items: baseline;
     font-weight: 600;
-    color: #374151;
+    color: var(--ds-text-secondary);
 }
 
 .trade-amount {
-  font-size: 0.9rem;
+  font-size: var(--ds-font-md);
 }
 
 .trade-commodity {
-  font-size: 0.85rem;
-  color: #6b7280;
+  font-size: var(--ds-font-base);
+  color: var(--ds-text-muted);
 }
 
 .trade-price {
   font-size: 0.95rem;
-  color: #d97706;
+  color: var(--ds-primary-600);
 }
 
 .trade-number {
-  font-size: 0.75rem;
+  font-size: var(--ds-font-sm);
   font-weight: 700;
-  color: #6b7280;
-  background: #f3f4f6;
+  color: var(--ds-text-muted);
+  background: var(--ds-bg-hover);
   padding: 2px 6px;
   border-radius: 4px;
 }
 
 .trade-counterparty {
-  margin-top: 0.75rem;
+  margin-top: var(--ds-section-gap);
   padding-top: 0.5rem;
-  border-top: 1px dashed #e5e7eb;
+  border-top: 1px dashed var(--ds-border-medium);
   display: flex;
   justify-content: space-between;
   font-size: 0.8rem;
 }
 
 .trade-counterparty .label {
-  color: #9ca3af;
+  color: var(--ds-text-placeholder);
 }
 
 .trade-counterparty .value {
-  color: #1f2937;
+  color: var(--ds-text-primary);
   font-weight: 700;
 }
 
 .spinner-small {
     width: 20px;
     height: 20px;
-    border: 2px solid #f3f3f3;
-    border-top: 2px solid var(--primary-color);
+    border: 2px solid var(--ds-border-light);
+    border-top: 2px solid var(--ds-primary-500);
     border-radius: 50%;
     animation: spin 1s linear infinite;
     margin: 10px auto;
@@ -828,8 +824,10 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 
 .empty-text {
     text-align: center;
-    color: var(--text-secondary);
+    color: var(--ds-text-secondary);
     font-size: 13px;
     padding: 10px;
 }
 </style>
+
+
