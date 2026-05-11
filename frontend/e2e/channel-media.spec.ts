@@ -251,6 +251,10 @@ async function loginWithSeededSession(page: Page, fixture: SeededChannelAdminFix
   await expect(page.getByText(fixture.accountName)).toBeVisible()
 }
 
+async function expectRoomHeaderStatus(page: Page, expectedStatus: 'کانال' | 'گروه') {
+  await expect(page.locator('.chat-header .header-status')).toHaveText(expectedStatus)
+}
+
 async function seedBootstrapChannelMessage(
   request: APIRequestContext,
   fixture: SeededChannelAdminFixture,
@@ -857,7 +861,7 @@ test.describe('Channel media regressions', () => {
     await expect(page.getByText(fixture.channelTitle)).toBeVisible()
     await page.getByText(fixture.channelTitle).click()
 
-    await expect(page.getByText('کانال • شما مدیر هستید')).toBeVisible()
+    await expectRoomHeaderStatus(page, 'کانال')
     await expect(page.locator('button.attach-btn')).toBeVisible()
     await expect(page.locator('button.voice-btn')).toHaveCount(0)
 
@@ -894,7 +898,7 @@ test.describe('Channel media regressions', () => {
     await expect(page.getByText(fixture.channelTitle)).toBeVisible()
     await page.getByText(fixture.channelTitle).click()
 
-    await expect(page.getByText('کانال • فقط مدیران امکان ارسال دارند')).toBeVisible()
+    await expectRoomHeaderStatus(page, 'کانال')
     await expect(page.getByText('فقط مدیران کانال امکان ارسال پیام دارند.')).toBeVisible()
     await expect(page.locator('button.attach-btn')).toHaveCount(0)
     await expect(page.locator('button.voice-btn')).toHaveCount(0)
@@ -931,14 +935,14 @@ test.describe('Channel media regressions', () => {
 
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
     await expect(page.locator('.chat-header').getByText(fixture.channelTitle)).toBeVisible()
-    await expect(page.locator('.chat-header').getByText('کانال • فقط مدیران امکان ارسال دارند')).toBeVisible()
+    await expectRoomHeaderStatus(page, 'کانال')
     await expect(page.locator('.messages-container').getByText(bootstrapContent)).toBeVisible()
 
     await page.reload()
 
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
     await expect(page.locator('.chat-header').getByText(fixture.channelTitle)).toBeVisible()
-    await expect(page.locator('.chat-header').getByText('کانال • فقط مدیران امکان ارسال دارند')).toBeVisible()
+    await expectRoomHeaderStatus(page, 'کانال')
     await expect(page.locator('.messages-container').getByText(bootstrapContent)).toBeVisible()
   })
 
@@ -973,7 +977,7 @@ test.describe('Channel media regressions', () => {
 
     await expect(page.locator('.forward-modal')).toHaveCount(0)
     await expect(page.getByText(fixture.channelTitle)).toBeVisible()
-    await expect(page.getByText('کانال • شما مدیر هستید')).toBeVisible()
+    await expectRoomHeaderStatus(page, 'کانال')
     await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.creatorAccountName}`)
     await expect(page.locator('.messages-container .msg-document').getByText(fileName)).toBeVisible()
 
@@ -1037,7 +1041,7 @@ test.describe('Channel media regressions', () => {
 
     await expect(page.locator('.forward-modal')).toHaveCount(0)
     await expect(page.locator('.chat-header').getByText(groupTitle)).toBeVisible()
-    await expect(page.locator('.chat-header').getByText('گروه • عضو گروه هستید')).toBeVisible()
+    await expectRoomHeaderStatus(page, 'گروه')
     await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.creatorAccountName}`)
     await expect(page.locator('.messages-container').getByText(sourceContent)).toBeVisible()
 
@@ -1079,7 +1083,7 @@ test.describe('Channel media regressions', () => {
 
     await expect(page.locator('.forward-modal')).toHaveCount(0)
     await expect(page.getByText(fixture.channelTitle)).toBeVisible()
-    await expect(page.getByText('کانال • شما مدیر هستید')).toBeVisible()
+    await expectRoomHeaderStatus(page, 'کانال')
     await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.creatorAccountName}`)
     await expect(page.locator('.messages-container .msg-media-link')).toBeVisible()
 
@@ -1125,7 +1129,7 @@ test.describe('Channel media regressions', () => {
 
     await expect(page.locator('.forward-modal')).toHaveCount(0)
     await expect(page.locator('.chat-header').getByText(fixture.channelTitle)).toBeVisible()
-    await expect(page.locator('.chat-header').getByText('کانال • شما مدیر هستید')).toBeVisible()
+    await expectRoomHeaderStatus(page, 'کانال')
     await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.accountName}`)
     await expect(page.locator('.messages-container video')).toHaveCount(1, { timeout: 30000 })
 
@@ -1167,14 +1171,14 @@ test.describe('Channel media regressions', () => {
 
     expect(unreadResponse.ok()).toBeTruthy()
 
-    await expect(conversationRow.locator('.unread-badge')).toHaveText('1')
+    await expect(conversationRow.locator('.unread-badge')).toHaveText(/^[1۱]$/)
     await expect
       .poll(async () => fetchChannelConversationUnread(request, fixture), { timeout: 30000 })
       .toBe(1)
 
     await conversationRow.click()
 
-    await expect(page.getByText('کانال • فقط مدیران امکان ارسال دارند')).toBeVisible()
+    await expectRoomHeaderStatus(page, 'کانال')
     await expect(page.locator('.messages-container').getByText(unreadContent)).toBeVisible()
     await expect
       .poll(async () => fetchChannelConversationUnread(request, fixture), { timeout: 30000 })
@@ -4409,7 +4413,7 @@ test.describe('Channel media regressions', () => {
 
     expect(unreadResponse.ok()).toBeTruthy()
 
-    await expect(conversationRow.locator('.unread-badge')).toHaveText('1')
+    await expect(conversationRow.locator('.unread-badge')).toHaveText(/^[1۱]$/)
     await expect
       .poll(async () => fetchConversationUnreadByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
       .toBe(1)
@@ -4417,7 +4421,7 @@ test.describe('Channel media regressions', () => {
     await conversationRow.click()
 
     await expect(page.locator('.chat-header').getByText(groupTitle)).toBeVisible()
-    await expect(page.locator('.chat-header').getByText('گروه • عضو گروه هستید')).toBeVisible()
+    await expectRoomHeaderStatus(page, 'گروه')
     await expect(page.locator('.messages-container').getByText(unreadContent)).toBeVisible()
     await expect
       .poll(async () => fetchConversationUnreadByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })

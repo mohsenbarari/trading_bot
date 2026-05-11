@@ -420,7 +420,7 @@ onBeforeUnmount(() => {
                 selectedUserId === conv.other_user_id,
                 !isRoomConversation(conv) && !!typingUsers[conv.other_user_id],
               ]"
-              class="conversation-card"
+              class="conversation-card conversation-item"
               v-ripple
               :class="{
                 'conversation-card--active': selectedUserId === conv.other_user_id,
@@ -458,6 +458,8 @@ onBeforeUnmount(() => {
                   <div class="conv-title-block">
                     <div class="conv-name-row">
                       <span class="conv-name">{{ conv.other_user_name }}</span>
+                      <span v-if="isChannelConversation(conv)" class="channel-badge-list" hidden>کانال</span>
+                      <span v-else-if="isGroupConversation(conv)" class="channel-badge-list" hidden>گروه</span>
                     </div>
                     <span class="conv-time" v-if="conv.last_message_at">{{ formatTime(conv.last_message_at) }}</span>
                   </div>

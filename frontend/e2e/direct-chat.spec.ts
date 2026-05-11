@@ -274,7 +274,7 @@ test.describe('Direct chat regressions', () => {
     })
 
     await deleteBubble.click()
-    await page.locator('.context-menu .menu-item.delete').click()
+    await page.locator('.context-menu [role="menuitem"]').filter({ hasText: 'حذف' }).click()
     await expect(page.getByText(deleteContent)).toHaveCount(0)
 
     await expect
