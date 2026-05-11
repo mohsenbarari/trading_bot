@@ -328,16 +328,16 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
           </div>
         </div>
 
-        <div class="accordion-section mt-4">
-          <div class="accordion-header" @click="openSections.info = !openSections.info">
-            <div class="header-info">
+        <div class="ds-accordion mt-4" :class="{ open: openSections.info }">
+          <div class="ds-accordion-header" @click="openSections.info = !openSections.info">
+            <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
               <h2>اطلاعات شخصی و آمار</h2>
             </div>
-            <component :is="openSections.info ? ChevronDown : ChevronLeft" :size="20" class="accordion-icon" />
+            <ChevronLeft :size="20" class="ds-accordion-icon" />
           </div>
           
-          <div v-show="openSections.info" class="accordion-content">
+          <div v-show="openSections.info" class="ds-accordion-body">
             <div class="info-section">
               <div class="info-row">
                   <span class="label">📞 موبایل:</span>
@@ -361,16 +361,16 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
       </section>
 
       <section class="profile-section">
-        <div class="accordion-section">
-          <div class="accordion-header" @click="toggleHistory">
-            <div class="header-info">
+        <div class="ds-accordion" :class="{ open: openSections.history }">
+          <div class="ds-accordion-header" @click="toggleHistory">
+            <div class="ds-accordion-header-info">
               <Activity :size="18" class="text-amber-600" />
               <h2>{{ isOwnProfile ? 'تاریخچه معاملات من' : 'تاریخچه معاملات مشترک' }}</h2>
             </div>
-            <component :is="openSections.history ? ChevronDown : ChevronLeft" :size="20" class="accordion-icon" />
+            <ChevronLeft :size="20" class="ds-accordion-icon" />
           </div>
 
-          <div v-show="openSections.history" class="accordion-content">
+          <div v-show="openSections.history" class="ds-accordion-body">
             <div v-if="isHistoryLoading">
                <LoadingSkeleton :count="3" :height="60" />
             </div>
@@ -656,58 +656,7 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 
 
 
-/* Accordion Styles */
-.accordion-section {
-  background: var(--ds-bg-card);
-  border: 1px solid var(--ds-border-accent);
-  border-radius: var(--ds-radius-lg);
-  overflow: hidden;
-  box-shadow: var(--ds-shadow-md);
-  width: 100%;
-}
-
-.accordion-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: var(--ds-card-padding);
-  background: var(--ds-gradient-amber-bg);
-  cursor: pointer;
-  transition: background 0.2s;
-  -webkit-tap-highlight-color: transparent;
-}
-.accordion-header:active {
-  background: var(--ds-primary-100);
-}
-
-.header-info {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.accordion-header h2 {
-  font-size: var(--ds-font-md);
-  font-weight: 700;
-  margin: 0;
-  color: var(--ds-text-primary);
-}
-
-.accordion-icon {
-  color: var(--ds-primary-600);
-  transition: transform 0.2s;
-}
-
-.accordion-content {
-  padding: var(--ds-card-padding);
-  border-top: 1px solid rgba(245, 158, 11, 0.08);
-  background: var(--ds-bg-card);
-  animation: slideDown 0.2s ease-out;
-}
-@keyframes slideDown {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+/* Accordion Styles removed as they are now global ds-accordion */
 
 .mt-4 {
   margin-top: 1rem;

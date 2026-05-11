@@ -37,10 +37,11 @@ const defaultVals = {
   anti_abuse_monthly_base: 7
 }
 
-const settings = ref({ ...defaultVals })
+const settings = ref<Record<string, any>>({ ...defaultVals })
 
 const isDefault = (key: keyof typeof defaultVals) => {
-  return settings.value[key] === defaultVals[key] || settings.value[key] == null || settings.value[key] === ''
+  const val = settings.value[key]
+  return val === defaultVals[key] || val == null || val === ''
 }
 
 const fetchApi = async (method: string, endpoint: string, body: any = null) => {
@@ -130,13 +131,13 @@ onMounted(() => {
       <!-- دعوت‌نامه -->
       <div class="ds-accordion" :class="{ open: openSections.invitation }">
         <div class="ds-accordion-header" @click="toggleSection('invitation')">
-          <div class="header-main">
+          <div class="ds-accordion-header-info">
             <Mail class="section-icon" :size="18" />
             <h2 class="section-title">دعوت‌نامه</h2>
           </div>
-          <ChevronLeft class="arrow-icon" :size="18" />
+          <ChevronLeft class="ds-accordion-icon" :size="18" />
         </div>
-        <div v-show="openSections.invitation" class="ds-accordion-content">
+        <div v-show="openSections.invitation" class="ds-accordion-body">
           <div class="ds-form-group">
             <label class="ds-label">مدت اعتبار لینک دعوت (روز)</label>
             <input type="number" v-model.number="settings.invitation_expiry_days" min="1" class="ds-input" :class="{'is-default': isDefault('invitation_expiry_days')}" />
@@ -148,13 +149,13 @@ onMounted(() => {
       <!-- لفظ -->
       <div class="ds-accordion" :class="{ open: openSections.offer }">
         <div class="ds-accordion-header" @click="toggleSection('offer')">
-          <div class="header-main">
+          <div class="ds-accordion-header-info">
             <ClipboardList class="section-icon" :size="18" />
             <h2 class="section-title">لفظ معاملاتی</h2>
           </div>
-          <ChevronLeft class="arrow-icon" :size="18" />
+          <ChevronLeft class="ds-accordion-icon" :size="18" />
         </div>
-        <div v-show="openSections.offer" class="ds-accordion-content">
+        <div v-show="openSections.offer" class="ds-accordion-body">
           <div class="ds-form-group">
             <label class="ds-label">مدت اعتبار لفظ (دقیقه)</label>
             <input type="number" v-model.number="settings.offer_expiry_minutes" min="1" class="ds-input" :class="{'is-default': isDefault('offer_expiry_minutes')}" />
@@ -183,13 +184,13 @@ onMounted(() => {
       <!-- محدودیت منقضی کردن -->
       <div class="ds-accordion" :class="{ open: openSections.expire }">
         <div class="ds-accordion-header" @click="toggleSection('expire')">
-          <div class="header-main">
+          <div class="ds-accordion-header-info">
             <Clock class="section-icon" :size="18" />
             <h2 class="section-title">محدودیت منقضی کردن</h2>
           </div>
-          <ChevronLeft class="arrow-icon" :size="18" />
+          <ChevronLeft class="ds-accordion-icon" :size="18" />
         </div>
-        <div v-show="openSections.expire" class="ds-accordion-content">
+        <div v-show="openSections.expire" class="ds-accordion-body">
           <div class="ds-form-group">
             <label class="ds-label">حداکثر منقضی شدن در دقیقه</label>
             <input type="number" v-model.number="settings.offer_expire_rate_per_minute" min="1" max="10" class="ds-input" :class="{'is-default': isDefault('offer_expire_rate_per_minute')}" />
@@ -206,13 +207,13 @@ onMounted(() => {
       <!-- امنیت -->
       <div class="ds-accordion" :class="{ open: openSections.security }">
         <div class="ds-accordion-header" @click="toggleSection('security')">
-          <div class="header-main">
+          <div class="ds-accordion-header-info">
             <ShieldCheck class="section-icon" :size="18" />
             <h2 class="section-title">امنیت و نشست‌ها</h2>
           </div>
-          <ChevronLeft class="arrow-icon" :size="18" />
+          <ChevronLeft class="ds-accordion-icon" :size="18" />
         </div>
-        <div v-show="openSections.security" class="ds-accordion-content">
+        <div v-show="openSections.security" class="ds-accordion-body">
           <div class="info-note">
             <AlertCircle :size="16" />
             <span>این مقادیر آستانه پایه برای جلوگیری از سوءاستفاده (Anti-Abuse) هستند. برای کاربرانی با بیش از یک نشست فعال، سیستم به صورت خودکار آستانه را افزایش می‌دهد.</span>
