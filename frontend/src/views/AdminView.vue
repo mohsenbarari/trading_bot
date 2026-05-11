@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowRight } from 'lucide-vue-next'
+import { ArrowRight, ChevronLeft } from 'lucide-vue-next'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import AdminPanel from '../components/AdminPanel.vue'
 import UserManager from '../components/UserManager.vue'
@@ -79,7 +79,7 @@ onUnmounted(() => clearBackStack())
                  }}
              </h1>
              <button @click="handleNavigate('admin_panel')" class="back-button">
-                 <ArrowRight :size="24" />
+                 <ChevronLeft :size="24" />
              </button>
          </div>
      </div>

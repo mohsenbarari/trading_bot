@@ -33,7 +33,7 @@ onMounted(async () => {
   <div class="notifications-page">
     <header class="top-nav">
       <button class="back-button" @click="goBack">
-        <ArrowRight :size="24" />
+        <ChevronLeft :size="24" />
       </button>
       <h1 class="title">مرکز اعلان‌ها</h1>
       <button class="clear-btn" :disabled="isClearingAll" @click="clearAll" v-if="notificationStore.appNotifications.length > 0">
