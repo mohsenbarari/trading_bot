@@ -26,9 +26,12 @@ interface PublicUser {
 
 interface MutualTradePreview {
   id: number;
+  trade_number: number;
   created_at: string;
   offer_user_id: number;
+  offer_user_name?: string;
   responder_user_id: number;
+  responder_user_name?: string;
   quantity: number;
   commodity_name: string;
   price: number;
@@ -366,6 +369,7 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
                 <div v-for="trade in mutualTrades" :key="trade.id" class="mini-trade-card">
                     <div class="trade-row">
                         <span class="trade-date">{{ trade.created_at }}</span>
+                        <span class="trade-number">#{{ trade.trade_number }}</span>
                         <span 
                           class="trade-badge"
                           :class="getTradeBadgeClass(trade)"
@@ -377,6 +381,10 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
                         <span class="trade-amount">{{ trade.quantity }} عدد</span>
                         <span class="trade-commodity">{{ trade.commodity_name }}</span>
                         <span class="trade-price">{{ trade.price.toLocaleString() }} ریال</span>
+                    </div>
+                    <div class="trade-counterparty">
+                      <span class="label">طرف معامله:</span>
+                      <span class="value">{{ Number(trade.responder_user_id) === Number(profileData?.id) ? trade.offer_user_name : trade.responder_user_name }}</span>
                     </div>
                 </div>
             </div>
@@ -761,6 +769,33 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 .trade-price {
   font-size: 0.95rem;
   color: #d97706;
+}
+
+.trade-number {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #6b7280;
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.trade-counterparty {
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+}
+
+.trade-counterparty .label {
+  color: #9ca3af;
+}
+
+.trade-counterparty .value {
+  color: #1f2937;
+  font-weight: 700;
 }
 
 .spinner-small {
