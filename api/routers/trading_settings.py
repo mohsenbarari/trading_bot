@@ -29,6 +29,9 @@ class TradingSettingsUpdate(BaseModel):
     max_active_offers: Optional[int] = None
     offer_expire_rate_per_minute: Optional[int] = None
     offer_expire_daily_limit_after_threshold: Optional[int] = None
+    anti_abuse_daily_base: Optional[int] = None
+    anti_abuse_weekly_base: Optional[int] = None
+    anti_abuse_monthly_base: Optional[int] = None
 
 
 class TradingSettingsResponse(BaseModel):
@@ -40,6 +43,9 @@ class TradingSettingsResponse(BaseModel):
     max_active_offers: int
     offer_expire_rate_per_minute: int
     offer_expire_daily_limit_after_threshold: int
+    anti_abuse_daily_base: int
+    anti_abuse_weekly_base: int
+    anti_abuse_monthly_base: int
     
     # مقادیر محاسباتی
     invitation_expiry_minutes: int
@@ -59,6 +65,9 @@ async def get_settings():
         max_active_offers=settings.max_active_offers,
         offer_expire_rate_per_minute=settings.offer_expire_rate_per_minute,
         offer_expire_daily_limit_after_threshold=settings.offer_expire_daily_limit_after_threshold,
+        anti_abuse_daily_base=settings.anti_abuse_daily_base,
+        anti_abuse_weekly_base=settings.anti_abuse_weekly_base,
+        anti_abuse_monthly_base=settings.anti_abuse_monthly_base,
         invitation_expiry_minutes=settings.invitation_expiry_minutes,
         lot_min_size=settings.lot_min_size,
         lot_max_count=settings.lot_max_count,
@@ -104,6 +113,9 @@ async def update_settings(updates: TradingSettingsUpdate):
         max_active_offers=updated.max_active_offers,
         offer_expire_rate_per_minute=updated.offer_expire_rate_per_minute,
         offer_expire_daily_limit_after_threshold=updated.offer_expire_daily_limit_after_threshold,
+        anti_abuse_daily_base=updated.anti_abuse_daily_base,
+        anti_abuse_weekly_base=updated.anti_abuse_weekly_base,
+        anti_abuse_monthly_base=updated.anti_abuse_monthly_base,
         invitation_expiry_minutes=updated.invitation_expiry_minutes,
         lot_min_size=updated.lot_min_size,
         lot_max_count=updated.lot_max_count,
@@ -132,6 +144,9 @@ async def reset_settings():
         max_active_offers=default_settings.max_active_offers,
         offer_expire_rate_per_minute=default_settings.offer_expire_rate_per_minute,
         offer_expire_daily_limit_after_threshold=default_settings.offer_expire_daily_limit_after_threshold,
+        anti_abuse_daily_base=default_settings.anti_abuse_daily_base,
+        anti_abuse_weekly_base=default_settings.anti_abuse_weekly_base,
+        anti_abuse_monthly_base=default_settings.anti_abuse_monthly_base,
         invitation_expiry_minutes=default_settings.invitation_expiry_minutes,
         lot_min_size=default_settings.lot_min_size,
         lot_max_count=default_settings.lot_max_count,

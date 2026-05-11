@@ -21,6 +21,9 @@ def make_settings(**overrides):
         "max_active_offers": 10,
         "offer_expire_rate_per_minute": 3,
         "offer_expire_daily_limit_after_threshold": 20,
+        "anti_abuse_daily_base": 2,
+        "anti_abuse_weekly_base": 5,
+        "anti_abuse_monthly_base": 7,
         "invitation_expiry_minutes": 10080,
         "lot_min_size": 1,
         "lot_max_count": 10,
@@ -49,8 +52,8 @@ class TradingSettingsRouterUpdateTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_settings_merges_only_non_none_fields_and_returns_reloaded_settings(self):
         current = make_settings()
-        updated = make_settings(offer_expiry_minutes=45, offer_max_quantity=50)
-        updates = TradingSettingsUpdate(offer_expiry_minutes=45, offer_max_quantity=None)
+        updated = make_settings(offer_expiry_minutes=45, offer_max_quantity=50, anti_abuse_weekly_base=9)
+        updates = TradingSettingsUpdate(offer_expiry_minutes=45, offer_max_quantity=None, anti_abuse_weekly_base=9)
 
         with patch(
             "api.routers.trading_settings.load_trading_settings_async",
@@ -71,6 +74,9 @@ class TradingSettingsRouterUpdateTests(unittest.IsolatedAsyncioTestCase):
                 "max_active_offers": 10,
                 "offer_expire_rate_per_minute": 3,
                 "offer_expire_daily_limit_after_threshold": 20,
+                "anti_abuse_daily_base": 2,
+                "anti_abuse_weekly_base": 9,
+                "anti_abuse_monthly_base": 7,
                 "invitation_expiry_minutes": 10080,
                 "lot_min_size": 1,
                 "lot_max_count": 10,
@@ -78,6 +84,7 @@ class TradingSettingsRouterUpdateTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.offer_expiry_minutes, 45)
         self.assertEqual(result.offer_max_quantity, 50)
+        self.assertEqual(result.anti_abuse_weekly_base, 9)
 
 
 if __name__ == "__main__":

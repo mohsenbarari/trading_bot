@@ -30,6 +30,7 @@ class TradingSettingsRouterResetTests(unittest.IsolatedAsyncioTestCase):
         refresh_mock.assert_awaited_once()
         self.assertEqual(result.offer_expiry_minutes, defaults.offer_expiry_minutes)
         self.assertEqual(result.offer_max_quantity, defaults.offer_max_quantity)
+        self.assertEqual(result.anti_abuse_daily_base, defaults.anti_abuse_daily_base)
 
 
 if __name__ == "__main__":
