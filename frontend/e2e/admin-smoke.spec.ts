@@ -189,25 +189,28 @@ test.describe('Admin smoke regressions', () => {
     const channelTitle = `Playwright Channel ${suffix}`
 
     await setAuthTokens(page, tokens)
-    await openAdmin(page)
+    await page.goto('/chat')
+    await expect(page.locator('.chat-header')).toBeVisible()
 
-    await page.getByRole('button', { name: /ساخت کانال اختیاری/ }).click()
-    await expect(page.getByRole('heading', { name: 'ساخت و مدیریت کانال‌ها' })).toBeVisible()
+    await page.locator('.chat-header .header-menu-container .header-btn').click()
+    await page.locator('.header-dropdown-menu .header-menu-item').filter({ hasText: 'ساخت کانال' }).click()
+    await expect(page.locator('.channel-manager-root')).toBeVisible()
+    await expect(page.locator('.channel-manager-root .manager-header h2')).toHaveText('کانال‌ها')
+    await page.getByRole('button', { name: 'کانال جدید' }).click()
 
     await page.locator('#channel-title').fill(channelTitle)
     await page.locator('#channel-description').fill('Playwright admin smoke channel')
-    await page.getByRole('button', { name: 'ساخت کانال و ادامه' }).click()
+    await page.getByRole('button', { name: 'ساخت کانال' }).click()
 
-    await expect(page.getByText('✅ کانال ساخته شد. حالا اعضای اولیه را انتخاب کنید.')).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'اعضای فعلی کانال' })).toBeVisible()
+    await expect(page.getByText('کانال ساخته شد. حالا اعضا و ادمین‌ها را مدیریت کنید.')).toBeVisible()
 
     await page.getByPlaceholder('جستجو با نام، اکانت یا موبایل...').fill(seededCandidate.accountName)
-    const candidateRow = page.locator('.candidate-row').filter({ hasText: seededCandidate.accountName })
+    const candidateRow = page.locator('.chat-user-row').filter({ hasText: seededCandidate.accountName }).first()
     await expect(candidateRow).toBeVisible()
     await candidateRow.click()
-    await page.getByRole('button', { name: 'ثبت اعضای انتخاب‌شده' }).click()
+    await page.getByRole('button', { name: 'افزودن' }).click()
 
-    await expect(page.getByText(/✅ اعضا با موفقیت افزوده شدند\./)).toBeVisible()
-    await expect(page.locator('.member-row').filter({ hasText: seededCandidate.accountName })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'اعضای کانال' })).toBeVisible()
+    await expect(page.locator('.chat-user-row').filter({ hasText: seededCandidate.accountName }).first()).toBeVisible()
   })
 })
