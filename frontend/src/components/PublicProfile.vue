@@ -9,6 +9,7 @@ const props = defineProps<{
   viewerUserId?: number | null;
   apiBaseUrl: string;
   jwtToken: string | null;
+  hideBackButton?: boolean;
 }>();
 
 const emit = defineEmits(['navigate']);
@@ -248,7 +249,7 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
          </h2>
          <h2 v-else>👤 پروفایل</h2>
       </div>
-      <button class="back-button" @click="$emit('navigate', 'home')">بازگشت <ArrowRight :size="16" /></button>
+      <button v-if="!hideBackButton" class="back-button" @click="$emit('navigate', 'home')"><ArrowRight :size="24" /></button>
     </div>
 
     <div v-if="isLoading" class="loading-state-skeleton">

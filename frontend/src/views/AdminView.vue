@@ -68,21 +68,19 @@ onUnmounted(() => clearBackStack())
      <!-- Top Bar (only when inside a sub-section) -->
      <div v-if="currentSection !== 'menu'" class="admin-top-bar p-4 sticky top-0 z-10">
          <div class="max-w-[480px] mx-auto flex items-center justify-between">
-             <div class="flex items-center gap-3">
-                 <button @click="handleNavigate('admin_panel')" class="back-button">
-                     بازگشت <ArrowRight :size="16" />
-                 </button>
-                 <h1 class="text-lg font-extrabold text-gray-800">
-                     {{ currentSection === 'manage_users' ? 'مدیریت کاربران' :
-                        currentSection === 'manage_commodities' ? 'مدیریت کالاها' :
-                        currentSection === 'settings' ? 'تنظیمات سیستم' : 
-                        currentSection === 'user_profile' ? 'پروفایل کاربر' : 
-                      currentSection === 'create_channel' ? 'ساخت کانال' :
-                        currentSection === 'create_invitation' ? 'ارسال دعوت‌نامه' :
-                        'پنل مدیریت' 
-                     }}
-                 </h1>
-             </div>
+             <h1 class="text-lg font-extrabold text-gray-800">
+                 {{ currentSection === 'manage_users' ? 'مدیریت کاربران' :
+                    currentSection === 'manage_commodities' ? 'مدیریت کالاها' :
+                    currentSection === 'settings' ? 'تنظیمات سیستم' : 
+                    currentSection === 'user_profile' ? 'پروفایل کاربر' : 
+                  currentSection === 'create_channel' ? 'ساخت کانال' :
+                    currentSection === 'create_invitation' ? 'ارسال دعوت‌نامه' :
+                    'پنل مدیریت' 
+                 }}
+             </h1>
+             <button @click="handleNavigate('admin_panel')" class="back-button">
+                 <ArrowRight :size="24" />
+             </button>
          </div>
      </div>
 
