@@ -241,7 +241,7 @@ function toggleNav() {
 .fab-container {
   position: fixed;
   bottom: 1rem;
-  left: 1rem;
+  right: 1rem;
   z-index: 50;
 }
 
@@ -279,7 +279,7 @@ function toggleNav() {
 .fab-nav {
   position: absolute;
   bottom: 56px;
-  left: 0;
+  right: 0;
   background: var(--ds-bg-card);
   border-radius: var(--ds-radius-lg);
   padding: 0.5rem;

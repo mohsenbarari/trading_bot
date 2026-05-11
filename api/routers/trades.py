@@ -109,14 +109,14 @@ def trade_to_response(trade: Trade) -> TradeResponse:
 async def send_telegram_message(chat_id: int, text: str) -> bool:
     """ارسال پیام به تلگرام"""
     bot_token = os.getenv("BOT_TOKEN")
-    if not bot_token:
+    if not bot_token or not chat_id:
         return False
     
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown"
+        "parse_mode": "HTML"
     }
     
     try:
@@ -183,11 +183,11 @@ async def update_channel_buttons(offer: Offer) -> bool:
 def send_telegram_message_sync(chat_id: int, text: str) -> bool:
     """نسخه sync برای استفاده در BackgroundTasks"""
     bot_token = os.getenv("BOT_TOKEN")
-    if not bot_token:
+    if not bot_token or not chat_id:
         return False
     
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     
     try:
         # استفاده از httpx sync client به جای asyncio.run
@@ -534,7 +534,7 @@ async def _execute_trade_authoritatively(
     
     # پیام برای پاسخ‌دهنده
     responder_msg = (
-        f"{respond_emoji} **{respond_type_fa}**\n\n"
+        f"{respond_emoji} <b>{respond_type_fa}</b>\n\n"
         f"💰 فی: {offer.price:,}\n"
         f"📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
@@ -545,7 +545,7 @@ async def _execute_trade_authoritatively(
     
     # پیام برای لفظ‌دهنده
     offer_owner_msg = (
-        f"{offer_emoji} **{offer_type_fa}**\n\n"
+        f"{offer_emoji} <b>{offer_type_fa}</b>\n\n"
         f"💰 فی: {offer.price:,}\n"
         f"📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
