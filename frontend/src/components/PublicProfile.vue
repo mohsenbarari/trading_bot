@@ -31,6 +31,7 @@ interface MutualTradePreview {
   quantity: number;
   commodity_name: string;
   price: number;
+  trade_type?: string;
 }
 
 interface ProfileStatCard {
@@ -204,7 +205,11 @@ async function loadMutualTrades() {
 
     isHistoryLoading.value = true;
     try {
-        const response = await fetch(`${props.apiBaseUrl}/api/trades/with/${profileData.value.id}`, {
+        const endpoint = isOwnProfile.value 
+            ? `${props.apiBaseUrl}/api/trades/my` 
+            : `${props.apiBaseUrl}/api/trades/with/${profileData.value.id}`;
+            
+        const response = await fetch(endpoint, {
             headers: { 'Authorization': `Bearer ${props.jwtToken}` }
         });
         if (response.ok) {
@@ -228,10 +233,16 @@ function handleActionClick(action: ProfileActionCard) {
 }
 
 function getTradeBadgeClass(trade: MutualTradePreview) {
+  if (isOwnProfile.value) {
+    return trade.trade_type === 'BUY' ? 'buy' : 'sell';
+  }
   return trade.offer_user_id === profileData.value?.id ? 'sell' : 'buy';
 }
 
 function getTradeBadgeLabel(trade: MutualTradePreview) {
+  if (isOwnProfile.value) {
+    return trade.trade_type === 'BUY' ? '🟢 خرید' : '🔴 فروش';
+  }
   return trade.offer_user_id === profileData.value?.id ? '🔴 فروش به شما' : '🟢 خرید از شما';
 }
 </script>
@@ -321,24 +332,12 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
         </div>
       </section>
 
-      <section v-if="showVisitorSections" class="profile-section visitor-profile-section">
-        <div class="action-grid" :class="{ 'single-column': visitorActionCards.length === 1 }">
-          <button
-            v-for="action in visitorActionCards"
-            :key="action.key"
-            class="message-btn"
-            @click="handleActionClick(action)"
-          >
-              <span class="stat-icon">{{ action.icon }}</span>
-              <span class="stat-label">{{ action.label }}</span>
-          </button>
-        </div>
-
-        <div class="accordion-section mt-4">
+      <section class="profile-section">
+        <div class="accordion-section">
           <div class="accordion-header" @click="toggleHistory">
             <div class="header-info">
               <Activity :size="18" class="text-amber-600" />
-              <h2>تاریخچه معاملات مشترک</h2>
+              <h2>{{ isOwnProfile ? 'تاریخچه معاملات من' : 'تاریخچه معاملات مشترک' }}</h2>
             </div>
             <component :is="openSections.history ? ChevronDown : ChevronLeft" :size="20" class="accordion-icon" />
           </div>
@@ -347,7 +346,9 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
             <div v-if="isHistoryLoading">
                <LoadingSkeleton :count="3" :height="60" />
             </div>
-            <p v-else-if="mutualTrades.length === 0" class="empty-text">هیچ معامله مشترکی یافت نشد.</p>
+            <p v-else-if="mutualTrades.length === 0" class="empty-text">
+              {{ isOwnProfile ? 'هنوز هیچ معامله‌ای انجام نداده‌اید.' : 'هیچ معامله مشترکی یافت نشد.' }}
+            </p>
             <div v-else class="history-list">
                 <div v-for="trade in mutualTrades" :key="trade.id" class="mini-trade-card">
                     <div class="trade-row">
@@ -360,8 +361,9 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
                         </span>
                     </div>
                     <div class="trade-details">
-                        <span>{{ trade.quantity }} {{ trade.commodity_name }}</span>
-                        <span>فی: {{ trade.price.toLocaleString() }}</span>
+                        <span class="trade-amount">{{ trade.quantity }} عدد</span>
+                        <span class="trade-commodity">{{ trade.commodity_name }}</span>
+                        <span class="trade-price">{{ trade.price.toLocaleString() }} ریال</span>
                     </div>
                 </div>
             </div>
@@ -679,42 +681,73 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 .history-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 0.75rem;
 }
 
 .mini-trade-card {
-    background: white;
-    border: 1px solid var(--border-color);
-    padding: 10px;
-    border-radius: 8px;
-    font-size: 13px;
+    background: #f9fafb;
+    border: 1px solid #f3f4f6;
+    padding: 1rem;
+    border-radius: 12px;
+    transition: transform 0.15s;
+}
+
+.mini-trade-card:active {
+  transform: scale(0.98);
 }
 
 .trade-row {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 6px;
+    align-items: center;
+    margin-bottom: 0.75rem;
 }
 
 .trade-date {
-    color: var(--text-secondary);
-    font-size: 11px;
+    color: #9ca3af;
+    font-size: 0.75rem;
+    font-weight: 500;
 }
 
 .trade-badge {
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-weight: 600;
-    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 0.7rem;
+    text-transform: uppercase;
 }
 
-.trade-badge.buy { background: #dcfce7; color: #166534; }
-.trade-badge.sell { background: #fee2e2; color: #991b1b; }
+.trade-badge.buy { 
+  background: #ecfdf5; 
+  color: #059669;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.1);
+}
+.trade-badge.sell { 
+  background: #fef2f2; 
+  color: #dc2626;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.1);
+}
 
 .trade-details {
     display: flex;
     justify-content: space-between;
-    font-weight: 500;
+    align-items: baseline;
+    font-weight: 600;
+    color: #374151;
+}
+
+.trade-amount {
+  font-size: 0.9rem;
+}
+
+.trade-commodity {
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.trade-price {
+  font-size: 0.95rem;
+  color: #d97706;
 }
 
 .spinner-small {
