@@ -52,10 +52,12 @@ Pre-release policy:
 
 The browser-matrix workflows intentionally bootstrap the real backend test surface instead of mocking it:
 - Write an ephemeral CI `.env`
-- Start the minimal Docker Compose stack needed by the Playwright suite (`db`, `redis`, `migration`, `app`)
+- Run the staged backend bootstrap script that builds images, starts `db` and `redis`, executes `migration` as a one-shot step, then starts `app` and performs a container-local readiness probe against `/api/config`
 - Build the frontend and run Playwright against the preview server in CI mode
 
 This is required because the current Playwright specs seed data via `docker exec trading_bot_app ...` and hit the live backend on `http://127.0.0.1:8000`.
+
+The staged bootstrap is intentional: a single `docker compose up --wait` proved too brittle across GitHub runner environments and produced poor failure visibility when the backend stack died before Playwright started. The readiness probe is also container-local so CI and local debug flows do not depend on publishing port `8000` to the host.
 
 ## Repository Limitation
 

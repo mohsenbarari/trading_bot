@@ -88,7 +88,7 @@ jobs:
         run: mkdir -p /tmp/trading-bot-ci-certs
 
       - name: Bootstrap backend stack
-        run: docker compose up -d --build --wait --wait-timeout 180 db redis migration app
+        run: bash ./scripts/bootstrap_ci_backend.sh
 
       - name: Install frontend dependencies
         working-directory: frontend
