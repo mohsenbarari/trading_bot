@@ -57,7 +57,7 @@ const isLoading = ref(true);
 const error = ref('');
 const isHistoryLoading = ref(false);
 const openSections = ref({
-  info: true,
+  info: false,
   history: false
 });
 const avatarBusy = ref(false);
@@ -103,12 +103,12 @@ const ownerOnlyActions = computed<ProfileActionCard[]>(() => {
     {
       key: 'add_customer',
       icon: '👥',
-      label: 'افزودن مشتری',
+      label: 'مشتریان',
     },
     {
       key: 'add_accountant',
       icon: '💼',
-      label: 'افزودن حسابدار',
+      label: 'حسابداران',
     }
   ];
 });
@@ -568,10 +568,10 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   width: 100%;
 }
 
-@media (max-width: 480px) {
-  .action-grid {
-    grid-template-columns: 1fr;
-  }
+/* If we have 3 buttons, make the first one (Settings) full width 
+   and the next two (Customers/Accountants) side-by-side. */
+.action-grid > button:first-child:nth-last-child(3) {
+  grid-column: span 2;
 }
 
 .stats-grid.single-column {

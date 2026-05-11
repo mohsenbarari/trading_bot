@@ -27,6 +27,8 @@ def get_user_panel_keyboard(user_role: UserRole = None) -> ReplyKeyboardMarkup:
     # دکمه تنظیمات فقط برای نقش‌های غیر عادی (مدیر ارشد، مدیر میانی، پلیس)
     if user_role and user_role != UserRole.STANDARD:
         keyboard_layout.append([KeyboardButton(text="⚙️ تنظیمات کاربری")])
+    
+    keyboard_layout.append([KeyboardButton(text="📊 تاریخچه معاملات من")])
     keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
