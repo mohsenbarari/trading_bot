@@ -436,7 +436,7 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   flex-direction: column;
   gap: 20px;
   align-items: center;
-  padding: 10px 0;
+  padding: 10px 0 12rem 0;
 }
 
 .profile-hero {
