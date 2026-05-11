@@ -99,6 +99,16 @@ const ownerOnlyActions = computed<ProfileActionCard[]>(() => {
       key: 'settings',
       icon: '⚙️',
       label: 'تنظیمات کاربری',
+    },
+    {
+      key: 'add_customer',
+      icon: '👥',
+      label: 'افزودن مشتری',
+    },
+    {
+      key: 'add_accountant',
+      icon: '💼',
+      label: 'افزودن حسابدار',
     }
   ];
 });
@@ -228,11 +238,15 @@ async function loadMutualTrades() {
 
 function handleActionClick(action: ProfileActionCard) {
   if (!profileData.value) return;
-
+  
   if (action.key === 'message') {
     emit('navigate', 'chat', { userId: profileData.value.id, userName: profileData.value.account_name });
   } else if (action.key === 'settings') {
     emit('navigate', 'settings');
+  } else if (action.key === 'add_customer') {
+    alert('قابلیت افزودن مشتری به زودی اضافه خواهد شد.');
+  } else if (action.key === 'add_accountant') {
+    alert('قابلیت افزودن حسابدار به زودی اضافه خواهد شد.');
   }
 }
 
@@ -553,9 +567,15 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 
 .action-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
   width: 100%;
+}
+
+@media (max-width: 480px) {
+  .action-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .stats-grid.single-column {
