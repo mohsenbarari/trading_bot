@@ -67,6 +67,7 @@ jobs:
         run: |
           cat > .env <<'EOF'
           SERVER_MODE=foreign
+          CERTS_HOST_PATH=/tmp/trading-bot-ci-certs
           BOT_USERNAME=ci_test_bot
           POSTGRES_DB=trading_bot_db
           POSTGRES_USER=admin
@@ -78,6 +79,9 @@ jobs:
           DEV_API_KEY=3f7bc530-b8a8-4125-9b79-256dc46bc530
           JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
           EOF
+
+      - name: Prepare CI host paths
+        run: mkdir -p /tmp/trading-bot-ci-certs
 
       - name: Bootstrap backend stack
         run: docker compose up -d --build --wait db redis migration app
