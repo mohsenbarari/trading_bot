@@ -249,19 +249,30 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
 
     const markAllAsRead = async () => {
-        const notificationIdsToMark = new Set(
-            appNotifications.value.map((notification) => notification.id)
-        )
-
         try {
              await apiFetch('/api/notifications/mark-all-read', { method: 'POST' })
-             appNotifications.value.forEach((notification) => {
-                 if (notificationIdsToMark.has(notification.id)) {
-                     notification.is_read = true
-                 }
-             })
+             appNotifications.value = appNotifications.value.map(n => ({ ...n, is_read: true }))
         } catch (e) {
              console.error('Failed to mark all as read:', e)
+        }
+    }
+
+    const toggleReadStatus = async (id: number | string, isRead: boolean) => {
+        const notification = appNotifications.value.find(n => n.id === id)
+        if (!notification) return
+
+        const originalState = notification.is_read
+        notification.is_read = isRead
+
+        try {
+            const res = await apiFetch(`/api/notifications/${id}/read`, {
+                method: 'PATCH',
+                body: JSON.stringify({ is_read: isRead })
+            })
+            if (!res.ok) throw new Error()
+        } catch (e) {
+            notification.is_read = originalState
+            console.error('Failed to toggle read status:', e)
         }
     }
 
@@ -333,6 +344,7 @@ export const useNotificationStore = defineStore('notifications', () => {
         openNotificationCenter,
         markAllAsRead,
         clearAllNotifications,
-        deleteNotification
+        deleteNotification,
+        toggleReadStatus
     }
 })

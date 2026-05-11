@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotificationStore } from '../stores/notifications'
-import { Bell, ChevronLeft, Trash2 } from 'lucide-vue-next'
+import { Bell, ChevronLeft, Trash2, Circle, CheckCircle2, Mail, MailOpen } from 'lucide-vue-next'
 import { getNotificationIconComponent } from '../utils/notificationUi'
 
 const router = useRouter()
@@ -11,6 +11,12 @@ const isClearingAll = ref(false)
 
 const goBack = () => {
   router.push('/')
+}
+
+const formatTime = (ts: any) => {
+  if (!ts) return ''
+  const date = new Date(ts)
+  return date.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
 }
 
 const clearAll = async () => {
@@ -62,18 +68,25 @@ onMounted(async () => {
           v-for="notif in notificationStore.appNotifications" 
           :key="notif.id"
           class="notif-item"
-          :class="`type-${notif.level || 'info'}`"
+          :class="[`type-${notif.level || 'info'}`, { 'is-unread': !notif.is_read }]"
         >
-          <button class="delete-btn-corner" @click="notificationStore.deleteNotification(notif.id)">
-            <Trash2 :size="14" />
-          </button>
+          <div class="notif-actions">
+            <button class="action-btn delete-btn" @click.stop="notificationStore.deleteNotification(notif.id)" title="حذف">
+              <Trash2 :size="16" />
+            </button>
+            <button class="action-btn toggle-read-btn" @click.stop="notificationStore.toggleReadStatus(notif.id, !notif.is_read)" :title="notif.is_read ? 'خوانده نشده' : 'خوانده شده'">
+              <component :is="notif.is_read ? Mail : MailOpen" :size="16" />
+            </button>
+          </div>
           
           <div class="notif-icon">
-            <component :is="getNotificationIconComponent(notif)" :size="18" />
+            <component :is="getNotificationIconComponent(notif)" :size="20" />
+            <div v-if="!notif.is_read" class="unread-dot"></div>
           </div>
           <div class="notif-body">
             <h3 class="notif-title">{{ notif.title || 'اعلان جدید' }}</h3>
             <p class="notif-text">{{ notif.content || notif.body }}</p>
+            <span class="notif-time">{{ formatTime(notif.created_at || notif.client_received_at) }}</span>
           </div>
         </div>
       </div>
@@ -151,75 +164,128 @@ onMounted(async () => {
 .notifications-list {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 1rem;
+  padding: 1rem;
 }
 
 .notif-item {
-  background: white;
-  padding: 1rem 1rem 1rem 2rem;
-  border-radius: 1rem;
+  position: relative;
   display: flex;
   gap: 1rem;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  position: relative;
-  overflow: hidden;
-  border-right: 4px solid #0ea5e9; /* default info color */
+  padding: 1.25rem;
+  background: white;
+  border-radius: 1.25rem;
+  border: 1px solid #f3f4f6;
+  border-right: 5px solid #d1d5db;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
 }
 
+.notif-item.is-unread {
+  background: #fdfaf3;
+  border-color: #fef3c7;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.05);
+}
+
+.notif-item.type-info { border-right-color: #0ea5e9; }
 .notif-item.type-success { border-right-color: #10b981; }
 .notif-item.type-warning { border-right-color: #f59e0b; }
 .notif-item.type-error { border-right-color: #ef4444; }
 
-.notif-icon {
-  width: 36px;
-  height: 36px;
-  background: #f1f5f9;
+.notif-actions {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  display: flex;
+  gap: 0.5rem;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.notif-item:hover .notif-actions {
+  opacity: 1;
+}
+
+.action-btn {
+  width: 32px;
+  height: 32px;
   border-radius: 10px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.delete-btn {
+  background: #fef2f2;
+  color: #ef4444;
+}
+.delete-btn:hover { background: #fee2e2; transform: scale(1.1); }
+
+.toggle-read-btn {
+  background: #f9fafb;
+  color: #6b7280;
+}
+.toggle-read-btn:hover { background: #f3f4f6; color: #1f2937; }
+
+.notif-icon {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  background: #f9fafb;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  color: #d97706;
 }
-.type-info .notif-icon { color: #0ea5e9; background: #e0f2fe; }
-.type-success .notif-icon { color: #10b981; background: #d1fae5; }
-.type-warning .notif-icon { color: #f59e0b; background: #fef3c7; }
-.type-error .notif-icon { color: #ef4444; background: #fee2e2; }
+
+.type-info .notif-icon { color: #0ea5e9; background: #f0f9ff; }
+.type-success .notif-icon { color: #10b981; background: #f0fdf4; }
+.type-warning .notif-icon { color: #f59e0b; background: #fffbeb; }
+.type-error .notif-icon { color: #ef4444; background: #fef2f2; }
+
+.unread-dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 10px;
+  height: 10px;
+  background: #ef4444;
+  border-radius: 50%;
+  border: 2px solid white;
+}
 
 .notif-body {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding-left: 1.5rem; /* Space for actions */
 }
 
 .notif-title {
-  font-size: 0.9rem;
+  font-size: 1rem;
   font-weight: 700;
-  margin: 0 0 0.25rem 0;
   color: #1f2937;
+  margin: 0;
 }
 
 .notif-text {
-  font-size: 0.8rem;
-  color: #6b7280;
+  font-size: 0.875rem;
+  color: #4b5563;
   margin: 0;
   line-height: 1.5;
 }
 
-.delete-btn-corner {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  background: transparent;
-  border: none;
-  color: #d1d5db;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-.delete-btn-corner:hover {
-  color: #ef4444;
-  background: #fee2e2;
+.notif-time {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-top: 0.25rem;
+  font-weight: 500;
 }
 </style>
