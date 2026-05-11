@@ -73,8 +73,8 @@ onMounted(fetchUser)
   <div class="dashboard-page">
     
     <!-- Loading -->
-    <div v-if="loading" class="loading-container">
-      <div class="loading-spinner"></div>
+    <div v-if="loading" class="ds-loading-state">
+      <div class="ds-spinner"></div>
     </div>
 
     <div v-else-if="user" class="dashboard-content">
@@ -82,7 +82,7 @@ onMounted(fetchUser)
       <!-- ═══ Top Bar ═══ -->
       <header class="top-bar">
         <!-- Notifications on the far Right (in RTL) -->
-        <button class="icon-btn notif-btn" @click="router.push('/notifications')" aria-label="اعلان‌ها">
+        <button class="ds-icon-btn notif-btn" @click="router.push('/notifications')" aria-label="اعلان‌ها">
           <Bell :size="22" />
           <div v-if="notificationStore.appNotifications.length > 0" class="notif-dot"></div>
         </button>
@@ -99,7 +99,7 @@ onMounted(fetchUser)
         </div>
 
         <!-- Logout on the far Left (in RTL) -->
-        <button class="icon-btn logout-btn" @click="logout" aria-label="خروج">
+        <button class="ds-icon-btn logout-btn" @click="logout" aria-label="خروج">
           <LogOut :size="20" />
         </button>
       </header>
@@ -164,31 +164,12 @@ onMounted(fetchUser)
   position: relative;
 }
 
-/* Loading */
-.loading-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100dvh;
-}
-.loading-spinner {
-  width: 36px;
-  height: 36px;
-  border: 3px solid #f59e0b;
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
 /* Content */
 .dashboard-content {
   padding: 1.25rem;
   padding-bottom: 2rem; /* Reduced since App.vue handles scroll margin */
   width: 100%;
-  max-width: 480px;
+  max-width: var(--ds-page-max-width);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -200,9 +181,9 @@ onMounted(fetchUser)
   align-items: center;
   justify-content: space-between;
   margin-bottom: 2rem;
-  background: white;
+  background: var(--ds-bg-card);
   padding: 0.5rem 0.25rem;
-  border-radius: 1rem;
+  border-radius: var(--ds-radius-lg);
 }
 
 .user-info-center {
@@ -218,8 +199,8 @@ onMounted(fetchUser)
 .avatar {
   width: 52px;
   height: 52px;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  border-radius: 16px;
+  background: linear-gradient(135deg, var(--ds-primary-500), var(--ds-primary-600));
+  border-radius: var(--ds-radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -240,47 +221,28 @@ onMounted(fetchUser)
   text-align: center;
 }
 .greeting {
-  font-size: 0.75rem;
-  color: #9ca3af;
+  font-size: var(--ds-font-sm);
+  color: var(--ds-text-placeholder);
   font-weight: 500;
 }
 .user-name {
   font-size: 0.95rem;
   font-weight: 700;
-  color: #1f2937;
-}
-
-.icon-btn {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
-  border: 1px solid #f3f4f6;
-  background: white;
-  color: #4b5563;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
-  transition: all 0.2s;
-  position: relative;
-  -webkit-tap-highlight-color: transparent;
+  color: var(--ds-text-primary);
 }
 
 .logout-btn {
-  color: #ef4444;
+  color: var(--ds-danger-500);
 }
 .logout-btn:active {
-  background: #fef2f2;
-  transform: scale(0.9);
+  background: var(--ds-danger-50);
 }
 
 .notif-btn {
-  color: #d97706;
+  color: var(--ds-primary-600);
 }
 .notif-btn:active {
-  background: #fffbeb;
-  transform: scale(0.9);
+  background: var(--ds-primary-50);
 }
 
 .notif-dot {
@@ -289,9 +251,9 @@ onMounted(fetchUser)
   right: 10px;
   width: 8px;
   height: 8px;
-  background: #ef4444;
+  background: var(--ds-danger-500);
   border-radius: 50%;
-  border: 2px solid white;
+  border: 2px solid var(--ds-bg-card);
 }
 
 /* ═══ Alert Cards ═══ */
@@ -300,7 +262,7 @@ onMounted(fetchUser)
   align-items: flex-start;
   gap: 0.875rem;
   padding: 1rem 1.25rem;
-  border-radius: 1rem;
+  border-radius: var(--ds-radius-lg);
   margin-bottom: 1.5rem;
   animation: slideDown 0.4s ease-out;
 }
@@ -310,34 +272,34 @@ onMounted(fetchUser)
 }
 
 .alert-blocked {
-  background: linear-gradient(135deg, #fef2f2, #fee2e2);
-  border: 1px solid #fecaca;
+  background: linear-gradient(135deg, var(--ds-danger-50), var(--ds-danger-100));
+  border: 1px solid var(--ds-danger-200);
 }
 .alert-restricted {
-  background: linear-gradient(135deg, #fffbeb, #fef3c7);
-  border: 1px solid #fde68a;
+  background: linear-gradient(135deg, var(--ds-warning-50), var(--ds-warning-100));
+  border: 1px solid var(--ds-primary-200);
 }
 
 .alert-icon {
   flex-shrink: 0;
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: var(--ds-radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .blocked-icon {
-  background: #fee2e2;
-  color: #dc2626;
+  background: var(--ds-danger-100);
+  color: var(--ds-danger-600);
 }
 .restricted-icon {
-  background: #fef3c7;
-  color: #d97706;
+  background: var(--ds-primary-100);
+  color: var(--ds-primary-600);
 }
 
 .alert-body h3 {
-  font-size: 0.9rem;
+  font-size: var(--ds-font-md);
   font-weight: 700;
   margin: 0 0 0.25rem 0;
 }
@@ -349,7 +311,7 @@ onMounted(fetchUser)
   margin: 0;
   line-height: 1.6;
 }
-.alert-blocked .alert-body p { color: #b91c1c; }
+.alert-blocked .alert-body p { color: var(--ds-danger-700); }
 .alert-restricted .alert-body p { color: #a16207; }
 
 /* ═══ Main Section ═══ */
@@ -367,7 +329,7 @@ onMounted(fetchUser)
   align-items: center;
   justify-content: space-between;
   padding: 1.5rem;
-  border-radius: 1.25rem;
+  border-radius: var(--ds-radius-xl);
   border: none;
   cursor: pointer;
   overflow: hidden;
@@ -381,7 +343,7 @@ onMounted(fetchUser)
 .hero-btn-bg {
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, #f59e0b, #d97706, #b45309);
+  background: var(--ds-gradient-primary);
 }
 .hero-btn-bg::after {
   content: '';
@@ -408,7 +370,7 @@ onMounted(fetchUser)
   height: 56px;
   background: rgba(255,255,255,0.2);
   backdrop-filter: blur(10px);
-  border-radius: 1rem;
+  border-radius: var(--ds-radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -421,12 +383,12 @@ onMounted(fetchUser)
   text-align: right;
 }
 .hero-title {
-  font-size: 1.2rem;
+  font-size: var(--ds-font-2xl);
   font-weight: 800;
   color: white;
 }
 .hero-subtitle {
-  font-size: 0.75rem;
+  font-size: var(--ds-font-sm);
   color: rgba(255,255,255,0.8);
   margin-top: 0.15rem;
   font-weight: 500;
@@ -449,8 +411,8 @@ onMounted(fetchUser)
 .dashboard-footer {
   text-align: center;
   padding: 1.5rem 0 1rem;
-  font-size: 0.7rem;
-  color: #d1d5db;
+  font-size: var(--ds-font-xs);
+  color: var(--ds-text-faint);
   font-weight: 500;
 }
 </style>

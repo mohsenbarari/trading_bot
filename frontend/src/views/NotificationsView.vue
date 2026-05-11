@@ -36,7 +36,7 @@ onMounted(async () => {
 
 
 <template>
-  <div class="notifications-page">
+  <div class="ds-page">
     <header class="header-row">
       <div class="header-spacer">
         <button class="clear-btn" :disabled="isClearingAll" @click="clearAll" v-if="notificationStore.appNotifications.length > 0">
@@ -52,12 +52,12 @@ onMounted(async () => {
     </header>
 
     <main class="content">
-      <div v-if="notificationStore.isLoadingHistory" class="loading-state">
-        <div class="loading-spinner"></div>
+      <div v-if="notificationStore.isLoadingHistory" class="ds-loading-state">
+        <div class="ds-spinner"></div>
       </div>
 
-      <div v-else-if="notificationStore.appNotifications.length === 0" class="empty-state">
-        <div class="empty-icon">
+      <div v-else-if="notificationStore.appNotifications.length === 0" class="ds-empty-state">
+        <div class="ds-empty-icon">
           <Bell :size="48" />
         </div>
         <p>هیچ اعلانی یافت نشد</p>
@@ -95,15 +95,10 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.notifications-page {
-  min-height: 100dvh;
-  background: #f9fafb;
-}
-
 .clear-btn {
-  background: #fef2f2;
-  border: 1px solid #fee2e2;
-  color: #ef4444;
+  background: var(--ds-danger-50);
+  border: 1px solid var(--ds-danger-100);
+  color: var(--ds-danger-500);
   cursor: pointer;
   width: 36px;
   height: 36px;
@@ -115,7 +110,7 @@ onMounted(async () => {
 }
 
 .clear-btn:hover {
-  background: #fee2e2;
+  background: var(--ds-danger-100);
 }
 
 .clear-btn:active {
@@ -123,49 +118,14 @@ onMounted(async () => {
 }
 
 .content {
-  padding: 1rem;
-}
-
-.empty-state, .loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  padding: 4rem 1rem;
-  color: #9ca3af;
-  text-align: center;
-}
-
-.loading-spinner {
-  width: 36px;
-  height: 36px;
-  border: 3px solid #f59e0b;
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.empty-icon {
-  width: 80px;
-  height: 80px;
-  background: white;
-  border-radius: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  padding: var(--ds-card-padding);
 }
 
 .notifications-list {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  padding: 1rem;
+  padding: var(--ds-card-padding);
   padding-bottom: 12rem; /* Ensure space for bottom nav and extra buffer */
 }
 
@@ -174,24 +134,24 @@ onMounted(async () => {
   display: flex;
   gap: 1rem;
   padding: 1.25rem;
-  background: white;
-  border-radius: 1.25rem;
-  border: 1px solid #f3f4f6;
-  border-right: 5px solid #d1d5db;
+  background: var(--ds-bg-card);
+  border-radius: var(--ds-radius-xl);
+  border: 1px solid var(--ds-border-light);
+  border-right: 5px solid var(--ds-border-strong);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+  box-shadow: var(--ds-shadow-xs);
 }
 
 .notif-item.is-unread {
   background: #fdfaf3;
-  border-color: #fef3c7;
+  border-color: var(--ds-primary-100);
   box-shadow: 0 4px 12px rgba(245, 158, 11, 0.05);
 }
 
-.notif-item.type-info { border-right-color: #0ea5e9; }
-.notif-item.type-success { border-right-color: #10b981; }
-.notif-item.type-warning { border-right-color: #f59e0b; }
-.notif-item.type-error { border-right-color: #ef4444; }
+.notif-item.type-info { border-right-color: var(--ds-info-500); }
+.notif-item.type-success { border-right-color: var(--ds-success-500); }
+.notif-item.type-warning { border-right-color: var(--ds-primary-500); }
+.notif-item.type-error { border-right-color: var(--ds-danger-500); }
 
 .notif-actions {
   position: absolute;
@@ -217,38 +177,38 @@ onMounted(async () => {
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  box-shadow: var(--ds-shadow-sm);
 }
 
 .delete-btn {
-  background: #fef2f2;
-  color: #ef4444;
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-500);
 }
-.delete-btn:hover { background: #fee2e2; transform: scale(1.1); }
+.delete-btn:hover { background: var(--ds-danger-100); transform: scale(1.1); }
 
 .toggle-read-btn {
-  background: #f9fafb;
-  color: #6b7280;
+  background: var(--ds-bg-page);
+  color: var(--ds-text-muted);
 }
-.toggle-read-btn:hover { background: #f3f4f6; color: #1f2937; }
+.toggle-read-btn:hover { background: var(--ds-bg-hover); color: var(--ds-text-primary); }
 
 .notif-icon {
   position: relative;
   width: 48px;
   height: 48px;
-  background: #f9fafb;
+  background: var(--ds-bg-page);
   border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: #d97706;
+  color: var(--ds-primary-600);
 }
 
-.type-info .notif-icon { color: #0ea5e9; background: #f0f9ff; }
-.type-success .notif-icon { color: #10b981; background: #f0fdf4; }
-.type-warning .notif-icon { color: #f59e0b; background: #fffbeb; }
-.type-error .notif-icon { color: #ef4444; background: #fef2f2; }
+.type-info .notif-icon { color: var(--ds-info-500); background: var(--ds-info-50); }
+.type-success .notif-icon { color: var(--ds-success-500); background: var(--ds-success-50); }
+.type-warning .notif-icon { color: var(--ds-primary-500); background: var(--ds-primary-50); }
+.type-error .notif-icon { color: var(--ds-danger-500); background: var(--ds-danger-50); }
 
 .unread-dot {
   position: absolute;
@@ -256,9 +216,9 @@ onMounted(async () => {
   right: -4px;
   width: 10px;
   height: 10px;
-  background: #ef4444;
+  background: var(--ds-danger-500);
   border-radius: 50%;
-  border: 2px solid white;
+  border: 2px solid var(--ds-bg-card);
 }
 
 .notif-body {
@@ -270,22 +230,22 @@ onMounted(async () => {
 }
 
 .notif-title {
-  font-size: 1rem;
+  font-size: var(--ds-font-lg);
   font-weight: 700;
-  color: #1f2937;
+  color: var(--ds-text-primary);
   margin: 0;
 }
 
 .notif-text {
-  font-size: 0.875rem;
-  color: #4b5563;
+  font-size: var(--ds-font-base);
+  color: var(--ds-text-secondary);
   margin: 0;
   line-height: 1.5;
 }
 
 .notif-time {
-  font-size: 0.75rem;
-  color: #9ca3af;
+  font-size: var(--ds-font-sm);
+  color: var(--ds-text-placeholder);
   margin-top: 0.25rem;
   font-weight: 500;
 }
