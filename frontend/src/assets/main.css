@@ -156,3 +156,30 @@
     opacity: 0;
   }
 }
+
+@layer utilities {
+  .back-button {
+    background: rgba(243, 244, 246, 0.8);
+    border: 1px solid rgba(229, 231, 235, 0.8);
+    border-radius: 0.5rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: #4b5563;
+    padding: 6px 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .back-button:hover {
+    background: #e5e7eb;
+    color: #1f2937;
+    transform: translateX(-2px);
+  }
+  
+  .back-button:active {
+    transform: scale(0.96);
+  }
+}

@@ -2,6 +2,7 @@
 import { ref, computed, watchEffect, onUnmounted, watch, toRef } from 'vue';
 import moment from 'moment-jalaali';
 import DatePicker from 'vue3-persian-datetime-picker';
+import { ArrowRight } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
 import { useUserProfileTiming } from '../composables/useUserProfileTiming';
 
@@ -505,7 +506,7 @@ async function deleteUser() {
   <div class="card">
     <div class="header-row">
         <h2>{{ isAdminView ? 'مدیریت کاربر' : 'پروفایل کاربری' }}</h2>
-        <button v-if="isAdminView" class="back-button" @click="$emit('navigate', 'manage_users')">🔙</button>
+        <button v-if="isAdminView" class="back-button" @click="$emit('navigate', 'manage_users')">بازگشت <ArrowRight :size="16" /></button>
     </div>
 
     <div class="profile-details">
@@ -1061,14 +1062,7 @@ h2 {
   margin-bottom: 1.25rem;
 }
 .header-row h2 { margin: 0; }
-.back-button {
-  width: 36px; height: 36px;
-  background: white; border: 1px solid rgba(245, 158, 11, 0.15);
-  border-radius: 0.75rem; font-size: 0.9rem; cursor: pointer; color: #6b7280;
-  display: flex; align-items: center; justify-content: center;
-  transition: all 0.2s; -webkit-tap-highlight-color: transparent; padding: 0;
-}
-.back-button:active { transform: scale(0.9); background: #f9fafb; }
+
 
 .edit-section {
   background: linear-gradient(135deg, #fffbeb, #fef3c7);

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
+import { ChevronDown, ChevronLeft, User as UserIcon, Activity, ArrowRight } from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
 
@@ -39,7 +40,7 @@ interface ProfileStatCard {
 }
 
 interface ProfileActionCard {
-  key: 'message';
+  key: 'message' | 'settings';
   icon: string;
   label: string;
 }
@@ -49,7 +50,10 @@ const mutualTrades = ref<MutualTradePreview[]>([]);
 const isLoading = ref(true);
 const error = ref('');
 const isHistoryLoading = ref(false);
-const showHistory = ref(false);
+const openSections = ref({
+  info: true,
+  history: false
+});
 const avatarBusy = ref(false);
 const avatarInput = ref<HTMLInputElement | null>(null);
 const isOwnProfile = computed(() => {
@@ -83,10 +87,14 @@ const visitorActionCards = computed<ProfileActionCard[]>(() => {
   ];
 });
 const ownerOnlyActions = computed<ProfileActionCard[]>(() => {
-  // Future owner-specific controls (for example edit/manage actions) should be
-  // added here. Keeping the seam explicit prevents visitor-only tools such as
-  // block/unblock from leaking into the owner's own view later.
-  return [];
+  if (!showOwnerSections.value) return [];
+  return [
+    {
+      key: 'settings',
+      icon: '⚙️',
+      label: 'تنظیمات کاربری',
+    }
+  ];
 });
 
 onMounted(async () => {
@@ -184,11 +192,14 @@ async function clearAvatar() {
   }
 }
 
+async function toggleHistory() {
+    openSections.value.history = !openSections.value.history;
+    if (!openSections.value.history || mutualTrades.value.length > 0) return;
+    await loadMutualTrades();
+}
+
 async function loadMutualTrades() {
     if (!profileData.value || isHistoryLoading.value) return;
-    
-    showHistory.value = !showHistory.value;
-    if (!showHistory.value || mutualTrades.value.length > 0) return;
 
     isHistoryLoading.value = true;
     try {
@@ -205,11 +216,13 @@ async function loadMutualTrades() {
     }
 }
 
-function handleVisitorActionClick(action: ProfileActionCard) {
+function handleActionClick(action: ProfileActionCard) {
   if (!profileData.value) return;
 
   if (action.key === 'message') {
     emit('navigate', 'chat', { userId: profileData.value.id, userName: profileData.value.account_name });
+  } else if (action.key === 'settings') {
+    emit('navigate', 'settings');
   }
 }
 
@@ -235,7 +248,7 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
          </h2>
          <h2 v-else>👤 پروفایل</h2>
       </div>
-      <button class="back-button" @click="$emit('navigate', 'home')">🔙 بازگشت</button>
+      <button class="back-button" @click="$emit('navigate', 'home')">بازگشت <ArrowRight :size="16" /></button>
     </div>
 
     <div v-if="isLoading" class="loading-state-skeleton">
@@ -275,22 +288,34 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
           </div>
         </div>
 
-        <div class="info-section">
-          <div class="info-row">
-              <span class="label">📞 موبایل:</span>
-              <span class="value">{{ profileData.mobile_number }}</span>
+        <div class="accordion-section mt-4">
+          <div class="accordion-header" @click="openSections.info = !openSections.info">
+            <div class="header-info">
+              <UserIcon :size="18" class="text-amber-600" />
+              <h2>اطلاعات شخصی و آمار</h2>
+            </div>
+            <component :is="openSections.info ? ChevronDown : ChevronLeft" :size="20" class="accordion-icon" />
           </div>
-          <div class="info-row address-row">
-              <span class="label">📍 آدرس:</span>
-              <span class="value">{{ profileData.address }}</span>
-          </div>
-        </div>
+          
+          <div v-show="openSections.info" class="accordion-content">
+            <div class="info-section">
+              <div class="info-row">
+                  <span class="label">📞 موبایل:</span>
+                  <span class="value">{{ profileData.mobile_number }}</span>
+              </div>
+              <div class="info-row address-row">
+                  <span class="label">📍 آدرس:</span>
+                  <span class="value">{{ profileData.address }}</span>
+              </div>
+            </div>
 
-        <div class="stats-grid" :class="{ 'single-column': sharedStatCards.length === 1 }">
-          <div v-for="stat in sharedStatCards" :key="stat.key" class="stat-card">
-              <span class="stat-icon">{{ stat.icon }}</span>
-              <span class="stat-label">{{ stat.label }}</span>
-              <span class="stat-value">{{ stat.value }}</span>
+            <div class="stats-grid" :class="{ 'single-column': sharedStatCards.length === 1 }">
+              <div v-for="stat in sharedStatCards" :key="stat.key" class="stat-card">
+                  <span class="stat-icon">{{ stat.icon }}</span>
+                  <span class="stat-label">{{ stat.label }}</span>
+                  <span class="stat-value">{{ stat.value }}</span>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -301,46 +326,60 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
             v-for="action in visitorActionCards"
             :key="action.key"
             class="message-btn"
-            @click="handleVisitorActionClick(action)"
+            @click="handleActionClick(action)"
           >
               <span class="stat-icon">{{ action.icon }}</span>
               <span class="stat-label">{{ action.label }}</span>
           </button>
         </div>
 
-        <div class="history-section">
-          <button class="history-toggle-btn" @click="loadMutualTrades">
-              📝 تاریخچه معاملات مشترک
-              <span v-if="showHistory">🔽</span>
-              <span v-else>◀️</span>
-          </button>
+        <div class="accordion-section mt-4">
+          <div class="accordion-header" @click="toggleHistory">
+            <div class="header-info">
+              <Activity :size="18" class="text-amber-600" />
+              <h2>تاریخچه معاملات مشترک</h2>
+            </div>
+            <component :is="openSections.history ? ChevronDown : ChevronLeft" :size="20" class="accordion-icon" />
+          </div>
 
-          <div v-if="showHistory" class="history-list">
-              <div v-if="isHistoryLoading">
-                 <LoadingSkeleton :count="3" :height="60" />
-              </div>
-              <p v-else-if="mutualTrades.length === 0" class="empty-text">هیچ معامله مشترکی یافت نشد.</p>
-              <div v-else v-for="trade in mutualTrades" :key="trade.id" class="mini-trade-card">
-                  <div class="trade-row">
-                      <span class="trade-date">{{ trade.created_at }}</span>
-                      <span 
-                        class="trade-badge"
-                        :class="getTradeBadgeClass(trade)"
-                      >
-                        {{ getTradeBadgeLabel(trade) }}
-                      </span>
-                  </div>
-                  <div class="trade-details">
-                      <span>{{ trade.quantity }} {{ trade.commodity_name }}</span>
-                      <span>فی: {{ trade.price.toLocaleString() }}</span>
-                  </div>
-              </div>
+          <div v-show="openSections.history" class="accordion-content">
+            <div v-if="isHistoryLoading">
+               <LoadingSkeleton :count="3" :height="60" />
+            </div>
+            <p v-else-if="mutualTrades.length === 0" class="empty-text">هیچ معامله مشترکی یافت نشد.</p>
+            <div v-else class="history-list">
+                <div v-for="trade in mutualTrades" :key="trade.id" class="mini-trade-card">
+                    <div class="trade-row">
+                        <span class="trade-date">{{ trade.created_at }}</span>
+                        <span 
+                          class="trade-badge"
+                          :class="getTradeBadgeClass(trade)"
+                        >
+                          {{ getTradeBadgeLabel(trade) }}
+                        </span>
+                    </div>
+                    <div class="trade-details">
+                        <span>{{ trade.quantity }} {{ trade.commodity_name }}</span>
+                        <span>فی: {{ trade.price.toLocaleString() }}</span>
+                    </div>
+                </div>
+            </div>
           </div>
         </div>
       </section>
 
       <section v-if="showOwnerSections && ownerOnlyActions.length > 0" class="profile-section owner-profile-section">
-        <!-- Intentionally empty for now. Future owner-only controls belong here. -->
+        <div class="action-grid" :class="{ 'single-column': ownerOnlyActions.length === 1 }">
+          <button
+            v-for="action in ownerOnlyActions"
+            :key="action.key"
+            class="settings-btn"
+            @click="handleActionClick(action)"
+          >
+              <span class="stat-icon">{{ action.icon }}</span>
+              <span class="stat-label">{{ action.label }}</span>
+          </button>
+        </div>
       </section>
     </div>
   </div>
@@ -537,11 +576,31 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   box-shadow: 0 4px 12px rgba(0, 122, 255, 0.4);
 }
 
-.message-btn .stat-icon {
+.settings-btn {
+  background: linear-gradient(135deg, #4b5563, #374151);
+  color: white;
+  padding: 12px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(75, 85, 99, 0.3);
+  transition: all 0.2s;
+}
+
+.settings-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(75, 85, 99, 0.4);
+}
+
+.message-btn .stat-icon, .settings-btn .stat-icon {
   font-size: 20px;
 }
 
-.message-btn .stat-label {
+.message-btn .stat-label, .settings-btn .stat-label {
   font-weight: 600;
   font-size: 13px;
 }
@@ -582,48 +641,64 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
     font-weight: 700;
 }
 
-.back-button {
-  justify-self: end; /* Moves to Left end in RTL */
-  background: transparent;
-  border: none;
+/* Accordion Styles */
+.accordion-section {
+  background: white;
+  border: 1px solid rgba(245, 158, 11, 0.12);
+  border-radius: 1rem;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+  width: 100%;
+}
+
+.accordion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  background: linear-gradient(135deg, #fffbeb, #fef9f0);
   cursor: pointer;
-  font-size: 14px;
-  color: var(--text-secondary);
-  padding: 8px 0;
+  transition: background 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.accordion-header:active {
+  background: #fef3c7;
+}
+
+.header-info {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-weight: 500;
+  gap: 0.5rem;
 }
 
-.back-button:hover {
-    color: var(--primary-color);
+.accordion-header h2 {
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin: 0;
+  color: #1f2937;
 }
 
-
-/* History Section - Same as before */
-.history-section {
-    width: 100%;
-    margin-top: 10px;
+.accordion-icon {
+  color: #d97706;
+  transition: transform 0.2s;
 }
 
-.history-toggle-btn {
-    width: 100%;
-    background: white;
-    border: 1px solid var(--border-color);
-    padding: 12px;
-    border-radius: 10px;
-    font-size: 14px;
-    font-weight: 600;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    cursor: pointer;
-    color: var(--text-color);
+.accordion-content {
+  padding: 1rem;
+  border-top: 1px solid rgba(245, 158, 11, 0.08);
+  background: white;
+  animation: slideDown 0.2s ease-out;
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.mt-4 {
+  margin-top: 1rem;
 }
 
 .history-list {
-    margin-top: 12px;
     display: flex;
     flex-direction: column;
     gap: 10px;

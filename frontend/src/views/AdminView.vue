@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ArrowRight } from 'lucide-vue-next'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import AdminPanel from '../components/AdminPanel.vue'
 import UserManager from '../components/UserManager.vue'
@@ -68,8 +69,8 @@ onUnmounted(() => clearBackStack())
      <div v-if="currentSection !== 'menu'" class="admin-top-bar p-4 sticky top-0 z-10">
          <div class="max-w-[480px] mx-auto flex items-center justify-between">
              <div class="flex items-center gap-3">
-                 <button @click="handleNavigate('admin_panel')" class="w-10 h-10 rounded-xl bg-white/80 border border-amber-100/50 flex items-center justify-center hover:bg-white transition-colors shadow-sm">
-                     <span class="text-lg">→</span>
+                 <button @click="handleNavigate('admin_panel')" class="back-button">
+                     بازگشت <ArrowRight :size="16" />
                  </button>
                  <h1 class="text-lg font-extrabold text-gray-800">
                      {{ currentSection === 'manage_users' ? 'مدیریت کاربران' :
