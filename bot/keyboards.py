@@ -11,7 +11,7 @@ def get_create_token_inline_keyboard() -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> ReplyKeyboardMarkup:
-    keyboard_layout = [[KeyboardButton(text="📈 معامله")]]
+    keyboard_layout = []
     row_2_buttons = []
     if user_role == UserRole.SUPER_ADMIN:
         row_2_buttons.append(KeyboardButton(text="🔐 پنل مدیریت")) 
