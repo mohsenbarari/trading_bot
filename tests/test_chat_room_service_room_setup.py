@@ -61,7 +61,7 @@ class FakeDB:
         self.commit = AsyncMock()
         self.refresh = AsyncMock()
 
-    async def execute(self, _stmt):
+    async def execute(self, _stmt, *_args, **_kwargs):
         if not self.execute_results:
             raise AssertionError("Unexpected execute() call")
         return self.execute_results.pop(0)
@@ -259,7 +259,8 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         deleted_user = SimpleNamespace(id=9, is_deleted=True)
         db = FakeDB(
             [
-                FakeExecuteResult(scalar_one_or_none_value=None),
+                FakeExecuteResult(),
+                FakeExecuteResult(scalars=[]),
                 FakeExecuteResult(scalar_one_or_none_value=7),
                 FakeExecuteResult(scalar_one_or_none_value=None),
                 FakeExecuteResult(scalar_one_or_none_value=None),
@@ -334,7 +335,8 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         )
         db = FakeDB(
             [
-                FakeExecuteResult(scalar_one_or_none_value=chat),
+                FakeExecuteResult(),
+                FakeExecuteResult(scalars=[chat]),
                 FakeExecuteResult(scalar_one_or_none_value=7),
                 FakeExecuteResult(scalar_one_or_none_value=admin_member),
                 FakeExecuteResult(scalar_one_or_none_value=reactivated_member),
@@ -362,6 +364,45 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(deleted_member.left_at, now)
         self.assertEqual(deleted_member.updated_at, now)
         self.assertEqual(db.added, [])
+        db.flush.assert_awaited_once()
+
+    async def test_ensure_mandatory_channel_rollout_soft_deletes_duplicate_channels(self):
+        now = datetime(2026, 5, 11, 19, 55, 0)
+        primary_chat = SimpleNamespace(
+            id=44,
+            title=MANDATORY_CHANNEL_TITLE,
+            description=MANDATORY_CHANNEL_DESCRIPTION,
+            is_deleted=False,
+            deleted_at=None,
+            updated_at=None,
+        )
+        duplicate_chat = SimpleNamespace(
+            id=45,
+            title=MANDATORY_CHANNEL_TITLE,
+            description=MANDATORY_CHANNEL_DESCRIPTION,
+            is_deleted=False,
+            deleted_at=None,
+            updated_at=None,
+        )
+        admin_user = SimpleNamespace(id=7, is_deleted=False)
+        db = FakeDB(
+            [
+                FakeExecuteResult(),
+                FakeExecuteResult(scalars=[primary_chat, duplicate_chat]),
+                FakeExecuteResult(scalar_one_or_none_value=7),
+                FakeExecuteResult(scalar_one_or_none_value=None),
+            ]
+        )
+
+        with patch("core.services.chat_room_service._utcnow", return_value=now):
+            result = await ensure_mandatory_channel_rollout(db, users=[admin_user])
+
+        self.assertIs(result, primary_chat)
+        self.assertTrue(duplicate_chat.is_deleted)
+        self.assertEqual(duplicate_chat.deleted_at, now)
+        self.assertEqual(duplicate_chat.updated_at, now)
+        self.assertEqual(len(db.added), 1)
+        self.assertEqual(db.added[0].user_id, 7)
         db.flush.assert_awaited_once()
 
 

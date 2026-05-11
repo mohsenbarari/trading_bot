@@ -9,7 +9,7 @@ import unicodedata
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, joinedload
 
@@ -200,21 +200,27 @@ def _unpack_conversation_projection_row(row):
 GROUP_MAX_MEMBERS = 50
 MANDATORY_CHANNEL_TITLE = "اطلاع‌رسانی"
 MANDATORY_CHANNEL_DESCRIPTION = "کانال اجباری اطلاع‌رسانی سامانه"
+MANDATORY_CHANNEL_LOCK_KEY = 362514001
 
 
 def _membership_status_for_user(user: User) -> ChatMembershipStatus:
     return ChatMembershipStatus.INACTIVE if getattr(user, "is_deleted", False) else ChatMembershipStatus.ACTIVE
 
 
-async def get_mandatory_channel(db: AsyncSession) -> Chat | None:
+async def _list_mandatory_channels(db: AsyncSession) -> list[Chat]:
     stmt = select(Chat).where(
         Chat.type == ChatType.CHANNEL,
         Chat.is_system.is_(True),
         Chat.is_mandatory.is_(True),
         Chat.is_deleted.is_(False),
-    )
+    ).order_by(Chat.id.asc())
     result = await db.execute(stmt)
-    return result.scalar_one_or_none()
+    return list(result.scalars().all())
+
+
+async def get_mandatory_channel(db: AsyncSession) -> Chat | None:
+    channels = await _list_mandatory_channels(db)
+    return channels[0] if channels else None
 
 
 def _normalize_mandatory_channel_metadata(chat: Chat) -> bool:
@@ -241,10 +247,35 @@ def _normalize_mandatory_channel_metadata(chat: Chat) -> bool:
     return changed
 
 
+def _soft_delete_duplicate_mandatory_channel(chat: Chat, *, now: datetime) -> bool:
+    changed = False
+
+    if not chat.is_deleted:
+        chat.is_deleted = True
+        changed = True
+    if chat.deleted_at != now:
+        chat.deleted_at = now
+        changed = True
+    if chat.updated_at != now:
+        chat.updated_at = now
+        changed = True
+
+    return changed
+
+
 async def ensure_mandatory_channel(db: AsyncSession) -> Chat:
-    chat = await get_mandatory_channel(db)
-    if chat is not None:
-        if _normalize_mandatory_channel_metadata(chat):
+    await db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": MANDATORY_CHANNEL_LOCK_KEY})
+
+    channels = await _list_mandatory_channels(db)
+    if channels:
+        chat = channels[0]
+        changed = _normalize_mandatory_channel_metadata(chat)
+        if len(channels) > 1:
+            now = _utcnow()
+            for duplicate in channels[1:]:
+                if _soft_delete_duplicate_mandatory_channel(duplicate, now=now):
+                    changed = True
+        if changed:
             await db.flush()
         return chat
 
