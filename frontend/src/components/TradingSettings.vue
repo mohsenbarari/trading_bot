@@ -1,137 +1,17 @@
-<template>
-  <div class="settings-page">
-    <div v-if="loading" class="loading">
-      <div class="spinner"></div>
-      <p>در حال بارگذاری...</p>
-    </div>
-
-    <div v-else class="settings-form">
-      <!-- دعوت‌نامه -->
-      <div class="accordion-section">
-        <div class="accordion-header" @click="toggleSection('invitation')">
-          <h2>📨 دعوت‌نامه</h2>
-          <span class="accordion-icon">{{ openSections.invitation ? '▼' : '◀' }}</span>
-        </div>
-        <div v-show="openSections.invitation" class="accordion-content">
-          <div class="form-group">
-            <label>مدت اعتبار لینک دعوت (روز)</label>
-            <input type="number" v-model.number="settings.invitation_expiry_days" min="1" placeholder="2" :class="{'is-default': isDefault('invitation_expiry_days')}" />
-            <span class="hint">پیش‌فرض: 2 روز</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- لفظ -->
-      <div class="accordion-section">
-        <div class="accordion-header" @click="toggleSection('offer')">
-          <h2>📋 لفظ معاملاتی</h2>
-          <span class="accordion-icon">{{ openSections.offer ? '▼' : '◀' }}</span>
-        </div>
-        <div v-show="openSections.offer" class="accordion-content">
-          <div class="form-group">
-            <label>مدت اعتبار لفظ (دقیقه)</label>
-            <input type="number" v-model.number="settings.offer_expiry_minutes" min="1" placeholder="2" :class="{'is-default': isDefault('offer_expiry_minutes')}" />
-            <span class="hint">پیش‌فرض: 2 دقیقه</span>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>حداقل تعداد کالا</label>
-              <input type="number" v-model.number="settings.offer_min_quantity" min="1" placeholder="5" :class="{'is-default': isDefault('offer_min_quantity')}" />
-              <span class="hint">پیش‌فرض: 5</span>
-            </div>
-            <div class="form-group">
-              <label>حداکثر تعداد کالا</label>
-              <input type="number" v-model.number="settings.offer_max_quantity" min="1" placeholder="50" :class="{'is-default': isDefault('offer_max_quantity')}" />
-              <span class="hint">پیش‌فرض: 50</span>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>حداکثر لفظ‌های فعال همزمان</label>
-            <input type="number" v-model.number="settings.max_active_offers" min="1" max="20" placeholder="4" :class="{'is-default': isDefault('max_active_offers')}" />
-            <span class="hint">پیش‌فرض: 4</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- محدودیت منقضی کردن -->
-      <div class="accordion-section">
-        <div class="accordion-header" @click="toggleSection('expire')">
-          <h2>⏰ محدودیت منقضی کردن لفظ‌ها</h2>
-          <span class="accordion-icon">{{ openSections.expire ? '▼' : '◀' }}</span>
-        </div>
-        <div v-show="openSections.expire" class="accordion-content">
-          <div class="form-group">
-            <label>حداکثر منقضی شدن در دقیقه</label>
-            <input type="number" v-model.number="settings.offer_expire_rate_per_minute" min="1" max="10" placeholder="2" :class="{'is-default': isDefault('offer_expire_rate_per_minute')}" />
-            <span class="hint">پیش‌فرض: 2 بار</span>
-          </div>
-          <div class="form-group">
-            <label>آستانه منقضی شدن روزانه</label>
-            <input type="number" v-model.number="settings.offer_expire_daily_limit_after_threshold" min="1" placeholder="10" :class="{'is-default': isDefault('offer_expire_daily_limit_after_threshold')}" />
-            <span class="hint">پیش‌فرض: 10 (بعد از این تعداد، محدودیت 1/3 اعمال می‌شود)</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- امنیت و نشست‌ها -->
-      <div class="accordion-section">
-        <div class="accordion-header" @click="toggleSection('security')">
-          <h2>🔒 امنیت و نشست‌ها</h2>
-          <span class="accordion-icon">{{ openSections.security ? '▼' : '◀' }}</span>
-        </div>
-        <div v-show="openSections.security" class="accordion-content">
-          <div class="security-note">
-            💡 این مقادیر آستانه پایه برای جلوگیری از سوءاستفاده (Anti-Abuse) در هنگام لاگین مجدد هستند. 
-            برای کاربرانی با بیش از ۱ نشست، سیستم به صورت خودکار آستانه را افزایش می‌دهد.
-          </div>
-          <div class="form-group">
-            <label>آستانه پایه روزانه</label>
-            <input type="number" v-model.number="settings.anti_abuse_daily_base" min="1" placeholder="2" :class="{'is-default': isDefault('anti_abuse_daily_base')}" />
-            <span class="hint">تعداد لاگین مجاز در ۲۴ ساعت (برای ۱ نشست)</span>
-          </div>
-          <div class="form-group">
-            <label>آستانه پایه هفتگی</label>
-            <input type="number" v-model.number="settings.anti_abuse_weekly_base" min="1" placeholder="5" :class="{'is-default': isDefault('anti_abuse_weekly_base')}" />
-            <span class="hint">تعداد لاگین مجاز در ۷ روز (برای ۱ نشست)</span>
-          </div>
-          <div class="form-group">
-            <label>آستانه پایه ماهانه</label>
-            <input type="number" v-model.number="settings.anti_abuse_monthly_base" min="1" placeholder="7" :class="{'is-default': isDefault('anti_abuse_monthly_base')}" />
-            <span class="hint">تعداد لاگین مجاز در ۳۰ روز (برای ۱ نشست)</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- دکمه‌ها -->
-      <div class="form-actions">
-        <button class="btn btn-primary" @click="saveSettings" :disabled="saving">
-          {{ saving ? 'در حال ذخیره...' : '💾 ذخیره تنظیمات' }}
-        </button>
-        <button class="btn btn-secondary" @click="resetSettings" :disabled="saving">
-          🔄 بازنشانی به پیش‌فرض
-        </button>
-      </div>
-
-      <div v-if="message" :class="['message', messageType]">
-        {{ message }}
-      </div>
-    </div>
-  </div>
-</template>
-
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { apiFetch } from '../utils/auth'
+import { Loader2, ChevronLeft, ChevronDown, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
 
-const props = defineProps({
-  apiBaseUrl: { type: String, required: true },
-  jwtToken: { type: String, required: true }
-})
+const props = defineProps<{
+  apiBaseUrl: string;
+  jwtToken: string | null;
+}>()
 
 const loading = ref(true)
 const saving = ref(false)
 const message = ref('')
-const messageType = ref('success')
+const messageType = ref<'success' | 'danger'>('success')
 
 const openSections = ref({
   invitation: false,
@@ -140,7 +20,7 @@ const openSections = ref({
   security: false
 })
 
-const toggleSection = (section) => {
+const toggleSection = (section: keyof typeof openSections.value) => {
   openSections.value[section] = !openSections.value[section]
 }
 
@@ -157,18 +37,14 @@ const defaultVals = {
   anti_abuse_monthly_base: 7
 }
 
-const isDefault = (key) => {
+const settings = ref({ ...defaultVals })
+
+const isDefault = (key: keyof typeof defaultVals) => {
   return settings.value[key] === defaultVals[key] || settings.value[key] == null || settings.value[key] === ''
 }
 
-const settings = ref({
-  ...defaultVals
-})
-
-const fetchApi = async (method, endpoint, body = null) => {
-  const options = {
-    method,
-  }
+const fetchApi = async (method: string, endpoint: string, body: any = null) => {
+  const options: RequestInit = { method }
   if (body) {
     options.body = JSON.stringify(body)
   }
@@ -187,7 +63,7 @@ const loadSettings = async () => {
     settings.value = data
   } catch (error) {
     message.value = 'خطا در بارگذاری تنظیمات'
-    messageType.value = 'error'
+    messageType.value = 'danger'
   } finally {
     loading.value = false
   }
@@ -203,9 +79,9 @@ const saveSettings = async () => {
     
     message.value = 'تنظیمات با موفقیت ذخیره شد'
     messageType.value = 'success'
-  } catch (error) {
+  } catch (error: any) {
     message.value = error.message || 'خطا در ذخیره تنظیمات'
-    messageType.value = 'error'
+    messageType.value = 'danger'
   } finally {
     saving.value = false
   }
@@ -227,7 +103,7 @@ const resetSettings = async () => {
     messageType.value = 'success'
   } catch (error) {
     message.value = 'خطا در بازنشانی تنظیمات'
-    messageType.value = 'error'
+    messageType.value = 'danger'
   } finally {
     saving.value = false
   }
@@ -238,168 +114,214 @@ onMounted(() => {
 })
 </script>
 
+<template>
+  <div class="trading-settings ds-page-content">
+    
+    <div v-if="loading" class="ds-loading-state">
+       <Loader2 class="ds-spinner" :size="32" />
+       <p>در حال بارگذاری تنظیمات...</p>
+    </div>
+
+    <div v-else class="settings-container">
+      <div v-if="message" class="ds-message" :class="messageType">
+        {{ message }}
+      </div>
+
+      <!-- دعوت‌نامه -->
+      <div class="ds-accordion" :class="{ open: openSections.invitation }">
+        <div class="ds-accordion-header" @click="toggleSection('invitation')">
+          <div class="header-main">
+            <Mail class="section-icon" :size="18" />
+            <h2 class="section-title">دعوت‌نامه</h2>
+          </div>
+          <ChevronLeft class="arrow-icon" :size="18" />
+        </div>
+        <div v-show="openSections.invitation" class="ds-accordion-content">
+          <div class="ds-form-group">
+            <label class="ds-label">مدت اعتبار لینک دعوت (روز)</label>
+            <input type="number" v-model.number="settings.invitation_expiry_days" min="1" class="ds-input" :class="{'is-default': isDefault('invitation_expiry_days')}" />
+            <span class="ds-hint">پیش‌فرض: 2 روز</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- لفظ -->
+      <div class="ds-accordion" :class="{ open: openSections.offer }">
+        <div class="ds-accordion-header" @click="toggleSection('offer')">
+          <div class="header-main">
+            <ClipboardList class="section-icon" :size="18" />
+            <h2 class="section-title">لفظ معاملاتی</h2>
+          </div>
+          <ChevronLeft class="arrow-icon" :size="18" />
+        </div>
+        <div v-show="openSections.offer" class="ds-accordion-content">
+          <div class="ds-form-group">
+            <label class="ds-label">مدت اعتبار لفظ (دقیقه)</label>
+            <input type="number" v-model.number="settings.offer_expiry_minutes" min="1" class="ds-input" :class="{'is-default': isDefault('offer_expiry_minutes')}" />
+            <span class="ds-hint">پیش‌فرض: 2 دقیقه</span>
+          </div>
+          <div class="form-row">
+            <div class="ds-form-group">
+              <label class="ds-label">حداقل تعداد کالا</label>
+              <input type="number" v-model.number="settings.offer_min_quantity" min="1" class="ds-input" :class="{'is-default': isDefault('offer_min_quantity')}" />
+              <span class="ds-hint">پیش‌فرض: 5</span>
+            </div>
+            <div class="ds-form-group">
+              <label class="ds-label">حداکثر تعداد کالا</label>
+              <input type="number" v-model.number="settings.offer_max_quantity" min="1" class="ds-input" :class="{'is-default': isDefault('offer_max_quantity')}" />
+              <span class="ds-hint">پیش‌فرض: 50</span>
+            </div>
+          </div>
+          <div class="ds-form-group">
+            <label class="ds-label">حداکثر لفظ‌های فعال همزمان</label>
+            <input type="number" v-model.number="settings.max_active_offers" min="1" max="20" class="ds-input" :class="{'is-default': isDefault('max_active_offers')}" />
+            <span class="ds-hint">پیش‌فرض: 4</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- محدودیت منقضی کردن -->
+      <div class="ds-accordion" :class="{ open: openSections.expire }">
+        <div class="ds-accordion-header" @click="toggleSection('expire')">
+          <div class="header-main">
+            <Clock class="section-icon" :size="18" />
+            <h2 class="section-title">محدودیت منقضی کردن</h2>
+          </div>
+          <ChevronLeft class="arrow-icon" :size="18" />
+        </div>
+        <div v-show="openSections.expire" class="ds-accordion-content">
+          <div class="ds-form-group">
+            <label class="ds-label">حداکثر منقضی شدن در دقیقه</label>
+            <input type="number" v-model.number="settings.offer_expire_rate_per_minute" min="1" max="10" class="ds-input" :class="{'is-default': isDefault('offer_expire_rate_per_minute')}" />
+            <span class="ds-hint">پیش‌فرض: 2 بار</span>
+          </div>
+          <div class="ds-form-group">
+            <label class="ds-label">آستانه منقضی شدن روزانه</label>
+            <input type="number" v-model.number="settings.offer_expire_daily_limit_after_threshold" min="1" class="ds-input" :class="{'is-default': isDefault('offer_expire_daily_limit_after_threshold')}" />
+            <span class="ds-hint">پیش‌فرض: 10 (بعد از این تعداد، محدودیت اعمال می‌شود)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- امنیت -->
+      <div class="ds-accordion" :class="{ open: openSections.security }">
+        <div class="ds-accordion-header" @click="toggleSection('security')">
+          <div class="header-main">
+            <ShieldCheck class="section-icon" :size="18" />
+            <h2 class="section-title">امنیت و نشست‌ها</h2>
+          </div>
+          <ChevronLeft class="arrow-icon" :size="18" />
+        </div>
+        <div v-show="openSections.security" class="ds-accordion-content">
+          <div class="info-note">
+            <AlertCircle :size="16" />
+            <span>این مقادیر آستانه پایه برای جلوگیری از سوءاستفاده (Anti-Abuse) هستند. برای کاربرانی با بیش از یک نشست فعال، سیستم به صورت خودکار آستانه را افزایش می‌دهد.</span>
+          </div>
+          <div class="ds-form-group">
+            <label class="ds-label">آستانه پایه روزانه</label>
+            <input type="number" v-model.number="settings.anti_abuse_daily_base" min="1" class="ds-input" :class="{'is-default': isDefault('anti_abuse_daily_base')}" />
+            <span class="ds-hint">تعداد لاگین مجاز در ۲۴ ساعت</span>
+          </div>
+          <div class="ds-form-group">
+            <label class="ds-label">آستانه پایه هفتگی</label>
+            <input type="number" v-model.number="settings.anti_abuse_weekly_base" min="1" class="ds-input" :class="{'is-default': isDefault('anti_abuse_weekly_base')}" />
+            <span class="ds-hint">تعداد لاگین مجاز در ۷ روز</span>
+          </div>
+          <div class="ds-form-group">
+            <label class="ds-label">آستانه پایه ماهانه</label>
+            <input type="number" v-model.number="settings.anti_abuse_monthly_base" min="1" class="ds-input" :class="{'is-default': isDefault('anti_abuse_monthly_base')}" />
+            <span class="ds-hint">تعداد لاگین مجاز در ۳۰ روز</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- دکمه‌ها -->
+      <div class="footer-actions">
+        <button class="ds-btn primary action-btn" @click="saveSettings" :disabled="saving">
+          <Loader2 v-if="saving" class="animate-spin" :size="18" />
+          <Save v-else :size="18" />
+          <span>ذخیره تنظیمات</span>
+        </button>
+        <button class="ds-btn secondary-soft action-btn" @click="resetSettings" :disabled="saving">
+          <RotateCcw :size="18" />
+          <span>بازنشانی</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
 <style scoped>
-.settings-page {
-  max-width: 100%;
-  margin: 0 auto;
-}
-
-.loading {
-  text-align: center;
-  padding: 2.5rem;
-}
-.spinner {
-  width: 36px;
-  height: 36px;
-  border: 3px solid #f59e0b;
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  margin: 0 auto 0.875rem;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.settings-form {
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(245, 158, 11, 0.1);
-  border-radius: 1.25rem;
-  padding: 1.25rem;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.04);
-}
-
-.accordion-section {
-  margin-bottom: 0.75rem;
-  border: 1px solid rgba(245, 158, 11, 0.12);
-  border-radius: 1rem;
-  overflow: hidden;
-}
-
-.accordion-header {
+.trading-settings {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.875rem 1rem;
-  background: linear-gradient(135deg, #fffbeb, #fef9f0);
-  cursor: pointer;
-  transition: background 0.2s;
-  -webkit-tap-highlight-color: transparent;
+  flex-direction: column;
 }
-.accordion-header:active {
-  background: #fef3c7;
+
+.settings-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
-.accordion-header h2 {
-  font-size: 0.85rem;
-  font-weight: 700;
+
+.section-icon {
+  color: var(--ds-primary-500);
+}
+
+.section-title {
   margin: 0;
-  color: #1f2937;
-}
-.accordion-icon {
-  font-size: 0.7rem;
-  color: #d97706;
-  transition: transform 0.2s;
-}
-
-.accordion-content {
-  padding: 1rem;
-  border-top: 1px solid rgba(245, 158, 11, 0.08);
-  background: white;
-  animation: slideDown 0.2s ease-out;
-}
-@keyframes slideDown {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.form-group { margin-bottom: 0.875rem; }
-.form-group label {
-  display: block; margin-bottom: 0.375rem;
-  font-weight: 700; font-size: 0.78rem; color: #6b7280;
-}
-.form-group input {
-  width: 100%; padding: 0.625rem 0.875rem;
-  border: 1px solid rgba(245, 158, 11, 0.15); border-radius: 0.75rem;
-  font-size: 0.9rem; background: white; color: #1f2937; outline: none;
-  transition: all 0.2s;
-}
-.form-group input::placeholder {
-  color: #9ca3af;
-  font-weight: 400;
-  opacity: 1;
-}
-.form-group input.is-default {
-  color: #9ca3af;
-}
-.form-group input:focus {
-  border-color: #f59e0b;
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
-  color: #1f2937; /* وقتی فوکوس شد رنگ اصلی برگرده */
-}
-
-.hint {
-  display: block; font-size: 0.7rem; color: #d1d5db;
-  margin-top: 0.25rem;
-}
-
-.security-note {
-  background: #fff7ed;
-  border: 1px solid #ffedd5;
-  border-radius: 0.75rem;
-  padding: 0.75rem;
-  margin-bottom: 1.25rem;
-  font-size: 0.75rem;
-  color: #c2410c;
-  line-height: 1.5;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--ds-text-primary);
 }
 
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.875rem;
+  gap: 1rem;
 }
 
-.form-actions {
+.is-default {
+  color: var(--ds-text-placeholder) !important;
+}
+
+.info-note {
   display: flex;
-  gap: 0.625rem;
-  margin-top: 1.25rem;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  background: var(--ds-primary-50);
+  border: 1px solid var(--ds-primary-100);
+  border-radius: var(--ds-radius-lg);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--ds-primary-800);
+  margin-bottom: 1.5rem;
 }
 
-.btn {
-  padding: 0.75rem 1.25rem;
-  border: none;
-  border-radius: 0.75rem;
-  font-size: 0.85rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s;
-  -webkit-tap-highlight-color: transparent;
+.info-note svg {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
-.btn:active { transform: scale(0.98); }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.btn-primary {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: white;
+.footer-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--ds-border-light);
+}
+
+.action-btn {
   flex: 1;
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.85rem;
 }
 
-.btn-secondary {
-  background: white;
-  color: #6b7280;
-  border: 1px solid rgba(245, 158, 11, 0.15);
+.secondary-soft {
+  background: var(--ds-bg-inset);
+  color: var(--ds-text-secondary);
+  border: 1px solid var(--ds-border-light);
 }
-.btn-secondary:active { background: #f9fafb; }
-
-.message {
-  margin-top: 1rem;
-  padding: 0.75rem;
-  border-radius: 0.75rem;
-  text-align: center;
-  font-size: 0.8rem;
-  font-weight: 600;
-}
-.message.success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
-.message.error { background: #fef2f2; color: #ef4444; border: 1px solid #fecaca; }
 </style>

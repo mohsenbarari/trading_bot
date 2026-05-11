@@ -94,7 +94,7 @@ async function onManageAliases(commodity: Commodity) {
   }
 }
 
-// --- 3. افزودن کالای جدید (با Payload اصلاح شده) ---
+// --- 3. افزودن کالای جدید ---
 function onAddCommodityStart() {
   resetMessages();
   resetForm();
@@ -113,7 +113,6 @@ async function onAddCommoditySubmit() {
         aliasList.unshift(commodityName);
     }
     
-    // فرمت صحیح برای API
     const payload = {
         commodity_data: { name: commodityName },
         aliases: aliasList
@@ -173,7 +172,7 @@ async function onEditCommodityNameSubmit() {
   }
 }
 
-// --- 5. افزودن نام مستعار (پشتیبانی از چند نام با جداکننده ، یا -) ---
+// --- 5. افزودن نام مستعار ---
 function onAddAliasStart() {
   if (!selectedCommodity.value) return;
   resetMessages();
@@ -185,7 +184,6 @@ async function onAddAliasSubmit() {
   isLoading.value = true;
   resetMessages();
   try {
-    // Split by ، or - (same logic as add commodity)
     const aliasList = form.name.split(/[،\-]/)
                           .map(a => a.trim())
                           .filter(a => a.length > 0);
@@ -330,39 +328,39 @@ onMounted(fetchCommodities);
 </script>
 
 <template>
-  <div class="commodity-manager-container">
+  <div class="commodity-manager ds-page-content">
     
-    <div v-if="successMessage" class="message success">{{ successMessage }}</div>
-    <div v-if="errorMessage" class="message error">
-       <pre style="white-space: pre-wrap; margin: 0;">{{ errorMessage }}</pre>
+    <div v-if="successMessage" class="ds-message success">{{ successMessage }}</div>
+    <div v-if="errorMessage" class="ds-message danger">
+       <pre class="error-pre">{{ errorMessage }}</pre>
     </div>
-    <!-- Removed generic spinner container -->
 
-    <div v-if="viewMode === 'list'" class="card">
+    <div v-if="viewMode === 'list'" class="ds-card">
       <div v-if="isLoading">
           <LoadingSkeleton :count="5" :height="60" />
       </div>
       <div v-else>
           <div v-if="commodities.length === 0" class="no-data">هیچ کالایی ثبت نشده است.</div>
-          <div class="button-list">
-            <button v-for="comm in commodities" :key="comm.id" @click="onManageAliases(comm)" class="comm-list-btn">
-              <span>📦 {{ comm.name }}</span>
-              <span>&rsaquo;</span>
+          <div class="list-group">
+            <button v-for="comm in commodities" :key="comm.id" @click="onManageAliases(comm)" class="list-item-btn">
+              <span class="item-label">📦 {{ comm.name }}</span>
+              <span class="chevron">&rsaquo;</span>
             </button>
           </div>
-          <hr class="divider" />
-          <button class="comm-list-btn comm-add-btn" @click="onAddCommodityStart">
-            <span>➕ افزودن کالای جدید</span>
-          </button>
+          <div class="card-footer">
+            <button class="action-btn primary-soft" @click="onAddCommodityStart">
+              ➕ افزودن کالای جدید
+            </button>
+          </div>
       </div>
     </div>
 
-    <div v-if="viewMode === 'aliases' && selectedCommodity" class="card">
-      <div class="sub-header-row">
-        <button @click="fetchCommodities" class="sub-back-btn">
-          <span class="sub-back-icon">→</span>
+    <div v-if="viewMode === 'aliases' && selectedCommodity" class="ds-card">
+      <div class="card-header">
+        <button @click="fetchCommodities" class="back-icon-btn">
+          <span>→</span>
         </button>
-        <h2 class="sub-title">{{ selectedCommodity.name }}</h2>
+        <h2 class="card-title">{{ selectedCommodity.name }}</h2>
       </div>
 
       <div v-if="isLoading">
@@ -371,116 +369,116 @@ onMounted(fetchCommodities);
       <div v-else>
           <div v-if="selectedCommodity.aliases.length === 0" class="no-data">هیچ نام مستعاری ثبت نشده است.</div>
           <div class="alias-list">
-            <div v-for="alias in selectedCommodity.aliases" :key="alias.id" class="alias-item">
-              <span>{{ alias.alias }}</span>
+            <div v-for="alias in selectedCommodity.aliases" :key="alias.id" class="alias-row">
+              <span class="alias-text">{{ alias.alias }}</span>
               <div class="alias-actions">
-                <button @click="onEditAliasStart(alias)" class="action-btn edit">✏️</button>
-                <button @click="onDeleteAliasStart(alias)" class="action-btn delete">❌</button>
+                <button @click="onEditAliasStart(alias)" class="icon-btn edit">✏️</button>
+                <button @click="onDeleteAliasStart(alias)" class="icon-btn delete">❌</button>
               </div>
             </div>
           </div>
-          <hr class="divider" />
-          <div class="button-list stacked">
-            <button class="comm-list-btn comm-add-btn" @click="onAddAliasStart">
-              <span>➕ افزودن نام مستعار جدید</span>
+          
+          <div class="card-footer stacked">
+            <button class="action-btn primary-soft" @click="onAddAliasStart">
+              ➕ افزودن نام مستعار جدید
             </button>
-            <button class="comm-list-btn comm-edit-btn" @click="onEditCommodityNameStart">
-              <span>✏️ ویرایش نام اصلی کالا</span>
+            <button class="action-btn secondary-soft" @click="onEditCommodityNameStart">
+              ✏️ ویرایش نام اصلی کالا
             </button>
-            <button class="comm-list-btn comm-del-btn" @click="onDeleteCommodityStart">
-              <span>❌ حذف کامل این کالا</span>
+            <button class="action-btn danger-soft" @click="onDeleteCommodityStart">
+              ❌ حذف کامل این کالا
             </button>
           </div>
       </div>
     </div>
     
-    <div v-if="viewMode === 'add_commodity'" class="card">
-      <h2>افزودن کالای جدید</h2>
-      <form @submit.prevent="onAddCommoditySubmit">
-        <div class="form-group">
-          <label for="comm_name">نام اصلی کالا</label>
-          <input v-model="form.name" id="comm_name" type="text" placeholder="مثلاً: سکه امامی" required />
+    <div v-if="viewMode === 'add_commodity'" class="ds-card">
+      <h2 class="card-title">افزودن کالای جدید</h2>
+      <form @submit.prevent="onAddCommoditySubmit" class="manager-form">
+        <div class="ds-form-group">
+          <label class="ds-label">نام اصلی کالا</label>
+          <input v-model="form.name" class="ds-input" type="text" placeholder="مثلاً: سکه امامی" required />
         </div>
-        <div class="form-group">
-          <label for="comm_aliases">نام‌های مستعار (جدا با `،` یا `-`)</label>
-          <input v-model="form.aliasesText" id="comm_aliases" type="text" placeholder="مثال: سکه جدید ، امامی - سکه بانکی" />
+        <div class="ds-form-group">
+          <label class="ds-label">نام‌های مستعار (جدا با `،` یا `-`)</label>
+          <input v-model="form.aliasesText" class="ds-input" type="text" placeholder="مثال: سکه جدید ، امامی - سکه بانکی" />
         </div>
-        <div class="form-actions">
-          <button type="submit" :disabled="isLoading">
+        <div class="form-footer">
+          <button type="submit" class="ds-btn primary" :disabled="isLoading">
             {{ isLoading ? 'در حال افزودن...' : 'افزودن کالا' }}
           </button>
-          <button type="button" class="secondary" @click="fetchCommodities" :disabled="isLoading">لغو</button>
+          <button type="button" class="ds-btn secondary" @click="fetchCommodities" :disabled="isLoading">لغو</button>
         </div>
       </form>
     </div>
 
-    <div v-if="viewMode === 'edit_commodity_name' && selectedCommodity" class="card">
-      <h2>ویرایش نام کالا</h2>
-      <form @submit.prevent="onEditCommodityNameSubmit">
-        <div class="form-group">
-          <label for="comm_edit_name">نام جدید برای «{{ selectedCommodity.name }}»</label>
-          <input v-model="form.name" id="comm_edit_name" type="text" required />
+    <div v-if="viewMode === 'edit_commodity_name' && selectedCommodity" class="ds-card">
+      <h2 class="card-title">ویرایش نام کالا</h2>
+      <form @submit.prevent="onEditCommodityNameSubmit" class="manager-form">
+        <div class="ds-form-group">
+          <label class="ds-label">نام جدید برای «{{ selectedCommodity.name }}»</label>
+          <input v-model="form.name" class="ds-input" type="text" required />
         </div>
-        <div class="form-actions">
-          <button type="submit" :disabled="isLoading">
+        <div class="form-footer">
+          <button type="submit" class="ds-btn primary" :disabled="isLoading">
             {{ isLoading ? 'در حال ذخیره...' : 'ذخیره نام' }}
           </button>
-          <button type="button" class="secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
+          <button type="button" class="ds-btn secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
         </div>
       </form>
     </div>
     
-    <div v-if="viewMode === 'add_alias' && selectedCommodity" class="card">
-      <h2>افزودن نام مستعار به «{{ selectedCommodity.name }}»</h2>
-      <form @submit.prevent="onAddAliasSubmit">
-        <div class="form-group">
-          <label for="alias_add_name">نام‌های مستعار (جدا با `،` یا `-`)</label>
-          <input v-model="form.name" id="alias_add_name" type="text" placeholder="مثال: نیم تاریخ پایین ، نیم ت.پ" required />
+    <div v-if="viewMode === 'add_alias' && selectedCommodity" class="ds-card">
+      <h2 class="card-title">افزودن نام مستعار</h2>
+      <form @submit.prevent="onAddAliasSubmit" class="manager-form">
+        <div class="ds-form-group">
+          <label class="ds-label">نام‌های مستعار (جدا با `،` یا `-`)</label>
+          <input v-model="form.name" class="ds-input" type="text" placeholder="مثال: نیم تاریخ پایین ، نیم ت.پ" required />
         </div>
-        <div class="form-actions">
-          <button type="submit" :disabled="isLoading">
+        <div class="form-footer">
+          <button type="submit" class="ds-btn primary" :disabled="isLoading">
             {{ isLoading ? 'در حال افزودن...' : 'افزودن' }}
           </button>
-          <button type="button" class="secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
+          <button type="button" class="ds-btn secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
         </div>
       </form>
     </div>
     
-    <div v-if="viewMode === 'edit_alias' && selectedCommodity && selectedAlias" class="card">
-      <h2>ویرایش نام مستعار</h2>
-      <form @submit.prevent="onEditAliasSubmit">
-        <div class="form-group">
-          <label for="alias_edit_name">نام جدید برای «{{ selectedAlias.alias }}»</label>
-          <input v-model="form.name" id="alias_edit_name" type="text" required />
+    <div v-if="viewMode === 'edit_alias' && selectedCommodity && selectedAlias" class="ds-card">
+      <h2 class="card-title">ویرایش نام مستعار</h2>
+      <form @submit.prevent="onEditAliasSubmit" class="manager-form">
+        <div class="ds-form-group">
+          <label class="ds-label">نام جدید برای «{{ selectedAlias.alias }}»</label>
+          <input v-model="form.name" class="ds-input" type="text" required />
         </div>
-        <div class="form-actions">
-          <button type="submit" :disabled="isLoading">
+        <div class="form-footer">
+          <button type="submit" class="ds-btn primary" :disabled="isLoading">
             {{ isLoading ? 'در حال ذخیره...' : 'ذخیره' }}
           </button>
-          <button type="button" class="secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
+          <button type="button" class="ds-btn secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
         </div>
       </form>
     </div>
 
-    <div v-if="viewMode === 'delete_commodity' && selectedCommodity" class="card confirmation-dialog">
-      <h2>حذف کالا</h2>
-      <p>⚠️ آیا از حذف کامل کالا **«{{ selectedCommodity.name }}»** مطمئن هستید؟ (تمام نام‌های مستعار آن نیز حذف خواهند شد)</p>
-      <div class="form-actions">
-        <button @click="onDeleteCommodityConfirm" :disabled="isLoading" class="delete-confirm">
+    <div v-if="viewMode === 'delete_commodity' && selectedCommodity" class="ds-card confirm-card">
+      <h2 class="card-title danger">حذف کالا</h2>
+      <p class="confirm-text">⚠️ آیا از حذف کامل کالا **«{{ selectedCommodity.name }}»** مطمئن هستید؟ (تمام نام‌های مستعار آن نیز حذف خواهند شد)</p>
+      <div class="form-footer">
+        <button @click="onDeleteCommodityConfirm" :disabled="isLoading" class="ds-btn danger">
           {{ isLoading ? 'در حال حذف...' : ' بله، حذف کامل' }}
         </button>
-        <button type="button" class="secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
+        <button type="button" class="ds-btn secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
       </div>
     </div>
     
-    <div v-if="viewMode === 'delete_alias' && selectedCommodity && selectedAlias" class="card confirmation-dialog">
-      <h2>حذف نام مستعار</h2>
-      <p>⚠️ آیا از حذف نام مستعار **«{{ selectedAlias.alias }}»** مطمئن هستید؟</p>
-      <div class="form-actions">
-        <button @click="onDeleteAliasConfirm" :disabled="isLoading" class="delete-confirm">
+    <div v-if="viewMode === 'delete_alias' && selectedCommodity && selectedAlias" class="ds-card confirm-card">
+      <h2 class="card-title danger">حذف نام مستعار</h2>
+      <p class="confirm-text">⚠️ آیا از حذف نام مستعار **«{{ selectedAlias.alias }}»** مطمئن هستید؟</p>
+      <div class="form-footer">
+        <button @click="onDeleteAliasConfirm" :disabled="isLoading" class="ds-btn danger">
           {{ isLoading ? 'در حال حذف...' : ' بله، حذف شود' }}
         </button>
-        <button type="button" class="secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
+        <button type="button" class="ds-btn secondary" @click="onManageAliases(selectedCommodity)" :disabled="isLoading">لغو</button>
       </div>
     </div>
 
@@ -488,171 +486,216 @@ onMounted(fetchCommodities);
 </template>
 
 <style scoped>
-/* ── Layout ── */
-.commodity-manager-container {
+.commodity-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.error-pre {
+  white-space: pre-wrap;
+  margin: 0;
+  font-family: inherit;
+}
+
+.no-data {
+  text-align: center;
+  color: var(--ds-text-placeholder);
+  padding: 2rem 0;
+  font-size: 0.9rem;
+}
+
+/* List Style */
+.list-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.list-item-btn {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  background: var(--ds-bg-card);
+  border: 1px solid var(--ds-border-light);
+  border-radius: var(--ds-radius-lg);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.list-item-btn:hover {
+  background: var(--ds-bg-hover);
+  border-color: var(--ds-primary-300);
+}
+
+.list-item-btn .item-label {
+  font-weight: 700;
+  color: var(--ds-text-primary);
+}
+
+.list-item-btn .chevron {
+  color: var(--ds-text-disabled);
+  font-size: 1.2rem;
+}
+
+/* Card Header */
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--ds-border-light);
+}
+
+.card-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--ds-text-primary);
+}
+
+.card-title.danger {
+  color: var(--ds-danger-600);
+}
+
+.back-icon-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ds-bg-inset);
+  border: 1px solid var(--ds-border-light);
+  border-radius: var(--ds-radius-md);
+  color: var(--ds-primary-600);
+  font-weight: 900;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.back-icon-btn:hover {
+  background: var(--ds-primary-50);
+  border-color: var(--ds-primary-300);
+}
+
+/* Alias List */
+.alias-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.alias-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: var(--ds-bg-inset);
+  border: 1px solid var(--ds-border-light);
+  border-radius: var(--ds-radius-md);
+}
+
+.alias-text {
+  font-weight: 600;
+  color: var(--ds-text-secondary);
+}
+
+.alias-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.icon-btn {
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--ds-radius-md);
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.icon-btn.edit {
+  background: var(--ds-primary-50);
+  color: var(--ds-primary-600);
+}
+
+.icon-btn.delete {
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-600);
+}
+
+.icon-btn:active {
+  transform: scale(0.9);
+}
+
+/* Footers */
+.card-footer {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--ds-border-light);
+}
+
+.card-footer.stacked {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
 }
 
-/* ── Card (glass) ── */
-.card {
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(245, 158, 11, 0.1);
-  border-radius: 1.25rem;
-  padding: 1.25rem;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.04);
-}
-
-/* ── Form elements ── */
-.form-group { margin-bottom: 1rem; }
-label { display: block; margin-bottom: 0.5rem; font-weight: 700; font-size: 0.8rem; color: #6b7280; }
-input {
-  width: 100%; padding: 0.625rem 0.875rem; border-radius: 0.75rem;
-  border: 1px solid rgba(245, 158, 11, 0.15); background: white;
-  font-size: 0.9rem; font-family: inherit; outline: none; transition: all 0.2s;
-  box-sizing: border-box; color: #1f2937;
-}
-input:focus { border-color: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1); }
-
-/* ── Form action buttons (scoped — NOT global button) ── */
-.form-actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
-.form-actions button {
-  flex-grow: 1; background: linear-gradient(135deg, #f59e0b, #d97706); color: white;
-  border: none; cursor: pointer; font-weight: 700; padding: 0.75rem;
-  border-radius: 0.75rem; font-size: 0.9rem; transition: all 0.2s;
-  -webkit-tap-highlight-color: transparent;
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25);
-}
-.form-actions button:active { transform: scale(0.98); }
-.form-actions button:disabled { background: #d1d5db; box-shadow: none; cursor: not-allowed; color: white; }
-.form-actions button.secondary {
-  background: white; color: #6b7280; box-shadow: none;
-  border: 1px solid rgba(245, 158, 11, 0.15); flex-grow: 0;
-}
-.form-actions button.secondary:active { background: #f9fafb; }
-.form-actions .delete-confirm {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
-  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
-}
-
-/* ── Messages ── */
-.message { padding: 0.75rem; border-radius: 0.75rem; margin-bottom: 1rem; font-size: 0.8rem; }
-.message.error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
-.message.success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
-.no-data { text-align: center; color: #9ca3af; padding: 1.5rem 0; font-size: 0.85rem; }
-.divider { border: none; border-top: 1px solid rgba(245, 158, 11, 0.1); margin: 1rem 0; }
-
-/* ── Sub-section header (aliases view) ── */
-.sub-header-row {
-  display: flex; align-items: center; gap: 0.625rem; margin-bottom: 1rem;
-  padding-bottom: 0.75rem; border-bottom: 1px solid rgba(245, 158, 11, 0.1);
-}
-.sub-back-btn {
-  flex-shrink: 0; width: 34px; height: 34px; padding: 0;
-  background: linear-gradient(135deg, #fffbeb, #fef3c7);
-  border: 1px solid rgba(245, 158, 11, 0.2);
-  border-radius: 0.625rem; cursor: pointer; color: #b45309;
-  display: flex; align-items: center; justify-content: center;
-  transition: all 0.2s; -webkit-tap-highlight-color: transparent;
-}
-.sub-back-btn:hover { background: #fef3c7; border-color: rgba(245, 158, 11, 0.4); }
-.sub-back-btn:active { transform: scale(0.92); }
-.sub-back-icon { font-size: 1rem; font-weight: 700; line-height: 1; }
-.sub-title { font-size: 0.95rem; font-weight: 800; color: #1f2937; margin: 0; }
-
-/* ── Commodity list items ── */
-.button-list { display: flex; flex-direction: column; gap: 0.5rem; }
-.comm-list-btn {
-  width: 100%; background: white;
-  color: #1f2937;
-  border: 1px solid rgba(245, 158, 11, 0.15);
-  padding: 0.875rem 1rem;
-  font-size: 0.9rem;
-  font-family: inherit;
-  font-weight: 600;
-  text-align: right;
-  display: flex; justify-content: space-between; align-items: center;
-  border-radius: 1rem; transition: all 0.2s;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.comm-list-btn:hover {
-  border-color: #f59e0b;
-  background: #fffbeb;
-}
-.comm-list-btn:active { transform: scale(0.98); }
-/* Arrow chevron on regular commodity list items (two-span buttons only) */
-.comm-list-btn span:last-child:not(:first-child) {
-  color: #d1d5db;
-  font-weight: 400;
-  font-size: 1.2rem;
-}
-
-/* Action buttons — soft pastel bg + bold colored text (matches UserProfile style) */
-.comm-list-btn.comm-add-btn {
-  justify-content: center;
-  background: linear-gradient(135deg, #fffbeb, #fef3c7);
-  color: #92400e;
-  border-color: rgba(245, 158, 11, 0.25);
-  font-weight: 700;
-}
-.comm-list-btn.comm-add-btn:hover {
-  background: #fef3c7;
-  border-color: #f59e0b;
-  color: #78350f;
-}
-
-.comm-list-btn.comm-edit-btn {
-  justify-content: center;
-  background: #eff6ff;
-  color: #1d4ed8;
-  border-color: #bfdbfe;
-  font-weight: 700;
-}
-.comm-list-btn.comm-edit-btn:hover {
-  background: #dbeafe;
-  border-color: #93c5fd;
-  color: #1e40af;
-}
-
-.comm-list-btn.comm-del-btn {
-  justify-content: center;
-  background: #fef2f2;
-  color: #dc2626;
-  border-color: #fecaca;
-  font-weight: 700;
-}
-.comm-list-btn.comm-del-btn:hover {
-  background: #fee2e2;
-  border-color: #fca5a5;
-  color: #b91c1c;
-}
-
-/* ── Aliases ── */
-.alias-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; }
-.alias-item {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 0.75rem 0.875rem; background: white; border-radius: 0.75rem;
-  border: 1px solid rgba(245, 158, 11, 0.08);
-}
-.alias-item span { font-weight: 600; font-size: 0.85rem; color: #1f2937; }
-.alias-actions { display: flex; gap: 0.375rem; }
 .action-btn {
-  padding: 0.375rem 0.625rem; font-size: 0.8rem; border-radius: 0.5rem;
-  border: none; background: transparent; cursor: pointer;
-  transition: all 0.2s; -webkit-tap-highlight-color: transparent;
+  width: 100%;
+  padding: 0.85rem;
+  border-radius: var(--ds-radius-lg);
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
 }
-.action-btn:active { transform: scale(0.9); }
-.action-btn.edit { color: #d97706; background: #fffbeb; }
-.action-btn.delete { color: #dc2626; background: #fef2f2; }
-.button-list.stacked { margin-top: 1.25rem; }
 
-/* ── Confirmation dialog ── */
-.confirmation-dialog p { font-size: 0.85rem; line-height: 1.7; color: #4b5563; }
-.confirmation-dialog p strong { color: #dc2626; }
-h2 { margin-top: 0; margin-bottom: 1rem; font-size: 1rem; font-weight: 800; color: #1f2937; }
+.action-btn.primary-soft {
+  background: var(--ds-primary-50);
+  color: var(--ds-primary-700);
+  border: 1px solid var(--ds-primary-100);
+}
+
+.action-btn.secondary-soft {
+  background: var(--ds-bg-inset);
+  color: var(--ds-text-secondary);
+  border: 1px solid var(--ds-border-light);
+}
+
+.action-btn.danger-soft {
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-700);
+  border: 1px solid var(--ds-danger-100);
+}
+
+.action-btn:active {
+  transform: scale(0.98);
+}
+
+/* Forms */
+.manager-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.form-footer {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.form-footer .ds-btn {
+  flex: 1;
+}
+
+.confirm-text {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--ds-text-secondary);
+  margin-bottom: 1.5rem;
+}
 </style>
