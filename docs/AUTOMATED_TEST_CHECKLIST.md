@@ -167,7 +167,7 @@ Current messenger coverage already locked by Playwright:
 Remaining messenger-specific automated test backlog:
 
 - [x] Conversation-list state/actions: long-press popover actions for pin/unpin, pin reorder, mute/unmute, manual unread, hide direct chats, optional-channel unfollow, and mandatory-channel ordering invariants.
-- [ ] Pinned-message UX inside open rooms: pin/unpin action, banner rendering, navigation/jump behavior, and direct/group/channel persistence.
+- [x] Pinned-message UX inside open rooms: pin/unpin action, banner rendering, navigation/jump behavior, and direct/group/channel persistence in `frontend/e2e/messenger-pinned-message.spec.ts`.
 - [x] Messenger room-manager core flows: group/channel create/edit title and description, avatar upload/remove persistence, channel member add, header-open entry points, and back-stack dismissal in `ChatGroupManagerModal.vue` and `CreateChannelView.vue`.
 - [ ] Remaining group/channel manager edge flows: admin-role mutations, leave/delete paths, and broader member-management permutations in `ChatGroupManagerModal.vue` and `CreateChannelView.vue`.
 - [x] Messenger public-profile core flows: open self/other public profiles from header entry points, self avatar add/remove, and return-to-chat navigation.
@@ -178,7 +178,7 @@ Remaining messenger-specific automated test backlog:
 
 Remaining completion estimate for full messenger test closure:
 
-- [ ] 2 focused Playwright slices covering pinned-message UX and direct-room media/search/viewer UX.
+- [ ] 1 focused Playwright slice covering the remaining direct-room media/search/viewer UX.
 - [ ] 2 focused Vitest slices covering deterministic messenger UI state that is cheaper to lock below Playwright.
 - [ ] 1 full serial browser-matrix rerun on Chromium / Firefox / WebKit after the new messenger slices land.
 
