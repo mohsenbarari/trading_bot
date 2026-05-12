@@ -23,6 +23,7 @@ from core.services.accountant_relation_service import (
     update_owner_accountant_relation,
     validate_accountant_capacity,
 )
+from models.accountant_relation import AccountantRelation
 from models.accountant_relation import AccountantRelationStatus
 from models.user import UserRole
 
@@ -70,6 +71,12 @@ class FakeDB:
 
 
 class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
+    def test_accountant_relation_status_column_uses_database_values(self):
+        self.assertEqual(
+            AccountantRelation.__table__.c.status.type.enums,
+            ["pending", "active", "expired", "revoked", "deleted"],
+        )
+
     def test_get_effective_max_accountants_clamps_invalid_values(self):
         self.assertEqual(get_effective_max_accountants(SimpleNamespace(max_accountants=5)), 5)
         self.assertEqual(get_effective_max_accountants(SimpleNamespace(max_accountants=-2)), 0)
