@@ -18,6 +18,7 @@ class Message(Base):
     chat_id = Column(Integer, ForeignKey("chats.id", name="fk_messages_chat"), nullable=True, index=True)
     sender_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     receiver_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    actor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     
     # Reply support
     reply_to_message_id = Column(Integer, ForeignKey("messages.id", name="fk_messages_reply_to_message"), nullable=True)
@@ -75,3 +76,4 @@ class Message(Base):
     chat = relationship("Chat", back_populates="messages", foreign_keys=[chat_id])
     sender = relationship("User", foreign_keys=[sender_id], backref="sent_messages")
     receiver = relationship("User", foreign_keys=[receiver_id], backref="received_messages")
+    actor_user = relationship("User", foreign_keys=[actor_user_id])

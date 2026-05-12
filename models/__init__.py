@@ -3,6 +3,7 @@
 مدل‌های دیتابیس - SQLAlchemy ORM
 """
 from .user import User
+from .accountant_relation import AccountantRelation, AccountantRelationStatus
 from .invitation import Invitation
 from .session import UserSession, Platform, SessionLoginRequest, LoginRequestStatus
 from .commodity import Commodity, CommodityAlias
@@ -22,6 +23,8 @@ from .sync_block import SyncBlock
 __all__ = [
     # User & Auth
     "User",
+    "AccountantRelation",
+    "AccountantRelationStatus",
     "Invitation",
     "UserSession",
     "Platform",

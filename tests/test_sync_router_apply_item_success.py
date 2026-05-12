@@ -109,6 +109,33 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         builder.assert_called_once_with(object, "offers", offer_data)
         self.assertEqual(db.execute_calls[0], ("UPSERT", {"is_sync": True}))
 
+        relation_data = {
+            "owner_user_id": 2,
+            "accountant_user_id": 5,
+            "created_by_user_id": 2,
+            "invitation_token": "invite-token",
+            "global_account_name": "acct-user",
+            "relation_display_name": "دفتر",
+            "duty_description": "books",
+            "mobile_number": "09120000000",
+            "status": "active",
+        }
+        db = FakeDB()
+        with patch("api.routers.sync._build_upsert_stmt", return_value="RELATION_UPSERT") as builder:
+            result = await _apply_item(
+                db,
+                "accountant_relations",
+                "INSERT",
+                19,
+                relation_data,
+                model=object,
+                new_offers=[],
+            )
+        self.assertEqual(result, "ok")
+        self.assertEqual(relation_data["id"], 19)
+        builder.assert_called_once_with(object, "accountant_relations", relation_data)
+        self.assertEqual(db.execute_calls[0], ("RELATION_UPSERT", {"is_sync": True}))
+
     async def test_apply_item_merges_unique_violation_by_natural_key(self):
         duplicate_error = Exception("duplicate key value violates unique constraint")
         db = FakeDB([

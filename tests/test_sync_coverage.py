@@ -2,14 +2,18 @@ import json
 import unittest
 
 from api.routers import sync
+from models.accountant_relation import AccountantRelation
 from models.invitation import Invitation
 from models.notification import Notification
 
 
 class SyncCoverageTests(unittest.TestCase):
     def test_non_messenger_tables_are_registered_for_sync(self):
+        self.assertIs(sync.get_model_class("accountant_relations"), AccountantRelation)
         self.assertIs(sync.get_model_class("invitations"), Invitation)
         self.assertIs(sync.get_model_class("notifications"), Notification)
+        self.assertLess(sync.TABLE_ORDER["users"], sync.TABLE_ORDER["accountant_relations"])
+        self.assertLess(sync.TABLE_ORDER["accountant_relations"], sync.TABLE_ORDER["offers"])
         self.assertLess(sync.TABLE_ORDER["users"], sync.TABLE_ORDER["invitations"])
         self.assertLess(sync.TABLE_ORDER["users"], sync.TABLE_ORDER["notifications"])
         self.assertLess(sync.TABLE_ORDER["invitations"], sync.TABLE_ORDER["offers"])

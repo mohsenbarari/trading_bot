@@ -16,16 +16,17 @@ logger = logging.getLogger(__name__)
 # Table processing order: dependencies first
 TABLE_ORDER = {
     "users": 0,
-    "chats": 1,
-    "chat_members": 2,
-    "invitations": 3,
-    "notifications": 4,
-    "user_blocks": 5,
-    "commodities": 6,
-    "commodity_aliases": 7,
-    "trading_settings": 8,
-    "offers": 9,
-    "trades": 10,
+    "accountant_relations": 1,
+    "chats": 2,
+    "chat_members": 3,
+    "invitations": 4,
+    "notifications": 5,
+    "user_blocks": 6,
+    "commodities": 7,
+    "commodity_aliases": 8,
+    "trading_settings": 9,
+    "offers": 10,
+    "trades": 11,
 }
 
 async def verify_signature(request: Request):
@@ -74,6 +75,7 @@ from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from core.enums import ChatType
+from models.accountant_relation import AccountantRelation
 from models.user import User
 from models.invitation import Invitation
 from models.notification import Notification
@@ -101,6 +103,7 @@ NATURAL_KEYS = {
 
 SEQUENCE_MAP = {
     "users": ("users_id_seq", "users"),
+    "accountant_relations": ("accountant_relations_id_seq", "accountant_relations"),
     "chats": ("chats_id_seq", "chats"),
     "chat_members": ("chat_members_id_seq", "chat_members"),
     "offers": ("offers_id_seq", "offers"),
@@ -115,6 +118,7 @@ SEQUENCE_MAP = {
 def get_model_class(table_name: str):
     mapping = {
         "users": User,
+        "accountant_relations": AccountantRelation,
         "chats": Chat,
         "chat_members": ChatMember,
         "invitations": Invitation,

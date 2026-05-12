@@ -269,6 +269,10 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
         val = update_data['max_sessions']
         user.max_sessions = max(1, min(val, 3)) if val else 1
 
+    # --- 4c. Accountant Capacity ---
+    if 'max_accountants' in update_data and update_data['max_accountants'] is not None:
+        user.max_accountants = max(0, update_data['max_accountants'])
+
     await sync_mandatory_channel_for_user_state_change(
         db,
         user=user,

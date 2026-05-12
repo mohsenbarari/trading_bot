@@ -76,7 +76,13 @@ class CoreEventsTests(unittest.TestCase):
             joined_at=now,
             left_at=None,
             last_read_at=now,
+            is_marked_unread=False,
             is_muted=False,
+            is_pinned=False,
+            pinned_at=None,
+            pin_order=None,
+            is_hidden=False,
+            hidden_at=None,
             created_at=now,
             updated_at=now,
         )
@@ -84,6 +90,7 @@ class CoreEventsTests(unittest.TestCase):
             id=1,
             version_id=2,
             user_id=9,
+            actor_user_id=7,
             home_server='foreign',
             offer_type=SimpleNamespace(value='buy'),
             commodity_id=11,
@@ -111,6 +118,7 @@ class CoreEventsTests(unittest.TestCase):
             offer_user_mobile='0912',
             responder_user_id=4,
             responder_user_mobile='0935',
+            actor_user_id=5,
             commodity_id=11,
             trade_type=SimpleNamespace(value='buy'),
             quantity=7,
@@ -154,6 +162,23 @@ class CoreEventsTests(unittest.TestCase):
             created_at=now,
             updated_at=now,
         )
+        accountant_relation = SimpleNamespace(
+            id=8,
+            owner_user_id=3,
+            accountant_user_id=4,
+            created_by_user_id=3,
+            invitation_token='invite-token',
+            global_account_name='acct-user',
+            relation_display_name='دفتر',
+            duty_description='books',
+            mobile_number='09120000000',
+            status=SimpleNamespace(value='active'),
+            expires_at=now,
+            activated_at=now,
+            deleted_at=None,
+            created_at=now,
+            updated_at=now,
+        )
         commodity = SimpleNamespace(id=1, name='Gold')
         alias = SimpleNamespace(id=2, alias='gold', commodity_id=1)
         block = SimpleNamespace(id=3, blocker_id=8, blocked_id=9, created_at=now)
@@ -186,6 +211,9 @@ class CoreEventsTests(unittest.TestCase):
             ('Trade', 'after_update'): trade,
             ('User', 'after_insert'): user,
             ('User', 'after_update'): user,
+            ('AccountantRelation', 'after_insert'): accountant_relation,
+            ('AccountantRelation', 'after_update'): accountant_relation,
+            ('AccountantRelation', 'after_delete'): accountant_relation,
             ('Commodity', 'after_insert'): commodity,
             ('Commodity', 'after_update'): commodity,
             ('Commodity', 'after_delete'): commodity,
@@ -377,6 +405,7 @@ class CoreEventsTests(unittest.TestCase):
         with patch('core.events.event.listens_for', side_effect=_capture_listeners(registry)), patch.object(
             events, 'logger'
         ) as logger:
+            events.setup_accountant_relation_events()
             events.setup_chat_events()
             events.setup_chat_member_events()
             events.setup_commodity_events()
@@ -419,7 +448,13 @@ class CoreEventsTests(unittest.TestCase):
                 joined_at=now,
                 left_at=None,
                 last_read_at=now,
+                is_marked_unread=False,
                 is_muted=False,
+                is_pinned=False,
+                pinned_at=None,
+                pin_order=None,
+                is_hidden=False,
+                hidden_at=None,
                 created_at=now,
                 updated_at=now,
             )
@@ -466,7 +501,29 @@ class CoreEventsTests(unittest.TestCase):
             registry[('Notification', 'after_update')](None, connection, notification)
             registry[('Notification', 'after_delete')](None, connection, notification)
 
-        self.assertGreaterEqual(log_change.call_count, 22)
+            accountant_relation = SimpleNamespace(
+                id=8,
+                owner_user_id=3,
+                accountant_user_id=4,
+                created_by_user_id=3,
+                invitation_token='invite-token',
+                global_account_name='acct-user',
+                relation_display_name='دفتر',
+                duty_description='books',
+                mobile_number='09120000000',
+                status=SimpleNamespace(value='active'),
+                expires_at=now,
+                activated_at=now,
+                deleted_at=None,
+                created_at=now,
+                updated_at=now,
+            )
+            registry[('AccountantRelation', 'after_insert')](None, connection, accountant_relation)
+            registry[('AccountantRelation', 'after_update')](None, connection, accountant_relation)
+            registry[('AccountantRelation', 'after_delete')](None, connection, accountant_relation)
+
+        self.assertGreaterEqual(log_change.call_count, 25)
+        logger.info.assert_any_call('✅ AccountantRelation event listeners registered')
         logger.info.assert_any_call('✅ Chat event listeners registered')
         logger.info.assert_any_call('✅ ChatMember event listeners registered')
         logger.info.assert_any_call('✅ Commodity event listeners registered')
@@ -477,6 +534,8 @@ class CoreEventsTests(unittest.TestCase):
         logger.info.assert_any_call('✅ Notification event listeners registered')
 
         with patch('core.events.setup_user_events') as setup_user_events, patch(
+            'core.events.setup_accountant_relation_events'
+        ) as setup_accountant_relation_events, patch(
             'core.events.setup_chat_events'
         ) as setup_chat_events, patch(
             'core.events.setup_chat_member_events'
@@ -494,6 +553,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_all_events()
 
         setup_user_events.assert_called_once()
+        setup_accountant_relation_events.assert_called_once()
         setup_chat_events.assert_called_once()
         setup_chat_member_events.assert_called_once()
         setup_invitation_events.assert_called_once()
@@ -514,6 +574,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_offer_events()
             events.setup_trade_events()
             events.setup_user_events()
+            events.setup_accountant_relation_events()
             events.setup_chat_events()
             events.setup_chat_member_events()
             events.setup_commodity_events()
