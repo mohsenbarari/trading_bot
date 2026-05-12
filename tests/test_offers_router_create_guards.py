@@ -46,10 +46,16 @@ def make_user(**overrides):
     return SimpleNamespace(**data)
 
 
+def make_context(owner_user=None, actor_user=None):
+    owner = owner_user or make_user()
+    actor = actor_user or owner
+    return SimpleNamespace(owner_user=owner, actor_user=actor, relation=None, is_accountant_context=owner.id != actor.id)
+
+
 class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_offer_rejects_watch_users(self):
         with self.assertRaises(HTTPException) as exc_info:
-            await create_offer(make_offer(), db=FakeDB(), current_user=make_user(role=UserRole.WATCH))
+            await create_offer(make_offer(), db=FakeDB(), context=make_context(make_user(role=UserRole.WATCH)))
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "شما دسترسی به بخش معاملات را ندارید.")
 
@@ -57,7 +63,7 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
         current_user = make_user(trading_restricted_until=datetime.utcnow() + timedelta(hours=2))
 
         with self.assertRaises(HTTPException) as exc_info:
-            await create_offer(make_offer(), db=FakeDB(), current_user=current_user)
+            await create_offer(make_offer(), db=FakeDB(), context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertIn("حساب شما مسدود است", exc_info.exception.detail)
 
@@ -69,7 +75,7 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             side_effect=[(False, "channel blocked")],
         ):
             with self.assertRaises(HTTPException) as exc_info:
-                await create_offer(make_offer(), db=FakeDB(), current_user=current_user)
+                await create_offer(make_offer(), db=FakeDB(), context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "channel blocked")
 
@@ -78,7 +84,7 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             side_effect=[(True, None), (False, "trade blocked")],
         ):
             with self.assertRaises(HTTPException) as exc_info:
-                await create_offer(make_offer(), db=FakeDB(), current_user=current_user)
+                await create_offer(make_offer(), db=FakeDB(), context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "trade blocked")
 
@@ -95,7 +101,7 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=None),
         ), patch("core.cache.set_active_offer_count", new=AsyncMock()):
             with self.assertRaises(HTTPException) as exc_info:
-                await create_offer(make_offer(), db=db, current_user=current_user)
+                await create_offer(make_offer(), db=db, context=make_context(current_user))
 
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(
@@ -116,7 +122,7 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=0),
         ):
             with self.assertRaises(HTTPException) as exc_info:
-                await create_offer(make_offer(), db=db, current_user=current_user)
+                await create_offer(make_offer(), db=db, context=make_context(current_user))
 
         self.assertEqual(exc_info.exception.status_code, 404)
         self.assertEqual(exc_info.exception.detail, "کالا یافت نشد.")
@@ -138,7 +144,7 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             return_value=(False, "bad quantity"),
         ):
             with self.assertRaises(HTTPException) as exc_info:
-                await create_offer(make_offer(), db=db, current_user=current_user)
+                await create_offer(make_offer(), db=db, context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "bad quantity")
 
@@ -154,7 +160,7 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             return_value=(False, "bad price"),
         ):
             with self.assertRaises(HTTPException) as exc_info:
-                await create_offer(make_offer(), db=db, current_user=current_user)
+                await create_offer(make_offer(), db=db, context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "bad price")
 
@@ -173,7 +179,7 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=(False, "not competitive")),
         ):
             with self.assertRaises(HTTPException) as exc_info:
-                await create_offer(make_offer(), db=db, current_user=current_user)
+                await create_offer(make_offer(), db=db, context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "not competitive")
 
@@ -193,7 +199,7 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
                 await create_offer(
                     make_offer(is_wholesale=False, lot_sizes=None),
                     db=FakeDB(scalar_result=0, get_result=commodity),
-                    current_user=current_user,
+                    context=make_context(current_user),
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "برای آفر خُرد باید لات‌ها مشخص شوند.")
@@ -212,10 +218,24 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
                 await create_offer(
                     make_offer(is_wholesale=False, lot_sizes=[4, 6]),
                     db=FakeDB(scalar_result=0, get_result=commodity),
-                    current_user=current_user,
+                    context=make_context(current_user),
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "bad lots")
+
+    async def test_create_offer_uses_effective_owner_limits_for_accountant_context(self):
+        owner_user = make_user(id=5)
+        actor_user = make_user(id=44, role=UserRole.WATCH)
+
+        with patch(
+            "api.routers.offers.check_user_limits",
+            side_effect=[(False, "owner blocked")],
+        ) as limits_mock:
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_offer(make_offer(), db=FakeDB(), context=make_context(owner_user, actor_user))
+
+        self.assertEqual(exc_info.exception.detail, "owner blocked")
+        self.assertEqual(limits_mock.call_args.args[0], owner_user)
 
 
 if __name__ == "__main__":

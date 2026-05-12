@@ -189,6 +189,27 @@ class AccountantRelationCreate(BaseModel):
         return cleaned or None
 
 
+class AccountantRelationUpdate(BaseModel):
+    relation_display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    duty_description: str | None = Field(default=None, max_length=255)
+
+    @field_validator('relation_display_name', mode='before')
+    @classmethod
+    def strip_relation_display_name(cls, value):
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
+
+    @field_validator('duty_description', mode='before')
+    @classmethod
+    def strip_updated_duty_description(cls, value):
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
+
+
 class AccountantRelationRead(BaseModel):
     id: int
     owner_user_id: int

@@ -24,6 +24,11 @@ class FakeDB:
         return self.get_results.pop(0)
 
 
+def make_context(owner_user, actor_user=None):
+    actor = actor_user or owner_user
+    return SimpleNamespace(owner_user=owner_user, actor_user=actor, relation=None, is_accountant_context=owner_user.id != actor.id)
+
+
 def make_request(body=b"{}", headers=None):
     async def body_reader():
         return body
@@ -36,6 +41,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
         trade_data = TradeCreate(offer_id=7, quantity=3, idempotency_key="idem-1")
         background_tasks = BackgroundTasks()
         current_user = SimpleNamespace(id=5)
+        context = make_context(current_user)
         forwarded = JSONResponse(status_code=202, content={"forwarded": True})
 
         with patch(
@@ -50,7 +56,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
                 background_tasks=background_tasks,
                 raw_request=SimpleNamespace(),
                 db=FakeDB(),
-                current_user=current_user,
+                context=context,
             )
 
         self.assertIs(result, forwarded)
@@ -61,6 +67,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
         trade_data = TradeCreate(offer_id=7, quantity=3, idempotency_key="idem-1")
         background_tasks = BackgroundTasks()
         current_user = SimpleNamespace(id=5)
+        context = make_context(current_user)
 
         with patch(
             "api.routers.trades._forward_trade_if_remote_home",
@@ -74,14 +81,14 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
                 background_tasks=background_tasks,
                 raw_request=SimpleNamespace(),
                 db=FakeDB(),
-                current_user=current_user,
+                context=context,
             )
 
         self.assertEqual(result, {"id": 77})
         execute_mock.assert_awaited_once()
         self.assertEqual(execute_mock.await_args.kwargs["trade_data"], trade_data)
         self.assertIs(execute_mock.await_args.kwargs["background_tasks"], background_tasks)
-        self.assertEqual(execute_mock.await_args.kwargs["current_user"], current_user)
+        self.assertEqual(execute_mock.await_args.kwargs["context"], context)
         self.assertIsInstance(execute_mock.await_args.kwargs["edge_received_at"], datetime)
 
     async def test_execute_trade_internal_rejects_invalid_signature(self):
@@ -148,12 +155,14 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
             offer_id=7,
             quantity=3,
             responder_user_id=5,
+            actor_user_id=44,
             edge_received_at=datetime(2026, 1, 1, 12, 0, 0),
             source_server="foreign",
             idempotency_key="idem-1",
         )
         headers = {"x-timestamp": "1", "x-signature": "sig", "x-api-key": "key"}
         responder = SimpleNamespace(id=5, is_deleted=False)
+        actor = SimpleNamespace(id=44, is_deleted=False)
 
         with patch("api.routers.trades.verify_internal_signature", return_value=True), patch(
             "api.routers.trades.normalize_server",
@@ -166,7 +175,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
                 internal_data=internal_data,
                 background_tasks=BackgroundTasks(),
                 raw_request=make_request(body=b"payload", headers=headers),
-                db=FakeDB(get_results=[SimpleNamespace(home_server="foreign"), responder]),
+                db=FakeDB(get_results=[SimpleNamespace(home_server="foreign"), responder, actor]),
             )
 
         self.assertEqual(result, {"id": 99})
@@ -175,7 +184,10 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(delegated_trade_data.offer_id, 7)
         self.assertEqual(delegated_trade_data.quantity, 3)
         self.assertEqual(delegated_trade_data.idempotency_key, "idem-1")
-        self.assertEqual(execute_mock.await_args.kwargs["current_user"], responder)
+        delegated_context = execute_mock.await_args.kwargs["context"]
+        self.assertEqual(delegated_context.owner_user, responder)
+        self.assertEqual(delegated_context.actor_user, actor)
+        self.assertTrue(delegated_context.is_accountant_context)
         self.assertEqual(execute_mock.await_args.kwargs["edge_received_at"], internal_data.edge_received_at)
 
 

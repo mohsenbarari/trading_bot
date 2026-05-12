@@ -85,6 +85,11 @@ def make_offer(**overrides):
     return SimpleNamespace(**data)
 
 
+def make_context(owner_user, actor_user=None):
+    actor = actor_user or owner_user
+    return SimpleNamespace(owner_user=owner_user, actor_user=actor, relation=None, is_accountant_context=owner_user.id != actor.id)
+
+
 class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_trade_authoritatively_converts_stale_commit_to_conflict(self):
         locked_user = make_user()
@@ -108,7 +113,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                     TradeCreate(offer_id=7, quantity=4),
                     BackgroundTasks(),
                     db=db,
-                    current_user=locked_user,
+                    context=make_context(locked_user),
                 )
 
         db.rollback.assert_awaited_once()
@@ -119,9 +124,8 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         locked_user = make_user()
         offer = make_offer()
         reloaded_trade = SimpleNamespace(id=88)
-        user_for_counter = make_user()
         db = FakeDB(
-            get_results=[offer, user_for_counter],
+            get_results=[offer],
             execute_results=[
                 FakeExecuteResult(single=locked_user),
                 FakeExecuteResult(single=reloaded_trade),
@@ -136,6 +140,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
             "api.routers.trades.validate_offer_trade_amount",
             return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[locked_user.id], [offer.user_id]]),
         ), patch("api.routers.trades.update_channel_buttons", new=AsyncMock(return_value=True)) as update_buttons_mock, patch(
             "api.routers.trades.create_user_notification",
             new=AsyncMock(),
@@ -150,7 +157,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                 TradeCreate(offer_id=7, quantity=4),
                 background_tasks,
                 db=db,
-                current_user=locked_user,
+                context=make_context(locked_user),
             )
 
         self.assertEqual(len(db.added), 1)
@@ -160,6 +167,8 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_trade.trade_type, TradeType.BUY)
         self.assertEqual(new_trade.status, TradeStatus.COMPLETED)
         self.assertEqual(new_trade.quantity, 4)
+        self.assertEqual(new_trade.responder_user_id, locked_user.id)
+        self.assertEqual(new_trade.actor_user_id, locked_user.id)
         self.assertEqual(offer.remaining_quantity, 0)
         self.assertEqual(offer.status, OfferStatus.COMPLETED)
         db.refresh.assert_awaited_once_with(offer, ["user", "commodity"])
@@ -174,7 +183,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                 "category": NotificationCategory.TRADE,
             },
         )
-        counter_mock.assert_awaited_once_with(db, user_for_counter, "trade", 4)
+        counter_mock.assert_awaited_once_with(db, locked_user, "trade", 4)
         self.assertEqual(publish_mock.await_count, 2)
         self.assertEqual(publish_mock.await_args_list[0].args[0], "trade:created")
         self.assertEqual(publish_mock.await_args_list[1].args[0], "offer:updated")
@@ -192,9 +201,8 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             remaining_quantity=4,
         )
         reloaded_trade = SimpleNamespace(id=89)
-        user_for_counter = make_user()
         db = FakeDB(
-            get_results=[offer, user_for_counter],
+            get_results=[offer],
             execute_results=[
                 FakeExecuteResult(single=locked_user),
                 FakeExecuteResult(single=reloaded_trade),
@@ -209,6 +217,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
             "api.routers.trades.validate_offer_trade_amount",
             return_value=(True, None, 3, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[locked_user.id], [offer.user_id]]),
         ), patch("sqlalchemy.orm.attributes.flag_modified") as flag_modified, patch(
             "api.routers.trades.update_channel_buttons",
             new=AsyncMock(side_effect=RuntimeError("button failure")),
@@ -226,7 +237,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                 TradeCreate(offer_id=7, quantity=3),
                 background_tasks,
                 db=db,
-                current_user=locked_user,
+                context=make_context(locked_user),
             )
 
         self.assertEqual(offer.remaining_quantity, 1)
@@ -234,7 +245,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         flag_modified.assert_called_once_with(offer, "lot_sizes")
         self.assertEqual(len(background_tasks.tasks), 2)
         notif_mock.assert_awaited_once()
-        counter_mock.assert_awaited_once_with(db, user_for_counter, "trade", 3)
+        counter_mock.assert_awaited_once_with(db, locked_user, "trade", 3)
         self.assertEqual(publish_mock.await_count, 2)
         logger.error.assert_called_once()
         response_mock.assert_called_once_with(reloaded_trade)
@@ -250,9 +261,8 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             remaining_quantity=25,
         )
         reloaded_trade = SimpleNamespace(id=90)
-        user_for_counter = make_user()
         db = FakeDB(
-            get_results=[offer, user_for_counter],
+            get_results=[offer],
             execute_results=[
                 FakeExecuteResult(single=locked_user),
                 FakeExecuteResult(single=reloaded_trade),
@@ -266,6 +276,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
             "api.routers.trades.validate_offer_trade_amount",
             return_value=(True, None, 25, [25, 15, 10]),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[locked_user.id], [offer.user_id]]),
         ), patch("sqlalchemy.orm.attributes.flag_modified") as flag_modified, patch(
             "api.routers.trades.update_channel_buttons",
             new=AsyncMock(return_value=True),
@@ -283,7 +296,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                 TradeCreate(offer_id=7, quantity=25),
                 BackgroundTasks(),
                 db=db,
-                current_user=locked_user,
+                context=make_context(locked_user),
             )
 
         self.assertEqual(offer.remaining_quantity, 0)
@@ -314,10 +327,61 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                     TradeCreate(offer_id=7, quantity=4),
                     BackgroundTasks(),
                     db=db,
-                    current_user=locked_user,
+                    context=make_context(locked_user),
                 )
 
         self.assertEqual(str(exc_info.exception), "db boom")
+
+    async def test_execute_trade_authoritatively_stamps_actor_user_id_for_accountant_context(self):
+        owner_user = make_user(id=5, account_name="owner", telegram_id=555)
+        actor_user = make_user(id=44, account_name="accountant", telegram_id=444)
+        offer = make_offer()
+        reloaded_trade = SimpleNamespace(id=91)
+        db = FakeDB(
+            get_results=[offer],
+            execute_results=[
+                FakeExecuteResult(single=owner_user),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=10003,
+        )
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[owner_user.id, actor_user.id], [offer.user_id]]),
+        ), patch("api.routers.trades.update_channel_buttons", new=AsyncMock(return_value=True)), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(),
+        ) as notif_mock, patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ) as counter_mock, patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "api.routers.trades.trade_to_response",
+            return_value={"id": 91, "trade_number": 10004},
+        ):
+            result = await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=4),
+                BackgroundTasks(),
+                db=db,
+                context=make_context(owner_user, actor_user),
+            )
+
+        new_trade = db.added[0]
+        self.assertEqual(new_trade.responder_user_id, owner_user.id)
+        self.assertEqual(new_trade.actor_user_id, actor_user.id)
+        self.assertEqual(notif_mock.await_count, 3)
+        self.assertEqual(notif_mock.await_args_list[0].args[1], owner_user.id)
+        self.assertEqual(notif_mock.await_args_list[1].args[1], actor_user.id)
+        self.assertEqual(notif_mock.await_args_list[2].args[1], offer.user_id)
+        counter_mock.assert_awaited_once_with(db, owner_user, "trade", 4)
+        self.assertEqual(publish_mock.await_args_list[0].args[1]["responder_user_id"], owner_user.id)
+        self.assertEqual(result, {"id": 91, "trade_number": 10004})
 
 
 if __name__ == "__main__":

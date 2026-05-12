@@ -2,6 +2,7 @@
 import { computed, ref, onMounted } from 'vue';
 import { ChevronDown, ChevronLeft, User as UserIcon, Activity, ArrowRight, ChevronRight } from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
+import OwnerAccountantManagerModal from './OwnerAccountantManagerModal.vue';
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
 
 const props = defineProps<{
@@ -62,6 +63,7 @@ const openSections = ref({
 });
 const avatarBusy = ref(false);
 const avatarInput = ref<HTMLInputElement | null>(null);
+const showAccountantManager = ref(false);
 const isOwnProfile = computed(() => {
   if (!profileData.value) return false;
   return Number(profileData.value.id) === Number(props.viewerUserId);
@@ -246,7 +248,7 @@ function handleActionClick(action: ProfileActionCard) {
   } else if (action.key === 'add_customer') {
     alert('قابلیت افزودن مشتری به زودی اضافه خواهد شد.');
   } else if (action.key === 'add_accountant') {
-    alert('قابلیت افزودن حسابدار به زودی اضافه خواهد شد.');
+    showAccountantManager.value = true;
   }
 }
 
@@ -418,6 +420,11 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
         </div>
       </section>
     </div>
+
+    <OwnerAccountantManagerModal
+      v-if="showAccountantManager"
+      @close="showAccountantManager = false"
+    />
   </div>
 </template>
 
