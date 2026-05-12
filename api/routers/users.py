@@ -14,7 +14,7 @@ from core.services.user_deletion_service import delete_user_account
 from models.user import User
 from api.deps import verify_super_admin_or_dev_key
 
-from core.utils import create_user_notification, to_jalali_str
+from core.utils import create_user_notification, send_telegram_notification, to_jalali_str
 from core.enums import NotificationLevel, NotificationCategory
 import schemas
 
@@ -106,7 +106,8 @@ async def send_block_notification(
         )
     
     await create_user_notification(db, user.id, message, NotificationLevel.WARNING, NotificationCategory.SYSTEM)
-    await send_telegram_notification(user.telegram_id, message)
+    if user.telegram_id is not None:
+        await send_telegram_notification(user.telegram_id, message)
 
 
 async def send_limitation_notification(
@@ -123,7 +124,8 @@ async def send_limitation_notification(
     message += f"\n📅 *اعتبار تا:* {expire_jalali}"
     
     await create_user_notification(db, user.id, message, NotificationLevel.WARNING, NotificationCategory.SYSTEM)
-    await send_telegram_notification(user.telegram_id, message)
+    if user.telegram_id is not None:
+        await send_telegram_notification(user.telegram_id, message)
 
 
 async def send_bot_access_notification(
@@ -149,10 +151,17 @@ async def send_bot_access_notification(
         level = NotificationLevel.INFO
     
     await create_user_notification(db, user.id, message, level, NotificationCategory.SYSTEM)
-    await send_telegram_notification(user.telegram_id, message)
+    if user.telegram_id is not None:
+        await send_telegram_notification(user.telegram_id, message)
 
 
-async def send_delayed_removal_notification_api(db_session_factory, user_id: int, telegram_id: int, is_block: bool, delay_seconds: int = 120):
+async def send_delayed_removal_notification_api(
+    db_session_factory,
+    user_id: int,
+    telegram_id: Optional[int],
+    is_block: bool,
+    delay_seconds: int = 120,
+) -> None:
     """ارسال نوتیفیکیشن رفع مسدودیت/محدودیت با تاخیر
     
     قبل از ارسال بررسی می‌کند که آیا کاربر هنوز رفع محدودیت/مسدودیت است یا خیر.
@@ -160,13 +169,16 @@ async def send_delayed_removal_notification_api(db_session_factory, user_id: int
     """
     await asyncio.sleep(delay_seconds)
     
+    msg: Optional[str] = None
+
     async for session in db_session_factory():
         user = await session.get(User, user_id)
         if not user:
             return
         
         if is_block:
-            if user.trading_restricted_until and user.trading_restricted_until > datetime.utcnow():
+            current_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+            if user.trading_restricted_until and user.trading_restricted_until > current_utc:
                 return
             msg = "ℹ️ *رفع مسدودیت توسط مدیر*\n\nمسدودیت حساب شما توسط مدیر رفع شد."
         else:
@@ -182,7 +194,8 @@ async def send_delayed_removal_notification_api(db_session_factory, user_id: int
         await create_user_notification(session, user_id, msg, NotificationLevel.INFO, NotificationCategory.SYSTEM)
         break
     
-    await send_telegram_notification(telegram_id, msg)
+    if telegram_id is not None and msg is not None:
+        await send_telegram_notification(telegram_id, msg)
 
 router = APIRouter(
     tags=["Users Management"],
