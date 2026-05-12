@@ -2,6 +2,17 @@
 
 این roadmap فقط بعد از بسته‌شدن challengeهای [ACCOUNTANT_FEATURE_CHECKLIST.md](ACCOUNTANT_FEATURE_CHECKLIST.md) ساخته شده است. این سند challenge جدید باز نمی‌کند؛ فقط ترتیب اجرای دقیق، وابستگی‌ها، validation، و rollback surface را مشخص می‌کند.
 
+## Snapshot وضعیت فعلی تا 2026-05-12
+
+- [x] Phase 1 از نظر data foundation، migration، sync/change-log و actor fields بسته شده است.
+- [x] Phase 2 از نظر seamهای relation lifecycle، effective owner resolution و audience fanout بسته شده است.
+- [x] Phase 3 از نظر owner-facing accountant APIs، accountant-aware register/session policy و bot deny branching بسته شده است.
+- [x] Phase 4 از نظر delegated offer/trade write/read، actor audit، و fanout/privacy validation بسته شده است.
+- [ ] Phase 5 شروع شده است؛ `users_public` اکنون accountantها را به owner principal resolve می‌کند و public profile frontend context اولیه این resolve را نمایش می‌دهد، اما contractهای chat/realtime و deny pathهای کامل هنوز باقی مانده‌اند.
+- [ ] Phase 6 به‌صورت partial شروع شده است؛ modal مدیریت حسابدار owner وجود دارد، اما section نهایی profile/public profile و بعضی UX/lifecycle ruleها هنوز باقی مانده‌اند.
+- [ ] Phase 7 هنوز شروع نشده است.
+- [ ] Phase 8 هنوز شروع نشده است.
+
 ## 0. قواعد اجرای roadmap
 
 - [ ] اجرای roadmap به ترتیب phaseها انجام شود و phase بعدی قبل از سبز شدن validation phase قبلی شروع نشود.
@@ -133,23 +144,31 @@ rollback surface:
 هدف:
 اعمال `effective_owner` و `actor_user_id` روی offer/trade و side effectهای آن.
 
+وضعیت فعلی:
+- create/expire offer، execute trade، و read/historyهای offer/trade روی owner principal هم‌راستا شده‌اند.
+- `actor_user_id` روی create/execute delegated path ثبت می‌شود.
+- trade notification audience برای owner/accountant fanout شده است.
+- close-out phase هنوز به بستن validationهای باقیمانده و مرور seamهای جانبی وابسته است.
+
 خروجی‌های لازم:
-- [ ] create/expire offer path delegated-aware شود.
-- [ ] execute trade path delegated-aware شود.
-- [ ] `offers.user_id` و `trades.offer_user_id/responder_user_id` principal owner را نگه دارند.
-- [ ] `actor_user_id` روی surfaceهای delegated ذخیره شود.
-- [ ] trade fanout helper owner + active accountants هر دو سمت را notify کند.
-- [ ] counterpart-facing notification/realtime فقط owner principal را نشان دهد.
+- [x] create/expire offer path delegated-aware شود.
+- [x] execute trade path delegated-aware شود.
+- [x] `offers.user_id` و `trades.offer_user_id/responder_user_id` principal owner را نگه دارند.
+- [x] `actor_user_id` روی surfaceهای delegated ذخیره شود.
+- [x] trade fanout helper owner + active accountants هر دو سمت را notify کند.
+- [x] counterpart-facing notification/realtime فقط owner principal را نشان دهد.
+- [x] read/history surfaceهای offer/trade هم owner principal را به‌عنوان identity موثر ببینند.
 
 فایل‌های درگیر اصلی:
-- [ ] [api/routers/offers.py](api/routers/offers.py)
-- [ ] [api/routers/trades.py](api/routers/trades.py)
+- [x] [api/routers/offers.py](api/routers/offers.py)
+- [x] [api/routers/trades.py](api/routers/trades.py)
 - [ ] [core/services/trade_service.py](core/services/trade_service.py)
 - [ ] [core/notifications.py](core/notifications.py)
 
 validation phase:
-- [ ] create offer by accountant تحت owner principal سبز شود.
-- [ ] execute trade by accountant با audit actor سبز شود.
+- [x] create offer by accountant تحت owner principal سبز شود.
+- [x] execute trade by accountant با audit actor سبز شود.
+- [x] offer/trade read history تحت owner principal سبز شود.
 - [ ] notification fanout to owner + accountants سبز شود.
 - [ ] counterpart-facing payload privacy tests سبز شود.
 
@@ -161,9 +180,14 @@ rollback surface:
 هدف:
 تغییر contractهای backend و frontend برای relation-aware display و owner-resolved profile navigation.
 
+وضعیت فعلی:
+- شروع شده است.
+- [api/routers/users_public.py](api/routers/users_public.py) برای read/search accountant active را به owner principal resolve می‌کند و metadata additive برمی‌گرداند.
+- [frontend/src/components/PublicProfile.vue](frontend/src/components/PublicProfile.vue) context اولیه‌ی owner-resolve را به کاربر نشان می‌دهد، اما consumerهای chat/profile دیگر هنوز relation-aware نشده‌اند.
+
 خروجی‌های لازم:
-- [ ] `users_public` owner-resolve behavior اضافه شود.
-- [ ] `UserPublicRead` با metadata لازم مثل `resolved_from_accountant_id` گسترش پیدا کند.
+- [x] `users_public` owner-resolve behavior اضافه شود.
+- [x] `UserPublicRead` با metadata لازم مثل `resolved_from_accountant_id` گسترش پیدا کند.
 - [ ] `ConversationRead`, `MessageRead`, و payloadهای realtime با fieldهای additive برای display/profile target گسترش پیدا کنند.
 - [ ] `chat_service` projection relation-aware display name تولید کند.
 - [ ] accountant direct chat initiation در UI/backend deny شود.
@@ -197,18 +221,23 @@ rollback surface:
 هدف:
 دادن UI کامل owner برای مدیریت حسابداران بدون reuse ناقص UI دعوت‌نامه‌ی عمومی.
 
+وضعیت فعلی:
+- modal اختصاصی owner manager از [frontend/src/components/PublicProfile.vue](frontend/src/components/PublicProfile.vue) باز می‌شود و create/list/edit/cancel pending را پوشش می‌دهد.
+- هنوز section نهایی داخل خود profile/public profile، active unlink، expiry timer، و محدودسازی edit به `duty_description` باقی است.
+
 خروجی‌های لازم:
 - [ ] section حسابداران در owner profile و public owner profile اضافه شود.
 - [ ] لیست pending/active با stateهای واضح و expiry timer اضافه شود.
-- [ ] create accountant form اختصاصی با `relation_display_name`, `account_name`, `mobile_number`, `duty_description` اضافه شود.
+- [x] create accountant form اختصاصی با `relation_display_name`, `account_name`, `mobile_number`, `duty_description` اضافه شود.
 - [ ] owner بتواند فقط `duty_description` را ویرایش کند.
 - [ ] unlink/cancel controls برای pending/active اضافه شود.
 - [x] admin UI تنظیم `max_accountants` به‌ازای هر owner را در [frontend/src/components/UserProfile.vue](frontend/src/components/UserProfile.vue) انجام دهد و session cap accountant را editable نکند.
 
 فایل‌های درگیر اصلی:
 - [ ] [frontend/src/views/ProfileView.vue](frontend/src/views/ProfileView.vue)
-- [ ] [frontend/src/components/PublicProfile.vue](frontend/src/components/PublicProfile.vue)
+- [x] [frontend/src/components/PublicProfile.vue](frontend/src/components/PublicProfile.vue)
 - [ ] [frontend/src/components/CreateInvitationView.vue](frontend/src/components/CreateInvitationView.vue) یا component جدید اختصاصی accountant
+- [x] [frontend/src/components/OwnerAccountantManagerModal.vue](frontend/src/components/OwnerAccountantManagerModal.vue)
 - [ ] [frontend/src/components/UserProfile.vue](frontend/src/components/UserProfile.vue)
 
 validation phase:

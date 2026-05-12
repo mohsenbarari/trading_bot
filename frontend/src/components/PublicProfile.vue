@@ -23,6 +23,9 @@ interface PublicUser {
   address: string;
   created_at_jalali: string;
   trades_count: number;
+  resolved_from_accountant_id?: number | null;
+  highlight_accountant_user_id?: number | null;
+  highlight_accountant_relation_display_name?: string | null;
 }
 
 interface MutualTradePreview {
@@ -71,6 +74,16 @@ const isOwnProfile = computed(() => {
 const showVisitorSections = computed(() => !isOwnProfile.value);
 const showOwnerSections = computed(() => isOwnProfile.value);
 const profileAvatarUrl = computed(() => buildChatFileUrl(profileData.value?.avatar_file_id ?? null, props.apiBaseUrl));
+const resolvedAccountantContext = computed(() => {
+  if (!profileData.value?.resolved_from_accountant_id) {
+    return null;
+  }
+
+  const relationDisplayName = profileData.value.highlight_accountant_relation_display_name?.trim() || null;
+  return {
+    relationDisplayName,
+  };
+});
 const sharedStatCards = computed<ProfileStatCard[]>(() => {
   if (!profileData.value) return [];
 
@@ -330,6 +343,16 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
           </div>
         </div>
 
+        <div v-if="resolvedAccountantContext" class="accountant-resolution-banner">
+          <div class="accountant-resolution-title">نمایش پروفایل مالک اصلی</div>
+          <p class="accountant-resolution-copy">
+            این صفحه از مسیر حسابدار باز شده است و اطلاعات مالک اصلی را نشان می‌دهد.
+            <span v-if="resolvedAccountantContext.relationDisplayName">
+              عنوان این رابطه: «{{ resolvedAccountantContext.relationDisplayName }}»
+            </span>
+          </p>
+        </div>
+
         <div class="ds-accordion mt-4" :class="{ open: openSections.info }">
           <div class="ds-accordion-header" @click="openSections.info = !openSections.info">
             <div class="ds-accordion-header-info">
@@ -490,6 +513,33 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   margin: 0;
   font-size: 1.15rem;
   color: var(--ds-text-primary);
+}
+
+.accountant-resolution-banner {
+  width: 100%;
+  max-width: min(100%, 520px);
+  margin: 0 auto;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background:
+    linear-gradient(135deg, rgba(255, 251, 235, 0.96), rgba(255, 247, 237, 0.96));
+  box-shadow: 0 10px 28px rgba(245, 158, 11, 0.12);
+  text-align: right;
+}
+
+.accountant-resolution-title {
+  margin-bottom: 6px;
+  font-size: 0.94rem;
+  font-weight: 800;
+  color: #b45309;
+}
+
+.accountant-resolution-copy {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.7;
+  color: #78350f;
 }
 
 .profile-avatar-actions {

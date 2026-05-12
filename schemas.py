@@ -124,6 +124,9 @@ class UserPublicRead(BaseModel):
     created_at: datetime
     trades_count: int = 0
     last_seen_at: datetime | None = None
+    resolved_from_accountant_id: int | None = None
+    highlight_accountant_user_id: int | None = None
+    highlight_accountant_relation_display_name: str | None = None
     
     @computed_field
     def created_at_jalali(self) -> str | None:

@@ -383,6 +383,118 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(publish_mock.await_args_list[0].args[1]["responder_user_id"], owner_user.id)
         self.assertEqual(result, {"id": 91, "trade_number": 10004})
 
+    async def test_execute_trade_authoritatively_fans_out_notifications_to_both_owner_sides(self):
+        owner_user = make_user(id=5, account_name="owner_principal", telegram_id=555)
+        actor_user = make_user(id=44, account_name="delegate_actor", telegram_id=444)
+        offer = make_offer(user_id=9)
+        offer_side_accountant_id = 77
+        reloaded_trade = SimpleNamespace(id=92)
+        db = FakeDB(
+            get_results=[offer],
+            execute_results=[
+                FakeExecuteResult(single=owner_user),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=10004,
+        )
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[owner_user.id, actor_user.id], [offer.user_id, offer_side_accountant_id]]),
+        ) as audience_mock, patch(
+            "api.routers.trades.update_channel_buttons",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(),
+        ) as notif_mock, patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
+            "api.routers.trades.trade_to_response",
+            return_value={"id": 92, "trade_number": 10005},
+        ):
+            await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=4),
+                BackgroundTasks(),
+                db=db,
+                context=make_context(owner_user, actor_user),
+            )
+
+        self.assertEqual(audience_mock.await_args_list[0].args[1], [owner_user.id])
+        self.assertEqual(audience_mock.await_args_list[1].args[1], [offer.user_id])
+        self.assertEqual(
+            [call.args[1] for call in notif_mock.await_args_list],
+            [owner_user.id, actor_user.id, offer.user_id, offer_side_accountant_id],
+        )
+
+    async def test_execute_trade_authoritatively_keeps_counterpart_payloads_on_owner_principal(self):
+        owner_user = make_user(id=5, account_name="owner_principal", telegram_id=555)
+        actor_user = make_user(id=44, account_name="delegate_actor", telegram_id=444)
+        offer = make_offer(
+            user_id=9,
+            user=SimpleNamespace(account_name="seller_principal", mobile_number="09125555555", telegram_id=999),
+        )
+        reloaded_trade = SimpleNamespace(id=93)
+        db = FakeDB(
+            get_results=[offer],
+            execute_results=[
+                FakeExecuteResult(single=owner_user),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=10005,
+        )
+        background_tasks = BackgroundTasks()
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[owner_user.id, actor_user.id], [offer.user_id]]),
+        ), patch(
+            "api.routers.trades.update_channel_buttons",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(),
+        ) as notif_mock, patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "api.routers.trades.trade_to_response",
+            return_value={"id": 93, "trade_number": 10006},
+        ):
+            await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=4),
+                background_tasks,
+                db=db,
+                context=make_context(owner_user, actor_user),
+            )
+
+        notification_messages = {call.args[1]: call.args[2] for call in notif_mock.await_args_list}
+        self.assertIn(owner_user.account_name, notification_messages[offer.user_id])
+        self.assertNotIn(actor_user.account_name, notification_messages[offer.user_id])
+
+        trade_created_payload = publish_mock.await_args_list[0].args[1]
+        self.assertEqual(trade_created_payload["responder_user_id"], owner_user.id)
+        self.assertEqual(trade_created_payload["responder_user_name"], owner_user.account_name)
+        self.assertNotIn("actor_user_id", trade_created_payload)
+        self.assertNotIn(actor_user.account_name, str(trade_created_payload))
+
+        owner_side_telegram_task = next(task for task in background_tasks.tasks if task.args[0] == offer.user.telegram_id)
+        self.assertIn(owner_user.account_name, owner_side_telegram_task.args[1])
+        self.assertNotIn(actor_user.account_name, owner_side_telegram_task.args[1])
+
 
 if __name__ == "__main__":
     unittest.main()
