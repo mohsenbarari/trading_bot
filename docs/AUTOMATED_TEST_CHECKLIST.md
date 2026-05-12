@@ -150,6 +150,38 @@ Scope rules:
 - [x] Expand the full frontend Playwright matrix beyond Chromium with serial Firefox (`64/64`) and WebKit (`64/64`) passes after the current cross-browser selector/runtime hardening and `MarketView.vue` manual-create restoration.
 - [x] Expose routine frontend browser commands for Chromium / Firefox / WebKit via `npm run test:e2e`, serial `npm run test:e2e:firefox`, serial `npm run test:e2e:webkit`, and `npm run test:e2e:matrix` so the checklist path is executable without ad hoc shell commands and keeps the proven cross-browser worker profile.
 
+### Messenger Detailed Coverage Map
+
+Current messenger coverage already locked by Playwright:
+
+- [x] Direct chat text composer send/edit flow through the real UI in `frontend/e2e/direct-chat.spec.ts`.
+- [x] Direct chat reaction and own-message delete flow through the real context menu in `frontend/e2e/direct-chat.spec.ts`.
+- [x] Chat notification toast, unread badge increment, and deep-link back into the messenger in `frontend/e2e/notifications.spec.ts`.
+- [x] Mandatory messenger room visibility/open flow and fresh-activation rollout in `frontend/e2e/mandatory-channel.spec.ts`.
+- [x] Channel composer gating for admin vs member, route-query restore after reload, live unread/read reset, and live reactions in `frontend/e2e/channel-media.spec.ts`.
+- [x] Direct-to-room forward coverage for text/document/image/video paths into writable groups/channels in `frontend/e2e/channel-media.spec.ts`.
+- [x] Share Receive routing matrix across direct/group/channel targets for text, document, image, video, voice, and multi-target fanout in `frontend/e2e/channel-media.spec.ts`.
+- [x] Group backend-to-messenger room coverage for create/list/detail/admin APIs, room send/load/read/react flows, conversation-list projection, and realtime unread/live-append behavior in `frontend/e2e/channel-media.spec.ts`.
+- [x] Current messenger entry-point smoke for optional-channel creation/member invite from the admin-facing UI in `frontend/e2e/admin-smoke.spec.ts`.
+
+Remaining messenger-specific automated test backlog:
+
+- [x] Conversation-list state/actions: long-press popover actions for pin/unpin, pin reorder, mute/unmute, manual unread, hide direct chats, optional-channel unfollow, and mandatory-channel ordering invariants.
+- [ ] Pinned-message UX inside open rooms: pin/unpin action, banner rendering, navigation/jump behavior, and direct/group/channel persistence.
+- [x] Messenger room-manager core flows: group/channel create/edit title and description, avatar upload/remove persistence, channel member add, header-open entry points, and back-stack dismissal in `ChatGroupManagerModal.vue` and `CreateChannelView.vue`.
+- [ ] Remaining group/channel manager edge flows: admin-role mutations, leave/delete paths, and broader member-management permutations in `ChatGroupManagerModal.vue` and `CreateChannelView.vue`.
+- [x] Messenger public-profile core flows: open self/other public profiles from header entry points, self avatar add/remove, and return-to-chat navigation.
+- [ ] Remaining public-profile edge flows: member-row profile entry points and an explicit avatar-change regression path beyond the current self-avatar add/remove coverage.
+- [ ] Direct-room rich composer/media UX: `AttachmentMenu.vue` image/video/document/voice/location/camera paths, crop/editor flow, background upload/download persistence, and cached file open/share/download behavior.
+- [ ] Viewer/search/selection UX: `ChatLightbox.vue` toolbar and album navigation, global/in-chat search flows, `ChatNewConversationModal.vue`, selection-mode bulk actions, and overlay/back-button semantics.
+- [ ] Messenger-focused unit/component baseline for high-churn chat UI pieces such as `ChatConversationList.vue`, `ChatHeader.vue`, `ChatContextMenu.vue`, `ChatLightbox.vue`, `ChatInputBar.vue`, `ChatGroupManagerModal.vue`, `CreateChannelView.vue`, and `PublicProfile.vue`.
+
+Remaining completion estimate for full messenger test closure:
+
+- [ ] 2 focused Playwright slices covering pinned-message UX and direct-room media/search/viewer UX.
+- [ ] 2 focused Vitest slices covering deterministic messenger UI state that is cheaper to lock below Playwright.
+- [ ] 1 full serial browser-matrix rerun on Chromium / Firefox / WebKit after the new messenger slices land.
+
 ## Phase 7 - Models, Migrations, Startup, and Deployment Smoke Coverage
 
 - [x] Cover behaviorful model helpers in `models/`.
