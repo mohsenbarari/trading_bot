@@ -234,6 +234,81 @@ async function openDirectHeaderSearch(page: Page) {
   await expect(page.locator('#search-input')).toBeVisible({ timeout: 30000 })
 }
 
+async function triggerLongPressSelectionOnMessage(page: Page, messageText: string) {
+  const bubble = page.locator('.message-bubble').filter({ hasText: messageText }).first()
+  await expect(bubble).toBeVisible({ timeout: 30000 })
+
+  await bubble.evaluate((node) => {
+    const createSyntheticTouchEvent = (
+      type: 'touchstart' | 'touchend',
+      target: HTMLElement,
+      touchList: Array<Record<string, number | HTMLElement>>,
+    ) => {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperties(event, {
+        touches: { value: type === 'touchstart' ? touchList : [], configurable: true },
+        targetTouches: { value: type === 'touchstart' ? touchList : [], configurable: true },
+        changedTouches: { value: touchList, configurable: true },
+      })
+      target.dispatchEvent(event)
+    }
+
+    const target = (node.closest('.message-wrapper') as HTMLElement | null) ?? (node as HTMLElement)
+    const rect = target.getBoundingClientRect()
+    const point = {
+      identifier: 1,
+      target,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+      pageX: rect.left + rect.width / 2,
+      pageY: rect.top + rect.height / 2,
+      screenX: rect.left + rect.width / 2,
+      screenY: rect.top + rect.height / 2,
+      radiusX: 2,
+      radiusY: 2,
+      rotationAngle: 0,
+      force: 1,
+    }
+    createSyntheticTouchEvent('touchstart', target, [point])
+  })
+
+  await page.waitForTimeout(650)
+
+  await bubble.evaluate((node) => {
+    const createSyntheticTouchEvent = (
+      type: 'touchstart' | 'touchend',
+      target: HTMLElement,
+      touchList: Array<Record<string, number | HTMLElement>>,
+    ) => {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperties(event, {
+        touches: { value: type === 'touchstart' ? touchList : [], configurable: true },
+        targetTouches: { value: type === 'touchstart' ? touchList : [], configurable: true },
+        changedTouches: { value: touchList, configurable: true },
+      })
+      target.dispatchEvent(event)
+    }
+
+    const target = (node.closest('.message-wrapper') as HTMLElement | null) ?? (node as HTMLElement)
+    const rect = target.getBoundingClientRect()
+    const point = {
+      identifier: 1,
+      target,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+      pageX: rect.left + rect.width / 2,
+      pageY: rect.top + rect.height / 2,
+      screenX: rect.left + rect.width / 2,
+      screenY: rect.top + rect.height / 2,
+      radiusX: 2,
+      radiusY: 2,
+      rotationAngle: 0,
+      force: 1,
+    }
+    createSyntheticTouchEvent('touchend', target, [point])
+  })
+}
+
 test.describe('Messenger direct-room media/search/viewer regressions', () => {
   test('new conversation modal can start a direct chat and file tab sends a document', async ({ page, request }) => {
     test.setTimeout(90000)
@@ -345,5 +420,59 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     await page.locator('.lightbox-btn.close').click()
     await expect(page.locator('.lightbox-overlay')).toHaveCount(0, { timeout: 30000 })
+  })
+
+  test('selection mode can reply to a long-pressed message and exit selection state', async ({ page, request }) => {
+    test.setTimeout(90000)
+    const actor = seedPrimarySession('direct_room_selection_reply_actor')
+    const peer = seedPrimarySession('direct_room_selection_reply_peer')
+    const targetContent = `PW DIRECT SELECT REPLY ${Date.now()}`
+
+    await waitForBackendReady(request)
+    await sendDirectTextMessage(request, peer, actor.userId, targetContent)
+
+    await loginWithSeededSession(page, actor)
+    await openDirectChat(page, peer.userId, peer.accountName)
+
+    await triggerLongPressSelectionOnMessage(page, targetContent)
+
+    await expect(page.locator('.selection-bottom-bar')).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.message-bubble.selected-message').filter({ hasText: targetContent })).toHaveCount(1)
+
+    await page.locator('.selection-bottom-bar .selection-action-btn').filter({ hasText: 'پاسخ' }).click()
+
+    await expect(page.locator('.reply-banner')).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.reply-banner')).toContainText(targetContent)
+    await expect(page.locator('.selection-bottom-bar')).toHaveCount(0, { timeout: 30000 })
+    await expect(page.locator('.message-bubble.selected-message')).toHaveCount(0)
+  })
+
+  test('selection mode supports multi-select toggles and exits through browser back', async ({ page, request }) => {
+    test.setTimeout(90000)
+    const actor = seedPrimarySession('direct_room_selection_multi_actor')
+    const peer = seedPrimarySession('direct_room_selection_multi_peer')
+    const firstContent = `PW DIRECT SELECT FIRST ${Date.now()}`
+    const secondContent = `PW DIRECT SELECT SECOND ${Date.now()}`
+
+    await waitForBackendReady(request)
+    await sendDirectTextMessage(request, peer, actor.userId, firstContent)
+    await sendDirectTextMessage(request, peer, actor.userId, secondContent)
+
+    await loginWithSeededSession(page, actor)
+    await openDirectChat(page, peer.userId, peer.accountName)
+
+    await triggerLongPressSelectionOnMessage(page, firstContent)
+    await expect(page.locator('.selection-bottom-bar')).toBeVisible({ timeout: 30000 })
+
+    await page.locator('.message-bubble').filter({ hasText: secondContent }).first().click()
+
+    await expect(page.locator('.message-bubble.selected-message')).toHaveCount(2)
+    await expect(page.locator('.selection-bottom-bar')).not.toContainText('پاسخ')
+    await expect(page.locator('.selection-bottom-bar')).toContainText('هدایت')
+
+    await page.evaluate(() => window.history.back())
+
+    await expect(page.locator('.selection-bottom-bar')).toHaveCount(0, { timeout: 30000 })
+    await expect(page.locator('.message-bubble.selected-message')).toHaveCount(0)
   })
 })
