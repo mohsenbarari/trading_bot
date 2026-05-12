@@ -1657,7 +1657,12 @@ function openChannelCreation() {
 function closeChannelManager() {
   channelManagerChatId.value = null
   showChannelManagerModal.value = false
-  void loadConversations()
+  void (async () => {
+    await loadConversations()
+    if (selectedUserId.value != null) {
+      selectedUserName.value = resolveSelectedConversationName(selectedUserId.value)
+    }
+  })()
 }
 
 function clearActiveConversationState() {
@@ -1707,7 +1712,12 @@ async function handleChannelManagerOpenChannel(payload: { chatId: number; title:
 }
 
 function handleChannelManagerConversationRefresh() {
-  void loadConversations()
+  void (async () => {
+    await loadConversations()
+    if (selectedUserId.value != null) {
+      selectedUserName.value = resolveSelectedConversationName(selectedUserId.value)
+    }
+  })()
 }
 
 function openSelectedRoomManager() {
