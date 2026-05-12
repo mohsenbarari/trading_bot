@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import ChatUserListRow from './chat/ChatUserListRow.vue'
 import { apiFetch, apiFetchJson } from '../utils/auth'
 import { discardBackState, popBackState, pushBackState } from '../composables/useBackButton'
@@ -16,6 +17,8 @@ import {
   UsersRound,
   X,
 } from 'lucide-vue-next'
+
+const router = useRouter()
 
 type ChannelRoom = {
   id: number
@@ -96,6 +99,7 @@ const emit = defineEmits<{
   (e: 'open-channel', payload: { chatId: number; title: string }): void
   (e: 'left', chatId: number): void
   (e: 'close'): void
+  (e: 'open-public-profile', payload: { id: number; account_name: string }): void
 }>()
 
 const page = ref<ChannelManagerPage>('home')
@@ -291,6 +295,34 @@ function clearAvatar() {
 function getPrimaryUserName(accountName: string, fullName?: string | null) {
   const normalizedFullName = (fullName || '').trim()
   return normalizedFullName || accountName
+}
+
+function openMemberProfile(member: { user_id: number; account_name: string }) {
+  const normalizedId = Number(member.user_id)
+  if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
+    return
+  }
+
+  const target = {
+    name: 'public-profile',
+    params: { id: String(normalizedId) },
+    query: member.account_name ? { account_name: member.account_name } : undefined,
+  } as const
+
+  const currentFullPath = router.currentRoute.value.fullPath
+  const resolvedTarget = router.resolve(target)
+
+  void router.push(target)
+
+  window.setTimeout(() => {
+    if (router.currentRoute.value.fullPath !== currentFullPath) {
+      return
+    }
+    if (!resolvedTarget.href) {
+      return
+    }
+    window.location.assign(resolvedTarget.href)
+  }, 200)
 }
 
 function applyPage(nextPage: ChannelManagerPage) {
@@ -928,13 +960,20 @@ onBeforeUnmount(() => {
             <template #subtitle>
               <span dir="ltr">{{ member.mobile_number }}</span>
             </template>
-            <template v-if="!isMembershipManagementLocked" #actions>
+            <template #actions>
               <button
-                v-if="canRemoveMember(member)"
+                type="button"
+                class="chat-user-row__action-btn"
+                @click.stop="openMemberProfile(member)"
+              >
+                پروفایل
+              </button>
+              <button
+                v-if="!isMembershipManagementLocked && canRemoveMember(member)"
                 type="button"
                 class="chat-user-row__action-btn chat-user-row__action-btn--danger"
                 :disabled="mutatingUserId === member.user_id"
-                @click="removeMember(member)"
+                @click.stop="removeMember(member)"
               >
                 حذف
               </button>
@@ -963,11 +1002,18 @@ onBeforeUnmount(() => {
               </template>
               <template #actions>
                 <button
+                  type="button"
+                  class="chat-user-row__action-btn"
+                  @click.stop="openMemberProfile(member)"
+                >
+                  پروفایل
+                </button>
+                <button
                   v-if="canDemoteMember(member)"
                   type="button"
                   class="chat-user-row__action-btn"
                   :disabled="mutatingUserId === member.user_id"
-                  @click="demoteMember(member)"
+                  @click.stop="demoteMember(member)"
                 >
                   حذف ادمین
                 </button>
@@ -993,9 +1039,16 @@ onBeforeUnmount(() => {
               <template #actions>
                 <button
                   type="button"
+                  class="chat-user-row__action-btn"
+                  @click.stop="openMemberProfile(member)"
+                >
+                  پروفایل
+                </button>
+                <button
+                  type="button"
                   class="chat-user-row__action-btn chat-user-row__action-btn--primary"
                   :disabled="mutatingUserId === member.user_id"
-                  @click="promoteMember(member)"
+                  @click.stop="promoteMember(member)"
                 >
                   ارتقا به ادمین
                 </button>

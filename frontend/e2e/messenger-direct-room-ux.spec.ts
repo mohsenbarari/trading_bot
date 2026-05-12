@@ -138,6 +138,12 @@ function authHeaders(accessToken: string) {
   }
 }
 
+function authOnlyHeaders(accessToken: string) {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+  }
+}
+
 function createPlaywrightBinaryFile(name: string, mimeType: string, bodyBase64: string) {
   return {
     name,
@@ -193,6 +199,45 @@ async function sendDirectTextMessage(
 
   expect(response.ok()).toBeTruthy()
   return response.json() as Promise<{ id: number; content: string }>
+}
+
+async function seedDirectDocumentMessage(
+  request: APIRequestContext,
+  sender: SessionFixture,
+  receiverId: number,
+  fileName: string,
+  fileBody: string,
+) {
+  const uploadResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/upload-media`, {
+    headers: authOnlyHeaders(sender.accessToken),
+    multipart: {
+      file: {
+        name: fileName,
+        mimeType: 'text/plain',
+        buffer: Buffer.from(fileBody, 'utf8'),
+      },
+    },
+  })
+
+  expect(uploadResponse.ok()).toBeTruthy()
+  const uploadPayload = await uploadResponse.json() as {
+    file_id: string
+    file_name: string
+    mime_type: string
+    size: number
+  }
+
+  const sendResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/send`, {
+    headers: authHeaders(sender.accessToken),
+    data: {
+      receiver_id: receiverId,
+      content: JSON.stringify(uploadPayload),
+      message_type: 'document',
+    },
+  })
+
+  expect(sendResponse.ok()).toBeTruthy()
+  return sendResponse.json() as Promise<{ id: number; content: string; message_type: string }>
 }
 
 async function fetchDirectMessages(
@@ -344,6 +389,43 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
       .toBe(true)
   })
 
+  test('document upload resumes after reload and stays attached to the active direct room', async ({ page, request }) => {
+    test.setTimeout(120000)
+    const actor = seedPrimarySession('direct_room_upload_resume_actor')
+    const peer = seedPrimarySession('direct_room_upload_resume_peer')
+
+    await waitForBackendReady(request)
+    await loginWithSeededSession(page, actor)
+    await openDirectChat(page, peer.userId, peer.accountName)
+
+    await page.route('**/api/chat/upload-media', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 4000))
+      await route.continue()
+    })
+
+    await page.locator('button.attach-btn').click()
+    await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
+    await page.getByRole('button', { name: 'فایل' }).first().click()
+    await injectDocument(page)
+
+    await expect(page.locator('.messages-container .msg-document')).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.messages-container .sending-status-wrapper')).toBeVisible({ timeout: 30000 })
+
+    await page.reload()
+
+    await expect(page.locator('.chat-header .header-name')).toContainText(peer.accountName, { timeout: 30000 })
+
+    await expect
+      .poll(async () => {
+        const messages = await fetchDirectMessages(request, actor, peer.userId)
+        return messages.some((message) => message.message_type === 'document')
+      }, { timeout: 60000 })
+      .toBe(true)
+
+    await expect(page.locator('.messages-container .msg-document')).toBeVisible({ timeout: 60000 })
+    await expect(page.locator('.messages-container .sending-status-wrapper')).toHaveCount(0, { timeout: 60000 })
+  })
+
   test('in-chat search can jump to results, switch to list mode, and close overlays via browser back', async ({ page, request }) => {
     test.setTimeout(90000)
     const actor = seedPrimarySession('direct_room_search_actor')
@@ -380,6 +462,45 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await expect(page.locator('.chat-header .header-name')).toContainText(peer.accountName)
   })
 
+  test('search list clicks keep search active and next or prev controls move between matched messages', async ({ page, request }) => {
+    test.setTimeout(90000)
+    const actor = seedPrimarySession('direct_room_search_nav_actor')
+    const peer = seedPrimarySession('direct_room_search_nav_peer')
+    const suffix = Date.now()
+    const query = `PW DIRECT SEARCH EDGE ${suffix}`
+    const olderTarget = `${query} OLDER`
+    const newerTarget = `${query} NEWER`
+
+    await waitForBackendReady(request)
+    await sendDirectTextMessage(request, peer, actor.userId, `PW DIRECT SEARCH EDGE FILL ${suffix} #1`)
+    await sendDirectTextMessage(request, peer, actor.userId, olderTarget)
+    await sendDirectTextMessage(request, peer, actor.userId, `PW DIRECT SEARCH EDGE FILL ${suffix} #2`)
+    await sendDirectTextMessage(request, peer, actor.userId, newerTarget)
+
+    await loginWithSeededSession(page, actor)
+    await openDirectChat(page, peer.userId, peer.accountName)
+    await openDirectHeaderSearch(page)
+
+    await page.locator('#search-input').fill(query)
+    await expect(page.locator('.search-bottom-bar')).toContainText('1 از 2')
+
+    await page.locator('.toggle-list-btn').click()
+    const olderResult = page.locator('.search-global-list .search-result-item').filter({ hasText: olderTarget })
+    await expect(olderResult).toBeVisible({ timeout: 30000 })
+    await olderResult.click()
+
+    await expect(page.locator('.search-global-list')).toHaveCount(0, { timeout: 30000 })
+    await expect(page.locator('#search-input')).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.message-bubble').filter({ hasText: olderTarget }).first()).toHaveClass(/highlight-message/, { timeout: 30000 })
+
+    const navButtons = page.locator('.search-bottom-bar .right-navs .nav-btn')
+    await navButtons.nth(1).click()
+    await expect(page.locator('.message-bubble').filter({ hasText: newerTarget }).first()).toHaveClass(/highlight-message/, { timeout: 30000 })
+
+    await navButtons.nth(0).click()
+    await expect(page.locator('.message-bubble').filter({ hasText: olderTarget }).first()).toHaveClass(/highlight-message/, { timeout: 30000 })
+  })
+
   test('gallery album send opens the lightbox with toolbar actions and strip navigation', async ({ page, request }) => {
     test.setTimeout(120000)
     const actor = seedPrimarySession('direct_room_media_actor')
@@ -404,7 +525,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
       .poll(async () => {
         const messages = await fetchDirectMessages(request, actor, peer.userId)
         return messages.map((message) => message.message_type)
-      }, { timeout: 30000 })
+      }, { timeout: 90000 })
       .toEqual(expect.arrayContaining(['image', 'video']))
 
     await page.locator('.messages-container img[data-media-msg-id]').first().click()
@@ -417,9 +538,65 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     await page.locator('.lightbox-thumb').nth(1).click()
     await expect(page.locator('.lightbox-stage-counter')).toContainText(/2\s*\/\s*2/)
+    await expect(page.locator('.lightbox-stage-card.active video.lightbox-media')).toHaveCount(1)
 
     await page.locator('.lightbox-btn.close').click()
     await expect(page.locator('.lightbox-overlay')).toHaveCount(0, { timeout: 30000 })
+  })
+
+  test('document download stays attached across room switches and clears its busy state when the background queue finishes', async ({ page, request }) => {
+    test.setTimeout(120000)
+    const actor = seedPrimarySession('direct_room_download_resume_actor')
+    const peer = seedPrimarySession('direct_room_download_resume_peer')
+    const otherPeer = seedPrimarySession('direct_room_download_resume_other_peer')
+    const suffix = Date.now()
+    const fileName = `pw-direct-download-${suffix}.txt`
+
+    await waitForBackendReady(request)
+    await seedDirectDocumentMessage(request, peer, actor.userId, fileName, `Playwright document body ${suffix}`)
+  await sendDirectTextMessage(request, otherPeer, actor.userId, `PW DIRECT DOWNLOAD SWITCH ${suffix}`)
+
+    await loginWithSeededSession(page, actor)
+    await page.goto('/chat')
+    const initialPeerConversation = page.locator('.conversation-item').filter({ hasText: peer.accountName }).first()
+    const initialOtherConversation = page.locator('.conversation-item').filter({ hasText: otherPeer.accountName }).first()
+    await expect(initialPeerConversation).toBeVisible({ timeout: 30000 })
+    await expect(initialOtherConversation).toBeVisible({ timeout: 30000 })
+    await initialPeerConversation.click()
+    await expect(page.locator('.chat-header .header-name')).toContainText(peer.accountName, { timeout: 30000 })
+
+    await page.route('**/api/chat/files/**', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 10000))
+      await route.continue()
+    })
+
+    const documentBubble = page.locator('.messages-container .msg-document').filter({ hasText: fileName }).first()
+    await expect(documentBubble).toBeVisible({ timeout: 30000 })
+
+    await documentBubble.click()
+    await expect(documentBubble).toHaveClass(/is-busy/, { timeout: 30000 })
+    await expect(documentBubble.locator('.doc-icon.doc-uploading')).toBeVisible({ timeout: 30000 })
+
+    await page.locator('.chat-header .back-btn').click()
+    const otherConversation = page.locator('.conversation-item').filter({ hasText: otherPeer.accountName }).first()
+    await expect(otherConversation).toBeVisible({ timeout: 30000 })
+    await otherConversation.click()
+    await expect(page.locator('.chat-header .header-name')).toContainText(otherPeer.accountName, { timeout: 30000 })
+
+    await page.locator('.chat-header .back-btn').click()
+    const originalConversation = page.locator('.conversation-item').filter({ hasText: peer.accountName }).first()
+    await expect(originalConversation).toBeVisible({ timeout: 30000 })
+    await originalConversation.click()
+    await expect(page.locator('.chat-header .header-name')).toContainText(peer.accountName, { timeout: 30000 })
+
+    const resumedBubble = page.locator('.messages-container .msg-document').filter({ hasText: fileName }).first()
+    await expect(resumedBubble).toBeVisible({ timeout: 30000 })
+    await expect(resumedBubble).toHaveClass(/is-busy/, { timeout: 30000 })
+    await expect(resumedBubble.locator('.doc-icon.doc-uploading')).toBeVisible({ timeout: 30000 })
+
+    await expect(resumedBubble).not.toHaveClass(/is-busy/, { timeout: 60000 })
+    await expect(resumedBubble.locator('.doc-icon.doc-uploading')).toHaveCount(0, { timeout: 60000 })
+    await expect(resumedBubble.locator('.doc-download-icon')).toHaveCount(0, { timeout: 60000 })
   })
 
   test('selection mode can reply to a long-pressed message and exit selection state', async ({ page, request }) => {

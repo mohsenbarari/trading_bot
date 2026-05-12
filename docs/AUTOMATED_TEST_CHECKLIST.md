@@ -169,24 +169,24 @@ Remaining messenger-specific automated test backlog:
 - [x] Conversation-list state/actions: long-press popover actions for pin/unpin, pin reorder, mute/unmute, manual unread, hide direct chats, optional-channel unfollow, and mandatory-channel ordering invariants.
 - [x] Pinned-message UX inside open rooms: pin/unpin action, banner rendering, navigation/jump behavior, and direct/group/channel persistence in `frontend/e2e/messenger-pinned-message.spec.ts`.
 - [x] Messenger room-manager core flows: group/channel create/edit title and description, avatar upload/remove persistence, channel member add, header-open entry points, and back-stack dismissal in `ChatGroupManagerModal.vue` and `CreateChannelView.vue`.
-- [ ] Remaining group/channel manager edge flows: admin-role mutations, leave/delete paths, and broader member-management permutations in `ChatGroupManagerModal.vue` and `CreateChannelView.vue`.
+- [x] Remaining group/channel manager edge flows: admin-role mutations, leave/delete paths, and broader member-management permutations in `ChatGroupManagerModal.vue` and `CreateChannelView.vue`.
 - [x] Messenger public-profile core flows: open self/other public profiles from header entry points, self avatar add/remove, and return-to-chat navigation.
-- [ ] Remaining public-profile edge flows: member-row profile entry points and an explicit avatar-change regression path beyond the current self-avatar add/remove coverage.
+- [x] Remaining public-profile edge flows: member-row profile entry points and an explicit avatar-change regression path beyond the current self-avatar add/remove coverage.
 - [x] Direct-room core composer/media regression coverage: new-conversation entry, file-tab document send, and gallery album send in `frontend/e2e/messenger-direct-room-ux.spec.ts`.
 - [x] Deterministic direct-room media edge coverage below Playwright: voice playback/error state in `ChatMessageItem.vue`, location send and camera fallback in `AttachmentMenu.vue`, crop-editor load/ratio behavior in `ImageEditorModal.vue`, and cached file registry/open/share flows in `useChatFileHandler.ts`.
-- [ ] Remaining direct-room media edge flows: background upload/download persistence and broader browser-driven attachment permutations beyond the new deterministic unit coverage.
+- [ ] Remaining direct-room media edge flows: background upload/download persistence and broader browser-driven attachment permutations beyond the new deterministic unit coverage. Chromium/Firefox coverage is in place for the new room-persistence paths, but WebKit full-reload upload resume still fails and remains open.
 - [x] Viewer/search/back-stack core coverage: `ChatLightbox.vue` toolbar and album navigation, in-chat search/list switching, `ChatNewConversationModal.vue`, and overlay/browser-back semantics in `frontend/e2e/messenger-direct-room-ux.spec.ts`.
 - [x] Deterministic selection-mode action-bar coverage in `ChatInputBar.vue` for single/multi-select action visibility and emits.
 - [x] End-to-end selection-mode coverage in `ChatView.vue`: long-press entry, reply-from-selection, multi-select toggles, and browser-back exit in `frontend/e2e/messenger-direct-room-ux.spec.ts`.
-- [ ] Remaining viewer/search edge flows: deeper search/viewer edge cases beyond the current direct-room coverage.
+- [x] Remaining viewer/search edge flows: deeper search/viewer edge cases beyond the current direct-room coverage.
 - [x] Focused messenger unit/component baseline for deterministic header/viewer behavior in `ChatHeader.vue` and `ChatLightbox.vue` via Vitest.
 - [x] Focused messenger unit/component expansion added for `ChatInputBar.vue`, `ChatMessageItem.vue`, `AttachmentMenu.vue`, `ImageEditorModal.vue`, and `useChatFileHandler.ts`, plus stale `NotificationsView.test.ts` / `ProfileView.test.ts` cleanup.
-- [ ] Remaining messenger unit/component expansion targets: `ChatConversationList.vue`, `ChatContextMenu.vue`, `ChatGroupManagerModal.vue`, `CreateChannelView.vue`, and broader `PublicProfile.vue` edge paths.
+- [x] Remaining messenger unit/component expansion targets: `ChatConversationList.vue`, `ChatContextMenu.vue`, `ChatGroupManagerModal.vue`, `CreateChannelView.vue`, and broader `PublicProfile.vue` edge paths.
 
 Remaining completion estimate for full messenger test closure:
 
 - [x] 1 focused Playwright slice covering the remaining direct-room media/search/viewer UX.
-- [x] 1 focused Vitest expansion batch covering deterministic selection/media/editor/cache contracts and leaving the full frontend Vitest suite green (`21/21` files, `59/59` tests).
+- [x] 1 focused Vitest expansion batch covering deterministic selection/media/editor/cache contracts and leaving the full frontend Vitest suite green (`25/25` files, `67/67` tests).
 - [x] 1 full serial browser-matrix rerun on Chromium / Firefox / WebKit after the new messenger slices land (`231/231`).
 
 ## Phase 7 - Models, Migrations, Startup, and Deployment Smoke Coverage

@@ -12,6 +12,16 @@ import { initChatFileDebugOverlay } from '../composables/chat/useChatFileHandler
 
 const { on, off, connect } = useWebSocket()
 
+void initChatUploadBackground({
+  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
+  getAuthToken: () => localStorage.getItem('auth_token'),
+})
+
+void initChatDocumentDownloadBackground({
+  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
+  getAuthToken: () => localStorage.getItem('auth_token'),
+})
+
 const ensureSessionValidation = async () => {
   const refreshToken = localStorage.getItem('refresh_token')
   if (!refreshToken) return
@@ -30,16 +40,6 @@ onMounted(() => {
   setupExpiryTimer()
 
   initChatFileDebugOverlay()
-
-  void initChatUploadBackground({
-    apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
-    getAuthToken: () => localStorage.getItem('auth_token'),
-  })
-
-  void initChatDocumentDownloadBackground({
-    apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
-    getAuthToken: () => localStorage.getItem('auth_token'),
-  })
 
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault()

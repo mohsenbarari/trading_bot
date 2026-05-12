@@ -135,6 +135,11 @@ interface AlbumBatchState {
     flushing: boolean
 }
 
+type PersistedPendingUpload = Omit<PendingUpload, 'file'> & {
+    file?: Blob
+    fileBytes?: ArrayBuffer
+}
+
 // -----------------------------------------------------------------------------
 // Module-level state (survives ChatView unmount)
 // -----------------------------------------------------------------------------
@@ -303,9 +308,15 @@ function openDB(): Promise<IDBDatabase> {
 async function idbPut(upload: PendingUpload) {
     try {
         const db = await openDB()
-        const record: PendingUpload = { ...upload }
+        const record: PersistedPendingUpload = { ...upload }
         // Do not persist UI-only fields
         delete record.localBlobUrl
+        try {
+            record.fileBytes = await upload.file.arrayBuffer()
+            delete record.file
+        } catch {
+            record.file = upload.file
+        }
         await new Promise<void>((resolve) => {
             try {
                 const tx = db.transaction(STORE_NAME, 'readwrite')
@@ -349,7 +360,24 @@ async function idbGetAll(): Promise<PendingUpload[]> {
             try {
                 const tx = db.transaction(STORE_NAME, 'readonly')
                 const req = tx.objectStore(STORE_NAME).getAll()
-                req.onsuccess = () => resolve((req.result as PendingUpload[]) || [])
+                req.onsuccess = () => {
+                    const records = ((req.result as PersistedPendingUpload[]) || []).map((record) => {
+                        if (record.file instanceof Blob) {
+                            return record as PendingUpload
+                        }
+
+                        if (record.fileBytes) {
+                            return {
+                                ...record,
+                                file: new Blob([record.fileBytes], { type: record.mimeType }),
+                            } as PendingUpload
+                        }
+
+                        return null
+                    }).filter((record): record is PendingUpload => record !== null)
+
+                    resolve(records)
+                }
                 req.onerror = () => resolve([])
             } catch {
                 resolve([])
@@ -862,6 +890,13 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
                     continue
                 }
 
+                emit({
+                    type: 'added',
+                    userId: upload.userId,
+                    optimisticId: upload.id,
+                    message: buildOptimisticMessageFromUpload(upload),
+                })
+
                 // Re-enter at the appropriate phase
                 if (
                     upload.phase === 'uploaded' ||
@@ -884,6 +919,10 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
     })()
 
     return resumePromise
+}
+
+export async function waitForChatUploadBackgroundReady(): Promise<void> {
+    await (resumePromise || Promise.resolve())
 }
 
 export async function submitUpload(params: SubmitUploadParams): Promise<void> {
