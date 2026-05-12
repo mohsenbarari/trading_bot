@@ -64,6 +64,7 @@ const emit = defineEmits<{
   (e: 'created', group: GroupRoom): void
   (e: 'updated', group: GroupRoom): void
   (e: 'left', chatId: number): void
+  (e: 'open-public-profile', payload: { id: number; account_name: string }): void
 }>()
 
 const page = ref<GroupManagerPage>('select-members')
@@ -277,6 +278,13 @@ function getGroupMemberBadges(member: GroupMember): Array<{ label: string; tone:
 
 function getPromotableMemberBadges(member: GroupMember): Array<{ label: string; tone: 'admin' | 'member' | 'creator' }> {
   return getGroupMemberBadges(member)
+}
+
+function openMemberProfile(member: GroupMember) {
+  emit('open-public-profile', {
+    id: member.user_id,
+    account_name: member.account_name,
+  })
 }
 
 function canDemote(member: GroupMember) {
@@ -742,13 +750,20 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   <template #subtitle>
                     <span dir="ltr">{{ member.mobile_number }}</span>
                   </template>
-                  <template v-if="isAdmin" #actions>
+                  <template #actions>
                     <button
-                      v-if="canRemove(member)"
+                      type="button"
+                      class="chat-user-row__action-btn"
+                      @click.stop="openMemberProfile(member)"
+                    >
+                      پروفایل
+                    </button>
+                    <button
+                      v-if="isAdmin && canRemove(member)"
                       type="button"
                       class="chat-user-row__action-btn chat-user-row__action-btn--danger"
                       :disabled="mutatingUserId === member.user_id"
-                      @click="removeMember(member)"
+                      @click.stop="removeMember(member)"
                     >
                       حذف
                     </button>
@@ -777,11 +792,18 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                     </template>
                     <template #actions>
                       <button
+                        type="button"
+                        class="chat-user-row__action-btn"
+                        @click.stop="openMemberProfile(member)"
+                      >
+                        پروفایل
+                      </button>
+                      <button
                         v-if="canDemote(member)"
                         type="button"
                         class="chat-user-row__action-btn"
                         :disabled="mutatingUserId === member.user_id"
-                        @click="demote(member)"
+                        @click.stop="demote(member)"
                       >
                         حذف ادمین
                       </button>
@@ -807,9 +829,16 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                     <template #actions>
                       <button
                         type="button"
+                        class="chat-user-row__action-btn"
+                        @click.stop="openMemberProfile(member)"
+                      >
+                        پروفایل
+                      </button>
+                      <button
+                        type="button"
                         class="chat-user-row__action-btn chat-user-row__action-btn--primary"
                         :disabled="mutatingUserId === member.user_id"
-                        @click="promote(member)"
+                        @click.stop="promote(member)"
                       >
                         ارتقا به ادمین
                       </button>

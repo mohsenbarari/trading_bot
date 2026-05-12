@@ -3,11 +3,13 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 const pushBackStateMock = vi.fn()
 const popBackStateMock = vi.fn()
+const discardBackStateMock = vi.fn()
 const buildChatFileUrlMock = vi.fn(() => '')
 
 vi.mock('../../composables/useBackButton', () => ({
   pushBackState: pushBackStateMock,
   popBackState: popBackStateMock,
+  discardBackState: discardBackStateMock,
 }))
 
 vi.mock('../../utils/chatFiles', () => ({
@@ -19,6 +21,7 @@ describe('ChatHeader.vue', () => {
   beforeEach(() => {
     pushBackStateMock.mockReset()
     popBackStateMock.mockReset()
+    discardBackStateMock.mockReset()
     buildChatFileUrlMock.mockClear()
   })
 
@@ -70,7 +73,7 @@ describe('ChatHeader.vue', () => {
     await flushPromises()
 
     expect(wrapper.emitted('toggle-search')).toHaveLength(1)
-    expect(popBackStateMock).toHaveBeenCalledTimes(1)
+    expect(discardBackStateMock).toHaveBeenCalledTimes(1)
   })
 
   it('routes room-title actions to manage-room for groups and channels', async () => {

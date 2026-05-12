@@ -17,6 +17,7 @@ import {
 import {
     getPendingForUser as backgroundGetPendingForUser,
     buildOptimisticMessageFromUpload,
+    waitForChatUploadBackgroundReady,
 } from '../../services/chatUploadBackground'
 
 export interface UseChatMessagesOptions {
@@ -338,6 +339,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             // Append any pending background-service uploads for this user
             // (both currently uploading + those resumed from IndexedDB after
             // a page reload) so the optimistic messages are visible on mount.
+            await waitForChatUploadBackgroundReady()
             const pendingOptimistic = getPendingOptimisticMessages(userId)
 
             if (aroundId) {

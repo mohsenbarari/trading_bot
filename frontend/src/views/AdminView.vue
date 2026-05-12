@@ -60,6 +60,19 @@ function handleNavigate(section: string, data?: any) {
   }
 }
 
+function handleOpenPublicProfile(payload?: { id?: number; account_name?: string }) {
+  const normalizedId = Number(payload?.id)
+  if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
+    return
+  }
+
+  void router.push({
+    name: 'public-profile',
+    params: { id: String(normalizedId) },
+    query: payload?.account_name ? { account_name: payload.account_name } : undefined,
+  })
+}
+
 onUnmounted(() => clearBackStack())
 </script>
 
@@ -104,6 +117,7 @@ onUnmounted(() => clearBackStack())
                    v-else-if="currentSection === 'create_channel'"
                    :apiBaseUrl="apiBaseUrl"
                    :jwtToken="jwtToken"
+                   @open-public-profile="handleOpenPublicProfile"
                  />
 
                 <CommodityManager 

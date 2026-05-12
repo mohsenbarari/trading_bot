@@ -3245,6 +3245,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @created="handleGroupCreated"
       @updated="handleGroupUpdated"
       @left="handleGroupLeft"
+      @open-public-profile="openPublicProfile"
     />
 
     <div v-if="showChannelManagerModal" class="channel-manager-overlay">
@@ -3259,6 +3260,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
           @refresh-conversations="handleChannelManagerConversationRefresh"
           @open-channel="handleChannelManagerOpenChannel"
           @left="handleChannelLeft"
+          @open-public-profile="openPublicProfile"
         />
       </div>
     </div>

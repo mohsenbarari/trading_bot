@@ -8,6 +8,7 @@ import {
     subscribeToUploads as backgroundSubscribeToUploads,
     getPendingForUser as backgroundGetPendingForUser,
     buildOptimisticMessageFromUpload,
+    waitForChatUploadBackgroundReady,
     type UploadEvent,
 } from '../../services/chatUploadBackground'
 import {
@@ -2076,6 +2077,14 @@ export function useChatMedia(options: UseChatMediaOptions) {
             messages.value.push(buildOptimisticMessageFromUpload(upload))
         }
     }
+
+    watch(selectedUserId, (userId) => {
+        if (typeof userId !== 'number') return
+        void waitForChatUploadBackgroundReady().then(() => {
+            if (selectedUserId.value !== userId) return
+            adoptPendingUploadsForUser(userId)
+        })
+    }, { immediate: true })
 
     return {
         cancelUpload,
