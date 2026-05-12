@@ -56,7 +56,10 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_contact_handles_missing_already_linked_and_already_connected_users(self):
         message = make_message()
         state = FakeState()
-        with patch("bot.handlers.link_account.get_db", new=db_factory(None)):
+        with patch("bot.handlers.link_account.get_db", new=db_factory(None)), patch(
+            "bot.handlers.link_account.is_user_accountant",
+            new=AsyncMock(return_value=False),
+        ):
             await handle_contact(message, state)
         self.assertIn("کاربری با این شماره یافت نشد", message.answer.await_args.args[0])
         self.assertEqual(state.cleared, 1)
@@ -64,7 +67,10 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         other_user = SimpleNamespace(id=2, telegram_id=77, account_name="acc", full_name="acc", address="تهران خیابان آزادی پلاک ۱۰")
         message = make_message()
         state = FakeState()
-        with patch("bot.handlers.link_account.get_db", new=db_factory(other_user)):
+        with patch("bot.handlers.link_account.get_db", new=db_factory(other_user)), patch(
+            "bot.handlers.link_account.is_user_accountant",
+            new=AsyncMock(return_value=False),
+        ):
             await handle_contact(message, state)
         self.assertIn("قبلاً به یک اکانت تلگرام دیگر", message.answer.await_args.args[0])
         self.assertEqual(state.cleared, 1)
@@ -72,9 +78,26 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         same_user = SimpleNamespace(id=3, telegram_id=10, account_name="acc", full_name="acc", address="تهران خیابان آزادی پلاک ۱۰")
         message = make_message()
         state = FakeState()
-        with patch("bot.handlers.link_account.get_db", new=db_factory(same_user)):
+        with patch("bot.handlers.link_account.get_db", new=db_factory(same_user)), patch(
+            "bot.handlers.link_account.is_user_accountant",
+            new=AsyncMock(return_value=False),
+        ):
             await handle_contact(message, state)
         self.assertIn("قبلاً متصل شده", message.answer.await_args.args[0])
+        self.assertEqual(state.cleared, 1)
+
+    async def test_handle_contact_blocks_accountant_bot_linking(self):
+        accountant_user = SimpleNamespace(id=5, telegram_id=None, account_name="acc", full_name="acc", address="تهران خیابان آزادی پلاک ۱۰")
+        message = make_message()
+        state = FakeState()
+
+        with patch("bot.handlers.link_account.get_db", new=db_factory(accountant_user)), patch(
+            "bot.handlers.link_account.is_user_accountant",
+            new=AsyncMock(return_value=True),
+        ):
+            await handle_contact(message, state)
+
+        self.assertIn("حسابدارها به ربات تلگرام دسترسی ندارند", message.answer.await_args.args[0])
         self.assertEqual(state.cleared, 1)
 
 

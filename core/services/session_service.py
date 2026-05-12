@@ -39,6 +39,15 @@ def calculate_threshold(base: int, max_sessions: int) -> int:
     return math.floor(base * (1 + 0.5 * (max_sessions - 1)))
 
 
+async def _is_accountant_user(db: AsyncSession, user_id: int) -> bool:
+    if not hasattr(db, "execute"):
+        return False
+
+    from core.services.accountant_relation_service import is_user_accountant
+
+    return await is_user_accountant(db, user_id)
+
+
 async def get_active_sessions(
     db: AsyncSession, user_id: int
 ) -> List[UserSession]:
@@ -134,7 +143,7 @@ async def handle_login_session(
     - {"action": "approval_required", "request": SessionLoginRequest}
     - {"action": "blocked", "reason": str}
     """
-    max_sessions = get_effective_max_sessions(user)
+    max_sessions = 1 if await _is_accountant_user(db, user.id) else get_effective_max_sessions(user)
     
     # Attempt to revive suspended session
     if suspended_refresh_token:
@@ -299,7 +308,7 @@ async def approve_login_request(
     # Load user to get max_sessions
     user = (await db.execute(select(User).where(User.id == login_req.user_id))).scalar_one()
     active_sessions = await get_active_sessions(db, login_req.user_id)
-    max_sessions_allowed = get_effective_max_sessions(user)
+    max_sessions_allowed = 1 if await _is_accountant_user(db, user.id) else get_effective_max_sessions(user)
 
     # Determine how many sessions to evict to make room for the new one
     num_to_evict = max(0, len(active_sessions) - max_sessions_allowed + 1)

@@ -1,16 +1,29 @@
 import unittest
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
 from core.services.accountant_relation_service import (
+    ACCOUNTANT_INVITATION_PREFIX,
+    build_trade_notification_audience_user_ids,
+    cancel_pending_accountant_relation,
+    create_owner_accountant_relation,
+    get_accountant_relation_by_invitation_token,
     get_active_accountant_relation_for_accountant,
     get_effective_max_accountants,
+    get_pending_accountant_relation_by_invitation_token,
     list_active_accountants_for_owner,
+    list_owner_accountant_relations,
     resolve_effective_owner_actor,
+    sweep_expired_pending_accountant_relations,
+    is_accountant_invitation_token,
+    is_user_accountant,
     validate_accountant_capacity,
 )
+from models.accountant_relation import AccountantRelationStatus
+from models.user import UserRole
 
 
 class FakeScalarResult:
@@ -19,6 +32,9 @@ class FakeScalarResult:
 
     def all(self):
         return self._values
+
+    def first(self):
+        return self._values[0] if self._values else None
 
 
 class FakeExecuteResult:
@@ -39,11 +55,17 @@ class FakeExecuteResult:
 class FakeDB:
     def __init__(self, execute_results=None):
         self.execute_results = list(execute_results or [])
+        self.commit = AsyncMock()
+        self.refresh = AsyncMock()
+        self.added = []
 
     async def execute(self, _stmt):
         if not self.execute_results:
             raise AssertionError("Unexpected execute() call")
         return self.execute_results.pop(0)
+
+    def add(self, item):
+        self.added.append(item)
 
 
 class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -52,6 +74,8 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(get_effective_max_accountants(SimpleNamespace(max_accountants=-2)), 0)
         self.assertEqual(get_effective_max_accountants(SimpleNamespace(max_accountants="bad")), 3)
         self.assertEqual(get_effective_max_accountants(SimpleNamespace()), 3)
+        self.assertTrue(is_accountant_invitation_token(f"{ACCOUNTANT_INVITATION_PREFIX}123"))
+        self.assertFalse(is_accountant_invitation_token("INV-123"))
 
     async def test_get_active_accountant_relation_for_accountant_returns_active_relation(self):
         relation = SimpleNamespace(id=41, owner_user=SimpleNamespace(id=7), accountant_user=SimpleNamespace(id=9))
@@ -70,9 +94,61 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, [relation_one, relation_two])
 
+    async def test_build_trade_notification_audience_user_ids_includes_owners_and_active_accountants(self):
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[21, 22, 21, None])])
+
+        result = await build_trade_notification_audience_user_ids(db, [7, "8", 7, 0, None])
+
+        self.assertEqual(result, [7, 8, 21, 22])
+
+    async def test_build_trade_notification_audience_user_ids_handles_empty_owner_set(self):
+        result = await build_trade_notification_audience_user_ids(FakeDB(), [None, 0, "bad"])
+
+        self.assertEqual(result, [])
+
+    async def test_sweep_expired_pending_accountant_relations_marks_rows_deleted(self):
+        expired = SimpleNamespace(
+            status=AccountantRelationStatus.PENDING,
+            deleted_at=None,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[expired])])
+
+        expired_relations = await sweep_expired_pending_accountant_relations(db)
+
+        self.assertEqual(expired_relations, [expired])
+        self.assertEqual(expired.status, AccountantRelationStatus.EXPIRED)
+        self.assertIsNotNone(expired.deleted_at)
+
+    async def test_get_pending_accountant_relation_by_invitation_token_commits_expired_rows_before_lookup(self):
+        pending_relation = SimpleNamespace(id=12)
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[SimpleNamespace(status=AccountantRelationStatus.PENDING, deleted_at=None)]),
+                FakeExecuteResult(scalar_one_value=pending_relation),
+            ]
+        )
+
+        result = await get_pending_accountant_relation_by_invitation_token(db, f"{ACCOUNTANT_INVITATION_PREFIX}token")
+
+        self.assertIs(result, pending_relation)
+        db.commit.assert_awaited_once()
+
+    async def test_get_accountant_relation_by_invitation_token_and_is_user_accountant(self):
+        relation = SimpleNamespace(id=9)
+        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)])
+
+        result = await get_accountant_relation_by_invitation_token(db, f"{ACCOUNTANT_INVITATION_PREFIX}token")
+        self.assertIs(result, relation)
+
+        with patch(
+            "core.services.accountant_relation_service.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=relation),
+        ):
+            self.assertTrue(await is_user_accountant(FakeDB(), 5))
+
     async def test_validate_accountant_capacity_raises_when_owner_is_full(self):
         owner = SimpleNamespace(id=5, max_accountants=2)
-        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=2)])
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[]), FakeExecuteResult(scalar_one_value=2)])
 
         with self.assertRaises(HTTPException) as exc_info:
             await validate_accountant_capacity(db, owner)
@@ -82,12 +158,123 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_validate_accountant_capacity_returns_current_count_and_limit(self):
         owner = SimpleNamespace(id=5, max_accountants=4)
-        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=2)])
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[]), FakeExecuteResult(scalar_one_value=2)])
 
         current_count, limit = await validate_accountant_capacity(db, owner)
 
         self.assertEqual(current_count, 2)
         self.assertEqual(limit, 4)
+
+    async def test_create_owner_accountant_relation_creates_pending_relation_and_invitation(self):
+        owner = SimpleNamespace(id=7, max_accountants=3)
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[]),
+                FakeExecuteResult(scalar_one_value=0),
+                FakeExecuteResult(scalar_one_value=None),
+                FakeExecuteResult(scalar_one_value=None),
+                FakeExecuteResult(scalar_one_value=None),
+            ]
+        )
+
+        with patch(
+            "core.services.accountant_relation_service.generate_accountant_invitation_token",
+            return_value=f"{ACCOUNTANT_INVITATION_PREFIX}token",
+        ), patch(
+            "core.services.accountant_relation_service.generate_accountant_short_code",
+            return_value="SHORTA1",
+        ):
+            relation, invitation = await create_owner_accountant_relation(
+                db,
+                owner_user=owner,
+                global_account_name=" accountant_1 ",
+                relation_display_name="  حسابدار اول  ",
+                mobile_number="۰۹۱۲۳۴۵۶۷۸۹",
+                duty_description="  کارهای روزانه  ",
+            )
+
+        self.assertEqual(len(db.added), 2)
+        self.assertEqual(invitation.account_name, "accountant_1")
+        self.assertEqual(invitation.mobile_number, "09123456789")
+        self.assertEqual(invitation.role, UserRole.WATCH)
+        self.assertEqual(invitation.token, f"{ACCOUNTANT_INVITATION_PREFIX}token")
+        self.assertEqual(relation.owner_user_id, 7)
+        self.assertEqual(relation.global_account_name, "accountant_1")
+        self.assertEqual(relation.relation_display_name, "حسابدار اول")
+        self.assertEqual(relation.mobile_number, "09123456789")
+        self.assertEqual(relation.duty_description, "کارهای روزانه")
+        self.assertEqual(relation.status, AccountantRelationStatus.PENDING)
+        db.commit.assert_awaited_once()
+        self.assertEqual(db.refresh.await_count, 2)
+
+    async def test_create_owner_accountant_relation_rejects_duplicate_and_existing_user_states(self):
+        owner = SimpleNamespace(id=7, max_accountants=3)
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await create_owner_accountant_relation(
+                FakeDB(),
+                owner_user=owner,
+                global_account_name="acc",
+                relation_display_name="",
+                mobile_number="0912",
+            )
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[]),
+                FakeExecuteResult(scalar_one_value=0),
+                FakeExecuteResult(scalar_one_value=SimpleNamespace(id=1)),
+            ]
+        )
+        with self.assertRaises(HTTPException) as exc_info:
+            await create_owner_accountant_relation(
+                db,
+                owner_user=owner,
+                global_account_name="acc",
+                relation_display_name="disp",
+                mobile_number="09120000000",
+            )
+        self.assertIn("قبلاً ثبت شده", exc_info.exception.detail)
+
+    async def test_list_owner_accountant_relations_commits_expired_rows_then_returns_pending_and_active(self):
+        relation_one = SimpleNamespace(id=1)
+        relation_two = SimpleNamespace(id=2)
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[SimpleNamespace(status=AccountantRelationStatus.PENDING, deleted_at=None)]),
+                FakeExecuteResult(values=[relation_one, relation_two]),
+            ]
+        )
+
+        result = await list_owner_accountant_relations(db, 7)
+
+        self.assertEqual(result, [relation_one, relation_two])
+        db.commit.assert_awaited_once()
+
+    async def test_cancel_pending_accountant_relation_revokes_pending_relation(self):
+        relation = SimpleNamespace(
+            id=4,
+            owner_user_id=7,
+            status=AccountantRelationStatus.PENDING,
+            deleted_at=None,
+            invitation_token=f"{ACCOUNTANT_INVITATION_PREFIX}token",
+        )
+        invitation = SimpleNamespace(is_used=False, expires_at=datetime.utcnow() + timedelta(days=1))
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(scalar_one_value=relation),
+                FakeExecuteResult(scalar_one_value=invitation),
+            ]
+        )
+
+        result = await cancel_pending_accountant_relation(db, owner_user_id=7, relation_id=4)
+
+        self.assertIs(result, relation)
+        self.assertEqual(relation.status, AccountantRelationStatus.REVOKED)
+        self.assertTrue(invitation.is_used)
+        db.commit.assert_awaited_once()
+        db.refresh.assert_awaited_once_with(relation)
 
     async def test_resolve_effective_owner_actor_returns_self_context_without_relation(self):
         user = SimpleNamespace(id=10)

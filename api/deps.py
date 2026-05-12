@@ -9,6 +9,7 @@ from sqlalchemy import select
 from core import security
 from core.config import settings
 from core.db import get_db
+from core.services.accountant_relation_service import EffectiveOwnerActor, resolve_effective_owner_actor
 from models.session import UserSession
 from models.user import User, UserRole
 from datetime import datetime
@@ -132,6 +133,19 @@ async def get_current_user_optional(
         return await get_current_user(db, token)
     except HTTPException:
         return None
+
+
+async def get_effective_owner_actor_context(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EffectiveOwnerActor:
+    return await resolve_effective_owner_actor(db, current_user)
+
+
+async def get_effective_owner_user(
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+) -> User:
+    return context.owner_user
 
 async def verify_super_admin(
     current_user: User = Depends(get_current_user)

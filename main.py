@@ -9,6 +9,7 @@ from api.routers import (
     auth, invitations, commodities, users, notifications, 
     trading_settings, offers, trades, realtime, users_public, chat, blocks, sync, sessions
 )
+from api.routers import accountants
 from core.config import settings
 from core.redis import init_redis, close_redis
 from core.db import AsyncSessionLocal, init_db
@@ -83,6 +84,7 @@ app.add_middleware(
 api_router = APIRouter(prefix="/api")
 
 api_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
+api_router.include_router(accountants.router, prefix="/accountants", tags=["Accountants"])
 api_router.include_router(invitations.router, prefix="/invitations", tags=["Invitations"])
 api_router.include_router(commodities.router, prefix="/commodities", tags=["Commodities"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])

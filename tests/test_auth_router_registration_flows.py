@@ -140,6 +140,23 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         send_sms_mock.assert_called_once_with("09120000000", "12345")
         self.assertEqual(result, {"detail": "کد تایید ارسال شد", "expires_in": 120})
 
+    async def test_register_otp_request_rejects_invalid_accountant_relation_tokens(self):
+        req = RegisterOTPRequest(token="ACCT-token")
+        invitation = SimpleNamespace(
+            is_used=False,
+            expires_at=datetime.utcnow() + timedelta(minutes=5),
+            mobile_number="09120000000",
+        )
+        redis = FakeRedis()
+
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth.get_pending_accountant_relation_by_invitation_token",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await register_otp_request(req, db=FakeDB([FakeExecuteResult(invitation)]))
+        self.assertEqual(exc_info.exception.status_code, 400)
+
     async def test_register_otp_verify_rejects_invalid_code_and_persists_verified_flag(self):
         req = RegisterOTPVerify(token="abc", code="12345")
         redis = FakeRedis()
@@ -275,6 +292,57 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
                 "token_type": "bearer",
             },
         )
+
+    async def test_register_complete_binds_pending_accountant_relation_and_disables_bot_access(self):
+        invitation = SimpleNamespace(
+            token="ACCT-token",
+            account_name="accountant1",
+            mobile_number="09120000000",
+            role="watch",
+            is_used=False,
+            expires_at=datetime.utcnow() + timedelta(minutes=5),
+        )
+        relation = SimpleNamespace(
+            accountant_user_id=None,
+            status="pending",
+            activated_at=None,
+            deleted_at=None,
+        )
+        redis = FakeRedis({"reg_verified:ACCT-token": "1"})
+        db = FakeDB([FakeExecuteResult(invitation)])
+        session = SimpleNamespace(id="session-acc")
+
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth.get_pending_accountant_relation_by_invitation_token",
+            new=AsyncMock(return_value=relation),
+        ), patch(
+            "api.routers.auth._login_home_server",
+            return_value="foreign",
+        ), patch(
+            "api.routers.auth.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.auth.create_refresh_token",
+            return_value="refresh-acc",
+        ), patch(
+            "api.routers.auth.handle_login_session",
+            new=AsyncMock(return_value={"session": session}),
+        ), patch(
+            "api.routers.auth.create_access_token",
+            return_value="access-acc",
+        ):
+            result = await register_complete(
+                RegisterComplete(token="ACCT-token", address="Tehran, Valiasr"),
+                raw_request=make_request(),
+                db=db,
+            )
+
+        new_user = db.added[0]
+        self.assertFalse(new_user.has_bot_access)
+        self.assertEqual(relation.accountant_user_id, 77)
+        self.assertEqual(relation.status, "active")
+        self.assertIsNotNone(relation.activated_at)
+        self.assertEqual(result["access_token"], "access-acc")
 
 
 if __name__ == "__main__":

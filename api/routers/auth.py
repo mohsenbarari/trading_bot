@@ -11,6 +11,7 @@ import hmac
 import time
 from core.db import get_db
 from models.user import User, UserRole
+from models.accountant_relation import AccountantRelationStatus
 from models.invitation import Invitation
 from core.security import (
     create_access_token,
@@ -35,6 +36,10 @@ import uuid
 from core.utils import utc_now
 from core.server_routing import SERVER_FOREIGN, server_from_request
 from core.services.chat_room_service import ensure_mandatory_channel_membership
+from core.services.accountant_relation_service import (
+    get_pending_accountant_relation_by_invitation_token,
+    is_accountant_invitation_token,
+)
 
 
 router = APIRouter()
@@ -139,6 +144,11 @@ async def register_otp_request(
     if inv.expires_at < datetime.utcnow():
         raise HTTPException(status_code=400, detail="دعوت‌نامه منقضی شده است")
 
+    if is_accountant_invitation_token(req.token):
+        relation = await get_pending_accountant_relation_by_invitation_token(db, req.token)
+        if not relation:
+            raise HTTPException(status_code=400, detail="دعوت‌نامه حسابدار نامعتبر یا منقضی شده است")
+
     mobile = inv.mobile_number
     
     # Rate limiting
@@ -198,6 +208,12 @@ async def register_complete(
     
     if not inv or inv.is_used or inv.expires_at < datetime.utcnow():
         raise HTTPException(status_code=400, detail="دعوت‌نامه نامعتبر است")
+
+    accountant_relation = None
+    if is_accountant_invitation_token(req.token):
+        accountant_relation = await get_pending_accountant_relation_by_invitation_token(db, req.token)
+        if not accountant_relation:
+            raise HTTPException(status_code=400, detail="دعوت‌نامه حسابدار نامعتبر یا منقضی شده است")
         
     # 3. Create User
     new_user = User(
@@ -206,18 +222,26 @@ async def register_complete(
         role=inv.role,
         full_name=inv.account_name, # Temporary full name
         address=req.address,
-        has_bot_access=True, # Default to True as requested
+        has_bot_access=False if accountant_relation else True,
         telegram_id=None, # Web only user
         home_server=_login_home_server(raw_request),
+        max_sessions=1,
     )
     
     db.add(new_user)
     
     # 4. Mark invitation as used
     inv.is_used = True
+    if accountant_relation:
+        accountant_relation.accountant_user_id = new_user.id
+        accountant_relation.status = AccountantRelationStatus.ACTIVE
+        accountant_relation.activated_at = utc_now()
+        accountant_relation.deleted_at = None
     
     try:
         await db.flush()
+        if accountant_relation:
+            accountant_relation.accountant_user_id = new_user.id
         await ensure_mandatory_channel_membership(db, user=new_user)
         await db.commit()
         await db.refresh(new_user)

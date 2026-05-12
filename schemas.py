@@ -5,6 +5,7 @@ from typing import List, Optional
 from datetime import datetime
 from core.utils import normalize_persian_numerals, to_jalali_str
 from core.enums import UserRole, NotificationLevel, NotificationCategory
+from models.accountant_relation import AccountantRelationStatus
 
 # --- Token Schemas ---
 class Token(BaseModel):
@@ -159,6 +160,54 @@ class UserAvatarUpdate(BaseModel):
             return None
         cleaned = value.strip()
         return cleaned or None
+
+
+class AccountantRelationCreate(BaseModel):
+    account_name: str
+    relation_display_name: str = Field(..., min_length=1, max_length=120)
+    mobile_number: str = Field(..., pattern=r"^09[0-9]{9}$")
+    duty_description: str | None = Field(default=None, max_length=255)
+
+    @field_validator('mobile_number', mode='before')
+    @classmethod
+    def normalize_mobile_accountant(cls, value):
+        return normalize_persian_numerals(value)
+
+    @field_validator('account_name', 'relation_display_name', mode='before')
+    @classmethod
+    def strip_accountant_strings(cls, value):
+        if value is None:
+            return value
+        return str(value).strip()
+
+    @field_validator('duty_description', mode='before')
+    @classmethod
+    def strip_duty_description(cls, value):
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
+
+
+class AccountantRelationRead(BaseModel):
+    id: int
+    owner_user_id: int
+    accountant_user_id: int | None = None
+    accountant_account_name: str | None = None
+    global_account_name: str
+    relation_display_name: str
+    duty_description: str | None = None
+    mobile_number: str
+    status: AccountantRelationStatus
+    invitation_token: str
+    registration_link: str | None = None
+    expires_at: datetime
+    activated_at: datetime | None = None
+    deleted_at: datetime | None = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # --- ۳. اعتبارسنج (validator) اضافه شد ---

@@ -43,6 +43,7 @@ __all__ = [
     # String normalization
     "normalize_persian_numerals",
     "normalize_account_name",
+    "unique_user_ids",
     # Telegram
     "send_deletable_message",
     "send_telegram_notification",
@@ -180,6 +181,26 @@ def normalize_account_name(text: str) -> str:
         return text
     normalized_text = normalize_persian_numerals(text)
     return normalized_text.lower()
+
+
+def unique_user_ids(user_ids: list[object]) -> list[int]:
+    """Return positive user ids once while preserving input order."""
+    unique_ids: list[int] = []
+    seen_ids: set[int] = set()
+
+    for raw_value in user_ids:
+        try:
+            user_id = int(raw_value)
+        except (TypeError, ValueError):
+            continue
+
+        if user_id <= 0 or user_id in seen_ids:
+            continue
+
+        seen_ids.add(user_id)
+        unique_ids.append(user_id)
+
+    return unique_ids
 
 
 # ===== TELEGRAM UTILITIES =====
