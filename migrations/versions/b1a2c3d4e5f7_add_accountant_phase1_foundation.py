@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import ENUM
 
 
 revision: str = 'b1a2c3d4e5f7'
@@ -18,13 +19,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    accountant_relation_status = sa.Enum(
+    accountant_relation_status = ENUM(
         'pending',
         'active',
         'expired',
         'revoked',
         'deleted',
         name='accountantrelationstatus',
+        create_type=False,
     )
     accountant_relation_status.create(op.get_bind(), checkfirst=True)
 
@@ -135,12 +137,13 @@ def downgrade() -> None:
 
     op.drop_column('users', 'max_accountants')
 
-    accountant_relation_status = sa.Enum(
+    accountant_relation_status = ENUM(
         'pending',
         'active',
         'expired',
         'revoked',
         'deleted',
         name='accountantrelationstatus',
+        create_type=False,
     )
     accountant_relation_status.drop(op.get_bind(), checkfirst=True)
