@@ -51,13 +51,13 @@ describe('NotificationsView.vue', () => {
     const wrapper = mount(NotificationsView)
     await flushPromises()
 
-    await wrapper.get('.back-btn').trigger('click')
+    await wrapper.get('.back-button').trigger('click')
     expect(routerPushMock).toHaveBeenCalledWith('/')
 
     await wrapper.get('.clear-btn').trigger('click')
     expect(clearAllSpy).toHaveBeenCalledTimes(1)
 
-    await wrapper.get('.delete-btn-corner').trigger('click')
+    await wrapper.get('.delete-btn').trigger('click')
     expect(deleteSpy).toHaveBeenCalledWith(11)
     expect(wrapper.text()).toContain('اعلان')
   })
