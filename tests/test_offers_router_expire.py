@@ -9,6 +9,12 @@ from api.routers.offers import expire_offer
 from models.offer import OfferStatus
 
 
+def make_context(owner_user=None, actor_user=None):
+    owner = owner_user or SimpleNamespace(id=5)
+    actor = actor_user or owner
+    return SimpleNamespace(owner_user=owner, actor_user=actor, relation=None, is_accountant_context=getattr(owner, "id", None) != getattr(actor, "id", None))
+
+
 class FakeDB:
     def __init__(self, *, scalar_result=None, get_result=None):
         self.scalar_result = scalar_result
@@ -47,7 +53,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=3),
         ):
             with self.assertRaises(HTTPException) as exc_info:
-                await expire_offer(offer_id=1, db=db, current_user=current_user)
+                await expire_offer(offer_id=1, db=db, context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 429)
         self.assertEqual(exc_info.exception.detail, "حداکثر 2 منقضی در دقیقه مجاز است")
 
@@ -60,7 +66,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value={"count": 3}),
         ), patch("api.routers.offers.date", wraps=date):
             with self.assertRaises(HTTPException) as exc_info:
-                await expire_offer(offer_id=1, db=db, current_user=current_user)
+                await expire_offer(offer_id=1, db=db, context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertIn("امروز 3 لفظ منقضی کرده", exc_info.exception.detail)
 
@@ -79,7 +85,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value={"count": 0}),
         ):
             with self.assertRaises(HTTPException) as exc_info:
-                await expire_offer(offer_id=1, db=FakeDB(scalar_result=0, get_result=None), current_user=current_user)
+                await expire_offer(offer_id=1, db=FakeDB(scalar_result=0, get_result=None), context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 404)
 
         foreign_offer = SimpleNamespace(user_id=8, status=OfferStatus.ACTIVE, channel_message_id=None)
@@ -91,7 +97,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value={"count": 0}),
         ):
             with self.assertRaises(HTTPException) as exc_info:
-                await expire_offer(offer_id=1, db=FakeDB(scalar_result=0, get_result=foreign_offer), current_user=current_user)
+                await expire_offer(offer_id=1, db=FakeDB(scalar_result=0, get_result=foreign_offer), context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "شما مالک این لفظ نیستید.")
 
@@ -104,7 +110,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value={"count": 0}),
         ):
             with self.assertRaises(HTTPException) as exc_info:
-                await expire_offer(offer_id=1, db=FakeDB(scalar_result=0, get_result=inactive_offer), current_user=current_user)
+                await expire_offer(offer_id=1, db=FakeDB(scalar_result=0, get_result=inactive_offer), context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "این لفظ قبلاً غیرفعال شده است.")
 
@@ -130,7 +136,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             "core.cache.decr_active_offer_count",
             new=AsyncMock(),
         ) as decr_mock:
-            result = await expire_offer(offer_id=7, db=db, current_user=current_user)
+            result = await expire_offer(offer_id=7, db=db, context=make_context(current_user))
 
         self.assertIsNone(result)
         self.assertEqual(offer.status, OfferStatus.EXPIRED)
@@ -165,7 +171,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             "core.cache.decr_active_offer_count",
             new=AsyncMock(),
         ):
-            await expire_offer(offer_id=9, db=db, current_user=current_user)
+            await expire_offer(offer_id=9, db=db, context=make_context(current_user))
 
         fake_client.post.assert_awaited_once_with(
             "https://api.telegram.org/botbot-token/editMessageReplyMarkup",
@@ -201,9 +207,35 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             "core.cache.decr_active_offer_count",
             new=AsyncMock(),
         ), patch("api.routers.offers.logger") as logger:
-            await expire_offer(offer_id=10, db=db, current_user=current_user)
+            await expire_offer(offer_id=10, db=db, context=make_context(current_user))
 
         logger.warning.assert_called_once()
+
+    async def test_expire_offer_uses_effective_owner_identity_for_accountant_context(self):
+        settings = SimpleNamespace(
+            offer_expire_rate_per_minute=5,
+            offer_expire_daily_limit_after_threshold=10,
+        )
+        offer = SimpleNamespace(user_id=5, status=OfferStatus.ACTIVE, channel_message_id=None)
+        db = FakeDB(scalar_result=6, get_result=offer)
+        owner_user = SimpleNamespace(id=5)
+        actor_user = SimpleNamespace(id=44)
+
+        with patch("api.routers.offers.get_trading_settings", return_value=settings), patch(
+            "bot.utils.redis_helpers.track_expire_rate",
+            new=AsyncMock(return_value=1),
+        ) as rate_mock, patch(
+            "bot.utils.redis_helpers.track_daily_expire",
+            new=AsyncMock(return_value={"count": 0}),
+        ) as daily_mock, patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
+            "core.cache.decr_active_offer_count",
+            new=AsyncMock(),
+        ) as decr_mock:
+            await expire_offer(offer_id=11, db=db, context=make_context(owner_user, actor_user))
+
+        rate_mock.assert_awaited_once_with(5, window_seconds=60)
+        daily_mock.assert_awaited_once_with(5, 6)
+        decr_mock.assert_awaited_once_with(5)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ from core.utils import (
     check_user_limits, increment_user_counter, to_jalali_str,
     create_user_notification, send_telegram_notification
 )
+from core.services.accountant_relation_service import build_trade_notification_audience_user_ids
 from core.services.trade_service import (
     build_lot_unavailable_suggestion_payload,
     get_available_trade_amounts,
@@ -31,7 +32,7 @@ from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
 from models.trade import Trade, TradeType, TradeStatus
 from models.commodity import Commodity
-from api.deps import get_current_user
+from api.deps import EffectiveOwnerActor, get_current_user, get_effective_owner_actor_context
 from core.server_routing import current_server, is_remote_home, normalize_server
 from core.trade_forwarding import forward_trade_to_home_server, verify_internal_signature
 
@@ -58,6 +59,7 @@ class InternalTradeExecuteRequest(BaseModel):
     offer_id: int = Field(..., gt=0)
     quantity: int = Field(..., gt=0)
     responder_user_id: int = Field(..., gt=0)
+    actor_user_id: Optional[int] = Field(None, gt=0)
     edge_received_at: datetime
     source_server: str
     idempotency_key: Optional[str] = None
@@ -302,17 +304,20 @@ async def _is_offer_expired_for_trade(offer: Offer, edge_received_at: Optional[d
 async def _forward_trade_if_remote_home(
     db: AsyncSession,
     trade_data: TradeCreate,
-    current_user: User,
+    context: EffectiveOwnerActor,
     edge_received_at: datetime,
 ) -> Optional[JSONResponse]:
     offer = await db.get(Offer, trade_data.offer_id)
     if not offer or not is_remote_home(offer.home_server):
         return None
 
+    owner_user = context.owner_user
+    actor_user = context.actor_user
     payload = {
         "offer_id": trade_data.offer_id,
         "quantity": trade_data.quantity,
-        "responder_user_id": current_user.id,
+        "responder_user_id": owner_user.id,
+        "actor_user_id": actor_user.id,
         "edge_received_at": edge_received_at.isoformat(),
         "source_server": current_server(),
         "idempotency_key": trade_data.idempotency_key,
@@ -325,7 +330,7 @@ async def _execute_trade_authoritatively(
     trade_data: TradeCreate,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     edge_received_at: Optional[datetime] = None,
 ):
     """
@@ -333,17 +338,19 @@ async def _execute_trade_authoritatively(
     """
     from core.enums import UserRole
     import jdatetime
+    owner_user = context.owner_user
+    actor_user = context.actor_user
     
     # بررسی نقش
-    if current_user.role == UserRole.WATCH:
+    if owner_user.role == UserRole.WATCH:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="شما دسترسی به بخش معاملات را ندارید."
         )
     
     # بررسی مسدودیت (قبل از قفل)
-    if current_user.trading_restricted_until:
-        if current_user.trading_restricted_until > datetime.utcnow():
+    if owner_user.trading_restricted_until:
+        if owner_user.trading_restricted_until > datetime.utcnow():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="حساب شما مسدود است."
@@ -352,12 +359,12 @@ async def _execute_trade_authoritatively(
     # ===== قفل کاربر برای جلوگیری از Race Condition در محدودیت‌ها =====
     # اگر دو درخواست همزمان بیاید، اولی قفل می‌کند و دومی منتظر می‌ماند
     locked_user = await db.execute(
-        select(User).where(User.id == current_user.id).with_for_update()
+        select(User).where(User.id == owner_user.id).with_for_update()
     )
-    current_user = locked_user.scalar_one()
+    owner_user = locked_user.scalar_one()
     
     # بررسی محدودیت معامله (حالا با قفل)
-    allowed, error_msg = check_user_limits(current_user, 'trade', trade_data.quantity)
+    allowed, error_msg = check_user_limits(owner_user, 'trade', trade_data.quantity)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
     
@@ -377,12 +384,12 @@ async def _execute_trade_authoritatively(
     if (offer.status != OfferStatus.ACTIVE and not allow_in_flight_after_auto_expiry) or expired_for_trade:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ دیگر فعال نیست.")
     
-    if offer.user_id == current_user.id:
+    if offer.user_id == owner_user.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="نمی‌توانید روی لفظ خودتان معامله کنید.")
     
     # بررسی بلاک بین کاربران (پنهان - کاربر نباید متوجه بلاک شدن بشه)
     from core.services.block_service import is_blocked
-    blocked, _ = await is_blocked(db, current_user.id, offer.user_id)
+    blocked, _ = await is_blocked(db, owner_user.id, offer.user_id)
     if blocked:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -450,8 +457,9 @@ async def _execute_trade_authoritatively(
         offer_id=offer.id,
         offer_user_id=offer.user_id,
         offer_user_mobile=offer.user.mobile_number if offer.user else None,
-        responder_user_id=current_user.id,
-        responder_user_mobile=current_user.mobile_number,
+        responder_user_id=owner_user.id,
+        responder_user_mobile=owner_user.mobile_number,
+        actor_user_id=actor_user.id,
         commodity_id=offer.commodity_id,
         trade_type=responder_trade_type,
         quantity=trade_quantity,
@@ -549,13 +557,13 @@ async def _execute_trade_authoritatively(
         f"💰 فی: {offer.price:,}\n"
         f"📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
-        f"👤 طرف معامله: {current_user.account_name}\n"
+        f"👤 طرف معامله: {owner_user.account_name}\n"
         f"🔢 شماره معامله: {new_trade_number}\n"
         f"🕐 زمان معامله: {trade_datetime}"
     )
     
     # ارسال پیام‌های تلگرام (در background)
-    background_tasks.add_task(send_telegram_message_sync, current_user.telegram_id, responder_msg)
+    background_tasks.add_task(send_telegram_message_sync, owner_user.telegram_id, responder_msg)
     if offer.user:
         background_tasks.add_task(send_telegram_message_sync, offer.user.telegram_id, offer_owner_msg)
     
@@ -572,19 +580,23 @@ async def _execute_trade_authoritatively(
         f"{offer_emoji} {offer_type_fa}\n"
         f"💰 فی: {offer.price:,} | 📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
-        f"👤 طرف معامله: {current_user.account_name}\n"
+        f"👤 طرف معامله: {owner_user.account_name}\n"
         f"🔢 شماره: {new_trade_number}"
     )
     
     try:
-        await create_user_notification(
-            db, current_user.id, notif_msg_responder,
-            level=NotificationLevel.SUCCESS,
-            category=NotificationCategory.TRADE
-        )
-        if offer.user_id:
+        responder_audience = await build_trade_notification_audience_user_ids(db, [owner_user.id])
+        offer_owner_audience = await build_trade_notification_audience_user_ids(db, [offer.user_id])
+
+        for audience_user_id in responder_audience:
             await create_user_notification(
-                db, offer.user_id, notif_msg_owner,
+                db, audience_user_id, notif_msg_responder,
+                level=NotificationLevel.SUCCESS,
+                category=NotificationCategory.TRADE
+            )
+        for audience_user_id in offer_owner_audience:
+            await create_user_notification(
+                db, audience_user_id, notif_msg_owner,
                 level=NotificationLevel.SUCCESS,
                 category=NotificationCategory.TRADE
             )
@@ -594,9 +606,7 @@ async def _execute_trade_authoritatively(
     # افزایش شمارنده معامله
     # فقط پاسخ‌دهنده (کسی که روی لفظ دیگران معامله می‌کند) شمارنده‌اش افزایش می‌یابد
     # صاحب لفظ شمارنده‌اش افزایش نمی‌یابد (چون او فقط لفظ داده، فعالانه معامله نکرده)
-    user_for_counter = await db.get(User, current_user.id)
-    if user_for_counter:
-        await increment_user_counter(db, user_for_counter, 'trade', trade_quantity)
+    await increment_user_counter(db, owner_user, 'trade', trade_quantity)
     
     # ارسال رویداد SSE
     from .realtime import publish_event
@@ -609,8 +619,8 @@ async def _execute_trade_authoritatively(
         "trade_type": responder_trade_type.value,
         "offer_user_id": offer.user_id,
         "offer_user_name": offer.user.account_name if offer.user else "ناشناس",
-        "responder_user_id": current_user.id,
-        "responder_user_name": current_user.account_name
+        "responder_user_id": owner_user.id,
+        "responder_user_name": owner_user.account_name
     })
     await publish_event("offer:updated", {
         "id": offer.id,
@@ -628,10 +638,10 @@ async def create_trade(
     background_tasks: BackgroundTasks,
     raw_request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context)
 ):
     edge_received_at = datetime.utcnow()
-    forwarded_response = await _forward_trade_if_remote_home(db, trade_data, current_user, edge_received_at)
+    forwarded_response = await _forward_trade_if_remote_home(db, trade_data, context, edge_received_at)
     if forwarded_response is not None:
         return forwarded_response
 
@@ -639,7 +649,7 @@ async def create_trade(
         trade_data=trade_data,
         background_tasks=background_tasks,
         db=db,
-        current_user=current_user,
+        context=context,
         edge_received_at=edge_received_at,
     )
 
@@ -668,6 +678,12 @@ async def execute_trade_internal(
     if not responder or responder.is_deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کاربر درخواست‌دهنده یافت نشد")
 
+    actor_user = responder
+    if internal_data.actor_user_id and internal_data.actor_user_id != responder.id:
+        actor_user = await db.get(User, internal_data.actor_user_id)
+        if not actor_user or actor_user.is_deleted:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کاربر اجراکننده یافت نشد")
+
     return await _execute_trade_authoritatively(
         trade_data=TradeCreate(
             offer_id=internal_data.offer_id,
@@ -676,7 +692,12 @@ async def execute_trade_internal(
         ),
         background_tasks=background_tasks,
         db=db,
-        current_user=responder,
+        context=EffectiveOwnerActor(
+            owner_user=responder,
+            actor_user=actor_user,
+            relation=None,
+            is_accountant_context=actor_user.id != responder.id,
+        ),
         edge_received_at=internal_data.edge_received_at,
     )
 

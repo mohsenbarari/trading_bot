@@ -10,6 +10,7 @@ from core.services.accountant_relation_service import (
     cancel_pending_accountant_relation,
     create_owner_accountant_relation,
     list_owner_accountant_relations,
+    update_owner_accountant_relation,
 )
 from core.sms import send_accountant_invitation_sms
 
@@ -97,5 +98,23 @@ async def cancel_my_pending_accountant(
         db,
         owner_user_id=context.owner_user.id,
         relation_id=relation_id,
+    )
+    return serialize_accountant_relation(relation)
+
+
+@router.patch("/owner-relations/{relation_id}", response_model=schemas.AccountantRelationRead)
+async def update_my_accountant(
+    relation_id: int,
+    payload: schemas.AccountantRelationUpdate,
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_owner_context(context)
+    relation = await update_owner_accountant_relation(
+        db,
+        owner_user_id=context.owner_user.id,
+        relation_id=relation_id,
+        relation_display_name=payload.relation_display_name,
+        duty_description=payload.duty_description,
     )
     return serialize_accountant_relation(relation)

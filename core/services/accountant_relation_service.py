@@ -380,3 +380,43 @@ async def cancel_pending_accountant_relation(
     await db.commit()
     await db.refresh(relation)
     return relation
+
+
+async def update_owner_accountant_relation(
+    db: AsyncSession,
+    *,
+    owner_user_id: int,
+    relation_id: int,
+    relation_display_name: str | None = None,
+    duty_description: str | None = None,
+) -> AccountantRelation:
+    stmt = select(AccountantRelation).where(
+        AccountantRelation.id == relation_id,
+        AccountantRelation.owner_user_id == owner_user_id,
+    )
+    relation = (await db.execute(stmt)).scalar_one_or_none()
+    if not relation:
+        raise HTTPException(status_code=404, detail="رابطه حسابدار یافت نشد")
+    if relation.deleted_at is not None or relation.status not in CAPACITY_TRACKED_RELATION_STATUSES:
+        raise HTTPException(status_code=400, detail="فقط حسابدار pending یا active قابل ویرایش است")
+
+    normalized_display_name = (relation_display_name or "").strip() or None
+    normalized_duty_description = (duty_description or "").strip() or None
+
+    if normalized_display_name and normalized_display_name != relation.relation_display_name:
+        duplicate_display_stmt = select(AccountantRelation).where(
+            AccountantRelation.owner_user_id == owner_user_id,
+            AccountantRelation.deleted_at.is_(None),
+            AccountantRelation.id != relation.id,
+            AccountantRelation.relation_display_name == normalized_display_name,
+        )
+        duplicate_display = (await db.execute(duplicate_display_stmt)).scalar_one_or_none()
+        if duplicate_display:
+            raise HTTPException(status_code=400, detail="این نام نمایشی قبلاً برای یکی از حسابداران این کاربر استفاده شده است")
+        relation.relation_display_name = normalized_display_name
+
+    relation.duty_description = normalized_duty_description
+
+    await db.commit()
+    await db.refresh(relation)
+    return relation

@@ -22,7 +22,7 @@ from core.services.trade_service import get_available_trade_amounts
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
 from models.commodity import Commodity
-from api.deps import get_current_user
+from api.deps import EffectiveOwnerActor, get_current_user, get_effective_owner_actor_context
 from core.server_routing import current_server
 
 
@@ -205,7 +205,7 @@ async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
 async def create_offer(
     offer_data: OfferCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context)
 ):
     """
     ثبت لفظ جدید از MiniApp
@@ -214,36 +214,38 @@ async def create_offer(
     - ارسال به کانال تلگرام
     """
     from core.enums import UserRole
+    owner_user = context.owner_user
+    actor_user = context.actor_user
     
     # بررسی نقش
-    if current_user.role == UserRole.WATCH:
+    if owner_user.role == UserRole.WATCH:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="شما دسترسی به بخش معاملات را ندارید."
         )
     
     # بررسی مسدودیت
-    if current_user.trading_restricted_until:
-        if current_user.trading_restricted_until > datetime.utcnow():
-            remaining = current_user.trading_restricted_until - datetime.utcnow()
+    if owner_user.trading_restricted_until:
+        if owner_user.trading_restricted_until > datetime.utcnow():
+            remaining = owner_user.trading_restricted_until - datetime.utcnow()
             total_seconds = int(remaining.total_seconds())
             days = total_seconds // 86400
             hours = (total_seconds % 86400) // 3600
             minutes = (total_seconds % 3600) // 60
             countdown = f"{days:02d}:{hours:02d}:{minutes:02d}"
-            expiry_jalali = to_jalali_str(current_user.trading_restricted_until, "%Y/%m/%d - %H:%M")
+            expiry_jalali = to_jalali_str(owner_user.trading_restricted_until, "%Y/%m/%d - %H:%M")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"حساب شما مسدود است.\n📅 رفع مسدودیت: {expiry_jalali}\n⏳ زمان باقی‌مانده: {countdown}"
             )
     
     # بررسی محدودیت ارسال لفظ
-    allowed, error_msg = check_user_limits(current_user, 'channel_message')
+    allowed, error_msg = check_user_limits(owner_user, 'channel_message')
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
     
     # بررسی محدودیت معامله و کالا
-    allowed, error_msg = check_user_limits(current_user, 'trade', offer_data.quantity)
+    allowed, error_msg = check_user_limits(owner_user, 'trade', offer_data.quantity)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
     
@@ -253,17 +255,17 @@ async def create_offer(
     # ===== Redis Cache Check =====
     from core.cache import get_active_offer_count, set_active_offer_count
     
-    active_count = await get_active_offer_count(current_user.id)
+    active_count = await get_active_offer_count(owner_user.id)
     if active_count is None:
         # Cache miss - query DB
         active_count = await db.scalar(
             select(func.count(Offer.id)).where(
-                Offer.user_id == current_user.id,
+                Offer.user_id == owner_user.id,
                 Offer.status == OfferStatus.ACTIVE
             )
         )
         # Cache the result
-        await set_active_offer_count(current_user.id, active_count)
+        await set_active_offer_count(owner_user.id, active_count)
     # =============================
     
     if active_count >= ts.max_active_offers:
@@ -311,7 +313,7 @@ async def create_offer(
         commodity_id=offer_data.commodity_id,
         quantity=offer_data.quantity,
         proposed_price=offer_data.price,
-        user_id=current_user.id
+        user_id=owner_user.id
     )
     if not is_valid_comp:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_comp)
@@ -319,15 +321,16 @@ async def create_offer(
     # مدیریت تکرار لفظ قدیمی
     if offer_data.republished_from_id:
         old_offer = await db.get(Offer, offer_data.republished_from_id)
-        if old_offer and old_offer.user_id == current_user.id:
+        if old_offer and old_offer.user_id == owner_user.id:
             # اگر لفظ قبلی هنوز فعال باشد، آن را منقضی می‌کنیم
             if old_offer.status == OfferStatus.ACTIVE:
                  old_offer.status = OfferStatus.EXPIRED
 
     # ایجاد لفظ
     new_offer = Offer(
-        user_id=current_user.id,
-        home_server=current_server(),
+        user_id=owner_user.id,
+        actor_user_id=actor_user.id,
+        home_server=getattr(owner_user, "home_server", None) or current_server(),
         offer_type=OfferType.BUY if offer_data.offer_type == "buy" else OfferType.SELL,
         commodity_id=offer_data.commodity_id,
         quantity=offer_data.quantity,
@@ -360,18 +363,18 @@ async def create_offer(
     new_offer = result.scalar_one()
     
     # ارسال به کانال
-    message_id = await send_offer_to_channel(new_offer, current_user)
+    message_id = await send_offer_to_channel(new_offer, owner_user)
     if message_id:
         new_offer.channel_message_id = message_id
         await db.commit()
     
     # ===== Increment Offer Count Cache =====
     from core.cache import incr_active_offer_count
-    await incr_active_offer_count(current_user.id)
+    await incr_active_offer_count(owner_user.id)
     # =======================================
     
     # افزایش شمارنده
-    await increment_user_counter(db, current_user, 'channel_message')
+    await increment_user_counter(db, owner_user, 'channel_message')
     
     # دریافت تنظیمات برای محاسبه انقضا
     from core.trading_settings import get_trading_settings_async
@@ -408,7 +411,7 @@ async def create_offer(
         "expires_at_ts": sse_expires_at_ts,
     })
     
-    return offer_to_response(new_offer, ts, viewer_user_id=current_user.id, include_owner_identity=True)
+    return offer_to_response(new_offer, ts, viewer_user_id=owner_user.id, include_owner_identity=True)
 
 
 @router.get("/", response_model=List[OfferResponse])
@@ -507,16 +510,17 @@ async def get_my_offers(
 async def expire_offer(
     offer_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context)
 ):
     """
     منقضی کردن لفظ
     """
+    owner_user = context.owner_user
     ts = get_trading_settings()
 
     from bot.utils.redis_helpers import track_daily_expire, track_expire_rate
 
-    rate_count = await track_expire_rate(current_user.id, window_seconds=60)
+    rate_count = await track_expire_rate(owner_user.id, window_seconds=60)
     if rate_count > ts.offer_expire_rate_per_minute:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -526,12 +530,12 @@ async def expire_offer(
     start_of_day = datetime.combine(date.today(), datetime.min.time())
     total_offers_today = await db.scalar(
         select(func.count(Offer.id)).where(
-            Offer.user_id == current_user.id,
+            Offer.user_id == owner_user.id,
             Offer.created_at >= start_of_day
         )
     ) or 0
 
-    daily_data = await track_daily_expire(current_user.id, total_offers_today)
+    daily_data = await track_daily_expire(owner_user.id, total_offers_today)
     threshold = ts.offer_expire_daily_limit_after_threshold
     if daily_data["count"] >= threshold:
         max_allowed = total_offers_today // 3
@@ -549,7 +553,7 @@ async def expire_offer(
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
     
-    if offer.user_id != current_user.id:
+    if offer.user_id != owner_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما مالک این لفظ نیستید.")
     
     if offer.status != OfferStatus.ACTIVE:

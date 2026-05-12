@@ -20,6 +20,7 @@ from core.services.accountant_relation_service import (
     sweep_expired_pending_accountant_relations,
     is_accountant_invitation_token,
     is_user_accountant,
+    update_owner_accountant_relation,
     validate_accountant_capacity,
 )
 from models.accountant_relation import AccountantRelationStatus
@@ -275,6 +276,79 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(invitation.is_used)
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(relation)
+
+    async def test_update_owner_accountant_relation_updates_editable_fields(self):
+        relation = SimpleNamespace(
+            id=4,
+            owner_user_id=7,
+            status=AccountantRelationStatus.ACTIVE,
+            deleted_at=None,
+            relation_display_name="حسابدار اول",
+            duty_description="پیگیری",
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)])
+        db.execute_results.append(FakeExecuteResult(scalar_one_value=None))
+
+        result = await update_owner_accountant_relation(
+            db,
+            owner_user_id=7,
+            relation_id=4,
+            relation_display_name="حسابدار دوم",
+            duty_description="گزارش‌گیری",
+        )
+
+        self.assertIs(result, relation)
+        self.assertEqual(relation.relation_display_name, "حسابدار دوم")
+        self.assertEqual(relation.duty_description, "گزارش‌گیری")
+        db.commit.assert_awaited_once()
+        db.refresh.assert_awaited_once_with(relation)
+
+    async def test_update_owner_accountant_relation_rejects_duplicate_or_inactive_relation(self):
+        relation = SimpleNamespace(
+            id=4,
+            owner_user_id=7,
+            status=AccountantRelationStatus.ACTIVE,
+            deleted_at=None,
+            relation_display_name="حسابدار اول",
+            duty_description="پیگیری",
+        )
+        duplicate = SimpleNamespace(id=8)
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(scalar_one_value=relation),
+                FakeExecuteResult(scalar_one_value=duplicate),
+            ]
+        )
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await update_owner_accountant_relation(
+                db,
+                owner_user_id=7,
+                relation_id=4,
+                relation_display_name="حسابدار دوم",
+                duty_description="پیگیری",
+            )
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        inactive_relation = SimpleNamespace(
+            id=4,
+            owner_user_id=7,
+            status=AccountantRelationStatus.REVOKED,
+            deleted_at=datetime.utcnow(),
+            relation_display_name="حسابدار اول",
+            duty_description=None,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=inactive_relation)])
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await update_owner_accountant_relation(
+                db,
+                owner_user_id=7,
+                relation_id=4,
+                relation_display_name="حسابدار دوم",
+                duty_description=None,
+            )
+        self.assertEqual(exc_info.exception.status_code, 400)
 
     async def test_resolve_effective_owner_actor_returns_self_context_without_relation(self):
         user = SimpleNamespace(id=10)

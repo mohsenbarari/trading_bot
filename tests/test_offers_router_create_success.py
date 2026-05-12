@@ -70,6 +70,12 @@ def make_user(**overrides):
     return SimpleNamespace(**data)
 
 
+def make_context(owner_user=None, actor_user=None):
+    owner = owner_user or make_user()
+    actor = actor_user or owner
+    return SimpleNamespace(owner_user=owner, actor_user=actor, relation=None, is_accountant_context=owner.id != actor.id)
+
+
 def make_reloaded_offer(*, offer_id=77, channel_message_id=None, notes="urgent"):
     return SimpleNamespace(
         id=offer_id,
@@ -129,7 +135,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             result = await create_offer(
                 make_offer(republished_from_id=99),
                 db=db,
-                current_user=current_user,
+                context=make_context(current_user),
             )
 
         new_offer = db.added[0]
@@ -178,7 +184,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.offers.offer_to_response",
             return_value={"id": 88, "channel_message_id": 555},
         ) as response_mock:
-            result = await create_offer(make_offer(), db=db, current_user=current_user)
+            result = await create_offer(make_offer(), db=db, context=make_context(current_user))
 
         new_offer = db.added[0]
         self.assertEqual(new_offer.home_server, "foreign")
@@ -243,7 +249,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.offers.offer_to_response",
             return_value={"id": 99},
         ), patch("api.routers.offers.to_jalali_str", return_value=""):
-            result = await create_offer(make_offer(), db=db, current_user=current_user)
+            result = await create_offer(make_offer(), db=db, context=make_context(current_user))
 
         publish_mock.assert_awaited_once_with(
             "offer:created",
@@ -268,6 +274,53 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(result, {"id": 99})
+
+    async def test_create_offer_uses_owner_principal_and_actor_audit_for_accountant(self):
+        commodity = SimpleNamespace(id=1)
+        owner_user = make_user(id=5, home_server="iran")
+        actor_user = make_user(id=44, role=UserRole.WATCH)
+        reloaded_offer = make_reloaded_offer(offer_id=120)
+        reloaded_offer.user_id = 5
+        db = FakeDB(
+            get_results=[commodity],
+            execute_results=[FakeExecuteResult(reloaded_offer)],
+        )
+        settings = SimpleNamespace(max_active_offers=5)
+        async_settings = SimpleNamespace(offer_expiry_minutes=30)
+
+        with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=settings,
+        ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=0)), patch(
+            "core.services.trade_service.validate_quantity",
+            return_value=(True, None),
+        ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "api.routers.offers.send_offer_to_channel",
+            new=AsyncMock(return_value=None),
+        ) as send_mock, patch("core.cache.incr_active_offer_count", new=AsyncMock()) as incr_mock, patch(
+            "api.routers.offers.increment_user_counter",
+            new=AsyncMock(),
+        ) as counter_mock, patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=async_settings),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
+            "api.routers.offers.offer_to_response",
+            return_value={"id": 120, "user_id": 5},
+        ) as response_mock:
+            result = await create_offer(make_offer(), db=db, context=make_context(owner_user, actor_user))
+
+        new_offer = db.added[0]
+        self.assertEqual(new_offer.user_id, 5)
+        self.assertEqual(new_offer.actor_user_id, 44)
+        self.assertEqual(new_offer.home_server, "iran")
+        send_mock.assert_awaited_once_with(reloaded_offer, owner_user)
+        incr_mock.assert_awaited_once_with(5)
+        counter_mock.assert_awaited_once_with(db, owner_user, "channel_message")
+        response_mock.assert_called_once_with(reloaded_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
+        self.assertEqual(result, {"id": 120, "user_id": 5})
 
 
 if __name__ == "__main__":

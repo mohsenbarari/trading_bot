@@ -76,6 +76,11 @@ def make_offer(**overrides):
     return SimpleNamespace(**data)
 
 
+def make_context(owner_user, actor_user=None):
+    actor = actor_user or owner_user
+    return SimpleNamespace(owner_user=owner_user, actor_user=actor, relation=None, is_accountant_context=owner_user.id != actor.id)
+
+
 class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_trade_authoritatively_rejects_watch_restricted_and_limit_failures(self):
         trade_data = TradeCreate(offer_id=7, quantity=4)
@@ -85,7 +90,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                 trade_data,
                 BackgroundTasks(),
                 db=FakeDB(),
-                current_user=make_user(role=UserRole.WATCH),
+                context=make_context(make_user(role=UserRole.WATCH)),
             )
         self.assertEqual(exc_info.exception.status_code, 403)
 
@@ -94,7 +99,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                 trade_data,
                 BackgroundTasks(),
                 db=FakeDB(),
-                current_user=make_user(trading_restricted_until=datetime.utcnow() + timedelta(minutes=10)),
+                context=make_context(make_user(trading_restricted_until=datetime.utcnow() + timedelta(minutes=10))),
             )
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "حساب شما مسدود است.")
@@ -102,7 +107,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB(execute_results=[FakeExecuteResult(single=make_user())])
         with patch("api.routers.trades.check_user_limits", return_value=(False, "trade blocked")):
             with self.assertRaises(HTTPException) as exc_info:
-                await _execute_trade_authoritatively(trade_data, BackgroundTasks(), db=db, current_user=make_user())
+                await _execute_trade_authoritatively(trade_data, BackgroundTasks(), db=db, context=make_context(make_user()))
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "trade blocked")
 
@@ -116,7 +121,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                     trade_data,
                     BackgroundTasks(),
                     db=FakeDB(execute_results=[FakeExecuteResult(single=locked_user)], get_results=[None]),
-                    current_user=locked_user,
+                    context=make_context(locked_user),
                 )
         self.assertEqual(exc_info.exception.status_code, 404)
 
@@ -130,7 +135,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                     trade_data,
                     BackgroundTasks(),
                     db=FakeDB(execute_results=[FakeExecuteResult(single=locked_user)], get_results=[inactive_offer]),
-                    current_user=locked_user,
+                    context=make_context(locked_user),
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "این لفظ دیگر فعال نیست.")
@@ -145,7 +150,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                     trade_data,
                     BackgroundTasks(),
                     db=FakeDB(execute_results=[FakeExecuteResult(single=locked_user)], get_results=[own_offer]),
-                    current_user=locked_user,
+                    context=make_context(locked_user),
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "نمی‌توانید روی لفظ خودتان معامله کنید.")
@@ -160,7 +165,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                     trade_data,
                     BackgroundTasks(),
                     db=FakeDB(execute_results=[FakeExecuteResult(single=locked_user)], get_results=[blocked_offer]),
-                    current_user=locked_user,
+                    context=make_context(locked_user),
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "امکان انجام این معامله وجود ندارد.")
@@ -184,7 +189,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                 TradeCreate(offer_id=7, quantity=5),
                 BackgroundTasks(),
                 db=db,
-                current_user=locked_user,
+                context=make_context(locked_user),
             )
 
         db.refresh.assert_awaited_once_with(offer, ["commodity"])
@@ -207,7 +212,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                     TradeCreate(offer_id=7, quantity=5),
                     BackgroundTasks(),
                     db=FakeDB(execute_results=[FakeExecuteResult(single=locked_user)], get_results=[offer]),
-                    current_user=locked_user,
+                    context=make_context(locked_user),
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "bad amount")
@@ -231,7 +236,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                 TradeCreate(offer_id=7, quantity=4, idempotency_key="idem-1"),
                 BackgroundTasks(),
                 db=db,
-                current_user=locked_user,
+                context=make_context(locked_user),
             )
 
         db.refresh.assert_awaited_once_with(offer, ["user", "commodity"])
