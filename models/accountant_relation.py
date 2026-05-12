@@ -9,6 +9,10 @@ from sqlalchemy.sql import func
 from .database import Base
 
 
+def _accountant_relation_status_values(enum_cls):
+    return [status.value for status in enum_cls]
+
+
 class AccountantRelationStatus(str, enum.Enum):
     PENDING = "pending"
     ACTIVE = "active"
@@ -51,7 +55,16 @@ class AccountantRelation(Base):
     relation_display_name = Column(String, nullable=False)
     duty_description = Column(String(255), nullable=True)
     mobile_number = Column(String, nullable=False, index=True)
-    status = Column(Enum(AccountantRelationStatus), nullable=False, default=AccountantRelationStatus.PENDING, index=True)
+    status = Column(
+        Enum(
+            AccountantRelationStatus,
+            name="accountantrelationstatus",
+            values_callable=_accountant_relation_status_values,
+        ),
+        nullable=False,
+        default=AccountantRelationStatus.PENDING,
+        index=True,
+    )
 
     expires_at = Column(DateTime(timezone=True), nullable=False)
     activated_at = Column(DateTime(timezone=True), nullable=True)

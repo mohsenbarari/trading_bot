@@ -70,6 +70,7 @@ const pinnedMessageState = ref<PinnedMessageState | null>(null)
 
 // Selection State
 const selectedMessages = ref<number[]>([])
+const forwardMessageIds = ref<number[]>([])
 const selectionModePurpose = ref<'default' | 'album-download' | 'album-forward' | 'album-share'>('default')
 const activeAlbumSelectionId = ref<string | null>(null)
 const isSelectionMode = computed(() => selectedMessages.value.length > 0)
@@ -1035,10 +1036,10 @@ async function toggleMessageReaction(msg: Message, emoji: string) {
 }
 
 function openForwardModalForIds(messageIds: number[]) {
-    const normalized = sortMessageIdsByChatOrder(messageIds)
+  const normalized = sortMessageIdsByChatOrder(messageIds)
   if (normalized.length === 0) return
 
-  selectedMessages.value = normalized
+  forwardMessageIds.value = normalized
   showForwardModal.value = true
 }
 
@@ -2277,7 +2278,10 @@ const handleReplySelected = () => {
 }
 
 function openForwardModal() {
-  if (selectedMessages.value.length > 0) showForwardModal.value = true
+  const normalized = sortMessageIdsByChatOrder(selectedMessages.value)
+  if (normalized.length === 0) return
+  forwardMessageIds.value = normalized
+  showForwardModal.value = true
 }
 
 async function handleSendVoice(blob: Blob, durationMs: number) {
@@ -2318,6 +2322,7 @@ async function handleSendLocation(lat: number, lng: number) {
 }
 
 function closeForwardModal() {
+  forwardMessageIds.value = []
   showForwardModal.value = false
 }
 
@@ -2333,8 +2338,19 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
     return
   }
 
-  const preparedBatch = prepareForwardBatch(selectedMessages.value)
-  if (preparedBatch.length === 0) return
+  const forwardIds = sortMessageIdsByChatOrder(
+    forwardMessageIds.value.length > 0 ? forwardMessageIds.value : selectedMessages.value,
+  )
+  if (forwardIds.length === 0) {
+    closeForwardModal()
+    return
+  }
+
+  const preparedBatch = prepareForwardBatch(forwardIds)
+  if (preparedBatch.length === 0) {
+    closeForwardModal()
+    return
+  }
 
   const getTargetKey = (target: ChatForwardTarget) => `${target.kind}:${target.id}`
   const getConversationIdForTarget = (target: ChatForwardTarget) => {
@@ -2360,6 +2376,7 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
   // Close modal and clear selection immediately so the UI unblocks.
   // Sending happens in parallel in the background.
   selectedMessages.value = []
+  forwardMessageIds.value = []
   showForwardModal.value = false
 
   // Build flat (target, item) send tasks so we can parallelize across
@@ -2509,7 +2526,7 @@ function handleForwardSelectedAlbumMessages() {
   // Reset purpose before opening modal so the forward modal isn't considered a selection mode.
   selectionModePurpose.value = 'default'
   activeAlbumSelectionId.value = null
-  selectedMessages.value = orderedIds
+  forwardMessageIds.value = orderedIds
   showForwardModal.value = true
 }
 
@@ -2787,7 +2804,7 @@ bindOverlayBackState(() => showNewChatModal.value, () => {
 })
 
 bindOverlayBackState(() => showForwardModal.value, () => {
-  showForwardModal.value = false
+  closeForwardModal()
 })
 
 bindOverlayBackState(() => showStickerPicker.value, () => {
