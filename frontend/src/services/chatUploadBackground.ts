@@ -138,6 +138,7 @@ interface AlbumBatchState {
 type PersistedPendingUpload = Omit<PendingUpload, 'file'> & {
     file?: Blob
     fileBytes?: ArrayBuffer
+    fileDataUrl?: string
 }
 
 // -----------------------------------------------------------------------------
@@ -272,6 +273,46 @@ const STORE_NAME = 'pending'
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
+function blobToDataUrl(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+        try {
+            const reader = new FileReader()
+            reader.onload = () => resolve(String(reader.result || ''))
+            reader.onerror = () => reject(reader.error)
+            reader.readAsDataURL(blob)
+        } catch (error) {
+            reject(error)
+        }
+    })
+}
+
+function dataUrlToBlob(dataUrl: string, fallbackType?: string): Blob {
+    const [header, base64] = dataUrl.split(',', 2)
+    const mimeMatch = /^data:([^;]+);base64$/i.exec(header || '')
+    const mimeType = mimeMatch?.[1] || fallbackType || 'application/octet-stream'
+    const binary = atob(base64 || '')
+    const bytes = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index)
+    }
+    return new Blob([bytes], { type: mimeType })
+}
+
+async function putRecord(db: IDBDatabase, record: PersistedPendingUpload): Promise<boolean> {
+    return await new Promise<boolean>((resolve) => {
+        try {
+            const tx = db.transaction(STORE_NAME, 'readwrite')
+            tx.objectStore(STORE_NAME).put(record)
+            tx.oncomplete = () => resolve(true)
+            tx.onerror = () => resolve(false)
+            tx.onabort = () => resolve(false)
+        } catch (e) {
+            console.warn('[uploadService] idbPut failed:', e)
+            resolve(false)
+        }
+    })
+}
+
 function openDB(): Promise<IDBDatabase> {
     if (dbPromise) return dbPromise
 
@@ -311,24 +352,34 @@ async function idbPut(upload: PendingUpload) {
         const record: PersistedPendingUpload = { ...upload }
         // Do not persist UI-only fields
         delete record.localBlobUrl
+
+        if (upload.msgType === 'document') {
+            try {
+                record.fileDataUrl = await blobToDataUrl(upload.file)
+            } catch {
+                // Non-fatal. Blob/byte persistence below may still succeed.
+            }
+        }
+
+        // Prefer persisting the original Blob/File directly. WebKit proved
+        // unreliable when resuming document uploads from ArrayBuffer-first
+        // records after a full reload, producing a corrupted payload that the
+        // backend rejected with 400. Blob cloning through IndexedDB is the
+        // more faithful path here; only fall back to bytes if the browser
+        // refuses to store the Blob record.
+        record.file = upload.file
+        delete record.fileBytes
+
+        const storedBlob = await putRecord(db, record)
+        if (storedBlob) return
+
         try {
             record.fileBytes = await upload.file.arrayBuffer()
             delete record.file
+            await putRecord(db, record)
         } catch {
-            record.file = upload.file
+            // Give up quietly; the caller keeps the in-memory upload alive.
         }
-        await new Promise<void>((resolve) => {
-            try {
-                const tx = db.transaction(STORE_NAME, 'readwrite')
-                tx.objectStore(STORE_NAME).put(record)
-                tx.oncomplete = () => resolve()
-                tx.onerror = () => resolve()
-                tx.onabort = () => resolve()
-            } catch (e) {
-                console.warn('[uploadService] idbPut failed:', e)
-                resolve()
-            }
-        })
     } catch (e) {
         console.warn('[uploadService] idbPut open failed:', e)
     }
@@ -362,6 +413,13 @@ async function idbGetAll(): Promise<PendingUpload[]> {
                 const req = tx.objectStore(STORE_NAME).getAll()
                 req.onsuccess = () => {
                     const records = ((req.result as PersistedPendingUpload[]) || []).map((record) => {
+                        if (record.msgType === 'document' && record.fileDataUrl) {
+                            return {
+                                ...record,
+                                file: dataUrlToBlob(record.fileDataUrl, record.mimeType),
+                            } as PendingUpload
+                        }
+
                         if (record.file instanceof Blob) {
                             return record as PendingUpload
                         }

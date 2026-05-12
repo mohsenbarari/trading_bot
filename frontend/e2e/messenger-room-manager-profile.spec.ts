@@ -285,9 +285,7 @@ async function fetchCurrentUser(request: APIRequestContext, accessToken: string)
 }
 
 async function fetchGroupDetail(request: APIRequestContext, accessToken: string, groupId: number): Promise<GroupPayload> {
-  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}`, {
-    headers: authHeaders(accessToken),
-  })
+  const response = await retryGroupDetailRequest(request, accessToken, groupId)
 
   expect(response.ok()).toBeTruthy()
   const payload = await response.json() as { group?: GroupPayload } | GroupPayload
@@ -295,12 +293,32 @@ async function fetchGroupDetail(request: APIRequestContext, accessToken: string,
 }
 
 async function fetchGroupDetailPayload(request: APIRequestContext, accessToken: string, groupId: number): Promise<GroupDetailPayload> {
-  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}`, {
-    headers: authHeaders(accessToken),
-  })
+  const response = await retryGroupDetailRequest(request, accessToken, groupId)
 
   expect(response.ok()).toBeTruthy()
   return response.json() as Promise<GroupDetailPayload>
+}
+
+async function retryGroupDetailRequest(request: APIRequestContext, accessToken: string, groupId: number) {
+  const maxAttempts = 3
+  let lastError: unknown = null
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await request.get(`${BACKEND_BASE_URL}/api/chat/groups/${groupId}`, {
+        headers: authHeaders(accessToken),
+      })
+    } catch (error) {
+      lastError = error
+      const message = error instanceof Error ? error.message : String(error)
+      const isTransientSocketError = /socket hang up|ECONNRESET/i.test(message)
+      if (!isTransientSocketError || attempt === maxAttempts) {
+        throw error
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || 'group detail request failed'))
 }
 
 async function createGroupViaApi(
