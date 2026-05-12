@@ -10,11 +10,13 @@ vi.mock('../utils/chatFiles', () => ({
   uploadAvatarImage: uploadAvatarImageMock,
 }))
 
-function makeResponse(payload: unknown, ok = true) {
-  return {
-    ok,
-    json: async () => payload,
-  }
+function makeResponse(payload: unknown, ok = true, status = ok ? 200 : 400): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
 }
 
 describe('PublicProfile.vue', () => {
