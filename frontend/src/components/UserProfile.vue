@@ -38,6 +38,7 @@ const showLimitDateModal = ref(false);
 const customLimitDate = ref('');
 const selectedRole = ref(props.user?.role || 'تماشا');
 const editMaxSessions = ref(props.user?.max_sessions ?? 1);
+const editMaxAccountants = ref(props.user?.max_accountants ?? 3);
 const hasBotAccess = ref(props.user?.has_bot_access ?? true);
 
 // --- Date Picker Logic ---
@@ -58,6 +59,20 @@ const limitTimePickerRef = ref<any>(null);
 watch(tempTimePart, (newVal, oldVal) => {
     console.log('tempTimePart changed via watch:', oldVal, '->', newVal);
 });
+
+watch(
+  () => props.user?.max_sessions,
+  (value) => {
+    editMaxSessions.value = value ?? 1;
+  }
+);
+
+watch(
+  () => props.user?.max_accountants,
+  (value) => {
+    editMaxAccountants.value = value ?? 3;
+  }
+);
 
 function initDatePicker(currentValue: string) {
     pickerStep.value = 1;
@@ -477,6 +492,26 @@ async function saveMaxSessions() {
   }
 }
 
+async function saveMaxAccountants() {
+  const normalizedValue = Number.isFinite(editMaxAccountants.value)
+    ? Math.max(0, Math.trunc(editMaxAccountants.value))
+    : 0;
+  editMaxAccountants.value = normalizedValue;
+
+  try {
+    const response = await apiFetch(`/api/users/${props.user.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ max_accountants: normalizedValue })
+    });
+    if (!response.ok) throw new Error('خطا');
+    const updatedUser = await response.json();
+    Object.assign(props.user, updatedUser);
+  } catch (e) {
+    alert('خطا در ذخیره سقف حسابداران');
+    editMaxAccountants.value = props.user.max_accountants ?? 3;
+  }
+}
+
 function handleAdminSessionClick() {
   if (props.user.role === 'مدیر ارشد' || props.user.role === 'مدیر میانی') {
     alert('به دلایل امنیتی، تعداد نشست‌های مجاز برای مدیران سایت نمی‌تواند بیش از ۱ باشد.');
@@ -574,6 +609,19 @@ async function deleteUser() {
               <option :value="2">۲</option>
               <option :value="3">۳</option>
             </select>
+          </div>
+        </div>
+        <div class="detail-item owner-limit-row">
+          <span class="label">حداکثر حسابداران مجاز</span>
+          <div class="inline-edit">
+            <input
+              v-model.number="editMaxAccountants"
+              type="number"
+              min="0"
+              step="1"
+              class="form-input-sm max-accountants-input"
+              @change="saveMaxAccountants"
+            />
           </div>
         </div>
       </div>
@@ -1343,6 +1391,9 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   justify-content: space-between;
   align-items: center;
 }
+.owner-limit-row {
+  margin-top: 0.5rem;
+}
 .inline-edit {
   display: flex;
   align-items: center;
@@ -1353,6 +1404,15 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   border: 1px solid #d1d5db;
   font-size: 0.8rem;
   background: white;
+}
+.form-input-sm {
+  width: 4.5rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid #d1d5db;
+  font-size: 0.8rem;
+  background: white;
+  text-align: center;
 }
 </style><style scoped>
 .admin-lock-note {

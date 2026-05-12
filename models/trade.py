@@ -55,6 +55,10 @@ class Trade(Base):
     responder_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     responder_user = relationship("User", foreign_keys=[responder_user_id])
     responder_user_mobile = Column(String(20), nullable=True)  # شماره موبایل برای حفظ تاریخچه
+
+    # The real actor for delegated execution/audit.
+    actor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    actor_user = relationship("User", foreign_keys=[actor_user_id])
     
     # کالا
     commodity_id = Column(Integer, ForeignKey("commodities.id"), nullable=False)

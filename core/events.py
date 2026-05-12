@@ -262,6 +262,7 @@ def setup_offer_events():
                 "id": target.id,
                 "version_id": target.version_id or 1,
                 "user_id": target.user_id,
+                "actor_user_id": getattr(target, "actor_user_id", None),
                 "home_server": target.home_server,
                 "offer_type": target.offer_type.value if target.offer_type else None,
                 "commodity_id": target.commodity_id,
@@ -294,6 +295,7 @@ def setup_offer_events():
                 "id": target.id,
                 "version_id": target.version_id or 1,
                 "user_id": target.user_id,
+                "actor_user_id": getattr(target, "actor_user_id", None),
                 "home_server": target.home_server,
                 "offer_type": target.offer_type.value if target.offer_type else None,
                 "commodity_id": target.commodity_id,
@@ -356,6 +358,7 @@ def setup_trade_events():
                 "offer_user_mobile": target.offer_user_mobile,
                 "responder_user_id": target.responder_user_id,
                 "responder_user_mobile": target.responder_user_mobile,
+                "actor_user_id": getattr(target, "actor_user_id", None),
                 "commodity_id": target.commodity_id,
                 "trade_type": trade_type_val,
                 "quantity": target.quantity,
@@ -390,6 +393,7 @@ def setup_trade_events():
                 "offer_user_mobile": target.offer_user_mobile,
                 "responder_user_id": target.responder_user_id,
                 "responder_user_mobile": target.responder_user_mobile,
+                "actor_user_id": getattr(target, "actor_user_id", None),
                 "commodity_id": target.commodity_id,
                 "trade_type": trade_type_val,
                 "quantity": target.quantity,
@@ -445,6 +449,7 @@ def setup_user_events():
                 "commodities_traded_count": target.commodities_traded_count,
                 "channel_messages_count": target.channel_messages_count,
                 "max_sessions": target.max_sessions,
+                "max_accountants": getattr(target, "max_accountants", 3),
                 "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
                 "created_at": target.created_at.isoformat() if target.created_at else None,
             }
@@ -484,6 +489,7 @@ def setup_user_events():
                 "commodities_traded_count": target.commodities_traded_count,
                 "channel_messages_count": target.channel_messages_count,
                 "max_sessions": target.max_sessions,
+                "max_accountants": getattr(target, "max_accountants", 3),
                 "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
                 "updated_at": target.updated_at.isoformat() if target.updated_at else None,
             }
@@ -492,6 +498,60 @@ def setup_user_events():
             logger.error(f"Error in user after_update event: {e}")
 
     logger.info("✅ User event listeners registered")
+
+
+def setup_accountant_relation_events():
+    """Setup event listeners for AccountantRelation model."""
+    from models.accountant_relation import AccountantRelation
+
+    def accountant_relation_payload(target):
+        status = target.status.value if hasattr(target.status, "value") else target.status
+        return {
+            "id": target.id,
+            "owner_user_id": target.owner_user_id,
+            "accountant_user_id": target.accountant_user_id,
+            "created_by_user_id": target.created_by_user_id,
+            "invitation_token": target.invitation_token,
+            "global_account_name": target.global_account_name,
+            "relation_display_name": target.relation_display_name,
+            "duty_description": target.duty_description,
+            "mobile_number": target.mobile_number,
+            "status": status,
+            "expires_at": target.expires_at.isoformat() if target.expires_at else None,
+            "activated_at": target.activated_at.isoformat() if target.activated_at else None,
+            "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
+            "created_at": target.created_at.isoformat() if target.created_at else None,
+            "updated_at": target.updated_at.isoformat() if target.updated_at else None,
+        }
+
+    @event.listens_for(AccountantRelation, 'after_insert')
+    def on_accountant_relation_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "accountant_relations", target.id, "INSERT", accountant_relation_payload(target))
+        except Exception as e:
+            logger.error(f"Error in accountant_relation after_insert event: {e}")
+
+    @event.listens_for(AccountantRelation, 'after_update')
+    def on_accountant_relation_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "accountant_relations", target.id, "UPDATE", accountant_relation_payload(target))
+        except Exception as e:
+            logger.error(f"Error in accountant_relation after_update event: {e}")
+
+    @event.listens_for(AccountantRelation, 'after_delete')
+    def on_accountant_relation_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "accountant_relations", target.id, "DELETE", {"id": target.id})
+        except Exception as e:
+            logger.error(f"Error in accountant_relation after_delete event: {e}")
+
+    logger.info("✅ AccountantRelation event listeners registered")
 
 
 def setup_commodity_events():
@@ -760,6 +820,7 @@ def setup_notification_events():
 def setup_all_events():
     """Setup all event listeners"""
     setup_user_events()
+    setup_accountant_relation_events()
     setup_chat_events()
     setup_chat_member_events()
     setup_invitation_events()

@@ -95,6 +95,7 @@ class UserRead(UserBase):
     can_block_users: bool = True
     max_blocked_users: int = 10
     max_sessions: int = 1
+    max_accountants: int = 3
     
     @computed_field
     def created_at_jalali(self) -> str | None:
@@ -145,6 +146,7 @@ class UserUpdate(BaseModel):
     can_block_users: Optional[bool] = None
     max_blocked_users: Optional[int] = None
     max_sessions: Optional[int] = None
+    max_accountants: Optional[int] = None
 
 
 class UserAvatarUpdate(BaseModel):

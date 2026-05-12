@@ -27,6 +27,7 @@ def make_user(**overrides):
         "commodities_traded_count": 2,
         "channel_messages_count": 3,
         "max_sessions": 1,
+        "max_accountants": 3,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -54,10 +55,10 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
             await update_user(5, schemas.UserUpdate(), db=FakeDB(None))
         self.assertEqual(exc_info.exception.status_code, 404)
 
-    async def test_update_user_updates_role_bot_access_and_clamps_max_sessions(self):
+    async def test_update_user_updates_role_bot_access_and_owner_limits(self):
         user = make_user()
         db = FakeDB(user)
-        update = schemas.UserUpdate(role=UserRole.STANDARD, has_bot_access=False, max_sessions=99)
+        update = schemas.UserUpdate(role=UserRole.STANDARD, has_bot_access=False, max_sessions=99, max_accountants=6)
 
         with patch("api.routers.users.track_limitation_changes", return_value=([], False, False)), patch(
             "api.routers.users.sync_mandatory_channel_for_user_state_change", new=AsyncMock()
@@ -74,6 +75,7 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user.role, UserRole.STANDARD)
         self.assertFalse(user.has_bot_access)
         self.assertEqual(user.max_sessions, 3)
+        self.assertEqual(user.max_accountants, 6)
         self.assertEqual(db.commits, 1)
         self.assertEqual(db.refreshes, 1)
         mandatory_sync_mock.assert_awaited_once_with(
