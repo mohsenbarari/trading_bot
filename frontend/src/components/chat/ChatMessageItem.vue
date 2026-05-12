@@ -463,7 +463,11 @@ const audioStore = useAudioStore()
 
 // --- Computed State ---
 const isSent = computed(() => props.msg.sender_id === props.currentUserId)
-const isSending = computed(() => props.msg.id < 0 || props.msg.is_sending)
+const isSending = computed(() => {
+  if (props.msg.is_sending) return true
+  if (props.msg.id >= 0 || props.msg.is_error) return false
+  return props.msg.upload_handoff_pending !== true
+})
 const isError = computed(() => props.msg.is_error)
 const isSelected = computed(() => props.selectedMessages.includes(props.msg.id))
 const canOpenForwardedProfile = computed(() => {

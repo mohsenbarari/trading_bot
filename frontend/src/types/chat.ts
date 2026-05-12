@@ -40,6 +40,7 @@ export interface Message {
     message_type: 'text' | 'image' | 'video' | 'voice' | 'sticker' | 'location' | 'document'
     is_read: boolean
     is_sending?: boolean
+    upload_handoff_pending?: boolean
     upload_progress?: number
     upload_loaded?: number
     upload_total?: number

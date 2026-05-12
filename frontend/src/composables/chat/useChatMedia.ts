@@ -1468,7 +1468,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
             content: JSON.stringify(initialContent),
             message_type: msgType,
             is_read: true,
-            is_sending: true,
+            is_sending: false,
+            upload_handoff_pending: true,
             upload_progress: 0,
             upload_loaded: 0,
             upload_total: 0,
@@ -1489,9 +1490,15 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
         const getOptimisticTarget = () => messages.value.find(m => m.id === optimisticId) || optimisticMsg;
 
-        await nextTick()
-        scrollToBottom()
-        await waitForNextPaint()
+        if (sendAsDocument) {
+            void nextTick().then(() => {
+                scrollToBottom()
+            })
+        } else {
+            await nextTick()
+            scrollToBottom()
+            await waitForNextPaint()
+        }
 
         try {
             let sourceFile = file
@@ -1868,6 +1875,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 localBlobUrl: finalLocalUrl,
             })
 
+            const handedOffTarget = getOptimisticTarget()
+            handedOffTarget.upload_handoff_pending = false
+            handedOffTarget.is_sending = true
+
             // Seed the local image cache with the preprocessed blob so the
             // current UI does not need to re-download the file after the
             // service's 'sent' event replaces the optimistic message.
@@ -1885,6 +1896,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             error.value = `خطا در پردازش: ` + errString;
             optimisticMsg.is_error = true;
             optimisticMsg.is_sending = false;
+            optimisticMsg.upload_handoff_pending = false;
             preprocessingAborts.delete(optimisticId)
         } finally {
             activeUploadsCount--
@@ -1922,6 +1934,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
             case 'progress': {
                 const m = index !== -1 ? msgs[index] : undefined
                 if (m) {
+                    m.upload_handoff_pending = false
+                    m.is_sending = true
                     m.upload_progress = event.progress
                     m.upload_loaded = event.uploadedBytes
                     m.upload_total = event.totalBytes
@@ -1931,6 +1945,8 @@ export function useChatMedia(options: UseChatMediaOptions) {
             case 'uploaded': {
                 const m = index !== -1 ? msgs[index] : undefined
                 if (m) {
+                    m.upload_handoff_pending = false
+                    m.is_sending = true
                     m.upload_progress = 100
                     // Upgrade the optimistic message content to include the
                     // server-returned file_id + final dimensions so renderers
@@ -1967,6 +1983,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             case 'error': {
                 const m = index !== -1 ? msgs[index] : undefined
                 if (m) {
+                    m.upload_handoff_pending = false
                     m.is_error = true
                     m.is_sending = false
                 }
