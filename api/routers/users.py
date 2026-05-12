@@ -9,6 +9,7 @@ import pytz
 from core.db import get_db
 from core.services.accountant_relation_service import is_user_accountant
 from core.services.chat_room_service import sync_mandatory_channel_for_user_state_change
+from core.services.session_service import force_clear_sessions
 from core.services.user_deletion_service import delete_user_account
 from models.user import User
 from api.deps import verify_super_admin_or_dev_key
@@ -271,7 +272,14 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
         val = update_data['max_sessions']
         user.max_sessions = 1 if accountant_user else (max(1, min(val, 3)) if val else 1)
 
-    # --- 4c. Accountant Capacity ---
+    # --- 4c. User Block Capability ---
+    if 'can_block_users' in update_data and update_data['can_block_users'] is not None:
+        user.can_block_users = bool(update_data['can_block_users'])
+
+    if 'max_blocked_users' in update_data and update_data['max_blocked_users'] is not None:
+        user.max_blocked_users = max(1, min(int(update_data['max_blocked_users']), 100))
+
+    # --- 4d. Accountant Capacity ---
     if 'max_accountants' in update_data and update_data['max_accountants'] is not None:
         user.max_accountants = max(0, update_data['max_accountants'])
 
@@ -334,3 +342,17 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
         )
     
     return {"message": "User deleted successfully"}
+
+
+@router.post("/{user_id}/sessions/terminate-all")
+async def terminate_user_sessions(user_id: int, db: AsyncSession = Depends(get_db)):
+    """پایان دادن فوری به تمام نشست‌های فعال یک کاربر"""
+    user = await db.get(User, user_id)
+    if not user or user.is_deleted:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    terminated_count = await force_clear_sessions(db, user.id)
+    return {
+        "detail": f"{terminated_count} نشست پایان یافت",
+        "terminated_sessions": terminated_count,
+    }

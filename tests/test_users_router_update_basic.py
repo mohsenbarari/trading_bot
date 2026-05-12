@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 import schemas
 from api.routers.users import update_user
+from api.routers.users import terminate_user_sessions
 from core.enums import UserRole
 
 
@@ -28,6 +29,8 @@ def make_user(**overrides):
         "channel_messages_count": 3,
         "max_sessions": 1,
         "max_accountants": 3,
+        "can_block_users": True,
+        "max_blocked_users": 10,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -93,6 +96,30 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         limit_mock.assert_not_awaited()
         create_task_mock.assert_not_called()
 
+    async def test_update_user_persists_block_capability_settings(self):
+        user = make_user(can_block_users=True, max_blocked_users=10)
+        db = FakeDB(user)
+        update = schemas.UserUpdate(can_block_users=False, max_blocked_users=999)
+
+        with patch("api.routers.users.is_user_accountant", new=AsyncMock(return_value=False)), patch(
+            "api.routers.users.track_limitation_changes", return_value=([], False, False)
+        ), patch(
+            "api.routers.users.sync_mandatory_channel_for_user_state_change", new=AsyncMock()
+        ), patch(
+            "core.cache.invalidate_user_cache", new=AsyncMock()
+        ), patch(
+            "api.routers.users.send_bot_access_notification", new=AsyncMock()
+        ), patch(
+            "api.routers.users.send_block_notification", new=AsyncMock()
+        ), patch(
+            "api.routers.users.send_limitation_notification", new=AsyncMock()
+        ), patch("api.routers.users.asyncio.create_task"):
+            result = await update_user(5, update, db=db)
+
+        self.assertIs(result, user)
+        self.assertFalse(user.can_block_users)
+        self.assertEqual(user.max_blocked_users, 100)
+
     async def test_update_user_clamps_accountant_bot_access_and_session_cap(self):
         user = make_user(has_bot_access=False, max_sessions=1)
         db = FakeDB(user)
@@ -118,6 +145,25 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(user.has_bot_access)
         self.assertEqual(user.max_sessions, 1)
         bot_notify_mock.assert_not_awaited()
+
+    async def test_terminate_user_sessions_raises_404_for_missing_or_deleted_user(self):
+        with self.assertRaises(HTTPException) as exc_info:
+            await terminate_user_sessions(5, db=FakeDB(None))
+        self.assertEqual(exc_info.exception.status_code, 404)
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await terminate_user_sessions(5, db=FakeDB(make_user(is_deleted=True)))
+        self.assertEqual(exc_info.exception.status_code, 404)
+
+    async def test_terminate_user_sessions_clears_all_active_sessions(self):
+        user = make_user(id=12)
+        db = FakeDB(user)
+
+        with patch("api.routers.users.force_clear_sessions", new=AsyncMock(return_value=4)) as clear_mock:
+            result = await terminate_user_sessions(12, db=db)
+
+        clear_mock.assert_awaited_once_with(db, 12)
+        self.assertEqual(result, {"detail": "4 نشست پایان یافت", "terminated_sessions": 4})
 
 
 if __name__ == "__main__":

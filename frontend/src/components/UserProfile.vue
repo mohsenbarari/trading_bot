@@ -39,7 +39,10 @@ const customLimitDate = ref('');
 const selectedRole = ref(props.user?.role || 'تماشا');
 const editMaxSessions = ref(props.user?.max_sessions ?? 1);
 const editMaxAccountants = ref(props.user?.max_accountants ?? 3);
+const canBlockUsers = ref(props.user?.can_block_users ?? true);
+const editMaxBlockedUsers = ref(props.user?.max_blocked_users ?? 10);
 const hasBotAccess = ref(props.user?.has_bot_access ?? true);
+const isTerminatingSessions = ref(false);
 
 // --- Date Picker Logic ---
 const showCustomDateInput = ref(false);
@@ -71,6 +74,20 @@ watch(
   () => props.user?.max_accountants,
   (value) => {
     editMaxAccountants.value = value ?? 3;
+  }
+);
+
+watch(
+  () => props.user?.can_block_users,
+  (value) => {
+    canBlockUsers.value = value ?? true;
+  }
+);
+
+watch(
+  () => props.user?.max_blocked_users,
+  (value) => {
+    editMaxBlockedUsers.value = value ?? 10;
   }
 );
 
@@ -512,6 +529,68 @@ async function saveMaxAccountants() {
   }
 }
 
+async function toggleBlockCapability() {
+  const nextValue = !canBlockUsers.value;
+
+  try {
+    const response = await apiFetch(`/api/users/${props.user.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ can_block_users: nextValue })
+    });
+    if (!response.ok) throw new Error('خطا');
+    const updatedUser = await response.json();
+    Object.assign(props.user, updatedUser);
+    canBlockUsers.value = updatedUser.can_block_users ?? nextValue;
+    alert(`حق بلاک‌کردن دیگران ${canBlockUsers.value ? 'فعال' : 'غیرفعال'} شد.`);
+  } catch (e) {
+    alert('خطا در ذخیره مجوز بلاک');
+  }
+}
+
+async function saveMaxBlockedUsers() {
+  const normalizedValue = Number.isFinite(editMaxBlockedUsers.value)
+    ? Math.min(100, Math.max(1, Math.trunc(editMaxBlockedUsers.value)))
+    : 10;
+  editMaxBlockedUsers.value = normalizedValue;
+
+  try {
+    const response = await apiFetch(`/api/users/${props.user.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ max_blocked_users: normalizedValue })
+    });
+    if (!response.ok) throw new Error('خطا');
+    const updatedUser = await response.json();
+    Object.assign(props.user, updatedUser);
+  } catch (e) {
+    alert('خطا در ذخیره سقف بلاک');
+    editMaxBlockedUsers.value = props.user.max_blocked_users ?? 10;
+  }
+}
+
+async function terminateAllSessions() {
+  if (!confirm('آیا از پایان دادن فوری به همه نشست‌های فعال این کاربر اطمینان دارید؟')) return;
+
+  isTerminatingSessions.value = true;
+  try {
+    const response = await apiFetch(`/api/users/${props.user.id}/sessions/terminate-all`, {
+      method: 'POST',
+    });
+    if (!response.ok) throw new Error('خطا');
+
+    const result = await response.json();
+    const terminatedSessions = Number(result.terminated_sessions ?? 0);
+    alert(
+      terminatedSessions > 0
+        ? `${terminatedSessions} نشست پایان یافت.`
+        : 'نشست فعالی برای پایان دادن وجود نداشت.'
+    );
+  } catch (e) {
+    alert('خطا در پایان دادن به نشست‌های فعال');
+  } finally {
+    isTerminatingSessions.value = false;
+  }
+}
+
 function handleAdminSessionClick() {
   if (props.user.role === 'مدیر ارشد' || props.user.role === 'مدیر میانی') {
     alert('به دلایل امنیتی، تعداد نشست‌های مجاز برای مدیران سایت نمی‌تواند بیش از ۱ باشد.');
@@ -622,6 +701,46 @@ async function deleteUser() {
               class="form-input-sm max-accountants-input"
               @change="saveMaxAccountants"
             />
+          </div>
+        </div>
+        <div class="detail-item owner-limit-row">
+          <span class="label">حق بلاک‌کردن دیگران</span>
+          <div class="inline-edit">
+            <button
+              type="button"
+              class="inline-action-btn toggle-block-capability-btn"
+              :class="{ 'is-disabled': !canBlockUsers }"
+              @click="toggleBlockCapability"
+            >
+              {{ canBlockUsers ? 'فعال' : 'غیرفعال' }}
+            </button>
+          </div>
+        </div>
+        <div class="detail-item owner-limit-row">
+          <span class="label">سقف کاربران قابل بلاک</span>
+          <div class="inline-edit">
+            <input
+              v-model.number="editMaxBlockedUsers"
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              class="form-input-sm max-blocked-users-input"
+              @change="saveMaxBlockedUsers"
+            />
+          </div>
+        </div>
+        <div class="detail-item owner-limit-row terminate-sessions-row">
+          <span class="label">نشست‌های فعال کاربر</span>
+          <div class="inline-edit">
+            <button
+              type="button"
+              class="inline-action-btn danger-inline-btn terminate-sessions-btn"
+              :disabled="isTerminatingSessions"
+              @click="terminateAllSessions"
+            >
+              {{ isTerminatingSessions ? 'در حال قطع...' : 'پایان فوری همه نشست‌ها' }}
+            </button>
           </div>
         </div>
       </div>
@@ -1413,6 +1532,33 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   font-size: 0.8rem;
   background: white;
   text-align: center;
+}
+.inline-action-btn {
+  border: 1px solid #cbd5e1;
+  background: white;
+  color: #0f172a;
+  border-radius: 0.625rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.inline-action-btn.is-disabled {
+  color: #991b1b;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+.danger-inline-btn {
+  color: #b91c1c;
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+.danger-inline-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+.terminate-sessions-row {
+  align-items: flex-start;
 }
 </style><style scoped>
 .admin-lock-note {
