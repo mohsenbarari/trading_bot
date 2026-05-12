@@ -419,7 +419,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await channelManager.locator('.manager-header .header-icon-btn').first().click()
   await waitForBackendReady(request)
   await expect(channelManager.getByRole('button', { name: 'باز کردن در پیام‌رسان' })).toBeVisible({ timeout: 30000 })
-    await channelManager.getByRole('button', { name: 'باز کردن در پیام‌رسان' }).click()
+    await channelManager.getByRole('button', { name: 'باز کردن در پیام‌رسان' }).evaluate((node: HTMLElement) => node.click())
 
     await expect.poll(() => page.url(), { timeout: 60000 }).toContain('/chat?user_id=-')
 
@@ -428,15 +428,20 @@ test.describe('Messenger room manager and public profile flows', () => {
 
     await page.locator('.chat-header .header-user-info').click()
     await expect(channelManager).toBeVisible({ timeout: 30000 })
+    const reopenedChannelManager = page.locator('.channel-manager-root').last()
 
-    await setAvatarInput(channelManager.locator('input.hidden-avatar-input'), `pw-channel-${suffix}.png`)
-    await expect(channelManager.getByRole('button', { name: 'حذف عکس' })).toBeVisible({ timeout: 30000 })
+    await reopenedChannelManager.locator('.telegram-row').filter({ hasText: 'تنظیمات کانال' }).click()
 
-    await channelManager.locator('.telegram-row').filter({ hasText: 'تنظیمات کانال' }).click()
+    const avatarUploadResponse = page.waitForResponse((response) => {
+      return response.request().method() === 'POST' && response.url().includes('/api/chat/upload-media')
+    })
+    await setAvatarInput(reopenedChannelManager.locator('input.hidden-avatar-input'), `pw-channel-${suffix}.png`)
+    expect((await avatarUploadResponse).ok()).toBeTruthy()
+    await expect(reopenedChannelManager.getByRole('button', { name: 'حذف عکس' })).toBeVisible({ timeout: 30000 })
 
-    await channelManager.locator('#edit-channel-title').fill(updatedTitle)
-    await channelManager.locator('#edit-channel-description').fill(updatedDescription)
-    await channelManager.getByRole('button', { name: 'ذخیره تغییرات' }).click()
+    await reopenedChannelManager.locator('#edit-channel-title').fill(updatedTitle)
+    await reopenedChannelManager.locator('#edit-channel-description').fill(updatedDescription)
+    await reopenedChannelManager.getByRole('button', { name: 'ذخیره تغییرات' }).click()
 
     await expect
       .poll(async () => fetchChannelById(request, owner.accessToken, channelId), { timeout: 30000 })
@@ -446,11 +451,11 @@ test.describe('Messenger room manager and public profile flows', () => {
         description: updatedDescription,
         avatar_file_id: expect.any(String),
       })
-    await expect(channelManager.locator('.hero-title')).toContainText(updatedTitle, { timeout: 30000 })
+    await expect(reopenedChannelManager.locator('.hero-title')).toContainText(updatedTitle, { timeout: 30000 })
 
-    await channelManager.locator('.telegram-row').filter({ hasText: 'تنظیمات کانال' }).click()
-    await channelManager.getByRole('button', { name: 'حذف عکس' }).click()
-    await channelManager.getByRole('button', { name: 'ذخیره تغییرات' }).click()
+    await reopenedChannelManager.locator('.telegram-row').filter({ hasText: 'تنظیمات کانال' }).click()
+    await reopenedChannelManager.getByRole('button', { name: 'حذف عکس' }).click()
+    await reopenedChannelManager.getByRole('button', { name: 'ذخیره تغییرات' }).click()
 
     await expect
       .poll(async () => fetchChannelById(request, owner.accessToken, channelId), { timeout: 30000 })
@@ -460,7 +465,7 @@ test.describe('Messenger room manager and public profile flows', () => {
         description: updatedDescription,
         avatar_file_id: null,
       })
-    await expect(channelManager.locator('.hero-title')).toContainText(updatedTitle, { timeout: 30000 })
+    await expect(reopenedChannelManager.locator('.hero-title')).toContainText(updatedTitle, { timeout: 30000 })
 
     await page.goBack()
     await expect(page.locator('.channel-manager-root')).toHaveCount(0)

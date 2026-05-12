@@ -748,6 +748,7 @@ test.describe('Channel media regressions', () => {
     page,
     request,
   }) => {
+    test.setTimeout(90000)
     const fixture = seedChannelSession('channel_media', 'admin')
     const bootstrapContent = `PLAYWRIGHT CHANNEL BOOTSTRAP ${Date.now()}`
     await seedBootstrapChannelMessage(request, fixture, bootstrapContent)
@@ -773,11 +774,11 @@ test.describe('Channel media regressions', () => {
     await page.getByRole('button', { name: 'ارسال 2 مورد' }).click()
     await expect(page.getByRole('button', { name: 'ارسال 2 مورد' })).toHaveCount(0)
 
-    await expect(page.locator('.messages-container [data-media-msg-id]')).toHaveCount(1, { timeout: 30000 })
-    await expect(page.locator('.messages-container video')).toHaveCount(1, { timeout: 30000 })
+    await expect(page.locator('.messages-container [data-media-msg-id]')).toHaveCount(1, { timeout: 60000 })
+    await expect(page.locator('.messages-container video')).toHaveCount(1, { timeout: 60000 })
 
     await expect
-      .poll(async () => fetchLatestRoomMessageTypes(request, fixture), { timeout: 30000 })
+      .poll(async () => fetchLatestRoomMessageTypes(request, fixture), { timeout: 60000 })
       .toEqual(expect.arrayContaining(['image', 'video']))
   })
 

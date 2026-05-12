@@ -85,6 +85,17 @@ export function popBackState() {
 }
 
 /**
+ * حذف آخرین state بدون دست زدن به history
+ * برای actionهایی که خودشان بلافاصله route/ui دیگری را باز می‌کنند
+ */
+export function discardBackState() {
+  if (backStack.length > 0) {
+    backStack.pop()
+    updateTelegramBackButton()
+  }
+}
+
+/**
  * پاک کردن همه stateهای مربوط به view فعلی
  * (مثلاً وقتی از یک route خارج می‌شویم)
  * history entries اضافی را نمی‌بردارد چون Vue Router خودش history را مدیریت می‌کند
