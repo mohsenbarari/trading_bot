@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 
+from api.deps import EffectiveOwnerActor
 from api.routers.trades import get_my_trades, get_trade, get_trades_with_user
 
 
@@ -38,26 +39,37 @@ class FakeDB:
 
 
 class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def make_context(owner_id=5, actor_id=None):
+        owner_user = SimpleNamespace(id=owner_id)
+        actor_user = SimpleNamespace(id=actor_id if actor_id is not None else owner_id)
+        return EffectiveOwnerActor(
+            owner_user=owner_user,
+            actor_user=actor_user,
+            relation=None,
+            is_accountant_context=owner_user.id != actor_user.id,
+        )
+
     async def test_get_my_trades_serializes_matching_rows(self):
         trades = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
         db = FakeDB([FakeExecuteResult(values=trades)])
-        current_user = SimpleNamespace(id=5)
+        context = self.make_context(owner_id=5, actor_id=11)
 
         with patch(
             "api.routers.trades.trade_to_response",
             side_effect=[{"id": 1}, {"id": 2}],
         ) as response_mock:
-            result = await get_my_trades(skip=0, limit=50, db=db, current_user=current_user)
+            result = await get_my_trades(skip=0, limit=50, db=db, context=context)
 
         self.assertEqual(result, [{"id": 1}, {"id": 2}])
         self.assertEqual(response_mock.call_count, 2)
         self.assertEqual(response_mock.call_args_list[0].args[0], trades[0])
 
     async def test_get_trade_enforces_not_found_and_access_control(self):
-        current_user = SimpleNamespace(id=5)
+        context = self.make_context(owner_id=5, actor_id=12)
 
         with self.assertRaises(HTTPException) as exc_info:
-            await get_trade(trade_id=7, db=FakeDB([FakeExecuteResult(single=None)]), current_user=current_user)
+            await get_trade(trade_id=7, db=FakeDB([FakeExecuteResult(single=None)]), context=context)
         self.assertEqual(exc_info.exception.status_code, 404)
         self.assertEqual(exc_info.exception.detail, "معامله یافت نشد.")
 
@@ -66,29 +78,29 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
             await get_trade(
                 trade_id=7,
                 db=FakeDB([FakeExecuteResult(single=foreign_trade)]),
-                current_user=current_user,
+                context=context,
             )
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "شما به این معامله دسترسی ندارید.")
 
     async def test_get_trade_returns_trade_for_participant(self):
-        current_user = SimpleNamespace(id=5)
+        context = self.make_context(owner_id=5, actor_id=12)
         trade = SimpleNamespace(id=7, offer_user_id=5, responder_user_id=10)
 
         with patch("api.routers.trades.trade_to_response", return_value={"id": 7}) as response_mock:
             result = await get_trade(
                 trade_id=7,
                 db=FakeDB([FakeExecuteResult(single=trade)]),
-                current_user=current_user,
+                context=context,
             )
 
         response_mock.assert_called_once_with(trade)
         self.assertEqual(result, {"id": 7})
 
     async def test_get_trades_with_user_short_circuits_self_and_serializes_history(self):
-        current_user = SimpleNamespace(id=5)
+        context = self.make_context(owner_id=5, actor_id=12)
         self.assertEqual(
-            await get_trades_with_user(other_user_id=5, skip=0, limit=20, db=FakeDB(), current_user=current_user),
+            await get_trades_with_user(other_user_id=5, skip=0, limit=20, db=FakeDB(), context=context),
             [],
         )
 
@@ -99,11 +111,25 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
                 skip=0,
                 limit=20,
                 db=FakeDB([FakeExecuteResult(values=trades)]),
-                current_user=current_user,
+                context=context,
             )
 
         response_mock.assert_called_once_with(trades[0])
         self.assertEqual(result, [{"id": 11}])
+
+    async def test_get_trade_allows_effective_owner_when_actor_differs(self):
+        context = self.make_context(owner_id=51, actor_id=52)
+        trade = SimpleNamespace(id=17, offer_user_id=9, responder_user_id=51)
+
+        with patch("api.routers.trades.trade_to_response", return_value={"id": 17}) as response_mock:
+            result = await get_trade(
+                trade_id=17,
+                db=FakeDB([FakeExecuteResult(single=trade)]),
+                context=context,
+            )
+
+        response_mock.assert_called_once_with(trade)
+        self.assertEqual(result, {"id": 17})
 
 
 if __name__ == "__main__":

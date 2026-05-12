@@ -421,7 +421,7 @@ async def get_active_offers(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
     """
     دریافت لیست لفظ‌های فعال
@@ -445,8 +445,10 @@ async def get_active_offers(
     # دریافت تنظیمات برای محاسبه دقیق انقضا
     from core.trading_settings import get_trading_settings_async
     ts = await get_trading_settings_async()
+
+    owner_user = context.owner_user
     
-    return [offer_to_response(o, ts, viewer_user_id=current_user.id, include_owner_identity=False) for o in offers]
+    return [offer_to_response(o, ts, viewer_user_id=owner_user.id, include_owner_identity=False) for o in offers]
 
 
 @router.get("/my", response_model=List[OfferResponse])
@@ -456,15 +458,17 @@ async def get_my_offers(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
     """
     دریافت لفظ‌های کاربر
     """
+    owner_user = context.owner_user
+
     query = select(Offer).options(
         selectinload(Offer.user),
         selectinload(Offer.commodity)
-    ).where(Offer.user_id == current_user.id)
+    ).where(Offer.user_id == owner_user.id)
     
     # فیلتر کردن لفظ‌هایی که دوباره منتشر شده‌اند
     query = query.where(Offer.republished_offer_id.is_(None))
@@ -503,7 +507,7 @@ async def get_my_offers(
     from core.trading_settings import get_trading_settings_async
     ts = await get_trading_settings_async()
     
-    return [offer_to_response(o, ts, viewer_user_id=current_user.id, include_owner_identity=True) for o in offers]
+    return [offer_to_response(o, ts, viewer_user_id=owner_user.id, include_owner_identity=True) for o in offers]
 
 
 @router.delete("/{offer_id}", status_code=status.HTTP_204_NO_CONTENT)

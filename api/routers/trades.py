@@ -707,12 +707,14 @@ async def get_my_trades(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
     """
     دریافت تاریخچه معاملات کاربر
     """
     from sqlalchemy import or_
+
+    owner_user = context.owner_user
     
     query = select(Trade).options(
         selectinload(Trade.offer_user),
@@ -720,8 +722,8 @@ async def get_my_trades(
         selectinload(Trade.commodity)
     ).where(
         or_(
-            Trade.offer_user_id == current_user.id,
-            Trade.responder_user_id == current_user.id
+            Trade.offer_user_id == owner_user.id,
+            Trade.responder_user_id == owner_user.id
         )
     ).order_by(Trade.created_at.desc()).offset(skip).limit(limit)
     
@@ -735,7 +737,7 @@ async def get_my_trades(
 async def get_trade(
     trade_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
     """
     دریافت جزئیات یک معامله
@@ -748,12 +750,14 @@ async def get_trade(
         ).where(Trade.id == trade_id)
     )
     trade = result.scalar_one_or_none()
+
+    owner_user = context.owner_user
     
     if not trade:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="معامله یافت نشد.")
     
     # فقط طرفین معامله می‌توانند جزئیات را ببینند
-    if trade.offer_user_id != current_user.id and trade.responder_user_id != current_user.id:
+    if trade.offer_user_id != owner_user.id and trade.responder_user_id != owner_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما به این معامله دسترسی ندارید.")
     
     return trade_to_response(trade)
@@ -765,15 +769,17 @@ async def get_trades_with_user(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
     """
     دریافت تاریخچه معاملات با یک کاربر خاص
     """
     from sqlalchemy import and_, or_
+
+    owner_user = context.owner_user
     
     # کاربر نمی‌تواند معاملات خودش با خودش را بگیرد (که منطقاً وجود ندارد)
-    if other_user_id == current_user.id:
+    if other_user_id == owner_user.id:
         return []
 
     query = select(Trade).options(
@@ -782,8 +788,8 @@ async def get_trades_with_user(
         selectinload(Trade.commodity)
     ).where(
         or_(
-            and_(Trade.offer_user_id == current_user.id, Trade.responder_user_id == other_user_id),
-            and_(Trade.offer_user_id == other_user_id, Trade.responder_user_id == current_user.id)
+            and_(Trade.offer_user_id == owner_user.id, Trade.responder_user_id == other_user_id),
+            and_(Trade.offer_user_id == other_user_id, Trade.responder_user_id == owner_user.id)
         )
     ).order_by(Trade.created_at.desc()).offset(skip).limit(limit)
     
