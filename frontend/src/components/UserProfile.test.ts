@@ -46,6 +46,8 @@ describe('UserProfile.vue', () => {
       mobile_number: '09120000000',
       role: 'عادی',
       has_bot_access: true,
+      can_block_users: true,
+      max_blocked_users: 10,
       trading_restricted_until: null,
       max_daily_trades: null,
       max_active_commodities: null,
@@ -87,5 +89,81 @@ describe('UserProfile.vue', () => {
       body: JSON.stringify({ max_accountants: 6 }),
     })
     expect(user.max_accountants).toBe(6)
+  })
+
+  it('allows admin to update block permissions and terminate all sessions', async () => {
+    const user = {
+      id: 15,
+      account_name: 'owner15',
+      mobile_number: '09123334444',
+      role: 'عادی',
+      has_bot_access: true,
+      can_block_users: true,
+      max_blocked_users: 10,
+      trading_restricted_until: null,
+      max_daily_trades: null,
+      max_active_commodities: null,
+      max_daily_requests: null,
+      limitations_expire_at: null,
+      trades_count: 0,
+      commodities_traded_count: 0,
+      channel_messages_count: 0,
+      max_sessions: 2,
+      max_accountants: 3,
+    }
+
+    apiFetchMock
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        can_block_users: false,
+      }))
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        can_block_users: false,
+        max_blocked_users: 25,
+      }))
+      .mockResolvedValueOnce(makeResponse({
+        detail: '3 نشست پایان یافت',
+        terminated_sessions: 3,
+      }))
+
+    const UserProfile = (await import('./UserProfile.vue')).default
+    const wrapper = mount(UserProfile, {
+      props: {
+        user,
+        isAdminView: true,
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    await wrapper.get('.toggle-block-capability-btn').trigger('click')
+    await flushPromises()
+
+    const maxBlockedInput = wrapper.get('.max-blocked-users-input')
+    await maxBlockedInput.setValue('25')
+    await flushPromises()
+
+    await wrapper.get('.terminate-sessions-btn').trigger('click')
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenCalledTimes(3)
+    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/users/15', {
+      method: 'PUT',
+      body: JSON.stringify({ can_block_users: false }),
+    })
+    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/users/15', {
+      method: 'PUT',
+      body: JSON.stringify({ max_blocked_users: 25 }),
+    })
+    expect(apiFetchMock).toHaveBeenNthCalledWith(3, '/api/users/15/sessions/terminate-all', {
+      method: 'POST',
+    })
+    expect(user.can_block_users).toBe(false)
+    expect(user.max_blocked_users).toBe(25)
   })
 })
