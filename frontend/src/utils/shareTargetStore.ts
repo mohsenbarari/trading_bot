@@ -91,11 +91,14 @@ function normalizeSharedFileEntry(file: StoredSharedFileEntry): SharedFileEntry 
     return null
   }
 
+  const blobBytes = new Uint8Array(bytes.byteLength)
+  blobBytes.set(bytes)
+
   return {
     name,
     type,
     size: Number(file.size || bytes.byteLength),
-    blob: new Blob([bytes], { type }),
+    blob: new Blob([blobBytes.buffer], { type }),
   }
 }
 
