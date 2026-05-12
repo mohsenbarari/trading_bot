@@ -67,6 +67,16 @@ class SessionServiceHelperTests(unittest.TestCase):
 
 
 class HandleLoginSessionTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.accountant_patch = patch(
+            "core.services.session_service._is_accountant_user",
+            new=AsyncMock(return_value=False),
+        )
+        self.mock_is_accountant = self.accountant_patch.start()
+
+    async def asyncTearDown(self):
+        self.accountant_patch.stop()
+
     async def test_revives_suspended_session_and_updates_runtime_fields(self):
         old_refresh = "old-refresh-token"
         new_refresh = "new-refresh-token"
@@ -167,6 +177,29 @@ class HandleLoginSessionTests(unittest.IsolatedAsyncioTestCase):
             home_server="foreign",
         )
         db.commit.assert_awaited_once()
+
+    async def test_accountant_users_stay_limited_to_one_active_session(self):
+        db = SimpleNamespace(execute=AsyncMock(return_value=scalar_one_or_none_result(None)), commit=AsyncMock(), add=Mock())
+        user = SimpleNamespace(id=12, role=UserRole.STANDARD, max_sessions=3)
+        fake_redis = FakeRedis({
+            "session_req:12:daily": "0",
+            "session_req:12:weekly": "0",
+            "session_req:12:monthly": "0",
+        })
+        settings = SimpleNamespace(
+            anti_abuse_daily_base=4,
+            anti_abuse_weekly_base=10,
+            anti_abuse_monthly_base=20,
+        )
+        self.mock_is_accountant.return_value = True
+
+        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[SimpleNamespace(is_primary=True)])), \
+             patch("bot.utils.redis_helpers.get_redis", AsyncMock(return_value=fake_redis)), \
+             patch("core.services.session_service.get_trading_settings_async", AsyncMock(return_value=settings)), \
+             patch("core.services.session_service.publish_user_event", new=AsyncMock(), create=True):
+            result = await session_service.handle_login_session(db, user, "refresh-acc")
+
+        self.assertEqual(result["action"], "approval_required")
 
     async def test_blocks_when_anti_abuse_threshold_is_hit(self):
         db = SimpleNamespace(execute=AsyncMock(), commit=AsyncMock())
@@ -353,6 +386,16 @@ class HandleLoginSessionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ApproveAndRevocationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.accountant_patch = patch(
+            "core.services.session_service._is_accountant_user",
+            new=AsyncMock(return_value=False),
+        )
+        self.accountant_patch.start()
+
+    async def asyncTearDown(self):
+        self.accountant_patch.stop()
+
     async def test_approve_login_request_rejects_expired_pending_request(self):
         login_req = SimpleNamespace(
             id=uuid.uuid4(),
@@ -486,6 +529,16 @@ class ApproveAndRevocationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SessionServiceAdditionalCoverageTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.accountant_patch = patch(
+            "core.services.session_service._is_accountant_user",
+            new=AsyncMock(return_value=False),
+        )
+        self.accountant_patch.start()
+
+    async def asyncTearDown(self):
+        self.accountant_patch.stop()
+
     async def test_lookup_and_creation_helpers(self):
         token = "refresh-token"
         hashed = session_service.hash_token(token)

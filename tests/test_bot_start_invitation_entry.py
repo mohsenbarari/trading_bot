@@ -103,6 +103,32 @@ class BotStartInvitationEntryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("لینک دعوت شما معتبر است", message.answer.await_args.args[0])
         set_anchor.assert_called_once_with(13, 77)
 
+    async def test_handle_start_with_token_redirects_accountant_invitation_to_web_only_flow(self):
+        invitation = SimpleNamespace(token="ACCT-token", mobile_number="09120000000", is_used=False)
+        message = SimpleNamespace(
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=13),
+            answer=AsyncMock(return_value=SimpleNamespace(message_id=77)),
+        )
+        state = FakeState()
+        command = SimpleNamespace(args="ACCT-token")
+
+        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
+            "bot.handlers.start.AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(invitation)),
+        ), patch(
+            "bot.handlers.start.get_pending_accountant_relation_by_invitation_token",
+            new=AsyncMock(return_value=SimpleNamespace(id=1)),
+        ), patch(
+            "bot.handlers.start.settings",
+            SimpleNamespace(frontend_url="https://app.example"),
+        ):
+            await handle_start_with_token(message, command, state, user=None)
+
+        self.assertEqual(state.updated, [])
+        self.assertEqual(state.states, [])
+        self.assertIn("فقط از طریق وب‌اپ", message.answer.await_args.args[0])
+
 
 if __name__ == "__main__":
     unittest.main()

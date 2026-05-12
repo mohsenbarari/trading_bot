@@ -7,6 +7,7 @@ import asyncio
 import pytz
 
 from core.db import get_db
+from core.services.accountant_relation_service import is_user_accountant
 from core.services.chat_room_service import sync_mandatory_channel_for_user_state_change
 from core.services.user_deletion_service import delete_user_account
 from models.user import User
@@ -235,6 +236,7 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
     old_role = user.role
     old_is_deleted = getattr(user, "is_deleted", False)
     old_deleted_at = getattr(user, "deleted_at", None)
+    accountant_user = await is_user_accountant(db, user.id) if hasattr(db, "execute") else False
     
     # --- 1. Role Update ---
     if 'role' in update_data:
@@ -243,7 +245,7 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
     # --- 2. Bot Access ---
     old_bot_access = user.has_bot_access
     if 'has_bot_access' in update_data:
-        user.has_bot_access = update_data['has_bot_access']
+        user.has_bot_access = False if accountant_user else update_data['has_bot_access']
     bot_access_changed = old_bot_access != user.has_bot_access
     
     # --- 3. Trading Restriction (مسدودیت) ---
@@ -267,7 +269,7 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
     # --- 4b. Max Sessions ---
     if 'max_sessions' in update_data:
         val = update_data['max_sessions']
-        user.max_sessions = max(1, min(val, 3)) if val else 1
+        user.max_sessions = 1 if accountant_user else (max(1, min(val, 3)) if val else 1)
 
     # --- 4c. Accountant Capacity ---
     if 'max_accountants' in update_data and update_data['max_accountants'] is not None:

@@ -130,6 +130,35 @@ class BotStartRegistrationAddressTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ورود به وب اپ", message.answer.await_args.args[0])
         set_anchor.assert_called_once_with(21, 66)
 
+    async def test_handle_address_blocks_accountant_tokens_from_bot_registration(self):
+        invitation = SimpleNamespace(
+            token="ACCT-token",
+            account_name="acc",
+            mobile_number="09120001122",
+            role="standard",
+            is_used=False,
+        )
+        session = FakeSession(invitation)
+        state = FakeState("ACCT-token")
+        message = make_message()
+
+        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
+            "bot.handlers.start.AsyncSessionLocal",
+            return_value=FakeSessionContext(session),
+        ), patch(
+            "bot.handlers.start.get_pending_accountant_relation_by_invitation_token",
+            new=AsyncMock(return_value=SimpleNamespace(id=1)),
+        ), patch(
+            "bot.handlers.start.settings",
+            SimpleNamespace(frontend_url="https://app.example"),
+        ):
+            await handle_address(message, state)
+
+        self.assertEqual(state.cleared, 1)
+        self.assertEqual(session.commits, 0)
+        self.assertEqual(len(session.added), 0)
+        self.assertIn("ثبت‌نام حسابدار از مسیر ربات مجاز نیست", message.answer.await_args.args[0])
+
 
 if __name__ == "__main__":
     unittest.main()

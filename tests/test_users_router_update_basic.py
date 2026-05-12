@@ -60,7 +60,9 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB(user)
         update = schemas.UserUpdate(role=UserRole.STANDARD, has_bot_access=False, max_sessions=99, max_accountants=6)
 
-        with patch("api.routers.users.track_limitation_changes", return_value=([], False, False)), patch(
+        with patch("api.routers.users.is_user_accountant", new=AsyncMock(return_value=False)), patch(
+            "api.routers.users.track_limitation_changes", return_value=([], False, False)
+        ), patch(
             "api.routers.users.sync_mandatory_channel_for_user_state_change", new=AsyncMock()
         ) as mandatory_sync_mock, patch(
             "api.routers.users.invalidate_user_cache", new=AsyncMock(), create=True
@@ -90,6 +92,32 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         block_mock.assert_not_awaited()
         limit_mock.assert_not_awaited()
         create_task_mock.assert_not_called()
+
+    async def test_update_user_clamps_accountant_bot_access_and_session_cap(self):
+        user = make_user(has_bot_access=False, max_sessions=1)
+        db = FakeDB(user)
+        db.execute = AsyncMock()
+        update = schemas.UserUpdate(has_bot_access=True, max_sessions=3)
+
+        with patch("api.routers.users.is_user_accountant", new=AsyncMock(return_value=True)), patch(
+            "api.routers.users.track_limitation_changes", return_value=([], False, False)
+        ), patch(
+            "api.routers.users.sync_mandatory_channel_for_user_state_change", new=AsyncMock()
+        ), patch(
+            "core.cache.invalidate_user_cache", new=AsyncMock()
+        ), patch(
+            "api.routers.users.send_bot_access_notification", new=AsyncMock()
+        ) as bot_notify_mock, patch(
+            "api.routers.users.send_block_notification", new=AsyncMock()
+        ), patch(
+            "api.routers.users.send_limitation_notification", new=AsyncMock()
+        ), patch("api.routers.users.asyncio.create_task"):
+            result = await update_user(5, update, db=db)
+
+        self.assertIs(result, user)
+        self.assertFalse(user.has_bot_access)
+        self.assertEqual(user.max_sessions, 1)
+        bot_notify_mock.assert_not_awaited()
 
 
 if __name__ == "__main__":

@@ -87,3 +87,18 @@ def send_invitation_sms(
         f"{web_link}"
     )
     return send_sms(mobile, message)
+
+
+def send_accountant_invitation_sms(
+    mobile: str,
+    relation_display_name: str,
+    web_link: str,
+) -> bool:
+    """Send accountant invitation SMS with a web-only registration link."""
+    message = (
+        f"{relation_display_name} عزیز\n"
+        f"دعوت ثبت‌نام حسابدار سامانه معاملاتی\n"
+        f"تکمیل ثبت‌نام فقط از طریق وب‌اپ انجام می‌شود:\n"
+        f"{web_link}"
+    )
+    return send_sms(mobile, message)

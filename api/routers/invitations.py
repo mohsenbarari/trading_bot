@@ -8,6 +8,10 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from core.db import get_db
+from core.services.accountant_relation_service import (
+    get_pending_accountant_relation_by_invitation_token,
+    is_accountant_invitation_token,
+)
 from models.invitation import Invitation
 from models.user import User, UserRole
 from core.config import settings
@@ -151,6 +155,11 @@ async def lookup_invitation(
         
     if inv.is_used:
         raise HTTPException(status_code=400, detail="Invitation already used")
+
+    if is_accountant_invitation_token(inv.token):
+        relation = await get_pending_accountant_relation_by_invitation_token(db, inv.token)
+        if not relation:
+            raise HTTPException(status_code=400, detail="Invitation expired")
         
     if inv.expires_at < datetime.utcnow():
         raise HTTPException(status_code=400, detail="Invitation expired")
@@ -173,6 +182,11 @@ async def validate_invitation(
         
     if inv.is_used:
         raise HTTPException(status_code=400, detail="Invitation already used")
+
+    if is_accountant_invitation_token(token):
+        relation = await get_pending_accountant_relation_by_invitation_token(db, token)
+        if not relation:
+            raise HTTPException(status_code=400, detail="Invitation expired")
         
     if inv.expires_at < datetime.utcnow():
         raise HTTPException(status_code=400, detail="Invitation expired")

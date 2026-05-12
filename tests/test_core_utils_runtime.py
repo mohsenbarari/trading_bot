@@ -72,6 +72,7 @@ class CoreUtilsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(utils.normalize_persian_numerals('۱۲٣abc'), '123abc')
         self.assertEqual(utils.normalize_account_name('آزمایشی۱۲'), 'آزمایشی12')
         self.assertEqual(utils.normalize_account_name(''), '')
+        self.assertEqual(utils.unique_user_ids([5, '6', 5, 0, None, 'bad', 7]), [5, 6, 7])
 
     async def test_send_deletable_message_success_and_failure(self):
         bot = AsyncMock()

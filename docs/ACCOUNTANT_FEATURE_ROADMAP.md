@@ -82,17 +82,17 @@ rollback surface:
 - [x] helper مشترک `resolve_effective_owner_actor(...)` یا معادل آن ساخته شود.
 - [x] helper مشترک برای `list_active_accountants_for_owner(...)` ساخته شود.
 - [x] helper مشترک برای `validate_accountant_capacity(...)` ساخته شود.
-- [ ] helper مشترک برای trade notification audience fanout ساخته شود.
+- [x] helper مشترک برای trade notification audience fanout ساخته شود.
 
 فایل‌های درگیر اصلی:
 - [x] [core/services](core/services)
-- [ ] [api/deps.py](api/deps.py)
-- [ ] [core/utils.py](core/utils.py)
+- [x] [api/deps.py](api/deps.py)
+- [x] [core/utils.py](core/utils.py)
 
 validation phase:
 - [x] unit tests سرویس relation سبز شود.
 - [x] unit tests resolver owner/actor سبز شود.
-- [ ] unit tests audience fanout سبز شود.
+- [x] unit tests audience fanout سبز شود.
 
 rollback surface:
 - [ ] seamهای جدید فقط additive باشند و behavior قدیمی را تا قبل از phaseهای بعدی نشکنند.
@@ -103,27 +103,27 @@ rollback surface:
 branch کردن onboarding و session policy برای accountant.
 
 خروجی‌های لازم:
-- [ ] owner-facing accountant create/list/cancel APIs اضافه شود.
-- [ ] `register_otp_request`, `register_otp_verify`, `register_complete` در [api/routers/auth.py](api/routers/auth.py) accountant-aware شوند.
-- [ ] `register_complete` هنگام accountant registration، `has_bot_access=False` را enforce کند.
-- [ ] relation pending بر اساس `invitation_token` به user تازه‌ساخته bind شود.
-- [ ] `core/services/session_service.py` accountant را در effective max session = 1 enforce کند.
-- [ ] update user admin path هر تغییر `max_sessions` برای accountant را clamp یا reject کند.
-- [ ] `bot/handlers/start.py` و [bot/handlers/link_account.py](bot/handlers/link_account.py) path accountant را از bot-enable flow جدا کنند.
+- [x] owner-facing accountant create/list/cancel APIs اضافه شود.
+- [x] `register_otp_request`, `register_otp_verify`, `register_complete` در [api/routers/auth.py](api/routers/auth.py) accountant-aware شوند.
+- [x] `register_complete` هنگام accountant registration، `has_bot_access=False` را enforce کند.
+- [x] relation pending بر اساس `invitation_token` به user تازه‌ساخته bind شود.
+- [x] `core/services/session_service.py` accountant را در effective max session = 1 enforce کند.
+- [x] update user admin path هر تغییر `max_sessions` برای accountant را clamp یا reject کند.
+- [x] `bot/handlers/start.py` و [bot/handlers/link_account.py](bot/handlers/link_account.py) path accountant را از bot-enable flow جدا کنند.
 
 فایل‌های درگیر اصلی:
-- [ ] [api/routers/auth.py](api/routers/auth.py)
-- [ ] [api/routers/invitations.py](api/routers/invitations.py) یا router/accountant جدید
-- [ ] [core/services/session_service.py](core/services/session_service.py)
-- [ ] [api/routers/users.py](api/routers/users.py)
-- [ ] [bot/handlers/start.py](bot/handlers/start.py)
-- [ ] [bot/handlers/link_account.py](bot/handlers/link_account.py)
+- [x] [api/routers/auth.py](api/routers/auth.py)
+- [x] [api/routers/invitations.py](api/routers/invitations.py) یا router/accountant جدید
+- [x] [core/services/session_service.py](core/services/session_service.py)
+- [x] [api/routers/users.py](api/routers/users.py)
+- [x] [bot/handlers/start.py](bot/handlers/start.py)
+- [x] [bot/handlers/link_account.py](bot/handlers/link_account.py)
 
 validation phase:
-- [ ] owner accountant create/cancel/pending-expire tests سبز شود.
-- [ ] accountant registration flow با web-only session سبز شود.
-- [ ] second-login approval flow برای accountant سبز شود.
-- [ ] bot `/start` و `/link` برای accountant hard-deny/regression tests سبز شود.
+- [x] owner accountant create/cancel/pending-expire tests سبز شود.
+- [x] accountant registration flow با web-only session سبز شود.
+- [x] second-login approval flow برای accountant سبز شود.
+- [x] bot `/start` و `/link` برای accountant hard-deny/regression tests سبز شود.
 
 rollback surface:
 - [ ] اگر bot/accountant branch مشکل داشت، accountant creation endpoint موقتاً disable شود اما relation data حفظ شود.
