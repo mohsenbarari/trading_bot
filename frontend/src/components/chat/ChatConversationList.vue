@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { type Conversation } from '../../types/chat'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
-import { popBackState, pushBackState } from '../../composables/useBackButton'
+import { discardBackState, popBackState, pushBackState } from '../../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial } from '../../utils/chatFiles'
 import {
   ArrowDown,
@@ -174,6 +174,14 @@ function closeConversationMenu() {
   window.setTimeout(() => {
     suppressClickConversationId.value = null
   }, 0)
+}
+
+function closeConversationMenuForAction() {
+  if (conversationMenuBackStateActive.value) {
+    conversationMenuBackStateActive.value = false
+    discardBackState()
+  }
+  closeConversationMenu()
 }
 
 watch(() => Boolean(menuConversation.value), (isOpen) => {
@@ -369,7 +377,7 @@ const menuPosition = computed(() => {
 function emitConversationAction(action: ConversationListAction) {
   if (!menuConversation.value) return
   const conv = menuConversation.value
-  closeConversationMenu()
+  closeConversationMenuForAction()
   emit('conversation-action', { action, conv })
 }
 
@@ -503,9 +511,11 @@ onBeforeUnmount(() => {
               <template v-for="(action, index) in activeMenuActions" :key="action.key">
                 <div v-if="shouldShowActionDivider(index)" class="menu-action-divider"></div>
                 <button
+                  type="button"
                   class="menu-action"
                   :class="[`tone-${action.tone}`]"
-                  @click="emitConversationAction(action.key)"
+                  @pointerup.stop.prevent="emitConversationAction(action.key)"
+                  @click.stop.prevent="emitConversationAction(action.key)"
                 >
                   <div class="menu-action-icon">
                     <component :is="action.icon" :size="20" />

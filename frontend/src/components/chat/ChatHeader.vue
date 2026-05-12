@@ -170,7 +170,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Megaphone, MoreVertical, Search, UsersRound } from 'lucide-vue-next'
-import { popBackState, pushBackState } from '../../composables/useBackButton'
+import { discardBackState, popBackState, pushBackState } from '../../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial } from '../../utils/chatFiles'
 
 const props = defineProps<{
@@ -237,6 +237,14 @@ const closeMenu = () => {
   isMenuOpen.value = false
 }
 
+const closeMenuForAction = () => {
+  if (menuBackStateActive.value) {
+    menuBackStateActive.value = false
+    discardBackState()
+  }
+  isMenuOpen.value = false
+}
+
 watch(isMenuOpen, (isOpen) => {
   if (isOpen) {
     if (!menuBackStateActive.value) {
@@ -269,27 +277,27 @@ watch(
 )
 
 const handleMenuSearch = () => {
-  closeMenu()
+  closeMenuForAction()
   emit('toggle-search')
 }
 
 const handleMenuViewProfile = () => {
-  closeMenu()
+  closeMenuForAction()
   emit('view-profile')
 }
 
 const handleMenuManageRoom = () => {
-  closeMenu()
+  closeMenuForAction()
   emit('manage-room')
 }
 
 const handleMenuCreateGroup = () => {
-  closeMenu()
+  closeMenuForAction()
   emit('create-group')
 }
 
 const handleMenuCreateChannel = () => {
-  closeMenu()
+  closeMenuForAction()
   emit('create-channel')
 }
 

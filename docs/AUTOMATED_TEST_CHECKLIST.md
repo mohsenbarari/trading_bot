@@ -187,7 +187,7 @@ Remaining completion estimate for full messenger test closure:
 
 - [x] 1 focused Playwright slice covering the remaining direct-room media/search/viewer UX.
 - [x] 1 focused Vitest expansion batch covering deterministic selection/media/editor/cache contracts and leaving the full frontend Vitest suite green (`21/21` files, `59/59` tests).
-- [ ] 1 full serial browser-matrix rerun on Chromium / Firefox / WebKit after the new messenger slices land.
+- [x] 1 full serial browser-matrix rerun on Chromium / Firefox / WebKit after the new messenger slices land (`231/231`).
 
 ## Phase 7 - Models, Migrations, Startup, and Deployment Smoke Coverage
 

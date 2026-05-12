@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import ChatUserListRow from './chat/ChatUserListRow.vue'
 import { apiFetch, apiFetchJson } from '../utils/auth'
-import { popBackState, pushBackState } from '../composables/useBackButton'
+import { discardBackState, popBackState, pushBackState } from '../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles'
 import {
   Check,
@@ -263,6 +263,12 @@ async function handleAvatarSelected(event: Event) {
   try {
     const uploaded = await uploadAvatarImage(file, props.apiBaseUrl)
     avatarFileId.value = uploaded.file_id
+    if (activeChannel.value) {
+      activeChannel.value = {
+        ...activeChannel.value,
+        avatar_file_id: uploaded.file_id,
+      }
+    }
   } catch (error) {
     setError(error, 'آپلود آواتار کانال ناموفق بود')
   } finally {
@@ -274,6 +280,12 @@ async function handleAvatarSelected(event: Event) {
 function clearAvatar() {
   if (avatarBusy.value) return
   avatarFileId.value = null
+  if (activeChannel.value) {
+    activeChannel.value = {
+      ...activeChannel.value,
+      avatar_file_id: null,
+    }
+  }
 }
 
 function getPrimaryUserName(accountName: string, fullName?: string | null) {
@@ -321,6 +333,12 @@ function pushManagerBackState() {
       pushManagerBackState()
     }
   })
+}
+
+function discardManagerBackState() {
+  if (!managerBackStateActive.value) return
+  managerBackStateActive.value = false
+  discardBackState()
 }
 
 function setError(error: unknown, fallback: string) {
@@ -659,6 +677,7 @@ async function removeMember(member: ChannelMember) {
 
 function openCurrentChannelInMessenger() {
   if (!activeChannel.value) return
+  discardManagerBackState()
   emit('open-channel', {
     chatId: activeChannel.value.id,
     title: activeChannel.value.title,
@@ -695,14 +714,16 @@ if (props.showCloseButton) {
   pushManagerBackState()
 }
 
+if (!props.initialChannelId) {
+  void loadExistingChannels()
+}
+
 onBeforeUnmount(() => {
   if (managerBackStateActive.value) {
     managerBackStateActive.value = false
     popBackState()
   }
 })
-
-void loadExistingChannels()
 </script>
 
 <template>

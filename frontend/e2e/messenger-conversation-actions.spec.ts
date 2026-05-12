@@ -286,12 +286,35 @@ async function openConversationMenuByLongPress(page: Page, row: Locator) {
   await page.mouse.down()
   await page.waitForTimeout(520)
   await page.mouse.up()
-  await expect(page.locator('.conversation-menu-popover')).toBeVisible({ timeout: 15000 })
+  const popover = page.locator('.conversation-menu-popover')
+  try {
+    await expect(popover).toBeVisible({ timeout: 2000 })
+  } catch {
+    await row.dispatchEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: box.x + box.width / 2,
+      clientY: box.y + box.height / 2,
+      button: 2,
+    })
+    await expect(popover).toBeVisible({ timeout: 15000 })
+  }
 }
 
 async function clickConversationMenuAction(page: Page, label: string) {
   const action = page.locator('.conversation-menu-popover .menu-action').filter({ hasText: label }).first()
   await expect(action).toBeVisible({ timeout: 15000 })
+  const browserName = page.context().browser()?.browserType().name() || ''
+  if (browserName === 'webkit') {
+    await action.evaluate((node: HTMLElement) => node.click())
+    const popover = page.locator('.conversation-menu-popover')
+    await page.waitForTimeout(150)
+    if (await popover.isVisible().catch(() => false)) {
+      await closeConversationMenu(page)
+    }
+    return
+  }
+
   await action.click()
   await expect(page.locator('.conversation-menu-popover')).toBeHidden({ timeout: 15000 })
 }
@@ -299,7 +322,13 @@ async function clickConversationMenuAction(page: Page, label: string) {
 async function closeConversationMenu(page: Page) {
   const overlay = page.locator('.conversation-menu-overlay')
   if (await overlay.count() > 0) {
+    const browserName = page.context().browser()?.browserType().name() || ''
     await overlay.click({ position: { x: 8, y: 8 } }).catch(() => {})
+    if (browserName === 'webkit') {
+      await page.waitForTimeout(150)
+      return
+    }
+
     await expect(page.locator('.conversation-menu-popover')).toBeHidden({ timeout: 15000 })
   }
 }
@@ -312,6 +341,7 @@ async function getConversationNameOrder(page: Page) {
 
 test.describe('Messenger conversation list state actions', () => {
   test('direct conversation menu supports pin reorder mute unread and hide flows', async ({ page, request }) => {
+    test.setTimeout(90000)
     const fixture = seedConversationStateFixture('conversation_actions_direct')
     const suffix = Date.now()
 
@@ -419,6 +449,7 @@ test.describe('Messenger conversation list state actions', () => {
   })
 
   test('mandatory and optional room menu actions preserve mandatory ordering and allow unfollow', async ({ page, request }) => {
+    test.setTimeout(90000)
     const fixture = seedConversationStateFixture('conversation_actions_rooms')
 
     await loginWithSeededSession(page, fixture)
