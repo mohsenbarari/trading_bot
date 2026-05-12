@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from api.deps import EffectiveOwnerActor
 from api.routers.offers import ParseOfferRequest, get_active_offers, get_my_offers, parse_offer_text
 
 
@@ -32,6 +33,17 @@ class FakeDB:
 
 
 class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def make_context(owner_id=77, actor_id=None):
+        owner_user = SimpleNamespace(id=owner_id)
+        actor_user = SimpleNamespace(id=actor_id if actor_id is not None else owner_id)
+        return EffectiveOwnerActor(
+            owner_user=owner_user,
+            actor_user=actor_user,
+            relation=None,
+            is_accountant_context=owner_user.id != actor_user.id,
+        )
+
     async def test_parse_offer_text_handles_error_unrecognized_and_success(self):
         current_user = SimpleNamespace(id=5)
 
@@ -84,7 +96,7 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
     async def test_get_active_offers_serializes_rows_for_viewer(self):
         offers = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
         db = FakeDB([FakeExecuteResult(offers)])
-        current_user = SimpleNamespace(id=77)
+        context = self.make_context(owner_id=77, actor_id=99)
 
         with patch(
             "core.trading_settings.get_trading_settings_async",
@@ -99,7 +111,7 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
                 skip=0,
                 limit=50,
                 db=db,
-                current_user=current_user,
+                context=context,
             )
 
         self.assertEqual(result, [{"id": 1}, {"id": 2}])
@@ -113,7 +125,7 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
     async def test_get_my_offers_serializes_rows_with_owner_identity(self):
         offers = [SimpleNamespace(id=5)]
         db = FakeDB([FakeExecuteResult(offers)])
-        current_user = SimpleNamespace(id=88)
+        context = self.make_context(owner_id=88, actor_id=144)
 
         with patch(
             "core.trading_settings.get_trading_settings_async",
@@ -128,7 +140,7 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
                 skip=0,
                 limit=50,
                 db=db,
-                current_user=current_user,
+                context=context,
             )
 
         self.assertEqual(result, [{"id": 5, "user_id": 88}])
@@ -137,6 +149,29 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call.args[0], offers[0])
         self.assertEqual(call.kwargs["viewer_user_id"], 88)
         self.assertTrue(call.kwargs["include_owner_identity"])
+
+    async def test_get_my_offers_uses_effective_owner_view_when_actor_differs(self):
+        offers = [SimpleNamespace(id=9)]
+        db = FakeDB([FakeExecuteResult(offers)])
+        context = self.make_context(owner_id=61, actor_id=62)
+
+        with patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=30)),
+        ), patch(
+            "api.routers.offers.offer_to_response",
+            return_value={"id": 9, "user_id": 61},
+        ) as response_mock:
+            await get_my_offers(
+                status_filter=None,
+                since_hours=None,
+                skip=0,
+                limit=50,
+                db=db,
+                context=context,
+            )
+
+        self.assertEqual(response_mock.call_args.kwargs["viewer_user_id"], 61)
 
 
 if __name__ == "__main__":
