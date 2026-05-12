@@ -84,9 +84,6 @@ jobs:
       - name: Prepare CI host paths
         run: mkdir -p /tmp/trading-bot-ci-certs
 
-      - name: Bootstrap backend stack
-        run: bash ./scripts/bootstrap_ci_backend.sh
-
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
@@ -98,6 +95,9 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+      - name: Bootstrap backend stack
+        run: bash ./scripts/bootstrap_ci_backend.sh
 
       - name: Run Playwright browser gate
         working-directory: frontend
