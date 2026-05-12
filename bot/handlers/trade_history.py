@@ -9,6 +9,7 @@ from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import joinedload
 from typing import Optional
 from datetime import datetime, timedelta
+from importlib import import_module
 import os
 import tempfile
 
@@ -190,8 +191,13 @@ async def change_history_months(callback: types.CallbackQuery, callback_data: Hi
 
 async def generate_excel(trades, target_user, current_user) -> str:
     """ایجاد فایل Excel با پشتیبانی RTL"""
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, Alignment, PatternFill
+    openpyxl = import_module("openpyxl")
+    openpyxl_styles = import_module("openpyxl.styles")
+
+    Workbook = openpyxl.Workbook
+    Font = openpyxl_styles.Font
+    Alignment = openpyxl_styles.Alignment
+    PatternFill = openpyxl_styles.PatternFill
     
     wb = Workbook()
     ws = wb.active
@@ -216,12 +222,15 @@ async def generate_excel(trades, target_user, current_user) -> str:
     
     # داده‌ها
     for row_idx, trade in enumerate(trades, 2):
+        counterparty = None
         if trade.responder_user_id == current_user.id:
             is_buy = trade.trade_type == TradeType.BUY
-            counterparty = trade.offer_user.account_name
+            if is_self:
+                counterparty = trade.offer_user.account_name
         else:
             is_buy = trade.trade_type != TradeType.BUY
-            counterparty = trade.responder_user.account_name
+            if is_self:
+                counterparty = trade.responder_user.account_name
             
         created_at_iran = trade.created_at.astimezone(IRAN_TZ) if trade.created_at.tzinfo else trade.created_at
         jalali_date = jdatetime.datetime.fromgregorian(datetime=created_at_iran)
