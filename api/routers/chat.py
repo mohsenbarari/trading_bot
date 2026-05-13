@@ -6,6 +6,7 @@ API endpoints for in-app messaging system
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
+import inspect
 import os
 import uuid
 import asyncio
@@ -1416,104 +1417,111 @@ async def upload_chat_media(
     db: AsyncSession = Depends(get_db)
 ):
     """آپلود فایل برای چت (ذخیره روی دیسک سرور)"""
-    allowed_types = [
-        "image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heic-sequence", "image/heif", "image/heif-sequence",
-        "video/mp4", "video/webm", "video/quicktime", "video/x-matroska", "application/mp4", "video/x-m4v", "video/3gpp", "video/quicktime", "application/octet-stream",
-        "audio/mp4", "audio/webm", "audio/ogg", "audio/mpeg", "audio/aac", "audio/x-m4a", "audio/wav", "audio/x-wav",
-        "application/pdf", "text/plain", "text/csv", "application/json", "application/xml", "text/xml", "application/rtf",
-        "application/zip", "application/x-zip-compressed", "application/x-rar-compressed", "application/vnd.rar", "application/x-7z-compressed",
-        "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    ]
-    
-    base_content_type = file.content_type.split(";")[0].strip()
-    
-    if base_content_type not in allowed_types:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
-    
-    # بررسی محتوای واقعی فایل با استفاده از Magic bytes
-    # CPU-bound libmagic probe is offloaded to a thread to avoid blocking the event loop
-    contents = await file.read()
-    mime = await asyncio.to_thread(lambda: magic.from_buffer(contents, mime=True))
-    
-    # allow magic to return "video/webm" for "audio/webm" files
-    if mime == 'video/webm' and base_content_type == 'audio/webm':
-        mime = 'audio/webm'
+    try:
+        allowed_types = [
+            "image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heic-sequence", "image/heif", "image/heif-sequence",
+            "video/mp4", "video/webm", "video/quicktime", "video/x-matroska", "application/mp4", "video/x-m4v", "video/3gpp", "video/quicktime", "application/octet-stream",
+            "audio/mp4", "audio/webm", "audio/ogg", "audio/mpeg", "audio/aac", "audio/x-m4a", "audio/wav", "audio/x-wav",
+            "application/pdf", "text/plain", "text/csv", "application/json", "application/xml", "text/xml", "application/rtf",
+            "application/zip", "application/x-zip-compressed", "application/x-rar-compressed", "application/vnd.rar", "application/x-7z-compressed",
+            "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ]
 
-    if mime not in allowed_types:
-        raise HTTPException(status_code=400, detail=f"Invalid file content. Real type is {mime} and base type is {base_content_type}")
-    
-    # بررسی سایز (حداکثر 50MB)
-    size = len(contents)
-    if size > CHAT_MEDIA_MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail=f"File too large (max {CHAT_MEDIA_MAX_UPLOAD_LABEL})")
-        
-    ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else mime.split("/")[-1]
-    file_uuid = str(uuid.uuid4())
-    
-    # ذخیره در پوشه محلی سرور (نه S3)
-    # فضای مخفی - مسیر واقعی هرگز به کاربر نمایش داده نمی‌شود
-    upload_dir = os.path.join("uploads", "chat_files", str(current_user.id))
-    os.makedirs(upload_dir, exist_ok=True)
-    
-    file_path = os.path.join(upload_dir, f"{file_uuid}.{ext}")
+        base_content_type = file.content_type.split(";")[0].strip()
 
-    # EXIF transpose for images: rotate pixels to match EXIF orientation, then strip the tag.
-    # CPU-bound Pillow work runs in a thread pool to avoid blocking the uvicorn event loop,
-    # which otherwise stalls unrelated /api/chat/* requests (messages, conversations, poll)
-    # while media uploads are being processed.
-    img_width = None
-    img_height = None
-    if mime.startswith("image/") and mime != "image/gif":
-        def _exif_transpose_sync(raw: bytes, mime_type: str):
-            from PIL import Image as PILImage, ImageOps
-            import io as _io
-            pil_img = PILImage.open(_io.BytesIO(raw))
-            pil_img = ImageOps.exif_transpose(pil_img)
-            w, h = pil_img.size
-            buf = _io.BytesIO()
-            fmt = "JPEG" if mime_type in ("image/jpeg", "image/jpg") else ("PNG" if mime_type == "image/png" else "WEBP")
-            pil_img.save(buf, format=fmt, quality=90)
-            return buf.getvalue(), w, h
+        if base_content_type not in allowed_types:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
 
-        try:
-            new_contents, img_width, img_height = await asyncio.to_thread(
-                _exif_transpose_sync, contents, mime
-            )
-            contents = new_contents
-            size = len(contents)
-        except Exception as e:
-            logger.warning(f"Pillow EXIF transpose failed, saving original: {e}")
+        # بررسی محتوای واقعی فایل با استفاده از Magic bytes
+        # CPU-bound libmagic probe is offloaded to a thread to avoid blocking the event loop
+        contents = await file.read()
+        mime = await asyncio.to_thread(lambda: magic.from_buffer(contents, mime=True))
 
-    async with aiofiles.open(file_path, "wb") as f:
-        await f.write(contents)
-            
-    # ذخیره در دیتابیس (s3_key = مسیر نسبی فایل روی دیسک)
-    chat_file = ChatFile(
-        id=file_uuid,
-        uploader_id=current_user.id,
-        s3_key=file_path,  # در اینجا مسیر فایل ذخیره می‌شود
-        file_name=file.filename,
-        mime_type=mime,
-        size=size,
-        thumbnail=thumbnail
-    )
-    db.add(chat_file)
-    await db.commit()
-    
-    # برگرداندن شناسه، تامنیل و ابعاد تصویر
-    result = {
-        "file_id": chat_file.id,
-        "thumbnail": chat_file.thumbnail,
-        "file_name": chat_file.file_name,
-        "mime_type": chat_file.mime_type,
-        "size": chat_file.size,
-    }
-    if img_width and img_height:
-        result["width"] = img_width
-        result["height"] = img_height
-    return result
+        # allow magic to return "video/webm" for "audio/webm" files
+        if mime == 'video/webm' and base_content_type == 'audio/webm':
+            mime = 'audio/webm'
+
+        if mime not in allowed_types:
+            raise HTTPException(status_code=400, detail=f"Invalid file content. Real type is {mime} and base type is {base_content_type}")
+
+        # بررسی سایز (حداکثر 50MB)
+        size = len(contents)
+        if size > CHAT_MEDIA_MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail=f"File too large (max {CHAT_MEDIA_MAX_UPLOAD_LABEL})")
+
+        ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else mime.split("/")[-1]
+        file_uuid = str(uuid.uuid4())
+
+        # ذخیره در پوشه محلی سرور (نه S3)
+        # فضای مخفی - مسیر واقعی هرگز به کاربر نمایش داده نمی‌شود
+        upload_dir = os.path.join("uploads", "chat_files", str(current_user.id))
+        os.makedirs(upload_dir, exist_ok=True)
+
+        file_path = os.path.join(upload_dir, f"{file_uuid}.{ext}")
+
+        # EXIF transpose for images: rotate pixels to match EXIF orientation, then strip the tag.
+        # CPU-bound Pillow work runs in a thread pool to avoid blocking the uvicorn event loop,
+        # which otherwise stalls unrelated /api/chat/* requests (messages, conversations, poll)
+        # while media uploads are being processed.
+        img_width = None
+        img_height = None
+        if mime.startswith("image/") and mime != "image/gif":
+            def _exif_transpose_sync(raw: bytes, mime_type: str):
+                from PIL import Image as PILImage, ImageOps
+                import io as _io
+                pil_img = PILImage.open(_io.BytesIO(raw))
+                pil_img = ImageOps.exif_transpose(pil_img)
+                w, h = pil_img.size
+                buf = _io.BytesIO()
+                fmt = "JPEG" if mime_type in ("image/jpeg", "image/jpg") else ("PNG" if mime_type == "image/png" else "WEBP")
+                pil_img.save(buf, format=fmt, quality=90)
+                return buf.getvalue(), w, h
+
+            try:
+                new_contents, img_width, img_height = await asyncio.to_thread(
+                    _exif_transpose_sync, contents, mime
+                )
+                contents = new_contents
+                size = len(contents)
+            except Exception as e:
+                logger.warning(f"Pillow EXIF transpose failed, saving original: {e}")
+
+        async with aiofiles.open(file_path, "wb") as f:
+            await f.write(contents)
+
+        # ذخیره در دیتابیس (s3_key = مسیر نسبی فایل روی دیسک)
+        chat_file = ChatFile(
+            id=file_uuid,
+            uploader_id=current_user.id,
+            s3_key=file_path,  # در اینجا مسیر فایل ذخیره می‌شود
+            file_name=file.filename,
+            mime_type=mime,
+            size=size,
+            thumbnail=thumbnail
+        )
+        db.add(chat_file)
+        await db.commit()
+
+        # برگرداندن شناسه، تامنیل و ابعاد تصویر
+        result = {
+            "file_id": chat_file.id,
+            "thumbnail": chat_file.thumbnail,
+            "file_name": chat_file.file_name,
+            "mime_type": chat_file.mime_type,
+            "size": chat_file.size,
+        }
+        if img_width and img_height:
+            result["width"] = img_width
+            result["height"] = img_height
+        return result
+    finally:
+        close_file = getattr(file, "close", None)
+        if callable(close_file):
+            close_result = close_file()
+            if inspect.isawaitable(close_result):
+                await close_result
 
 @router.get("/files/{file_id}")
 async def get_chat_file(

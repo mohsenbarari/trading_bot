@@ -1,11 +1,15 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
+import { mkdtempSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ6kAAAAASUVORK5CYII='
 const GENERATED_WEBM_BASE64 = 'GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAMpEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHYTbuMU6uEElTDZ1OsggEeTbuMU6uEHFO7a1OsggMT7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsirXsYMPQkBNgI1MYXZmNjAuMTYuMTAwV0GNTGF2ZjYwLjE2LjEwMESJiECCwAAAAAAAFlSua8GuAQAAAAAAADjXgQFzxYgcOxjQCFYmc5yBACK1nIN1bmSIgQCGhVZfVlA5g4EBI+ODhAJiWgDgibCBYLqBYJqBAhJUw2dAgHNzoGPAgGfImkWjh0VOQ09ERVJEh41MYXZmNjAuMTYuMTAwc3PaY8CLY8WIHDsY0AhWJnNnyKVFo4dFTkNPREVSRIeYTGF2YzYwLjMxLjEwMiBsaWJ2cHgtdnA5Z8ihRaOIRFVSQVRJT05Eh5MwMDowMDowMC42MDAwMDAwMDAAH0O2dUFp54EAo7CBAACAgkmDQgAF8AX2ADgkHBhKAAAwYAAAfKn//1zBn///25IP//6uxlgyUsRrFACjlIEAKACGAECSnABQAAADIAAAWTDgo5SBAFAAhgBAkpwATuAAAyAAAFkw4KOUgQB4AIYAQJKcAFAAAAMgAABZMOCjlIEAoACGAECSnABNQAADIAAAWTDgo5SBAMgAhgBAkpwAUAAAAyAAAFkw4KOUgQDwAIYAQJKcAE7gAAMgAABZMOCjlIEBGACGAECSnABQAAADIAAAWTDgo5SBAUAAhgBAkpwASiAAAyAAAFkw4KOUgQFoAIYAQJKcAFAAAAMgAABZMOCjlIEBkACGAMCSnABKIAADIAAAWTDgo5SBAbgAhgBAkpwAUAAAAyAAAFkw4KOUgQHgAIYAQJKcAE1AAAMgAABZMOCjlIECCACGAECSnABQAAADIAAAWTDgo5SBAjAAhgBAkpwATuAAAyAAAFkw4BxTu2uRu4+zgQC3iveBAfGCAaTwgQM='
+const PLAYWRIGHT_TMP_DIR = mkdtempSync(join(tmpdir(), 'pw-direct-room-'))
 
 interface SessionFixture {
   userId: number
@@ -152,6 +156,12 @@ function createPlaywrightBinaryFile(name: string, mimeType: string, bodyBase64: 
   }
 }
 
+function createPlaywrightTextFilePath(name: string, contents: string) {
+  const filePath = join(PLAYWRIGHT_TMP_DIR, name)
+  writeFileSync(filePath, contents, 'utf8')
+  return filePath
+}
+
 async function waitForBackendReady(request: APIRequestContext) {
   await expect
     .poll(async () => {
@@ -254,6 +264,49 @@ async function fetchDirectMessages(
   return Array.isArray(body) ? body : []
 }
 
+async function waitForPersistedPendingDocumentUpload(page: Page) {
+  await expect
+    .poll(async () => {
+      return await page.evaluate(async () => {
+        return await new Promise<boolean>((resolve) => {
+          try {
+            const openRequest = indexedDB.open('chat_upload_queue')
+            openRequest.onerror = () => resolve(false)
+            openRequest.onupgradeneeded = () => resolve(false)
+            openRequest.onsuccess = () => {
+              try {
+                const db = openRequest.result
+                if (!db.objectStoreNames.contains('pending')) {
+                  resolve(false)
+                  return
+                }
+
+                const tx = db.transaction('pending', 'readonly')
+                const getAllRequest = tx.objectStore('pending').getAll()
+                getAllRequest.onerror = () => resolve(false)
+                getAllRequest.onsuccess = () => {
+                  const rows = Array.isArray(getAllRequest.result) ? getAllRequest.result : []
+                  resolve(
+                    rows.some((row) => (
+                      row?.msgType === 'document' &&
+                      typeof row?.phase === 'string' &&
+                      !['sent', 'cancelled', 'failed'].includes(row.phase)
+                    )),
+                  )
+                }
+              } catch {
+                resolve(false)
+              }
+            }
+          } catch {
+            resolve(false)
+          }
+        })
+      })
+    }, { timeout: 15000 })
+    .toBe(true)
+}
+
 async function injectGalleryAlbum(page: Page) {
   const suffix = Date.now()
   await page.locator('input[type="file"][accept="image/*,video/*"]').setInputFiles([
@@ -264,13 +317,8 @@ async function injectGalleryAlbum(page: Page) {
 
 async function injectDocument(page: Page) {
   const suffix = Date.now()
-  await page.locator('input[type="file"][accept="*"]').setInputFiles([
-    {
-      name: `pw-direct-${suffix}.txt`,
-      mimeType: 'text/plain',
-      buffer: Buffer.from(`Playwright document ${suffix}`, 'utf8'),
-    },
-  ])
+  const filePath = createPlaywrightTextFilePath(`pw-direct-${suffix}.txt`, `Playwright document ${suffix}`)
+  await page.locator('input[type="file"][accept="*"]').setInputFiles(filePath)
 }
 
 async function openDirectHeaderSearch(page: Page) {
@@ -410,6 +458,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     await expect(page.locator('.messages-container .msg-document')).toBeVisible({ timeout: 30000 })
     await expect(page.locator('.messages-container .sending-status-wrapper')).toBeVisible({ timeout: 30000 })
+    await waitForPersistedPendingDocumentUpload(page)
 
     await page.reload()
 

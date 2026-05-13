@@ -670,6 +670,56 @@ async function fetchRoomMessageReactionEmojis(
     : []
 }
 
+async function waitForReactionFrame(page: Page, messageId: number) {
+  await new Promise<void>((resolve, reject) => {
+    let settled = false
+    const cleanupCallbacks: Array<() => void> = []
+
+    const cleanup = () => {
+      while (cleanupCallbacks.length > 0) {
+        cleanupCallbacks.pop()?.()
+      }
+    }
+
+    const settle = (callback: () => void) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      cleanup()
+      callback()
+    }
+
+    const onWebSocket = (socket: any) => {
+      const onFrameReceived = (event: { payload?: string }) => {
+        if (typeof event?.payload !== 'string') {
+          return
+        }
+
+        try {
+          const parsed = JSON.parse(event.payload)
+          if (parsed?.type === 'chat:reaction' && Number(parsed?.data?.id) === messageId) {
+            settle(resolve)
+          }
+        } catch {
+          // Ignore unrelated or non-JSON frames.
+        }
+      }
+
+      socket.on('framereceived', onFrameReceived)
+      cleanupCallbacks.push(() => socket.off('framereceived', onFrameReceived))
+    }
+
+    const timeoutId = setTimeout(() => {
+      settle(() => reject(new Error(`Timed out waiting for chat:reaction frame for message ${messageId}`)))
+    }, 30000)
+
+    page.on('websocket', onWebSocket)
+    cleanupCallbacks.push(() => page.off('websocket', onWebSocket))
+    cleanupCallbacks.push(() => clearTimeout(timeoutId))
+  })
+}
+
 async function seedShareReceivePayload(page: Page, payload: {
   key: string
   title?: string
@@ -1100,12 +1150,17 @@ test.describe('Channel media regressions', () => {
 
     await loginWithSeededSession(page, fixture)
 
+    const reactionFrameReceived = waitForReactionFrame(page, messageId)
+    const realtimeConnected = page.waitForEvent('console', (message) => (
+      message.type() === 'log' && message.text().includes('✅ WebSocket Connected')
+    ))
     await page.goto('/chat')
+    await realtimeConnected
     await expect(page.getByText(fixture.channelTitle)).toBeVisible()
     await page.getByText(fixture.channelTitle).click()
 
     const messageRoot = page.locator(`#msg-${messageId}`)
-    const liveReactionChip = page.locator('.messages-container .reaction-chip').filter({ hasText: '🔥' })
+    const liveReactionChip = messageRoot.locator('.reaction-chip').filter({ hasText: '🔥' })
     await expect(messageRoot.getByText(bootstrapContent)).toBeVisible()
     await expect(liveReactionChip).toHaveCount(0)
 
@@ -1121,7 +1176,8 @@ test.describe('Channel media regressions', () => {
       id: messageId,
     })
 
-    await expect(liveReactionChip).toHaveCount(1)
+    await reactionFrameReceived
+    await expect(liveReactionChip).toHaveCount(1, { timeout: 30000 })
     await expect(liveReactionChip).toContainText('🔥')
     await expect
       .poll(async () => fetchRoomMessageReactionEmojis(request, fixture, messageId), { timeout: 30000 })
