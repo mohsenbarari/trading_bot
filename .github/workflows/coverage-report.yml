@@ -67,7 +67,11 @@ jobs:
           status=0
           mkdir -p tmp
           python3 -m coverage erase
-          python3 -m coverage run --branch -m unittest discover -s tests -p 'test_*.py' || status=$?
+          python3 -m coverage run --branch -m unittest discover -s tests -p 'test_*.py' 2>&1 | tee tmp/backend-coverage.log
+          command_status=${PIPESTATUS[0]}
+          if [[ "$command_status" -ne 0 ]]; then
+            status=$command_status
+          fi
           python3 -m coverage json -o tmp/backend-coverage.json || status=$?
           python3 -m coverage xml -o tmp/backend-coverage.xml || status=$?
           python3 -m coverage html -d tmp/backend-coverage-html || status=$?
@@ -83,7 +87,11 @@ jobs:
         run: |
           set +e
           status=0
-          npm run test:unit:coverage || status=$?
+          npm run test:unit:coverage 2>&1 | tee ../tmp/frontend-unit-coverage.log
+          command_status=${PIPESTATUS[0]}
+          if [[ "$command_status" -ne 0 ]]; then
+            status=$command_status
+          fi
           exit "$status"
 
       - name: Build repository coverage summary
@@ -104,6 +112,26 @@ jobs:
             echo '- Read the percentages directly in the run **Summary** tab.'
             echo '- Download **repository-coverage-${{ github.run_number }}** from the **Artifacts** section for the backend/frontend HTML reports and raw JSON/XML outputs.'
           } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ steps.backend_coverage.outcome }}" != 'success' && -f tmp/backend-coverage.log ]]; then
+            {
+              echo
+              echo '## Backend Coverage Failure Tail'
+              echo
+              echo '```text'
+              tail -n 200 tmp/backend-coverage.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ "${{ steps.frontend_coverage.outcome }}" != 'success' && -f tmp/frontend-unit-coverage.log ]]; then
+            {
+              echo
+              echo '## Frontend Coverage Failure Tail'
+              echo
+              echo '```text'
+              tail -n 200 tmp/frontend-unit-coverage.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload coverage artifacts
         if: always()
@@ -112,9 +140,11 @@ jobs:
           name: repository-coverage-${{ github.run_number }}
           path: |
             tmp/backend-coverage-html
+            tmp/backend-coverage.log
             tmp/backend-coverage.json
             tmp/backend-coverage.xml
             frontend/coverage
+            tmp/frontend-unit-coverage.log
             tmp/repo-coverage-summary.md
             tmp/repo-coverage-summary.json
           if-no-files-found: warn
