@@ -109,6 +109,7 @@ from core.services.chat_room_service import (
     update_channel_member,
 )
 from core.services.avatar_service import resolve_owned_avatar_file_id
+from core.services.accountant_relation_service import is_user_accountant
 from core.services.chat_service import (
     apply_direct_message_delete,
     apply_direct_message_edit,
@@ -490,6 +491,12 @@ async def create_group(
     db: AsyncSession = Depends(get_db),
 ):
     """ساخت گروه جدید با سازنده به‌عنوان admin و اعضای اولیه"""
+    if await is_user_accountant(db, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="حسابدار در این فاز اجازه ساخت گروه جدید را ندارد",
+        )
+
     create_kwargs = {
         "creator": current_user,
         "title": data.title,

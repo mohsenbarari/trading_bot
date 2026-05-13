@@ -6,6 +6,8 @@ import { UsersRound } from 'lucide-vue-next'
 
 const props = defineProps<{
   show: boolean
+  canStartDirectChat?: boolean
+  canCreateGroup?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -73,6 +75,16 @@ onMounted(() => {
   }
 })
 
+function handleCreateGroup() {
+  if (props.canCreateGroup === false) return
+  emit('create-group')
+}
+
+function handleUserClick(userId: number, userName: string) {
+  if (props.canStartDirectChat === false) return
+  emit('start-chat', userId, userName)
+}
+
 </script>
 
 <template>
@@ -92,7 +104,7 @@ onMounted(() => {
 
       <!-- Search Input -->
       <div class="search-area">
-        <button type="button" class="new-group-action" v-ripple @click="$emit('create-group')">
+        <button v-if="canCreateGroup !== false" type="button" class="new-group-action" v-ripple @click="handleCreateGroup">
           <span class="new-group-icon"><UsersRound :size="20" /></span>
           <span>ساخت گروه جدید</span>
         </button>
@@ -123,10 +135,10 @@ onMounted(() => {
           v-for="user in users"
           :key="user.id"
           tag="button"
-          :interactive="true"
+          :interactive="canStartDirectChat !== false"
           :name="getPrimaryUserName(user.account_name, user.full_name)"
           :avatar-file-id="user.avatar_file_id || null"
-          @click="$emit('start-chat', user.id, getPrimaryUserName(user.account_name, user.full_name))"
+          @click="handleUserClick(user.id, getPrimaryUserName(user.account_name, user.full_name))"
         >
           <template #subtitle>
             <span dir="ltr">{{ user.mobile_number }}</span>

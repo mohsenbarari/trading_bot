@@ -43,6 +43,7 @@ const props = defineProps<{
   jwtToken: string | null
   currentUserId: number
   currentUserRole?: string | null
+  currentUserIsAccountant?: boolean
   targetUserId?: number
   targetUserName?: string
 }>()
@@ -600,6 +601,9 @@ const selectedRoomMemberCount = computed(() => selectedConversation.value?.membe
 const selectedRoomIsMandatory = computed(() => !!selectedConversation.value?.is_mandatory)
 const selectedRoomIsSystem = computed(() => !!selectedConversation.value?.is_system)
 const selectedAvatarFileId = computed(() => selectedConversation.value?.avatar_file_id ?? null)
+const isCurrentUserAccountant = computed(() => props.currentUserIsAccountant === true)
+const canStartNewConversation = computed(() => !isCurrentUserAccountant.value)
+const canCreateGroup = computed(() => !isCurrentUserAccountant.value)
 const canCreateOptionalChannel = computed(() => (props.currentUserRole ?? null) === 'مدیر ارشد')
 
 const canSendToSelectedRoom = computed(() => {
@@ -1606,8 +1610,34 @@ const selectConversation = (conv: Conversation) => {
   })
 }
 
+function openConversationFromRoute(targetId: number, fallbackName = '') {
+  if (!Number.isInteger(targetId) || targetId === 0) {
+    return
+  }
+
+  const resolvedName = resolveSelectedConversationName(targetId, fallbackName)
+
+  if (targetId > 0) {
+    startNewChat(targetId, resolvedName)
+    return
+  }
+
+  selectedUserId.value = targetId
+  selectedUserName.value = resolvedName
+  void loadMessages(targetId)
+  pushBackState(() => {
+    selectedUserId.value = null
+    selectedUserName.value = ''
+    messages.value = []
+  })
+}
+
 const startNewChat = (userId: number, userName: string) => {
   const existingConversation = conversations.value.find((conversation) => conversation.other_user_id === userId)
+  if (!existingConversation && isCurrentUserAccountant.value) {
+    showInlineToast('حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد')
+    return
+  }
   if (!existingConversation) {
     conversations.value.unshift({
       id: userId,
@@ -1641,7 +1671,19 @@ const handleNewChatSearch = (userId: number, userName: string) => {
     startNewChat(userId, userName)
 }
 
+function openNewConversation() {
+  if (!canStartNewConversation.value) {
+    showInlineToast('حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد')
+    return
+  }
+  showNewChatModal.value = true
+}
+
 function openGroupCreation() {
+  if (!canCreateGroup.value) {
+    showInlineToast('حسابدار در این فاز اجازه ساخت گروه جدید را ندارد')
+    return
+  }
   showNewChatModal.value = false
   groupManagerChatId.value = null
   showGroupManagerModal.value = true
@@ -2725,14 +2767,7 @@ onMounted(async () => {
   isLoading.value = false
   
   if (props.targetUserId) {
-    selectedUserId.value = props.targetUserId
-    selectedUserName.value = resolveSelectedConversationName(props.targetUserId, props.targetUserName || '')
-    void loadMessages(props.targetUserId)
-    pushBackState(() => {
-      selectedUserId.value = null
-      selectedUserName.value = ''
-      messages.value = []
-    })
+    openConversationFromRoute(props.targetUserId, props.targetUserName || '')
   }
   
   startPolling()
@@ -2745,14 +2780,7 @@ onMounted(async () => {
 
 watch(() => props.targetUserId, (newId) => {
   if (newId && newId !== selectedUserId.value) {
-    selectedUserId.value = newId
-    selectedUserName.value = resolveSelectedConversationName(newId, props.targetUserName || '')
-    void loadMessages(newId)
-    pushBackState(() => {
-      selectedUserId.value = null
-      selectedUserName.value = ''
-      messages.value = []
-    })
+    openConversationFromRoute(newId, props.targetUserName || '')
   }
 })
 
@@ -2890,6 +2918,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :roomMemberCount="selectedRoomMemberCount"
       :isRoomMandatory="selectedRoomIsMandatory"
       :isRoomSystem="selectedRoomIsSystem"
+      :canCreateGroup="canCreateGroup"
       :canCreateChannel="canCreateOptionalChannel"
       @back="goBack"
       @view-profile="viewProfile"
@@ -2964,9 +2993,10 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :selectedUserId="selectedUserId"
       :typingUsers="typingUsers"
       :apiBaseUrl="apiBaseUrl"
+      :canStartNewConversation="canStartNewConversation"
       @select-conversation="selectConversation"
       @conversation-action="handleConversationAction"
-      @new-conversation="showNewChatModal = true"
+      @new-conversation="openNewConversation"
     />
 
     <!-- Messages View -->
@@ -3232,6 +3262,8 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
     <!-- New Conversation Search Modal (outside v-if/v-else chain so it's always available) -->
     <ChatNewConversationModal
       :show="showNewChatModal"
+      :canStartDirectChat="canStartNewConversation"
+      :canCreateGroup="canCreateGroup"
       @close="showNewChatModal = false"
       @start-chat="handleNewChatSearch"
       @create-group="openGroupCreation"

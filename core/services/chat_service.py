@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, joinedload
 
 from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType, MessageType
+from core.services.accountant_relation_service import get_active_accountant_relation_for_accountant
 from models.chat import Chat
 from models.chat_file import ChatFile
 from models.chat_member import ChatMember
@@ -32,6 +33,30 @@ DirectEventPublisher = Callable[[int, str, dict[str, object]], Awaitable[object]
 
 
 logger = logging.getLogger(__name__)
+
+
+async def _ensure_direct_chat_initiation_allowed(
+    db: AsyncSession,
+    *,
+    sender: User,
+    receiver_id: int,
+) -> None:
+    relation = await get_active_accountant_relation_for_accountant(db, sender.id)
+    if relation is None:
+        return
+
+    existing_conversation = await get_existing_direct_conversation(db, sender.id, receiver_id)
+    if existing_conversation is not None:
+        return
+
+    existing_chat = await get_existing_direct_chat(db, sender.id, receiver_id)
+    if existing_chat is not None:
+        return
+
+    raise HTTPException(
+        status_code=403,
+        detail="حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد",
+    )
 
 COMMON_MESSAGE_REACTIONS = (
     "👍",
@@ -953,6 +978,12 @@ async def prepare_direct_message_send(
         raise HTTPException(status_code=404, detail="Receiver not found")
     if receiver.is_deleted:
         raise HTTPException(status_code=400, detail="امکان ارسال پیام به کاربر غیرفعال وجود ندارد")
+
+    await _ensure_direct_chat_initiation_allowed(
+        db,
+        sender=sender,
+        receiver_id=receiver_id,
+    )
 
     prepared_content = content
     if message_type == MessageType.LOCATION:

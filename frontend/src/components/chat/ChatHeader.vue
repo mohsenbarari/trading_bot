@@ -138,7 +138,7 @@
               <span>پروفایل عمومی من</span>
               <UsersRound :size="18" />
             </div>
-            <div class="header-menu-item" @click="handleMenuCreateGroup">
+            <div v-if="canCreateGroup" class="header-menu-item" @click="handleMenuCreateGroup">
               <span>ساخت گروه جدید</span>
               <UsersRound :size="18" />
             </div>
@@ -192,6 +192,7 @@ const props = defineProps<{
   roomMemberCount?: number | null
   isRoomMandatory?: boolean
   isRoomSystem?: boolean
+  canCreateGroup?: boolean
   canCreateChannel?: boolean
 }>()
 
@@ -292,6 +293,10 @@ const handleMenuManageRoom = () => {
 }
 
 const handleMenuCreateGroup = () => {
+  if (props.canCreateGroup === false) {
+    closeMenuForAction()
+    return
+  }
   closeMenuForAction()
   emit('create-group')
 }

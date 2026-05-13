@@ -37,6 +37,7 @@ const props = defineProps<{
   selectedUserId: number | null
   typingUsers: Record<number, boolean>
   apiBaseUrl?: string
+  canStartNewConversation?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -499,7 +500,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <button class="fab-new-chat" v-ripple @click="emit('new-conversation')">
+    <button v-if="canStartNewConversation !== false" class="fab-new-chat" v-ripple @click="emit('new-conversation')">
       <MessageCirclePlus :size="28" />
     </button>
 

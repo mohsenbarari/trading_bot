@@ -47,6 +47,7 @@ describe('ChatHeader.vue', () => {
         roomMemberCount: null,
         isRoomMandatory: false,
         isRoomSystem: false,
+        canCreateGroup: true,
         canCreateChannel: true,
       },
       global: {
@@ -98,6 +99,7 @@ describe('ChatHeader.vue', () => {
         roomMemberCount: 12,
         isRoomMandatory: false,
         isRoomSystem: false,
+        canCreateGroup: true,
         canCreateChannel: true,
       },
       global: {
@@ -143,6 +145,7 @@ describe('ChatHeader.vue', () => {
         roomMemberCount: null,
         isRoomMandatory: false,
         isRoomSystem: false,
+        canCreateGroup: false,
         canCreateChannel: false,
       },
       global: {
@@ -158,6 +161,7 @@ describe('ChatHeader.vue', () => {
     await hiddenWrapper.find('.header-menu-container .header-btn').trigger('click')
     await flushPromises()
     expect(hiddenWrapper.text()).not.toContain('ساخت کانال')
+    expect(hiddenWrapper.text()).not.toContain('ساخت گروه جدید')
 
     const visibleWrapper = mount(ChatHeader, {
       props: {
@@ -179,6 +183,7 @@ describe('ChatHeader.vue', () => {
         roomMemberCount: null,
         isRoomMandatory: false,
         isRoomSystem: false,
+        canCreateGroup: true,
         canCreateChannel: true,
       },
       global: {
@@ -193,9 +198,13 @@ describe('ChatHeader.vue', () => {
     await flushPromises()
 
     const createChannelItem = visibleWrapper.findAll('.header-menu-item').find((item) => item.text().includes('ساخت کانال'))
+    const createGroupItem = visibleWrapper.findAll('.header-menu-item').find((item) => item.text().includes('ساخت گروه جدید'))
+    expect(createGroupItem).toBeTruthy()
     expect(createChannelItem).toBeTruthy()
 
+    await createGroupItem!.trigger('click')
     await createChannelItem!.trigger('click')
+    expect(visibleWrapper.emitted('create-group')).toHaveLength(1)
     expect(visibleWrapper.emitted('create-channel')).toHaveLength(1)
   })
 
@@ -221,6 +230,7 @@ describe('ChatHeader.vue', () => {
         roomMemberCount: null,
         isRoomMandatory: false,
         isRoomSystem: false,
+        canCreateGroup: true,
         canCreateChannel: true,
       },
       global: {

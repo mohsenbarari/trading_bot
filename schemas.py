@@ -74,6 +74,7 @@ class UserRead(UserBase):
     id: int
     role: UserRole
     has_bot_access: bool
+    is_accountant: bool = False
     is_deleted: bool = False
     avatar_file_id: str | None = None
     created_at: datetime

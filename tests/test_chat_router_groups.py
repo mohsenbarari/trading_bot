@@ -3,6 +3,8 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
+
 from core.enums import ChatMemberRole, ChatType
 from api.routers.chat import (
     create_group,
@@ -80,18 +82,42 @@ class ChatRouterGroupEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
         data = SimpleNamespace(title="Alpha", member_ids=[9, 10])
 
-        with patch("api.routers.chat.create_group_chat", new=AsyncMock(return_value=group)) as create_mock, patch(
+        with patch("api.routers.chat.is_user_accountant", new=AsyncMock(return_value=False)) as accountant_mock, patch(
+            "api.routers.chat.create_group_chat", new=AsyncMock(return_value=group)
+        ) as create_mock, patch(
             "api.routers.chat.count_active_chat_members",
             new=AsyncMock(return_value=3),
         ) as count_mock:
             result = await create_group(data=data, current_user=current_user, db=db)
 
+        accountant_mock.assert_awaited_once_with(db, 5)
         create_mock.assert_awaited_once_with(db, creator=current_user, title="Alpha", member_ids=[9, 10])
         count_mock.assert_awaited_once_with(db, 77)
         self.assertEqual(result.group.id, 77)
         self.assertEqual(result.group.type, ChatType.GROUP)
         self.assertEqual(result.group.member_count, 3)
         self.assertEqual(result.group.current_user_role, "admin")
+
+    async def test_create_group_rejects_accountant_users(self):
+        current_user = SimpleNamespace(id=5)
+
+        with patch("api.routers.chat.is_user_accountant", new=AsyncMock(return_value=True)) as accountant_mock, patch(
+            "api.routers.chat.create_group_chat", new=AsyncMock()
+        ) as create_mock:
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_group(
+                    data=SimpleNamespace(title="Alpha", member_ids=[9, 10]),
+                    current_user=current_user,
+                    db=object(),
+                )
+
+        accountant_mock.assert_awaited_once()
+        create_mock.assert_not_called()
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(
+            exc_info.exception.detail,
+            "حسابدار در این فاز اجازه ساخت گروه جدید را ندارد",
+        )
 
     async def test_get_group_detail_serializes_group_and_members(self):
         current_user = SimpleNamespace(id=5)

@@ -180,7 +180,10 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
 
         sender = SimpleNamespace(id=5)
         receiver = SimpleNamespace(id=6, is_deleted=False)
-        db = SimpleNamespace(get=AsyncMock(return_value=receiver))
+        db = SimpleNamespace(
+            get=AsyncMock(return_value=receiver),
+            execute=AsyncMock(return_value=scalar_one_or_none_result(None)),
+        )
         with patch(
             "core.services.chat_service.prepare_direct_location_content",
             new=AsyncMock(return_value='{"lat": 1.0, "lng": 2.0}'),
@@ -223,6 +226,30 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
                 content="hello",
                 message_type=MessageType.TEXT,
             )
+
+        with patch(
+            "core.services.chat_service.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=SimpleNamespace(id=9)),
+        ), patch(
+            "core.services.chat_service.get_existing_direct_conversation",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "core.services.chat_service.get_existing_direct_chat",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await chat_service.prepare_direct_message_send(
+                    SimpleNamespace(get=AsyncMock(return_value=receiver)),
+                    sender=sender,
+                    receiver_id=6,
+                    content="hello",
+                    message_type=MessageType.TEXT,
+                )
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(
+            exc_info.exception.detail,
+            "حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد",
+        )
 
         with patch(
             "core.services.chat_service.generate_direct_location_snapshot",
