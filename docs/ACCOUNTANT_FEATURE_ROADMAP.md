@@ -283,24 +283,24 @@ rollback surface:
 بستن non-regression قبل از release.
 
 backend test scope:
-- [ ] relation lifecycle service tests
-- [ ] auth/register/accountant branch tests
-- [ ] session approval/single-session tests
-- [ ] offer/trade delegated actor tests
-- [ ] users_public resolve tests
-- [ ] sync receive/resync/accountant relation tests
-- [ ] deletion cascade tests
+- [x] relation lifecycle service tests
+- [x] auth/register/accountant branch tests
+- [x] session approval/single-session tests
+- [x] offer/trade delegated actor tests
+- [x] users_public resolve tests
+- [x] sync receive/resync/accountant relation tests
+- [x] deletion cascade tests
 
 frontend test scope:
-- [ ] component/unit tests for owner accountant manager
-- [ ] profile redirect/highlight tests
-- [ ] chat contract display tests
-- [ ] direct-chat deny tests
+- [x] component/unit tests for owner accountant manager
+- [x] profile redirect/highlight tests
+- [x] chat contract display tests
+- [x] direct-chat deny tests
 - [x] e2e owner create → pending → activate → view → unlink flow
 
 bot test scope:
-- [ ] `/start` deny for accountant
-- [ ] `/link` deny/no bot-enable for accountant
+- [x] `/start` deny for accountant
+- [x] `/link` deny/no bot-enable for accountant
 
 deploy order:
 - [ ] migration image/build آماده شود.
@@ -311,9 +311,9 @@ deploy order:
 - [ ] در این repo فقط `make foreign` برای استقرار استفاده شود.
 
 release gate:
-- [ ] backend focused suites سبز شوند.
-- [ ] frontend unit + Playwright suites سبز شوند.
-- [ ] sync smoke سبز شود.
+- [x] backend focused suites سبز شوند.
+- [x] frontend unit + Playwright suites سبز شوند.
+- [x] sync smoke سبز شود.
 - [ ] manual sanity روی owner/accountant happy path سبز شود.
 
 rollback strategy:
