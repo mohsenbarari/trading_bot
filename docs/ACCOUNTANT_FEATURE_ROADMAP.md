@@ -296,7 +296,7 @@ frontend test scope:
 - [ ] profile redirect/highlight tests
 - [ ] chat contract display tests
 - [ ] direct-chat deny tests
-- [ ] e2e owner create → pending → activate → view → unlink flow
+- [x] e2e owner create → pending → activate → view → unlink flow
 
 bot test scope:
 - [ ] `/start` deny for accountant
