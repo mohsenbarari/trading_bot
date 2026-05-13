@@ -1,0 +1,133 @@
+name: Coverage Report
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: Optional git ref to run the coverage report for
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-report-${{ github.event.pull_request.number || inputs.git_ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  repository-coverage:
+    name: repository-coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend coverage dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install coverage
+          python3 -m pip install -r requirements.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run backend coverage suite
+        id: backend_coverage
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
+          status=0
+          mkdir -p tmp
+          python3 -m coverage erase
+          python3 -m coverage run --branch -m unittest discover -s tests -p 'test_*.py' || status=$?
+          python3 -m coverage json -o tmp/backend-coverage.json || status=$?
+          python3 -m coverage xml -o tmp/backend-coverage.xml || status=$?
+          python3 -m coverage html -d tmp/backend-coverage-html || status=$?
+          exit "$status"
+
+      - name: Run frontend unit coverage suite
+        id: frontend_coverage
+        continue-on-error: true
+        working-directory: frontend
+        env:
+          CI: 'true'
+        shell: bash
+        run: |
+          set -u
+          status=0
+          npm run test:unit:coverage || status=$?
+          exit "$status"
+
+      - name: Build repository coverage summary
+        if: always()
+        shell: bash
+        run: |
+          python3 ./scripts/build_repo_coverage_summary.py \
+            --backend-json tmp/backend-coverage.json \
+            --frontend-summary frontend/coverage/coverage-summary.json \
+            --markdown-out tmp/repo-coverage-summary.md \
+            --json-out tmp/repo-coverage-summary.json
+          cat tmp/repo-coverage-summary.md >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo
+            echo '## GitHub Navigation'
+            echo
+            echo '- Open **Actions** in GitHub, then open the latest **Coverage Report** run.'
+            echo '- Read the percentages directly in the run **Summary** tab.'
+            echo '- Download **repository-coverage-${{ github.run_number }}** from the **Artifacts** section for the backend/frontend HTML reports and raw JSON/XML outputs.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-coverage-${{ github.run_number }}
+          path: |
+            tmp/backend-coverage-html
+            tmp/backend-coverage.json
+            tmp/backend-coverage.xml
+            frontend/coverage
+            tmp/repo-coverage-summary.md
+            tmp/repo-coverage-summary.json
+          if-no-files-found: warn
+
+      - name: Fail coverage job if a covered suite failed
+        if: always()
+        shell: bash
+        run: |
+          failed=0
+          if [[ "${{ steps.backend_coverage.outcome }}" != "success" ]]; then
+            echo 'Backend coverage suite failed.' >&2
+            failed=1
+          fi
+          if [[ "${{ steps.frontend_coverage.outcome }}" != "success" ]]; then
+            echo 'Frontend coverage suite failed.' >&2
+            failed=1
+          fi
+          exit "$failed"
