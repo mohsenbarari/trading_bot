@@ -119,14 +119,19 @@ jobs:
 
       - name: Fail coverage job if a covered suite failed
         if: always()
+        env:
+          BACKEND_OUTCOME: ${{ steps.backend_coverage.outcome }}
+          FRONTEND_OUTCOME: ${{ steps.frontend_coverage.outcome }}
         shell: bash
         run: |
           failed=0
-          if [[ "${{ steps.backend_coverage.outcome }}" != "success" ]]; then
+          echo "Backend coverage outcome: $BACKEND_OUTCOME"
+          echo "Frontend coverage outcome: $FRONTEND_OUTCOME"
+          if [[ "$BACKEND_OUTCOME" != "success" ]]; then
             echo 'Backend coverage suite failed.' >&2
             failed=1
           fi
-          if [[ "${{ steps.frontend_coverage.outcome }}" != "success" ]]; then
+          if [[ "$FRONTEND_OUTCOME" != "success" ]]; then
             echo 'Frontend coverage suite failed.' >&2
             failed=1
           fi
