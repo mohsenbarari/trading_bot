@@ -6,6 +6,11 @@ export interface Conversation {
     other_user_id: number
     other_user_name: string
     avatar_file_id?: string | null
+    profile_user_id?: number | null
+    profile_account_name?: string | null
+    resolved_from_accountant_id?: number | null
+    highlight_accountant_user_id?: number | null
+    highlight_accountant_relation_display_name?: string | null
     other_user_is_deleted?: boolean
     last_message_content: string | null
     last_message_type: string | null
@@ -53,7 +58,17 @@ export interface Message {
     created_at: string
     forwarded_from_id?: number | null
     forwarded_from_name?: string | null
+    forwarded_from_profile_user_id?: number | null
+    forwarded_from_profile_account_name?: string | null
+    forwarded_from_resolved_from_accountant_id?: number | null
+    forwarded_from_highlight_accountant_user_id?: number | null
+    forwarded_from_highlight_accountant_relation_display_name?: string | null
     sender_name?: string | null
+    sender_profile_user_id?: number | null
+    sender_profile_account_name?: string | null
+    sender_resolved_from_accountant_id?: number | null
+    sender_highlight_accountant_user_id?: number | null
+    sender_highlight_accountant_relation_display_name?: string | null
     reactions?: MessageReaction[]
     reply_to_message?: {
         id: number

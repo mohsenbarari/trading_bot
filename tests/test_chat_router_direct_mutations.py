@@ -38,7 +38,7 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat.publish_direct_message_event",
             new=AsyncMock(),
         ) as publish_mock, patch(
-            "api.routers.chat.serialize_direct_message_for_response",
+            "api.routers.chat._serialize_direct_message_with_accountant_contract",
             return_value=serialized,
         ) as serialize_mock:
             result = await send_message(data=data, current_user=current_user, db=db)
@@ -58,9 +58,9 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
             message=message,
             serializer=unittest.mock.ANY,
             publisher=unittest.mock.ANY,
-            sender_name="alpha",
+            sender_name=None,
         )
-        serialize_mock.assert_called_once_with(message, serializer=unittest.mock.ANY)
+        serialize_mock.assert_awaited_once_with(db, message)
         self.assertIs(result, serialized)
 
     async def test_send_message_raises_500_when_persist_returns_none(self):
@@ -91,7 +91,7 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
         serialized = SimpleNamespace(id=44)
 
         with patch("api.routers.chat.apply_direct_message_edit", new=AsyncMock(return_value=updated)) as edit_mock, patch(
-            "api.routers.chat.serialize_direct_message_for_response",
+            "api.routers.chat._serialize_direct_message_with_accountant_contract",
             return_value=serialized,
         ) as serialize_mock:
             result = await update_message(
@@ -102,7 +102,7 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
             )
 
         edit_mock.assert_awaited_once_with(db, message_id=44, actor_id=5, content="edited")
-        serialize_mock.assert_called_once_with(updated, serializer=unittest.mock.ANY)
+        serialize_mock.assert_awaited_once_with(db, updated)
         self.assertIs(result, serialized)
 
         with patch("api.routers.chat.apply_direct_message_delete", new=AsyncMock()) as delete_mock:
@@ -129,7 +129,27 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_toggle_message_reaction_uses_direct_publish_branch(self):
         current_user = SimpleNamespace(id=5)
         message = SimpleNamespace(id=50, chat_id=None)
-        payload = SimpleNamespace(id=50)
+        payload = SimpleNamespace(
+            id=50,
+            sender_id=5,
+            forwarded_from_id=None,
+            model_dump=lambda: {
+                "id": 50,
+                "sender_id": 5,
+                "receiver_id": 6,
+                "content": "hello",
+                "message_type": "text",
+                "is_read": False,
+                "is_deleted": False,
+                "created_at": "2026-05-12T10:00:00Z",
+                "updated_at": None,
+                "forwarded_from_id": None,
+                "forwarded_from_name": None,
+                "sender_name": "alpha",
+                "reactions": [],
+                "reply_to_message": None,
+            },
+        )
 
         db = FakeDB()
 
@@ -137,6 +157,9 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat.serialize_direct_message_for_response",
             return_value=payload,
         ) as serialize_mock, patch(
+            "api.routers.chat.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch(
             "api.routers.chat.publish_direct_reaction_event",
             new=AsyncMock(),
         ) as publish_mock:
@@ -150,7 +173,7 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
         toggle_mock.assert_awaited_once_with(db, message_id=50, actor_id=5, emoji="🔥")
         serialize_mock.assert_called_once_with(message, serializer=unittest.mock.ANY)
         publish_mock.assert_awaited_once_with(message=message, serializer=unittest.mock.ANY, publisher=unittest.mock.ANY)
-        self.assertIs(result, payload)
+        self.assertEqual(result.id, 50)
 
     async def test_toggle_message_reaction_uses_channel_and_group_publish_branches(self):
         current_user = SimpleNamespace(id=5)
@@ -161,7 +184,30 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.chat.apply_direct_message_reaction_toggle", new=AsyncMock(return_value=channel_message)), patch(
             "api.routers.chat.serialize_direct_message_for_response",
-            return_value=SimpleNamespace(id=51),
+            return_value=SimpleNamespace(
+                id=51,
+                sender_id=5,
+                forwarded_from_id=None,
+                model_dump=lambda: {
+                    "id": 51,
+                    "sender_id": 5,
+                    "receiver_id": 6,
+                    "content": "hello",
+                    "message_type": "text",
+                    "is_read": False,
+                    "is_deleted": False,
+                    "created_at": "2026-05-12T10:00:00Z",
+                    "updated_at": None,
+                    "forwarded_from_id": None,
+                    "forwarded_from_name": None,
+                    "sender_name": "alpha",
+                    "reactions": [],
+                    "reply_to_message": None,
+                },
+            ),
+        ), patch(
+            "api.routers.chat.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
         ), patch(
             "api.routers.chat.list_active_channel_member_user_ids",
             new=AsyncMock(return_value=[5, 6]),
@@ -187,7 +233,30 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.chat.apply_direct_message_reaction_toggle", new=AsyncMock(return_value=group_message)), patch(
             "api.routers.chat.serialize_direct_message_for_response",
-            return_value=SimpleNamespace(id=52),
+            return_value=SimpleNamespace(
+                id=52,
+                sender_id=5,
+                forwarded_from_id=None,
+                model_dump=lambda: {
+                    "id": 52,
+                    "sender_id": 5,
+                    "receiver_id": 6,
+                    "content": "hello",
+                    "message_type": "text",
+                    "is_read": False,
+                    "is_deleted": False,
+                    "created_at": "2026-05-12T10:00:00Z",
+                    "updated_at": None,
+                    "forwarded_from_id": None,
+                    "forwarded_from_name": None,
+                    "sender_name": "alpha",
+                    "reactions": [],
+                    "reply_to_message": None,
+                },
+            ),
+        ), patch(
+            "api.routers.chat.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
         ), patch(
             "api.routers.chat.list_active_room_member_user_ids",
             new=AsyncMock(return_value=[5, 7]),

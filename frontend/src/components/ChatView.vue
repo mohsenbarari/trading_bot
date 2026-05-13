@@ -35,6 +35,7 @@ import {
   isNamedRoomKind,
   resolveRoomConversationKey,
 } from '../utils/chatRoomRouting'
+import { resolveConversationProfileTarget } from '../utils/accountantChatIdentity'
 import { isAdminRole } from '../utils/currentUser'
 
 // Props
@@ -2673,7 +2674,11 @@ function navigateToPublicProfile(userId: number | null | undefined, accountName 
 
 function viewProfile() {
   if (selectedUserId.value && selectedRoomKind.value === 'direct') {
-    navigateToPublicProfile(selectedUserId.value, selectedUserName.value)
+    const conversationProfileTarget = resolveConversationProfileTarget(selectedConversation.value)
+    navigateToPublicProfile(
+      conversationProfileTarget?.id ?? selectedUserId.value,
+      conversationProfileTarget?.account_name ?? selectedUserName.value,
+    )
     return
   }
 

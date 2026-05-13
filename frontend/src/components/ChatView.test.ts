@@ -167,7 +167,7 @@ describe('ChatView.vue', () => {
           teleport: true,
           MessengerLoadingScreen: { template: '<div class="messenger-loading-stub"></div>' },
           ChatAlbumLayout: { template: '<div class="chat-album-layout-stub"></div>' },
-          ChatHeader: { template: '<button class="chat-header-stub open-group-creation" @click="$emit(\'create-group\')">group</button>' },
+          ChatHeader: { template: '<div><button class="chat-header-stub open-group-creation" @click="$emit(\'create-group\')">group</button><button class="chat-header-view-profile" @click="$emit(\'view-profile\')">profile</button></div>' },
           ChatInputBar: { template: '<div class="chat-input-bar-stub"></div>' },
           ChatMessageItem: { template: '<div class="chat-message-item-stub"></div>' },
           ChatContextMenu: { template: '<div class="chat-context-menu-stub"></div>' },
@@ -187,11 +187,19 @@ describe('ChatView.vue', () => {
     })
   }
 
+  function getExposedStartNewChat(wrapper: Awaited<ReturnType<typeof mountChatView>>) {
+    const exposed = wrapper.vm.$.exposed as { startNewChat?: (userId: number, userName: string) => unknown } | null
+    if (!exposed?.startNewChat) {
+      throw new Error('ChatView expose is unavailable in test harness')
+    }
+    return exposed.startNewChat
+  }
+
   it('blocks accountants from starting a brand-new direct chat through startNewChat', async () => {
     const wrapper = await mountChatView({ currentUserIsAccountant: true })
     await flushPromises()
 
-    await wrapper.vm.$.exposed.startNewChat(55, 'Target User')
+    await getExposedStartNewChat(wrapper)(55, 'Target User')
 
     expect(chatViewMocks.loadMessagesMock).not.toHaveBeenCalled()
     expect(document.body.textContent).toContain('حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد')
@@ -257,5 +265,42 @@ describe('ChatView.vue', () => {
     expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55)
 
     wrapper.unmount()
+  })
+
+  it('opens the owner public profile from a direct conversation when additive profile metadata exists', async () => {
+    vi.useFakeTimers()
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 55,
+        other_user_id: 55,
+        other_user_name: 'دفتر حسابدار',
+        profile_user_id: 99,
+        profile_account_name: 'owner-99',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'direct',
+      },
+    ]
+
+    const wrapper = await mountChatView({
+      currentUserIsAccountant: false,
+      targetUserId: 55,
+      targetUserName: 'دفتر حسابدار',
+    })
+    await flushPromises()
+
+    await wrapper.get('.chat-header-view-profile').trigger('click')
+    await vi.runAllTimersAsync()
+
+    expect(chatViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'public-profile',
+      params: { id: '99' },
+      query: { account_name: 'owner-99' },
+    })
+
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 })
