@@ -258,8 +258,8 @@ rollback surface:
 
 خروجی‌های لازم:
 - [ ] pending revoke flow کامل شود.
-- [ ] active unlink flow از `user_deletion_service` reuse کند.
-- [ ] owner delete cascade accountant relations و accountant users را ببندد.
+- [x] active unlink flow از `user_deletion_service` reuse کند.
+- [x] owner delete cascade accountant relations و accountant users را ببندد.
 - [ ] resync/change-log drift cases برای accountant relations و actor fields پوشش داده شود.
 
 فایل‌های درگیر اصلی:
@@ -269,8 +269,8 @@ rollback surface:
 - [ ] relation service جدید
 
 validation phase:
-- [ ] unlink active accountant tests سبز شود.
-- [ ] owner delete cascade tests سبز شود.
+- [x] unlink active accountant tests سبز شود.
+- [x] owner delete cascade tests سبز شود.
 - [ ] sync replay/resync tests سبز شود.
 
 rollback surface:
