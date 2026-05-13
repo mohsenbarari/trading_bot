@@ -58,6 +58,7 @@ jobs:
 
       - name: Run backend coverage suite
         id: backend_coverage
+        continue-on-error: true
         shell: bash
         run: |
           set +e
@@ -68,12 +69,11 @@ jobs:
           python3 -m coverage json -o tmp/backend-coverage.json || status=$?
           python3 -m coverage xml -o tmp/backend-coverage.xml || status=$?
           python3 -m coverage html -d tmp/backend-coverage-html || status=$?
-          printf '%s\n' "$status" > tmp/backend-coverage.exitcode
-          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
-          exit 0
+          exit "$status"
 
       - name: Run frontend unit coverage suite
         id: frontend_coverage
+        continue-on-error: true
         working-directory: frontend
         env:
           CI: 'true'
@@ -81,11 +81,8 @@ jobs:
         run: |
           set +e
           status=0
-          mkdir -p ../tmp
           npm run test:unit:coverage || status=$?
-          printf '%s\n' "$status" > ../tmp/frontend-coverage.exitcode
-          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
-          exit 0
+          exit "$status"
 
       - name: Build repository coverage summary
         if: always()
@@ -121,14 +118,10 @@ jobs:
           if-no-files-found: warn
 
       - name: Fail coverage job if a covered suite failed
-        if: always()
+        if: always() && (steps.backend_coverage.outcome != 'success' || steps.frontend_coverage.outcome != 'success')
         shell: bash
         run: |
-          backend_exit_code="$(cat tmp/backend-coverage.exitcode 2>/dev/null || echo missing)"
-          frontend_exit_code="$(cat tmp/frontend-coverage.exitcode 2>/dev/null || echo missing)"
-          echo "Backend coverage exit code: ${backend_exit_code}"
-          echo "Frontend coverage exit code: ${frontend_exit_code}"
-          if [[ "${backend_exit_code}" != "0" || "${frontend_exit_code}" != "0" ]]; then
-            echo 'At least one covered suite failed.' >&2
-            exit 1
-          fi
+          echo "Backend coverage outcome: ${{ steps.backend_coverage.outcome }}"
+          echo "Frontend coverage outcome: ${{ steps.frontend_coverage.outcome }}"
+          echo 'At least one covered suite failed.' >&2
+          exit 1
