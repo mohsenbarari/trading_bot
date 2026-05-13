@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { apiFetch } from '../utils/auth'
 
 const emit = defineEmits<{
@@ -50,9 +50,11 @@ const editingRelationId = ref<number | null>(null)
 const error = ref('')
 const notice = ref('')
 const copiedRelationId = ref<number | null>(null)
+const currentTimeMs = ref(Date.now())
 
 const createForm = reactive(makeEmptyCreateForm())
 const editForm = reactive(makeEmptyEditForm())
+let countdownTimer: number | null = null
 
 function parseApiError(payload: unknown, fallback: string) {
   if (typeof payload === 'object' && payload && 'detail' in payload) {
@@ -83,6 +85,77 @@ function formatDateTime(value: string | null) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('fa-IR')
+}
+
+function getRemainingMs(value: string | null) {
+  if (!value) return null
+  const timestamp = new Date(value).getTime()
+  if (Number.isNaN(timestamp)) return null
+  return timestamp - currentTimeMs.value
+}
+
+function formatCountdown(value: string | null) {
+  const remainingMs = getRemainingMs(value)
+  if (remainingMs == null) return '---'
+  if (remainingMs <= 0) return '00:00:00'
+
+  const totalSeconds = Math.floor(remainingMs / 1000)
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  const clock = [hours, minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':')
+  if (days > 0) {
+    return `${days} روز و ${clock}`
+  }
+  return clock
+}
+
+function getRelationStateText(relation: AccountantRelation) {
+  if (relation.status === 'pending') {
+    const remainingMs = getRemainingMs(relation.expires_at)
+    if (remainingMs == null) return 'دعوت ثبت شده و در انتظار ثبت نام حسابدار است.'
+    if (remainingMs <= 0) return 'مهلت این دعوت تمام شده و در انتظار همگام سازی وضعیت است.'
+    return `مهلت ثبت نام: ${formatCountdown(relation.expires_at)}`
+  }
+
+  if (relation.status === 'active') {
+    if (relation.accountant_account_name) {
+      return `این حسابدار با @${relation.accountant_account_name} فعال است.`
+    }
+    return 'این رابطه فعال شده است.'
+  }
+
+  if (relation.status === 'expired') {
+    return 'مهلت این دعوت به پایان رسیده است.'
+  }
+
+  if (relation.status === 'revoked') {
+    return 'این دعوت توسط مالک لغو شده است.'
+  }
+
+  if (relation.status === 'deleted') {
+    return 'این رابطه حذف شده است.'
+  }
+
+  return ''
+}
+
+function refreshCurrentTime() {
+  currentTimeMs.value = Date.now()
+}
+
+function startCountdownTimer() {
+  if (countdownTimer !== null || typeof window === 'undefined') return
+  countdownTimer = window.setInterval(() => {
+    refreshCurrentTime()
+  }, 1000)
+}
+
+function stopCountdownTimer() {
+  if (countdownTimer === null || typeof window === 'undefined') return
+  window.clearInterval(countdownTimer)
+  countdownTimer = null
 }
 
 function statusLabel(status: RelationStatus) {
@@ -236,7 +309,12 @@ async function copyRegistrationLink(relation: AccountantRelation) {
 }
 
 onMounted(() => {
+  startCountdownTimer()
   void loadRelations()
+})
+
+onBeforeUnmount(() => {
+  stopCountdownTimer()
 })
 </script>
 
@@ -336,8 +414,13 @@ onMounted(() => {
                   <span class="meta-label">فعال‌سازی</span>
                   <span class="meta-value">{{ formatDateTime(relation.activated_at) }}</span>
                 </div>
+                <div v-if="relation.status === 'pending'" class="meta-item">
+                  <span class="meta-label">انقضا</span>
+                  <span class="meta-value">{{ formatDateTime(relation.expires_at) }}</span>
+                </div>
               </div>
 
+              <p v-if="getRelationStateText(relation)" class="accountant-state-copy" :class="`status-${relation.status}`">{{ getRelationStateText(relation) }}</p>
               <p v-if="relation.duty_description" class="accountant-duty">{{ relation.duty_description }}</p>
 
               <div v-if="editingRelationId === relation.id" class="edit-panel">
@@ -630,6 +713,27 @@ onMounted(() => {
 .meta-value {
   color: #0f172a;
   font-weight: 600;
+}
+
+.accountant-state-copy {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.8;
+}
+
+.accountant-state-copy.status-pending {
+  color: #b45309;
+}
+
+.accountant-state-copy.status-active {
+  color: #047857;
+}
+
+.accountant-state-copy.status-expired,
+.accountant-state-copy.status-revoked,
+.accountant-state-copy.status-deleted {
+  color: #b91c1c;
 }
 
 .accountant-duty {

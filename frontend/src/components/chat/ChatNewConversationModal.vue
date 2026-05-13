@@ -18,13 +18,35 @@ const emit = defineEmits<{
 
 const token = localStorage.getItem('auth_token') || ''
 
+type SearchUser = {
+  id: number
+  account_name: string
+  full_name?: string | null
+  mobile_number: string
+  avatar_file_id?: string | null
+  resolved_from_accountant_id?: number | null
+  highlight_accountant_relation_display_name?: string | null
+}
+
 const searchQuery = ref('')
-const users = ref<Array<{ id: number; account_name: string; full_name?: string | null; mobile_number: string; avatar_file_id?: string | null }>>([])
+const users = ref<SearchUser[]>([])
 const isLoading = ref(false)
 
 function getPrimaryUserName(accountName: string, fullName?: string | null) {
   const normalizedFullName = (fullName || '').trim()
   return normalizedFullName || accountName
+}
+
+function getAccountantContextLabel(user: SearchUser) {
+  if (!user.resolved_from_accountant_id) return ''
+  const relationDisplayName = (user.highlight_accountant_relation_display_name || '').trim()
+  if (!relationDisplayName) return 'از مسیر حسابدار'
+  return `از مسیر حسابدار: ${relationDisplayName}`
+}
+
+function getUserBadges(user: SearchUser) {
+  if (!user.resolved_from_accountant_id) return []
+  return [{ label: 'مالک', tone: 'info' as const }]
 }
 
 const searchUsers = async (query: string = '') => {
@@ -138,10 +160,14 @@ function handleUserClick(userId: number, userName: string) {
           :interactive="canStartDirectChat !== false"
           :name="getPrimaryUserName(user.account_name, user.full_name)"
           :avatar-file-id="user.avatar_file_id || null"
+          :badges="getUserBadges(user)"
           @click="handleUserClick(user.id, getPrimaryUserName(user.account_name, user.full_name))"
         >
           <template #subtitle>
-            <span dir="ltr">{{ user.mobile_number }}</span>
+            <div class="new-chat-user-subtitle">
+              <span dir="ltr">{{ user.mobile_number }}</span>
+              <span v-if="getAccountantContextLabel(user)" class="new-chat-user-context">{{ getAccountantContextLabel(user) }}</span>
+            </div>
           </template>
         </ChatUserListRow>
       </div>
@@ -237,6 +263,18 @@ function handleUserClick(userId: number, userName: string) {
 
 .new-group-action:hover {
   background: rgba(51, 144, 236, 0.14);
+}
+
+.new-chat-user-subtitle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.new-chat-user-context {
+  color: #0f766e;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .new-group-icon {

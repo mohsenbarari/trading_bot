@@ -40,6 +40,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     apiFetchMock.mockReset()
     vi.spyOn(window, 'confirm').mockImplementation(() => true)
     vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-02T10:00:00Z'))
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
@@ -72,6 +73,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
 
     await flushPromises()
     expect(wrapper.text()).toContain('حسابدار اول')
+  expect(wrapper.text()).toContain('مهلت ثبت نام: 1 روز')
 
     await wrapper.get('.create-account-name').setValue('acc2')
     await wrapper.get('.create-display-name').setValue('حسابدار دوم')
@@ -127,6 +129,9 @@ describe('OwnerAccountantManagerModal.vue', () => {
     })
     expect(wrapper.text()).toContain('حسابدار اول')
 
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('مهلت ثبت نام: 23:59:59')
+
     await wrapper.get('.cancel-pending').trigger('click')
     await flushPromises()
 
@@ -181,6 +186,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
 
     expect(clipboardWrite).toHaveBeenCalledWith('https://app.example/register?token=ACCT-token')
     expect(wrapper.text()).toContain('کپی شد')
+  expect(wrapper.text()).toContain('این حسابدار با @acc2 فعال است.')
 
     await vi.advanceTimersByTimeAsync(1800)
     expect(wrapper.text()).toContain('کپی لینک ثبت‌نام')
@@ -193,6 +199,55 @@ describe('OwnerAccountantManagerModal.vue', () => {
 
     await wrapper.get('.accountant-manager-close').trigger('click')
     expect(wrapper.emitted('close')).toEqual([[]])
+  })
+
+  it('renders lifecycle copy for active and terminal relation states', async () => {
+    apiFetchMock.mockResolvedValueOnce(makeResponse([
+      makeRelation({
+        id: 2,
+        status: 'active',
+        accountant_account_name: null,
+        relation_display_name: 'حسابدار فعال بدون نام کاربری',
+        registration_link: null,
+        activated_at: '2026-01-02T08:00:00',
+      }),
+      makeRelation({
+        id: 3,
+        status: 'expired',
+        relation_display_name: 'حسابدار منقضی',
+        registration_link: null,
+      }),
+      makeRelation({
+        id: 4,
+        status: 'revoked',
+        relation_display_name: 'حسابدار لغوشده',
+        registration_link: null,
+      }),
+      makeRelation({
+        id: 5,
+        status: 'deleted',
+        relation_display_name: 'حسابدار حذف‌شده',
+        registration_link: null,
+      }),
+    ]))
+
+    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
+    const wrapper = mount(OwnerAccountantManagerModal, {
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('این رابطه فعال شده است.')
+    expect(wrapper.text()).toContain('مهلت این دعوت به پایان رسیده است.')
+    expect(wrapper.text()).toContain('این دعوت توسط مالک لغو شده است.')
+    expect(wrapper.text()).toContain('این رابطه حذف شده است.')
+
+    wrapper.unmount()
   })
 
   it('shows fallback and detail errors for load, create, edit, cancel, and copy failures', async () => {
