@@ -112,7 +112,7 @@ jobs:
             echo '- Read the percentages directly in the run **Summary** tab.'
             echo '- Download **repository-coverage-${{ github.run_number }}** from the **Artifacts** section for the backend/frontend HTML reports and raw JSON/XML outputs.'
           } >> "$GITHUB_STEP_SUMMARY"
-          if [[ "${{ steps.backend_coverage.outcome }}" != 'success' && -f tmp/backend-coverage.log ]]; then
+          if [[ "${{ steps.backend_coverage.conclusion }}" != 'success' && -f tmp/backend-coverage.log ]]; then
             {
               echo
               echo '## Backend Coverage Failure Tail'
@@ -122,7 +122,7 @@ jobs:
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-          if [[ "${{ steps.frontend_coverage.outcome }}" != 'success' && -f tmp/frontend-unit-coverage.log ]]; then
+          if [[ "${{ steps.frontend_coverage.conclusion }}" != 'success' && -f tmp/frontend-unit-coverage.log ]]; then
             {
               echo
               echo '## Frontend Coverage Failure Tail'
@@ -150,10 +150,10 @@ jobs:
           if-no-files-found: warn
 
       - name: Fail coverage job if a covered suite failed
-        if: always() && (steps.backend_coverage.outcome != 'success' || steps.frontend_coverage.outcome != 'success')
+        if: always() && (steps.backend_coverage.conclusion != 'success' || steps.frontend_coverage.conclusion != 'success')
         shell: bash
         run: |
-          echo "Backend coverage outcome: ${{ steps.backend_coverage.outcome }}"
-          echo "Frontend coverage outcome: ${{ steps.frontend_coverage.outcome }}"
+          echo "Backend coverage conclusion: ${{ steps.backend_coverage.conclusion }}"
+          echo "Frontend coverage conclusion: ${{ steps.frontend_coverage.conclusion }}"
           echo 'At least one covered suite failed.' >&2
           exit 1
