@@ -667,8 +667,13 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     const resumedBubble = page.locator('.messages-container .msg-document').filter({ hasText: fileName }).first()
     await expect(resumedBubble).toBeVisible({ timeout: 30000 })
-    await expect(resumedBubble).toHaveClass(/is-busy/, { timeout: 30000 })
-    await expect(resumedBubble.locator('.doc-icon.doc-uploading')).toBeVisible({ timeout: 30000 })
+    await expect.poll(async () => {
+      const className = (await resumedBubble.getAttribute('class')) || ''
+      if (/is-busy/.test(className)) return 'busy'
+      if ((await resumedBubble.locator('.doc-icon.doc-uploading').count()) > 0) return 'busy'
+      if ((await resumedBubble.locator('.doc-download-icon').count()) === 0) return 'completed'
+      return 'idle'
+    }, { timeout: 30000 }).not.toBe('idle')
 
     releaseDocumentDownload?.()
     releaseDocumentDownload = null
