@@ -8,8 +8,8 @@
 - [x] Phase 2 از نظر seamهای relation lifecycle، effective owner resolution و audience fanout بسته شده است.
 - [x] Phase 3 از نظر owner-facing accountant APIs، accountant-aware register/session policy و bot deny branching بسته شده است.
 - [x] Phase 4 از نظر delegated offer/trade write/read، actor audit، و fanout/privacy validation بسته شده است.
-- [ ] Phase 5 به‌صورت عمیق‌تر پیش رفته است؛ `users_public` اکنون accountantها را به owner principal resolve می‌کند، public profile route/query state و accountant highlight در frontend سبز شده‌اند، deny pathهای accountant برای direct chat جدید و group creation در messenger/backend بسته شده‌اند، و contractهای relation-aware برای chat/realtime در direct/room paths با navigation owner-resolved و direct-conversation projection service-level اضافه شده‌اند؛ اما چند consumer/fallback نهایی هنوز باقی مانده‌اند.
-- [ ] Phase 6 به‌صورت partial شروع شده است؛ modal مدیریت حسابدار owner وجود دارد، section حسابداران در profile/public profile اضافه شده، و edit contract روی `duty_description` محدود شده است؛ اما active unlink، expiry timer، و بعضی UX/lifecycle ruleها هنوز باقی مانده‌اند.
+- [x] Phase 5 از نظر contractهای messenger/public profile و consumerهای اصلی بسته شده است؛ `users_public` accountantها را به owner principal resolve می‌کند، همه consumerهای chat/profile از جمله `ChatNewConversationModal.vue` relation-aware شده‌اند، و deny pathهای accountant برای direct chat جدید و group creation در messenger/backend سبز شده‌اند.
+- [ ] Phase 6 به‌صورت partial پیش رفته است؛ modal مدیریت حسابدار owner اکنون create/list/edit/cancel pending را پوشش می‌دهد، section حسابداران در profile/public profile اضافه شده، edit contract روی `duty_description` محدود شده، و stateهای واضح pending/active به‌همراه expiry timer به UI اضافه شده‌اند؛ اما active unlink و بعضی UX/lifecycle ruleهای نهایی هنوز باقی مانده‌اند.
 - [ ] Phase 7 هنوز شروع نشده است.
 - [ ] Phase 8 هنوز شروع نشده است.
 
@@ -183,7 +183,7 @@ rollback surface:
 وضعیت فعلی:
 - شروع شده است.
 - [api/routers/users_public.py](api/routers/users_public.py) برای read/search accountant active را به owner principal resolve می‌کند و metadata additive برمی‌گرداند.
-- [frontend/src/components/PublicProfile.vue](frontend/src/components/PublicProfile.vue) context اولیه‌ی owner-resolve را به کاربر نشان می‌دهد، اما consumerهای chat/profile دیگر هنوز relation-aware نشده‌اند.
+- consumerهای chat/profile اکنون relation-aware شده‌اند و search modal شروع مکالمه هم owner-resolved accountant hit را با context مناسب نمایش می‌دهد.
 
 خروجی‌های لازم:
 - [x] `users_public` owner-resolve behavior اضافه شود.
@@ -204,7 +204,7 @@ frontend contract consumers:
 - [x] [frontend/src/components/ChatView.vue](frontend/src/components/ChatView.vue)
 - [x] [frontend/src/components/chat/ChatConversationList.vue](frontend/src/components/chat/ChatConversationList.vue)
 - [x] [frontend/src/components/chat/ChatMessageItem.vue](frontend/src/components/chat/ChatMessageItem.vue)
-- [ ] [frontend/src/components/chat/ChatNewConversationModal.vue](frontend/src/components/chat/ChatNewConversationModal.vue)
+- [x] [frontend/src/components/chat/ChatNewConversationModal.vue](frontend/src/components/chat/ChatNewConversationModal.vue)
 - [x] [frontend/src/views/PublicProfileView.vue](frontend/src/views/PublicProfileView.vue)
 - [x] [frontend/src/components/PublicProfile.vue](frontend/src/components/PublicProfile.vue)
 
@@ -225,11 +225,11 @@ rollback surface:
 
 وضعیت فعلی:
 - modal اختصاصی owner manager از [frontend/src/components/PublicProfile.vue](frontend/src/components/PublicProfile.vue) باز می‌شود و create/list/edit/cancel pending را پوشش می‌دهد.
-- هنوز section نهایی داخل خود profile/public profile، active unlink، expiry timer، و محدودسازی edit به `duty_description` باقی است.
+- stateهای واضح pending/active و expiry timer به modal اضافه شده‌اند، اما active unlink و بعضی lifecycle ruleهای نهایی هنوز باقی است.
 
 خروجی‌های لازم:
 - [x] section حسابداران در owner profile و public owner profile اضافه شود.
-- [ ] لیست pending/active با stateهای واضح و expiry timer اضافه شود.
+- [x] لیست pending/active با stateهای واضح و expiry timer اضافه شود.
 - [x] create accountant form اختصاصی با `relation_display_name`, `account_name`, `mobile_number`, `duty_description` اضافه شود.
 - [x] owner بتواند فقط `duty_description` را ویرایش کند.
 - [ ] unlink/cancel controls برای pending/active اضافه شود.
