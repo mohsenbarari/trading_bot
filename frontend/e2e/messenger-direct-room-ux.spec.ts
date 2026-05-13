@@ -481,7 +481,8 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await waitForPersistedPendingDocumentUpload(page)
 
     await page.reload()
-    releaseInitialUploadAbort?.()
+    const releaseUploadAbort = releaseInitialUploadAbort ?? (() => {})
+    releaseUploadAbort()
 
     await expect(page.locator('.chat-header .header-name')).toContainText(peer.accountName, { timeout: 30000 })
 
@@ -492,7 +493,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
       }, { timeout: 60000 })
       .toBe(true)
 
-    await expect(page.locator('.messages-container .msg-document')).toBeVisible({ timeout: 60000 })
+    await expect(page.locator('.messages-container .msg-document').first()).toBeVisible({ timeout: 60000 })
     await expect(page.locator('.messages-container .sending-status-wrapper')).toHaveCount(0, { timeout: 60000 })
   })
 
