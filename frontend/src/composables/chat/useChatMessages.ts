@@ -193,6 +193,21 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         return merged
     }
 
+    function mergeServerMessageWithExistingState(existingMessage: Message | undefined, incomingMessage: Message) {
+        const mergedMessage = cloneMessage(incomingMessage)
+
+        if (
+            existingMessage &&
+            Array.isArray(existingMessage.reactions) &&
+            existingMessage.reactions.length > 0 &&
+            (!Array.isArray(mergedMessage.reactions) || mergedMessage.reactions.length === 0)
+        ) {
+            mergedMessage.reactions = existingMessage.reactions.map(reaction => ({ ...reaction }))
+        }
+
+        return mergedMessage
+    }
+
     function mergeServerTailIntoExistingMessages(existingMessages: Message[], latestMessages: Message[]) {
         const persistedById = new Map<number, Message>()
 
@@ -202,7 +217,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         }
 
         for (const message of latestMessages) {
-            persistedById.set(message.id, cloneMessage(message))
+            persistedById.set(message.id, mergeServerMessageWithExistingState(persistedById.get(message.id), message))
         }
 
         return Array.from(persistedById.values()).sort((left, right) => left.id - right.id)

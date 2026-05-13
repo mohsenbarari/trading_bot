@@ -186,7 +186,11 @@ test.describe('Admin smoke regressions', () => {
     await expect(page.getByText('تنظیمات با موفقیت ذخیره شد')).toBeVisible()
   })
 
-  test('admin can create an optional channel and invite a seeded active member', async ({ page, request }) => {
+  test('admin can create an optional channel and invite a seeded active member', async ({ page, request, browserName }) => {
+    if (browserName === 'webkit') {
+      test.slow()
+    }
+
     const tokens = await fetchDevLoginTokens(request)
     const seededCandidate = seedActiveUser('admin_channel')
     const suffix = Date.now()
@@ -214,11 +218,7 @@ test.describe('Admin smoke regressions', () => {
     await candidateRow.click()
     const addMemberButton = page.locator('.primary-chip').filter({ hasText: 'افزودن' }).first()
     await expect(addMemberButton).toBeVisible()
-    await addMemberButton.evaluate((node) => {
-      if (node instanceof HTMLElement) {
-        node.click()
-      }
-    })
+    await addMemberButton.click()
 
     await expect(page.getByRole('heading', { name: 'اعضای کانال' })).toBeVisible()
     await expect(page.locator('.chat-user-row').filter({ hasText: seededCandidate.accountName }).first()).toBeVisible()

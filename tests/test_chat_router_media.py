@@ -13,6 +13,7 @@ class FakeUploadFile:
         self.content_type = content_type
         self.filename = filename
         self._contents = contents
+        self.close = AsyncMock()
 
     async def read(self):
         return self._contents
@@ -102,26 +103,30 @@ class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB()
 
         with self.assertRaises(HTTPException) as exc_info:
+            upload_file = FakeUploadFile(content_type="application/x-msdownload", filename="evil.exe", contents=b"x")
             await upload_chat_media(
-                file=FakeUploadFile(content_type="application/x-msdownload", filename="evil.exe", contents=b"x"),
+                file=upload_file,
                 current_user=current_user,
                 db=db,
             )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertIn("Unsupported file type", exc_info.exception.detail)
+        upload_file.close.assert_awaited_once()
 
         with patch("api.routers.chat.asyncio.to_thread", new=AsyncMock(side_effect=lambda fn, *args: fn(*args))), patch(
             "api.routers.chat.magic.from_buffer",
             return_value="application/x-msdownload",
         ):
+            upload_file = FakeUploadFile(content_type="application/pdf", filename="a.pdf", contents=b"pdf")
             with self.assertRaises(HTTPException) as exc_info:
                 await upload_chat_media(
-                    file=FakeUploadFile(content_type="application/pdf", filename="a.pdf", contents=b"pdf"),
+                    file=upload_file,
                     current_user=current_user,
                     db=db,
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertIn("Invalid file content", exc_info.exception.detail)
+        upload_file.close.assert_awaited_once()
 
     async def test_upload_chat_media_rejects_oversized_files(self):
         current_user = SimpleNamespace(id=5)
@@ -132,14 +137,16 @@ class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat.magic.from_buffer",
             return_value="application/pdf",
         ):
+            upload_file = FakeUploadFile(content_type="application/pdf", filename="a.pdf", contents=huge_contents)
             with self.assertRaises(HTTPException) as exc_info:
                 await upload_chat_media(
-                    file=FakeUploadFile(content_type="application/pdf", filename="a.pdf", contents=huge_contents),
+                    file=upload_file,
                     current_user=current_user,
                     db=db,
                 )
         self.assertEqual(exc_info.exception.status_code, 413)
         self.assertIn("File too large", exc_info.exception.detail)
+        upload_file.close.assert_awaited_once()
 
     async def test_upload_chat_media_persists_file_and_returns_metadata(self):
         current_user = SimpleNamespace(id=5)
@@ -155,8 +162,9 @@ class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat.aiofiles.open",
             return_value=fake_file,
         ):
+            upload_file = FakeUploadFile(content_type="application/pdf", filename="report.pdf", contents=b"pdf-bytes")
             result = await upload_chat_media(
-                file=FakeUploadFile(content_type="application/pdf", filename="report.pdf", contents=b"pdf-bytes"),
+                file=upload_file,
                 thumbnail="thumb",
                 current_user=current_user,
                 db=db,
@@ -174,6 +182,7 @@ class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["file_id"], "uuid-1")
         self.assertEqual(result["mime_type"], "application/pdf")
         self.assertEqual(result["size"], len(b"pdf-bytes"))
+        upload_file.close.assert_awaited_once()
 
 
 if __name__ == "__main__":
