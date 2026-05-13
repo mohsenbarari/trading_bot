@@ -6,6 +6,7 @@ export interface CurrentUserSummary {
   role: string
   full_name?: string | null
   account_name?: string | null
+  is_accountant?: boolean
 }
 
 const CURRENT_USER_STORAGE_KEY = 'current_user_summary'
@@ -25,6 +26,7 @@ function normalizeCurrentUserSummary(raw: unknown): CurrentUserSummary | null {
     role: user.role,
     full_name: typeof user.full_name === 'string' ? user.full_name : null,
     account_name: typeof user.account_name === 'string' ? user.account_name : null,
+    is_accountant: user.is_accountant === true,
   }
 }
 

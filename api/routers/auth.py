@@ -39,6 +39,7 @@ from core.services.chat_room_service import ensure_mandatory_channel_membership
 from core.services.accountant_relation_service import (
     get_pending_accountant_relation_by_invitation_token,
     is_accountant_invitation_token,
+    is_user_accountant,
 )
 
 
@@ -106,10 +107,21 @@ class RefreshTokenRequest(BaseModel):
 
 # --- Endpoints ---
 
+def _serialize_current_user_response(current_user: User, *, is_accountant: bool) -> schemas.UserRead:
+    return schemas.UserRead.model_validate(current_user).model_copy(
+        update={"is_accountant": is_accountant}
+    )
+
 @router.get("/me", response_model=schemas.UserRead)
-async def read_users_me(current_user: User = Depends(get_current_user)):
+async def read_users_me(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """دریافت اطلاعات کاربر جاری"""
-    return current_user
+    return _serialize_current_user_response(
+        current_user,
+        is_accountant=await is_user_accountant(db, current_user.id),
+    )
 
 
 @router.put("/me/avatar", response_model=schemas.UserRead)
@@ -125,7 +137,10 @@ async def update_my_avatar(
     )
     await db.commit()
     await db.refresh(current_user)
-    return current_user
+    return _serialize_current_user_response(
+        current_user,
+        is_accountant=await is_user_accountant(db, current_user.id),
+    )
 
 
 @router.post("/register-otp-request", response_model=dict)

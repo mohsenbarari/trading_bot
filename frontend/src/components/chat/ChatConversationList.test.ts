@@ -132,4 +132,28 @@ describe('ChatConversationList.vue', () => {
     expect(menuText).toContain('خروج از حالت بی‌صدا')
     expect(menuText).not.toContain('حذف گفتگو')
   })
+
+  it('hides the new conversation fab when starting new chats is disabled', async () => {
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [makeConversation()],
+        selectedUserId: null,
+        typingUsers: {},
+        apiBaseUrl: '',
+        canStartNewConversation: false,
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    expect(wrapper.find('.fab-new-chat').exists()).toBe(false)
+  })
 })

@@ -8,7 +8,7 @@
 - [x] Phase 2 از نظر seamهای relation lifecycle، effective owner resolution و audience fanout بسته شده است.
 - [x] Phase 3 از نظر owner-facing accountant APIs، accountant-aware register/session policy و bot deny branching بسته شده است.
 - [x] Phase 4 از نظر delegated offer/trade write/read، actor audit، و fanout/privacy validation بسته شده است.
-- [ ] Phase 5 شروع شده است؛ `users_public` اکنون accountantها را به owner principal resolve می‌کند و public profile frontend context اولیه این resolve را نمایش می‌دهد، اما contractهای chat/realtime و deny pathهای کامل هنوز باقی مانده‌اند.
+- [ ] Phase 5 شروع شده است؛ `users_public` اکنون accountantها را به owner principal resolve می‌کند، public profile frontend context اولیه این resolve را نمایش می‌دهد، و deny pathهای accountant برای direct chat جدید و group creation در messenger/backend بسته شده‌اند؛ اما contractهای chat/realtime و fieldهای relation-aware کامل هنوز باقی مانده‌اند.
 - [ ] Phase 6 به‌صورت partial شروع شده است؛ modal مدیریت حسابدار owner وجود دارد، اما section نهایی profile/public profile و بعضی UX/lifecycle ruleها هنوز باقی مانده‌اند.
 - [ ] Phase 7 هنوز شروع نشده است.
 - [ ] Phase 8 هنوز شروع نشده است.
@@ -190,7 +190,8 @@ rollback surface:
 - [x] `UserPublicRead` با metadata لازم مثل `resolved_from_accountant_id` گسترش پیدا کند.
 - [ ] `ConversationRead`, `MessageRead`, و payloadهای realtime با fieldهای additive برای display/profile target گسترش پیدا کنند.
 - [ ] `chat_service` projection relation-aware display name تولید کند.
-- [ ] accountant direct chat initiation در UI/backend deny شود.
+- [x] accountant direct chat initiation در UI/backend deny شود.
+- [x] accountant group creation در UI/backend deny شود.
 
 فایل‌های درگیر اصلی:
 - [ ] [api/routers/users_public.py](api/routers/users_public.py)
@@ -211,7 +212,8 @@ validation phase:
 - [ ] owner-resolved public profile navigation سبز شود.
 - [ ] accountant highlight query/state سبز شود.
 - [ ] conversation list/header/message labels relation-aware سبز شوند.
-- [ ] accountant direct-chat deny path سبز شود.
+- [x] accountant direct-chat deny path سبز شود.
+- [x] accountant group-create deny path سبز شود.
 
 rollback surface:
 - [ ] additive schema fields fallback داشته باشند تا فرانت قدیمی هنوز با fieldهای legacy کار کند.

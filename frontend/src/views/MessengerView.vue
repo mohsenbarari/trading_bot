@@ -77,6 +77,7 @@ function handleBack() {
         :jwtToken="jwtToken"
         :currentUserId="user.id"
         :currentUserRole="user.role || null"
+        :currentUserIsAccountant="user.is_accountant === true"
         :targetUserId="targetUserId"
         :targetUserName="targetUserName"
         @navigate="handleNavigate"
