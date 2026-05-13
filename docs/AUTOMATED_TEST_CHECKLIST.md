@@ -146,8 +146,8 @@ Scope rules:
 - [x] Revalidate `frontend/e2e/channel-media.spec.ts`, `frontend/e2e/direct-chat.spec.ts`, and `frontend/e2e/mandatory-channel.spec.ts` serially with a clean green pass (`49/49`).
 - [x] Revalidate `frontend/e2e/notifications.spec.ts` serially against the current auth/realtime runtime (`4/4`).
 - [x] Re-sync `frontend/e2e/admin-smoke.spec.ts` and `frontend/e2e/auth.spec.ts` with the current channel-manager entry flow and profile/settings routing.
-- [x] Revalidate the full frontend Playwright suite serially with a clean green pass (`64/64`).
-- [x] Expand the full frontend Playwright matrix beyond Chromium with serial Firefox (`64/64`) and WebKit (`64/64`) passes after the current cross-browser selector/runtime hardening and `MarketView.vue` manual-create restoration.
+- [x] Revalidate the full frontend Playwright suite serially with a clean green pass (`83/83`).
+- [x] Expand the full frontend Playwright matrix beyond Chromium with serial Firefox (`83/83`) and WebKit (`83/83`) passes after the current cross-browser selector/runtime hardening and `MarketView.vue` manual-create restoration.
 - [x] Expose routine frontend browser commands for Chromium / Firefox / WebKit via `npm run test:e2e`, serial `npm run test:e2e:firefox`, serial `npm run test:e2e:webkit`, and `npm run test:e2e:matrix` so the checklist path is executable without ad hoc shell commands and keeps the proven cross-browser worker profile.
 
 ### Messenger Detailed Coverage Map
@@ -174,7 +174,7 @@ Remaining messenger-specific automated test backlog:
 - [x] Remaining public-profile edge flows: member-row profile entry points and an explicit avatar-change regression path beyond the current self-avatar add/remove coverage.
 - [x] Direct-room core composer/media regression coverage: new-conversation entry, file-tab document send, and gallery album send in `frontend/e2e/messenger-direct-room-ux.spec.ts`.
 - [x] Deterministic direct-room media edge coverage below Playwright: voice playback/error state in `ChatMessageItem.vue`, location send and camera fallback in `AttachmentMenu.vue`, crop-editor load/ratio behavior in `ImageEditorModal.vue`, and cached file registry/open/share flows in `useChatFileHandler.ts`.
-- [ ] Remaining direct-room media edge flows: background upload/download persistence and broader browser-driven attachment permutations beyond the new deterministic unit coverage. Chromium/Firefox coverage is in place for the new room-persistence paths, but WebKit full-reload upload resume still fails and remains open.
+- [x] Remaining direct-room media edge flows: background upload/download persistence and broader browser-driven attachment permutations beyond the new deterministic unit coverage. Chromium/Firefox coverage is in place for the room-persistence paths, and the WebKit full-reload upload resume path now passes in the restored browser matrix.
 - [x] Viewer/search/back-stack core coverage: `ChatLightbox.vue` toolbar and album navigation, in-chat search/list switching, `ChatNewConversationModal.vue`, and overlay/browser-back semantics in `frontend/e2e/messenger-direct-room-ux.spec.ts`.
 - [x] Deterministic selection-mode action-bar coverage in `ChatInputBar.vue` for single/multi-select action visibility and emits.
 - [x] End-to-end selection-mode coverage in `ChatView.vue`: long-press entry, reply-from-selection, multi-select toggles, and browser-back exit in `frontend/e2e/messenger-direct-room-ux.spec.ts`.
@@ -187,7 +187,7 @@ Remaining completion estimate for full messenger test closure:
 
 - [x] 1 focused Playwright slice covering the remaining direct-room media/search/viewer UX.
 - [x] 1 focused Vitest expansion batch covering deterministic selection/media/editor/cache contracts and leaving the full frontend Vitest suite green (`25/25` files, `67/67` tests).
-- [x] 1 full serial browser-matrix rerun on Chromium / Firefox / WebKit after the new messenger slices land (`231/231`).
+- [x] 1 full serial browser-matrix rerun on Chromium / Firefox / WebKit after the new messenger slices land (`249/249`).
 
 ## Phase 7 - Models, Migrations, Startup, and Deployment Smoke Coverage
 

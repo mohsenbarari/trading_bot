@@ -1160,7 +1160,8 @@ test.describe('Channel media regressions', () => {
     await page.getByText(fixture.channelTitle).click()
 
     const messageRoot = page.locator(`#msg-${messageId}`)
-    const liveReactionChip = messageRoot.locator('.reaction-chip').filter({ hasText: '🔥' })
+    const messageWrapper = messageRoot.locator('xpath=..')
+    const liveReactionChip = messageWrapper.locator('.reaction-chip').filter({ hasText: '🔥' })
     await expect(messageRoot.getByText(bootstrapContent)).toBeVisible()
     await expect(liveReactionChip).toHaveCount(0)
 

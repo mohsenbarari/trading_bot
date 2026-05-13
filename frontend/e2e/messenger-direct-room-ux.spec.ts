@@ -441,13 +441,32 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     test.setTimeout(120000)
     const actor = seedPrimarySession('direct_room_upload_resume_actor')
     const peer = seedPrimarySession('direct_room_upload_resume_peer')
+    let hasHeldInitialUpload = false
+    let releaseInitialUploadAbort: (() => void) | null = null
+    let resolveInitialUploadSeen: (() => void) | null = null
+    const initialUploadSeen = new Promise<void>((resolve) => {
+      resolveInitialUploadSeen = resolve
+    })
 
     await waitForBackendReady(request)
     await loginWithSeededSession(page, actor)
     await openDirectChat(page, peer.userId, peer.accountName)
 
     await page.route('**/api/chat/upload-media', async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 4000))
+      if (!hasHeldInitialUpload) {
+        hasHeldInitialUpload = true
+        resolveInitialUploadSeen?.()
+        await new Promise<void>((resolve) => {
+          releaseInitialUploadAbort = resolve
+        })
+        try {
+          await route.abort()
+        } catch {
+          // Page reload may have already disposed the intercepted request.
+        }
+        return
+      }
+
       await route.continue()
     })
 
@@ -458,9 +477,11 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     await expect(page.locator('.messages-container .msg-document')).toBeVisible({ timeout: 30000 })
     await expect(page.locator('.messages-container .sending-status-wrapper')).toBeVisible({ timeout: 30000 })
+    await initialUploadSeen
     await waitForPersistedPendingDocumentUpload(page)
 
     await page.reload()
+    releaseInitialUploadAbort?.()
 
     await expect(page.locator('.chat-header .header-name')).toContainText(peer.accountName, { timeout: 30000 })
 
