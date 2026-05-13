@@ -9,7 +9,7 @@
 - [x] Phase 3 از نظر owner-facing accountant APIs، accountant-aware register/session policy و bot deny branching بسته شده است.
 - [x] Phase 4 از نظر delegated offer/trade write/read، actor audit، و fanout/privacy validation بسته شده است.
 - [x] Phase 5 از نظر contractهای messenger/public profile و consumerهای اصلی بسته شده است؛ `users_public` accountantها را به owner principal resolve می‌کند، همه consumerهای chat/profile از جمله `ChatNewConversationModal.vue` relation-aware شده‌اند، و deny pathهای accountant برای direct chat جدید و group creation در messenger/backend سبز شده‌اند.
-- [ ] Phase 6 به‌صورت partial پیش رفته است؛ modal مدیریت حسابدار owner اکنون create/list/edit/cancel pending را پوشش می‌دهد، section حسابداران در profile/public profile اضافه شده، edit contract روی `duty_description` محدود شده، و stateهای واضح pending/active به‌همراه expiry timer به UI اضافه شده‌اند؛ اما active unlink و بعضی UX/lifecycle ruleهای نهایی هنوز باقی مانده‌اند.
+- [ ] Phase 6 به‌صورت partial پیش رفته است؛ modal مدیریت حسابدار owner اکنون create/list/edit/cancel pending/active unlink را پوشش می‌دهد، section حسابداران در profile/public profile اضافه شده، edit contract روی `duty_description` محدود شده، و stateهای واضح pending/active به‌همراه expiry timer به UI اضافه شده‌اند؛ اما بعضی UX/lifecycle ruleهای نهایی هنوز باقی مانده‌اند.
 - [ ] Phase 7 هنوز شروع نشده است.
 - [ ] Phase 8 هنوز شروع نشده است.
 
@@ -232,7 +232,7 @@ rollback surface:
 - [x] لیست pending/active با stateهای واضح و expiry timer اضافه شود.
 - [x] create accountant form اختصاصی با `relation_display_name`, `account_name`, `mobile_number`, `duty_description` اضافه شود.
 - [x] owner بتواند فقط `duty_description` را ویرایش کند.
-- [ ] unlink/cancel controls برای pending/active اضافه شود.
+- [x] unlink/cancel controls برای pending/active اضافه شود.
 - [x] admin UI تنظیم `max_accountants` به‌ازای هر owner را در [frontend/src/components/UserProfile.vue](frontend/src/components/UserProfile.vue) انجام دهد و session cap accountant را editable نکند.
 
 فایل‌های درگیر اصلی:
@@ -243,8 +243,8 @@ rollback surface:
 - [ ] [frontend/src/components/UserProfile.vue](frontend/src/components/UserProfile.vue)
 
 validation phase:
-- [ ] owner CRUD accountant UI سبز شود.
-- [ ] pending expiry/cancel UI سبز شود.
+- [x] owner CRUD accountant UI سبز شود.
+- [x] pending expiry/cancel UI سبز شود.
 - [x] description-only edit UI سبز شود.
 - [ ] admin cap read-only/accountant session clamp UI سبز شود.
 

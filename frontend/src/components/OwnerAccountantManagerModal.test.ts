@@ -141,6 +141,41 @@ describe('OwnerAccountantManagerModal.vue', () => {
     expect(wrapper.text()).not.toContain('حسابدار اول')
   })
 
+  it('unlinks active accountant relations through the same delete endpoint', async () => {
+    const activeRelation = makeRelation({
+      id: 8,
+      status: 'active',
+      accountant_account_name: 'acc-active',
+      relation_display_name: 'حسابدار فعال',
+      registration_link: null,
+      activated_at: '2026-01-02T08:00:00',
+    })
+
+    apiFetchMock.mockResolvedValueOnce(makeResponse([activeRelation]))
+    apiFetchMock.mockResolvedValueOnce(makeResponse({ ...activeRelation, status: 'deleted' }))
+
+    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
+    const wrapper = mount(OwnerAccountantManagerModal, {
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.unlink-active').exists()).toBe(true)
+    await wrapper.get('.unlink-active').trigger('click')
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8', {
+      method: 'DELETE',
+    })
+    expect(wrapper.text()).toContain('ارتباط حسابدار قطع شد')
+    expect(wrapper.text()).not.toContain('حسابدار فعال')
+  })
+
   it('supports silent refresh, form reset, copy-link feedback, and close emit', async () => {
     apiFetchMock.mockResolvedValueOnce(makeResponse([
       makeRelation(),

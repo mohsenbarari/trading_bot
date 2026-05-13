@@ -7,9 +7,9 @@ from core.config import settings
 from core.db import get_db
 from core.services.accountant_relation_service import (
     EffectiveOwnerActor,
-    cancel_pending_accountant_relation,
     create_owner_accountant_relation,
     list_owner_accountant_relations,
+    unlink_owner_accountant_relation,
     update_owner_accountant_relation,
 )
 from core.sms import send_accountant_invitation_sms
@@ -94,7 +94,7 @@ async def cancel_my_pending_accountant(
     db: AsyncSession = Depends(get_db),
 ):
     ensure_owner_context(context)
-    relation = await cancel_pending_accountant_relation(
+    relation = await unlink_owner_accountant_relation(
         db,
         owner_user_id=context.owner_user.id,
         relation_id=relation_id,

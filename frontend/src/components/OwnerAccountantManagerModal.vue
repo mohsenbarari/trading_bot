@@ -269,9 +269,15 @@ async function saveEdit(relationId: number) {
   }
 }
 
-async function cancelPendingRelation(relation: AccountantRelation) {
-  if (relation.status !== 'pending') return
-  if (!window.confirm(`دعوت ${relation.relation_display_name} لغو شود؟`)) return
+async function unlinkRelation(relation: AccountantRelation) {
+  const isPending = relation.status === 'pending'
+  const isActive = relation.status === 'active'
+  if (!isPending && !isActive) return
+
+  const promptMessage = isPending
+    ? `دعوت ${relation.relation_display_name} لغو شود؟`
+    : `ارتباط حسابدار ${relation.relation_display_name} قطع شود؟ این عملیات دسترسی حسابدار را کامل غیرفعال می‌کند.`
+  if (!window.confirm(promptMessage)) return
 
   error.value = ''
   notice.value = ''
@@ -281,15 +287,15 @@ async function cancelPendingRelation(relation: AccountantRelation) {
     })
     const payload = await response.json().catch(() => null)
     if (!response.ok) {
-      throw new Error(parseApiError(payload, 'لغو دعوت حسابدار ناموفق بود.'))
+      throw new Error(parseApiError(payload, isPending ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.'))
     }
     relations.value = relations.value.filter((item) => item.id !== relation.id)
     if (editingRelationId.value === relation.id) {
       clearEditState()
     }
-    notice.value = 'دعوت حسابدار لغو شد.'
+    notice.value = isPending ? 'دعوت حسابدار لغو شد.' : 'ارتباط حسابدار قطع شد و دسترسی او غیرفعال گردید.'
   } catch (err: any) {
-    error.value = err?.message || 'لغو دعوت حسابدار ناموفق بود.'
+    error.value = err?.message || (isPending ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.')
   }
 }
 
@@ -449,9 +455,17 @@ onBeforeUnmount(() => {
                   v-if="relation.status === 'pending'"
                   type="button"
                   class="danger-btn cancel-pending"
-                  @click="cancelPendingRelation(relation)"
+                  @click="unlinkRelation(relation)"
                 >
                   لغو دعوت
+                </button>
+                <button
+                  v-if="relation.status === 'active'"
+                  type="button"
+                  class="danger-btn unlink-active"
+                  @click="unlinkRelation(relation)"
+                >
+                  قطع ارتباط
                 </button>
               </div>
             </article>

@@ -98,7 +98,7 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
         context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
 
         with patch(
-            "api.routers.accountants.cancel_pending_accountant_relation",
+            "api.routers.accountants.unlink_owner_accountant_relation",
             new=AsyncMock(return_value=relation),
         ), patch(
             "api.routers.accountants.settings",
@@ -108,6 +108,37 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["id"], 9)
         self.assertEqual(result["registration_link"], "https://app.example/register?token=ACCT-token")
+
+    async def test_cancel_owner_active_accountant_uses_unlink_service(self):
+        relation = SimpleNamespace(
+            id=11,
+            owner_user_id=7,
+            accountant_user_id=12,
+            accountant_user=SimpleNamespace(account_name="acc-active"),
+            global_account_name="acc-active",
+            relation_display_name="حسابدار فعال",
+            duty_description="پیگیری",
+            mobile_number="09120000000",
+            status="deleted",
+            invitation_token="ACCT-token",
+            expires_at=datetime.utcnow() + timedelta(days=2),
+            activated_at=datetime.utcnow(),
+            deleted_at=datetime.utcnow(),
+            created_at=datetime.utcnow(),
+        )
+        context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
+
+        with patch(
+            "api.routers.accountants.unlink_owner_accountant_relation",
+            new=AsyncMock(return_value=relation),
+        ) as unlink_mock, patch(
+            "api.routers.accountants.settings",
+            SimpleNamespace(frontend_url="https://app.example"),
+        ):
+            result = await cancel_my_pending_accountant(11, context=context, db=FakeDB())
+
+        unlink_mock.assert_awaited_once()
+        self.assertEqual(result["status"], "deleted")
 
     async def test_update_owner_accountant_returns_serialized_relation(self):
         relation = SimpleNamespace(

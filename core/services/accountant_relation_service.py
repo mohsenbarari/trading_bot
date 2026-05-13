@@ -382,6 +382,57 @@ async def cancel_pending_accountant_relation(
     return relation
 
 
+async def unlink_owner_accountant_relation(
+    db: AsyncSession,
+    *,
+    owner_user_id: int,
+    relation_id: int,
+) -> AccountantRelation:
+    stmt = (
+        select(AccountantRelation)
+        .options(joinedload(AccountantRelation.accountant_user))
+        .where(
+            AccountantRelation.id == relation_id,
+            AccountantRelation.owner_user_id == owner_user_id,
+        )
+    )
+    relation = (await db.execute(stmt)).scalar_one_or_none()
+    if not relation:
+        raise HTTPException(status_code=404, detail="رابطه حسابدار یافت نشد")
+
+    if relation.deleted_at is not None or relation.status in (
+        AccountantRelationStatus.EXPIRED,
+        AccountantRelationStatus.REVOKED,
+        AccountantRelationStatus.DELETED,
+    ):
+        raise HTTPException(status_code=400, detail="این رابطه قبلاً بسته شده است")
+
+    if relation.status == AccountantRelationStatus.PENDING:
+        return await cancel_pending_accountant_relation(
+            db,
+            owner_user_id=owner_user_id,
+            relation_id=relation_id,
+        )
+
+    if relation.status != AccountantRelationStatus.ACTIVE:
+        raise HTTPException(status_code=400, detail="فقط حسابدار pending یا active قابل قطع ارتباط است")
+
+    # Import lazily to avoid service-layer circular imports at module load time.
+    from core.services.user_deletion_service import delete_user_account
+
+    accountant_user = relation.accountant_user
+    if accountant_user and not accountant_user.is_deleted:
+        await delete_user_account(db, accountant_user)
+
+    now = _utcnow_naive()
+    relation.status = AccountantRelationStatus.DELETED
+    relation.deleted_at = now
+
+    await db.commit()
+    await db.refresh(relation)
+    return relation
+
+
 async def update_owner_accountant_relation(
     db: AsyncSession,
     *,
