@@ -298,6 +298,36 @@ function dataUrlToBlob(dataUrl: string, fallbackType?: string): Blob {
     return new Blob([bytes], { type: mimeType })
 }
 
+function restorePersistedFile(record: PersistedPendingUpload): Blob | null {
+    if (record.file instanceof Blob) {
+        if (record.msgType === 'document' && !(record.file instanceof File)) {
+            return new File([record.file], record.fileName, {
+                type: record.file.type || record.mimeType || 'application/octet-stream',
+            })
+        }
+        return record.file
+    }
+
+    if (record.msgType === 'document' && record.fileDataUrl) {
+        const blob = dataUrlToBlob(record.fileDataUrl, record.mimeType)
+        return new File([blob], record.fileName, {
+            type: blob.type || record.mimeType || 'application/octet-stream',
+        })
+    }
+
+    if (record.fileBytes) {
+        const blob = new Blob([record.fileBytes], { type: record.mimeType })
+        if (record.msgType === 'document') {
+            return new File([blob], record.fileName, {
+                type: blob.type || record.mimeType || 'application/octet-stream',
+            })
+        }
+        return blob
+    }
+
+    return null
+}
+
 async function putRecord(db: IDBDatabase, record: PersistedPendingUpload): Promise<boolean> {
     return await new Promise<boolean>((resolve) => {
         try {
@@ -413,25 +443,12 @@ async function idbGetAll(): Promise<PendingUpload[]> {
                 const req = tx.objectStore(STORE_NAME).getAll()
                 req.onsuccess = () => {
                     const records = ((req.result as PersistedPendingUpload[]) || []).map((record) => {
-                        if (record.msgType === 'document' && record.fileDataUrl) {
-                            return {
-                                ...record,
-                                file: dataUrlToBlob(record.fileDataUrl, record.mimeType),
-                            } as PendingUpload
-                        }
-
-                        if (record.file instanceof Blob) {
-                            return record as PendingUpload
-                        }
-
-                        if (record.fileBytes) {
-                            return {
-                                ...record,
-                                file: new Blob([record.fileBytes], { type: record.mimeType }),
-                            } as PendingUpload
-                        }
-
-                        return null
+                        const restoredFile = restorePersistedFile(record)
+                        if (!restoredFile) return null
+                        return {
+                            ...record,
+                            file: restoredFile,
+                        } as PendingUpload
                     }).filter((record): record is PendingUpload => record !== null)
 
                     resolve(records)

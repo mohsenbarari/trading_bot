@@ -533,9 +533,10 @@ test.describe('Messenger room manager and public profile flows', () => {
     await expect(channelManager.locator('.chat-user-row').filter({ hasText: candidate.accountName }).first()).toBeVisible({ timeout: 30000 })
 
     await channelManager.locator('.manager-header .header-icon-btn').first().click()
-  await waitForBackendReady(request)
-  await expect(channelManager.getByRole('button', { name: 'باز کردن در پیام‌رسان' })).toBeVisible({ timeout: 30000 })
-    await channelManager.getByRole('button', { name: 'باز کردن در پیام‌رسان' }).evaluate((node: HTMLElement) => node.click())
+    await waitForBackendReady(request)
+    const openInMessengerButton = channelManager.getByRole('button', { name: 'باز کردن در پیام‌رسان' })
+    await expect(openInMessengerButton).toBeVisible({ timeout: 30000 })
+    await openInMessengerButton.click()
 
     await expect.poll(() => page.url(), { timeout: 60000 }).toContain('/chat?user_id=-')
 
