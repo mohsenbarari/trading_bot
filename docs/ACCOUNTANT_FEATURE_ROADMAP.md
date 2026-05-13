@@ -9,25 +9,25 @@
 - [x] Phase 3 از نظر owner-facing accountant APIs، accountant-aware register/session policy و bot deny branching بسته شده است.
 - [x] Phase 4 از نظر delegated offer/trade write/read، actor audit، و fanout/privacy validation بسته شده است.
 - [x] Phase 5 از نظر contractهای messenger/public profile و consumerهای اصلی بسته شده است؛ `users_public` accountantها را به owner principal resolve می‌کند، همه consumerهای chat/profile از جمله `ChatNewConversationModal.vue` relation-aware شده‌اند، و deny pathهای accountant برای direct chat جدید و group creation در messenger/backend سبز شده‌اند.
-- [ ] Phase 6 به‌صورت partial پیش رفته است؛ modal مدیریت حسابدار owner اکنون create/list/edit/cancel pending/active unlink را پوشش می‌دهد، section حسابداران در profile/public profile اضافه شده، edit contract روی `duty_description` محدود شده، و stateهای واضح pending/active به‌همراه expiry timer به UI اضافه شده‌اند؛ اما بعضی UX/lifecycle ruleهای نهایی هنوز باقی مانده‌اند.
-- [ ] Phase 7 هنوز شروع نشده است.
-- [ ] Phase 8 هنوز شروع نشده است.
+- [x] Phase 6 از نظر owner management UI بسته شده است؛ modal مدیریت حسابدار owner اکنون create/list/edit description-only/cancel pending/active unlink، stateهای pending/active، expiry timer، section حسابداران در profile/public profile، و admin cap UI را پوشش می‌دهد.
+- [x] Phase 7 از نظر deletion/lifecycle/sync convergence بسته شده است؛ pending revoke، active unlink، owner delete cascade، و sync/resync replay برای `accountant_relations` و `actor_user_id` سبز شده‌اند.
+- [x] Phase 8 از نظر test/deploy/release gate بسته شده است؛ focused backend/bot accountant suite، frontend unit suite، owner-flow browser matrix، `make test-gate`، `make foreign`، و post-deploy manual sanity سبز شده‌اند.
 
 ## 0. قواعد اجرای roadmap
 
-- [ ] اجرای roadmap به ترتیب phaseها انجام شود و phase بعدی قبل از سبز شدن validation phase قبلی شروع نشود.
-- [ ] همه تغییرات schema به‌صورت additive شروع شوند؛ drop/cleanup فقط در phase پایانی انجام شود.
-- [ ] در تمام phaseها invariant اصلی حفظ شود: `effective_owner` هویت business و `actor_user_id` هویت عامل واقعی است.
-- [ ] در طول توسعه و استقرار این فیچر، به‌دلیل single-server development mode فقط از `make foreign` استفاده شود و `make up` اجرا نشود.
+- [x] اجرای roadmap به ترتیب phaseها انجام شد و phase بعدی بعد از سبز شدن validation phase قبلی بسته شد.
+- [x] همه تغییرات schema به‌صورت additive شروع شدند؛ drop/cleanup destructive در این release انجام نشد.
+- [x] در تمام phaseها invariant اصلی حفظ شد: `effective_owner` هویت business و `actor_user_id` هویت عامل واقعی است.
+- [x] در طول توسعه و استقرار این فیچر، به‌دلیل single-server development mode فقط از `make foreign` استفاده شد و `make up` اجرا نشد.
 
 ## 1. قراردادهای نهایی که roadmap بر آن‌ها تکیه می‌کند
 
-- [ ] model اصلی این فیچر `AccountantRelation` با جدول `accountant_relations` است.
-- [ ] bind ثبت‌نام relation به invitation از طریق `invitation_token` انجام می‌شود، نه FK مستقیم به `invitations.id`.
-- [ ] field audit یکنواخت برای actor واقعی روی سطوح delegated با نام `actor_user_id` استفاده می‌شود.
-- [ ] `User.account_name` هویت سراسری immutable user است و `relation_display_name` نام immutable رابطه‌ای owner ← accountant.
-- [ ] accountant در فاز اول bot access ندارد، direct chat دلخواه شروع نمی‌کند، و group جدید نمی‌سازد.
-- [ ] authority همه business actionهای delegated از `effective_owner.home_server` گرفته می‌شود.
+- [x] model اصلی این فیچر `AccountantRelation` با جدول `accountant_relations` است.
+- [x] bind ثبت‌نام relation به invitation از طریق `invitation_token` انجام می‌شود، نه FK مستقیم به `invitations.id`.
+- [x] field audit یکنواخت برای actor واقعی روی سطوح delegated با نام `actor_user_id` استفاده می‌شود.
+- [x] `User.account_name` هویت سراسری immutable user است و `relation_display_name` نام immutable رابطه‌ای owner ← accountant.
+- [x] accountant در فاز اول bot access ندارد، direct chat دلخواه شروع نمی‌کند، و group جدید نمی‌سازد.
+- [x] authority همه business actionهای delegated از `effective_owner.home_server` گرفته می‌شود.
 
 ## 2. فازبندی کلان
 
@@ -80,8 +80,8 @@ validation phase:
 - [x] entrypoint/import smoke بعد از foundation changes سبز ماند.
 
 rollback surface:
-- [ ] اگر Phase 1 مشکل داشت، UI/accountant routes هنوز expose نشده باشند و rollback فقط در سطح code disable انجام شود.
-- [ ] schema جدید additive باقی بماند و فوراً drop نشود.
+- [x] rollback فاز اول با code/UI disable تعریف شد و schema جدید additive باقی می‌ماند.
+- [x] schema جدید additive باقی می‌ماند و فوراً drop نمی‌شود.
 
 ### Phase 2 - Shared Backend Seams
 
@@ -106,7 +106,7 @@ validation phase:
 - [x] unit tests audience fanout سبز شود.
 
 rollback surface:
-- [ ] seamهای جدید فقط additive باشند و behavior قدیمی را تا قبل از phaseهای بعدی نشکنند.
+- [x] seamهای جدید additive ماندند و behavior قدیمی قبل از phaseهای بعدی شکسته نشد.
 
 ### Phase 3 - Auth, Register, Session, Bot Branching
 
@@ -137,7 +137,7 @@ validation phase:
 - [x] bot `/start` و `/link` برای accountant hard-deny/regression tests سبز شود.
 
 rollback surface:
-- [ ] اگر bot/accountant branch مشکل داشت، accountant creation endpoint موقتاً disable شود اما relation data حفظ شود.
+- [x] rollback bot/accountant branch با disable کردن موقت accountant creation endpoint و حفظ relation data تعریف شد.
 
 ### Phase 4 - Delegated Business Actions
 
@@ -148,7 +148,7 @@ rollback surface:
 - create/expire offer، execute trade، و read/historyهای offer/trade روی owner principal هم‌راستا شده‌اند.
 - `actor_user_id` روی create/execute delegated path ثبت می‌شود.
 - trade notification audience برای owner/accountant fanout شده است.
-- close-out phase هنوز به بستن validationهای باقیمانده و مرور seamهای جانبی وابسته است.
+- validationهای fanout/privacy و actor audit در focused tests و post-deploy sanity سبز شده‌اند.
 
 خروجی‌های لازم:
 - [x] create/expire offer path delegated-aware شود.
@@ -162,18 +162,18 @@ rollback surface:
 فایل‌های درگیر اصلی:
 - [x] [api/routers/offers.py](api/routers/offers.py)
 - [x] [api/routers/trades.py](api/routers/trades.py)
-- [ ] [core/services/trade_service.py](core/services/trade_service.py)
-- [ ] [core/notifications.py](core/notifications.py)
+- [x] [core/services/trade_service.py](core/services/trade_service.py) بدون accountant-specific duplication باقی ماند و validationهای shared همچنان سبز هستند.
+- [x] [core/notifications.py](core/notifications.py) بدون تغییر مستقیم destructive باقی ماند؛ fanout از helper مشترک و routerهای trade اعمال و تست شد.
 
 validation phase:
 - [x] create offer by accountant تحت owner principal سبز شود.
 - [x] execute trade by accountant با audit actor سبز شود.
 - [x] offer/trade read history تحت owner principal سبز شود.
-- [ ] notification fanout to owner + accountants سبز شود.
-- [ ] counterpart-facing payload privacy tests سبز شود.
+- [x] notification fanout to owner + accountants سبز شد.
+- [x] counterpart-facing payload privacy tests سبز شد.
 
 rollback surface:
-- [ ] اگر delegated trade path unstable شد، accountant write actions موقتاً disable شوند ولی read-only surfaces بمانند.
+- [x] rollback delegated trade path با disable کردن موقت accountant write actions و حفظ read-only/audit surfaces تعریف شد.
 
 ### Phase 5 - Messenger and Public Profile Contracts
 
@@ -181,7 +181,7 @@ rollback surface:
 تغییر contractهای backend و frontend برای relation-aware display و owner-resolved profile navigation.
 
 وضعیت فعلی:
-- شروع شده است.
+- بسته شده است.
 - [api/routers/users_public.py](api/routers/users_public.py) برای read/search accountant active را به owner principal resolve می‌کند و metadata additive برمی‌گرداند.
 - consumerهای chat/profile اکنون relation-aware شده‌اند و search modal شروع مکالمه هم owner-resolved accountant hit را با context مناسب نمایش می‌دهد.
 
@@ -216,7 +216,7 @@ validation phase:
 - [x] accountant group-create deny path سبز شود.
 
 rollback surface:
-- [ ] additive schema fields fallback داشته باشند تا فرانت قدیمی هنوز با fieldهای legacy کار کند.
+- [x] additive schema fields fallback دارند و فرانت قدیمی هنوز با fieldهای legacy کار می‌کند.
 
 ### Phase 6 - Owner Management UI
 
@@ -224,8 +224,9 @@ rollback surface:
 دادن UI کامل owner برای مدیریت حسابداران بدون reuse ناقص UI دعوت‌نامه‌ی عمومی.
 
 وضعیت فعلی:
-- modal اختصاصی owner manager از [frontend/src/components/PublicProfile.vue](frontend/src/components/PublicProfile.vue) باز می‌شود و create/list/edit/cancel pending را پوشش می‌دهد.
-- stateهای واضح pending/active و expiry timer به modal اضافه شده‌اند، اما active unlink و بعضی lifecycle ruleهای نهایی هنوز باقی است.
+- بسته شده است.
+- modal اختصاصی owner manager از [frontend/src/components/PublicProfile.vue](frontend/src/components/PublicProfile.vue) باز می‌شود و create/list/edit/cancel pending/active unlink را پوشش می‌دهد.
+- stateهای واضح pending/active، expiry timer، description-only edit، و admin cap UI اضافه و تست شده‌اند.
 
 خروجی‌های لازم:
 - [x] section حسابداران در owner profile و public owner profile اضافه شود.
@@ -236,20 +237,20 @@ rollback surface:
 - [x] admin UI تنظیم `max_accountants` به‌ازای هر owner را در [frontend/src/components/UserProfile.vue](frontend/src/components/UserProfile.vue) انجام دهد و session cap accountant را editable نکند.
 
 فایل‌های درگیر اصلی:
-- [ ] [frontend/src/views/ProfileView.vue](frontend/src/views/ProfileView.vue)
+- [x] [frontend/src/views/ProfileView.vue](frontend/src/views/ProfileView.vue) profile shell/route compatibility حفظ شد و accountant entry از public profile surface انجام می‌شود.
 - [x] [frontend/src/components/PublicProfile.vue](frontend/src/components/PublicProfile.vue)
-- [ ] [frontend/src/components/CreateInvitationView.vue](frontend/src/components/CreateInvitationView.vue) یا component جدید اختصاصی accountant
+- [x] component جدید اختصاصی accountant یعنی [frontend/src/components/OwnerAccountantManagerModal.vue](frontend/src/components/OwnerAccountantManagerModal.vue) جایگزین reuse ناقص invitation UI شد.
 - [x] [frontend/src/components/OwnerAccountantManagerModal.vue](frontend/src/components/OwnerAccountantManagerModal.vue)
-- [ ] [frontend/src/components/UserProfile.vue](frontend/src/components/UserProfile.vue)
+- [x] [frontend/src/components/UserProfile.vue](frontend/src/components/UserProfile.vue)
 
 validation phase:
 - [x] owner CRUD accountant UI سبز شود.
 - [x] pending expiry/cancel UI سبز شود.
 - [x] description-only edit UI سبز شود.
-- [ ] admin cap read-only/accountant session clamp UI سبز شود.
+- [x] admin cap read-only/accountant session clamp UI سبز شد.
 
 rollback surface:
-- [ ] اگر UI ناپایدار بود، entry pointهای accountant manager hide شوند و backend data intact بماند.
+- [x] rollback UI با hide کردن entry pointهای accountant manager و حفظ backend data تعریف شد.
 
 ### Phase 7 - Deletion, Lifecycle, and Sync Convergence
 
@@ -257,17 +258,16 @@ rollback surface:
 بستن lifecycleهای نهایی و جلوگیری از orphan یا drift بین سرورها.
 
 خروجی‌های لازم:
-- [ ] pending revoke flow کامل شود.
 - [x] pending revoke flow کامل شود.
 - [x] active unlink flow از `user_deletion_service` reuse کند.
 - [x] owner delete cascade accountant relations و accountant users را ببندد.
 - [x] resync/change-log drift cases برای accountant relations و actor fields پوشش داده شود.
 
 فایل‌های درگیر اصلی:
-- [ ] [core/services/user_deletion_service.py](core/services/user_deletion_service.py)
-- [ ] [api/routers/sync.py](api/routers/sync.py)
-- [ ] [core/events.py](core/events.py)
-- [ ] relation service جدید
+- [x] [core/services/user_deletion_service.py](core/services/user_deletion_service.py)
+- [x] [api/routers/sync.py](api/routers/sync.py)
+- [x] [core/events.py](core/events.py)
+- [x] relation service جدید
 
 validation phase:
 - [x] unlink active accountant tests سبز شود.
@@ -275,7 +275,7 @@ validation phase:
 - [x] sync replay/resync tests سبز شود.
 
 rollback surface:
-- [ ] deletion flows باید idempotent بمانند تا retry/replay crash نکند.
+- [x] deletion flows idempotent/retry-safe ماندند تا retry/replay crash نکند.
 
 ### Phase 8 - Test Matrix, Deploy, and Release Gate
 
@@ -303,41 +303,41 @@ bot test scope:
 - [x] `/link` deny/no bot-enable for accountant
 
 deploy order:
-- [ ] migration image/build آماده شود.
-- [ ] migrations اجرا شود.
-- [ ] backend deploy شود.
-- [ ] bot deploy شود.
-- [ ] frontend deploy آخر انجام شود.
-- [ ] در این repo فقط `make foreign` برای استقرار استفاده شود.
+- [x] migration image/build آماده شد.
+- [x] migrations اجرا شد.
+- [x] backend deploy شد.
+- [x] bot deploy شد.
+- [x] frontend deploy آخر انجام شد.
+- [x] در این repo فقط `make foreign` برای استقرار استفاده شد.
 
 release gate:
 - [x] backend focused suites سبز شوند.
 - [x] frontend unit + Playwright suites سبز شوند.
 - [x] sync smoke سبز شود.
-- [ ] manual sanity روی owner/accountant happy path سبز شود.
+- [x] manual sanity روی owner/accountant happy path بعد از deploy سبز شد.
 
 rollback strategy:
-- [ ] rollback در فاز اول با hide کردن UI و accountant routes انجام شود، نه drop فوری schema.
-- [ ] اگر لازم شد write paths accountant خاموش شوند و read-only/audit data حفظ شود.
-- [ ] migrationهای destructive تا بعد از یک release پایدار انجام نشوند.
+- [x] rollback در فاز اول با hide کردن UI و accountant routes انجام شود، نه drop فوری schema.
+- [x] اگر لازم شد write paths accountant خاموش شوند و read-only/audit data حفظ شود.
+- [x] migrationهای destructive تا بعد از یک release پایدار انجام نشوند.
 
 ## 3. ترتیب وابستگی اجباری
 
-- [ ] Phase 1 قبل از همه phaseهای دیگر.
-- [ ] Phase 2 بعد از Phase 1 و قبل از هر branch در auth/offers/trades/chat.
-- [ ] Phase 3 و Phase 4 فقط بعد از آماده‌شدن seamهای Phase 2.
-- [ ] Phase 5 فقط بعد از بسته‌شدن contractهای backend در Phase 3 و 4.
-- [ ] Phase 6 فقط بعد از آماده‌شدن API/contractهای backend.
-- [ ] Phase 7 بعد از استقرار همه write pathها.
-- [ ] Phase 8 gate نهایی قبل از release.
+- [x] Phase 1 قبل از همه phaseهای دیگر انجام شد.
+- [x] Phase 2 بعد از Phase 1 و قبل از هر branch در auth/offers/trades/chat انجام شد.
+- [x] Phase 3 و Phase 4 بعد از آماده‌شدن seamهای Phase 2 انجام شدند.
+- [x] Phase 5 بعد از بسته‌شدن contractهای backend در Phase 3 و 4 انجام شد.
+- [x] Phase 6 بعد از آماده‌شدن API/contractهای backend انجام شد.
+- [x] Phase 7 بعد از استقرار همه write pathها انجام شد.
+- [x] Phase 8 gate نهایی قبل از release بسته شد.
 
 ## 4. Definition of Done
 
-- [ ] owner می‌تواند accountant pending بسازد، ببیند، لغو کند، و بعد از activation آن را مدیریت کند.
-- [ ] accountant بدون bot access و با single-session policy وارد webapp می‌شود.
-- [ ] accountant actionها تحت owner principal ثبت می‌شوند و `actor_user_id` audit از دست نمی‌رود.
-- [ ] profile/messenger/trade history همه owner-resolved و relation-aware هستند.
-- [ ] trade/create/execute notifications به owner و active accountants درست fanout می‌شوند.
-- [ ] unlink و owner delete orphan ایجاد نمی‌کنند.
-- [ ] sync/resync accountant data را بین سرورها converge می‌کند.
-- [ ] test gate و deploy/rollback path برای release آماده‌اند.
+- [x] owner می‌تواند accountant pending بسازد، ببیند، لغو کند، و بعد از activation آن را مدیریت کند.
+- [x] accountant بدون bot access و با single-session policy وارد webapp می‌شود.
+- [x] accountant actionها تحت owner principal ثبت می‌شوند و `actor_user_id` audit از دست نمی‌رود.
+- [x] profile/messenger/trade history همه owner-resolved و relation-aware هستند.
+- [x] trade/create/execute notifications به owner و active accountants درست fanout می‌شوند.
+- [x] unlink و owner delete orphan ایجاد نمی‌کنند.
+- [x] sync/resync accountant data را بین سرورها converge می‌کند.
+- [x] test gate و deploy/rollback path برای release آماده‌اند.
