@@ -115,11 +115,11 @@ def format_trade_history(trades, target_user, current_user_id: int) -> str:
         if trade.responder_user_id == current_user_id:
             # کاربر فعلی پاسخ‌دهنده بود - trade_type همان نوع عمل اوست
             is_buy = trade.trade_type == TradeType.BUY
-            counterparty = trade.offer_user.account_name
+            counterparty = getattr(getattr(trade, "offer_user", None), "account_name", "")
         else:
             # کاربر فعلی لفظ‌دهنده بود - عکس trade_type
             is_buy = trade.trade_type != TradeType.BUY
-            counterparty = trade.responder_user.account_name
+            counterparty = getattr(getattr(trade, "responder_user", None), "account_name", "")
         
         trade_emoji = "🟢" if is_buy else "🔴"
         trade_label = "خرید" if is_buy else "فروش"
@@ -184,6 +184,45 @@ async def change_history_months(callback: types.CallbackQuery, callback_data: Hi
         )
     except TelegramBadRequest:
         pass  # پیام تغییر نکرده
+    await callback.answer()
+
+
+async def show_trade_history(callback: types.CallbackQuery, callback_data: TradeHistoryCallback, state: FSMContext, user: Optional[User]):
+    if not user:
+        await callback.answer("لطفاً ابتدا ثبت نام کنید!", show_alert=True)
+        return
+
+    target_user_id = callback_data.target_user_id
+    target_user, trades = await get_trade_history(user.id, target_user_id, months=3)
+    if target_user is None and not trades and target_user_id not in {user.id, 0}:
+        await callback.answer("کاربر یافت نشد!", show_alert=True)
+        return
+
+    await state.update_data(history_months=3, history_target_id=target_user_id)
+    is_self = target_user_id in {user.id, 0}
+    text = format_trade_history(trades, None if is_self else target_user, user.id)
+    await callback.message.edit_text(text, reply_markup=get_trade_history_keyboard(target_user_id))
+    await callback.answer()
+
+
+async def filter_trade_history(callback: types.CallbackQuery, callback_data: HistoryPageCallback, state: FSMContext, user: Optional[User]):
+    if not user:
+        await callback.answer("لطفاً ابتدا ثبت نام کنید!", show_alert=True)
+        return
+
+    target_user_id = callback_data.target_user_id
+    target_user, trades = await get_trade_history(user.id, target_user_id, months=callback_data.months)
+    if target_user is None and not trades and target_user_id not in {user.id, 0}:
+        await callback.answer("کاربر یافت نشد!", show_alert=True)
+        return
+
+    await state.update_data(history_months=callback_data.months, history_target_id=target_user_id)
+    is_self = target_user_id in {user.id, 0}
+    text = format_trade_history(trades, None if is_self else target_user, user.id)
+    try:
+        await callback.message.edit_text(text, reply_markup=get_trade_history_keyboard(target_user_id))
+    except TelegramBadRequest:
+        pass
     await callback.answer()
 
 

@@ -678,7 +678,7 @@ async def sync_direct_message_threading(
 
     members = await _load_direct_chat_members(db, direct_chat.id, sender.id, receiver.id)
     for member in members.values():
-        if member.is_hidden:
+        if getattr(member, "is_hidden", False):
             member.is_hidden = False
             member.hidden_at = None
             member.updated_at = message.created_at or datetime.now(timezone.utc)

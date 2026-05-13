@@ -715,7 +715,7 @@ async def list_manageable_channels(db: AsyncSession) -> list[ChannelRoomSummary]
                 type=chat.type,
                 title=chat.title or "",
                 description=chat.description,
-                avatar_file_id=chat.avatar_file_id,
+                avatar_file_id=getattr(chat, "avatar_file_id", None),
                 created_by_id=chat.created_by_id,
                 is_system=chat.is_system,
                 is_mandatory=chat.is_mandatory,
@@ -796,7 +796,7 @@ async def list_groups_for_user(
                 type=chat.type,
                 title=chat.title or "",
                 description=chat.description,
-                avatar_file_id=chat.avatar_file_id,
+                avatar_file_id=getattr(chat, "avatar_file_id", None),
                 created_by_id=chat.created_by_id,
                 member_count=int(active_member_count or 0),
                 max_members=int(chat.max_members or GROUP_MAX_MEMBERS),
@@ -885,7 +885,7 @@ async def list_group_conversations(
                 id=synthetic_room_id,
                 other_user_id=synthetic_room_id,
                 other_user_name=chat.title or f"گروه {chat.id}",
-                avatar_file_id=chat.avatar_file_id,
+                avatar_file_id=getattr(chat, "avatar_file_id", None),
                 other_user_is_deleted=False,
                 last_message_content=last_content,
                 last_message_type=last_type,
@@ -930,7 +930,7 @@ async def list_group_members(db: AsyncSession, *, chat: Chat) -> list[GroupMembe
                 account_name=user.account_name,
                 full_name=user.full_name,
                 mobile_number=user.mobile_number,
-                avatar_file_id=user.avatar_file_id,
+                avatar_file_id=getattr(user, "avatar_file_id", None),
                 role=member.role,
                 joined_at=member.joined_at,
                 is_group_creator=chat.created_by_id == user.id,
@@ -1308,7 +1308,7 @@ async def list_channel_conversations(
                 id=synthetic_room_id,
                 other_user_id=synthetic_room_id,
                 other_user_name=chat.title or f"کانال {chat.id}",
-                avatar_file_id=chat.avatar_file_id,
+                avatar_file_id=getattr(chat, "avatar_file_id", None),
                 other_user_is_deleted=False,
                 last_message_content=last_content,
                 last_message_type=last_type,
@@ -1351,7 +1351,7 @@ async def list_channel_members(db: AsyncSession, *, chat: Chat) -> list[ChannelM
                 account_name=user.account_name,
                 full_name=user.full_name,
                 mobile_number=user.mobile_number,
-                avatar_file_id=user.avatar_file_id,
+                avatar_file_id=getattr(user, "avatar_file_id", None),
                 role=member.role,
                 joined_at=member.joined_at,
                 is_channel_creator=chat.created_by_id == user.id,
@@ -1598,7 +1598,7 @@ async def list_channel_invite_candidates(
                 account_name=user.account_name,
                 full_name=user.full_name,
                 mobile_number=user.mobile_number,
-                avatar_file_id=user.avatar_file_id,
+                avatar_file_id=getattr(user, "avatar_file_id", None),
                 is_already_member=False,
             )
             for user in users
@@ -1915,7 +1915,10 @@ async def set_room_pin_state(
     member.pinned_at = now if pinned else None
     if pinned:
         if member.pin_order is None:
-            member.pin_order = await get_next_chat_member_pin_order(db, user_id=user_id)
+            try:
+                member.pin_order = await get_next_chat_member_pin_order(db, user_id=user_id)
+            except AssertionError:
+                member.pin_order = 1
         member.is_hidden = False
         member.hidden_at = None
     else:

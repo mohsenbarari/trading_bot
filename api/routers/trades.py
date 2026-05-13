@@ -311,17 +311,18 @@ async def _forward_trade_if_remote_home(
     if not offer or not is_remote_home(offer.home_server):
         return None
 
-    owner_user = context.owner_user
-    actor_user = context.actor_user
+    owner_user = getattr(context, "owner_user", context)
+    actor_user = getattr(context, "actor_user", owner_user)
     payload = {
         "offer_id": trade_data.offer_id,
         "quantity": trade_data.quantity,
         "responder_user_id": owner_user.id,
-        "actor_user_id": actor_user.id,
         "edge_received_at": edge_received_at.isoformat(),
         "source_server": current_server(),
         "idempotency_key": trade_data.idempotency_key,
     }
+    if getattr(actor_user, "id", None) != owner_user.id:
+        payload["actor_user_id"] = actor_user.id
     status_code, body = await forward_trade_to_home_server(offer.home_server, payload)
     return JSONResponse(status_code=status_code, content=body)
 

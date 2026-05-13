@@ -465,7 +465,10 @@ async def receive_sync_data(
                     errors.append(f"{table}:{record_id}")
 
         if user_changes_applied:
-            await ensure_mandatory_channel_rollout(db)
+            try:
+                await ensure_mandatory_channel_rollout(db)
+            except Exception as exc:
+                logger.error(f"Failed to refresh mandatory channel rollout after sync: {exc}")
 
         await db.commit()
 
