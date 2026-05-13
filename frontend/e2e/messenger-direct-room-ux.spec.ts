@@ -636,8 +636,13 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await initialPeerConversation.click()
     await expect(page.locator('.chat-header .header-name')).toContainText(peer.accountName, { timeout: 30000 })
 
+    let releaseDocumentDownload: (() => void) | null = null
+    const holdDocumentDownload = new Promise<void>((resolve) => {
+      releaseDocumentDownload = resolve
+    })
+
     await page.route('**/api/chat/files/**', async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 10000))
+      await holdDocumentDownload
       await route.continue()
     })
 
@@ -664,6 +669,9 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await expect(resumedBubble).toBeVisible({ timeout: 30000 })
     await expect(resumedBubble).toHaveClass(/is-busy/, { timeout: 30000 })
     await expect(resumedBubble.locator('.doc-icon.doc-uploading')).toBeVisible({ timeout: 30000 })
+
+    releaseDocumentDownload?.()
+    releaseDocumentDownload = null
 
     await expect(resumedBubble).not.toHaveClass(/is-busy/, { timeout: 60000 })
     await expect(resumedBubble.locator('.doc-icon.doc-uploading')).toHaveCount(0, { timeout: 60000 })
