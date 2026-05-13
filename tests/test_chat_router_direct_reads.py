@@ -121,6 +121,14 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
         db = FakeDB(execute_results=[FakeExecuteResult(mappings=direct_rows)])
 
+        direct_rows[0]["other_user_name"] = "دفتر مستقیم"
+        direct_rows[0]["profile_user_id"] = 90
+        direct_rows[0]["profile_account_name"] = "owner-90"
+        direct_rows[0]["resolved_from_accountant_id"] = 9
+        direct_rows[0]["highlight_accountant_user_id"] = 9
+        direct_rows[0]["highlight_accountant_relation_display_name"] = "دفتر مستقیم"
+        direct_rows[0]["avatar_file_id"] = "avatar-90"
+
         with patch("api.routers.chat.build_direct_conversation_list_stmt", return_value="stmt") as stmt_mock, patch(
             "api.routers.chat.list_group_conversations",
             new=AsyncMock(return_value=[group_row]),
@@ -133,7 +141,9 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         stmt_mock.assert_called_once_with(5)
         groups_mock.assert_awaited_once_with(db, current_user_id=5)
         channels_mock.assert_awaited_once_with(db, current_user_id=5)
-        self.assertEqual([item.other_user_name for item in result], ["Channel", "Group", "Direct"])
+        self.assertEqual([item.other_user_name for item in result], ["Channel", "Group", "دفتر مستقیم"])
+        self.assertEqual(result[2].profile_user_id, 90)
+        self.assertEqual(result[2].profile_account_name, "owner-90")
         self.assertEqual(result[0].member_count, 12)
         self.assertIsNone(result[0].max_members)
         self.assertTrue(result[0].is_system)
@@ -149,13 +159,13 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         serialized = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
 
         with patch("api.routers.chat.build_direct_message_search_stmt", new=AsyncMock(return_value="stmt")) as build_mock, patch(
-            "api.routers.chat.serialize_direct_messages_for_response",
+            "api.routers.chat._serialize_direct_messages_with_accountant_contract",
             return_value=serialized,
         ) as serialize_mock:
             result = await search_messages(q="hello", chat_id=9, limit=15, db=db, current_user=current_user)
 
         build_mock.assert_awaited_once_with(db, current_user_id=5, query_text="hello", other_user_id=9, limit=15)
-        serialize_mock.assert_called_once()
+        serialize_mock.assert_awaited_once()
         self.assertIs(result, serialized)
 
     async def test_get_messages_raises_404_when_target_user_missing(self):
@@ -184,14 +194,14 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat.build_direct_message_history_statements",
             new=AsyncMock(return_value=("older", "newer")),
         ) as build_mock, patch(
-            "api.routers.chat.serialize_direct_messages_for_response",
+            "api.routers.chat._serialize_direct_messages_with_accountant_contract",
             side_effect=[serialized, [SimpleNamespace(id=6), SimpleNamespace(id=7)]],
         ) as serialize_mock:
             around_result = await get_messages(user_id=9, around_id=9, current_user=current_user, db=db)
             default_result = await get_messages(user_id=9, current_user=current_user, db=db)
 
         self.assertEqual(build_mock.await_count, 2)
-        serialize_mock.assert_any_call([unittest.mock.ANY, unittest.mock.ANY, unittest.mock.ANY], serializer=unittest.mock.ANY)
+        self.assertEqual(serialize_mock.await_count, 2)
         self.assertEqual([item.id for item in around_result], [8, 9, 10])
         self.assertEqual([item.id for item in default_result], [6, 7])
 
@@ -236,6 +246,8 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
             is_muted=True,
         )
 
+        rows[0]["other_user_name"] = "دفتر A"
+
         with patch("api.routers.chat.build_direct_conversation_list_stmt", return_value="stmt") as stmt_mock, patch(
             "api.routers.chat.list_group_conversations",
             new=AsyncMock(return_value=[group_row]),
@@ -250,6 +262,7 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         channels_mock.assert_awaited_once_with(db, current_user_id=5)
         self.assertEqual(result.total_unread, 7)
         self.assertEqual(result.unread_chats_count, 3)
+        self.assertEqual(result.conversations_with_unread[0]["user_name"], "دفتر A")
         self.assertEqual(result.conversations_with_unread[1]["user_id"], -20)
         self.assertEqual(result.conversations_with_unread[2]["user_id"], -30)
         self.assertEqual(result.muted_conversation_ids, [-30, 9])

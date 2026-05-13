@@ -110,6 +110,12 @@ from core.services.chat_room_service import (
 )
 from core.services.avatar_service import resolve_owned_avatar_file_id
 from core.services.accountant_relation_service import is_user_accountant
+from core.services.accountant_chat_contract import (
+    apply_accountant_identity_to_direct_conversation_row,
+    apply_accountant_identity_to_message_payload,
+    collect_message_identity_user_ids,
+    load_accountant_chat_identity_map,
+)
 from core.services.chat_service import (
     apply_direct_message_delete,
     apply_direct_message_edit,
@@ -149,8 +155,9 @@ router = APIRouter(
 )
 
 
-def _serialize_pinned_message_state(
+async def _serialize_pinned_message_state(
     *,
+    db: AsyncSession,
     room_kind: str,
     chat: Chat | None,
     message: Message | None,
@@ -161,10 +168,7 @@ def _serialize_pinned_message_state(
         pinned_at=getattr(chat, "pinned_message_at", None) if chat is not None else None,
         pinned_by_user_id=getattr(chat, "pinned_message_by_id", None) if chat is not None else None,
         message=(
-            serialize_direct_message_for_response(
-                message,
-                serializer=MessageRead.from_orm_with_forwarding,
-            )
+            await _serialize_direct_message_with_accountant_contract(db, message)
             if message is not None
             else None
         ),
@@ -304,7 +308,7 @@ async def get_direct_pinned_message(
 
     chat = await get_existing_direct_chat(db, current_user.id, user_id)
     message = await get_pinned_message_for_chat(db, chat) if chat is not None else None
-    return _serialize_pinned_message_state(room_kind="direct", chat=chat, message=message)
+    return await _serialize_pinned_message_state(db=db, room_kind="direct", chat=chat, message=message)
 
 
 @router.post("/direct/{user_id}/mute", response_model=ConversationMuteResponse)
@@ -385,11 +389,7 @@ async def search_messages(
     )
     result = await db.execute(query)
     messages = result.scalars().all()
-    # Serializing with custom method
-    return serialize_direct_messages_for_response(
-        messages,
-        serializer=MessageRead.from_orm_with_forwarding,
-    )
+    return await _serialize_direct_messages_with_accountant_contract(db, messages)
 
 
 @router.get("/messages/{user_id}", response_model=List[MessageRead])
@@ -426,20 +426,14 @@ async def get_messages(
         
         # Combine: older reversed (to be asc) + newer
         messages = list(reversed(older_msgs)) + list(newer_msgs)
-        return serialize_direct_messages_for_response(
-            messages,
-            serializer=MessageRead.from_orm_with_forwarding,
-        )
+        return await _serialize_direct_messages_with_accountant_contract(db, messages)
 
     result = await db.execute(stmt_older)
     messages = result.scalars().all()
     
     # معکوس کردن برای نمایش صعودی
     messages = list(reversed(messages))
-    return serialize_direct_messages_for_response(
-        messages,
-        serializer=MessageRead.from_orm_with_forwarding,
-    )
+    return await _serialize_direct_messages_with_accountant_contract(db, messages)
 
 
 @router.post("/typing", status_code=status.HTTP_204_NO_CONTENT)
@@ -458,6 +452,60 @@ async def send_typing_signal(
 
 def _optional_attr(obj: object, name: str):
     return getattr(obj, name, None)
+
+
+async def _enrich_direct_message_reads(
+    db: AsyncSession,
+    messages: list[MessageRead],
+) -> list[MessageRead]:
+    if not messages:
+        return messages
+    identity_map = await load_accountant_chat_identity_map(
+        db,
+        collect_message_identity_user_ids(messages),
+    )
+    return [
+        MessageRead(**apply_accountant_identity_to_message_payload(message.model_dump(), identity_map))
+        for message in messages
+    ]
+
+
+async def _serialize_direct_message_with_accountant_contract(
+    db: AsyncSession,
+    message: Message,
+) -> MessageRead:
+    return (
+        await _enrich_direct_message_reads(
+            db,
+            [
+                serialize_direct_message_for_response(
+                    message,
+                    serializer=MessageRead.from_orm_with_forwarding,
+                )
+            ],
+        )
+    )[0]
+
+
+async def _serialize_direct_messages_with_accountant_contract(
+    db: AsyncSession,
+    messages: list[Message],
+) -> list[MessageRead]:
+    serialized_messages = serialize_direct_messages_for_response(
+        messages,
+        serializer=MessageRead.from_orm_with_forwarding,
+    )
+    return await _enrich_direct_message_reads(db, serialized_messages)
+
+
+def _build_direct_message_accountant_serializer(identity_map):
+    def serializer(message: Message) -> MessageRead:
+        base_payload = MessageRead.from_orm_with_forwarding(message)
+        return MessageRead(
+            **apply_accountant_identity_to_message_payload(base_payload.model_dump(), identity_map)
+        )
+
+    return serializer
 
 
 @router.get("/groups", response_model=List[GroupRoomRead])
@@ -785,7 +833,7 @@ async def get_room_pinned_message(
         raise HTTPException(status_code=400, detail="Use the direct pinned-message endpoint for personal chats")
 
     message = await get_pinned_message_for_chat(db, room)
-    return _serialize_pinned_message_state(room_kind=room.type.value, chat=room, message=message)
+    return await _serialize_pinned_message_state(db=db, room_kind=room.type.value, chat=room, message=message)
 
 
 @router.post("/rooms/{chat_id}/mute", response_model=ConversationMuteResponse)
@@ -1099,10 +1147,7 @@ async def get_room_messages(
             before_id=before_id,
             around_id=around_id,
         )
-    return serialize_direct_messages_for_response(
-        messages,
-        serializer=MessageRead.from_orm_with_forwarding,
-    )
+    return await _serialize_direct_messages_with_accountant_contract(db, messages)
 
 
 @router.post("/rooms/{chat_id}/send", response_model=MessageRead)
@@ -1124,11 +1169,16 @@ async def send_room_message(
             reply_to_message_id=data.reply_to_message_id,
             forwarded_from_id=data.forwarded_from_id,
         )
+        response_message = await _serialize_direct_message_with_accountant_contract(db, message)
+        identity_map = await load_accountant_chat_identity_map(
+            db,
+            collect_message_identity_user_ids([response_message]),
+        )
         await publish_group_message_event(
             chat=chat,
             message=message,
             member_user_ids=await list_active_room_member_user_ids(db, chat_id=chat.id),
-            serializer=MessageRead.from_orm_with_forwarding,
+            serializer=_build_direct_message_accountant_serializer(identity_map),
             publisher=publish_user_event,
         )
     else:
@@ -1141,17 +1191,19 @@ async def send_room_message(
             reply_to_message_id=data.reply_to_message_id,
             forwarded_from_id=data.forwarded_from_id,
         )
+        response_message = await _serialize_direct_message_with_accountant_contract(db, message)
+        identity_map = await load_accountant_chat_identity_map(
+            db,
+            collect_message_identity_user_ids([response_message]),
+        )
         await publish_channel_message_event(
             chat=chat,
             message=message,
             member_user_ids=await list_active_channel_member_user_ids(db, chat_id=chat.id),
-            serializer=MessageRead.from_orm_with_forwarding,
+            serializer=_build_direct_message_accountant_serializer(identity_map),
             publisher=publish_user_event,
         )
-    return serialize_direct_message_for_response(
-        message,
-        serializer=MessageRead.from_orm_with_forwarding,
-    )
+    return response_message
 
 
 @router.post("/rooms/{chat_id}/read", status_code=status.HTTP_204_NO_CONTENT)
@@ -1215,21 +1267,23 @@ async def send_message(
     )
     if message is None:
         raise HTTPException(status_code=500, detail="Failed to persist message")
+    response_message = await _serialize_direct_message_with_accountant_contract(db, message)
+    identity_map = await load_accountant_chat_identity_map(
+        db,
+        collect_message_identity_user_ids([response_message]),
+    )
     
     # انتشار پیام برای گیرنده (Real-time update)
     # استفاده از MessageRead برای سریالایز کردن مناسب
     await publish_direct_message_event(
         receiver_id=data.receiver_id,
         message=message,
-        serializer=MessageRead.from_orm_with_forwarding,
+        serializer=_build_direct_message_accountant_serializer(identity_map),
         publisher=publish_user_event,
-        sender_name=current_user.account_name,
+        sender_name=None,
     )
 
-    return serialize_direct_message_for_response(
-        message,
-        serializer=MessageRead.from_orm_with_forwarding,
-    )
+    return response_message
 
 
 @router.put("/messages/{message_id}", response_model=MessageRead)
@@ -1246,10 +1300,7 @@ async def update_message(
         actor_id=current_user.id,
         content=data.content,
     )
-    return serialize_direct_message_for_response(
-        msg,
-        serializer=MessageRead.from_orm_with_forwarding,
-    )
+    return await _serialize_direct_message_with_accountant_contract(db, msg)
 
 
 @router.post("/messages/{message_id}/reaction", response_model=MessageRead)
@@ -1273,13 +1324,20 @@ async def toggle_message_reaction(
         updated_message,
         serializer=MessageRead.from_orm_with_forwarding,
     )
+    identity_map = await load_accountant_chat_identity_map(
+        db,
+        collect_message_identity_user_ids([reaction_payload]),
+    )
+    reaction_payload = MessageRead(
+        **apply_accountant_identity_to_message_payload(reaction_payload.model_dump(), identity_map)
+    )
     reaction_chat = await db.get(Chat, updated_message.chat_id) if updated_message.chat_id else None
     if reaction_chat is not None and reaction_chat.type == ChatType.CHANNEL and not reaction_chat.is_deleted:
         await publish_channel_reaction_event(
             chat=reaction_chat,
             message=updated_message,
             member_user_ids=await list_active_channel_member_user_ids(db, chat_id=reaction_chat.id),
-            serializer=MessageRead.from_orm_with_forwarding,
+            serializer=_build_direct_message_accountant_serializer(identity_map),
             publisher=publish_user_event,
         )
     elif reaction_chat is not None and reaction_chat.type == ChatType.GROUP and not reaction_chat.is_deleted:
@@ -1287,13 +1345,13 @@ async def toggle_message_reaction(
             chat=reaction_chat,
             message=updated_message,
             member_user_ids=await list_active_room_member_user_ids(db, chat_id=reaction_chat.id),
-            serializer=MessageRead.from_orm_with_forwarding,
+            serializer=_build_direct_message_accountant_serializer(identity_map),
             publisher=publish_user_event,
         )
     else:
         await publish_direct_reaction_event(
             message=updated_message,
-            serializer=MessageRead.from_orm_with_forwarding,
+            serializer=_build_direct_message_accountant_serializer(identity_map),
             publisher=publish_user_event,
         )
 
@@ -1313,7 +1371,8 @@ async def toggle_message_pin(
         actor_id=current_user.id,
         pinned=data.pinned,
     )
-    return _serialize_pinned_message_state(
+    return await _serialize_pinned_message_state(
+        db=db,
         room_kind=chat.type.value,
         chat=chat,
         message=pinned_message,

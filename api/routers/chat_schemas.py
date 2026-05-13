@@ -47,7 +47,17 @@ class MessageRead(BaseModel):
     created_at: datetime
     forwarded_from_id: Optional[int] = None
     forwarded_from_name: Optional[str] = None
+    forwarded_from_profile_user_id: Optional[int] = None
+    forwarded_from_profile_account_name: Optional[str] = None
+    forwarded_from_resolved_from_accountant_id: Optional[int] = None
+    forwarded_from_highlight_accountant_user_id: Optional[int] = None
+    forwarded_from_highlight_accountant_relation_display_name: Optional[str] = None
     sender_name: Optional[str] = None
+    sender_profile_user_id: Optional[int] = None
+    sender_profile_account_name: Optional[str] = None
+    sender_resolved_from_accountant_id: Optional[int] = None
+    sender_highlight_accountant_user_id: Optional[int] = None
+    sender_highlight_accountant_relation_display_name: Optional[str] = None
     reply_to_message: Optional[MessageReplyRead] = None
     reactions: List[MessageReactionRead] = Field(default_factory=list)
 
@@ -140,6 +150,11 @@ class ConversationRead(BaseModel):
     other_user_id: int
     other_user_name: str
     avatar_file_id: Optional[str] = None
+    profile_user_id: Optional[int] = None
+    profile_account_name: Optional[str] = None
+    resolved_from_accountant_id: Optional[int] = None
+    highlight_accountant_user_id: Optional[int] = None
+    highlight_accountant_relation_display_name: Optional[str] = None
     other_user_is_deleted: bool = False
     last_message_content: Optional[str] = None
     last_message_type: Optional[MessageType] = None

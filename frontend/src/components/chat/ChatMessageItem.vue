@@ -382,6 +382,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAudioStore } from '../../stores/audio'
 import type { Message, MessageReaction } from '../../types/chat'
 import ChatAlbumLayout from './ChatAlbumLayout.vue'
+import { resolveForwardedProfileTarget } from '../../utils/accountantChatIdentity'
 import { observeVisibility } from '../../utils/sharedVisibilityObserver'
 import { MESSAGE_REACTION_ORDER } from '../../utils/messageReactions'
 import {
@@ -471,7 +472,7 @@ const isSending = computed(() => {
 const isError = computed(() => props.msg.is_error)
 const isSelected = computed(() => props.selectedMessages.includes(props.msg.id))
 const canOpenForwardedProfile = computed(() => {
-  return Number.isInteger(Number(props.msg.forwarded_from_id)) && typeof props.msg.forwarded_from_name === 'string' && props.msg.forwarded_from_name.trim().length > 0
+  return resolveForwardedProfileTarget(props.msg) !== null
 })
 const groupedReactions = computed(() => {
   if (props.msg.is_deleted || !Array.isArray(props.msg.reactions) || props.msg.reactions.length === 0) {
@@ -1339,13 +1340,12 @@ function handleForwardedProfileClick() {
     return
   }
 
-  const id = Number(props.msg.forwarded_from_id)
-  const accountName = typeof props.msg.forwarded_from_name === 'string' ? props.msg.forwarded_from_name.trim() : ''
-  if (!Number.isInteger(id) || id <= 0 || !accountName) {
+  const target = resolveForwardedProfileTarget(props.msg)
+  if (!target) {
     return
   }
 
-  emit('open-public-profile', { id, account_name: accountName })
+  emit('open-public-profile', target)
 }
 
 const handleWrapperClick = (e: MouseEvent) => {

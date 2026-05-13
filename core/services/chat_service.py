@@ -20,6 +20,7 @@ from sqlalchemy.orm import aliased, joinedload
 
 from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType, MessageType
 from core.services.accountant_relation_service import get_active_accountant_relation_for_accountant
+from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.chat import Chat
 from models.chat_file import ChatFile
 from models.chat_member import ChatMember
@@ -155,6 +156,10 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
     """Project only the fields needed by direct-chat list and poll endpoints."""
     user1_alias = aliased(User)
     user2_alias = aliased(User)
+    user1_relation_alias = aliased(AccountantRelation)
+    user2_relation_alias = aliased(AccountantRelation)
+    user1_owner_alias = aliased(User)
+    user2_owner_alias = aliased(User)
     last_message_alias = aliased(Message)
     direct_chat_lookup = (
         select(
@@ -202,13 +207,45 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         (Conversation.user1_id == current_user_id, Conversation.user2_id),
         else_=Conversation.user1_id,
     ).label("other_user_id")
+    user1_relation_display_name = func.nullif(func.btrim(user1_relation_alias.relation_display_name), "")
+    user2_relation_display_name = func.nullif(func.btrim(user2_relation_alias.relation_display_name), "")
+    user1_display_name = func.coalesce(
+        user1_relation_display_name,
+        user1_owner_alias.account_name,
+        user1_alias.account_name,
+    )
+    user2_display_name = func.coalesce(
+        user2_relation_display_name,
+        user2_owner_alias.account_name,
+        user2_alias.account_name,
+    )
     other_user_name = case(
-        (Conversation.user1_id == current_user_id, user2_alias.account_name),
-        else_=user1_alias.account_name,
+        (Conversation.user1_id == current_user_id, user2_display_name),
+        else_=user1_display_name,
     ).label("other_user_name")
+    other_user_profile_user_id = case(
+        (Conversation.user1_id == current_user_id, func.coalesce(user2_owner_alias.id, user2_alias.id)),
+        else_=func.coalesce(user1_owner_alias.id, user1_alias.id),
+    ).label("profile_user_id")
+    other_user_profile_account_name = case(
+        (Conversation.user1_id == current_user_id, func.coalesce(user2_owner_alias.account_name, user2_alias.account_name)),
+        else_=func.coalesce(user1_owner_alias.account_name, user1_alias.account_name),
+    ).label("profile_account_name")
+    resolved_from_accountant_id = case(
+        (Conversation.user1_id == current_user_id, user2_relation_alias.accountant_user_id),
+        else_=user1_relation_alias.accountant_user_id,
+    ).label("resolved_from_accountant_id")
+    highlight_accountant_user_id = case(
+        (Conversation.user1_id == current_user_id, user2_relation_alias.accountant_user_id),
+        else_=user1_relation_alias.accountant_user_id,
+    ).label("highlight_accountant_user_id")
+    highlight_accountant_relation_display_name = case(
+        (Conversation.user1_id == current_user_id, user2_relation_alias.relation_display_name),
+        else_=user1_relation_alias.relation_display_name,
+    ).label("highlight_accountant_relation_display_name")
     other_user_avatar_file_id = case(
-        (Conversation.user1_id == current_user_id, user2_alias.avatar_file_id),
-        else_=user1_alias.avatar_file_id,
+        (Conversation.user1_id == current_user_id, func.coalesce(user2_owner_alias.avatar_file_id, user2_alias.avatar_file_id)),
+        else_=func.coalesce(user1_owner_alias.avatar_file_id, user1_alias.avatar_file_id),
     ).label("avatar_file_id")
     other_user_is_deleted = case(
         (Conversation.user1_id == current_user_id, user2_alias.is_deleted),
@@ -280,6 +317,11 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
             other_user_id,
             other_user_name,
             other_user_avatar_file_id,
+            other_user_profile_user_id,
+            other_user_profile_account_name,
+            resolved_from_accountant_id,
+            highlight_accountant_user_id,
+            highlight_accountant_relation_display_name,
             other_user_is_deleted,
             last_message_content,
             last_message_alias.message_type.label("last_message_type"),
@@ -294,6 +336,36 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         .select_from(Conversation)
         .join(user1_alias, Conversation.user1_id == user1_alias.id)
         .join(user2_alias, Conversation.user2_id == user2_alias.id)
+        .outerjoin(
+            user1_relation_alias,
+            sa.and_(
+                user1_relation_alias.accountant_user_id == user1_alias.id,
+                user1_relation_alias.status == AccountantRelationStatus.ACTIVE,
+                user1_relation_alias.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(
+            user2_relation_alias,
+            sa.and_(
+                user2_relation_alias.accountant_user_id == user2_alias.id,
+                user2_relation_alias.status == AccountantRelationStatus.ACTIVE,
+                user2_relation_alias.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(
+            user1_owner_alias,
+            sa.and_(
+                user1_owner_alias.id == user1_relation_alias.owner_user_id,
+                user1_owner_alias.is_deleted.is_(False),
+            ),
+        )
+        .outerjoin(
+            user2_owner_alias,
+            sa.and_(
+                user2_owner_alias.id == user2_relation_alias.owner_user_id,
+                user2_owner_alias.is_deleted.is_(False),
+            ),
+        )
         .outerjoin(
             direct_chat_lookup,
             sa.and_(

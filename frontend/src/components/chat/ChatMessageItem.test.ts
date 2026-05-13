@@ -92,10 +92,43 @@ function buildVoiceMessage(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function buildTextMessage(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 61,
+    sender_id: 9,
+    content: 'forwarded text',
+    message_type: 'text',
+    created_at: '2026-05-12T10:00:00.000Z',
+    is_deleted: false,
+    reactions: [],
+    ...overrides,
+  }
+}
+
 function mountVoiceMessage(messageOverrides: Record<string, unknown> = {}) {
   return mount(ChatMessageItem, {
     props: {
       msg: buildVoiceMessage(messageOverrides),
+      currentUserId: 7,
+      selectedUserName: 'Ali',
+      selectedMessages: [],
+      imageCache: {},
+      isSelectionMode: false,
+    },
+    global: {
+      stubs: {
+        ChatAlbumLayout: {
+          template: '<div class="album-layout-stub"></div>',
+        },
+      },
+    },
+  })
+}
+
+function mountTextMessage(messageOverrides: Record<string, unknown> = {}) {
+  return mount(ChatMessageItem, {
+    props: {
+      msg: buildTextMessage(messageOverrides),
       currentUserId: 7,
       selectedUserName: 'Ali',
       selectedMessages: [],
@@ -164,5 +197,20 @@ describe('ChatMessageItem.vue', () => {
     expect(wrapper.find('.msg-voice').classes()).toContain('is-error')
     expect(chatMessageItemMocks.audioStore!.currentPlayingId).toBeNull()
     expect(chatMessageItemMocks.audioStore!.setCurrentPlaying).toHaveBeenCalledWith(null)
+  })
+
+  it('emits owner profile targets for forwarded accountant messages', async () => {
+    const wrapper = mountTextMessage({
+      forwarded_from_id: 12,
+      forwarded_from_name: 'دفتر حسابدار',
+      forwarded_from_profile_user_id: 88,
+      forwarded_from_profile_account_name: 'owner-88',
+    })
+
+    await wrapper.get('.forward-link').trigger('click')
+
+    expect(wrapper.emitted('open-public-profile')).toEqual([
+      [{ id: 88, account_name: 'owner-88' }],
+    ])
   })
 })

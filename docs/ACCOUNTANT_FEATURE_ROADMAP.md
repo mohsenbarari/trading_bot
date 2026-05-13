@@ -2,13 +2,13 @@
 
 این roadmap فقط بعد از بسته‌شدن challengeهای [ACCOUNTANT_FEATURE_CHECKLIST.md](ACCOUNTANT_FEATURE_CHECKLIST.md) ساخته شده است. این سند challenge جدید باز نمی‌کند؛ فقط ترتیب اجرای دقیق، وابستگی‌ها، validation، و rollback surface را مشخص می‌کند.
 
-## Snapshot وضعیت فعلی تا 2026-05-12
+## Snapshot وضعیت فعلی تا 2026-05-13
 
 - [x] Phase 1 از نظر data foundation، migration، sync/change-log و actor fields بسته شده است.
 - [x] Phase 2 از نظر seamهای relation lifecycle، effective owner resolution و audience fanout بسته شده است.
 - [x] Phase 3 از نظر owner-facing accountant APIs، accountant-aware register/session policy و bot deny branching بسته شده است.
 - [x] Phase 4 از نظر delegated offer/trade write/read، actor audit، و fanout/privacy validation بسته شده است.
-- [ ] Phase 5 شروع شده است؛ `users_public` اکنون accountantها را به owner principal resolve می‌کند، public profile frontend context اولیه این resolve را نمایش می‌دهد، و deny pathهای accountant برای direct chat جدید و group creation در messenger/backend بسته شده‌اند؛ اما contractهای chat/realtime و fieldهای relation-aware کامل هنوز باقی مانده‌اند.
+- [ ] Phase 5 به‌صورت عمیق‌تر پیش رفته است؛ `users_public` اکنون accountantها را به owner principal resolve می‌کند، public profile frontend context اولیه این resolve را نمایش می‌دهد، deny pathهای accountant برای direct chat جدید و group creation در messenger/backend بسته شده‌اند، و contractهای relation-aware برای chat/realtime در direct/room paths با navigation owner-resolved و direct-conversation projection service-level اضافه شده‌اند؛ اما accountant highlight state و چند consumer/validation نهایی هنوز باقی مانده‌اند.
 - [ ] Phase 6 به‌صورت partial شروع شده است؛ modal مدیریت حسابدار owner وجود دارد، اما section نهایی profile/public profile و بعضی UX/lifecycle ruleها هنوز باقی مانده‌اند.
 - [ ] Phase 7 هنوز شروع نشده است.
 - [ ] Phase 8 هنوز شروع نشده است.
@@ -188,8 +188,8 @@ rollback surface:
 خروجی‌های لازم:
 - [x] `users_public` owner-resolve behavior اضافه شود.
 - [x] `UserPublicRead` با metadata لازم مثل `resolved_from_accountant_id` گسترش پیدا کند.
-- [ ] `ConversationRead`, `MessageRead`, و payloadهای realtime با fieldهای additive برای display/profile target گسترش پیدا کنند.
-- [ ] `chat_service` projection relation-aware display name تولید کند.
+- [x] `ConversationRead`, `MessageRead`, و payloadهای realtime با fieldهای additive برای display/profile target گسترش پیدا کنند.
+- [x] `chat_service` projection relation-aware display name تولید کند.
 - [x] accountant direct chat initiation در UI/backend deny شود.
 - [x] accountant group creation در UI/backend deny شود.
 
@@ -197,21 +197,21 @@ rollback surface:
 - [ ] [api/routers/users_public.py](api/routers/users_public.py)
 - [ ] [schemas.py](schemas.py)
 - [ ] [api/routers/chat_schemas.py](api/routers/chat_schemas.py)
-- [ ] [core/services/chat_service.py](core/services/chat_service.py)
-- [ ] [api/routers/chat.py](api/routers/chat.py)
+- [x] [core/services/chat_service.py](core/services/chat_service.py)
+- [x] [api/routers/chat.py](api/routers/chat.py)
 
 frontend contract consumers:
-- [ ] [frontend/src/components/ChatView.vue](frontend/src/components/ChatView.vue)
-- [ ] [frontend/src/components/chat/ChatConversationList.vue](frontend/src/components/chat/ChatConversationList.vue)
-- [ ] [frontend/src/components/chat/ChatMessageItem.vue](frontend/src/components/chat/ChatMessageItem.vue)
+- [x] [frontend/src/components/ChatView.vue](frontend/src/components/ChatView.vue)
+- [x] [frontend/src/components/chat/ChatConversationList.vue](frontend/src/components/chat/ChatConversationList.vue)
+- [x] [frontend/src/components/chat/ChatMessageItem.vue](frontend/src/components/chat/ChatMessageItem.vue)
 - [ ] [frontend/src/components/chat/ChatNewConversationModal.vue](frontend/src/components/chat/ChatNewConversationModal.vue)
 - [ ] [frontend/src/views/PublicProfileView.vue](frontend/src/views/PublicProfileView.vue)
 - [ ] [frontend/src/components/PublicProfile.vue](frontend/src/components/PublicProfile.vue)
 
 validation phase:
-- [ ] owner-resolved public profile navigation سبز شود.
+- [x] owner-resolved public profile navigation سبز شود.
 - [ ] accountant highlight query/state سبز شود.
-- [ ] conversation list/header/message labels relation-aware سبز شوند.
+- [x] conversation list/header/message labels relation-aware سبز شوند.
 - [x] accountant direct-chat deny path سبز شود.
 - [x] accountant group-create deny path سبز شود.
 
