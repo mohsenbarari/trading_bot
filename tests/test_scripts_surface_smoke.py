@@ -1,10 +1,12 @@
 import json
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+PYTHON_BIN = sys.executable
 
 PYTHON_SCRIPTS = (
     'scripts/backfill_direct_chats.py',
@@ -37,7 +39,7 @@ def run_checked(command: list[str]) -> subprocess.CompletedProcess[str]:
 
 class ScriptsSurfaceSmokeTests(unittest.TestCase):
     def test_python_scripts_compile(self):
-        result = run_checked(['/bin/python3', '-m', 'py_compile', *PYTHON_SCRIPTS])
+        result = run_checked([PYTHON_BIN, '-m', 'py_compile', *PYTHON_SCRIPTS])
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
     def test_shell_scripts_have_valid_bash_syntax(self):
@@ -45,7 +47,7 @@ class ScriptsSurfaceSmokeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
     def test_report_test_matrix_cli_outputs_parseable_json(self):
-        result = run_checked(['/bin/python3', 'scripts/report_test_matrix.py', '--json'])
+        result = run_checked([PYTHON_BIN, 'scripts/report_test_matrix.py', '--json'])
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
         payload = json.loads(result.stdout)

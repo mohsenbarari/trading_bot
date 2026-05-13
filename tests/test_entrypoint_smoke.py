@@ -1,16 +1,18 @@
 import importlib
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+PYTHON_BIN = sys.executable
 
 
 class EntrypointSmokeTests(unittest.TestCase):
     def test_entrypoint_files_compile(self):
         result = subprocess.run(
-            ['/bin/python3', '-m', 'py_compile', 'main.py', 'run_bot.py', 'manage.py'],
+            [PYTHON_BIN, '-m', 'py_compile', 'main.py', 'run_bot.py', 'manage.py'],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,

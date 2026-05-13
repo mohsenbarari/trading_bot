@@ -1,10 +1,12 @@
 import ast
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+PYTHON_BIN = sys.executable
 TOOL_PATHS = [
     Path('tests/api_load_test.py'),
     Path('tests/load_test.py'),
@@ -17,7 +19,7 @@ EXPECTED_PHRASE = 'manual non-regression tool'
 class NonRegressionToolSmokeTests(unittest.TestCase):
     def test_manual_tools_compile_cleanly(self):
         result = subprocess.run(
-            ['/bin/python3', '-m', 'py_compile', *[str(path) for path in TOOL_PATHS]],
+            [PYTHON_BIN, '-m', 'py_compile', *[str(path) for path in TOOL_PATHS]],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
