@@ -22,11 +22,27 @@ from core.services.trade_service import get_available_trade_amounts
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
 from models.commodity import Commodity
-from api.deps import EffectiveOwnerActor, get_current_user, get_effective_owner_actor_context
+from api.deps import EffectiveOwnerActor, get_current_user, get_current_user_optional, get_effective_owner_actor_context
 from core.server_routing import current_server
 
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_offer_owner_context(
+    context: EffectiveOwnerActor | None,
+    current_user: Optional[User],
+) -> EffectiveOwnerActor:
+    if hasattr(context, "owner_user") and hasattr(context, "actor_user"):
+        return context
+    if current_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return EffectiveOwnerActor(
+        owner_user=current_user,
+        actor_user=current_user,
+        relation=None,
+        is_accountant_context=False,
+    )
 
 
 router = APIRouter(
@@ -205,7 +221,8 @@ async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
 async def create_offer(
     offer_data: OfferCreate,
     db: AsyncSession = Depends(get_db),
-    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context)
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    context: EffectiveOwnerActor | None = Depends(get_effective_owner_actor_context),
 ):
     """
     ثبت لفظ جدید از MiniApp
@@ -214,6 +231,7 @@ async def create_offer(
     - ارسال به کانال تلگرام
     """
     from core.enums import UserRole
+    context = _resolve_offer_owner_context(context, current_user)
     owner_user = context.owner_user
     actor_user = context.actor_user
     
@@ -421,7 +439,8 @@ async def get_active_offers(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    context: EffectiveOwnerActor | None = Depends(get_effective_owner_actor_context),
 ):
     """
     دریافت لیست لفظ‌های فعال
@@ -446,6 +465,7 @@ async def get_active_offers(
     from core.trading_settings import get_trading_settings_async
     ts = await get_trading_settings_async()
 
+    context = _resolve_offer_owner_context(context, current_user)
     owner_user = context.owner_user
     
     return [offer_to_response(o, ts, viewer_user_id=owner_user.id, include_owner_identity=False) for o in offers]
@@ -458,11 +478,13 @@ async def get_my_offers(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    context: EffectiveOwnerActor | None = Depends(get_effective_owner_actor_context),
 ):
     """
     دریافت لفظ‌های کاربر
     """
+    context = _resolve_offer_owner_context(context, current_user)
     owner_user = context.owner_user
 
     query = select(Offer).options(

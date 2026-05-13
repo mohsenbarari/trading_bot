@@ -41,8 +41,8 @@ async def create_superadmin(mobile: str, account_name: str, temp_password: str):
         
         db.add(admin_user)
         try:
-                    await db.flush()
-                    await ensure_mandatory_channel_membership(db, user=admin_user)
+            await db.flush()
+            await ensure_mandatory_channel_membership(db, user=admin_user)
             await db.commit()
             print("✅ Super Admin successfully created!")
             print(
