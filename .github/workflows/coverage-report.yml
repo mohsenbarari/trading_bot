@@ -68,6 +68,7 @@ jobs:
           python3 -m coverage json -o tmp/backend-coverage.json || status=$?
           python3 -m coverage xml -o tmp/backend-coverage.xml || status=$?
           python3 -m coverage html -d tmp/backend-coverage-html || status=$?
+          printf '%s\n' "$status" > tmp/backend-coverage.exitcode
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
@@ -80,7 +81,9 @@ jobs:
         run: |
           set +e
           status=0
+          mkdir -p ../tmp
           npm run test:unit:coverage || status=$?
+          printf '%s\n' "$status" > ../tmp/frontend-coverage.exitcode
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
@@ -118,10 +121,14 @@ jobs:
           if-no-files-found: warn
 
       - name: Fail coverage job if a covered suite failed
-        if: always() && (steps.backend_coverage.outputs.exit_code != '0' || steps.frontend_coverage.outputs.exit_code != '0')
+        if: always()
         shell: bash
         run: |
-          echo "Backend coverage exit code: ${{ steps.backend_coverage.outputs.exit_code }}"
-          echo "Frontend coverage exit code: ${{ steps.frontend_coverage.outputs.exit_code }}"
-          echo 'At least one covered suite failed.' >&2
-          exit 1
+          backend_exit_code="$(cat tmp/backend-coverage.exitcode 2>/dev/null || echo missing)"
+          frontend_exit_code="$(cat tmp/frontend-coverage.exitcode 2>/dev/null || echo missing)"
+          echo "Backend coverage exit code: ${backend_exit_code}"
+          echo "Frontend coverage exit code: ${frontend_exit_code}"
+          if [[ "${backend_exit_code}" != "0" || "${frontend_exit_code}" != "0" ]]; then
+            echo 'At least one covered suite failed.' >&2
+            exit 1
+          fi
