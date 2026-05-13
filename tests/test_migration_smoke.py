@@ -1,10 +1,12 @@
 import configparser
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+PYTHON_BIN = sys.executable
 
 
 class MigrationSmokeTests(unittest.TestCase):
@@ -16,7 +18,7 @@ class MigrationSmokeTests(unittest.TestCase):
 
     def test_alembic_and_migration_python_files_compile(self):
         result = subprocess.run(
-            ['/bin/python3', '-m', 'compileall', '-q', 'alembic', 'migrations'],
+            [PYTHON_BIN, '-m', 'compileall', '-q', 'alembic', 'migrations'],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
@@ -27,7 +29,7 @@ class MigrationSmokeTests(unittest.TestCase):
 
     def test_alembic_heads_command_loads_revision_graph(self):
         result = subprocess.run(
-            ['/bin/python3', '-m', 'alembic', '-c', 'alembic.ini', 'heads'],
+            [PYTHON_BIN, '-m', 'alembic', '-c', 'alembic.ini', 'heads'],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
