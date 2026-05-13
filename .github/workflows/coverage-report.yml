@@ -118,21 +118,10 @@ jobs:
           if-no-files-found: warn
 
       - name: Fail coverage job if a covered suite failed
-        if: always()
-        env:
-          BACKEND_OUTCOME: ${{ steps.backend_coverage.outcome }}
-          FRONTEND_OUTCOME: ${{ steps.frontend_coverage.outcome }}
+        if: always() && (steps.backend_coverage.outcome != 'success' || steps.frontend_coverage.outcome != 'success')
         shell: bash
         run: |
-          failed=0
-          echo "Backend coverage outcome: $BACKEND_OUTCOME"
-          echo "Frontend coverage outcome: $FRONTEND_OUTCOME"
-          if [[ "$BACKEND_OUTCOME" != "success" ]]; then
-            echo 'Backend coverage suite failed.' >&2
-            failed=1
-          fi
-          if [[ "$FRONTEND_OUTCOME" != "success" ]]; then
-            echo 'Frontend coverage suite failed.' >&2
-            failed=1
-          fi
-          exit "$failed"
+          echo "Backend coverage outcome: ${{ steps.backend_coverage.outcome }}"
+          echo "Frontend coverage outcome: ${{ steps.frontend_coverage.outcome }}"
+          echo 'At least one covered suite failed.' >&2
+          exit 1
