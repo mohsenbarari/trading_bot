@@ -20,6 +20,7 @@ from core.services.accountant_relation_service import (
     list_owner_accountant_relations,
     resolve_effective_owner_actor,
     sweep_expired_pending_accountant_relations,
+    unlink_owner_accountant_relation,
     is_accountant_invitation_token,
     is_user_accountant,
     update_owner_accountant_relation,
@@ -344,6 +345,65 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaises(HTTPException) as exc_info:
             await cancel_pending_accountant_relation(FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)]), owner_user_id=7, relation_id=4)
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+    async def test_unlink_owner_accountant_relation_delegates_pending_to_cancel(self):
+        relation = SimpleNamespace(
+            id=18,
+            owner_user_id=7,
+            status=AccountantRelationStatus.PENDING,
+            deleted_at=None,
+            accountant_user=None,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)])
+
+        expected = SimpleNamespace(id=18, status=AccountantRelationStatus.REVOKED)
+        with patch(
+            "core.services.accountant_relation_service.cancel_pending_accountant_relation",
+            new=AsyncMock(return_value=expected),
+        ) as cancel_mock:
+            result = await unlink_owner_accountant_relation(db, owner_user_id=7, relation_id=18)
+
+        cancel_mock.assert_awaited_once_with(db, owner_user_id=7, relation_id=18)
+        self.assertIs(result, expected)
+
+    async def test_unlink_owner_accountant_relation_soft_deletes_active_accountant_and_relation(self):
+        accountant_user = SimpleNamespace(id=77, is_deleted=False)
+        relation = SimpleNamespace(
+            id=19,
+            owner_user_id=7,
+            status=AccountantRelationStatus.ACTIVE,
+            deleted_at=None,
+            accountant_user=accountant_user,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)])
+
+        with patch(
+            "core.services.user_deletion_service.delete_user_account",
+            new=AsyncMock(return_value=SimpleNamespace(user_id=77)),
+        ) as delete_mock:
+            result = await unlink_owner_accountant_relation(db, owner_user_id=7, relation_id=19)
+
+        delete_mock.assert_awaited_once_with(db, accountant_user)
+        self.assertIs(result, relation)
+        self.assertEqual(relation.status, AccountantRelationStatus.DELETED)
+        self.assertIsNotNone(relation.deleted_at)
+        db.commit.assert_awaited_once()
+        db.refresh.assert_awaited_once_with(relation)
+
+    async def test_unlink_owner_accountant_relation_rejects_closed_relation_status(self):
+        relation = SimpleNamespace(
+            id=20,
+            owner_user_id=7,
+            status=AccountantRelationStatus.REVOKED,
+            deleted_at=datetime.utcnow(),
+            accountant_user=None,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)])
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await unlink_owner_accountant_relation(db, owner_user_id=7, relation_id=20)
+
         self.assertEqual(exc_info.exception.status_code, 400)
 
     async def test_update_owner_accountant_relation_updates_only_duty_description(self):

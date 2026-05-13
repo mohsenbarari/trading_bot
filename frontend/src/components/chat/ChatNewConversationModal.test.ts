@@ -125,7 +125,9 @@ describe('ChatNewConversationModal.vue', () => {
     await flushPromises()
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, options] = fetchMock.mock.calls[0]
+    const firstCall = fetchMock.mock.calls[0]
+    expect(firstCall).toBeDefined()
+    const [url, options] = firstCall as [RequestInfo | URL, RequestInit | undefined]
     expect(String(url)).toContain('/api/users-public/search')
     expect(String(url)).toContain('q=ali')
     expect(String(url)).toContain('limit=50')
