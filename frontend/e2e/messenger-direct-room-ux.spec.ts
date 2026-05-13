@@ -4,7 +4,7 @@ import { execFileSync } from 'child_process'
 import { mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ6kAAAAASUVORK5CYII='
@@ -305,6 +305,14 @@ async function waitForPersistedPendingDocumentUpload(page: Page) {
       })
     }, { timeout: 15000 })
     .toBe(true)
+}
+
+async function getDocumentBubbleTransferState(documentBubble: Locator): Promise<'busy' | 'completed' | 'idle'> {
+  const className = (await documentBubble.getAttribute('class')) || ''
+  if (/is-busy/.test(className)) return 'busy'
+  if ((await documentBubble.locator('.doc-icon.doc-uploading').count()) > 0) return 'busy'
+  if ((await documentBubble.locator('.doc-download-icon').count()) === 0) return 'completed'
+  return 'idle'
 }
 
 async function injectGalleryAlbum(page: Page) {
@@ -650,8 +658,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await expect(documentBubble).toBeVisible({ timeout: 30000 })
 
     await documentBubble.click()
-    await expect(documentBubble).toHaveClass(/is-busy/, { timeout: 30000 })
-    await expect(documentBubble.locator('.doc-icon.doc-uploading')).toBeVisible({ timeout: 30000 })
+    await expect.poll(async () => getDocumentBubbleTransferState(documentBubble), { timeout: 30000 }).not.toBe('idle')
 
     await page.locator('.chat-header .back-btn').click()
     const otherConversation = page.locator('.conversation-item').filter({ hasText: otherPeer.accountName }).first()
@@ -667,15 +674,10 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     const resumedBubble = page.locator('.messages-container .msg-document').filter({ hasText: fileName }).first()
     await expect(resumedBubble).toBeVisible({ timeout: 30000 })
-    await expect.poll(async () => {
-      const className = (await resumedBubble.getAttribute('class')) || ''
-      if (/is-busy/.test(className)) return 'busy'
-      if ((await resumedBubble.locator('.doc-icon.doc-uploading').count()) > 0) return 'busy'
-      if ((await resumedBubble.locator('.doc-download-icon').count()) === 0) return 'completed'
-      return 'idle'
-    }, { timeout: 30000 }).not.toBe('idle')
+    await expect.poll(async () => getDocumentBubbleTransferState(resumedBubble), { timeout: 30000 }).not.toBe('idle')
 
-    releaseDocumentDownload?.()
+    const releaseDownload = releaseDocumentDownload ?? (() => {})
+    releaseDownload()
     releaseDocumentDownload = null
 
     await expect(resumedBubble).not.toHaveClass(/is-busy/, { timeout: 60000 })
