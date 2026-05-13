@@ -30,6 +30,15 @@ function getViewerIdFromToken(token: string | null): number | null {
 
 const viewerUserId = ref<number | null>(getViewerIdFromToken(jwtToken.value))
 
+function getQueryString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function getQueryPositiveInt(value: unknown): number | null {
+  const normalized = Number(value)
+  return Number.isInteger(normalized) && normalized > 0 ? normalized : null
+}
+
 const profileUser = computed(() => {
   const rawId = route.params.id
   const id = Number(rawId)
@@ -43,6 +52,10 @@ const profileUser = computed(() => {
     account_name: accountName,
   }
 })
+
+const highlightAccountantUserId = computed(() => getQueryPositiveInt(route.query.highlight_accountant_user_id))
+const highlightAccountantRelationDisplayName = computed(() => getQueryString(route.query.highlight_accountant_relation_display_name))
+const profileViewKey = computed(() => `${profileUser.value?.id || 'invalid-profile'}:${highlightAccountantUserId.value || 'no-highlight'}`)
 
 function handleNavigate(view: string, payload?: { userId?: number; userName?: string }) {
   if (view === 'chat' && payload?.userId) {
@@ -87,11 +100,13 @@ onMounted(async () => {
 <template>
   <div class="public-profile-view">
     <PublicProfile
-      :key="profileUser?.id || 'invalid-profile'"
+      :key="profileViewKey"
       :user="profileUser"
       :viewerUserId="viewerUserId"
       :apiBaseUrl="apiBaseUrl"
       :jwtToken="jwtToken"
+      :highlightAccountantUserId="highlightAccountantUserId"
+      :highlightAccountantRelationDisplayName="highlightAccountantRelationDisplayName"
       @navigate="handleNavigate"
     />
   </div>

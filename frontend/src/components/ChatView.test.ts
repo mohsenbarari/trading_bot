@@ -276,6 +276,8 @@ describe('ChatView.vue', () => {
         other_user_name: 'دفتر حسابدار',
         profile_user_id: 99,
         profile_account_name: 'owner-99',
+        highlight_accountant_user_id: 55,
+        highlight_accountant_relation_display_name: 'حسابدار فروش',
         last_message_content: null,
         last_message_type: null,
         last_message_at: null,
@@ -297,7 +299,11 @@ describe('ChatView.vue', () => {
     expect(chatViewMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'public-profile',
       params: { id: '99' },
-      query: { account_name: 'owner-99' },
+      query: {
+        account_name: 'owner-99',
+        highlight_accountant_user_id: '55',
+        highlight_accountant_relation_display_name: 'حسابدار فروش',
+      },
     })
 
     wrapper.unmount()

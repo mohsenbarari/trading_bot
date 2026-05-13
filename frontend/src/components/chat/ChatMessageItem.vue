@@ -457,7 +457,7 @@ const emit = defineEmits<{
   (e: 'delete-album-item', msg: any): void
   (e: 'toggle-album-download-item', msg: any): void
   (e: 'toggle-reaction', payload: { msg: any, emoji: string }): void
-  (e: 'open-public-profile', payload: { id: number; account_name: string }): void
+  (e: 'open-public-profile', payload: { id: number; account_name: string; highlight_accountant_user_id?: number | null; highlight_accountant_relation_display_name?: string | null }): void
 }>()
 
 const audioStore = useAudioStore()

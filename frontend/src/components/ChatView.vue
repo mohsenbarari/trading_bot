@@ -2657,17 +2657,42 @@ function goBack() {
   }
 }
 
-function navigateToPublicProfile(userId: number | null | undefined, accountName = '') {
-  const normalizedId = Number(userId)
+function navigateToPublicProfile(target?: {
+  id?: number | null
+  account_name?: string
+  highlight_accountant_user_id?: number | null
+  highlight_accountant_relation_display_name?: string | null
+} | null) {
+  const normalizedId = Number(target?.id)
   if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
     return
+  }
+
+  const normalizedAccountName = typeof target?.account_name === 'string' && target.account_name.trim()
+    ? target.account_name.trim()
+    : ''
+  const normalizedHighlightAccountantUserId = Number(target?.highlight_accountant_user_id)
+  const hasHighlightAccountantUserId = Number.isInteger(normalizedHighlightAccountantUserId) && normalizedHighlightAccountantUserId > 0
+  const normalizedHighlightRelationDisplayName = typeof target?.highlight_accountant_relation_display_name === 'string' && target.highlight_accountant_relation_display_name.trim()
+    ? target.highlight_accountant_relation_display_name.trim()
+    : ''
+
+  const query: Record<string, string> = {}
+  if (normalizedAccountName) {
+    query.account_name = normalizedAccountName
+  }
+  if (hasHighlightAccountantUserId) {
+    query.highlight_accountant_user_id = String(normalizedHighlightAccountantUserId)
+  }
+  if (normalizedHighlightRelationDisplayName) {
+    query.highlight_accountant_relation_display_name = normalizedHighlightRelationDisplayName
   }
 
   window.setTimeout(() => {
     void router.push({
       name: 'public-profile',
       params: { id: String(normalizedId) },
-      query: accountName ? { account_name: accountName } : undefined,
+      query: Object.keys(query).length > 0 ? query : undefined,
     })
   }, 0)
 }
@@ -2675,18 +2700,23 @@ function navigateToPublicProfile(userId: number | null | undefined, accountName 
 function viewProfile() {
   if (selectedUserId.value && selectedRoomKind.value === 'direct') {
     const conversationProfileTarget = resolveConversationProfileTarget(selectedConversation.value)
-    navigateToPublicProfile(
-      conversationProfileTarget?.id ?? selectedUserId.value,
-      conversationProfileTarget?.account_name ?? selectedUserName.value,
-    )
+    navigateToPublicProfile(conversationProfileTarget ?? {
+      id: selectedUserId.value,
+      account_name: selectedUserName.value,
+    })
     return
   }
 
-  navigateToPublicProfile(props.currentUserId)
+  navigateToPublicProfile({ id: props.currentUserId })
 }
 
-function openPublicProfile(payload?: { id?: number; account_name?: string }) {
-  navigateToPublicProfile(payload?.id, payload?.account_name || '')
+function openPublicProfile(payload?: {
+  id?: number | null
+  account_name?: string
+  highlight_accountant_user_id?: number | null
+  highlight_accountant_relation_display_name?: string | null
+}) {
+  navigateToPublicProfile(payload)
 }
 
 const handleCall = () => alert('قابلیت تماس به زودی اضافه می‌شود')

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const apiFetchMock = vi.fn()
@@ -39,11 +39,16 @@ describe('OwnerAccountantManagerModal.vue', () => {
   beforeEach(() => {
     apiFetchMock.mockReset()
     vi.spyOn(window, 'confirm').mockImplementation(() => true)
+    vi.useFakeTimers()
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
       },
     })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('loads relations and creates a new accountant relation', async () => {
@@ -90,7 +95,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
   it('edits and cancels a pending accountant relation', async () => {
     const initialRelation = makeRelation()
     const updatedRelation = makeRelation({
-      relation_display_name: 'حسابدار ارشد',
+      relation_display_name: 'حسابدار اول',
       duty_description: 'مدیریت ثبت‌ها',
     })
 
@@ -110,7 +115,6 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await flushPromises()
 
     await wrapper.get('.start-edit').trigger('click')
-    await wrapper.get('.edit-display-name').setValue('حسابدار ارشد')
     await wrapper.get('.edit-duty-description').setValue('مدیریت ثبت‌ها')
     await wrapper.get('.save-edit').trigger('click')
     await flushPromises()
@@ -118,11 +122,10 @@ describe('OwnerAccountantManagerModal.vue', () => {
     expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/1', {
       method: 'PATCH',
       body: JSON.stringify({
-        relation_display_name: 'حسابدار ارشد',
         duty_description: 'مدیریت ثبت‌ها',
       }),
     })
-    expect(wrapper.text()).toContain('حسابدار ارشد')
+    expect(wrapper.text()).toContain('حسابدار اول')
 
     await wrapper.get('.cancel-pending').trigger('click')
     await flushPromises()
@@ -130,6 +133,157 @@ describe('OwnerAccountantManagerModal.vue', () => {
     expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/1', {
       method: 'DELETE',
     })
-    expect(wrapper.text()).not.toContain('حسابدار ارشد')
+    expect(wrapper.text()).not.toContain('حسابدار اول')
+  })
+
+  it('supports silent refresh, form reset, copy-link feedback, and close emit', async () => {
+    apiFetchMock.mockResolvedValueOnce(makeResponse([
+      makeRelation(),
+      makeRelation({
+        id: 2,
+        status: 'active',
+        accountant_account_name: 'acc2',
+        relation_display_name: 'حسابدار فعال',
+        registration_link: null,
+      }),
+    ]))
+    apiFetchMock.mockResolvedValueOnce(makeResponse([]))
+
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, {
+      clipboard: { writeText: clipboardWrite },
+    })
+
+    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
+    const wrapper = mount(OwnerAccountantManagerModal, {
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    await wrapper.get('.create-account-name').setValue('acc-temp')
+    await wrapper.get('.create-display-name').setValue('حسابدار موقت')
+    await wrapper.get('.create-mobile-number').setValue('09125555555')
+    await wrapper.get('.create-duty-description').setValue('توضیح موقت')
+    await wrapper.get('.secondary-btn').trigger('click')
+
+    expect((wrapper.get('.create-account-name').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('.create-display-name').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('.create-mobile-number').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('.create-duty-description').element as HTMLTextAreaElement).value).toBe('')
+
+    await wrapper.get('.copy-link').trigger('click')
+    await flushPromises()
+
+    expect(clipboardWrite).toHaveBeenCalledWith('https://app.example/register?token=ACCT-token')
+    expect(wrapper.text()).toContain('کپی شد')
+
+    await vi.advanceTimersByTimeAsync(1800)
+    expect(wrapper.text()).toContain('کپی لینک ثبت‌نام')
+
+    await wrapper.get('.ghost-btn').trigger('click')
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenLastCalledWith('/api/accountants/owner-relations')
+    expect(wrapper.text()).toContain('هنوز هیچ حسابداری برای این مالک ثبت نشده است.')
+
+    await wrapper.get('.accountant-manager-close').trigger('click')
+    expect(wrapper.emitted('close')).toEqual([[]])
+  })
+
+  it('shows fallback and detail errors for load, create, edit, cancel, and copy failures', async () => {
+    apiFetchMock.mockRejectedValueOnce(new Error('خطای شبکه'))
+
+    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
+    const wrapper = mount(OwnerAccountantManagerModal, {
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    expect(wrapper.text()).toContain('خطای شبکه')
+
+    apiFetchMock.mockReset()
+    apiFetchMock.mockResolvedValueOnce(makeResponse([makeRelation()]))
+    apiFetchMock.mockResolvedValueOnce(makeResponse({ detail: 'ایجاد نشد' }, false))
+    apiFetchMock.mockResolvedValueOnce(makeResponse({ detail: 'ویرایش نشد' }, false))
+    apiFetchMock.mockResolvedValueOnce(makeResponse({ detail: 'لغو نشد' }, false))
+    const clipboardWrite = vi.fn().mockRejectedValue(new Error('copy failed'))
+    Object.assign(navigator, {
+      clipboard: { writeText: clipboardWrite },
+    })
+
+    const secondWrapper = mount(OwnerAccountantManagerModal, {
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    await secondWrapper.get('.create-account-name').setValue('acc3')
+    await secondWrapper.get('.create-display-name').setValue('حسابدار سوم')
+    await secondWrapper.get('.create-mobile-number').setValue('09126666666')
+    await secondWrapper.get('.submit-create').trigger('click')
+    await flushPromises()
+    expect(secondWrapper.text()).toContain('ایجاد نشد')
+
+    await secondWrapper.get('.start-edit').trigger('click')
+    await secondWrapper.get('.edit-duty-description').setValue('تغییر')
+    await secondWrapper.get('.save-edit').trigger('click')
+    await flushPromises()
+    expect(secondWrapper.text()).toContain('ویرایش نشد')
+
+    const cancelEditButton = secondWrapper.findAll('button').find((button) => button.text().includes('انصراف'))
+    expect(cancelEditButton).toBeTruthy()
+    await cancelEditButton!.trigger('click')
+    await flushPromises()
+
+    await secondWrapper.get('.cancel-pending').trigger('click')
+    await flushPromises()
+    expect(secondWrapper.text()).toContain('لغو نشد')
+
+    await secondWrapper.get('.copy-link').trigger('click')
+    await flushPromises()
+    expect(secondWrapper.text()).toContain('کپی لینک ثبت‌نام ممکن نشد.')
+  })
+
+  it('cancels edit mode and respects a rejected pending-cancel confirmation', async () => {
+    vi.mocked(window.confirm).mockReturnValue(false)
+    apiFetchMock.mockResolvedValueOnce(makeResponse([makeRelation()]))
+
+    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
+    const wrapper = mount(OwnerAccountantManagerModal, {
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    await wrapper.get('.start-edit').trigger('click')
+    await wrapper.get('.edit-duty-description').setValue('توضیح جدید')
+    const cancelEditButton = wrapper.findAll('button').find((button) => button.text().includes('انصراف'))
+    expect(cancelEditButton).toBeTruthy()
+    await cancelEditButton!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.edit-duty-description').exists()).toBe(false)
+
+    await wrapper.get('.cancel-pending').trigger('click')
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenCalledTimes(1)
   })
 })

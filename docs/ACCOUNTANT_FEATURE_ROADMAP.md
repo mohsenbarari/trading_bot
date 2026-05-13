@@ -8,8 +8,8 @@
 - [x] Phase 2 از نظر seamهای relation lifecycle، effective owner resolution و audience fanout بسته شده است.
 - [x] Phase 3 از نظر owner-facing accountant APIs، accountant-aware register/session policy و bot deny branching بسته شده است.
 - [x] Phase 4 از نظر delegated offer/trade write/read، actor audit، و fanout/privacy validation بسته شده است.
-- [ ] Phase 5 به‌صورت عمیق‌تر پیش رفته است؛ `users_public` اکنون accountantها را به owner principal resolve می‌کند، public profile frontend context اولیه این resolve را نمایش می‌دهد، deny pathهای accountant برای direct chat جدید و group creation در messenger/backend بسته شده‌اند، و contractهای relation-aware برای chat/realtime در direct/room paths با navigation owner-resolved و direct-conversation projection service-level اضافه شده‌اند؛ اما accountant highlight state و چند consumer/validation نهایی هنوز باقی مانده‌اند.
-- [ ] Phase 6 به‌صورت partial شروع شده است؛ modal مدیریت حسابدار owner وجود دارد، اما section نهایی profile/public profile و بعضی UX/lifecycle ruleها هنوز باقی مانده‌اند.
+- [ ] Phase 5 به‌صورت عمیق‌تر پیش رفته است؛ `users_public` اکنون accountantها را به owner principal resolve می‌کند، public profile route/query state و accountant highlight در frontend سبز شده‌اند، deny pathهای accountant برای direct chat جدید و group creation در messenger/backend بسته شده‌اند، و contractهای relation-aware برای chat/realtime در direct/room paths با navigation owner-resolved و direct-conversation projection service-level اضافه شده‌اند؛ اما چند consumer/fallback نهایی هنوز باقی مانده‌اند.
+- [ ] Phase 6 به‌صورت partial شروع شده است؛ modal مدیریت حسابدار owner وجود دارد، section حسابداران در profile/public profile اضافه شده، و edit contract روی `duty_description` محدود شده است؛ اما active unlink، expiry timer، و بعضی UX/lifecycle ruleها هنوز باقی مانده‌اند.
 - [ ] Phase 7 هنوز شروع نشده است.
 - [ ] Phase 8 هنوز شروع نشده است.
 
@@ -194,9 +194,9 @@ rollback surface:
 - [x] accountant group creation در UI/backend deny شود.
 
 فایل‌های درگیر اصلی:
-- [ ] [api/routers/users_public.py](api/routers/users_public.py)
-- [ ] [schemas.py](schemas.py)
-- [ ] [api/routers/chat_schemas.py](api/routers/chat_schemas.py)
+- [x] [api/routers/users_public.py](api/routers/users_public.py)
+- [x] [schemas.py](schemas.py)
+- [x] [api/routers/chat_schemas.py](api/routers/chat_schemas.py)
 - [x] [core/services/chat_service.py](core/services/chat_service.py)
 - [x] [api/routers/chat.py](api/routers/chat.py)
 
@@ -205,12 +205,12 @@ frontend contract consumers:
 - [x] [frontend/src/components/chat/ChatConversationList.vue](frontend/src/components/chat/ChatConversationList.vue)
 - [x] [frontend/src/components/chat/ChatMessageItem.vue](frontend/src/components/chat/ChatMessageItem.vue)
 - [ ] [frontend/src/components/chat/ChatNewConversationModal.vue](frontend/src/components/chat/ChatNewConversationModal.vue)
-- [ ] [frontend/src/views/PublicProfileView.vue](frontend/src/views/PublicProfileView.vue)
-- [ ] [frontend/src/components/PublicProfile.vue](frontend/src/components/PublicProfile.vue)
+- [x] [frontend/src/views/PublicProfileView.vue](frontend/src/views/PublicProfileView.vue)
+- [x] [frontend/src/components/PublicProfile.vue](frontend/src/components/PublicProfile.vue)
 
 validation phase:
 - [x] owner-resolved public profile navigation سبز شود.
-- [ ] accountant highlight query/state سبز شود.
+- [x] accountant highlight query/state سبز شود.
 - [x] conversation list/header/message labels relation-aware سبز شوند.
 - [x] accountant direct-chat deny path سبز شود.
 - [x] accountant group-create deny path سبز شود.
@@ -228,10 +228,10 @@ rollback surface:
 - هنوز section نهایی داخل خود profile/public profile، active unlink، expiry timer، و محدودسازی edit به `duty_description` باقی است.
 
 خروجی‌های لازم:
-- [ ] section حسابداران در owner profile و public owner profile اضافه شود.
+- [x] section حسابداران در owner profile و public owner profile اضافه شود.
 - [ ] لیست pending/active با stateهای واضح و expiry timer اضافه شود.
 - [x] create accountant form اختصاصی با `relation_display_name`, `account_name`, `mobile_number`, `duty_description` اضافه شود.
-- [ ] owner بتواند فقط `duty_description` را ویرایش کند.
+- [x] owner بتواند فقط `duty_description` را ویرایش کند.
 - [ ] unlink/cancel controls برای pending/active اضافه شود.
 - [x] admin UI تنظیم `max_accountants` به‌ازای هر owner را در [frontend/src/components/UserProfile.vue](frontend/src/components/UserProfile.vue) انجام دهد و session cap accountant را editable نکند.
 
@@ -245,7 +245,7 @@ rollback surface:
 validation phase:
 - [ ] owner CRUD accountant UI سبز شود.
 - [ ] pending expiry/cancel UI سبز شود.
-- [ ] description-only edit UI سبز شود.
+- [x] description-only edit UI سبز شود.
 - [ ] admin cap read-only/accountant session clamp UI سبز شود.
 
 rollback surface:

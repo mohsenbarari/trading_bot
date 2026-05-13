@@ -37,18 +37,25 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.list_active_accountants_for_owner",
+            new=AsyncMock(return_value=[]),
         ):
             result = await read_public_user(7, db=db)
 
         self.assertEqual(result.id, user.id)
         self.assertEqual(result.account_name, user.account_name)
         self.assertIsNone(result.resolved_from_accountant_id)
+        self.assertEqual(result.accountant_relations, [])
         self.assertEqual(db.calls[0][1], 7)
 
     async def test_read_public_user_raises_404_for_missing_or_deleted_user(self):
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.list_active_accountants_for_owner",
+            new=AsyncMock(return_value=[]),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await read_public_user(8, db=FakeDB(None))
@@ -57,6 +64,9 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.list_active_accountants_for_owner",
+            new=AsyncMock(return_value=[]),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await read_public_user(9, db=FakeDB(SimpleNamespace(id=9, is_deleted=True)))
@@ -79,11 +89,19 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
             owner_user=owner_user,
             relation_display_name="حسابدار فروش",
         )
+        active_relation = SimpleNamespace(
+            accountant_user=SimpleNamespace(id=44, account_name="acct44", is_deleted=False),
+            relation_display_name="حسابدار فروش",
+            duty_description="پیگیری معاملات",
+        )
         db = FakeDB(None)
 
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
             new=AsyncMock(return_value=relation),
+        ), patch(
+            "api.routers.users_public.list_active_accountants_for_owner",
+            new=AsyncMock(return_value=[active_relation]),
         ):
             result = await read_public_user(44, db=db)
 
@@ -92,6 +110,9 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.resolved_from_accountant_id, 44)
         self.assertEqual(result.highlight_accountant_user_id, 44)
         self.assertEqual(result.highlight_accountant_relation_display_name, "حسابدار فروش")
+        self.assertEqual(len(result.accountant_relations), 1)
+        self.assertEqual(result.accountant_relations[0].accountant_user_id, 44)
+        self.assertEqual(result.accountant_relations[0].relation_display_name, "حسابدار فروش")
         self.assertEqual(db.calls, [])
 
 

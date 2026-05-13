@@ -10,6 +10,8 @@ const props = defineProps<{
   viewerUserId?: number | null;
   apiBaseUrl: string;
   jwtToken: string | null;
+  highlightAccountantUserId?: number | null;
+  highlightAccountantRelationDisplayName?: string | null;
   hideBackButton?: boolean;
 }>();
 
@@ -26,6 +28,14 @@ interface PublicUser {
   resolved_from_accountant_id?: number | null;
   highlight_accountant_user_id?: number | null;
   highlight_accountant_relation_display_name?: string | null;
+  accountant_relations?: PublicAccountantRelationSummary[];
+}
+
+interface PublicAccountantRelationSummary {
+  accountant_user_id?: number | null;
+  accountant_account_name?: string | null;
+  relation_display_name: string;
+  duty_description?: string | null;
 }
 
 interface MutualTradePreview {
@@ -62,7 +72,8 @@ const error = ref('');
 const isHistoryLoading = ref(false);
 const openSections = ref({
   info: false,
-  history: false
+  history: false,
+  accountants: false,
 });
 const avatarBusy = ref(false);
 const avatarInput = ref<HTMLInputElement | null>(null);
@@ -74,14 +85,29 @@ const isOwnProfile = computed(() => {
 const showVisitorSections = computed(() => !isOwnProfile.value);
 const showOwnerSections = computed(() => isOwnProfile.value);
 const profileAvatarUrl = computed(() => buildChatFileUrl(profileData.value?.avatar_file_id ?? null, props.apiBaseUrl));
+const accountantRelations = computed<PublicAccountantRelationSummary[]>(() => {
+  return Array.isArray(profileData.value?.accountant_relations) ? profileData.value!.accountant_relations! : [];
+});
+const highlightedAccountantUserId = computed(() => {
+  const profileValue = Number(profileData.value?.highlight_accountant_user_id);
+  if (Number.isInteger(profileValue) && profileValue > 0) {
+    return profileValue;
+  }
+
+  const propValue = Number(props.highlightAccountantUserId);
+  return Number.isInteger(propValue) && propValue > 0 ? propValue : null;
+});
 const resolvedAccountantContext = computed(() => {
-  if (!profileData.value?.resolved_from_accountant_id) {
+  if (!highlightedAccountantUserId.value && !profileData.value?.resolved_from_accountant_id) {
     return null;
   }
 
-  const relationDisplayName = profileData.value.highlight_accountant_relation_display_name?.trim() || null;
+  const relationDisplayName = profileData.value?.highlight_accountant_relation_display_name?.trim()
+    || props.highlightAccountantRelationDisplayName?.trim()
+    || null;
   return {
     relationDisplayName,
+    accountantUserId: highlightedAccountantUserId.value,
   };
 });
 const sharedStatCards = computed<ProfileStatCard[]>(() => {
@@ -145,6 +171,9 @@ onMounted(async () => {
     if (!response.ok) throw new Error('خطا در دریافت اطلاعات کاربر');
     
     profileData.value = await response.json();
+    if (highlightedAccountantUserId.value && accountantRelations.value.length > 0) {
+      openSections.value.accountants = true;
+    }
   } catch (e: any) {
     error.value = e.message || 'خطا در برقراری ارتباط';
   } finally {
@@ -265,6 +294,10 @@ function handleActionClick(action: ProfileActionCard) {
   }
 }
 
+function isHighlightedAccountant(relation: PublicAccountantRelationSummary) {
+  return Number(relation.accountant_user_id) > 0 && Number(relation.accountant_user_id) === Number(highlightedAccountantUserId.value);
+}
+
 function getTradeBadgeClass(trade: MutualTradePreview) {
   const type = trade.trade_type?.toUpperCase();
   // We always show the perspective of the VIEWER (the person logged in)
@@ -382,6 +415,52 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section v-if="accountantRelations.length > 0" class="profile-section accountant-relations-section">
+        <div class="ds-accordion" :class="{ open: openSections.accountants }">
+          <div class="ds-accordion-header" @click="openSections.accountants = !openSections.accountants">
+            <div class="ds-accordion-header-info">
+              <UserIcon :size="18" class="text-amber-600" />
+              <h2>حسابداران این مالک</h2>
+            </div>
+            <ChevronLeft :size="20" class="ds-accordion-icon" />
+          </div>
+
+          <div v-show="openSections.accountants" class="ds-accordion-body">
+            <div class="public-accountant-list">
+              <article
+                v-for="relation in accountantRelations"
+                :key="`${relation.accountant_user_id || 'relation'}-${relation.relation_display_name}`"
+                class="public-accountant-card"
+                :class="{ highlighted: isHighlightedAccountant(relation) }"
+              >
+                <div class="public-accountant-card-head">
+                  <div>
+                    <h4>{{ relation.relation_display_name }}</h4>
+                    <p class="public-accountant-handle">@{{ relation.accountant_account_name || 'unknown' }}</p>
+                  </div>
+                  <span v-if="isHighlightedAccountant(relation)" class="public-accountant-highlight-badge">مسیر فعلی</span>
+                </div>
+                <p v-if="relation.duty_description" class="public-accountant-duty">{{ relation.duty_description }}</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="showVisitorSections && visitorActionCards.length > 0" class="profile-section visitor-profile-section">
+        <div class="action-grid" :class="{ 'single-column': visitorActionCards.length === 1 }">
+          <button
+            v-for="action in visitorActionCards"
+            :key="action.key"
+            class="settings-btn visitor-action-btn"
+            @click="handleActionClick(action)"
+          >
+            <span class="stat-icon">{{ action.icon }}</span>
+            <span class="stat-label">{{ action.label }}</span>
+          </button>
         </div>
       </section>
 
@@ -723,6 +802,61 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
     display: flex;
     flex-direction: column;
     gap: var(--ds-section-gap);
+}
+
+.public-accountant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.public-accountant-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(245, 158, 11, 0.16);
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.96), rgba(255, 247, 237, 0.98));
+}
+
+.public-accountant-card.highlighted {
+  border-color: rgba(217, 119, 6, 0.42);
+  box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.12), 0 16px 34px rgba(180, 83, 9, 0.16);
+}
+
+.public-accountant-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.public-accountant-card-head h4 {
+  margin: 0;
+  font-size: 1rem;
+  color: #7c2d12;
+}
+
+.public-accountant-handle {
+  margin: 6px 0 0;
+  font-size: 0.9rem;
+  color: #9a3412;
+  direction: ltr;
+  text-align: right;
+}
+
+.public-accountant-highlight-badge {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(217, 119, 6, 0.14);
+  color: #9a3412;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.public-accountant-duty {
+  margin: 12px 0 0;
+  color: #7c2d12;
+  line-height: 1.7;
 }
 
 .mini-trade-card {

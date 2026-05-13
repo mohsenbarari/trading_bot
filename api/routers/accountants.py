@@ -114,7 +114,6 @@ async def update_my_accountant(
         db,
         owner_user_id=context.owner_user.id,
         relation_id=relation_id,
-        relation_display_name=payload.relation_display_name,
         duty_description=payload.duty_description,
     )
     return serialize_accountant_relation(relation)
