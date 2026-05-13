@@ -37,7 +37,6 @@ function makeEmptyCreateForm() {
 
 function makeEmptyEditForm() {
   return {
-    relation_display_name: '',
     duty_description: '',
   }
 }
@@ -134,7 +133,6 @@ async function loadRelations(options?: { silent?: boolean }) {
 
 function startEditing(relation: AccountantRelation) {
   editingRelationId.value = relation.id
-  editForm.relation_display_name = relation.relation_display_name
   editForm.duty_description = relation.duty_description || ''
   notice.value = ''
   error.value = ''
@@ -180,7 +178,6 @@ async function saveEdit(relationId: number) {
     const response = await apiFetch(`/api/accountants/owner-relations/${relationId}`, {
       method: 'PATCH',
       body: JSON.stringify({
-        relation_display_name: editForm.relation_display_name,
         duty_description: normalizeDutyDescription(editForm.duty_description),
       }),
     })
@@ -256,7 +253,7 @@ onMounted(() => {
         </div>
 
         <div class="accountant-manager-note">
-          این لیست فقط حسابداران فعال و در انتظار ثبت‌نام را نشان می‌دهد. نام نمایشی و شرح وظیفه قابل ویرایش است.
+          این لیست فقط حسابداران فعال و در انتظار ثبت‌نام را نشان می‌دهد. در ویرایش فقط شرح وظیفه قابل تغییر است.
         </div>
 
         <div v-if="error" class="accountant-banner error">{{ error }}</div>
@@ -345,11 +342,7 @@ onMounted(() => {
 
               <div v-if="editingRelationId === relation.id" class="edit-panel">
                 <label class="field-block">
-                  <span>نام نمایشی</span>
-                  <input v-model="editForm.relation_display_name" class="accountant-input edit-display-name" type="text" />
-                </label>
-                <label class="field-block">
-                  <span>شرح وظیفه</span>
+                  <span>شرح وظیفه قابل ویرایش</span>
                   <textarea v-model="editForm.duty_description" class="accountant-input accountant-textarea edit-duty-description" rows="3"></textarea>
                 </label>
                 <div class="panel-actions compact">

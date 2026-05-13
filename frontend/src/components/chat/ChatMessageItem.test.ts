@@ -205,12 +205,19 @@ describe('ChatMessageItem.vue', () => {
       forwarded_from_name: 'دفتر حسابدار',
       forwarded_from_profile_user_id: 88,
       forwarded_from_profile_account_name: 'owner-88',
+      forwarded_from_highlight_accountant_user_id: 12,
+      forwarded_from_highlight_accountant_relation_display_name: 'حسابدار فروش',
     })
 
     await wrapper.get('.forward-link').trigger('click')
 
     expect(wrapper.emitted('open-public-profile')).toEqual([
-      [{ id: 88, account_name: 'owner-88' }],
+      [{
+        id: 88,
+        account_name: 'owner-88',
+        highlight_accountant_user_id: 12,
+        highlight_accountant_relation_display_name: 'حسابدار فروش',
+      }],
     ])
   })
 })

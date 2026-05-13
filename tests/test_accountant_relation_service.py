@@ -10,6 +10,8 @@ from core.services.accountant_relation_service import (
     build_trade_notification_audience_user_ids,
     cancel_pending_accountant_relation,
     create_owner_accountant_relation,
+    generate_accountant_invitation_token,
+    generate_accountant_short_code,
     get_accountant_relation_by_invitation_token,
     get_active_accountant_relation_for_accountant,
     get_effective_max_accountants,
@@ -84,6 +86,13 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(get_effective_max_accountants(SimpleNamespace()), 3)
         self.assertTrue(is_accountant_invitation_token(f"{ACCOUNTANT_INVITATION_PREFIX}123"))
         self.assertFalse(is_accountant_invitation_token("INV-123"))
+
+    def test_accountant_invitation_generators_return_expected_shapes(self):
+        invitation_token = generate_accountant_invitation_token()
+        short_code = generate_accountant_short_code()
+
+        self.assertTrue(invitation_token.startswith(ACCOUNTANT_INVITATION_PREFIX))
+        self.assertEqual(len(short_code), 8)
 
     async def test_get_active_accountant_relation_for_accountant_returns_active_relation(self):
         relation = SimpleNamespace(id=41, owner_user=SimpleNamespace(id=7), accountant_user=SimpleNamespace(id=9))
@@ -245,6 +254,43 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertIn("قبلاً ثبت شده", exc_info.exception.detail)
 
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[]),
+                FakeExecuteResult(scalar_one_value=0),
+                FakeExecuteResult(scalar_one_value=None),
+                FakeExecuteResult(scalar_one_value=SimpleNamespace(id=2)),
+            ]
+        )
+        with self.assertRaises(HTTPException) as exc_info:
+            await create_owner_accountant_relation(
+                db,
+                owner_user=owner,
+                global_account_name="acc",
+                relation_display_name="disp",
+                mobile_number="09120000000",
+            )
+        self.assertIn("pending یا active", exc_info.exception.detail)
+
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[]),
+                FakeExecuteResult(scalar_one_value=0),
+                FakeExecuteResult(scalar_one_value=None),
+                FakeExecuteResult(scalar_one_value=None),
+                FakeExecuteResult(scalar_one_value=SimpleNamespace(id=3)),
+            ]
+        )
+        with self.assertRaises(HTTPException) as exc_info:
+            await create_owner_accountant_relation(
+                db,
+                owner_user=owner,
+                global_account_name="acc",
+                relation_display_name="disp",
+                mobile_number="09120000000",
+            )
+        self.assertIn("نام نمایشی", exc_info.exception.detail)
+
     async def test_list_owner_accountant_relations_commits_expired_rows_then_returns_pending_and_active(self):
         relation_one = SimpleNamespace(id=1)
         relation_two = SimpleNamespace(id=2)
@@ -284,7 +330,23 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(relation)
 
-    async def test_update_owner_accountant_relation_updates_editable_fields(self):
+    async def test_cancel_pending_accountant_relation_rejects_missing_or_non_pending_relation(self):
+        with self.assertRaises(HTTPException) as exc_info:
+            await cancel_pending_accountant_relation(FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=None)]), owner_user_id=7, relation_id=4)
+        self.assertEqual(exc_info.exception.status_code, 404)
+
+        relation = SimpleNamespace(
+            id=4,
+            owner_user_id=7,
+            status=AccountantRelationStatus.ACTIVE,
+            deleted_at=None,
+            invitation_token=f"{ACCOUNTANT_INVITATION_PREFIX}token",
+        )
+        with self.assertRaises(HTTPException) as exc_info:
+            await cancel_pending_accountant_relation(FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)]), owner_user_id=7, relation_id=4)
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+    async def test_update_owner_accountant_relation_updates_only_duty_description(self):
         relation = SimpleNamespace(
             id=4,
             owner_user_id=7,
@@ -300,42 +362,24 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             db,
             owner_user_id=7,
             relation_id=4,
-            relation_display_name="حسابدار دوم",
             duty_description="گزارش‌گیری",
         )
 
         self.assertIs(result, relation)
-        self.assertEqual(relation.relation_display_name, "حسابدار دوم")
+        self.assertEqual(relation.relation_display_name, "حسابدار اول")
         self.assertEqual(relation.duty_description, "گزارش‌گیری")
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(relation)
 
-    async def test_update_owner_accountant_relation_rejects_duplicate_or_inactive_relation(self):
-        relation = SimpleNamespace(
-            id=4,
-            owner_user_id=7,
-            status=AccountantRelationStatus.ACTIVE,
-            deleted_at=None,
-            relation_display_name="حسابدار اول",
-            duty_description="پیگیری",
-        )
-        duplicate = SimpleNamespace(id=8)
-        db = FakeDB(
-            execute_results=[
-                FakeExecuteResult(scalar_one_value=relation),
-                FakeExecuteResult(scalar_one_value=duplicate),
-            ]
-        )
-
+    async def test_update_owner_accountant_relation_rejects_inactive_relation(self):
         with self.assertRaises(HTTPException) as exc_info:
             await update_owner_accountant_relation(
-                db,
+                FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=None)]),
                 owner_user_id=7,
                 relation_id=4,
-                relation_display_name="حسابدار دوم",
-                duty_description="پیگیری",
+                duty_description=None,
             )
-        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.status_code, 404)
 
         inactive_relation = SimpleNamespace(
             id=4,
@@ -352,7 +396,6 @@ class AccountantRelationServiceTests(unittest.IsolatedAsyncioTestCase):
                 db,
                 owner_user_id=7,
                 relation_id=4,
-                relation_display_name="حسابدار دوم",
                 duty_description=None,
             )
         self.assertEqual(exc_info.exception.status_code, 400)

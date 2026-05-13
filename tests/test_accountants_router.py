@@ -128,7 +128,6 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
         )
         context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
         payload = schemas.AccountantRelationUpdate(
-            relation_display_name="حسابدار ارشد",
             duty_description="پیگیری معاملات",
         )
 
@@ -142,6 +141,8 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
             result = await update_my_accountant(9, payload, context=context, db=FakeDB())
 
         update_mock.assert_awaited_once()
+        self.assertEqual(update_mock.await_args.kwargs["duty_description"], "پیگیری معاملات")
+        self.assertNotIn("relation_display_name", update_mock.await_args.kwargs)
         self.assertEqual(result["id"], 9)
         self.assertEqual(result["relation_display_name"], "حسابدار ارشد")
 

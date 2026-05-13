@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from core.db import get_db
-from core.services.accountant_relation_service import get_active_accountant_relation_for_accountant
+from core.services.accountant_relation_service import get_active_accountant_relation_for_accountant, list_active_accountants_for_owner
 from models.user import User
 from api.deps import get_current_user
 
@@ -24,13 +24,38 @@ def _serialize_public_user(
     resolved_from_accountant_id: int | None = None,
     highlight_accountant_user_id: int | None = None,
     highlight_accountant_relation_display_name: str | None = None,
+    accountant_relations: list[schemas.PublicAccountantRelationSummary] | None = None,
 ) -> schemas.UserPublicRead:
     public_user = schemas.UserPublicRead.model_validate(user, from_attributes=True)
     return public_user.model_copy(update={
         "resolved_from_accountant_id": resolved_from_accountant_id,
         "highlight_accountant_user_id": highlight_accountant_user_id,
         "highlight_accountant_relation_display_name": highlight_accountant_relation_display_name,
+        "accountant_relations": accountant_relations or [],
     })
+
+
+def _serialize_public_accountant_relation(
+    relation: AccountantRelation,
+) -> schemas.PublicAccountantRelationSummary | None:
+    accountant_user = getattr(relation, "accountant_user", None)
+    if accountant_user is None or accountant_user.is_deleted:
+        return None
+    return schemas.PublicAccountantRelationSummary(
+        accountant_user_id=accountant_user.id,
+        accountant_account_name=accountant_user.account_name,
+        relation_display_name=relation.relation_display_name,
+        duty_description=relation.duty_description,
+    )
+
+
+async def _load_public_accountant_relation_summaries(
+    db: AsyncSession,
+    owner_user_id: int,
+) -> list[schemas.PublicAccountantRelationSummary]:
+    relations = await list_active_accountants_for_owner(db, owner_user_id)
+    serialized = [_serialize_public_accountant_relation(relation) for relation in relations]
+    return [relation for relation in serialized if relation is not None]
 
 
 async def _resolve_public_search_rows(
@@ -116,14 +141,17 @@ async def read_public_user(user_id: int, db: AsyncSession = Depends(get_db)):
     """دریافت اطلاعات عمومی یک کاربر (قابل دسترسی برای همه کاربران لاگین شده)"""
     relation = await get_active_accountant_relation_for_accountant(db, user_id)
     if relation and relation.owner_user and not relation.owner_user.is_deleted:
+        accountant_relations = await _load_public_accountant_relation_summaries(db, relation.owner_user.id)
         return _serialize_public_user(
             relation.owner_user,
             resolved_from_accountant_id=user_id,
             highlight_accountant_user_id=user_id,
             highlight_accountant_relation_display_name=relation.relation_display_name,
+            accountant_relations=accountant_relations,
         )
 
     user = await db.get(User, user_id)
     if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
-    return _serialize_public_user(user)
+    accountant_relations = await _load_public_accountant_relation_summaries(db, user.id)
+    return _serialize_public_user(user, accountant_relations=accountant_relations)

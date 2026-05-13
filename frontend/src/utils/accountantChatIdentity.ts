@@ -3,6 +3,8 @@ import type { Conversation, Message } from '../types/chat'
 export type PublicProfileTarget = {
   id: number
   account_name: string
+  highlight_accountant_user_id?: number | null
+  highlight_accountant_relation_display_name?: string | null
 }
 
 function normalizePositiveInt(value: unknown): number | null {
@@ -15,7 +17,7 @@ function normalizeAccountName(value: unknown): string | null {
 }
 
 export function resolveConversationProfileTarget(
-  conversation?: Pick<Conversation, 'other_user_id' | 'other_user_name' | 'profile_user_id' | 'profile_account_name'> | null,
+  conversation?: Pick<Conversation, 'other_user_id' | 'other_user_name' | 'profile_user_id' | 'profile_account_name' | 'highlight_accountant_user_id' | 'highlight_accountant_relation_display_name'> | null,
 ): PublicProfileTarget | null {
   if (!conversation) {
     return null
@@ -30,11 +32,13 @@ export function resolveConversationProfileTarget(
   return {
     id: targetId,
     account_name: accountName,
+    highlight_accountant_user_id: normalizePositiveInt(conversation.highlight_accountant_user_id),
+    highlight_accountant_relation_display_name: normalizeAccountName(conversation.highlight_accountant_relation_display_name),
   }
 }
 
 export function resolveForwardedProfileTarget(
-  message?: Pick<Message, 'forwarded_from_id' | 'forwarded_from_name' | 'forwarded_from_profile_user_id' | 'forwarded_from_profile_account_name'> | null,
+  message?: Pick<Message, 'forwarded_from_id' | 'forwarded_from_name' | 'forwarded_from_profile_user_id' | 'forwarded_from_profile_account_name' | 'forwarded_from_highlight_accountant_user_id' | 'forwarded_from_highlight_accountant_relation_display_name'> | null,
 ): PublicProfileTarget | null {
   if (!message) {
     return null
@@ -49,5 +53,7 @@ export function resolveForwardedProfileTarget(
   return {
     id: targetId,
     account_name: accountName,
+    highlight_accountant_user_id: normalizePositiveInt(message.forwarded_from_highlight_accountant_user_id),
+    highlight_accountant_relation_display_name: normalizeAccountName(message.forwarded_from_highlight_accountant_relation_display_name),
   }
 }

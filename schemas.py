@@ -128,6 +128,7 @@ class UserPublicRead(BaseModel):
     resolved_from_accountant_id: int | None = None
     highlight_accountant_user_id: int | None = None
     highlight_accountant_relation_display_name: str | None = None
+    accountant_relations: List['PublicAccountantRelationSummary'] = Field(default_factory=list)
     
     @computed_field
     def created_at_jalali(self) -> str | None:
@@ -194,16 +195,7 @@ class AccountantRelationCreate(BaseModel):
 
 
 class AccountantRelationUpdate(BaseModel):
-    relation_display_name: str | None = Field(default=None, min_length=1, max_length=120)
     duty_description: str | None = Field(default=None, max_length=255)
-
-    @field_validator('relation_display_name', mode='before')
-    @classmethod
-    def strip_relation_display_name(cls, value):
-        if value is None:
-            return None
-        cleaned = str(value).strip()
-        return cleaned or None
 
     @field_validator('duty_description', mode='before')
     @classmethod
@@ -230,6 +222,16 @@ class AccountantRelationRead(BaseModel):
     activated_at: datetime | None = None
     deleted_at: datetime | None = None
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PublicAccountantRelationSummary(BaseModel):
+    accountant_user_id: int | None = None
+    accountant_account_name: str | None = None
+    relation_display_name: str
+    duty_description: str | None = None
 
     class Config:
         from_attributes = True
