@@ -1131,10 +1131,38 @@ async def publish_direct_typing_event(
     publisher: DirectEventPublisher,
 ) -> None:
     """Publish one direct-chat typing signal if the sender is not targeting themselves."""
+    await publish_direct_activity_event(
+        receiver_id=receiver_id,
+        sender_id=sender_id,
+        activity="typing",
+        active=True,
+        publisher=publisher,
+    )
+
+
+async def publish_direct_activity_event(
+    *,
+    receiver_id: int,
+    sender_id: int,
+    activity: str,
+    active: bool,
+    publisher: DirectEventPublisher,
+    sender_name: str | None = None,
+) -> None:
+    """Publish one direct-chat activity update if the sender is not targeting themselves."""
     if receiver_id == sender_id:
         return
 
-    await publisher(receiver_id, "chat:typing", {"sender_id": sender_id})
+    payload: dict[str, object] = {
+        "room_kind": "direct",
+        "sender_id": sender_id,
+        "activity": activity,
+        "active": active,
+    }
+    if sender_name is not None:
+        payload["sender_name"] = sender_name
+
+    await publisher(receiver_id, "chat:activity", payload)
 
 
 async def publish_direct_message_event(

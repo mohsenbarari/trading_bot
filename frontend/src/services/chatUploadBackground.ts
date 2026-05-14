@@ -28,6 +28,8 @@
 
 import type { Message } from '../types/chat'
 import {
+    buildChatActivityBody,
+    buildChatActivityEndpoint,
     buildChatSendBody,
     buildChatSendEndpoint,
 } from '../utils/chatRoomRouting'
@@ -74,6 +76,7 @@ export interface PendingUpload {
     localBlobUrl?: string // UI-only, not persisted
     retryCount?: number // number of transient retries attempted (upload-media)
     sendRetryCount?: number // number of transient retries attempted (/chat/send)
+    activitySignalActive?: boolean
 }
 
 export interface SubmitUploadParams {
@@ -156,6 +159,7 @@ const xhrControllers = new Map<number, XMLHttpRequest>()
 const abortFlags = new Set<number>()
 const albumBatches = new Map<string, AlbumBatchState>()
 const subscribers = new Set<UploadEventHandler>()
+const uploadActivityCounts = new Map<number, number>()
 
 // -----------------------------------------------------------------------------
 // Concurrency gate
@@ -263,6 +267,54 @@ function computeSendRetryDelayMs(attempt: number): number {
     const base = Math.min(1000 * Math.pow(2, Math.max(0, attempt)), 15000)
     const jitter = Math.floor(Math.random() * 1000) - 500
     return Math.max(750, base + jitter)
+}
+
+async function publishUploadActivitySignal(conversationKey: number, active: boolean) {
+    if (!config) return
+
+    try {
+        const token = config.getAuthToken()
+        await fetch(`${config.apiBaseUrl}/api${buildChatActivityEndpoint(conversationKey)}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify(buildChatActivityBody(conversationKey, {
+                activity: 'uploading_file',
+                active,
+            })),
+        })
+    } catch (error) {
+        console.warn('[uploadService] activity signal failed:', error)
+    }
+}
+
+function startUploadActivity(upload: PendingUpload) {
+    if (upload.activitySignalActive) return
+
+    upload.activitySignalActive = true
+    const nextCount = (uploadActivityCounts.get(upload.userId) ?? 0) + 1
+    uploadActivityCounts.set(upload.userId, nextCount)
+
+    if (nextCount === 1) {
+        void publishUploadActivitySignal(upload.userId, true)
+    }
+}
+
+function stopUploadActivity(upload: PendingUpload) {
+    if (!upload.activitySignalActive) return
+
+    upload.activitySignalActive = false
+    const currentCount = uploadActivityCounts.get(upload.userId) ?? 0
+
+    if (currentCount <= 1) {
+        uploadActivityCounts.delete(upload.userId)
+        void publishUploadActivitySignal(upload.userId, false)
+        return
+    }
+
+    uploadActivityCounts.set(upload.userId, currentCount - 1)
 }
 
 // -----------------------------------------------------------------------------
@@ -796,6 +848,7 @@ async function runUpload(upload: PendingUpload): Promise<void> {
         xhrControllers.delete(upload.id)
         if (abortFlags.has(upload.id)) {
             upload.phase = 'cancelled'
+            stopUploadActivity(upload)
             await idbDelete(upload.id)
             pendingUploads.delete(upload.id)
             abortFlags.delete(upload.id)
@@ -868,6 +921,7 @@ async function sendOne(upload: PendingUpload): Promise<void> {
         const serverMessage = (await res.json()) as Message
 
         upload.phase = 'sent'
+        stopUploadActivity(upload)
         emit({
             type: 'sent',
             userId: upload.userId,
@@ -914,6 +968,7 @@ async function sendOne(upload: PendingUpload): Promise<void> {
 async function markFailed(upload: PendingUpload, errorMessage: string) {
     upload.phase = 'failed'
     upload.errorMessage = errorMessage
+    stopUploadActivity(upload)
     await idbPut(upload)
     emit({
         type: 'error',
@@ -964,12 +1019,14 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
                     }
                 }
 
-                if (upload.phase === 'failed' || upload.phase === 'sent') {
+                if (upload.phase === 'failed' || upload.phase === 'sent' || upload.phase === 'cancelled') {
                     // Stale — drop
                     pendingUploads.delete(upload.id)
                     await idbDelete(upload.id)
                     continue
                 }
+
+                startUploadActivity(upload)
 
                 emit({
                     type: 'added',
@@ -1036,6 +1093,7 @@ export async function submitUpload(params: SubmitUploadParams): Promise<void> {
     }
 
     pendingUploads.set(upload.id, upload)
+    startUploadActivity(upload)
 
     if (upload.albumId) {
         const batch = ensureAlbumBatch(upload.albumId, upload.userId, upload.albumSize)
@@ -1078,6 +1136,7 @@ export function cancelUpload(id: number): void {
     // If XHR already finished or never started, clean up eagerly
     if (upload.phase !== 'uploading') {
         upload.phase = 'cancelled'
+        stopUploadActivity(upload)
         pendingUploads.delete(id)
         abortFlags.delete(id)
         void idbDelete(id)
@@ -1105,6 +1164,7 @@ export function retryFailedUpload(id: number): void {
     abortFlags.delete(id)
     upload.retryCount = 0
     upload.errorMessage = undefined
+    startUploadActivity(upload)
 
     if (upload.fileId) {
         // upload-media already succeeded; re-send only

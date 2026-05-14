@@ -1469,6 +1469,53 @@ async def publish_channel_reaction_event(
         await publisher(user_id, "chat:reaction", payload)
 
 
+def build_room_activity_event_payload(
+    *,
+    chat: Chat,
+    sender_id: int,
+    sender_name: str | None,
+    activity: str,
+    active: bool,
+) -> dict[str, object]:
+    room_kind = "group" if chat.type == ChatType.GROUP else "channel"
+    payload: dict[str, object] = {
+        "room_kind": room_kind,
+        "chat_id": chat.id,
+        "sender_id": sender_id,
+        "activity": activity,
+        "active": active,
+        "conversation_id": -int(chat.id),
+        "conversation_other_user_id": -int(chat.id),
+        "conversation_title": chat.title or (f"گروه {chat.id}" if room_kind == "group" else f"کانال {chat.id}"),
+    }
+    if sender_name is not None:
+        payload["sender_name"] = sender_name
+    return payload
+
+
+async def publish_room_activity_event(
+    *,
+    chat: Chat,
+    sender_id: int,
+    sender_name: str | None,
+    member_user_ids: list[int],
+    activity: str,
+    active: bool,
+    publisher: RoomEventPublisher,
+) -> None:
+    payload = build_room_activity_event_payload(
+        chat=chat,
+        sender_id=sender_id,
+        sender_name=sender_name,
+        activity=activity,
+        active=active,
+    )
+    for user_id in member_user_ids:
+        if user_id == sender_id:
+            continue
+        await publisher(user_id, "chat:activity", payload)
+
+
 def build_group_message_event_payload(
     message: Message,
     *,

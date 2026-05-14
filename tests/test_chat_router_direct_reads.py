@@ -15,6 +15,7 @@ from api.routers.chat import (
     pin_direct_conversation,
     poll_messages,
     search_messages,
+    send_direct_activity_signal,
     send_typing_signal,
 )
 
@@ -222,6 +223,23 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
             result = await mark_messages_read(user_id=9, current_user=current_user, db=db)
         commit_mock.assert_awaited_once_with(db, reader=current_user, other_user_id=9)
         publish_mock.assert_awaited_once_with(other_user_id=9, reader_id=5, publisher=unittest.mock.ANY)
+        self.assertIsNone(result)
+
+    async def test_send_direct_activity_signal_publishes_general_activity(self):
+        current_user = SimpleNamespace(id=5, account_name="ali-user")
+        activity_data = SimpleNamespace(receiver_id=9, activity="uploading_file", active=False)
+
+        with patch("api.routers.chat.publish_direct_activity_event", new=AsyncMock()) as activity_mock:
+            result = await send_direct_activity_signal(data=activity_data, current_user=current_user)
+
+        activity_mock.assert_awaited_once_with(
+            receiver_id=9,
+            sender_id=5,
+            sender_name="ali-user",
+            activity="uploading_file",
+            active=False,
+            publisher=unittest.mock.ANY,
+        )
         self.assertIsNone(result)
 
     async def test_poll_messages_shapes_unread_summary(self):

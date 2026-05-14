@@ -42,6 +42,7 @@ from api.routers.chat_schemas import (
     ConversationRead,
     ConversationUnreadResponse,
     ConversationUnreadUpdateRequest,
+    DirectChatActivitySignal,
     GroupCreateRequest,
     GroupCreateResponse,
     GroupDetailRead,
@@ -57,6 +58,7 @@ from api.routers.chat_schemas import (
     MessageUpdate,
     PinnedMessageStateResponse,
     PollResponse,
+    RoomChatActivitySignal,
     RoomMessageSend,
     StickerPack,
     TypingSignal,
@@ -92,6 +94,7 @@ from core.services.chat_room_service import (
     mark_channel_messages_read_with_broadcast,
     mark_group_messages_read_with_broadcast,
     publish_group_message_event,
+    publish_room_activity_event,
     publish_group_reaction_event,
     publish_group_read_event,
     publish_channel_message_event,
@@ -131,6 +134,7 @@ from core.services.chat_service import (
     hide_direct_conversation,
     persist_sent_direct_message,
     publish_direct_message_event,
+    publish_direct_activity_event,
     publish_direct_read_event,
     publish_direct_reaction_event,
     publish_direct_typing_event,
@@ -445,6 +449,50 @@ async def send_typing_signal(
     await publish_direct_typing_event(
         receiver_id=data.receiver_id,
         sender_id=current_user.id,
+        publisher=publish_user_event,
+    )
+    return None
+
+
+@router.post("/activity", status_code=status.HTTP_204_NO_CONTENT)
+async def send_direct_activity_signal(
+    data: DirectChatActivitySignal,
+    current_user: User = Depends(get_current_user),
+):
+    """ارسال سیگنال activity برای گفتگو مستقیم."""
+    await publish_direct_activity_event(
+        receiver_id=data.receiver_id,
+        sender_id=current_user.id,
+        sender_name=current_user.account_name,
+        activity=data.activity,
+        active=data.active,
+        publisher=publish_user_event,
+    )
+    return None
+
+
+@router.post("/rooms/{chat_id}/activity", status_code=status.HTTP_204_NO_CONTENT)
+async def send_room_activity_signal(
+    chat_id: int,
+    data: RoomChatActivitySignal,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """ارسال سیگنال activity برای roomهای گروه/کانال."""
+    chat = await get_room_or_404(db, chat_id)
+
+    if chat.type == ChatType.GROUP:
+        await get_active_group_member_or_403(db, chat=chat, user_id=current_user.id)
+    else:
+        await get_active_channel_member_or_403(db, chat=chat, user_id=current_user.id)
+
+    await publish_room_activity_event(
+        chat=chat,
+        sender_id=current_user.id,
+        sender_name=current_user.account_name,
+        member_user_ids=await list_active_room_member_user_ids(db, chat_id=chat.id),
+        activity=data.activity,
+        active=data.active,
         publisher=publish_user_event,
     )
     return None

@@ -88,6 +88,7 @@ describe('ChatHeader.vue', () => {
         selectedRoomKind: 'group',
         apiBaseUrl: '',
         targetUserStatus: '۱۲ عضو',
+        activityStatusText: 'علی در حال ارسال فایل...',
         isTyping: false,
         totalUnread: 0,
         isSearchActive: false,
@@ -109,6 +110,8 @@ describe('ChatHeader.vue', () => {
         },
       },
     })
+
+    expect(wrapper.text()).toContain('علی در حال ارسال فایل')
 
     await wrapper.find('.header-user-info').trigger('click')
     expect(wrapper.emitted('manage-room')).toHaveLength(1)
