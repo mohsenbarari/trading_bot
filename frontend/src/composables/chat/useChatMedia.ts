@@ -24,6 +24,7 @@ const CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const CHAT_MEDIA_MAX_UPLOAD_LABEL = '50MB'
 const CHAT_MEDIA_PERSISTED_THUMBNAIL_MAX_EDGE = 64
 const CHAT_MEDIA_PERSISTED_THUMBNAIL_QUALITY = 0.58
+const CHAT_MESSAGE_MAX_CONTENT_LENGTH = 4000
 const CHAT_EDITED_IMAGE_FLAG = '__chatEditedImage'
 const HEIC_MIME_TYPES = new Set([
     'image/heic',
@@ -777,6 +778,18 @@ export function useChatMedia(options: UseChatMediaOptions) {
         return content
     }
 
+    function appendCaptionMetadata(
+        content: Record<string, unknown>,
+        msgType: 'image' | 'video' | 'voice' | 'document',
+        caption?: string,
+    ) {
+        if ((msgType === 'image' || msgType === 'video') && caption) {
+            content.caption = caption
+        }
+
+        return content
+    }
+
     function getAlbumIdFromMessage(msg?: Message | null) {
         if (!msg?.content) return null
 
@@ -1400,7 +1413,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         albumId?: string | null,
         albumIndex?: number,
         albumSize?: number,
-        options: { sendAsDocument?: boolean } = {}
+        options: { sendAsDocument?: boolean; caption?: string; onCaptionApplied?: () => void } = {}
     ) {
         if (!file) return
 
@@ -1416,6 +1429,9 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const normalizedAlbumId = (!sendAsDocument && (msgType === 'image' || msgType === 'video')) ? albumId : null
         const normalizedAlbumIndex = typeof albumIndex === 'number' ? albumIndex : 0
         const normalizedAlbumSize = normalizedAlbumId ? Math.max(albumSize ?? 0, 1) : 0
+        const normalizedCaption = (!sendAsDocument && (msgType === 'image' || msgType === 'video') && (!normalizedAlbumId || normalizedAlbumIndex === 0))
+            ? (typeof options.caption === 'string' ? options.caption.trim() : '')
+            : ''
         const preprocessBatchSize = normalizedAlbumSize || 1
         const preprocessLimit = getAdaptivePreprocessLimit(preprocessBatchSize, msgType)
         // NOTE: uploadLimit previously gated XHR uploads in this composable.
@@ -1447,19 +1463,23 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
         const optimisticId = createOptimisticUploadId()
         const localUrl = URL.createObjectURL(file)
-        const initialContent = appendAlbumMetadata(
-            sendAsDocument
-                ? {
-                    placeholder: true,
-                    ...documentPayload,
-                }
-                : {
-                    placeholder: true,
-                    durationMs: (file as any).durationMs,
-                },
+        const initialContent = appendCaptionMetadata(
+            appendAlbumMetadata(
+                sendAsDocument
+                    ? {
+                        placeholder: true,
+                        ...documentPayload,
+                    }
+                    : {
+                        placeholder: true,
+                        durationMs: (file as any).durationMs,
+                    },
+                msgType,
+                normalizedAlbumId,
+                normalizedAlbumIndex,
+            ),
             msgType,
-            normalizedAlbumId,
-            normalizedAlbumIndex,
+            normalizedCaption,
         )
         const optimisticMsg: Message = {
             id: optimisticId,
@@ -1559,10 +1579,14 @@ export function useChatMedia(options: UseChatMediaOptions) {
                         height: finalHeight,
                     })
 
-                    const previewContent: any = appendAlbumMetadata({
-                        thumbnail: thumbBase64,
-                        placeholder: true,
-                    }, msgType, normalizedAlbumId, normalizedAlbumIndex)
+                    const previewContent: any = appendCaptionMetadata(
+                        appendAlbumMetadata({
+                            thumbnail: thumbBase64,
+                            placeholder: true,
+                        }, msgType, normalizedAlbumId, normalizedAlbumIndex),
+                        msgType,
+                        normalizedCaption,
+                    )
 
                     if (finalWidth && finalHeight) {
                         previewContent.width = finalWidth
@@ -1815,24 +1839,32 @@ export function useChatMedia(options: UseChatMediaOptions) {
             }
 
             const targetMsg = getOptimisticTarget();
-            const optimisticContent: any = appendAlbumMetadata(
-                sendAsDocument
-                    ? {
-                        ...documentPayload,
-                    }
-                    : {
-                        thumbnail: thumbBase64,
-                    },
+            const optimisticContent: any = appendCaptionMetadata(
+                appendAlbumMetadata(
+                    sendAsDocument
+                        ? {
+                            ...documentPayload,
+                        }
+                        : {
+                            thumbnail: thumbBase64,
+                        },
+                    msgType,
+                    normalizedAlbumId,
+                    normalizedAlbumIndex,
+                ),
                 msgType,
-                normalizedAlbumId,
-                normalizedAlbumIndex,
+                normalizedCaption,
             );
             if (!sendAsDocument && finalWidth && finalHeight) {
                 optimisticContent.width = finalWidth;
                 optimisticContent.height = finalHeight;
             }
             if (isVideo) optimisticContent.placeholder = true;
-            targetMsg.content = JSON.stringify(optimisticContent);
+            const serializedOptimisticContent = JSON.stringify(optimisticContent)
+            if (normalizedCaption && serializedOptimisticContent.length > CHAT_MESSAGE_MAX_CONTENT_LENGTH) {
+                throw new Error('متن کپشن برای این رسانه بیش از حد طولانی است.')
+            }
+            targetMsg.content = serializedOptimisticContent;
 
             step = 'prepare_form'
             if (uploadFile.size > CHAT_MEDIA_MAX_UPLOAD_BYTES) {
@@ -1869,6 +1901,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 width: finalWidth,
                 height: finalHeight,
                 durationMs: (file as any).durationMs,
+                caption: normalizedCaption || undefined,
                 albumId: normalizedAlbumId ?? null,
                 albumIndex: normalizedAlbumIndex,
                 albumSize: normalizedAlbumSize || 1,
@@ -1878,6 +1911,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             const handedOffTarget = getOptimisticTarget()
             handedOffTarget.upload_handoff_pending = false
             handedOffTarget.is_sending = true
+            options.onCaptionApplied?.()
 
             // Seed the local image cache with the preprocessed blob so the
             // current UI does not need to re-download the file after the

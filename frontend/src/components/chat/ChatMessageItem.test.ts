@@ -145,6 +145,40 @@ function mountTextMessage(messageOverrides: Record<string, unknown> = {}) {
   })
 }
 
+function mountMediaMessage(messageOverrides: Record<string, unknown> = {}, extraProps: Record<string, unknown> = {}) {
+  return mount(ChatMessageItem, {
+    props: {
+      msg: {
+        id: 71,
+        sender_id: 9,
+        content: JSON.stringify({
+          file_id: 'image-71',
+          thumbnail: 'data:image/png;base64,thumb',
+          caption: 'کپشن رسانه',
+        }),
+        message_type: 'image',
+        created_at: '2026-05-12T10:00:00.000Z',
+        is_deleted: false,
+        reactions: [],
+        ...messageOverrides,
+      },
+      currentUserId: 7,
+      selectedUserName: 'Ali',
+      selectedMessages: [],
+      imageCache: {},
+      isSelectionMode: false,
+      ...extraProps,
+    },
+    global: {
+      stubs: {
+        ChatAlbumLayout: {
+          template: '<div class="album-layout-stub"></div>',
+        },
+      },
+    },
+  })
+}
+
 describe('ChatMessageItem.vue', () => {
   const originalAudio = globalThis.Audio
 
@@ -219,5 +253,48 @@ describe('ChatMessageItem.vue', () => {
         highlight_accountant_relation_display_name: 'حسابدار فروش',
       }],
     ])
+  })
+
+  it('renders captions for single media bubbles', () => {
+    const wrapper = mountMediaMessage()
+
+    expect(wrapper.find('.media-caption').text()).toContain('کپشن رسانه')
+  })
+
+  it('renders the first album item caption under album bubbles', () => {
+    const albumLeadMessage = {
+      id: 81,
+      sender_id: 9,
+      content: JSON.stringify({
+        file_id: 'image-81',
+        thumbnail: 'data:image/png;base64,thumb',
+        caption: 'کپشن آلبوم',
+        album_id: 'album-1',
+        album_index: 0,
+      }),
+      message_type: 'image',
+      created_at: '2026-05-12T10:00:00.000Z',
+      is_deleted: false,
+      reactions: [],
+    }
+    const wrapper = mountMediaMessage(albumLeadMessage, {
+      isAlbum: true,
+      albumItems: [
+        albumLeadMessage,
+        {
+          ...albumLeadMessage,
+          id: 82,
+          content: JSON.stringify({
+            file_id: 'image-82',
+            thumbnail: 'data:image/png;base64,thumb',
+            album_id: 'album-1',
+            album_index: 1,
+          }),
+        },
+      ],
+    })
+
+    expect(wrapper.find('.album-layout-stub').exists()).toBe(true)
+    expect(wrapper.find('.media-caption').text()).toContain('کپشن آلبوم')
   })
 })

@@ -5,6 +5,7 @@ import { type Conversation } from '../../types/chat'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { discardBackState, popBackState, pushBackState } from '../../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial } from '../../utils/chatFiles'
+import { getConversationPreviewText } from '../../utils/chatMessagePreview'
 import {
   ArrowDown,
   ArrowUp,
@@ -135,16 +136,7 @@ function getConversationAvatarUrl(conv: Conversation) {
 }
 
 function getPreviewText(conv: Conversation) {
-  if (!conv.last_message_type) {
-    return ''
-  }
-  if (conv.last_message_type === 'image') return 'تصویر'
-  if (conv.last_message_type === 'video') return 'ویدئو'
-  if (conv.last_message_type === 'voice') return 'پیام صوتی'
-  if (conv.last_message_type === 'sticker') return 'استیکر'
-  if (conv.last_message_type === 'location') return 'موقعیت'
-  if (conv.last_message_type === 'document') return 'فایل'
-  return conv.last_message_content?.substring(0, 42) || '...'
+  return getConversationPreviewText(conv.last_message_type, conv.last_message_content)
 }
 
 function isUserOnline(lastSeen: string | null | undefined): boolean {
