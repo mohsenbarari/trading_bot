@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from models.upload_session import UploadBatchStatus, UploadSessionStatus
 from api.routers.chat_schemas import MessageRead
 from api.routers.chat import (
+    _publish_upload_session_runtime_event,
     cancel_upload_batch_endpoint,
     cancel_upload_session_endpoint,
     commit_upload_batch_endpoint,
@@ -83,10 +84,19 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             final_chat_file_id=None,
         )
 
-        with patch("api.routers.chat.create_upload_session", new=AsyncMock(return_value=session)) as create_mock:
+        with patch("api.routers.chat.create_upload_session", new=AsyncMock(return_value=session)) as create_mock, patch(
+            "api.routers.chat._publish_upload_session_runtime_event",
+            new=AsyncMock(),
+        ) as publish_runtime_mock:
             created = await post_upload_session(data=data, current_user=current_user, db=db)
 
         create_mock.assert_awaited_once()
+        publish_runtime_mock.assert_awaited_once_with(
+            db=db,
+            current_user=current_user,
+            session=session,
+            event_name="created",
+        )
         self.assertEqual(created.session_id, "sess-1")
 
         with patch("api.routers.chat.get_upload_session_for_current_user", new=AsyncMock(return_value=session)) as get_mock:
@@ -114,7 +124,10 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
         ) as read_mock, patch(
             "api.routers.chat.append_upload_chunk",
             new=AsyncMock(return_value=session),
-        ) as append_mock:
+        ) as append_mock, patch(
+            "api.routers.chat._publish_upload_session_runtime_event",
+            new=AsyncMock(),
+        ) as publish_runtime_mock:
             result = await patch_upload_session_chunk(
                 session_id="sess-2",
                 resume_token="token",
@@ -135,26 +148,50 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             chunk_bytes=b"chunk",
             is_last_chunk=False,
         )
+        publish_runtime_mock.assert_awaited_once_with(
+            db=db,
+            current_user=current_user,
+            session=session,
+            event_name="progress",
+        )
         self.assertEqual(result.session_id, "sess-2")
 
         ready_session = SimpleNamespace(id="sess-2", status=UploadSessionStatus.READY, final_chat_file_id="file-7")
         with patch("api.routers.chat.get_upload_session_for_current_user", new=AsyncMock(return_value=session)), patch(
             "api.routers.chat.finalize_upload_session",
             new=AsyncMock(return_value=ready_session),
-        ) as finalize_mock:
+        ) as finalize_mock, patch(
+            "api.routers.chat._publish_upload_session_runtime_event",
+            new=AsyncMock(),
+        ) as publish_runtime_mock:
             result = await finalize_upload_session_endpoint(session_id="sess-2", current_user=current_user, db=db)
 
         finalize_mock.assert_awaited_once_with(db, session=session, current_user=current_user)
+        publish_runtime_mock.assert_awaited_once_with(
+            db=db,
+            current_user=current_user,
+            session=ready_session,
+            event_name="ready",
+        )
         self.assertEqual(result.final_chat_file_id, "file-7")
 
         cancelled = SimpleNamespace(id="sess-2", status=UploadSessionStatus.CANCELLED, final_chat_file_id=None)
         with patch("api.routers.chat.get_upload_session_for_current_user", new=AsyncMock(return_value=session)), patch(
             "api.routers.chat.cancel_upload_session",
             new=AsyncMock(return_value=cancelled),
-        ) as cancel_mock:
+        ) as cancel_mock, patch(
+            "api.routers.chat._publish_upload_session_runtime_event",
+            new=AsyncMock(),
+        ) as publish_runtime_mock:
             result = await cancel_upload_session_endpoint(session_id="sess-2", current_user=current_user, db=db)
 
         cancel_mock.assert_awaited_once_with(db, session=session)
+        publish_runtime_mock.assert_awaited_once_with(
+            db=db,
+            current_user=current_user,
+            session=cancelled,
+            event_name="cancelled",
+        )
         self.assertEqual(result.status, UploadSessionStatus.CANCELLED)
 
     async def test_commit_upload_batch_publishes_direct_and_group_branches(self):
@@ -189,6 +226,10 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             target=SimpleNamespace(target_id=9, receiver=SimpleNamespace(id=9), chat=None),
             messages=messages,
         )
+        committed_sessions = [
+            SimpleNamespace(id="sess-1", batch_id="batch-9"),
+            SimpleNamespace(id="sess-2", batch_id="batch-9"),
+        ]
 
         with patch("api.routers.chat.get_upload_batch_for_current_user", new=AsyncMock(return_value=batch)), patch(
             "api.routers.chat.commit_upload_batch",
@@ -199,11 +240,18 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.chat.publish_direct_message_event",
             new=AsyncMock(),
-        ) as direct_publish_mock:
+        ) as direct_publish_mock, patch(
+            "api.routers.chat._list_batch_upload_sessions",
+            new=AsyncMock(return_value=committed_sessions),
+        ), patch(
+            "api.routers.chat._publish_upload_session_runtime_event",
+            new=AsyncMock(),
+        ) as publish_runtime_mock:
             result = await commit_upload_batch_endpoint(batch_id="batch-9", current_user=current_user, db=db)
 
         commit_mock.assert_awaited_once_with(db, batch=batch, current_user=current_user)
         self.assertEqual(direct_publish_mock.await_count, 2)
+        self.assertEqual(publish_runtime_mock.await_count, 2)
         self.assertEqual(result.committed_items, 2)
 
         group_result = SimpleNamespace(
@@ -233,11 +281,18 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
         ) as users_mock, patch(
             "api.routers.chat.publish_group_message_event",
             new=AsyncMock(),
-        ) as group_publish_mock:
+        ) as group_publish_mock, patch(
+            "api.routers.chat._list_batch_upload_sessions",
+            new=AsyncMock(return_value=[SimpleNamespace(id="sess-3", batch_id="batch-10")]),
+        ), patch(
+            "api.routers.chat._publish_upload_session_runtime_event",
+            new=AsyncMock(),
+        ) as publish_runtime_mock:
             result = await commit_upload_batch_endpoint(batch_id="batch-10", current_user=current_user, db=db)
 
         users_mock.assert_awaited_once_with(db, chat_id=70)
         group_publish_mock.assert_awaited_once()
+        publish_runtime_mock.assert_awaited_once()
         self.assertEqual(result.batch_id, "batch-10")
 
     async def test_cancel_upload_batch_delegates(self):
@@ -248,11 +303,105 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.chat.get_upload_batch_for_current_user", new=AsyncMock(return_value=batch)), patch(
             "api.routers.chat.cancel_upload_batch",
             new=AsyncMock(return_value=batch),
-        ) as cancel_mock:
+        ) as cancel_mock, patch(
+            "api.routers.chat._list_batch_upload_sessions",
+            new=AsyncMock(return_value=[SimpleNamespace(id="sess-4", batch_id="batch-11")]),
+        ), patch(
+            "api.routers.chat._publish_upload_session_runtime_event",
+            new=AsyncMock(),
+        ) as publish_runtime_mock:
             result = await cancel_upload_batch_endpoint(batch_id="batch-11", current_user=current_user, db=db)
 
         cancel_mock.assert_awaited_once_with(db, batch=batch)
+        publish_runtime_mock.assert_awaited_once()
         self.assertEqual(result.status, UploadBatchStatus.CANCELLED)
+
+    async def test_publish_upload_session_runtime_event_updates_direct_activity(self):
+        current_user = SimpleNamespace(id=5, account_name="sender")
+        db = object()
+        session = SimpleNamespace(
+            id="sess-direct",
+            batch_id="batch-direct",
+            room_kind="direct",
+            target_id=9,
+            media_type="image",
+            status=UploadSessionStatus.UPLOADING,
+            received_bytes=12,
+            total_bytes=40,
+            next_offset=12,
+            final_chat_file_id=None,
+            preview_metadata={"caption": "x"},
+        )
+
+        with patch("api.routers.chat.publish_user_event", new=AsyncMock()) as publish_user_mock, patch(
+            "api.routers.chat._has_active_upload_sessions_for_room",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "api.routers.chat.publish_direct_activity_event",
+            new=AsyncMock(),
+        ) as direct_activity_mock:
+            await _publish_upload_session_runtime_event(
+                db=db,
+                current_user=current_user,
+                session=session,
+                event_name="progress",
+            )
+
+        publish_user_mock.assert_awaited_once()
+        direct_activity_mock.assert_awaited_once_with(
+            receiver_id=9,
+            sender_id=5,
+            sender_name="sender",
+            activity="uploading_file",
+            active=True,
+            publisher=publish_user_mock,
+        )
+
+    async def test_publish_upload_session_runtime_event_updates_group_activity(self):
+        current_user = SimpleNamespace(id=5, account_name="sender")
+        chat = SimpleNamespace(id=70, is_deleted=False)
+        session = SimpleNamespace(
+            id="sess-group",
+            batch_id="batch-group",
+            room_kind="group",
+            target_id=70,
+            media_type="video",
+            status=UploadSessionStatus.READY,
+            received_bytes=90,
+            total_bytes=90,
+            next_offset=90,
+            final_chat_file_id="file-7",
+            preview_metadata={"album_index": 1},
+        )
+
+        with patch("api.routers.chat.publish_user_event", new=AsyncMock()) as publish_user_mock, patch(
+            "api.routers.chat._has_active_upload_sessions_for_room",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "api.routers.chat.list_active_room_member_user_ids",
+            new=AsyncMock(return_value=[5, 6]),
+        ), patch(
+            "api.routers.chat.publish_room_activity_event",
+            new=AsyncMock(),
+        ) as room_activity_mock:
+            db = SimpleNamespace(get=AsyncMock(return_value=chat))
+            await _publish_upload_session_runtime_event(
+                db=db,
+                current_user=current_user,
+                session=session,
+                event_name="ready",
+            )
+
+        publish_user_mock.assert_awaited_once()
+        room_activity_mock.assert_awaited_once_with(
+            chat=chat,
+            sender_id=5,
+            sender_name="sender",
+            member_user_ids=[5, 6],
+            activity="uploading_file",
+            active=False,
+            publisher=publish_user_mock,
+        )
 
 
 if __name__ == "__main__":
