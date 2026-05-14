@@ -18,14 +18,15 @@ export default defineConfig({
       registerType: 'autoUpdate',
       workbox: {
         cleanupOutdatedCaches: true,
+        clientsClaim: true,
         skipWaiting: true,
-        importScripts: ['share-target-sw.js'],
+        importScripts: ['share-target-sw.js', 'upload-background-sw.js'],
         // Don't intercept POST navigations — let our share-target handler
         // (above) own POST /share-receive, and let normal API POSTs hit the
         // network without going through the navigation fallback.
         navigateFallbackDenylist: [/^\/api\//, /^\/share-receive/],
       },
-      includeAssets: ['favicon.ico', 'pwa-192x192.png', 'pwa-512x512.png', 'share-target-sw.js'],
+      includeAssets: ['favicon.ico', 'pwa-192x192.png', 'pwa-512x512.png', 'share-target-sw.js', 'upload-background-sw.js'],
       manifest: {
         id: '/?source=pwa',
         name: 'Gold',

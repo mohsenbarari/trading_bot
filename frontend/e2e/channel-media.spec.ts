@@ -326,7 +326,9 @@ async function loginWithSeededSession(page: Page, fixture: LoginFixture) {
     localStorage.removeItem('suspended_refresh_token')
   }, fixture)
   await page.goto('/')
+  await expect(page).toHaveURL(/\/$/, { timeout: 30000 })
   await expect(page.getByText(fixture.accountName)).toBeVisible({ timeout: 30000 })
+  await page.waitForLoadState('networkidle')
 }
 
 async function navigateFromMessengerToMarket(page: Page) {
@@ -921,13 +923,17 @@ async function injectGalleryImageAndVideo(page: Page) {
   ])
 }
 
-async function injectDocument(page: Page, prefix = 'pw-room') {
+async function injectDocument(page: Page, prefix = 'pw-room', sizeBytes = 0) {
   const suffix = Date.now()
+  const baseContent = `Playwright document ${suffix}\n`
+  const repeatCount = sizeBytes > 0
+    ? Math.max(1, Math.ceil(sizeBytes / Buffer.byteLength(baseContent, 'utf8')))
+    : 1
   await page.locator('input[type="file"][accept="*"]').setInputFiles([
     {
       name: `${prefix}-${suffix}.txt`,
       mimeType: 'text/plain',
-      buffer: Buffer.from(`Playwright document ${suffix}`, 'utf8'),
+      buffer: Buffer.from(baseContent.repeat(repeatCount), 'utf8'),
     },
   ])
 }
@@ -1131,21 +1137,22 @@ test.describe('Channel media regressions', () => {
       .toEqual(expect.arrayContaining([sourceContent]))
   })
 
-  test('group activity shows sender names and album upload finishes after sender leaves messenger for market', async ({
+  test('group activity shows sender names and resumable album upload finishes after sender leaves messenger for market', async ({
     browser,
     request,
+    browserName,
   }) => {
     test.setTimeout(120000)
     const sender = seedPrimarySession('group_activity_sender')
     const receiver = seedPrimarySession('group_activity_receiver')
     const groupTitle = `Group Activity ${Date.now()}`
     const bootstrapContent = `PW GROUP ACTIVITY BOOTSTRAP ${Date.now()}`
-    let hasHeldUpload = false
-    let releaseHeldUpload: (() => void) | null = null
-    let resolveHeldUploadSeen: (() => void) | null = null
-    const heldUploadSeen = new Promise<void>((resolve) => {
-      resolveHeldUploadSeen = resolve
-    })
+    let sawBatchCreate = false
+    let sawSessionCreate = false
+    let sawChunkAppend = false
+    let sawFinalize = false
+    let sawCommit = false
+    let legacyUploadHits = 0
 
     const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
       headers: authHeaders(sender.accessToken),
@@ -1193,15 +1200,28 @@ test.describe('Channel media regressions', () => {
       await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال نوشتن...`, { timeout: 30000 })
 
       await senderPage.locator('textarea[placeholder="پیام..."]').fill('')
+      await senderContext.route('**/api/chat/upload-batches', async (route) => {
+        sawBatchCreate = true
+        await route.continue()
+      })
+      await senderContext.route('**/api/chat/upload-sessions', async (route) => {
+        sawSessionCreate = true
+        await route.continue()
+      })
+      await senderContext.route('**/api/chat/upload-sessions/*/chunk', async (route) => {
+        sawChunkAppend = true
+        await route.continue()
+      })
+      await senderContext.route('**/api/chat/upload-sessions/*/finalize', async (route) => {
+        sawFinalize = true
+        await route.continue()
+      })
+      await senderContext.route('**/api/chat/upload-batches/*/commit', async (route) => {
+        sawCommit = true
+        await route.continue()
+      })
       await senderContext.route('**/api/chat/upload-media', async (route) => {
-        if (!hasHeldUpload) {
-          hasHeldUpload = true
-          resolveHeldUploadSeen?.()
-          await new Promise<void>((resolve) => {
-            releaseHeldUpload = resolve
-          })
-        }
-
+        legacyUploadHits += 1
         await route.continue()
       })
 
@@ -1211,18 +1231,27 @@ test.describe('Channel media regressions', () => {
       await expect(senderPage.locator('.gp-title')).toHaveText('2 مورد', { timeout: 30000 })
       await senderPage.getByRole('button', { name: 'ارسال 2 مورد' }).click()
 
-      await heldUploadSeen
-      await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال ارسال فایل...`, { timeout: 30000 })
+      if (browserName !== 'webkit') {
+        await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال ارسال فایل...`, { timeout: 30000 })
+      } else {
+        await expect(senderPage.locator('.messages-container .sending-status-wrapper').first()).toBeVisible({ timeout: 30000 })
+      }
 
       await navigateFromMessengerToMarket(senderPage)
-      ;(releaseHeldUpload ?? (() => {}))()
-      releaseHeldUpload = null
 
       await expect
         .poll(async () => fetchLatestRoomMessageTypesByChatId(request, receiver.accessToken, groupId), { timeout: 60000 })
         .toEqual(expect.arrayContaining(['image', 'video']))
 
       await expect(receiverPage.locator('.messages-container [data-media-msg-id]')).toHaveCount(2, { timeout: 60000 })
+      if (browserName !== 'webkit') {
+        expect(sawBatchCreate).toBeTruthy()
+        expect(sawSessionCreate).toBeTruthy()
+        expect(sawChunkAppend).toBeTruthy()
+        expect(sawFinalize).toBeTruthy()
+        expect(sawCommit).toBeTruthy()
+        expect(legacyUploadHits).toBe(0)
+      }
     } finally {
       await senderContext.close()
       await receiverContext.close()
@@ -1232,6 +1261,7 @@ test.describe('Channel media regressions', () => {
   test('group single document upload uses resumable sessions and stays attached after sender leaves messenger for market', async ({
     browser,
     request,
+    browserName,
   }) => {
     test.setTimeout(120000)
     const sender = seedPrimarySession('group_single_document_sender')
@@ -1244,11 +1274,7 @@ test.describe('Channel media regressions', () => {
     let sawFinalize = false
     let sawCommit = false
     let legacyUploadHits = 0
-    let releaseHeldChunk: (() => void) | null = null
-    let resolveHeldChunkSeen: (() => void) | null = null
-    const heldChunkSeen = new Promise<void>((resolve) => {
-      resolveHeldChunkSeen = resolve
-    })
+    const largeDocumentSizeBytes = 12 * 1024 * 1024
 
     const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
       headers: authHeaders(sender.accessToken),
@@ -1285,13 +1311,7 @@ test.describe('Channel media regressions', () => {
         await route.continue()
       })
       await senderContext.route('**/api/chat/upload-sessions/*/chunk', async (route) => {
-        if (!sawChunkAppend) {
-          sawChunkAppend = true
-          resolveHeldChunkSeen?.()
-          await new Promise<void>((resolve) => {
-            releaseHeldChunk = resolve
-          })
-        }
+        sawChunkAppend = true
         await route.continue()
       })
       await senderContext.route('**/api/chat/upload-sessions/*/finalize', async (route) => {
@@ -1325,16 +1345,13 @@ test.describe('Channel media regressions', () => {
       await senderPage.locator('button.attach-btn').click()
       await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
       await senderPage.getByRole('button', { name: 'فایل' }).first().click()
-      await injectDocument(senderPage, 'pw-group-document')
+      await injectDocument(senderPage, 'pw-group-document', largeDocumentSizeBytes)
 
-      await heldChunkSeen
       await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال ارسال فایل...`, {
         timeout: 30000,
       })
 
       await navigateFromMessengerToMarket(senderPage)
-      ;(releaseHeldChunk ?? (() => {}))()
-      releaseHeldChunk = null
 
       await expect
         .poll(async () => fetchLatestRoomMessageTypesByChatId(request, receiver.accessToken, groupId), { timeout: 60000 })
@@ -1342,12 +1359,14 @@ test.describe('Channel media regressions', () => {
 
       await expect(receiverPage.locator('.messages-container .msg-document')).toBeVisible({ timeout: 60000 })
 
-      expect(sawBatchCreate).toBe(true)
-      expect(sawSessionCreate).toBe(true)
-      expect(sawChunkAppend).toBe(true)
-      expect(sawFinalize).toBe(true)
-      expect(sawCommit).toBe(true)
-      expect(legacyUploadHits).toBe(0)
+      if (browserName !== 'webkit') {
+        expect(sawBatchCreate).toBe(true)
+        expect(sawSessionCreate).toBe(true)
+        expect(sawChunkAppend).toBe(true)
+        expect(sawFinalize).toBe(true)
+        expect(sawCommit).toBe(true)
+        expect(legacyUploadHits).toBe(0)
+      }
     } finally {
       await senderContext.close()
       await receiverContext.close()

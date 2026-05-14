@@ -466,9 +466,15 @@ async function injectGalleryVideo(page: Page) {
   ])
 }
 
-async function injectDocument(page: Page) {
+async function injectDocument(page: Page, options?: { prefix?: string; sizeBytes?: number }) {
   const suffix = Date.now()
-  const filePath = createPlaywrightTextFilePath(`pw-direct-${suffix}.txt`, `Playwright document ${suffix}`)
+  const prefix = options?.prefix ?? 'pw-direct'
+  const requestedSizeBytes = Math.max(0, Number(options?.sizeBytes ?? 0))
+  const baseContent = `Playwright document ${suffix}\n`
+  const repeatCount = requestedSizeBytes > 0
+    ? Math.max(1, Math.ceil(requestedSizeBytes / Buffer.byteLength(baseContent, 'utf8')))
+    : 1
+  const filePath = createPlaywrightTextFilePath(`${prefix}-${suffix}.txt`, baseContent.repeat(repeatCount))
   await page.locator('input[type="file"][accept="*"]').setInputFiles(filePath)
 }
 
@@ -631,12 +637,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     const sender = seedPrimarySession('direct_room_activity_sender')
     const receiver = seedPrimarySession('direct_room_activity_receiver')
     const bootstrapContent = `PW DIRECT ACTIVITY BOOTSTRAP ${Date.now()}`
-    let hasHeldUpload = false
-    let releaseHeldUpload: (() => void) | null = null
-    let resolveHeldUploadSeen: (() => void) | null = null
-    const heldUploadSeen = new Promise<void>((resolve) => {
-      resolveHeldUploadSeen = resolve
-    })
+    const largeDocumentSizeBytes = 12 * 1024 * 1024
 
     await waitForBackendReady(request)
     await sendDirectTextMessage(request, sender, receiver.userId, bootstrapContent)
@@ -658,6 +659,65 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
       await senderPage.locator('textarea[placeholder="پیام..."]').fill(`PW DIRECT ACTIVITY ${Date.now()}`)
       await expect(receiverPage.locator('.chat-header .header-status')).toContainText('در حال نوشتن', { timeout: 30000 })
 
+      await senderPage.locator('button.attach-btn').click()
+      await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
+      await senderPage.getByRole('button', { name: 'فایل' }).first().click()
+      await injectDocument(senderPage, { sizeBytes: largeDocumentSizeBytes })
+
+      await expect(receiverPage.locator('.chat-header .header-status')).toContainText('در حال ارسال فایل...', { timeout: 30000 })
+
+      await navigateFromMessengerToMarket(senderPage)
+
+      await expect
+        .poll(async () => {
+          const messages = await fetchDirectMessages(request, receiver, sender.userId)
+          return messages.some((message) => message.message_type === 'document')
+        }, { timeout: 60000 })
+        .toBe(true)
+
+      await expect(receiverPage.locator('.messages-container .msg-document')).toBeVisible({ timeout: 60000 })
+    } finally {
+      await senderContext.close()
+      await receiverContext.close()
+    }
+  })
+
+  test('single direct document upload can finish while the sender chat tab is hidden behind another tab', async ({ browser, request, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Service-worker hidden-tab handoff is Chromium-only in this rollout')
+    test.skip(!process.env.CI && process.env.PLAYWRIGHT_PWA_PREVIEW !== '1', 'This PWA background-upload regression requires the preview server with a real service worker')
+    test.setTimeout(120000)
+    const sender = seedPrimarySession('direct_room_sw_hidden_sender')
+    const receiver = seedPrimarySession('direct_room_sw_hidden_receiver')
+    const bootstrapContent = `PW DIRECT SW HIDDEN BOOTSTRAP ${Date.now()}`
+    let hasHeldUpload = false
+    let releaseHeldUpload: (() => void) | null = null
+    let resolveHeldUploadSeen: (() => void) | null = null
+    const heldUploadSeen = new Promise<void>((resolve) => {
+      resolveHeldUploadSeen = resolve
+    })
+
+    await waitForBackendReady(request)
+    await sendDirectTextMessage(request, sender, receiver.userId, bootstrapContent)
+
+    const senderContext = await browser.newContext()
+    const receiverContext = await browser.newContext()
+    const senderPage = await senderContext.newPage()
+    const receiverPage = await receiverContext.newPage()
+    const senderCdp = await senderContext.newCDPSession(senderPage)
+
+    try {
+      await loginWithSeededSession(senderPage, sender)
+      await loginWithSeededSession(receiverPage, receiver)
+
+      await senderPage.goto('/chat')
+      await openConversationFromList(senderPage, receiver.accountName)
+      await receiverPage.goto('/chat')
+      await openConversationFromList(receiverPage, sender.accountName)
+
+      await expect
+        .poll(async () => senderPage.evaluate(() => Boolean(navigator.serviceWorker?.controller)), { timeout: 30000 })
+        .toBe(true)
+
       await senderContext.route('**/api/chat/upload-sessions/*/chunk', async (route) => {
         if (!hasHeldUpload) {
           hasHeldUpload = true
@@ -676,9 +736,10 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
       await injectDocument(senderPage)
 
       await heldUploadSeen
-  await expect(receiverPage.locator('.chat-header .header-status')).toContainText('در حال ارسال فایل...', { timeout: 30000 })
+      await expect(receiverPage.locator('.chat-header .header-status')).toContainText('در حال ارسال فایل...', { timeout: 30000 })
 
-      await navigateFromMessengerToMarket(senderPage)
+      await senderCdp.send('Page.setWebLifecycleState', { state: 'frozen' })
+
       ;(releaseHeldUpload ?? (() => {}))()
       releaseHeldUpload = null
 
@@ -690,7 +751,13 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
         .toBe(true)
 
       await expect(receiverPage.locator('.messages-container .msg-document')).toBeVisible({ timeout: 60000 })
+
+      await senderCdp.send('Page.setWebLifecycleState', { state: 'active' })
+      await senderPage.bringToFront()
+      await expect(senderPage.locator('.messages-container .msg-document')).toBeVisible({ timeout: 30000 })
+      await expect(senderPage.locator('.messages-container .sending-status-wrapper')).toHaveCount(0, { timeout: 30000 })
     } finally {
+      await senderCdp.detach().catch(() => undefined)
       await senderContext.close()
       await receiverContext.close()
     }
@@ -895,15 +962,47 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await expect(videoConversation).toContainText(`ویدئو · ${videoCaption}`, { timeout: 30000 })
   })
 
-  test('gallery album send keeps the lead caption and opens the lightbox with toolbar actions and strip navigation', async ({ page, request }) => {
+  test('gallery album send keeps the lead caption and opens the lightbox with toolbar actions and strip navigation', async ({ page, request, browserName }) => {
     test.setTimeout(120000)
     const actor = seedPrimarySession('direct_room_media_actor')
     const peer = seedPrimarySession('direct_room_media_peer')
     const albumCaption = `PW ALBUM CAP ${Date.now()}`
     const composer = page.locator('textarea[placeholder="پیام..."]')
+    let sawBatchCreate = false
+    let sawSessionCreate = false
+    let sawChunkAppend = false
+    let sawFinalize = false
+    let sawCommit = false
+    let legacyUploadHits = 0
 
     await waitForBackendReady(request)
     await loginWithSeededSession(page, actor)
+
+    await page.route('**/api/chat/upload-batches', async (route) => {
+      sawBatchCreate = true
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-sessions', async (route) => {
+      sawSessionCreate = true
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-sessions/*/chunk', async (route) => {
+      sawChunkAppend = true
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-sessions/*/finalize', async (route) => {
+      sawFinalize = true
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-batches/*/commit', async (route) => {
+      sawCommit = true
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-media', async (route) => {
+      legacyUploadHits += 1
+      await route.continue()
+    })
+
     await openDirectChat(page, peer.userId, peer.accountName)
 
     await composer.fill(albumCaption)
@@ -925,6 +1024,14 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     const albumMessages = await waitForDirectAlbumCaption(request, actor, peer.userId, albumCaption)
     expect(albumMessages.filter((message) => message.parsedContent?.caption === albumCaption)).toHaveLength(1)
     expect(albumMessages.find((message) => message.parsedContent?.caption === albumCaption)?.parsedContent?.album_index).toBe(0)
+    if (browserName !== 'webkit') {
+      expect(sawBatchCreate).toBeTruthy()
+      expect(sawSessionCreate).toBeTruthy()
+      expect(sawChunkAppend).toBeTruthy()
+      expect(sawFinalize).toBeTruthy()
+      expect(sawCommit).toBeTruthy()
+      expect(legacyUploadHits).toBe(0)
+    }
 
     await page.locator('.messages-container img[data-media-msg-id]').first().click()
     await expect(page.locator('.lightbox-overlay')).toBeVisible({ timeout: 30000 })

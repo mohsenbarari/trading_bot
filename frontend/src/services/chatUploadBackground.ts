@@ -147,8 +147,11 @@ interface ServiceConfig {
 interface AlbumBatchState {
     albumId: string
     userId: number
+    roomKind: UploadRoomKind
     expectedCount: number
     optimisticIds: Set<number>
+    batchId?: string
+    commitRetryCount?: number
     flushing: boolean
 }
 
@@ -173,6 +176,9 @@ const abortFlags = new Set<number>()
 const albumBatches = new Map<string, AlbumBatchState>()
 const subscribers = new Set<UploadEventHandler>()
 const uploadActivityCounts = new Map<number, number>()
+const serviceWorkerOwnedUploads = new Set<number>()
+const serviceWorkerHandoffAbortIds = new Set<number>()
+const serviceWorkerHandoffResolvers = new Map<number, () => void>()
 
 // -----------------------------------------------------------------------------
 // Concurrency gate
@@ -219,6 +225,7 @@ class UploadApiError extends Error {
 
 function enqueueUpload(upload: PendingUpload): void {
     // Avoid duplicates: if the upload is already queued or in-flight, ignore.
+    if (serviceWorkerOwnedUploads.has(upload.id)) return
     if (uploadQueue.some((u) => u.id === upload.id)) return
     if (xhrControllers.has(upload.id)) return
     uploadQueue.push(upload)
@@ -238,7 +245,29 @@ function isSessionBackedUploadRoomKind(roomKind: UploadRoomKind): roomKind is 'd
 }
 
 function shouldUseSessionBackedUpload(upload: PendingUpload): boolean {
-    return !upload.albumId && isSessionBackedUploadRoomKind(upload.roomKind)
+    return isSessionBackedUploadRoomKind(upload.roomKind)
+}
+
+function isSingleSessionBackedUpload(upload: PendingUpload): boolean {
+    return shouldUseSessionBackedUpload(upload) && !upload.albumId
+}
+
+function canUseUploadServiceWorker(): boolean {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+        return false
+    }
+    if (!navigator.serviceWorker?.controller) {
+        return false
+    }
+    const ua = navigator.userAgent || ''
+    return /(Chrome|Chromium|Edg)/i.test(ua) && !/Firefox/i.test(ua)
+}
+
+function resolveServiceWorkerHandoff(id: number): void {
+    const resolve = serviceWorkerHandoffResolvers.get(id)
+    if (!resolve) return
+    serviceWorkerHandoffResolvers.delete(id)
+    resolve()
 }
 
 function resolveUploadTargetId(upload: Pick<PendingUpload, 'roomKind' | 'userId'>): number {
@@ -257,6 +286,16 @@ function buildSingleUploadBatchIdempotencyKey(upload: PendingUpload): string {
         String(resolveUploadTargetId(upload)),
         String(upload.id),
         upload.msgType,
+    ].join(':').slice(0, 128)
+}
+
+function buildAlbumUploadBatchIdempotencyKey(upload: PendingUpload): string {
+    return [
+        'album',
+        upload.roomKind,
+        String(upload.senderId),
+        String(resolveUploadTargetId(upload)),
+        String(upload.albumId || ''),
     ].join(':').slice(0, 128)
 }
 
@@ -298,6 +337,9 @@ function getUploadPreviewMetadata(upload: PendingUpload): Record<string, unknown
     }
     if (typeof upload.durationMs === 'number' && upload.durationMs >= 0 && upload.msgType !== 'document') {
         payload.duration_ms = upload.durationMs
+    }
+    if (upload.albumId && upload.msgType !== 'document') {
+        payload.album_index = upload.albumIndex
     }
     if ((upload.msgType === 'image' || upload.msgType === 'video') && upload.caption) {
         payload.caption = upload.caption
@@ -360,6 +402,7 @@ function pumpUploadQueue(): void {
         const next = uploadQueue.shift()
         if (!next) break
         if (abortFlags.has(next.id)) continue
+        if (serviceWorkerOwnedUploads.has(next.id)) continue
         if (!pendingUploads.has(next.id)) continue
         activeUploadCount++
         void runUploadWithGate(next)
@@ -654,6 +697,38 @@ async function idbDelete(id: number) {
     }
 }
 
+async function idbGet(id: number): Promise<PendingUpload | null> {
+    try {
+        const db = await openDB()
+        return await new Promise<PendingUpload | null>((resolve) => {
+            try {
+                const tx = db.transaction(STORE_NAME, 'readonly')
+                const req = tx.objectStore(STORE_NAME).get(id)
+                req.onsuccess = () => {
+                    const record = req.result as PersistedPendingUpload | undefined
+                    if (!record) {
+                        resolve(null)
+                        return
+                    }
+
+                    const restoredFile = restorePersistedFile(record)
+                    if (!restoredFile) {
+                        resolve(null)
+                        return
+                    }
+
+                    resolve(normalizePersistedUpload(record, restoredFile))
+                }
+                req.onerror = () => resolve(null)
+            } catch {
+                resolve(null)
+            }
+        })
+    } catch {
+        return null
+    }
+}
+
 async function idbGetAll(): Promise<PendingUpload[]> {
     try {
         const db = await openDB()
@@ -703,17 +778,29 @@ export function subscribeToUploads(handler: UploadEventHandler): () => void {
 // Album batching
 // -----------------------------------------------------------------------------
 
-function ensureAlbumBatch(albumId: string, userId: number, expectedCount: number) {
+function ensureAlbumBatch(
+    albumId: string,
+    userId: number,
+    expectedCount: number,
+    roomKind: UploadRoomKind,
+    batchId?: string,
+) {
     const existing = albumBatches.get(albumId)
     if (existing) {
         existing.expectedCount = Math.max(existing.expectedCount, expectedCount)
+        if (batchId && !existing.batchId) {
+            existing.batchId = batchId
+        }
         return existing
     }
     const created: AlbumBatchState = {
         albumId,
         userId,
+        roomKind,
         expectedCount,
         optimisticIds: new Set(),
+        batchId,
+        commitRetryCount: 0,
         flushing: false,
     }
     albumBatches.set(albumId, created)
@@ -752,10 +839,15 @@ async function flushAlbumBatchIfReady(albumId: string) {
     })
     if (hasStillUploading) return
 
-    const sendable = ids
+    const uploads = ids
         .map((id) => pendingUploads.get(id))
-        .filter((u): u is PendingUpload => !!u && u.phase === 'uploaded')
+        .filter((u): u is PendingUpload => !!u)
         .sort((a, b) => a.albumIndex - b.albumIndex)
+
+    const hasFailed = uploads.some((upload) => upload.phase === 'failed')
+    if (hasFailed) return
+
+    const sendable = uploads.filter((upload) => upload.phase === 'uploaded')
 
     if (sendable.length === 0) {
         cleanupAlbumBatchIfSettled(albumId)
@@ -764,9 +856,14 @@ async function flushAlbumBatchIfReady(albumId: string) {
 
     batch.flushing = true
     try {
-        for (const upload of sendable) {
-            if (abortFlags.has(upload.id)) continue
-            await sendOne(upload)
+        const useResumableAlbumCommit = sendable.every((upload) => shouldUseSessionBackedUpload(upload))
+        if (useResumableAlbumCommit) {
+            await commitAlbumBatch(batch, sendable)
+        } else {
+            for (const upload of sendable) {
+                if (abortFlags.has(upload.id)) continue
+                await sendOne(upload)
+            }
         }
     } finally {
         batch.flushing = false
@@ -817,15 +914,174 @@ function ensureStalledAlbumsWatchdog(): void {
     }, 30_000)
 }
 
+async function pauseUploadForServiceWorker(upload: PendingUpload): Promise<void> {
+    if (serviceWorkerOwnedUploads.has(upload.id)) return
+
+    const xhr = xhrControllers.get(upload.id)
+    const sendController = sendControllers.get(upload.id)
+    if (!xhr && !sendController) {
+        serviceWorkerOwnedUploads.add(upload.id)
+        return
+    }
+
+    await new Promise<void>((resolve) => {
+        serviceWorkerHandoffAbortIds.add(upload.id)
+        serviceWorkerHandoffResolvers.set(upload.id, () => {
+            serviceWorkerOwnedUploads.add(upload.id)
+            resolve()
+        })
+
+        try {
+            xhr?.abort()
+        } catch {
+            /* ignore */
+        }
+
+        try {
+            sendController?.abort()
+        } catch {
+            /* ignore */
+        }
+
+        if (!xhr && !sendController) {
+            resolveServiceWorkerHandoff(upload.id)
+        }
+    })
+}
+
+async function postUploadsToServiceWorker(uploadIds: number[]): Promise<boolean> {
+    if (!config || !canUseUploadServiceWorker()) return false
+    const authToken = config.getAuthToken()
+    if (!authToken) return false
+
+    try {
+        navigator.serviceWorker.controller?.postMessage({
+            type: 'chat-upload:handoff',
+            apiBaseUrl: config.apiBaseUrl,
+            authToken,
+            uploadIds,
+        })
+        return true
+    } catch (error) {
+        console.warn('[uploadService] failed to hand off uploads to service worker:', error)
+        return false
+    }
+}
+
+async function handoffEligibleUploadsToServiceWorker(): Promise<void> {
+    if (!canUseUploadServiceWorker()) return
+
+    const eligibleUploads = Array.from(pendingUploads.values()).filter((upload) => {
+        if (!isSingleSessionBackedUpload(upload)) return false
+        if (serviceWorkerOwnedUploads.has(upload.id)) return false
+        if (abortFlags.has(upload.id)) return false
+        return upload.phase !== 'sent' && upload.phase !== 'cancelled' && upload.phase !== 'failed'
+    })
+
+    if (eligibleUploads.length === 0) return
+
+    for (const upload of eligibleUploads) {
+        await pauseUploadForServiceWorker(upload)
+    }
+
+    const handedOff = await postUploadsToServiceWorker(eligibleUploads.map((upload) => upload.id))
+    if (!handedOff) {
+        for (const upload of eligibleUploads) {
+            serviceWorkerOwnedUploads.delete(upload.id)
+        }
+    }
+}
+
+async function reclaimUploadsFromServiceWorker(): Promise<void> {
+    if (serviceWorkerOwnedUploads.size === 0) return
+
+    const ownedIds = Array.from(serviceWorkerOwnedUploads)
+    serviceWorkerOwnedUploads.clear()
+
+    try {
+        navigator.serviceWorker.controller?.postMessage({
+            type: 'chat-upload:reclaim',
+            uploadIds: ownedIds,
+        })
+    } catch (error) {
+        console.warn('[uploadService] failed to reclaim uploads from service worker:', error)
+    }
+
+    for (const id of ownedIds) {
+        const refreshedUpload = await idbGet(id)
+        if (!refreshedUpload) {
+            pendingUploads.delete(id)
+            continue
+        }
+
+        const existingUpload = pendingUploads.get(id)
+        if (existingUpload?.localBlobUrl && !refreshedUpload.localBlobUrl) {
+            refreshedUpload.localBlobUrl = existingUpload.localBlobUrl
+        } else if (!refreshedUpload.localBlobUrl) {
+            try {
+                refreshedUpload.localBlobUrl = URL.createObjectURL(refreshedUpload.file)
+            } catch {
+                /* ignore */
+            }
+        }
+
+        pendingUploads.set(id, refreshedUpload)
+    }
+}
+
+let uploadServiceWorkerBridgeBound = false
+function ensureUploadServiceWorkerBridge(): void {
+    if (uploadServiceWorkerBridgeBound || typeof navigator === 'undefined') return
+
+    navigator.serviceWorker?.addEventListener('message', (event) => {
+        const data = event.data as {
+            type?: string
+            uploadId?: number
+            serverMessage?: Message
+            errorMessage?: string
+        } | null
+        if (!data || typeof data.type !== 'string' || typeof data.uploadId !== 'number') {
+            return
+        }
+
+        const upload = pendingUploads.get(data.uploadId)
+        if (!upload) return
+
+        serviceWorkerOwnedUploads.delete(data.uploadId)
+
+        if (data.type === 'chat-upload:sent' && data.serverMessage) {
+            upload.phase = 'sent'
+            stopUploadActivity(upload)
+            pendingUploads.delete(upload.id)
+            void idbDelete(upload.id)
+            emit({
+                type: 'sent',
+                userId: upload.userId,
+                optimisticId: upload.id,
+                serverMessage: data.serverMessage,
+                localBlobUrl: upload.localBlobUrl,
+            })
+            return
+        }
+
+        if (data.type === 'chat-upload:error') {
+            void markFailed(upload, data.errorMessage || 'Service worker upload failed')
+        }
+    })
+
+    uploadServiceWorkerBridgeBound = true
+}
+
 let uploadForegroundRecoveryBound = false
 function ensureUploadForegroundRecovery(): void {
     if (uploadForegroundRecoveryBound || typeof window === 'undefined') return
 
     const handleForegroundWake = () => {
         if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+            void handoffEligibleUploadsToServiceWorker()
             return
         }
-        void resumePendingUploadsAfterForegroundWake()
+        void reclaimUploadsFromServiceWorker().then(() => resumePendingUploadsAfterForegroundWake())
     }
 
     window.addEventListener('focus', handleForegroundWake)
@@ -842,6 +1098,7 @@ async function resumePendingUploadsAfterForegroundWake(): Promise<void> {
 
     for (const upload of pendingUploads.values()) {
         if (abortFlags.has(upload.id)) continue
+        if (serviceWorkerOwnedUploads.has(upload.id)) continue
 
         startUploadActivity(upload)
 
@@ -1011,6 +1268,24 @@ async function syncResumableUploadState(upload: PendingUpload): Promise<UploadSe
 async function ensureResumableUploadBatch(upload: PendingUpload): Promise<void> {
     if (upload.batchId) return
 
+    const isAlbumUpload = Boolean(upload.albumId)
+    const expectedItems = isAlbumUpload ? Math.max(upload.albumSize || 1, 1) : 1
+    const localAlbumBatch = isAlbumUpload
+        ? ensureAlbumBatch(
+              upload.albumId!,
+              upload.userId,
+              expectedItems,
+              upload.roomKind,
+              upload.batchId,
+          )
+        : null
+
+    if (localAlbumBatch?.batchId) {
+        upload.batchId = localAlbumBatch.batchId
+        await idbPut(upload)
+        return
+    }
+
     const payload = await uploadApiFetch<UploadBatchCreatePayload>('/chat/upload-batches', {
         method: 'POST',
         headers: {
@@ -1019,14 +1294,30 @@ async function ensureResumableUploadBatch(upload: PendingUpload): Promise<void> 
         body: JSON.stringify({
             room_kind: upload.roomKind,
             target_id: resolveUploadTargetId(upload),
-            message_kind: 'single',
-            expected_items: 1,
-            caption_policy: 'none',
-            idempotency_key: buildSingleUploadBatchIdempotencyKey(upload),
+            message_kind: isAlbumUpload ? 'album' : 'single',
+            expected_items: expectedItems,
+            caption_policy: isAlbumUpload ? 'first_item_only' : 'none',
+            idempotency_key: isAlbumUpload
+                ? buildAlbumUploadBatchIdempotencyKey(upload)
+                : buildSingleUploadBatchIdempotencyKey(upload),
         }),
     })
 
     upload.batchId = payload.batch_id
+    if (localAlbumBatch) {
+        localAlbumBatch.batchId = payload.batch_id
+        localAlbumBatch.commitRetryCount = 0
+        await Promise.all(
+            Array.from(localAlbumBatch.optimisticIds).map(async (id) => {
+                const sibling = pendingUploads.get(id)
+                if (!sibling) return
+                sibling.batchId = payload.batch_id
+                await idbPut(sibling)
+            }),
+        )
+        return
+    }
+
     await idbPut(upload)
 }
 
@@ -1081,19 +1372,23 @@ async function appendResumableUploadChunk(
         throw new Error('Missing resumable upload session state')
     }
 
+    const localConfig = config
+    const sessionId = upload.sessionId
+    const resumeToken = upload.resumeToken
+
     return await new Promise<UploadSessionChunkPayload>((resolve, reject) => {
         const xhr = new XMLHttpRequest()
         xhrControllers.set(upload.id, xhr)
 
         const formData = new FormData()
-        formData.append('resume_token', upload.resumeToken)
+        formData.append('resume_token', resumeToken)
         formData.append('offset', String(offset))
         formData.append('is_last_chunk', String(isLastChunk))
         formData.append('chunk', chunkBlob, upload.fileName)
 
-        xhr.open('PATCH', `${config.apiBaseUrl}/api/chat/upload-sessions/${upload.sessionId}/chunk`)
+        xhr.open('PATCH', `${localConfig.apiBaseUrl}/api/chat/upload-sessions/${sessionId}/chunk`)
         xhr.timeout = XHR_UPLOAD_TIMEOUT_MS
-        const token = config.getAuthToken()
+        const token = localConfig.getAuthToken()
         if (token) {
             xhr.setRequestHeader('Authorization', `Bearer ${token}`)
         }
@@ -1244,7 +1539,11 @@ async function runResumableUpload(upload: PendingUpload): Promise<void> {
                 fileId: upload.fileId!,
                 content: buildContent(upload, 'final'),
             })
-            await sendOne(upload)
+            if (upload.albumId) {
+                await flushAlbumBatchIfReady(upload.albumId)
+            } else {
+                await sendOne(upload)
+            }
             return
         }
 
@@ -1282,9 +1581,23 @@ async function runResumableUpload(upload: PendingUpload): Promise<void> {
             content: buildContent(upload, 'final'),
         })
 
-        await sendOne(upload)
+        if (upload.albumId) {
+            await flushAlbumBatchIfReady(upload.albumId)
+        } else {
+            await sendOne(upload)
+        }
     } catch (error) {
         xhrControllers.delete(upload.id)
+        if (serviceWorkerHandoffAbortIds.has(upload.id)) {
+            serviceWorkerHandoffAbortIds.delete(upload.id)
+            upload.phase = upload.fileId ? 'uploaded' : 'queued'
+            upload.totalBytes = upload.file.size
+            upload.uploadedBytes = Math.max(0, Math.min(upload.nextOffset ?? upload.uploadedBytes ?? 0, upload.file.size))
+            upload.progress = upload.fileId ? 100 : getUploadResumeProgress(upload)
+            await idbPut(upload)
+            resolveServiceWorkerHandoff(upload.id)
+            return
+        }
         if (abortFlags.has(upload.id)) {
             upload.phase = 'cancelled'
             stopUploadActivity(upload)
@@ -1524,6 +1837,13 @@ async function commitSingleUploadBatch(upload: PendingUpload): Promise<void> {
         pendingUploads.delete(upload.id)
         await idbDelete(upload.id)
     } catch (error) {
+        if (serviceWorkerHandoffAbortIds.has(upload.id)) {
+            serviceWorkerHandoffAbortIds.delete(upload.id)
+            upload.phase = 'uploaded'
+            await idbPut(upload)
+            resolveServiceWorkerHandoff(upload.id)
+            return
+        }
         if (abortFlags.has(upload.id)) {
             upload.phase = 'cancelled'
             stopUploadActivity(upload)
@@ -1566,6 +1886,122 @@ async function commitSingleUploadBatch(upload: PendingUpload): Promise<void> {
         if (sendControllers.get(upload.id) === sendController) {
             sendControllers.delete(upload.id)
         }
+    }
+}
+
+function getCommittedAlbumMessageIndex(message: Message): number {
+    try {
+        const parsed = JSON.parse(message.content) as { album_index?: unknown }
+        const albumIndex = Number(parsed?.album_index)
+        if (Number.isFinite(albumIndex) && albumIndex >= 0) {
+            return albumIndex
+        }
+    } catch {
+        /* ignore malformed payloads and fall back to message order */
+    }
+    return Number.MAX_SAFE_INTEGER
+}
+
+async function commitAlbumBatch(batch: AlbumBatchState, uploads: PendingUpload[]): Promise<void> {
+    if (!config) return
+    if (!batch.batchId) {
+        throw new Error('Missing album upload batch id')
+    }
+
+    const sendableUploads = uploads
+        .filter((upload) => !abortFlags.has(upload.id))
+        .sort((a, b) => a.albumIndex - b.albumIndex)
+
+    if (sendableUploads.length === 0) {
+        cleanupAlbumBatchIfSettled(batch.albumId)
+        return
+    }
+
+    await Promise.all(sendableUploads.map(async (upload) => {
+        upload.phase = 'sending'
+        await idbPut(upload)
+    }))
+
+    const controller = new AbortController()
+    let sendTimedOut = false
+    const timeoutId = window.setTimeout(() => {
+        sendTimedOut = true
+        controller.abort()
+    }, SEND_REQUEST_TIMEOUT_MS)
+
+    try {
+        const commitPayload = await uploadApiFetch<UploadBatchCommitPayload>(
+            `/chat/upload-batches/${batch.batchId}/commit`,
+            {
+                method: 'POST',
+                signal: controller.signal,
+            },
+        )
+
+        const committedMessages = Array.isArray(commitPayload.messages)
+            ? [...commitPayload.messages].sort((left, right) => {
+                  const leftIndex = getCommittedAlbumMessageIndex(left)
+                  const rightIndex = getCommittedAlbumMessageIndex(right)
+                  if (leftIndex !== rightIndex) {
+                      return leftIndex - rightIndex
+                  }
+                  return left.id - right.id
+              })
+            : []
+
+        if (committedMessages.length < sendableUploads.length) {
+            throw new Error('همه پیام های آلبوم از سرور دریافت نشد')
+        }
+
+        await Promise.all(sendableUploads.map(async (upload, index) => {
+            const serverMessage = committedMessages[index]!
+            upload.phase = 'sent'
+            stopUploadActivity(upload)
+            emit({
+                type: 'sent',
+                userId: upload.userId,
+                optimisticId: upload.id,
+                serverMessage,
+                localBlobUrl: upload.localBlobUrl,
+            })
+            pendingUploads.delete(upload.id)
+            await idbDelete(upload.id)
+        }))
+    } catch (error) {
+        const normalizedError = sendTimedOut ? new Error('Network Error (send timeout)') : error
+        const shouldRetry =
+            isTransientUploadError(normalizedError) &&
+            (batch.commitRetryCount ?? 0) < MAX_SEND_RETRIES &&
+            !sendableUploads.some((upload) => abortFlags.has(upload.id))
+
+        if (shouldRetry) {
+            const attempt = (batch.commitRetryCount ?? 0) + 1
+            batch.commitRetryCount = attempt
+            await Promise.all(sendableUploads.map(async (upload) => {
+                upload.phase = 'uploaded'
+                upload.sendRetryCount = attempt
+                await idbPut(upload)
+            }))
+            const delay = computeSendRetryDelayMs(attempt - 1)
+            console.warn(
+                `[uploadService] transient album commit error (attempt ${attempt}/${MAX_SEND_RETRIES}), retrying in ${delay}ms:`,
+                normalizedError,
+            )
+            setTimeout(() => {
+                if (!albumBatches.has(batch.albumId)) return
+                void flushAlbumBatchIfReady(batch.albumId)
+            }, delay)
+            return
+        }
+
+        await Promise.all(sendableUploads.map(async (upload) => {
+            await markFailed(
+                upload,
+                normalizedError instanceof Error ? normalizedError.message : String(normalizedError),
+            )
+        }))
+    } finally {
+        window.clearTimeout(timeoutId)
     }
 }
 
@@ -1712,6 +2148,7 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
     }
     initialized = true
     ensureStalledAlbumsWatchdog()
+    ensureUploadServiceWorkerBridge()
     ensureUploadForegroundRecovery()
 
     resumePromise = (async () => {
@@ -1724,7 +2161,9 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
                     const batch = ensureAlbumBatch(
                         record.albumId,
                         record.userId,
-                        record.albumSize || 1
+                        record.albumSize || 1,
+                        record.roomKind,
+                        record.batchId,
                     )
                     batch.optimisticIds.add(record.id)
                 }
@@ -1819,7 +2258,13 @@ export async function submitUpload(params: SubmitUploadParams): Promise<void> {
     startUploadActivity(upload)
 
     if (upload.albumId) {
-        const batch = ensureAlbumBatch(upload.albumId, upload.userId, upload.albumSize)
+        const batch = ensureAlbumBatch(
+            upload.albumId,
+            upload.userId,
+            upload.albumSize,
+            upload.roomKind,
+            upload.batchId,
+        )
         batch.optimisticIds.add(upload.id)
     }
 

@@ -4,6 +4,7 @@ API endpoints for in-app messaging system
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 import inspect
@@ -18,6 +19,7 @@ from core.db import get_db
 from core.config import settings
 from models.chat import Chat
 from models.message import Message
+from models.upload_session import UploadSession, UploadSessionStatus, UploadRoomKind
 from models.user import User
 from models.chat_file import ChatFile
 from api.deps import get_current_user, verify_super_admin
@@ -179,6 +181,143 @@ CHAT_MEDIA_MAX_UPLOAD_LABEL = "50MB"
 router = APIRouter(
     tags=["Chat"]
 )
+
+ACTIVE_UPLOAD_SESSION_STATUSES = {
+    UploadSessionStatus.CREATED,
+    UploadSessionStatus.UPLOADING,
+    UploadSessionStatus.UPLOADED,
+    UploadSessionStatus.FINALIZING,
+}
+
+
+def _enum_value(value: object) -> object:
+    return getattr(value, "value", value)
+
+
+def _build_upload_session_event_payload(
+    *,
+    event_name: str,
+    session: UploadSession | object,
+    batch_status: object | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "event": event_name,
+        "session_id": getattr(session, "id"),
+        "batch_id": getattr(session, "batch_id", None),
+        "room_kind": _enum_value(getattr(session, "room_kind", None)),
+        "target_id": getattr(session, "target_id", None),
+        "media_type": _enum_value(getattr(session, "media_type", None)),
+        "status": _enum_value(getattr(session, "status", None)),
+        "received_bytes": getattr(session, "received_bytes", 0),
+        "total_bytes": getattr(session, "total_bytes", 0),
+        "next_offset": getattr(session, "next_offset", 0),
+        "final_chat_file_id": getattr(session, "final_chat_file_id", None),
+    }
+    preview_metadata = getattr(session, "preview_metadata", None)
+    if preview_metadata:
+        payload["preview_metadata"] = preview_metadata
+    if batch_status is not None:
+        payload["batch_status"] = _enum_value(batch_status)
+    return payload
+
+
+async def _has_active_upload_sessions_for_room(
+    db: AsyncSession,
+    *,
+    owner_user_id: int,
+    room_kind: UploadRoomKind | str,
+    target_id: int,
+) -> bool:
+    normalized_room_kind = room_kind
+    if isinstance(room_kind, str):
+        normalized_room_kind = UploadRoomKind(room_kind)
+
+    result = await db.execute(
+        select(UploadSession.id)
+        .where(
+            UploadSession.owner_user_id == owner_user_id,
+            UploadSession.room_kind == normalized_room_kind,
+            UploadSession.target_id == target_id,
+            UploadSession.status.in_(tuple(ACTIVE_UPLOAD_SESSION_STATUSES)),
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _publish_upload_session_runtime_event(
+    *,
+    db: AsyncSession,
+    current_user: User,
+    session: UploadSession | object,
+    event_name: str,
+    batch_status: object | None = None,
+) -> None:
+    room_kind = _enum_value(getattr(session, "room_kind", None))
+    target_id = int(getattr(session, "target_id"))
+    payload = _build_upload_session_event_payload(
+        event_name=event_name,
+        session=session,
+        batch_status=batch_status,
+    )
+
+    await publish_user_event(current_user.id, "chat:upload_session", payload)
+
+    logger.info(
+        "chat_upload_session_event",
+        extra={
+            "event": event_name,
+            "session_id": getattr(session, "id", None),
+            "batch_id": getattr(session, "batch_id", None),
+            "room_kind": room_kind,
+            "target_id": target_id,
+            "media_type": _enum_value(getattr(session, "media_type", None)),
+            "status": _enum_value(getattr(session, "status", None)),
+            "received_bytes": getattr(session, "received_bytes", 0),
+            "total_bytes": getattr(session, "total_bytes", 0),
+        },
+    )
+
+    has_active_uploads = await _has_active_upload_sessions_for_room(
+        db,
+        owner_user_id=current_user.id,
+        room_kind=room_kind,
+        target_id=target_id,
+    )
+
+    if room_kind == UploadRoomKind.DIRECT.value:
+        await publish_direct_activity_event(
+            receiver_id=target_id,
+            sender_id=current_user.id,
+            sender_name=getattr(current_user, "account_name", None),
+            activity="uploading_file",
+            active=has_active_uploads,
+            publisher=publish_user_event,
+        )
+        return
+
+    chat = await db.get(Chat, target_id)
+    if chat is None or chat.is_deleted:
+        return
+
+    await publish_room_activity_event(
+        chat=chat,
+        sender_id=current_user.id,
+        sender_name=getattr(current_user, "account_name", None),
+        member_user_ids=await list_active_room_member_user_ids(db, chat_id=chat.id),
+        activity="uploading_file",
+        active=has_active_uploads,
+        publisher=publish_user_event,
+    )
+
+
+async def _list_batch_upload_sessions(db: AsyncSession, *, batch_id: str) -> list[UploadSession]:
+    result = await db.execute(
+        select(UploadSession)
+        .where(UploadSession.batch_id == batch_id)
+        .order_by(UploadSession.id.asc())
+    )
+    return list(result.scalars().all())
 
 
 async def _serialize_pinned_message_state(
@@ -1654,6 +1793,12 @@ async def post_upload_session(
         preview_metadata=data.preview_metadata.model_dump(exclude_none=True),
         sha256_full=data.sha256_full,
     )
+    await _publish_upload_session_runtime_event(
+        db=db,
+        current_user=current_user,
+        session=session,
+        event_name="created",
+    )
     return UploadSessionCreateResponse(
         session_id=session.id,
         resume_token=session.resume_token,
@@ -1687,6 +1832,12 @@ async def patch_upload_session_chunk(
         offset=offset,
         chunk_bytes=chunk_bytes,
         is_last_chunk=is_last_chunk,
+    )
+    await _publish_upload_session_runtime_event(
+        db=db,
+        current_user=current_user,
+        session=session,
+        event_name="progress",
     )
     return UploadSessionChunkAppendResponse(
         session_id=session.id,
@@ -1733,6 +1884,12 @@ async def finalize_upload_session_endpoint(
         db,
         session=session,
         current_user=current_user,
+    )
+    await _publish_upload_session_runtime_event(
+        db=db,
+        current_user=current_user,
+        session=session,
+        event_name="ready",
     )
     return UploadSessionStatusChangeResponse(
         session_id=session.id,
@@ -1786,6 +1943,15 @@ async def commit_upload_batch_endpoint(
                 publisher=publish_user_event,
             )
 
+    for session in await _list_batch_upload_sessions(db, batch_id=commit_result.batch.id):
+        await _publish_upload_session_runtime_event(
+            db=db,
+            current_user=current_user,
+            session=session,
+            event_name="committed",
+            batch_status=commit_result.batch.status,
+        )
+
     return UploadBatchCommitResponse(
         batch_id=commit_result.batch.id,
         status=commit_result.batch.status,
@@ -1806,6 +1972,12 @@ async def cancel_upload_session_endpoint(
         current_user=current_user,
     )
     session = await cancel_upload_session(db, session=session)
+    await _publish_upload_session_runtime_event(
+        db=db,
+        current_user=current_user,
+        session=session,
+        event_name="cancelled",
+    )
     return UploadSessionStatusChangeResponse(
         session_id=session.id,
         status=session.status,
@@ -1825,6 +1997,14 @@ async def cancel_upload_batch_endpoint(
         current_user=current_user,
     )
     batch = await cancel_upload_batch(db, batch=batch)
+    for session in await _list_batch_upload_sessions(db, batch_id=batch.id):
+        await _publish_upload_session_runtime_event(
+            db=db,
+            current_user=current_user,
+            session=session,
+            event_name="cancelled",
+            batch_status=batch.status,
+        )
     return UploadBatchCancelResponse(batch_id=batch.id, status=batch.status)
 
 @router.get("/files/{file_id}")
