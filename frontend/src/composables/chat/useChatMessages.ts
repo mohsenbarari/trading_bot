@@ -14,6 +14,7 @@ import {
     buildChatSendEndpoint,
     isChannelConversationKey,
 } from '../../utils/chatRoomRouting'
+import { getConversationPreviewText } from '../../utils/chatMessagePreview'
 import {
     getPendingForUser as backgroundGetPendingForUser,
     buildOptimisticMessageFromUpload,
@@ -140,13 +141,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     }
 
     function getConversationPreviewContent(messageType: Message['message_type'], content: string) {
-        if (messageType === 'image') return 'تصویر'
-        if (messageType === 'video') return 'ویدئو'
-        if (messageType === 'voice') return 'پیام صوتی'
-        if (messageType === 'sticker') return 'استیکر'
-        if (messageType === 'location') return 'موقعیت'
-        if (messageType === 'document') return 'فایل'
-        return content
+        return getConversationPreviewText(messageType, content)
     }
 
     function upsertConversationPreview(userId: number, patch: Partial<Conversation>) {

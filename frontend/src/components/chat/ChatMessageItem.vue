@@ -113,6 +113,7 @@
           @delete-item="$emit('delete-album-item', $event)"
           @toggle-download-item="$emit('toggle-album-download-item', $event)"
         />
+        <p v-if="mediaCaption" class="media-caption" v-html="highlightedMediaCaption"></p>
       </template>
 
       <!-- Media (Image/Video) -->
@@ -194,6 +195,7 @@
             </div>
           </template>
         </div>
+        <p v-if="mediaCaption" class="media-caption" v-html="highlightedMediaCaption"></p>
       </template>
       
       <!-- Voice Message -->
@@ -386,6 +388,10 @@ import { resolveForwardedProfileTarget } from '../../utils/accountantChatIdentit
 import { observeVisibility } from '../../utils/sharedVisibilityObserver'
 import { MESSAGE_REACTION_ORDER } from '../../utils/messageReactions'
 import {
+  getMediaCaptionText,
+  parseStructuredMessageContent as parseMessageContent,
+} from '../../utils/chatMessagePreview'
+import {
   handleFileClick as cachedFileClick,
   shareFile as cachedShareFile,
   canShareFiles,
@@ -406,16 +412,6 @@ const messageTimeFormatter = new Intl.DateTimeFormat('fa-IR', {
   hour: '2-digit',
   minute: '2-digit'
 })
-
-function parseMessageContent(content: string): Record<string, any> | null {
-  if (!content) return null
-  try {
-    const parsed = JSON.parse(content)
-    return parsed && typeof parsed === 'object' ? parsed : null
-  } catch {
-    return null
-  }
-}
 
 const formatBytes = (bytes: number, decimals = 2) => {
   if (!+bytes) return "0 Bytes"
@@ -517,6 +513,7 @@ const groupedReactions = computed(() => {
 })
 const parsedContent = computed(() => parseMessageContent(props.msg.content))
 const mediaFileId = computed(() => getFileId(props.msg.content, parsedContent.value))
+const mediaCaption = computed(() => getMediaCaptionText(props.msg.message_type, props.msg.content, parsedContent.value))
 
 const cachedUrl = computed(() => props.imageCache[mediaFileId.value] || '')
 const isCached = computed(() => Boolean(cachedUrl.value))
@@ -1191,15 +1188,20 @@ function escapeHtml(unsafe: string) {
   });
 }
 
-const highlightedContent = computed(() => {
-  const content = props.msg.content || ''
+function highlightText(content: string) {
   if (!props.searchQuery) return escapeHtml(content)
-  
+
   const escapedContent = escapeHtml(content)
   const escapedQuery = props.searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const regex = new RegExp(`(${escapedQuery})`, 'gi')
   return escapedContent.replace(regex, '<mark class="in-bubble-highlight">$1</mark>')
+}
+
+const highlightedContent = computed(() => {
+  return highlightText(props.msg.content || '')
 })
+
+const highlightedMediaCaption = computed(() => highlightText(mediaCaption.value))
 
 const albumLayoutItems = computed(() => {
   return (props.albumItems || []).map((message: any) => {
@@ -1626,6 +1628,16 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .message-bubble.full-width-bubble.sent,
 .message-bubble.full-width-bubble.received { align-self: stretch; }
 .message-bubble p { margin: 0; }
+.media-caption {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.message-bubble.album-bubble .media-caption {
+  padding: 0 4px;
+}
 
 .message-reactions {
   display: flex;

@@ -1,6 +1,7 @@
 import { ref, computed, onMounted, onUnmounted, type Ref } from 'vue'
 import { useWebSocket } from '../../composables/useWebSocket'
 import { resolveRoomConversationKey } from '../../utils/chatRoomRouting'
+import { getConversationPreviewText } from '../../utils/chatMessagePreview'
 
 export interface UseChatWebSocketOptions {
     selectedUserId: Ref<number | null>
@@ -97,8 +98,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
 
     function getConversationPreviewContent(data: any) {
         if (data?.is_deleted) return 'پیام حذف شد'
-        if (data?.message_type !== 'text') return null
-        return typeof data?.content === 'string' ? data.content : null
+        return getConversationPreviewText(data?.message_type, data?.content)
     }
 
     function handleNewMessageEvent(data: any) {

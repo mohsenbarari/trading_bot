@@ -59,6 +59,7 @@ export interface PendingUpload {
     width: number
     height: number
     durationMs?: number
+    caption?: string
     albumId: string | null
     albumIndex: number
     albumSize: number
@@ -87,6 +88,7 @@ export interface SubmitUploadParams {
     width: number
     height: number
     durationMs?: number
+    caption?: string
     albumId: string | null
     albumIndex: number
     albumSize: number
@@ -638,6 +640,10 @@ function buildContent(upload: PendingUpload, phase: 'preview' | 'final'): string
         payload.durationMs = upload.durationMs
     }
 
+    if ((upload.msgType === 'image' || upload.msgType === 'video') && upload.caption) {
+        payload.caption = upload.caption
+    }
+
     return JSON.stringify(payload)
 }
 
@@ -1017,6 +1023,7 @@ export async function submitUpload(params: SubmitUploadParams): Promise<void> {
         width: params.width,
         height: params.height,
         durationMs: params.durationMs,
+        caption: params.caption,
         albumId: params.albumId,
         albumIndex: params.albumIndex,
         albumSize: params.albumSize,

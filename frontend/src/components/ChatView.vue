@@ -138,6 +138,7 @@ const showForwardModal = ref(false)
 
 // Attachment Bottom Sheet
 const showAttachmentMenu = ref(false)
+let pendingMediaCaptionReservation: { value: string; consumed: boolean } | null = null
 
 type MessagesContainerMetrics = {
   clientHeight: number
@@ -2869,7 +2870,10 @@ watch(() => contextMenu.value.visible, (isVisible) => {
 watch(showAttachmentMenu, (isOpen) => {
   if (isOpen) {
     showStickerPicker.value = false
+    return
   }
+
+  pendingMediaCaptionReservation = null
 })
 
 bindOverlayBackState(() => showNewChatModal.value, () => {
@@ -2910,6 +2914,63 @@ function handleToggleAttachment() {
   }
   showStickerPicker.value = false
   showAttachmentMenu.value = !showAttachmentMenu.value
+}
+
+function claimComposerCaptionForMedia(albumId?: string | null, albumIndex?: number) {
+  if (!pendingMediaCaptionReservation) {
+    const trimmedComposerValue = messageInput.value.trim()
+    if (!trimmedComposerValue) {
+      return { caption: '', onCaptionApplied: undefined as (() => void) | undefined }
+    }
+
+    pendingMediaCaptionReservation = {
+      value: trimmedComposerValue,
+      consumed: false,
+    }
+  }
+
+  if (!pendingMediaCaptionReservation || pendingMediaCaptionReservation.consumed) {
+    return { caption: '', onCaptionApplied: undefined as (() => void) | undefined }
+  }
+
+  const normalizedAlbumIndex = typeof albumIndex === 'number' ? albumIndex : 0
+  const shouldUseCaption = !albumId || normalizedAlbumIndex === 0
+  if (!shouldUseCaption) {
+    return { caption: '', onCaptionApplied: undefined as (() => void) | undefined }
+  }
+
+  const reservedCaption = pendingMediaCaptionReservation.value
+  pendingMediaCaptionReservation.consumed = true
+
+  return {
+    caption: reservedCaption,
+    onCaptionApplied: () => {
+      if (messageInput.value.trim() === reservedCaption) {
+        messageInput.value = ''
+      }
+
+      if (pendingMediaCaptionReservation?.value === reservedCaption) {
+        pendingMediaCaptionReservation = null
+      }
+    },
+  }
+}
+
+async function handleAttachmentMediaSelection(
+  file: File,
+  albumId?: string | null,
+  albumIndex?: number,
+  albumSize?: number,
+) {
+  const { caption, onCaptionApplied } = claimComposerCaptionForMedia(albumId, albumIndex)
+  await handleMediaUploadWrapper(file, albumId, albumIndex, albumSize, {
+    caption,
+    onCaptionApplied,
+  })
+}
+
+async function handleAttachmentFileSelection(file: File) {
+  await handleMediaUploadWrapper(file, null, 0, 1, { sendAsDocument: true })
 }
 
 onUnmounted(() => {
@@ -3235,8 +3296,8 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       <AttachmentMenu
         v-model="showAttachmentMenu"
         :allowLocation="selectedRoomKind === 'direct'"
-        @select-media="handleMediaUploadWrapper"
-        @select-file="(file) => handleMediaUploadWrapper(file, null, 0, 1, { sendAsDocument: true })"
+        @select-media="handleAttachmentMediaSelection"
+        @select-file="handleAttachmentFileSelection"
         @select-location="handleSendLocation"
       />
 

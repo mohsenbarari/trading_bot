@@ -156,4 +156,33 @@ describe('ChatConversationList.vue', () => {
 
     expect(wrapper.find('.fab-new-chat').exists()).toBe(false)
   })
+
+  it('shows media captions in the conversation preview text', async () => {
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [makeConversation({
+          last_message_type: 'image',
+          last_message_content: JSON.stringify({
+            file_id: 'image-11',
+            caption: 'کپشن آخرین تصویر',
+          }),
+        })],
+        selectedUserId: null,
+        typingUsers: {},
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('تصویر · کپشن آخرین تصویر')
+  })
 })

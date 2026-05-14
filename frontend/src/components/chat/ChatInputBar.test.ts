@@ -97,4 +97,22 @@ describe('ChatInputBar.vue', () => {
     expect(wrapper.text()).not.toContain('کپی')
     expect(wrapper.text()).toContain('هدایت')
   })
+
+  it('keeps the attachment button available when the composer has text', async () => {
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      canDeleteSelected: false,
+      canCopySelected: false,
+      modelValue: 'کپشن تست',
+    })
+
+    expect(wrapper.find('.attach-btn').exists()).toBe(true)
+    expect(wrapper.find('.voice-btn').exists()).toBe(false)
+    expect(wrapper.find('.send-btn-inline').exists()).toBe(true)
+
+    await wrapper.find('.attach-btn').trigger('click')
+
+    expect(wrapper.emitted('toggle-attachment')).toHaveLength(1)
+  })
 })
