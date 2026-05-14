@@ -330,7 +330,19 @@ async function loginWithSeededSession(page: Page, fixture: LoginFixture) {
 }
 
 async function navigateFromMessengerToMarket(page: Page) {
-  await page.goto('/market')
+  const attachmentSheet = page.locator('.attachment-sheet')
+  try {
+    await attachmentSheet.waitFor({ state: 'hidden', timeout: 10000 })
+  } catch {
+    // Ignore when the sheet was never mounted or has already been removed.
+  }
+
+  const fabButton = page.locator('.fab-btn').first()
+  await expect(fabButton).toBeVisible({ timeout: 30000 })
+  await fabButton.evaluate((node: HTMLElement) => node.click())
+  const marketLink = page.locator('.fab-item').filter({ hasText: 'بازار' }).first()
+  await expect(marketLink).toBeVisible({ timeout: 30000 })
+  await marketLink.evaluate((node: HTMLElement) => node.click())
   await expect(page).toHaveURL(/\/market$/, { timeout: 30000 })
 }
 
@@ -1135,7 +1147,7 @@ test.describe('Channel media regressions', () => {
       await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال نوشتن...`, { timeout: 30000 })
 
       await senderPage.locator('textarea[placeholder="پیام..."]').fill('')
-      await senderPage.route('**/api/chat/upload-media', async (route) => {
+      await senderContext.route('**/api/chat/upload-media', async (route) => {
         if (!hasHeldUpload) {
           hasHeldUpload = true
           resolveHeldUploadSeen?.()
