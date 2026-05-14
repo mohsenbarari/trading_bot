@@ -3,7 +3,7 @@
 API endpoints for in-app messaging system
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 import inspect
@@ -62,6 +62,15 @@ from api.routers.chat_schemas import (
     RoomMessageSend,
     StickerPack,
     TypingSignal,
+    UploadBatchCancelResponse,
+    UploadBatchCommitResponse,
+    UploadBatchCreateRequest,
+    UploadBatchCreateResponse,
+    UploadSessionChunkAppendResponse,
+    UploadSessionCreateRequest,
+    UploadSessionCreateResponse,
+    UploadSessionStateRead,
+    UploadSessionStatusChangeResponse,
 )
 
 from core.enums import ChatMemberRole, ChatType
@@ -145,6 +154,19 @@ from core.services.chat_service import (
     set_direct_chat_pin_state,
     serialize_direct_message_for_response,
     serialize_direct_messages_for_response,
+)
+from core.services.chat_upload_session_service import (
+    append_upload_chunk,
+    cancel_upload_batch,
+    cancel_upload_session,
+    commit_upload_batch,
+    create_upload_batch,
+    create_upload_session,
+    finalize_upload_session,
+    get_upload_batch_for_current_user,
+    get_upload_session_for_current_user,
+    persist_chat_media_file_bytes,
+    read_upload_chunk_bytes,
 )
 from core.utils import publish_user_event
 import logging
@@ -1558,103 +1580,28 @@ async def upload_chat_media(
 ):
     """آپلود فایل برای چت (ذخیره روی دیسک سرور)"""
     try:
-        allowed_types = [
-            "image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heic-sequence", "image/heif", "image/heif-sequence",
-            "video/mp4", "video/webm", "video/quicktime", "video/x-matroska", "application/mp4", "video/x-m4v", "video/3gpp", "video/quicktime", "application/octet-stream",
-            "audio/mp4", "audio/webm", "audio/ogg", "audio/mpeg", "audio/aac", "audio/x-m4a", "audio/wav", "audio/x-wav",
-            "application/pdf", "text/plain", "text/csv", "application/json", "application/xml", "text/xml", "application/rtf",
-            "application/zip", "application/x-zip-compressed", "application/x-rar-compressed", "application/vnd.rar", "application/x-7z-compressed",
-            "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        ]
-
-        base_content_type = file.content_type.split(";")[0].strip()
-
-        if base_content_type not in allowed_types:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
-
-        # بررسی محتوای واقعی فایل با استفاده از Magic bytes
-        # CPU-bound libmagic probe is offloaded to a thread to avoid blocking the event loop
         contents = await file.read()
-        mime = await asyncio.to_thread(lambda: magic.from_buffer(contents, mime=True))
-
-        # allow magic to return "video/webm" for "audio/webm" files
-        if mime == 'video/webm' and base_content_type == 'audio/webm':
-            mime = 'audio/webm'
-
-        if mime not in allowed_types:
-            raise HTTPException(status_code=400, detail=f"Invalid file content. Real type is {mime} and base type is {base_content_type}")
-
-        # بررسی سایز (حداکثر 50MB)
-        size = len(contents)
-        if size > CHAT_MEDIA_MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail=f"File too large (max {CHAT_MEDIA_MAX_UPLOAD_LABEL})")
-
-        ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else mime.split("/")[-1]
-        file_uuid = str(uuid.uuid4())
-
-        # ذخیره در پوشه محلی سرور (نه S3)
-        # فضای مخفی - مسیر واقعی هرگز به کاربر نمایش داده نمی‌شود
-        upload_dir = os.path.join("uploads", "chat_files", str(current_user.id))
-        os.makedirs(upload_dir, exist_ok=True)
-
-        file_path = os.path.join(upload_dir, f"{file_uuid}.{ext}")
-
-        # EXIF transpose for images: rotate pixels to match EXIF orientation, then strip the tag.
-        # CPU-bound Pillow work runs in a thread pool to avoid blocking the uvicorn event loop,
-        # which otherwise stalls unrelated /api/chat/* requests (messages, conversations, poll)
-        # while media uploads are being processed.
-        img_width = None
-        img_height = None
-        if mime.startswith("image/") and mime != "image/gif":
-            def _exif_transpose_sync(raw: bytes, mime_type: str):
-                from PIL import Image as PILImage, ImageOps
-                import io as _io
-                pil_img = PILImage.open(_io.BytesIO(raw))
-                pil_img = ImageOps.exif_transpose(pil_img)
-                w, h = pil_img.size
-                buf = _io.BytesIO()
-                fmt = "JPEG" if mime_type in ("image/jpeg", "image/jpg") else ("PNG" if mime_type == "image/png" else "WEBP")
-                pil_img.save(buf, format=fmt, quality=90)
-                return buf.getvalue(), w, h
-
-            try:
-                new_contents, img_width, img_height = await asyncio.to_thread(
-                    _exif_transpose_sync, contents, mime
-                )
-                contents = new_contents
-                size = len(contents)
-            except Exception as e:
-                logger.warning(f"Pillow EXIF transpose failed, saving original: {e}")
-
-        async with aiofiles.open(file_path, "wb") as f:
-            await f.write(contents)
-
-        # ذخیره در دیتابیس (s3_key = مسیر نسبی فایل روی دیسک)
-        chat_file = ChatFile(
-            id=file_uuid,
+        file_result = await persist_chat_media_file_bytes(
+            db,
             uploader_id=current_user.id,
-            s3_key=file_path,  # در اینجا مسیر فایل ذخیره می‌شود
-            file_name=file.filename,
-            mime_type=mime,
-            size=size,
-            thumbnail=thumbnail
+            file_name=file.filename or f"upload_{uuid.uuid4()}",
+            declared_content_type=file.content_type or "application/octet-stream",
+            contents=contents,
+            thumbnail=thumbnail,
         )
-        db.add(chat_file)
         await db.commit()
 
         # برگرداندن شناسه، تامنیل و ابعاد تصویر
         result = {
-            "file_id": chat_file.id,
-            "thumbnail": chat_file.thumbnail,
-            "file_name": chat_file.file_name,
-            "mime_type": chat_file.mime_type,
-            "size": chat_file.size,
+            "file_id": file_result.chat_file.id,
+            "thumbnail": file_result.chat_file.thumbnail,
+            "file_name": file_result.chat_file.file_name,
+            "mime_type": file_result.chat_file.mime_type,
+            "size": file_result.chat_file.size,
         }
-        if img_width and img_height:
-            result["width"] = img_width
-            result["height"] = img_height
+        if file_result.width and file_result.height:
+            result["width"] = file_result.width
+            result["height"] = file_result.height
         return result
     finally:
         close_file = getattr(file, "close", None)
@@ -1662,6 +1609,223 @@ async def upload_chat_media(
             close_result = close_file()
             if inspect.isawaitable(close_result):
                 await close_result
+
+
+@router.post("/upload-batches", response_model=UploadBatchCreateResponse, status_code=status.HTTP_201_CREATED)
+async def post_upload_batch(
+    data: UploadBatchCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    batch = await create_upload_batch(
+        db,
+        current_user=current_user,
+        room_kind=data.room_kind,
+        target_id=data.target_id,
+        message_kind=data.message_kind,
+        expected_items=data.expected_items,
+        caption_policy=data.caption_policy,
+        idempotency_key=data.idempotency_key,
+    )
+    return UploadBatchCreateResponse(
+        batch_id=batch.id,
+        status=batch.status,
+        expires_at=batch.expires_at,
+    )
+
+
+@router.post("/upload-sessions", response_model=UploadSessionCreateResponse, status_code=status.HTTP_201_CREATED)
+async def post_upload_session(
+    data: UploadSessionCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await create_upload_session(
+        db,
+        current_user=current_user,
+        batch_id=data.batch_id,
+        room_kind=data.room_kind,
+        target_id=data.target_id,
+        media_type=data.media_type,
+        file_name=data.file_name,
+        mime_type=data.mime_type,
+        total_bytes=data.total_bytes,
+        chunk_size=data.chunk_size,
+        preview_metadata=data.preview_metadata.model_dump(exclude_none=True),
+        sha256_full=data.sha256_full,
+    )
+    return UploadSessionCreateResponse(
+        session_id=session.id,
+        resume_token=session.resume_token,
+        next_offset=session.next_offset,
+        chunk_size=session.chunk_size,
+        expires_at=session.expires_at,
+        status=session.status,
+    )
+
+
+@router.patch("/upload-sessions/{session_id}/chunk", response_model=UploadSessionChunkAppendResponse)
+async def patch_upload_session_chunk(
+    session_id: str,
+    resume_token: str = Form(...),
+    offset: int = Form(...),
+    is_last_chunk: bool = Form(False),
+    chunk: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await get_upload_session_for_current_user(
+        db,
+        session_id=session_id,
+        current_user=current_user,
+    )
+    chunk_bytes = await read_upload_chunk_bytes(chunk)
+    session = await append_upload_chunk(
+        db,
+        session=session,
+        resume_token=resume_token,
+        offset=offset,
+        chunk_bytes=chunk_bytes,
+        is_last_chunk=is_last_chunk,
+    )
+    return UploadSessionChunkAppendResponse(
+        session_id=session.id,
+        received_bytes=session.received_bytes,
+        next_offset=session.next_offset,
+        status=session.status,
+    )
+
+
+@router.get("/upload-sessions/{session_id}", response_model=UploadSessionStateRead)
+async def get_upload_session_state(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await get_upload_session_for_current_user(
+        db,
+        session_id=session_id,
+        current_user=current_user,
+    )
+    return UploadSessionStateRead(
+        session_id=session.id,
+        status=session.status,
+        next_offset=session.next_offset,
+        received_bytes=session.received_bytes,
+        total_bytes=session.total_bytes,
+        preview_metadata=session.preview_metadata or {},
+        final_chat_file_id=session.final_chat_file_id,
+    )
+
+
+@router.post("/upload-sessions/{session_id}/finalize", response_model=UploadSessionStatusChangeResponse)
+async def finalize_upload_session_endpoint(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await get_upload_session_for_current_user(
+        db,
+        session_id=session_id,
+        current_user=current_user,
+    )
+    session = await finalize_upload_session(
+        db,
+        session=session,
+        current_user=current_user,
+    )
+    return UploadSessionStatusChangeResponse(
+        session_id=session.id,
+        status=session.status,
+        final_chat_file_id=session.final_chat_file_id,
+    )
+
+
+@router.post("/upload-batches/{batch_id}/commit", response_model=UploadBatchCommitResponse)
+async def commit_upload_batch_endpoint(
+    batch_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    batch = await get_upload_batch_for_current_user(
+        db,
+        batch_id=batch_id,
+        current_user=current_user,
+    )
+    commit_result = await commit_upload_batch(
+        db,
+        batch=batch,
+        current_user=current_user,
+    )
+    serialized_messages = await _serialize_direct_messages_with_accountant_contract(db, commit_result.messages)
+    serialized_by_id = {message.id: message for message in serialized_messages}
+
+    def _serializer(message: Message) -> MessageRead:
+        serialized = serialized_by_id.get(message.id)
+        if serialized is None:
+            return MessageRead.from_orm_with_forwarding(message)
+        return serialized
+
+    if commit_result.target.receiver is not None:
+        for message in commit_result.messages:
+            await publish_direct_message_event(
+                receiver_id=commit_result.target.receiver.id,
+                message=message,
+                serializer=_serializer,
+                publisher=publish_user_event,
+                sender_name=None,
+            )
+    else:
+        member_user_ids = await list_active_room_member_user_ids(db, chat_id=commit_result.target.target_id)
+        for message in commit_result.messages:
+            await publish_group_message_event(
+                chat=commit_result.target.chat,
+                message=message,
+                member_user_ids=member_user_ids,
+                serializer=_serializer,
+                publisher=publish_user_event,
+            )
+
+    return UploadBatchCommitResponse(
+        batch_id=commit_result.batch.id,
+        status=commit_result.batch.status,
+        committed_items=commit_result.batch.committed_items,
+        messages=serialized_messages,
+    )
+
+
+@router.post("/upload-sessions/{session_id}/cancel", response_model=UploadSessionStatusChangeResponse)
+async def cancel_upload_session_endpoint(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await get_upload_session_for_current_user(
+        db,
+        session_id=session_id,
+        current_user=current_user,
+    )
+    session = await cancel_upload_session(db, session=session)
+    return UploadSessionStatusChangeResponse(
+        session_id=session.id,
+        status=session.status,
+        final_chat_file_id=session.final_chat_file_id,
+    )
+
+
+@router.post("/upload-batches/{batch_id}/cancel", response_model=UploadBatchCancelResponse)
+async def cancel_upload_batch_endpoint(
+    batch_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    batch = await get_upload_batch_for_current_user(
+        db,
+        batch_id=batch_id,
+        current_user=current_user,
+    )
+    batch = await cancel_upload_batch(db, batch=batch)
+    return UploadBatchCancelResponse(batch_id=batch.id, status=batch.status)
 
 @router.get("/files/{file_id}")
 async def get_chat_file(

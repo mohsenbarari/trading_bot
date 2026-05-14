@@ -658,6 +658,35 @@ async function fetchLatestRoomMessageTypesByChatId(
   return Array.isArray(body) ? body.map((item) => item.message_type || '') : []
 }
 
+type RoomMessageRecord = {
+  id?: number
+  message_type?: string
+  content?: string
+}
+
+async function fetchLatestRoomMessagesByChatId(
+  request: APIRequestContext,
+  accessToken: string,
+  chatId: number,
+): Promise<RoomMessageRecord[]> {
+  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/rooms/${chatId}/messages?limit=24`, {
+    headers: authHeaders(accessToken),
+  })
+
+  expect(response.ok()).toBeTruthy()
+  const body = (await response.json()) as RoomMessageRecord[]
+  return Array.isArray(body) ? body : []
+}
+
+function parseRoomMessageContent(raw: string | undefined): Record<string, unknown> | null {
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
 async function fetchLatestRoomContentsByChatId(
   request: APIRequestContext,
   accessToken: string,
@@ -878,11 +907,28 @@ async function injectGalleryVideo(page: Page, fileName: string) {
   ])
 }
 
+async function injectGalleryImage(page: Page, fileName: string) {
+  await page.locator('input[type="file"][accept="image/*,video/*"]').setInputFiles([
+    createPlaywrightBinaryFile(fileName, 'image/png', TINY_PNG_BASE64),
+  ])
+}
+
 async function injectGalleryImageAndVideo(page: Page) {
   const suffix = Date.now()
   await page.locator('input[type="file"][accept="image/*,video/*"]').setInputFiles([
     createPlaywrightBinaryFile(`pw-channel-${suffix}.png`, 'image/png', TINY_PNG_BASE64),
     createPlaywrightBinaryFile(`pw-channel-${suffix}.webm`, 'video/webm', GENERATED_WEBM_BASE64),
+  ])
+}
+
+async function injectDocument(page: Page, prefix = 'pw-room') {
+  const suffix = Date.now()
+  await page.locator('input[type="file"][accept="*"]').setInputFiles([
+    {
+      name: `${prefix}-${suffix}.txt`,
+      mimeType: 'text/plain',
+      buffer: Buffer.from(`Playwright document ${suffix}`, 'utf8'),
+    },
   ])
 }
 
@@ -1181,6 +1227,273 @@ test.describe('Channel media regressions', () => {
       await senderContext.close()
       await receiverContext.close()
     }
+  })
+
+  test('group single document upload uses resumable sessions and stays attached after sender leaves messenger for market', async ({
+    browser,
+    request,
+  }) => {
+    test.setTimeout(120000)
+    const sender = seedPrimarySession('group_single_document_sender')
+    const receiver = seedPrimarySession('group_single_document_receiver')
+    const groupTitle = `Group Single Document ${Date.now()}`
+    const bootstrapContent = `PW GROUP SINGLE DOCUMENT BOOTSTRAP ${Date.now()}`
+    let sawBatchCreate = false
+    let sawSessionCreate = false
+    let sawChunkAppend = false
+    let sawFinalize = false
+    let sawCommit = false
+    let legacyUploadHits = 0
+    let releaseHeldChunk: (() => void) | null = null
+    let resolveHeldChunkSeen: (() => void) | null = null
+    const heldChunkSeen = new Promise<void>((resolve) => {
+      resolveHeldChunkSeen = resolve
+    })
+
+    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+      headers: authHeaders(sender.accessToken),
+      data: {
+        title: groupTitle,
+        member_ids: [receiver.userId],
+      },
+    })
+    expect(createResponse.ok()).toBeTruthy()
+    const createPayload = await createResponse.json() as { group: { id: number } }
+    const groupId = Number(createPayload.group.id)
+
+    const bootstrapResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+      headers: authHeaders(sender.accessToken),
+      data: {
+        content: bootstrapContent,
+        message_type: 'text',
+      },
+    })
+    expect(bootstrapResponse.ok()).toBeTruthy()
+
+    const senderContext = await browser.newContext()
+    const receiverContext = await browser.newContext()
+    const senderPage = await senderContext.newPage()
+    const receiverPage = await receiverContext.newPage()
+
+    try {
+      await senderContext.route('**/api/chat/upload-batches', async (route) => {
+        sawBatchCreate = true
+        await route.continue()
+      })
+      await senderContext.route('**/api/chat/upload-sessions', async (route) => {
+        sawSessionCreate = true
+        await route.continue()
+      })
+      await senderContext.route('**/api/chat/upload-sessions/*/chunk', async (route) => {
+        if (!sawChunkAppend) {
+          sawChunkAppend = true
+          resolveHeldChunkSeen?.()
+          await new Promise<void>((resolve) => {
+            releaseHeldChunk = resolve
+          })
+        }
+        await route.continue()
+      })
+      await senderContext.route('**/api/chat/upload-sessions/*/finalize', async (route) => {
+        sawFinalize = true
+        await route.continue()
+      })
+      await senderContext.route('**/api/chat/upload-batches/*/commit', async (route) => {
+        sawCommit = true
+        await route.continue()
+      })
+      await senderContext.route('**/api/chat/upload-media', async (route) => {
+        legacyUploadHits += 1
+        await route.continue()
+      })
+
+      await loginWithSeededSession(senderPage, sender)
+      await loginWithSeededSession(receiverPage, receiver)
+
+      await senderPage.goto('/chat')
+      const senderGroupRow = senderPage.locator('.conversation-item').filter({ hasText: groupTitle }).first()
+      await expect(senderGroupRow).toBeVisible({ timeout: 30000 })
+      await senderGroupRow.click()
+      await expectRoomOpen(senderPage, groupId, groupTitle, 'گروه')
+
+      await receiverPage.goto('/chat')
+      const receiverGroupRow = receiverPage.locator('.conversation-item').filter({ hasText: groupTitle }).first()
+      await expect(receiverGroupRow).toBeVisible({ timeout: 30000 })
+      await receiverGroupRow.click()
+      await expectRoomOpen(receiverPage, groupId, groupTitle, 'گروه')
+
+      await senderPage.locator('button.attach-btn').click()
+      await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
+      await senderPage.getByRole('button', { name: 'فایل' }).first().click()
+      await injectDocument(senderPage, 'pw-group-document')
+
+      await heldChunkSeen
+      await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال ارسال فایل...`, {
+        timeout: 30000,
+      })
+
+      await navigateFromMessengerToMarket(senderPage)
+      ;(releaseHeldChunk ?? (() => {}))()
+      releaseHeldChunk = null
+
+      await expect
+        .poll(async () => fetchLatestRoomMessageTypesByChatId(request, receiver.accessToken, groupId), { timeout: 60000 })
+        .toEqual(expect.arrayContaining(['document']))
+
+      await expect(receiverPage.locator('.messages-container .msg-document')).toBeVisible({ timeout: 60000 })
+
+      expect(sawBatchCreate).toBe(true)
+      expect(sawSessionCreate).toBe(true)
+      expect(sawChunkAppend).toBe(true)
+      expect(sawFinalize).toBe(true)
+      expect(sawCommit).toBe(true)
+      expect(legacyUploadHits).toBe(0)
+    } finally {
+      await senderContext.close()
+      await receiverContext.close()
+    }
+  })
+
+  test('group single image and single video preserve captions and update room previews', async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(120000)
+    const sender = seedPrimarySession('group_single_media_sender')
+    const receiver = seedPrimarySession('group_single_media_receiver')
+    const groupTitle = `Group Single Media ${Date.now()}`
+    const bootstrapContent = `PW GROUP SINGLE MEDIA BOOTSTRAP ${Date.now()}`
+    const imageCaption = `PW GROUP IMG CAP ${Date.now()}`
+    const videoCaption = `PW GROUP VID CAP ${Date.now()}`
+    const composer = page.locator('textarea[placeholder="پیام..."]')
+
+    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+      headers: authHeaders(sender.accessToken),
+      data: {
+        title: groupTitle,
+        member_ids: [receiver.userId],
+      },
+    })
+    expect(createResponse.ok()).toBeTruthy()
+    const createPayload = await createResponse.json() as { group: { id: number } }
+    const groupId = Number(createPayload.group.id)
+
+    const bootstrapResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+      headers: authHeaders(sender.accessToken),
+      data: {
+        content: bootstrapContent,
+        message_type: 'text',
+      },
+    })
+    expect(bootstrapResponse.ok()).toBeTruthy()
+
+    let batchCreateHits = 0
+    let sessionCreateHits = 0
+    let chunkAppendHits = 0
+    let finalizeHits = 0
+    let commitHits = 0
+    let legacyUploadHits = 0
+
+    await page.route('**/api/chat/upload-batches', async (route) => {
+      batchCreateHits += 1
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-sessions', async (route) => {
+      sessionCreateHits += 1
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-sessions/*/chunk', async (route) => {
+      chunkAppendHits += 1
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-sessions/*/finalize', async (route) => {
+      finalizeHits += 1
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-batches/*/commit', async (route) => {
+      commitHits += 1
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-media', async (route) => {
+      legacyUploadHits += 1
+      await route.continue()
+    })
+
+    await loginWithSeededSession(page, sender)
+    await page.goto('/chat')
+    const groupRow = page.locator('.conversation-item').filter({ hasText: groupTitle }).first()
+    await expect(groupRow).toBeVisible({ timeout: 30000 })
+    await groupRow.click()
+    await expectRoomOpen(page, groupId, groupTitle, 'گروه')
+
+    await composer.fill(imageCaption)
+    await page.locator('button.attach-btn').click()
+    await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
+    await injectGalleryImage(page, `pw-group-single-${Date.now()}.png`)
+
+    const sendUneditedButton = page.getByRole('button', { name: 'ارسال بدون ویرایش' })
+    await expect(sendUneditedButton).toBeVisible({ timeout: 30000 })
+    await sendUneditedButton.click()
+    await expect(sendUneditedButton).toHaveCount(0, { timeout: 30000 })
+
+    await expect
+      .poll(async () => {
+        const messages = await fetchLatestRoomMessagesByChatId(request, sender.accessToken, groupId)
+        const message = messages.find((item) => {
+          const parsed = parseRoomMessageContent(item.content)
+          return item.message_type === 'image' && parsed?.caption === imageCaption
+        })
+        return message?.id ?? 0
+      }, { timeout: 60000 })
+      .toBeGreaterThan(0)
+
+    const imageBubble = page.locator('.message-bubble').filter({ hasText: imageCaption }).first()
+    await expect(imageBubble).toBeVisible({ timeout: 30000 })
+    await expect(imageBubble.locator('.media-caption')).toHaveText(imageCaption)
+    await expect(imageBubble.locator('img[data-media-msg-id]')).toHaveCount(1)
+
+    await page.goto('/chat')
+    await expect(page.locator('.conversation-item').filter({ hasText: groupTitle }).first()).toContainText('تصویر', {
+      timeout: 30000,
+    })
+
+    const reopenedGroupRow = page.locator('.conversation-item').filter({ hasText: groupTitle }).first()
+    await reopenedGroupRow.click()
+    await expectRoomOpen(page, groupId, groupTitle, 'گروه')
+
+    await composer.fill(videoCaption)
+    await page.locator('button.attach-btn').click()
+    await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
+    await injectGalleryVideo(page, `pw-group-single-${Date.now()}.webm`)
+    await expect(page.locator('.attachment-sheet')).toHaveCount(0, { timeout: 30000 })
+
+    await expect
+      .poll(async () => {
+        const messages = await fetchLatestRoomMessagesByChatId(request, sender.accessToken, groupId)
+        const message = messages.find((item) => {
+          const parsed = parseRoomMessageContent(item.content)
+          return item.message_type === 'video' && parsed?.caption === videoCaption
+        })
+        return message?.id ?? 0
+      }, { timeout: 60000 })
+      .toBeGreaterThan(0)
+
+    const videoBubble = page.locator('.message-bubble').filter({ hasText: videoCaption }).first()
+    await expect(videoBubble).toBeVisible({ timeout: 30000 })
+    await expect(videoBubble.locator('.media-caption')).toHaveText(videoCaption)
+    await expect(videoBubble.locator('video')).toHaveCount(1)
+
+    await page.goto('/chat')
+    await expect(page.locator('.conversation-item').filter({ hasText: groupTitle }).first()).toContainText('ویدئو', {
+      timeout: 30000,
+    })
+
+    expect(batchCreateHits).toBeGreaterThanOrEqual(2)
+    expect(sessionCreateHits).toBeGreaterThanOrEqual(2)
+    expect(chunkAppendHits).toBeGreaterThanOrEqual(2)
+    expect(finalizeHits).toBeGreaterThanOrEqual(2)
+    expect(commitHits).toBeGreaterThanOrEqual(2)
+    expect(legacyUploadHits).toBe(0)
   })
 
   test('channel admin can forward an image message into the channel', async ({

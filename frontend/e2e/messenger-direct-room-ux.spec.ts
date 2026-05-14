@@ -558,9 +558,40 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     test.setTimeout(90000)
     const actor = seedPrimarySession('direct_room_modal_actor')
     const peer = seedPrimarySession('direct_room_modal_peer')
+    let sawBatchCreate = false
+    let sawSessionCreate = false
+    let sawChunkAppend = false
+    let sawFinalize = false
+    let sawCommit = false
+    let legacyUploadHits = 0
 
     await waitForBackendReady(request)
     await loginWithSeededSession(page, actor)
+
+    await page.route('**/api/chat/upload-batches', async (route) => {
+      sawBatchCreate = true
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-sessions', async (route) => {
+      sawSessionCreate = true
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-sessions/*/chunk', async (route) => {
+      sawChunkAppend = true
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-sessions/*/finalize', async (route) => {
+      sawFinalize = true
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-batches/*/commit', async (route) => {
+      sawCommit = true
+      await route.continue()
+    })
+    await page.route('**/api/chat/upload-media', async (route) => {
+      legacyUploadHits += 1
+      await route.continue()
+    })
 
     await page.goto('/chat')
     await expect(page.locator('.fab-new-chat')).toBeVisible({ timeout: 30000 })
@@ -586,6 +617,13 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
         return messages.some((message) => message.message_type === 'document')
       }, { timeout: 30000 })
       .toBe(true)
+
+    expect(sawBatchCreate).toBe(true)
+    expect(sawSessionCreate).toBe(true)
+    expect(sawChunkAppend).toBe(true)
+    expect(sawFinalize).toBe(true)
+    expect(sawCommit).toBe(true)
+    expect(legacyUploadHits).toBe(0)
   })
 
   test('direct typing and upload activity stay visible and document upload finishes after sender leaves messenger for market', async ({ browser, request }) => {
@@ -620,7 +658,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
       await senderPage.locator('textarea[placeholder="پیام..."]').fill(`PW DIRECT ACTIVITY ${Date.now()}`)
       await expect(receiverPage.locator('.chat-header .header-status')).toContainText('در حال نوشتن', { timeout: 30000 })
 
-      await senderContext.route('**/api/chat/upload-media', async (route) => {
+      await senderContext.route('**/api/chat/upload-sessions/*/chunk', async (route) => {
         if (!hasHeldUpload) {
           hasHeldUpload = true
           resolveHeldUploadSeen?.()
@@ -673,7 +711,14 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await loginWithSeededSession(page, actor)
     await openDirectChat(page, peer.userId, peer.accountName)
 
+    let legacyUploadHits = 0
+
     await page.route('**/api/chat/upload-media', async (route) => {
+      legacyUploadHits += 1
+      await route.continue()
+    })
+
+    await page.route('**/api/chat/upload-sessions/*/chunk', async (route) => {
       if (!hasHeldInitialUpload) {
         hasHeldInitialUpload = true
         resolveInitialUploadSeen?.()
@@ -716,6 +761,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     await expect(page.locator('.messages-container .msg-document').first()).toBeVisible({ timeout: 60000 })
     await expect(page.locator('.messages-container .sending-status-wrapper')).toHaveCount(0, { timeout: 60000 })
+    expect(legacyUploadHits).toBe(0)
   })
 
   test('in-chat search can jump to results, switch to list mode, and close overlays via browser back', async ({ page, request }) => {
