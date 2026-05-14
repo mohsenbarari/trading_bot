@@ -29,9 +29,12 @@
             {{ selectedUserName }}
             <span v-if="isDeleted" class="deleted-badge-small">غیرفعال</span>
           </span>
-          <span class="header-status" :class="{ 'online': selectedRoomKind === 'direct' && ((targetUserStatus.includes('آنلاین') && !isDeleted) || isTyping) }">
+          <span class="header-status" :class="{ 'online': !isDeleted && (((selectedRoomKind === 'direct' && targetUserStatus.includes('آنلاین')) || isTyping || hasActivityStatusText)) }">
             <template v-if="isDeleted">
               حساب کاربری غیرفعال است
+            </template>
+            <template v-else-if="hasActivityStatusText">
+              {{ activityStatusText }}
             </template>
             <template v-else-if="selectedRoomKind === 'direct' && isTyping">
               در حال نوشتن<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
@@ -181,6 +184,7 @@ const props = defineProps<{
   selectedRoomKind?: 'direct' | 'channel' | 'group' | null
   apiBaseUrl?: string
   targetUserStatus: string
+  activityStatusText?: string
   isTyping: boolean
   totalUnread: number
   isSearchActive: boolean
@@ -223,6 +227,8 @@ const roomMemberCountText = computed(() => {
   if (props.selectedRoomKind === 'direct' || count <= 0) return ''
   return `${count.toLocaleString('fa-IR')} عضو`
 })
+
+const hasActivityStatusText = computed(() => Boolean(props.activityStatusText && props.activityStatusText.trim()))
 
 const headerAvatarUrl = computed(() => buildChatFileUrl(props.selectedAvatarFileId ?? null, props.apiBaseUrl ?? ''))
 

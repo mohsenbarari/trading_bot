@@ -425,6 +425,7 @@ function closeLocationModal() {
 
 const {
   typingUsers,
+  activityTextByConversation,
   isTyping,
   handleTypingWrapper,
   sendTypingSignal
@@ -641,6 +642,11 @@ const selectedRoomStatusText = computed(() => {
     return targetUserStatus.value
   }
   return selectedRoomKind.value === 'group' ? 'گروه' : 'کانال'
+})
+
+const selectedConversationActivityText = computed(() => {
+  if (selectedUserId.value == null) return ''
+  return activityTextByConversation.value[selectedUserId.value] || ''
 })
 
 function isMandatoryPinnedConversation(conv: Conversation) {
@@ -2723,7 +2729,7 @@ function openPublicProfile(payload?: {
 const handleCall = () => alert('قابلیت تماس به زودی اضافه می‌شود')
 
 function handleTypingForCurrentRoom() {
-  if (selectedRoomKind.value !== 'direct') {
+  if (!selectedUserId.value) {
     return
   }
   handleTypingWrapper()
@@ -3004,6 +3010,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :selectedRoomKind="selectedRoomKind"
       :apiBaseUrl="apiBaseUrl"
       :targetUserStatus="selectedRoomStatusText"
+      :activityStatusText="selectedConversationActivityText"
       :isTyping="isTyping"
       :totalUnread="totalUnread"
       :isSearchActive="isSearchActive"
@@ -3088,6 +3095,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :conversations="sortedConversations"
       :selectedUserId="selectedUserId"
       :typingUsers="typingUsers"
+      :activityTextByConversation="activityTextByConversation"
       :apiBaseUrl="apiBaseUrl"
       :canStartNewConversation="canStartNewConversation"
       @select-conversation="selectConversation"

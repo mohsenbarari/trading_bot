@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -13,6 +13,20 @@ from models.message import Message
 
 class TypingSignal(BaseModel):
     receiver_id: int
+
+
+ChatActivityKind = Literal["typing", "uploading_file"]
+
+
+class DirectChatActivitySignal(BaseModel):
+    receiver_id: int
+    activity: ChatActivityKind = "typing"
+    active: bool = True
+
+
+class RoomChatActivitySignal(BaseModel):
+    activity: ChatActivityKind = "typing"
+    active: bool = True
 
 
 class MessageReplyRead(BaseModel):

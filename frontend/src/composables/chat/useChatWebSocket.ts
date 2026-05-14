@@ -1,6 +1,11 @@
 import { ref, computed, onMounted, onUnmounted, type Ref } from 'vue'
 import { useWebSocket } from '../../composables/useWebSocket'
-import { resolveRoomConversationKey } from '../../utils/chatRoomRouting'
+import {
+    buildChatActivityBody,
+    buildChatActivityEndpoint,
+    resolveRoomConversationKey,
+    type ChatActivityKind,
+} from '../../utils/chatRoomRouting'
 import { getConversationPreviewText } from '../../utils/chatMessagePreview'
 
 export interface UseChatWebSocketOptions {
@@ -19,7 +24,6 @@ export interface UseChatWebSocketOptions {
 export function useChatWebSocket(options: UseChatWebSocketOptions) {
     const {
         selectedUserId,
-        messageInput,
         messages,
         conversations,
         apiFetch,
@@ -27,17 +31,46 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         loadMessages,
         scrollToBottom,
         markAsRead,
-        isUserAtBottom
+        isUserAtBottom,
     } = options
 
     const ws = useWebSocket()
 
     const TYPING_THROTTLE = 2000
-    let lastTypingTime = 0
+    const TYPING_ACTIVITY_TIMEOUT_MS = 5000
+    const lastTypingTimeByConversation = new Map<number, number>()
 
     const typingUsers = ref<Record<number, boolean>>({})
-    const typingTimeouts = ref<Record<number, number>>({})
+    const typingParticipantNames = ref<Record<number, Record<number, string>>>({})
+    const uploadingParticipantNames = ref<Record<number, Record<number, string>>>({})
+    const typingTimeouts = new Map<string, number>()
+
     const isTyping = computed(() => selectedUserId.value ? !!typingUsers.value[selectedUserId.value] : false)
+    const activityTextByConversation = computed<Record<number, string>>(() => {
+        const result: Record<number, string> = {}
+        const conversationKeys = new Set<number>([
+            ...Object.keys(typingParticipantNames.value).map(Number),
+            ...Object.keys(uploadingParticipantNames.value).map(Number),
+        ])
+
+        conversationKeys.forEach((conversationKey) => {
+            if (!Number.isFinite(conversationKey)) return
+
+            const uploadNames = Object.values(uploadingParticipantNames.value[conversationKey] || {})
+            const typingNames = Object.values(typingParticipantNames.value[conversationKey] || {})
+
+            if (uploadNames.length > 0) {
+                result[conversationKey] = buildActivityLabel(conversationKey, 'uploading_file', uploadNames)
+                return
+            }
+
+            if (typingNames.length > 0) {
+                result[conversationKey] = buildActivityLabel(conversationKey, 'typing', typingNames)
+            }
+        })
+
+        return result
+    })
 
     function getConversationKeyFromPayload(data: any): number | null {
         const roomConversationKey = resolveRoomConversationKey(data?.room_kind, data?.chat_id)
@@ -49,44 +82,170 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         return Number.isFinite(senderId) ? senderId : null
     }
 
-    async function sendTypingSignal() {
-        if (!messageInput.value) return;
-        const now = Date.now();
-        if (now - lastTypingTime < TYPING_THROTTLE) return;
-        lastTypingTime = now;
+    function buildActivityLabel(
+        conversationKey: number,
+        activity: ChatActivityKind,
+        senderNames: string[],
+    ) {
+        const suffix = activity === 'typing' ? 'در حال نوشتن...' : 'در حال ارسال فایل...'
+        if (conversationKey > 0) {
+            return suffix
+        }
 
-        if (!selectedUserId.value) return;
+        const uniqueNames = Array.from(new Set(senderNames.filter((name) => name && name.trim())))
+        if (uniqueNames.length === 1) {
+            return `${uniqueNames[0]} ${suffix}`
+        }
+        if (uniqueNames.length > 1) {
+            return `${uniqueNames.length.toLocaleString('fa-IR')} نفر ${suffix}`
+        }
+        return `یک نفر ${suffix}`
+    }
+
+    function setConversationParticipantName(
+        target: typeof typingParticipantNames | typeof uploadingParticipantNames,
+        conversationKey: number,
+        senderId: number,
+        senderName: string,
+    ) {
+        const nextConversationState = {
+            ...(target.value[conversationKey] || {}),
+            [senderId]: senderName,
+        }
+
+        target.value = {
+            ...target.value,
+            [conversationKey]: nextConversationState,
+        }
+    }
+
+    function clearConversationParticipantName(
+        target: typeof typingParticipantNames | typeof uploadingParticipantNames,
+        conversationKey: number,
+        senderId: number,
+    ) {
+        const conversationState = target.value[conversationKey]
+        if (!conversationState) return
+
+        const nextConversationState = { ...conversationState }
+        delete nextConversationState[senderId]
+
+        const nextState = { ...target.value }
+        if (Object.keys(nextConversationState).length > 0) {
+            nextState[conversationKey] = nextConversationState
+        } else {
+            delete nextState[conversationKey]
+        }
+
+        target.value = nextState
+    }
+
+    function syncDirectTypingState(conversationKey: number) {
+        if (conversationKey <= 0) return
+        typingUsers.value[conversationKey] = Object.keys(typingParticipantNames.value[conversationKey] || {}).length > 0
+    }
+
+    function removeTypingActivity(conversationKey: number, senderId: number) {
+        const timeoutKey = `${conversationKey}:${senderId}`
+        const existingTimeout = typingTimeouts.get(timeoutKey)
+        if (existingTimeout) {
+            window.clearTimeout(existingTimeout)
+            typingTimeouts.delete(timeoutKey)
+        }
+
+        clearConversationParticipantName(typingParticipantNames, conversationKey, senderId)
+        syncDirectTypingState(conversationKey)
+    }
+
+    function upsertTypingActivity(conversationKey: number, senderId: number, senderName: string) {
+        setConversationParticipantName(typingParticipantNames, conversationKey, senderId, senderName)
+        syncDirectTypingState(conversationKey)
+
+        const timeoutKey = `${conversationKey}:${senderId}`
+        const existingTimeout = typingTimeouts.get(timeoutKey)
+        if (existingTimeout) {
+            window.clearTimeout(existingTimeout)
+        }
+
+        typingTimeouts.set(timeoutKey, window.setTimeout(() => {
+            typingTimeouts.delete(timeoutKey)
+            removeTypingActivity(conversationKey, senderId)
+        }, TYPING_ACTIVITY_TIMEOUT_MS))
+    }
+
+    function setUploadActivity(conversationKey: number, senderId: number, senderName: string, active: boolean) {
+        if (active) {
+            setConversationParticipantName(uploadingParticipantNames, conversationKey, senderId, senderName)
+            return
+        }
+        clearConversationParticipantName(uploadingParticipantNames, conversationKey, senderId)
+    }
+
+    function clearConversationActivities(conversationKey: number, senderId: number) {
+        removeTypingActivity(conversationKey, senderId)
+        clearConversationParticipantName(uploadingParticipantNames, conversationKey, senderId)
+    }
+
+    function resolveActivityKind(value: unknown): ChatActivityKind | null {
+        return value === 'typing' || value === 'uploading_file' ? value : null
+    }
+
+    async function sendTypingSignal() {
+        const conversationKey = selectedUserId.value
+        if (!conversationKey) return
+
+        const now = Date.now()
+        const lastTypingTime = lastTypingTimeByConversation.get(conversationKey) ?? 0
+        if (now - lastTypingTime < TYPING_THROTTLE) return
+        lastTypingTimeByConversation.set(conversationKey, now)
 
         try {
-            await apiFetch('/chat/typing', {
+            await apiFetch(buildChatActivityEndpoint(conversationKey), {
                 method: 'POST',
-                body: JSON.stringify({ receiver_id: selectedUserId.value })
-            });
+                body: JSON.stringify(buildChatActivityBody(conversationKey, { activity: 'typing', active: true })),
+            })
         } catch (e) {
-            console.error('Typing signal failed', e);
+            console.error('Typing signal failed', e)
         }
     }
 
     const handleTypingWrapper = () => {
-        sendTypingSignal();
-    };
-
-    function handleTypingEvent(data: any) {
-        const senderId = data.sender_id;
-        if (senderId) {
-            typingUsers.value[senderId] = true;
-
-            if (typingTimeouts.value[senderId]) clearTimeout(typingTimeouts.value[senderId]);
-
-            // Use window.setTimeout to ensure number return type
-            typingTimeouts.value[senderId] = window.setTimeout(() => {
-                typingUsers.value[senderId] = false;
-            }, 5000);
-        }
+        sendTypingSignal()
     }
 
-    // Debounced full conversation list reload so bursts of websocket
-    // events don't trigger many back-to-back /conversations fetches.
+    function handleTypingEvent(data: any) {
+        handleActivityEvent({
+            ...data,
+            activity: 'typing',
+            active: true,
+        })
+    }
+
+    function handleActivityEvent(data: any) {
+        const conversationKey = getConversationKeyFromPayload(data)
+        const senderId = Number(data?.sender_id)
+        const activity = resolveActivityKind(data?.activity)
+        const active = data?.active !== false
+        const senderName = typeof data?.sender_name === 'string' && data.sender_name.trim()
+            ? data.sender_name.trim()
+            : 'کاربر'
+
+        if (conversationKey === null || !Number.isFinite(senderId) || !activity) {
+            return
+        }
+
+        if (activity === 'typing') {
+            if (active) {
+                upsertTypingActivity(conversationKey, senderId, senderName)
+            } else {
+                removeTypingActivity(conversationKey, senderId)
+            }
+            return
+        }
+
+        setUploadActivity(conversationKey, senderId, senderName, active)
+    }
+
     let convReloadTimer: number | null = null
     function scheduleConversationsReload() {
         if (convReloadTimer !== null) return
@@ -102,19 +261,15 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     }
 
     function handleNewMessageEvent(data: any) {
-        const senderId = data.sender_id;
-
-        // Clear typing on message
-        if (senderId) {
-            typingUsers.value[senderId] = false;
-        }
-
-        const currentSelected = selectedUserId.value ? Number(selectedUserId.value) : null;
+        const senderId = Number(data?.sender_id)
         const arrivingConversationKey = getConversationKeyFromPayload(data)
 
-        // Append directly to messages if this chat is open. The backend
-        // publishes a fully serialized MessageRead so we avoid a 200-msg
-        // refetch on every incoming message.
+        if (Number.isFinite(senderId) && arrivingConversationKey !== null) {
+            clearConversationActivities(arrivingConversationKey, senderId)
+        }
+
+        const currentSelected = selectedUserId.value ? Number(selectedUserId.value) : null
+
         if (currentSelected !== null && arrivingConversationKey === currentSelected && data && typeof data.id === 'number') {
             const list = messages.value
             const alreadyExists = list.some((m: any) => m && m.id === data.id)
@@ -124,16 +279,11 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
                     Promise.resolve().then(() => scrollToBottom())
                 }
             }
-            // Mark as read quickly since chat is open.
-            markAsRead();
+            markAsRead()
         } else if (currentSelected !== null && arrivingConversationKey === currentSelected) {
-            // Payload missing fields — fall back to the previous full reload.
             loadMessages(currentSelected, true).then(() => markAsRead())
         }
 
-        // Patch conversation list entry in-place so the preview/unread
-        // update is instant, and still schedule a debounced reload as
-        // a convergence safety net.
         let shouldReloadConversations = arrivingConversationKey === null
         if (arrivingConversationKey !== null) {
             const conv = conversations.value.find((c: any) => c && c.other_user_id === arrivingConversationKey)
@@ -167,8 +317,6 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
             return
         }
 
-        // If the current chat user read our messages, patch in-place
-        // instead of refetching all 200 messages.
         if (selectedUserId.value && (data.reader_id === selectedUserId.value)) {
             const readerId = Number(data.reader_id)
             messages.value.forEach((m: any) => {
@@ -206,6 +354,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     function setupWebSocketListeners() {
         ws.on('chat:message', handleNewMessageEvent)
         ws.on('chat:typing', handleTypingEvent)
+        ws.on('chat:activity', handleActivityEvent)
         ws.on('chat:read', handleReadEvent)
         ws.on('chat:reaction', handleReactionEvent)
     }
@@ -213,6 +362,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     function teardownWebSocketListeners() {
         ws.off('chat:message', handleNewMessageEvent)
         ws.off('chat:typing', handleTypingEvent)
+        ws.off('chat:activity', handleActivityEvent)
         ws.off('chat:read', handleReadEvent)
         ws.off('chat:reaction', handleReactionEvent)
     }
@@ -222,13 +372,18 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     })
 
     onUnmounted(() => {
+        typingTimeouts.forEach((timeoutId) => {
+            window.clearTimeout(timeoutId)
+        })
+        typingTimeouts.clear()
         teardownWebSocketListeners()
     })
 
     return {
         typingUsers,
+        activityTextByConversation,
         isTyping,
         handleTypingWrapper,
-        sendTypingSignal
+        sendTypingSignal,
     }
 }

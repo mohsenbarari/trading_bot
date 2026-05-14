@@ -37,6 +37,7 @@ const props = defineProps<{
   conversations: Conversation[]
   selectedUserId: number | null
   typingUsers: Record<number, boolean>
+  activityTextByConversation?: Record<number, string>
   apiBaseUrl?: string
   canStartNewConversation?: boolean
 }>()
@@ -137,6 +138,17 @@ function getConversationAvatarUrl(conv: Conversation) {
 
 function getPreviewText(conv: Conversation) {
   return getConversationPreviewText(conv.last_message_type, conv.last_message_content)
+}
+
+function getConversationActivityText(conv: Conversation) {
+  const activityText = props.activityTextByConversation?.[conv.other_user_id]
+  if (activityText) return activityText
+
+  if (!isRoomConversation(conv) && props.typingUsers[conv.other_user_id]) {
+    return 'در حال نوشتن...'
+  }
+
+  return ''
 }
 
 function isUserOnline(lastSeen: string | null | undefined): boolean {
@@ -467,8 +479,8 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="conv-preview-row">
-                  <span v-if="!isRoomConversation(conv) && typingUsers[conv.other_user_id]" class="typing-text">
-                    در حال نوشتن...
+                  <span v-if="getConversationActivityText(conv)" class="typing-text">
+                    {{ getConversationActivityText(conv) }}
                   </span>
                   <template v-else>
                     {{ getPreviewText(conv) }}

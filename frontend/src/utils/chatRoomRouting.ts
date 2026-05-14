@@ -1,5 +1,7 @@
 import type { Message } from '../types/chat'
 
+export type ChatActivityKind = 'typing' | 'uploading_file'
+
 export function isRoomConversationKey(conversationKey: number) {
   return conversationKey < 0
 }
@@ -52,6 +54,13 @@ export function buildChatSendEndpoint(conversationKey: number) {
   return '/chat/send'
 }
 
+export function buildChatActivityEndpoint(conversationKey: number) {
+  if (isRoomConversationKey(conversationKey)) {
+    return `/chat/rooms/${resolveRoomChatId(conversationKey)}/activity`
+  }
+  return '/chat/activity'
+}
+
 export function buildChatSendBody(
   conversationKey: number,
   payload: {
@@ -71,6 +80,25 @@ export function buildChatSendBody(
 
   if (typeof payload.reply_to_message_id === 'number') {
     body.reply_to_message_id = payload.reply_to_message_id
+  }
+
+  return body
+}
+
+export function buildChatActivityBody(
+  conversationKey: number,
+  payload: {
+    activity: ChatActivityKind
+    active?: boolean
+  }
+) {
+  const body: Record<string, unknown> = {
+    activity: payload.activity,
+    active: payload.active ?? true,
+  }
+
+  if (!isRoomConversationKey(conversationKey)) {
+    body.receiver_id = conversationKey
   }
 
   return body

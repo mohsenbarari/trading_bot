@@ -185,4 +185,40 @@ describe('ChatConversationList.vue', () => {
 
     expect(wrapper.text()).toContain('تصویر · کپشن آخرین تصویر')
   })
+
+  it('shows generalized activity text for room conversations', async () => {
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const groupConversation = makeConversation({
+      id: 2,
+      chat_id: 17,
+      other_user_id: -17,
+      other_user_name: 'Group Alpha',
+      room_kind: 'group',
+      last_message_content: 'old preview',
+    })
+
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [groupConversation],
+        selectedUserId: null,
+        typingUsers: {},
+        activityTextByConversation: {
+          [-17]: 'علی در حال ارسال فایل...',
+        },
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('علی در حال ارسال فایل')
+    expect(wrapper.text()).not.toContain('old preview')
+  })
 })
