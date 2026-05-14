@@ -223,6 +223,11 @@ async function openConversationFromList(page: Page, userName: string) {
   await expect(page.locator('.chat-header .header-name')).toContainText(userName, { timeout: 30000 })
 }
 
+async function navigateFromMessengerToMarket(page: Page) {
+  await page.goto('/market')
+  await expect(page).toHaveURL(/\/market$/, { timeout: 30000 })
+}
+
 async function sendDirectTextMessage(
   request: APIRequestContext,
   sender: SessionFixture,
@@ -569,6 +574,82 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
         return messages.some((message) => message.message_type === 'document')
       }, { timeout: 30000 })
       .toBe(true)
+  })
+
+  test('direct typing and upload activity stay visible and document upload finishes after sender leaves messenger for market', async ({ browser, request }) => {
+    test.setTimeout(120000)
+    const sender = seedPrimarySession('direct_room_activity_sender')
+    const receiver = seedPrimarySession('direct_room_activity_receiver')
+    const bootstrapContent = `PW DIRECT ACTIVITY BOOTSTRAP ${Date.now()}`
+    let hasHeldUpload = false
+    let releaseHeldUpload: (() => void) | null = null
+    let resolveHeldUploadSeen: (() => void) | null = null
+    const heldUploadSeen = new Promise<void>((resolve) => {
+      resolveHeldUploadSeen = resolve
+    })
+
+    await waitForBackendReady(request)
+    await sendDirectTextMessage(request, sender, receiver.userId, bootstrapContent)
+
+    const senderContext = await browser.newContext()
+    const receiverContext = await browser.newContext()
+    const senderPage = await senderContext.newPage()
+    const receiverPage = await receiverContext.newPage()
+
+    try {
+      await loginWithSeededSession(senderPage, sender)
+      await loginWithSeededSession(receiverPage, receiver)
+
+      await senderPage.goto('/chat')
+      await openConversationFromList(senderPage, receiver.accountName)
+      await receiverPage.goto('/chat')
+      await openConversationFromList(receiverPage, sender.accountName)
+
+      await senderPage.locator('textarea[placeholder="پیام..."]').fill(`PW DIRECT ACTIVITY ${Date.now()}`)
+      await expect(receiverPage.locator('.chat-header .header-status')).toContainText('در حال نوشتن', { timeout: 30000 })
+
+      await receiverPage.locator('.chat-header .back-btn').click()
+      const receiverConversationRow = receiverPage.locator('.conversation-item').filter({ hasText: sender.accountName }).first()
+      await expect(receiverConversationRow).toContainText('در حال نوشتن...', { timeout: 30000 })
+
+      await senderPage.route('**/api/chat/upload-media', async (route) => {
+        if (!hasHeldUpload) {
+          hasHeldUpload = true
+          resolveHeldUploadSeen?.()
+          await new Promise<void>((resolve) => {
+            releaseHeldUpload = resolve
+          })
+        }
+
+        await route.continue()
+      })
+
+      await senderPage.locator('button.attach-btn').click()
+      await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
+      await senderPage.getByRole('button', { name: 'فایل' }).first().click()
+      await injectDocument(senderPage)
+
+      await heldUploadSeen
+      await expect(receiverConversationRow).toContainText('در حال ارسال فایل...', { timeout: 30000 })
+
+      await navigateFromMessengerToMarket(senderPage)
+      ;(releaseHeldUpload ?? (() => {}))()
+      releaseHeldUpload = null
+
+      await expect
+        .poll(async () => {
+          const messages = await fetchDirectMessages(request, receiver, sender.userId)
+          return messages.some((message) => message.message_type === 'document')
+        }, { timeout: 60000 })
+        .toBe(true)
+
+      await receiverConversationRow.click()
+      await expect(receiverPage.locator('.chat-header .header-name')).toContainText(sender.accountName, { timeout: 30000 })
+      await expect(receiverPage.locator('.messages-container .msg-document')).toBeVisible({ timeout: 60000 })
+    } finally {
+      await senderContext.close()
+      await receiverContext.close()
+    }
   })
 
   test('document upload resumes after reload and stays attached to the active direct room', async ({ page, request }) => {
