@@ -156,6 +156,7 @@ let resumePromise: Promise<void> | null = null
 
 const pendingUploads = new Map<number, PendingUpload>()
 const xhrControllers = new Map<number, XMLHttpRequest>()
+const sendControllers = new Map<number, AbortController>()
 const abortFlags = new Set<number>()
 const albumBatches = new Map<string, AlbumBatchState>()
 const subscribers = new Set<UploadEventHandler>()
@@ -186,6 +187,7 @@ const MAX_UPLOAD_RETRIES = 3 // initial attempt + 3 retries
 // from ever firing. Reproduced in the field: 13-image album never sent
 // even after several hours despite all progress circles showing complete.
 const XHR_UPLOAD_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes per file
+const SEND_REQUEST_TIMEOUT_MS = 2 * 60 * 1000 // 2 minutes per send
 let activeUploadCount = 0
 const uploadQueue: PendingUpload[] = []
 
@@ -654,6 +656,67 @@ function ensureStalledAlbumsWatchdog(): void {
     }, 30_000)
 }
 
+let uploadForegroundRecoveryBound = false
+function ensureUploadForegroundRecovery(): void {
+    if (uploadForegroundRecoveryBound || typeof window === 'undefined') return
+
+    const handleForegroundWake = () => {
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+            return
+        }
+        void resumePendingUploadsAfterForegroundWake()
+    }
+
+    window.addEventListener('focus', handleForegroundWake)
+    window.addEventListener('pageshow', handleForegroundWake)
+    if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', handleForegroundWake)
+    }
+
+    uploadForegroundRecoveryBound = true
+}
+
+async function resumePendingUploadsAfterForegroundWake(): Promise<void> {
+    if (!config) return
+
+    for (const upload of pendingUploads.values()) {
+        if (abortFlags.has(upload.id)) continue
+
+        startUploadActivity(upload)
+
+        if (upload.phase === 'queued') {
+            enqueueUpload(upload)
+            continue
+        }
+
+        if (upload.phase === 'uploading') {
+            const alreadyQueued = uploadQueue.some((queuedUpload) => queuedUpload.id === upload.id)
+            if (!xhrControllers.has(upload.id) && !alreadyQueued) {
+                upload.phase = 'queued'
+                upload.progress = 0
+                upload.uploadedBytes = 0
+                upload.totalBytes = upload.file.size
+                await idbPut(upload)
+                enqueueUpload(upload)
+            }
+            continue
+        }
+
+        if (upload.phase === 'uploaded') {
+            if (upload.albumId) {
+                void flushAlbumBatchIfReady(upload.albumId)
+            } else {
+                void sendOne(upload)
+            }
+            continue
+        }
+
+        if (upload.phase === 'sending' && !sendControllers.has(upload.id)) {
+            void sendOne(upload)
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Content payload construction
 // -----------------------------------------------------------------------------
@@ -897,6 +960,15 @@ async function sendOne(upload: PendingUpload): Promise<void> {
         message_type: upload.msgType,
     })
 
+    const sendController = new AbortController()
+    sendControllers.set(upload.id, sendController)
+    let sendTimedOut = false
+    const sendTimeoutId = window.setTimeout(() => {
+        if (sendControllers.get(upload.id) !== sendController) return
+        sendTimedOut = true
+        sendController.abort()
+    }, SEND_REQUEST_TIMEOUT_MS)
+
     try {
         const res = await fetch(endpoint, {
             method: 'POST',
@@ -904,6 +976,7 @@ async function sendOne(upload: PendingUpload): Promise<void> {
                 'Content-Type': 'application/json',
                 ...(token ? { Authorization: `Bearer ${token}` } : {}),
             },
+            signal: sendController.signal,
             body: JSON.stringify(body),
         })
 
@@ -934,13 +1007,26 @@ async function sendOne(upload: PendingUpload): Promise<void> {
         await idbDelete(upload.id)
         if (upload.albumId) cleanupAlbumBatchIfSettled(upload.albumId)
     } catch (error) {
+        if (abortFlags.has(upload.id)) {
+            upload.phase = 'cancelled'
+            stopUploadActivity(upload)
+            pendingUploads.delete(upload.id)
+            await idbDelete(upload.id)
+            abortFlags.delete(upload.id)
+            emit({ type: 'cancelled', userId: upload.userId, optimisticId: upload.id })
+            if (upload.albumId) cleanupAlbumBatchIfSettled(upload.albumId)
+            return
+        }
+
+        const normalizedError = sendTimedOut ? new Error('Network Error (send timeout)') : error
+
         // Retry transient /chat/send failures before giving up. Without this,
         // a single flaky fetch() (e.g. browser per-origin pool saturated by
         // 30+ concurrent album uploads across multiple chats) becomes a
         // permanent "failed" media bubble even though the upload itself
         // succeeded and the server is healthy.
         if (
-            isTransientUploadError(error) &&
+            isTransientUploadError(normalizedError) &&
             (upload.sendRetryCount ?? 0) < MAX_SEND_RETRIES &&
             !abortFlags.has(upload.id)
         ) {
@@ -952,7 +1038,7 @@ async function sendOne(upload: PendingUpload): Promise<void> {
             const delay = computeSendRetryDelayMs(attempt - 1)
             console.warn(
                 `[uploadService] transient /chat/send error (attempt ${attempt}/${MAX_SEND_RETRIES}), retrying in ${delay}ms:`,
-                error,
+                normalizedError,
             )
             setTimeout(() => {
                 if (abortFlags.has(upload.id)) return
@@ -961,7 +1047,15 @@ async function sendOne(upload: PendingUpload): Promise<void> {
             }, delay)
             return
         }
-        await markFailed(upload, error instanceof Error ? error.message : String(error))
+        await markFailed(
+            upload,
+            normalizedError instanceof Error ? normalizedError.message : String(normalizedError),
+        )
+    } finally {
+        window.clearTimeout(sendTimeoutId)
+        if (sendControllers.get(upload.id) === sendController) {
+            sendControllers.delete(upload.id)
+        }
     }
 }
 
@@ -991,6 +1085,7 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
     }
     initialized = true
     ensureStalledAlbumsWatchdog()
+    ensureUploadForegroundRecovery()
 
     resumePromise = (async () => {
         try {
@@ -1133,8 +1228,18 @@ export function cancelUpload(id: number): void {
         xhrControllers.delete(id)
     }
 
+    const sendController = sendControllers.get(id)
+    if (sendController) {
+        try {
+            sendController.abort()
+        } catch {
+            /* ignore */
+        }
+        sendControllers.delete(id)
+    }
+
     // If XHR already finished or never started, clean up eagerly
-    if (upload.phase !== 'uploading') {
+    if (upload.phase !== 'uploading' && (upload.phase !== 'sending' || !sendController)) {
         upload.phase = 'cancelled'
         stopUploadActivity(upload)
         pendingUploads.delete(id)

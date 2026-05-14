@@ -20,6 +20,13 @@ interface SeededChannelAdminFixture {
   channelTitle: string
 }
 
+interface SessionFixture {
+  userId: number
+  accountName: string
+  accessToken: string
+  refreshToken: string
+}
+
 type SeededChannelRole = 'admin' | 'member'
 
 function seedActiveUserIds(label: string, count: number): number[] {
@@ -229,6 +236,73 @@ asyncio.run(main())
 `)
 }
 
+function seedPrimarySession(label: string): SessionFixture {
+  return runPythonInApp<SessionFixture>(`
+import asyncio
+import json
+import uuid
+from datetime import timedelta
+
+from core.db import AsyncSessionLocal
+from core.security import create_access_token, create_refresh_token
+from core.services.session_service import hash_token
+from models.session import Platform, UserSession
+from models.user import User, UserRole
+
+label = ${JSON.stringify(label)}
+
+async def main():
+  suffix = uuid.uuid4().hex[:10]
+  account_name = f"pw_{label}_{suffix}"
+  mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+  mobile_number = f"09{mobile_seed:09d}"
+
+  async with AsyncSessionLocal() as db:
+    user = User(
+      account_name=account_name,
+      mobile_number=mobile_number,
+      full_name=account_name,
+      address='Playwright Group Activity',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    db.add(user)
+    await db.flush()
+
+    refresh_token = create_refresh_token(subject=user.id)
+    session = UserSession(
+      user_id=user.id,
+      device_name='Playwright Group Activity Device',
+      device_ip='127.0.0.1',
+      platform=Platform.WEB,
+      refresh_token_hash=hash_token(refresh_token),
+      is_primary=True,
+      is_active=True,
+      expires_at=None,
+    )
+    db.add(session)
+    await db.flush()
+
+    access_token = create_access_token(
+      subject=user.id,
+      expires_delta=timedelta(minutes=60),
+      session_id=str(session.id),
+    )
+
+    await db.commit()
+
+  print(json.dumps({
+    'userId': user.id,
+    'accountName': account_name,
+    'accessToken': access_token,
+    'refreshToken': refresh_token,
+  }))
+
+asyncio.run(main())
+`)
+}
+
 function authHeaders(accessToken: string) {
   return {
     Authorization: `Bearer ${accessToken}`,
@@ -242,7 +316,9 @@ function authOnlyHeaders(accessToken: string) {
   }
 }
 
-async function loginWithSeededSession(page: Page, fixture: SeededChannelAdminFixture) {
+type LoginFixture = Pick<SeededChannelAdminFixture, 'accountName' | 'accessToken' | 'refreshToken'>
+
+async function loginWithSeededSession(page: Page, fixture: LoginFixture) {
   await page.goto('/login')
   await page.evaluate(({ accessToken, refreshToken }) => {
     localStorage.setItem('auth_token', accessToken)
@@ -251,6 +327,11 @@ async function loginWithSeededSession(page: Page, fixture: SeededChannelAdminFix
   }, fixture)
   await page.goto('/')
   await expect(page.getByText(fixture.accountName)).toBeVisible({ timeout: 30000 })
+}
+
+async function navigateFromMessengerToMarket(page: Page) {
+  await page.goto('/market')
+  await expect(page).toHaveURL(/\/market$/, { timeout: 30000 })
 }
 
 async function expectRoomHeaderStatus(page: Page, expectedStatus: 'کانال' | 'گروه') {
@@ -990,6 +1071,104 @@ test.describe('Channel media regressions', () => {
     await expect
       .poll(async () => fetchLatestRoomContentsByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
       .toEqual(expect.arrayContaining([sourceContent]))
+  })
+
+  test('group activity shows sender names and album upload finishes after sender leaves messenger for market', async ({
+    browser,
+    request,
+  }) => {
+    test.setTimeout(120000)
+    const sender = seedPrimarySession('group_activity_sender')
+    const receiver = seedPrimarySession('group_activity_receiver')
+    const groupTitle = `Group Activity ${Date.now()}`
+    const bootstrapContent = `PW GROUP ACTIVITY BOOTSTRAP ${Date.now()}`
+    let hasHeldUpload = false
+    let releaseHeldUpload: (() => void) | null = null
+    let resolveHeldUploadSeen: (() => void) | null = null
+    const heldUploadSeen = new Promise<void>((resolve) => {
+      resolveHeldUploadSeen = resolve
+    })
+
+    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+      headers: authHeaders(sender.accessToken),
+      data: {
+        title: groupTitle,
+        member_ids: [receiver.userId],
+      },
+    })
+    expect(createResponse.ok()).toBeTruthy()
+    const createPayload = await createResponse.json() as { group: { id: number } }
+    const groupId = Number(createPayload.group.id)
+
+    const bootstrapResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+      headers: authHeaders(sender.accessToken),
+      data: {
+        content: bootstrapContent,
+        message_type: 'text',
+      },
+    })
+    expect(bootstrapResponse.ok()).toBeTruthy()
+
+    const senderContext = await browser.newContext()
+    const receiverContext = await browser.newContext()
+    const senderPage = await senderContext.newPage()
+    const receiverPage = await receiverContext.newPage()
+
+    try {
+      await loginWithSeededSession(senderPage, sender)
+      await loginWithSeededSession(receiverPage, receiver)
+
+      await senderPage.goto('/chat')
+      const senderGroupRow = senderPage.locator('.conversation-item').filter({ hasText: groupTitle }).first()
+      await expect(senderGroupRow).toBeVisible({ timeout: 30000 })
+      await senderGroupRow.click()
+      await expectRoomOpen(senderPage, groupId, groupTitle, 'گروه')
+
+      await receiverPage.goto('/chat')
+      const receiverGroupRow = receiverPage.locator('.conversation-item').filter({ hasText: groupTitle }).first()
+      await expect(receiverGroupRow).toBeVisible({ timeout: 30000 })
+      await receiverGroupRow.click()
+      await expectRoomOpen(receiverPage, groupId, groupTitle, 'گروه')
+
+      const typingText = `PW GROUP ACTIVITY ${Date.now()}`
+      await senderPage.locator('textarea[placeholder="پیام..."]').fill(typingText)
+      await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال نوشتن...`, { timeout: 30000 })
+
+      await senderPage.locator('textarea[placeholder="پیام..."]').fill('')
+      await senderPage.route('**/api/chat/upload-media', async (route) => {
+        if (!hasHeldUpload) {
+          hasHeldUpload = true
+          resolveHeldUploadSeen?.()
+          await new Promise<void>((resolve) => {
+            releaseHeldUpload = resolve
+          })
+        }
+
+        await route.continue()
+      })
+
+      await senderPage.locator('button.attach-btn').click()
+      await expect(senderPage.getByRole('button', { name: 'گالری' }).first()).toBeVisible({ timeout: 30000 })
+      await injectGalleryImageAndVideo(senderPage)
+      await expect(senderPage.locator('.gp-title')).toHaveText('2 مورد', { timeout: 30000 })
+      await senderPage.getByRole('button', { name: 'ارسال 2 مورد' }).click()
+
+      await heldUploadSeen
+      await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال ارسال فایل...`, { timeout: 30000 })
+
+      await navigateFromMessengerToMarket(senderPage)
+      ;(releaseHeldUpload ?? (() => {}))()
+      releaseHeldUpload = null
+
+      await expect
+        .poll(async () => fetchLatestRoomMessageTypesByChatId(request, receiver.accessToken, groupId), { timeout: 60000 })
+        .toEqual(expect.arrayContaining(['image', 'video']))
+
+      await expect(receiverPage.locator('.messages-container [data-media-msg-id]')).toHaveCount(2, { timeout: 60000 })
+    } finally {
+      await senderContext.close()
+      await receiverContext.close()
+    }
   })
 
   test('channel admin can forward an image message into the channel', async ({
