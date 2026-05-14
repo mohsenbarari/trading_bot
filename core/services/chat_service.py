@@ -307,6 +307,7 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
     last_message_content = case(
         (last_message_alias.is_deleted.is_(True), "پیام حذف شد"),
         (last_message_alias.message_type == MessageType.TEXT, last_message_alias.content),
+        (last_message_alias.message_type.in_((MessageType.IMAGE, MessageType.VIDEO)), last_message_alias.content),
         else_=None,
     ).label("last_message_content")
 
