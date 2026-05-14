@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
 from models.upload_session import UploadBatchStatus, UploadSessionStatus
 from api.routers.chat_schemas import MessageRead
 from api.routers.chat import (
@@ -175,6 +176,38 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.final_chat_file_id, "file-7")
 
+        failed_session = SimpleNamespace(
+            id="sess-2",
+            status=UploadSessionStatus.FAILED,
+            final_chat_file_id=None,
+            last_error="boom",
+            retry_count=1,
+        )
+
+        async def _raise_finalize_failure(*args, **kwargs):
+            session.status = failed_session.status
+            session.final_chat_file_id = failed_session.final_chat_file_id
+            session.last_error = failed_session.last_error
+            session.retry_count = failed_session.retry_count
+            raise HTTPException(status_code=500, detail="Failed to finalize upload session")
+
+        with patch("api.routers.chat.get_upload_session_for_current_user", new=AsyncMock(return_value=session)), patch(
+            "api.routers.chat.finalize_upload_session",
+            new=AsyncMock(side_effect=_raise_finalize_failure),
+        ), patch(
+            "api.routers.chat._publish_upload_session_runtime_event",
+            new=AsyncMock(),
+        ) as publish_runtime_mock:
+            with self.assertRaises(HTTPException):
+                await finalize_upload_session_endpoint(session_id="sess-2", current_user=current_user, db=db)
+
+        publish_runtime_mock.assert_awaited_once_with(
+            db=db,
+            current_user=current_user,
+            session=session,
+            event_name="failed",
+        )
+
         cancelled = SimpleNamespace(id="sess-2", status=UploadSessionStatus.CANCELLED, final_chat_file_id=None)
         with patch("api.routers.chat.get_upload_session_for_current_user", new=AsyncMock(return_value=session)), patch(
             "api.routers.chat.cancel_upload_session",
@@ -322,6 +355,8 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
         session = SimpleNamespace(
             id="sess-direct",
             batch_id="batch-direct",
+            owner_user_id=5,
+            actor_user_id=5,
             room_kind="direct",
             target_id=9,
             media_type="image",
@@ -331,9 +366,14 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             next_offset=12,
             final_chat_file_id=None,
             preview_metadata={"caption": "x"},
+            retry_count=2,
+            last_error="temporary",
         )
 
         with patch("api.routers.chat.publish_user_event", new=AsyncMock()) as publish_user_mock, patch(
+            "api.routers.chat._increment_upload_session_observability_counters",
+            new=AsyncMock(),
+        ) as counter_mock, patch(
             "api.routers.chat._has_active_upload_sessions_for_room",
             new=AsyncMock(return_value=True),
         ), patch(
@@ -348,6 +388,10 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             )
 
         publish_user_mock.assert_awaited_once()
+        published_payload = publish_user_mock.await_args.args[2]
+        self.assertEqual(published_payload["retry_count"], 2)
+        self.assertEqual(published_payload["last_error"], "temporary")
+        counter_mock.assert_awaited_once_with(event_name="progress", room_kind="direct", media_type="image")
         direct_activity_mock.assert_awaited_once_with(
             receiver_id=9,
             sender_id=5,
@@ -363,6 +407,8 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
         session = SimpleNamespace(
             id="sess-group",
             batch_id="batch-group",
+            owner_user_id=5,
+            actor_user_id=7,
             room_kind="group",
             target_id=70,
             media_type="video",
@@ -372,9 +418,14 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             next_offset=90,
             final_chat_file_id="file-7",
             preview_metadata={"album_index": 1},
+            retry_count=0,
+            last_error=None,
         )
 
         with patch("api.routers.chat.publish_user_event", new=AsyncMock()) as publish_user_mock, patch(
+            "api.routers.chat._increment_upload_session_observability_counters",
+            new=AsyncMock(),
+        ) as counter_mock, patch(
             "api.routers.chat._has_active_upload_sessions_for_room",
             new=AsyncMock(return_value=False),
         ), patch(
@@ -393,6 +444,7 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             )
 
         publish_user_mock.assert_awaited_once()
+        counter_mock.assert_awaited_once_with(event_name="ready", room_kind="group", media_type="video")
         room_activity_mock.assert_awaited_once_with(
             chat=chat,
             sender_id=5,

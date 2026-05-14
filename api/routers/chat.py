@@ -170,6 +170,7 @@ from core.services.chat_upload_session_service import (
     persist_chat_media_file_bytes,
     read_upload_chunk_bytes,
 )
+from core.redis import get_redis_client
 from core.utils import publish_user_event
 import logging
 
@@ -188,6 +189,8 @@ ACTIVE_UPLOAD_SESSION_STATUSES = {
     UploadSessionStatus.UPLOADED,
     UploadSessionStatus.FINALIZING,
 }
+
+UPLOAD_SESSION_OBSERVABILITY_COUNTERS_KEY = "chat:upload_session:counters"
 
 
 def _enum_value(value: object) -> object:
@@ -212,13 +215,42 @@ def _build_upload_session_event_payload(
         "total_bytes": getattr(session, "total_bytes", 0),
         "next_offset": getattr(session, "next_offset", 0),
         "final_chat_file_id": getattr(session, "final_chat_file_id", None),
+        "retry_count": getattr(session, "retry_count", 0),
     }
+    last_error = getattr(session, "last_error", None)
+    if last_error:
+        payload["last_error"] = last_error
     preview_metadata = getattr(session, "preview_metadata", None)
     if preview_metadata:
         payload["preview_metadata"] = preview_metadata
     if batch_status is not None:
         payload["batch_status"] = _enum_value(batch_status)
     return payload
+
+
+async def _increment_upload_session_observability_counters(
+    *,
+    event_name: str,
+    room_kind: object,
+    media_type: object,
+) -> None:
+    try:
+        redis = get_redis_client()
+        normalized_room_kind = _enum_value(room_kind) or "unknown"
+        normalized_media_type = _enum_value(media_type) or "unknown"
+        await redis.hincrby(UPLOAD_SESSION_OBSERVABILITY_COUNTERS_KEY, f"event:{event_name}", 1)
+        await redis.hincrby(
+            UPLOAD_SESSION_OBSERVABILITY_COUNTERS_KEY,
+            f"room:{normalized_room_kind}:event:{event_name}",
+            1,
+        )
+        await redis.hincrby(
+            UPLOAD_SESSION_OBSERVABILITY_COUNTERS_KEY,
+            f"media:{normalized_media_type}:event:{event_name}",
+            1,
+        )
+    except Exception:
+        logger.debug("upload session observability counter update skipped", exc_info=True)
 
 
 async def _has_active_upload_sessions_for_room(
@@ -262,6 +294,11 @@ async def _publish_upload_session_runtime_event(
     )
 
     await publish_user_event(current_user.id, "chat:upload_session", payload)
+    await _increment_upload_session_observability_counters(
+        event_name=event_name,
+        room_kind=room_kind,
+        media_type=getattr(session, "media_type", None),
+    )
 
     logger.info(
         "chat_upload_session_event",
@@ -269,12 +306,16 @@ async def _publish_upload_session_runtime_event(
             "event": event_name,
             "session_id": getattr(session, "id", None),
             "batch_id": getattr(session, "batch_id", None),
+            "owner_user_id": getattr(session, "owner_user_id", current_user.id),
+            "actor_user_id": getattr(session, "actor_user_id", current_user.id),
             "room_kind": room_kind,
             "target_id": target_id,
             "media_type": _enum_value(getattr(session, "media_type", None)),
             "status": _enum_value(getattr(session, "status", None)),
             "received_bytes": getattr(session, "received_bytes", 0),
             "total_bytes": getattr(session, "total_bytes", 0),
+            "retry_count": getattr(session, "retry_count", 0),
+            "last_error": getattr(session, "last_error", None),
         },
     )
 
@@ -1880,11 +1921,21 @@ async def finalize_upload_session_endpoint(
         session_id=session_id,
         current_user=current_user,
     )
-    session = await finalize_upload_session(
-        db,
-        session=session,
-        current_user=current_user,
-    )
+    try:
+        session = await finalize_upload_session(
+            db,
+            session=session,
+            current_user=current_user,
+        )
+    except HTTPException:
+        if getattr(session, "status", None) == UploadSessionStatus.FAILED:
+            await _publish_upload_session_runtime_event(
+                db=db,
+                current_user=current_user,
+                session=session,
+                event_name="failed",
+            )
+        raise
     await _publish_upload_session_runtime_event(
         db=db,
         current_user=current_user,
