@@ -7,10 +7,15 @@
  * even after the user leaves the messenger.
  *
  * Responsibilities:
- *  - Queue + dispatch XHR upload to `/api/chat/upload-media`
- *  - Post to `/api/chat/send` with the captured receiver id (NOT reading
- *    `selectedUserId.value` — which may have been cleared when the user
- *    navigated away)
+ *  - For single direct/group uploads: create resumable upload batches +
+ *    sessions, append chunks, finalize the uploaded file, then commit the
+ *    batch into the final chat message.
+ *  - For channel uploads and album uploads: keep the legacy
+ *    `/api/chat/upload-media` path until the resumable album/channel slices
+ *    are migrated.
+ *  - Post committed messages with the captured conversation target (NOT
+ *    reading `selectedUserId.value` — which may have been cleared when the
+ *    user navigated away)
  *  - Album batching: collect sibling uploads by `album_id`, and only trigger
  *    the per-message `/chat/send` calls once all album members finish uploading
  *  - IndexedDB persistence of pending uploads (including raw File blobs),
@@ -20,10 +25,9 @@
  *  - Event emission for any subscribed chat UI (`useChatMedia`) to update
  *    the visible optimistic messages in real time
  *
- * This is Phase 1 of the upload reliability plan. It does NOT yet implement
- * chunked resumable uploads (Phase 2) or Service Worker Background Fetch
- * (Phase 3) — uploads are still monolithic XHR requests, so a complete tab
- * close mid-upload will still drop that upload on non-Android-Chrome platforms.
+ * This service now uses the resumable upload backend for single direct/group
+ * uploads. Album + channel media still use the legacy monolithic upload path
+ * until their batch semantics are migrated on the frontend.
  */
 
 import type { Message } from '../types/chat'
@@ -39,6 +43,7 @@ import {
 // -----------------------------------------------------------------------------
 
 export type UploadMsgType = 'image' | 'video' | 'voice' | 'document'
+export type UploadRoomKind = 'direct' | 'group' | 'channel'
 
 export type UploadPhase =
     | 'queued'
@@ -51,7 +56,8 @@ export type UploadPhase =
 
 export interface PendingUpload {
     id: number // optimistic id (negative)
-    userId: number // conversation key captured at submit time; negative = channel room
+    userId: number // conversation key captured at submit time
+    roomKind: UploadRoomKind
     senderId: number
     msgType: UploadMsgType
     file: Blob // preprocessed blob — IndexedDB can store Blobs/Files
@@ -71,6 +77,11 @@ export interface PendingUpload {
     totalBytes: number
     fileId?: string // server-returned after upload-media
     serverThumbnail?: string
+    batchId?: string
+    sessionId?: string
+    resumeToken?: string
+    nextOffset?: number
+    sessionExpiresAt?: string
     errorMessage?: string
     createdAt: string // ISO timestamp
     localBlobUrl?: string // UI-only, not persisted
@@ -81,7 +92,8 @@ export interface PendingUpload {
 
 export interface SubmitUploadParams {
     optimisticId: number
-    userId: number // conversation key captured at submit time; negative = channel room
+    userId: number // conversation key captured at submit time
+    roomKind: UploadRoomKind
     senderId: number
     msgType: UploadMsgType
     file: Blob
@@ -179,6 +191,7 @@ const uploadActivityCounts = new Map<number, number>()
 
 const MAX_CONCURRENT_UPLOADS = 2
 const MAX_UPLOAD_RETRIES = 3 // initial attempt + 3 retries
+const DEFAULT_RESUMABLE_CHUNK_SIZE_BYTES = 512 * 1024
 // Hard cap on a single XHR upload. Protects against half-dead connections
 // where bytes are uploaded (progress hits 100%) but the response never
 // arrives — without this the XHR hangs forever, `phase='uploading'` is
@@ -191,12 +204,155 @@ const SEND_REQUEST_TIMEOUT_MS = 2 * 60 * 1000 // 2 minutes per send
 let activeUploadCount = 0
 const uploadQueue: PendingUpload[] = []
 
+const READY_LIKE_UPLOAD_SESSION_STATUSES = new Set(['ready', 'committed'])
+const TERMINAL_UPLOAD_SESSION_STATUSES = new Set(['failed', 'cancelled', 'expired'])
+
+class UploadApiError extends Error {
+    status: number
+
+    constructor(status: number, message: string) {
+        super(message)
+        this.name = 'UploadApiError'
+        this.status = status
+    }
+}
+
 function enqueueUpload(upload: PendingUpload): void {
     // Avoid duplicates: if the upload is already queued or in-flight, ignore.
     if (uploadQueue.some((u) => u.id === upload.id)) return
     if (xhrControllers.has(upload.id)) return
     uploadQueue.push(upload)
     pumpUploadQueue()
+}
+
+function normalizeUploadRoomKind(value: unknown, conversationKey: number): UploadRoomKind {
+    if (value === 'direct' || value === 'group' || value === 'channel') {
+        return value
+    }
+
+    return conversationKey < 0 ? 'channel' : 'direct'
+}
+
+function isSessionBackedUploadRoomKind(roomKind: UploadRoomKind): roomKind is 'direct' | 'group' {
+    return roomKind === 'direct' || roomKind === 'group'
+}
+
+function shouldUseSessionBackedUpload(upload: PendingUpload): boolean {
+    return !upload.albumId && isSessionBackedUploadRoomKind(upload.roomKind)
+}
+
+function resolveUploadTargetId(upload: Pick<PendingUpload, 'roomKind' | 'userId'>): number {
+    if (upload.roomKind === 'direct') {
+        return upload.userId
+    }
+
+    return Math.abs(upload.userId)
+}
+
+function buildSingleUploadBatchIdempotencyKey(upload: PendingUpload): string {
+    return [
+        'single',
+        upload.roomKind,
+        String(upload.senderId),
+        String(resolveUploadTargetId(upload)),
+        String(upload.id),
+        upload.msgType,
+    ].join(':').slice(0, 128)
+}
+
+function applyPreviewMetadataToUpload(upload: PendingUpload, previewMetadata: Record<string, unknown> | null | undefined) {
+    if (!previewMetadata || typeof previewMetadata !== 'object') return
+
+    const thumbnail = previewMetadata.thumbnail
+    if (typeof thumbnail === 'string' && thumbnail.trim()) {
+        upload.serverThumbnail = thumbnail
+        if (!upload.thumbnail) {
+            upload.thumbnail = thumbnail
+        }
+    }
+
+    const width = Number(previewMetadata.width)
+    const height = Number(previewMetadata.height)
+    if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+        upload.width = width
+        upload.height = height
+    }
+
+    const durationMs = Number(previewMetadata.duration_ms ?? previewMetadata.durationMs)
+    if (Number.isFinite(durationMs) && durationMs >= 0) {
+        upload.durationMs = durationMs
+    }
+}
+
+function getUploadPreviewMetadata(upload: PendingUpload): Record<string, unknown> {
+    const payload: Record<string, unknown> = {}
+
+    if (upload.thumbnail && upload.msgType !== 'document') {
+        payload.thumbnail = upload.thumbnail
+    }
+    if (upload.width > 0 && upload.msgType !== 'document') {
+        payload.width = upload.width
+    }
+    if (upload.height > 0 && upload.msgType !== 'document') {
+        payload.height = upload.height
+    }
+    if (typeof upload.durationMs === 'number' && upload.durationMs >= 0 && upload.msgType !== 'document') {
+        payload.duration_ms = upload.durationMs
+    }
+    if ((upload.msgType === 'image' || upload.msgType === 'video') && upload.caption) {
+        payload.caption = upload.caption
+    }
+
+    return payload
+}
+
+function getUploadResumeProgress(upload: PendingUpload): number {
+    const totalBytes = upload.file.size || upload.totalBytes || 0
+    const nextOffset = Math.max(0, Math.min(upload.nextOffset ?? upload.uploadedBytes ?? 0, totalBytes))
+    if (totalBytes <= 0) return 0
+    return Math.max(0, Math.min(100, Math.round((nextOffset / totalBytes) * 100)))
+}
+
+async function uploadApiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+    if (!config) {
+        throw new Error('[uploadService] not initialized')
+    }
+
+    const token = config.getAuthToken()
+    const response = await fetch(`${config.apiBaseUrl}/api${path}`, {
+        ...init,
+        headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(init?.headers || {}),
+        },
+    })
+
+    if (!response.ok) {
+        let detail = ''
+        try {
+            const parsed = await response.json() as { detail?: string }
+            if (typeof parsed?.detail === 'string') {
+                detail = parsed.detail
+            }
+        } catch {
+            /* ignore */
+        }
+
+        if (response.status === 401) {
+            throw new UploadApiError(response.status, 'نشست شما منقضی شده است. لطفاً صفحه را رفرش کنید.')
+        }
+        if (response.status === 413) {
+            throw new UploadApiError(response.status, 'حجم فایل از حد مجاز ۵۰ مگابایت بیشتر است.')
+        }
+
+        throw new UploadApiError(response.status, detail || `خطای سرور (${response.status})`)
+    }
+
+    if (response.status === 204) {
+        return undefined as T
+    }
+
+    return (await response.json()) as T
 }
 
 function pumpUploadQueue(): void {
@@ -384,6 +540,14 @@ function restorePersistedFile(record: PersistedPendingUpload): Blob | null {
     return null
 }
 
+function normalizePersistedUpload(record: PersistedPendingUpload, restoredFile: Blob): PendingUpload {
+    return {
+        ...record,
+        roomKind: normalizeUploadRoomKind((record as Partial<PendingUpload>).roomKind, Number(record.userId)),
+        file: restoredFile,
+    } as PendingUpload
+}
+
 async function putRecord(db: IDBDatabase, record: PersistedPendingUpload): Promise<boolean> {
     return await new Promise<boolean>((resolve) => {
         try {
@@ -501,10 +665,7 @@ async function idbGetAll(): Promise<PendingUpload[]> {
                     const records = ((req.result as PersistedPendingUpload[]) || []).map((record) => {
                         const restoredFile = restorePersistedFile(record)
                         if (!restoredFile) return null
-                        return {
-                            ...record,
-                            file: restoredFile,
-                        } as PendingUpload
+                        return normalizePersistedUpload(record, restoredFile)
                     }).filter((record): record is PendingUpload => record !== null)
 
                     resolve(records)
@@ -693,9 +854,15 @@ async function resumePendingUploadsAfterForegroundWake(): Promise<void> {
             const alreadyQueued = uploadQueue.some((queuedUpload) => queuedUpload.id === upload.id)
             if (!xhrControllers.has(upload.id) && !alreadyQueued) {
                 upload.phase = 'queued'
-                upload.progress = 0
-                upload.uploadedBytes = 0
-                upload.totalBytes = upload.file.size
+                if (shouldUseSessionBackedUpload(upload)) {
+                    upload.totalBytes = upload.file.size
+                    upload.uploadedBytes = Math.max(0, Math.min(upload.nextOffset ?? upload.uploadedBytes ?? 0, upload.file.size))
+                    upload.progress = getUploadResumeProgress(upload)
+                } else {
+                    upload.progress = 0
+                    upload.uploadedBytes = 0
+                    upload.totalBytes = upload.file.size
+                }
                 await idbPut(upload)
                 enqueueUpload(upload)
             }
@@ -762,6 +929,269 @@ function buildContent(upload: PendingUpload, phase: 'preview' | 'final'): string
     return JSON.stringify(payload)
 }
 
+type UploadSessionStatePayload = {
+    session_id: string
+    status: string
+    next_offset: number
+    received_bytes: number
+    total_bytes: number
+    preview_metadata?: Record<string, unknown>
+    final_chat_file_id?: string | null
+}
+
+type UploadBatchCreatePayload = {
+    batch_id: string
+    status: string
+    expires_at: string
+}
+
+type UploadSessionCreatePayload = {
+    session_id: string
+    resume_token: string
+    next_offset: number
+    chunk_size: number
+    expires_at: string
+    status: string
+}
+
+type UploadSessionChunkPayload = {
+    session_id: string
+    received_bytes: number
+    next_offset: number
+    status: string
+}
+
+type UploadSessionFinalizePayload = {
+    session_id: string
+    status: string
+    final_chat_file_id?: string | null
+}
+
+type UploadBatchCommitPayload = {
+    batch_id: string
+    status: string
+    committed_items: number
+    messages: Message[]
+}
+
+function clearResumableUploadState(upload: PendingUpload) {
+    upload.batchId = undefined
+    upload.sessionId = undefined
+    upload.resumeToken = undefined
+    upload.nextOffset = 0
+    upload.sessionExpiresAt = undefined
+    upload.fileId = undefined
+}
+
+async function syncResumableUploadState(upload: PendingUpload): Promise<UploadSessionStatePayload | null> {
+    if (!upload.sessionId) return null
+
+    try {
+        const state = await uploadApiFetch<UploadSessionStatePayload>(`/chat/upload-sessions/${upload.sessionId}`)
+        upload.totalBytes = Math.max(Number(state.total_bytes || 0), upload.file.size)
+        upload.nextOffset = Math.max(0, Number(state.next_offset || 0))
+        upload.uploadedBytes = Math.max(0, Math.min(Number(state.received_bytes || 0), upload.totalBytes))
+        upload.progress = getUploadResumeProgress(upload)
+        applyPreviewMetadataToUpload(upload, state.preview_metadata)
+        if (typeof state.final_chat_file_id === 'string' && state.final_chat_file_id) {
+            upload.fileId = state.final_chat_file_id
+        }
+
+        return state
+    } catch (error) {
+        if (error instanceof UploadApiError && error.status === 404) {
+            clearResumableUploadState(upload)
+            await idbPut(upload)
+            return null
+        }
+        throw error
+    }
+}
+
+async function ensureResumableUploadBatch(upload: PendingUpload): Promise<void> {
+    if (upload.batchId) return
+
+    const payload = await uploadApiFetch<UploadBatchCreatePayload>('/chat/upload-batches', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            room_kind: upload.roomKind,
+            target_id: resolveUploadTargetId(upload),
+            message_kind: 'single',
+            expected_items: 1,
+            caption_policy: 'none',
+            idempotency_key: buildSingleUploadBatchIdempotencyKey(upload),
+        }),
+    })
+
+    upload.batchId = payload.batch_id
+    await idbPut(upload)
+}
+
+async function ensureResumableUploadSession(upload: PendingUpload): Promise<UploadSessionStatePayload | null> {
+    const syncedState = await syncResumableUploadState(upload)
+    if (syncedState) {
+        if (TERMINAL_UPLOAD_SESSION_STATUSES.has(syncedState.status)) {
+            clearResumableUploadState(upload)
+        } else {
+            return syncedState
+        }
+    }
+
+    await ensureResumableUploadBatch(upload)
+
+    const payload = await uploadApiFetch<UploadSessionCreatePayload>('/chat/upload-sessions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            batch_id: upload.batchId,
+            room_kind: upload.roomKind,
+            target_id: resolveUploadTargetId(upload),
+            media_type: upload.msgType,
+            file_name: upload.fileName,
+            mime_type: upload.mimeType || 'application/octet-stream',
+            total_bytes: upload.file.size,
+            chunk_size: DEFAULT_RESUMABLE_CHUNK_SIZE_BYTES,
+            preview_metadata: getUploadPreviewMetadata(upload),
+        }),
+    })
+
+    upload.sessionId = payload.session_id
+    upload.resumeToken = payload.resume_token
+    upload.nextOffset = Math.max(0, Number(payload.next_offset || 0))
+    upload.sessionExpiresAt = payload.expires_at
+    upload.totalBytes = upload.file.size
+    upload.uploadedBytes = Math.max(0, Math.min(upload.nextOffset, upload.file.size))
+    upload.progress = getUploadResumeProgress(upload)
+    await idbPut(upload)
+    return null
+}
+
+async function appendResumableUploadChunk(
+    upload: PendingUpload,
+    chunkBlob: Blob,
+    offset: number,
+    isLastChunk: boolean,
+): Promise<UploadSessionChunkPayload> {
+    if (!config || !upload.sessionId || !upload.resumeToken) {
+        throw new Error('Missing resumable upload session state')
+    }
+
+    return await new Promise<UploadSessionChunkPayload>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhrControllers.set(upload.id, xhr)
+
+        const formData = new FormData()
+        formData.append('resume_token', upload.resumeToken)
+        formData.append('offset', String(offset))
+        formData.append('is_last_chunk', String(isLastChunk))
+        formData.append('chunk', chunkBlob, upload.fileName)
+
+        xhr.open('PATCH', `${config.apiBaseUrl}/api/chat/upload-sessions/${upload.sessionId}/chunk`)
+        xhr.timeout = XHR_UPLOAD_TIMEOUT_MS
+        const token = config.getAuthToken()
+        if (token) {
+            xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+        }
+
+        xhr.upload.onprogress = (event) => {
+            if (!event.lengthComputable) return
+            const totalBytes = upload.file.size || upload.totalBytes || event.total
+            const uploadedBytes = Math.max(0, Math.min(offset + event.loaded, totalBytes))
+            const progress = totalBytes > 0 ? Math.round((uploadedBytes / totalBytes) * 100) : 0
+            upload.progress = progress
+            upload.uploadedBytes = uploadedBytes
+            upload.totalBytes = totalBytes
+            emit({
+                type: 'progress',
+                userId: upload.userId,
+                optimisticId: upload.id,
+                progress,
+                uploadedBytes,
+                totalBytes,
+            })
+        }
+
+        xhr.onload = () => {
+            xhrControllers.delete(upload.id)
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    resolve(JSON.parse(xhr.responseText) as UploadSessionChunkPayload)
+                } catch {
+                    reject(new Error('پاسخ نامعتبر سرور'))
+                }
+                return
+            }
+
+            let detail = ''
+            try {
+                const parsed = JSON.parse(xhr.responseText) as { detail?: string }
+                if (typeof parsed?.detail === 'string') {
+                    detail = parsed.detail
+                }
+            } catch {
+                /* ignore */
+            }
+
+            if (xhr.status === 401) {
+                reject(new UploadApiError(xhr.status, 'نشست شما منقضی شده است. لطفاً صفحه را رفرش کنید.'))
+                return
+            }
+
+            reject(new UploadApiError(xhr.status, detail || `خطای سرور (${xhr.status})`))
+        }
+        xhr.onerror = () => {
+            xhrControllers.delete(upload.id)
+            reject(new Error('Network Error'))
+        }
+        xhr.onabort = () => {
+            xhrControllers.delete(upload.id)
+            reject(new Error('UploadCancelled'))
+        }
+        xhr.ontimeout = () => {
+            xhrControllers.delete(upload.id)
+            reject(new Error('Network Error (timeout)'))
+        }
+        xhr.send(formData)
+    })
+}
+
+async function finalizeResumableUploadSession(upload: PendingUpload): Promise<void> {
+    if (!upload.sessionId) {
+        throw new Error('Missing upload session id')
+    }
+
+    const finalizePayload = await uploadApiFetch<UploadSessionFinalizePayload>(`/chat/upload-sessions/${upload.sessionId}/finalize`, {
+        method: 'POST',
+    })
+    if (typeof finalizePayload.final_chat_file_id === 'string' && finalizePayload.final_chat_file_id) {
+        upload.fileId = finalizePayload.final_chat_file_id
+    }
+
+    const syncedState = await syncResumableUploadState(upload)
+    if (syncedState?.final_chat_file_id) {
+        upload.fileId = syncedState.final_chat_file_id
+    }
+}
+
+async function cancelServerUploadState(upload: PendingUpload): Promise<void> {
+    try {
+        if (upload.batchId) {
+            await uploadApiFetch(`/chat/upload-batches/${upload.batchId}/cancel`, { method: 'POST' })
+            return
+        }
+        if (upload.sessionId) {
+            await uploadApiFetch(`/chat/upload-sessions/${upload.sessionId}/cancel`, { method: 'POST' })
+        }
+    } catch {
+        /* ignore */
+    }
+}
+
 export function buildOptimisticMessageFromUpload(upload: PendingUpload): Message {
     const phase: 'preview' | 'final' = upload.fileId ? 'final' : 'preview'
     return {
@@ -785,7 +1215,108 @@ export function buildOptimisticMessageFromUpload(upload: PendingUpload): Message
 // Pipeline phases
 // -----------------------------------------------------------------------------
 
-async function runUpload(upload: PendingUpload): Promise<void> {
+async function runResumableUpload(upload: PendingUpload): Promise<void> {
+    if (!config) {
+        console.warn('[uploadService] runUpload before init')
+        return
+    }
+    if (abortFlags.has(upload.id)) return
+
+    upload.phase = 'uploading'
+    upload.totalBytes = upload.file.size
+    upload.uploadedBytes = Math.max(0, Math.min(upload.nextOffset ?? upload.uploadedBytes ?? 0, upload.file.size))
+    upload.progress = getUploadResumeProgress(upload)
+    await idbPut(upload)
+
+    try {
+        const syncedState = await ensureResumableUploadSession(upload)
+        if (abortFlags.has(upload.id)) return
+
+        if (syncedState && READY_LIKE_UPLOAD_SESSION_STATUSES.has(syncedState.status)) {
+            upload.phase = 'uploaded'
+            upload.progress = 100
+            upload.uploadedBytes = upload.totalBytes
+            await idbPut(upload)
+            emit({
+                type: 'uploaded',
+                userId: upload.userId,
+                optimisticId: upload.id,
+                fileId: upload.fileId!,
+                content: buildContent(upload, 'final'),
+            })
+            await sendOne(upload)
+            return
+        }
+
+        let offset = Math.max(0, Math.min(upload.nextOffset ?? 0, upload.file.size))
+        while (offset < upload.file.size) {
+            const nextOffset = Math.min(offset + DEFAULT_RESUMABLE_CHUNK_SIZE_BYTES, upload.file.size)
+            const chunkBlob = upload.file.slice(offset, nextOffset)
+            const chunkPayload = await appendResumableUploadChunk(upload, chunkBlob, offset, nextOffset >= upload.file.size)
+            if (abortFlags.has(upload.id)) return
+
+            offset = Math.max(0, Math.min(Number(chunkPayload.next_offset || nextOffset), upload.file.size))
+            upload.nextOffset = offset
+            upload.uploadedBytes = Math.max(0, Math.min(Number(chunkPayload.received_bytes || offset), upload.file.size))
+            upload.totalBytes = upload.file.size
+            upload.progress = getUploadResumeProgress(upload)
+            await idbPut(upload)
+        }
+
+        await finalizeResumableUploadSession(upload)
+        if (abortFlags.has(upload.id)) return
+        if (!upload.fileId) {
+            throw new Error('شناسه فایل نهایی از سرور دریافت نشد')
+        }
+
+        upload.phase = 'uploaded'
+        upload.progress = 100
+        upload.uploadedBytes = upload.totalBytes
+        await idbPut(upload)
+
+        emit({
+            type: 'uploaded',
+            userId: upload.userId,
+            optimisticId: upload.id,
+            fileId: upload.fileId,
+            content: buildContent(upload, 'final'),
+        })
+
+        await sendOne(upload)
+    } catch (error) {
+        xhrControllers.delete(upload.id)
+        if (abortFlags.has(upload.id)) {
+            upload.phase = 'cancelled'
+            stopUploadActivity(upload)
+            pendingUploads.delete(upload.id)
+            abortFlags.delete(upload.id)
+            void cancelServerUploadState(upload)
+            await idbDelete(upload.id)
+            emit({ type: 'cancelled', userId: upload.userId, optimisticId: upload.id })
+            return
+        }
+        if (isTransientUploadError(error) && (upload.retryCount ?? 0) < MAX_UPLOAD_RETRIES) {
+            const attempt = (upload.retryCount ?? 0) + 1
+            upload.retryCount = attempt
+            upload.phase = 'queued'
+            await idbPut(upload)
+            const delay = computeRetryDelayMs(attempt - 1)
+            console.warn(
+                `[uploadService] transient upload error (attempt ${attempt}/${MAX_UPLOAD_RETRIES}), retrying in ${delay}ms:`,
+                error,
+            )
+            setTimeout(() => {
+                if (abortFlags.has(upload.id)) return
+                if (!pendingUploads.has(upload.id)) return
+                enqueueUpload(upload)
+            }, delay)
+            return
+        }
+        await markFailed(upload, error instanceof Error ? error.message : String(error))
+    }
+}
+
+async function runLegacyUpload(upload: PendingUpload): Promise<void> {
     if (!config) {
         console.warn('[uploadService] runUpload before init')
         return
@@ -869,7 +1400,6 @@ async function runUpload(upload: PendingUpload): Promise<void> {
             }
             xhr.ontimeout = () => {
                 xhrControllers.delete(upload.id)
-                // Treat as transient so the retry path kicks in.
                 reject(new Error('Network Error (timeout)'))
             }
             xhr.send(formData)
@@ -919,9 +1449,6 @@ async function runUpload(upload: PendingUpload): Promise<void> {
             if (upload.albumId) cleanupAlbumBatchIfSettled(upload.albumId)
             return
         }
-        // Auto-retry transient network / 5xx errors with exponential backoff
-        // before giving up. This prevents single flaky-network hiccups during
-        // large album uploads from showing up as "failed" media bubbles.
         if (isTransientUploadError(error) && (upload.retryCount ?? 0) < MAX_UPLOAD_RETRIES) {
             const attempt = (upload.retryCount ?? 0) + 1
             upload.retryCount = attempt
@@ -945,7 +1472,104 @@ async function runUpload(upload: PendingUpload): Promise<void> {
     }
 }
 
-async function sendOne(upload: PendingUpload): Promise<void> {
+async function runUpload(upload: PendingUpload): Promise<void> {
+    if (shouldUseSessionBackedUpload(upload)) {
+        await runResumableUpload(upload)
+        return
+    }
+
+    await runLegacyUpload(upload)
+}
+
+async function commitSingleUploadBatch(upload: PendingUpload): Promise<void> {
+    if (!config) return
+    if (abortFlags.has(upload.id)) return
+    if (!upload.batchId) {
+        throw new Error('Missing upload batch id')
+    }
+
+    upload.phase = 'sending'
+    await idbPut(upload)
+
+    const sendController = new AbortController()
+    sendControllers.set(upload.id, sendController)
+    let sendTimedOut = false
+    const sendTimeoutId = window.setTimeout(() => {
+        if (sendControllers.get(upload.id) !== sendController) return
+        sendTimedOut = true
+        sendController.abort()
+    }, SEND_REQUEST_TIMEOUT_MS)
+
+    try {
+        const commitPayload = await uploadApiFetch<UploadBatchCommitPayload>(`/chat/upload-batches/${upload.batchId}/commit`, {
+            method: 'POST',
+            signal: sendController.signal,
+        })
+
+        const serverMessage = Array.isArray(commitPayload.messages) ? commitPayload.messages[0] : null
+        if (!serverMessage) {
+            throw new Error('پیام نهایی از سرور دریافت نشد')
+        }
+
+        upload.phase = 'sent'
+        stopUploadActivity(upload)
+        emit({
+            type: 'sent',
+            userId: upload.userId,
+            optimisticId: upload.id,
+            serverMessage,
+            localBlobUrl: upload.localBlobUrl,
+        })
+
+        pendingUploads.delete(upload.id)
+        await idbDelete(upload.id)
+    } catch (error) {
+        if (abortFlags.has(upload.id)) {
+            upload.phase = 'cancelled'
+            stopUploadActivity(upload)
+            pendingUploads.delete(upload.id)
+            await idbDelete(upload.id)
+            abortFlags.delete(upload.id)
+            emit({ type: 'cancelled', userId: upload.userId, optimisticId: upload.id })
+            return
+        }
+
+        const normalizedError = sendTimedOut ? new Error('Network Error (send timeout)') : error
+
+        if (
+            isTransientUploadError(normalizedError) &&
+            (upload.sendRetryCount ?? 0) < MAX_SEND_RETRIES &&
+            !abortFlags.has(upload.id)
+        ) {
+            const attempt = (upload.sendRetryCount ?? 0) + 1
+            upload.sendRetryCount = attempt
+            upload.phase = 'uploaded'
+            await idbPut(upload)
+            const delay = computeSendRetryDelayMs(attempt - 1)
+            console.warn(
+                `[uploadService] transient /chat/send error (attempt ${attempt}/${MAX_SEND_RETRIES}), retrying in ${delay}ms:`,
+                normalizedError,
+            )
+            setTimeout(() => {
+                if (abortFlags.has(upload.id)) return
+                if (!pendingUploads.has(upload.id)) return
+                void commitSingleUploadBatch(upload)
+            }, delay)
+            return
+        }
+        await markFailed(
+            upload,
+            normalizedError instanceof Error ? normalizedError.message : String(normalizedError),
+        )
+    } finally {
+        window.clearTimeout(sendTimeoutId)
+        if (sendControllers.get(upload.id) === sendController) {
+            sendControllers.delete(upload.id)
+        }
+    }
+}
+
+async function sendOneLegacy(upload: PendingUpload): Promise<void> {
     if (!config) return
     if (abortFlags.has(upload.id)) return
 
@@ -1020,11 +1644,6 @@ async function sendOne(upload: PendingUpload): Promise<void> {
 
         const normalizedError = sendTimedOut ? new Error('Network Error (send timeout)') : error
 
-        // Retry transient /chat/send failures before giving up. Without this,
-        // a single flaky fetch() (e.g. browser per-origin pool saturated by
-        // 30+ concurrent album uploads across multiple chats) becomes a
-        // permanent "failed" media bubble even though the upload itself
-        // succeeded and the server is healthy.
         if (
             isTransientUploadError(normalizedError) &&
             (upload.sendRetryCount ?? 0) < MAX_SEND_RETRIES &&
@@ -1032,7 +1651,6 @@ async function sendOne(upload: PendingUpload): Promise<void> {
         ) {
             const attempt = (upload.sendRetryCount ?? 0) + 1
             upload.sendRetryCount = attempt
-            // Revert to `uploaded` so a watchdog pass treats it as ready-to-send.
             upload.phase = 'uploaded'
             await idbPut(upload)
             const delay = computeSendRetryDelayMs(attempt - 1)
@@ -1043,7 +1661,7 @@ async function sendOne(upload: PendingUpload): Promise<void> {
             setTimeout(() => {
                 if (abortFlags.has(upload.id)) return
                 if (!pendingUploads.has(upload.id)) return
-                void sendOne(upload)
+                void sendOneLegacy(upload)
             }, delay)
             return
         }
@@ -1057,6 +1675,15 @@ async function sendOne(upload: PendingUpload): Promise<void> {
             sendControllers.delete(upload.id)
         }
     }
+}
+
+async function sendOne(upload: PendingUpload): Promise<void> {
+    if (shouldUseSessionBackedUpload(upload)) {
+        await commitSingleUploadBatch(upload)
+        return
+    }
+
+    await sendOneLegacy(upload)
 }
 
 async function markFailed(upload: PendingUpload, errorMessage: string) {
@@ -1166,6 +1793,7 @@ export async function submitUpload(params: SubmitUploadParams): Promise<void> {
     const upload: PendingUpload = {
         id: params.optimisticId,
         userId: params.userId,
+        roomKind: params.roomKind,
         senderId: params.senderId,
         msgType: params.msgType,
         file: params.file,
@@ -1244,6 +1872,9 @@ export function cancelUpload(id: number): void {
         stopUploadActivity(upload)
         pendingUploads.delete(id)
         abortFlags.delete(id)
+        if (shouldUseSessionBackedUpload(upload)) {
+            void cancelServerUploadState(upload)
+        }
         void idbDelete(id)
         emit({ type: 'cancelled', userId: upload.userId, optimisticId: id })
         if (upload.albumId) cleanupAlbumBatchIfSettled(upload.albumId)

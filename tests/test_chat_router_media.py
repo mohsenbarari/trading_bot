@@ -35,6 +35,7 @@ class FakeDB:
         self.get_map = dict(get_map or {})
         self.added = []
         self.commit = AsyncMock()
+        self.flush = AsyncMock()
 
     def add(self, obj):
         self.added.append(obj)
@@ -98,26 +99,30 @@ class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.media_type, "application/pdf")
         self.assertIn("report.pdf", response.headers.get("content-disposition", ""))
 
-    async def test_upload_chat_media_rejects_unsupported_or_mismatched_content(self):
+    async def test_upload_chat_media_surfaces_helper_validation_errors(self):
         current_user = SimpleNamespace(id=5)
         db = FakeDB()
 
-        with self.assertRaises(HTTPException) as exc_info:
-            upload_file = FakeUploadFile(content_type="application/x-msdownload", filename="evil.exe", contents=b"x")
-            await upload_chat_media(
-                file=upload_file,
-                current_user=current_user,
-                db=db,
-            )
+        upload_file = FakeUploadFile(content_type="application/x-msdownload", filename="evil.exe", contents=b"x")
+        with patch(
+            "api.routers.chat.persist_chat_media_file_bytes",
+            new=AsyncMock(side_effect=HTTPException(status_code=400, detail="Unsupported file type: application/x-msdownload")),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await upload_chat_media(
+                    file=upload_file,
+                    current_user=current_user,
+                    db=db,
+                )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertIn("Unsupported file type", exc_info.exception.detail)
         upload_file.close.assert_awaited_once()
 
-        with patch("api.routers.chat.asyncio.to_thread", new=AsyncMock(side_effect=lambda fn, *args: fn(*args))), patch(
-            "api.routers.chat.magic.from_buffer",
-            return_value="application/x-msdownload",
+        upload_file = FakeUploadFile(content_type="application/pdf", filename="a.pdf", contents=b"pdf")
+        with patch(
+            "api.routers.chat.persist_chat_media_file_bytes",
+            new=AsyncMock(side_effect=HTTPException(status_code=400, detail="Invalid file content. Real type is application/x-msdownload and base type is application/pdf")),
         ):
-            upload_file = FakeUploadFile(content_type="application/pdf", filename="a.pdf", contents=b"pdf")
             with self.assertRaises(HTTPException) as exc_info:
                 await upload_chat_media(
                     file=upload_file,
@@ -133,11 +138,11 @@ class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB()
         huge_contents = b"x" * (50 * 1024 * 1024 + 1)
 
-        with patch("api.routers.chat.asyncio.to_thread", new=AsyncMock(side_effect=lambda fn, *args: fn(*args))), patch(
-            "api.routers.chat.magic.from_buffer",
-            return_value="application/pdf",
+        upload_file = FakeUploadFile(content_type="application/pdf", filename="a.pdf", contents=huge_contents)
+        with patch(
+            "api.routers.chat.persist_chat_media_file_bytes",
+            new=AsyncMock(side_effect=HTTPException(status_code=413, detail="File too large (max 50MB)")),
         ):
-            upload_file = FakeUploadFile(content_type="application/pdf", filename="a.pdf", contents=huge_contents)
             with self.assertRaises(HTTPException) as exc_info:
                 await upload_chat_media(
                     file=upload_file,
@@ -151,16 +156,17 @@ class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_upload_chat_media_persists_file_and_returns_metadata(self):
         current_user = SimpleNamespace(id=5)
         db = FakeDB()
-        fake_file = FakeAsyncFile()
+        chat_file = SimpleNamespace(
+            id="uuid-1",
+            thumbnail="thumb",
+            file_name="report.pdf",
+            mime_type="application/pdf",
+            size=len(b"pdf-bytes"),
+        )
 
-        with patch("api.routers.chat.asyncio.to_thread", new=AsyncMock(side_effect=lambda fn, *args: fn(*args))), patch(
-            "api.routers.chat.magic.from_buffer",
-            return_value="application/pdf",
-        ), patch("api.routers.chat.uuid.uuid4", return_value="uuid-1"), patch(
-            "api.routers.chat.os.makedirs"
-        ) as makedirs_mock, patch(
-            "api.routers.chat.aiofiles.open",
-            return_value=fake_file,
+        with patch(
+            "api.routers.chat.persist_chat_media_file_bytes",
+            new=AsyncMock(return_value=SimpleNamespace(chat_file=chat_file, width=640, height=480)),
         ):
             upload_file = FakeUploadFile(content_type="application/pdf", filename="report.pdf", contents=b"pdf-bytes")
             result = await upload_chat_media(
@@ -170,18 +176,12 @@ class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
 
-        makedirs_mock.assert_called_once()
-        fake_file.write.assert_awaited_once_with(b"pdf-bytes")
         db.commit.assert_awaited_once()
-        self.assertEqual(len(db.added), 1)
-        chat_file = db.added[0]
-        self.assertEqual(chat_file.id, "uuid-1")
-        self.assertEqual(chat_file.file_name, "report.pdf")
-        self.assertEqual(chat_file.mime_type, "application/pdf")
-        self.assertEqual(chat_file.thumbnail, "thumb")
         self.assertEqual(result["file_id"], "uuid-1")
         self.assertEqual(result["mime_type"], "application/pdf")
         self.assertEqual(result["size"], len(b"pdf-bytes"))
+        self.assertEqual(result["width"], 640)
+        self.assertEqual(result["height"], 480)
         upload_file.close.assert_awaited_once()
 
 

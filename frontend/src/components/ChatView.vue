@@ -320,11 +320,21 @@ const {
   isLoadingOlderMessages
 } = messagesLogic
 
+const selectedConversation = computed(() => {
+  return conversations.value.find(c => c.other_user_id === selectedUserId.value) ?? null
+})
+
+const selectedRoomKind = computed<'direct' | 'channel' | 'group'>(() => {
+  const roomKind = selectedConversation.value?.room_kind
+  return roomKind === 'channel' || roomKind === 'group' ? roomKind : 'direct'
+})
+
 const mediaLogic = useChatMedia({
   apiBaseUrl: props.apiBaseUrl,
   jwtToken: props.jwtToken,
   currentUserId: props.currentUserId,
   selectedUserId,
+  selectedRoomKind,
   messages,
   error,
   isUploading,
@@ -589,16 +599,7 @@ const isSelectedUserDeleted = computed(() => {
   return conv?.room_kind && conv.room_kind !== 'direct' ? false : !!conv?.other_user_is_deleted
 })
 
-const selectedConversation = computed(() => {
-  return conversations.value.find(c => c.other_user_id === selectedUserId.value) ?? null
-})
-
 const pinnedMessage = computed(() => pinnedMessageState.value?.message ?? null)
-
-const selectedRoomKind = computed<'direct' | 'channel' | 'group'>(() => {
-  const roomKind = selectedConversation.value?.room_kind
-  return roomKind === 'channel' || roomKind === 'group' ? roomKind : 'direct'
-})
 
 const selectedRoomMemberCount = computed(() => selectedConversation.value?.member_count ?? null)
 const selectedRoomIsMandatory = computed(() => !!selectedConversation.value?.is_mandatory)
@@ -2350,7 +2351,7 @@ async function handleSendVoice(blob: Blob, durationMs: number) {
   const file = new File([blob], `voice_${Date.now()}.webm`, { type: blob.type || 'audio/webm' })
   // Pack durationMs into the file object so handleMediaUploadWrapper can extract it
   ;(file as any).durationMs = durationMs
-  await handleMediaUploadWrapper(file)
+  await handleMediaUploadWrapper(file, null, 0, 1, { roomKindOverride: selectedRoomKind.value })
 }
 
 async function handleSendLocation(lat: number, lng: number) {
@@ -2972,11 +2973,15 @@ async function handleAttachmentMediaSelection(
   await handleMediaUploadWrapper(file, albumId, albumIndex, albumSize, {
     caption,
     onCaptionApplied,
+    roomKindOverride: selectedRoomKind.value,
   })
 }
 
 async function handleAttachmentFileSelection(file: File) {
-  await handleMediaUploadWrapper(file, null, 0, 1, { sendAsDocument: true })
+  await handleMediaUploadWrapper(file, null, 0, 1, {
+    sendAsDocument: true,
+    roomKindOverride: selectedRoomKind.value,
+  })
 }
 
 onUnmounted(() => {

@@ -17,6 +17,16 @@ from .message import Message
 from .conversation import Conversation
 from .user_block import UserBlock
 from .chat_file import ChatFile
+from .upload_session import (
+    UploadBatch,
+    UploadBatchMessageKind,
+    UploadBatchStatus,
+    UploadCaptionPolicy,
+    UploadMediaType,
+    UploadRoomKind,
+    UploadSession,
+    UploadSessionStatus,
+)
 from .change_log import ChangeLog
 from .sync_block import SyncBlock
 
@@ -51,6 +61,14 @@ __all__ = [
     # Other
     "Notification",
     "TradingSetting",
+    "UploadBatch",
+    "UploadBatchMessageKind",
+    "UploadBatchStatus",
+    "UploadCaptionPolicy",
+    "UploadMediaType",
+    "UploadRoomKind",
+    "UploadSession",
+    "UploadSessionStatus",
     # Sync
     "ChangeLog",
     "SyncBlock",

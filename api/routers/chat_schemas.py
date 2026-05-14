@@ -8,6 +8,14 @@ from core.services.chat_service import (
     COMMON_MESSAGE_REACTION_SET,
     normalize_message_reactions,
 )
+from models.upload_session import (
+    UploadBatchMessageKind,
+    UploadBatchStatus,
+    UploadCaptionPolicy,
+    UploadMediaType,
+    UploadRoomKind,
+    UploadSessionStatus,
+)
 from models.message import Message
 
 
@@ -131,6 +139,122 @@ class MessageUpdate(BaseModel):
     """ویرایش پیام"""
 
     content: str = Field(..., min_length=1, max_length=4000)
+
+
+class UploadPreviewMetadata(BaseModel):
+    width: Optional[int] = None
+    height: Optional[int] = None
+    duration_ms: Optional[int] = None
+    thumbnail: Optional[str] = None
+    caption: Optional[str] = Field(None, max_length=4000)
+    album_index: Optional[int] = None
+    waveform: Optional[list[int]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_aliases(cls, value):
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        if "duration_ms" not in normalized and "durationMs" in normalized:
+            normalized["duration_ms"] = normalized.get("durationMs")
+        if "album_index" not in normalized and "albumIndex" in normalized:
+            normalized["album_index"] = normalized.get("albumIndex")
+        return normalized
+
+    @field_validator("caption")
+    @classmethod
+    def normalize_caption(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        caption = value.strip()
+        return caption or None
+
+
+class UploadBatchCreateRequest(BaseModel):
+    room_kind: UploadRoomKind
+    target_id: int
+    message_kind: UploadBatchMessageKind
+    expected_items: int = Field(..., ge=1, le=50)
+    caption_policy: UploadCaptionPolicy = UploadCaptionPolicy.NONE
+    idempotency_key: str = Field(..., min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_single_batch_shape(self):
+        if self.message_kind == UploadBatchMessageKind.SINGLE and self.expected_items != 1:
+            raise ValueError("Single-item batches must expect exactly one item")
+        return self
+
+
+class UploadBatchCreateResponse(BaseModel):
+    batch_id: str
+    status: UploadBatchStatus
+    expires_at: datetime
+
+
+class UploadSessionCreateRequest(BaseModel):
+    batch_id: Optional[str] = None
+    room_kind: UploadRoomKind
+    target_id: int
+    media_type: UploadMediaType
+    file_name: str = Field(..., min_length=1, max_length=255)
+    mime_type: str = Field(..., min_length=1, max_length=100)
+    total_bytes: int = Field(..., gt=0, le=50 * 1024 * 1024)
+    chunk_size: int = Field(..., gt=0, le=10 * 1024 * 1024)
+    preview_metadata: UploadPreviewMetadata = Field(default_factory=UploadPreviewMetadata)
+    sha256_full: Optional[str] = Field(None, min_length=16, max_length=128)
+
+    @field_validator("file_name")
+    @classmethod
+    def normalize_file_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("file_name is required")
+        return cleaned
+
+
+class UploadSessionCreateResponse(BaseModel):
+    session_id: str
+    resume_token: str
+    next_offset: int = 0
+    chunk_size: int
+    expires_at: datetime
+    status: UploadSessionStatus
+
+
+class UploadSessionChunkAppendResponse(BaseModel):
+    session_id: str
+    received_bytes: int
+    next_offset: int
+    status: UploadSessionStatus
+
+
+class UploadSessionStateRead(BaseModel):
+    session_id: str
+    status: UploadSessionStatus
+    next_offset: int
+    received_bytes: int
+    total_bytes: int
+    preview_metadata: UploadPreviewMetadata = Field(default_factory=UploadPreviewMetadata)
+    final_chat_file_id: Optional[str] = None
+
+
+class UploadSessionStatusChangeResponse(BaseModel):
+    session_id: str
+    status: UploadSessionStatus
+    final_chat_file_id: Optional[str] = None
+
+
+class UploadBatchCommitResponse(BaseModel):
+    batch_id: str
+    status: UploadBatchStatus
+    committed_items: int
+    messages: List[MessageRead] = Field(default_factory=list)
+
+
+class UploadBatchCancelResponse(BaseModel):
+    batch_id: str
+    status: UploadBatchStatus
 
 
 class MessageReactionToggle(BaseModel):

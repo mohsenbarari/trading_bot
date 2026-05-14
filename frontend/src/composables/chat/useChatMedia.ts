@@ -336,6 +336,7 @@ export interface UseChatMediaOptions {
     jwtToken: string | null
     currentUserId: number
     selectedUserId: Ref<number | null>
+    selectedRoomKind: Ref<'direct' | 'group' | 'channel'>
     messages: Ref<Message[]>
     error: Ref<string>
     isUploading: Ref<boolean>
@@ -1413,11 +1414,16 @@ export function useChatMedia(options: UseChatMediaOptions) {
         albumId?: string | null,
         albumIndex?: number,
         albumSize?: number,
-        options: { sendAsDocument?: boolean; caption?: string; onCaptionApplied?: () => void } = {}
+        uploadOptions: {
+            sendAsDocument?: boolean
+            caption?: string
+            onCaptionApplied?: () => void
+            roomKindOverride?: 'direct' | 'group' | 'channel'
+        } = {}
     ) {
         if (!file) return
 
-        const sendAsDocument = options.sendAsDocument === true
+        const sendAsDocument = uploadOptions.sendAsDocument === true
         const isVideo = file.type.startsWith('video/')
         const isAudio = file.type.startsWith('audio/')
         
@@ -1430,7 +1436,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const normalizedAlbumIndex = typeof albumIndex === 'number' ? albumIndex : 0
         const normalizedAlbumSize = normalizedAlbumId ? Math.max(albumSize ?? 0, 1) : 0
         const normalizedCaption = (!sendAsDocument && (msgType === 'image' || msgType === 'video') && (!normalizedAlbumId || normalizedAlbumIndex === 0))
-            ? (typeof options.caption === 'string' ? options.caption.trim() : '')
+            ? (typeof uploadOptions.caption === 'string' ? uploadOptions.caption.trim() : '')
             : ''
         const preprocessBatchSize = normalizedAlbumSize || 1
         const preprocessLimit = getAdaptivePreprocessLimit(preprocessBatchSize, msgType)
@@ -1889,9 +1895,11 @@ export function useChatMedia(options: UseChatMediaOptions) {
             // (see `cancelUpload` above which delegates via backgroundCancelUpload).
             preprocessingAborts.delete(optimisticId)
             const finalLocalUrl = getOptimisticTarget()?.local_blob_url || localUrl
+            const capturedRoomKind = uploadOptions.roomKindOverride || options.selectedRoomKind.value || (capturedReceiverId < 0 ? 'channel' : 'direct')
             await backgroundSubmitUpload({
                 optimisticId,
                 userId: capturedReceiverId,
+                roomKind: capturedRoomKind,
                 senderId: currentUserId,
                 msgType,
                 file: uploadFile,
@@ -1911,7 +1919,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             const handedOffTarget = getOptimisticTarget()
             handedOffTarget.upload_handoff_pending = false
             handedOffTarget.is_sending = true
-            options.onCaptionApplied?.()
+            uploadOptions.onCaptionApplied?.()
 
             // Seed the local image cache with the preprocessed blob so the
             // current UI does not need to re-download the file after the
