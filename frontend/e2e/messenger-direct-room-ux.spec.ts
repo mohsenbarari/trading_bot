@@ -25,6 +25,30 @@ interface DirectMessageRecord {
   is_deleted?: boolean
 }
 
+interface MediaMessageContent {
+  file_id?: string
+  file_name?: string
+  mime_type?: string
+  size?: number
+  thumbnail?: string
+  caption?: string
+  album_id?: string | null
+  album_index?: number | null
+}
+
+interface ParsedDirectMessageRecord extends DirectMessageRecord {
+  parsedContent: MediaMessageContent | null
+}
+
+function parseMediaMessageContent(content: string): MediaMessageContent | null {
+  try {
+    const parsed = JSON.parse(content)
+    return parsed && typeof parsed === 'object' ? parsed as MediaMessageContent : null
+  } catch {
+    return null
+  }
+}
+
 function resolveAppContainerName() {
   const stdout = execFileSync('docker', ['ps', '--format', '{{.Names}}'], {
     encoding: 'utf8',
@@ -192,6 +216,13 @@ async function openDirectChat(page: Page, otherUserId: number, userName: string)
   await expect(page.locator('.chat-header .header-name')).toContainText(userName, { timeout: 30000 })
 }
 
+async function openConversationFromList(page: Page, userName: string) {
+  const conversation = page.locator('.conversation-item').filter({ hasText: userName }).first()
+  await expect(conversation).toBeVisible({ timeout: 30000 })
+  await conversation.click()
+  await expect(page.locator('.chat-header .header-name')).toContainText(userName, { timeout: 30000 })
+}
+
 async function sendDirectTextMessage(
   request: APIRequestContext,
   sender: SessionFixture,
@@ -264,6 +295,87 @@ async function fetchDirectMessages(
   return Array.isArray(body) ? body : []
 }
 
+async function fetchParsedDirectMessages(
+  request: APIRequestContext,
+  fixture: SessionFixture,
+  otherUserId: number,
+): Promise<ParsedDirectMessageRecord[]> {
+  const messages = await fetchDirectMessages(request, fixture, otherUserId)
+  return messages.map((message) => ({
+    ...message,
+    parsedContent: parseMediaMessageContent(message.content),
+  }))
+}
+
+async function waitForDirectMediaCaption(
+  request: APIRequestContext,
+  fixture: SessionFixture,
+  otherUserId: number,
+  messageType: 'image' | 'video',
+  caption: string,
+): Promise<ParsedDirectMessageRecord> {
+  await expect
+    .poll(async () => {
+      const messages = await fetchParsedDirectMessages(request, fixture, otherUserId)
+      return messages.find((message) => (
+        message.message_type === messageType &&
+        message.parsedContent?.caption === caption
+      ))?.id ?? 0
+    }, { timeout: 90000 })
+    .toBeGreaterThan(0)
+
+  const messages = await fetchParsedDirectMessages(request, fixture, otherUserId)
+  const match = messages.find((message) => (
+    message.message_type === messageType &&
+    message.parsedContent?.caption === caption
+  ))
+
+  if (!match) {
+    throw new Error(`Could not find persisted ${messageType} message with caption ${caption}`)
+  }
+
+  return match
+}
+
+async function waitForDirectAlbumCaption(
+  request: APIRequestContext,
+  fixture: SessionFixture,
+  otherUserId: number,
+  caption: string,
+): Promise<ParsedDirectMessageRecord[]> {
+  let matchedAlbumId: string | null = null
+
+  await expect
+    .poll(async () => {
+      const messages = await fetchParsedDirectMessages(request, fixture, otherUserId)
+      const leadMessage = messages.find((message) => (
+        Boolean(message.parsedContent?.album_id) &&
+        message.parsedContent?.album_index === 0 &&
+        message.parsedContent?.caption === caption
+      ))
+
+      if (!leadMessage?.parsedContent?.album_id) {
+        return 0
+      }
+
+      matchedAlbumId = String(leadMessage.parsedContent.album_id)
+      const albumMessages = messages.filter(
+        (message) => String(message.parsedContent?.album_id ?? '') === matchedAlbumId,
+      )
+      const captionCount = albumMessages.filter((message) => message.parsedContent?.caption === caption).length
+      const hasImage = albumMessages.some((message) => message.message_type === 'image')
+      const hasVideo = albumMessages.some((message) => message.message_type === 'video')
+
+      return albumMessages.length === 2 && captionCount === 1 && hasImage && hasVideo ? 2 : 0
+    }, { timeout: 90000 })
+    .toBe(2)
+
+  const messages = await fetchParsedDirectMessages(request, fixture, otherUserId)
+  return messages.filter(
+    (message) => matchedAlbumId && String(message.parsedContent?.album_id ?? '') === matchedAlbumId,
+  )
+}
+
 async function waitForPersistedPendingDocumentUpload(page: Page) {
   await expect
     .poll(async () => {
@@ -319,6 +431,20 @@ async function injectGalleryAlbum(page: Page) {
   const suffix = Date.now()
   await page.locator('input[type="file"][accept="image/*,video/*"]').setInputFiles([
     createPlaywrightBinaryFile(`pw-direct-${suffix}.png`, 'image/png', TINY_PNG_BASE64),
+    createPlaywrightBinaryFile(`pw-direct-${suffix}.webm`, 'video/webm', GENERATED_WEBM_BASE64),
+  ])
+}
+
+async function injectGalleryImage(page: Page) {
+  const suffix = Date.now()
+  await page.locator('input[type="file"][accept="image/*,video/*"]').setInputFiles([
+    createPlaywrightBinaryFile(`pw-direct-${suffix}.png`, 'image/png', TINY_PNG_BASE64),
+  ])
+}
+
+async function injectGalleryVideo(page: Page) {
+  const suffix = Date.now()
+  await page.locator('input[type="file"][accept="image/*,video/*"]').setInputFiles([
     createPlaywrightBinaryFile(`pw-direct-${suffix}.webm`, 'video/webm', GENERATED_WEBM_BASE64),
   ])
 }
@@ -580,15 +706,75 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await expect(page.locator('.message-bubble').filter({ hasText: olderTarget }).first()).toHaveClass(/highlight-message/, { timeout: 30000 })
   })
 
-  test('gallery album send opens the lightbox with toolbar actions and strip navigation', async ({ page, request }) => {
+  test('single image and single video preserve captions and update direct-room previews', async ({ page, request }) => {
     test.setTimeout(120000)
-    const actor = seedPrimarySession('direct_room_media_actor')
-    const peer = seedPrimarySession('direct_room_media_peer')
+    const actor = seedPrimarySession('direct_room_media_caption_actor')
+    const peer = seedPrimarySession('direct_room_media_caption_peer')
+    const imageCaption = `PW IMG CAP ${Date.now()}`
+    const videoCaption = `PW VID CAP ${Date.now()}`
+    const composer = page.locator('textarea[placeholder="پیام..."]')
 
     await waitForBackendReady(request)
     await loginWithSeededSession(page, actor)
     await openDirectChat(page, peer.userId, peer.accountName)
 
+    await composer.fill(imageCaption)
+    await expect(page.locator('button.attach-btn')).toBeVisible()
+    await page.locator('button.attach-btn').click()
+    await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
+    await injectGalleryImage(page)
+
+    const sendUneditedButton = page.getByRole('button', { name: 'ارسال بدون ویرایش' })
+    await expect(sendUneditedButton).toBeVisible({ timeout: 30000 })
+    await sendUneditedButton.click()
+    await expect(sendUneditedButton).toHaveCount(0, { timeout: 30000 })
+
+    const imageMessage = await waitForDirectMediaCaption(request, actor, peer.userId, 'image', imageCaption)
+    expect(imageMessage.parsedContent?.caption).toBe(imageCaption)
+
+    const imageBubble = page.locator('.message-bubble').filter({ hasText: imageCaption }).first()
+    await expect(imageBubble).toBeVisible({ timeout: 30000 })
+    await expect(imageBubble.locator('.media-caption')).toHaveText(imageCaption)
+    await expect(imageBubble.locator('img[data-media-msg-id]')).toHaveCount(1)
+
+    await page.goto('/chat')
+    const imageConversation = page.locator('.conversation-item').filter({ hasText: peer.accountName }).first()
+    await expect(imageConversation).toContainText(`تصویر · ${imageCaption}`, { timeout: 30000 })
+    await openConversationFromList(page, peer.accountName)
+
+    await composer.fill(videoCaption)
+    await expect(page.locator('button.attach-btn')).toBeVisible()
+    await page.locator('button.attach-btn').click()
+    await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
+    await injectGalleryVideo(page)
+    await expect(page.locator('.attachment-sheet')).toHaveCount(0, { timeout: 30000 })
+
+    const videoMessage = await waitForDirectMediaCaption(request, actor, peer.userId, 'video', videoCaption)
+    expect(videoMessage.parsedContent?.caption).toBe(videoCaption)
+
+    const videoBubble = page.locator('.message-bubble').filter({ hasText: videoCaption }).first()
+    await expect(videoBubble).toBeVisible({ timeout: 30000 })
+    await expect(videoBubble.locator('.media-caption')).toHaveText(videoCaption)
+    await expect(videoBubble.locator('video')).toHaveCount(1)
+
+    await page.goto('/chat')
+    const videoConversation = page.locator('.conversation-item').filter({ hasText: peer.accountName }).first()
+    await expect(videoConversation).toContainText(`ویدئو · ${videoCaption}`, { timeout: 30000 })
+  })
+
+  test('gallery album send keeps the lead caption and opens the lightbox with toolbar actions and strip navigation', async ({ page, request }) => {
+    test.setTimeout(120000)
+    const actor = seedPrimarySession('direct_room_media_actor')
+    const peer = seedPrimarySession('direct_room_media_peer')
+    const albumCaption = `PW ALBUM CAP ${Date.now()}`
+    const composer = page.locator('textarea[placeholder="پیام..."]')
+
+    await waitForBackendReady(request)
+    await loginWithSeededSession(page, actor)
+    await openDirectChat(page, peer.userId, peer.accountName)
+
+    await composer.fill(albumCaption)
+    await expect(page.locator('button.attach-btn')).toBeVisible()
     await page.locator('button.attach-btn').click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
     await injectGalleryAlbum(page)
@@ -597,15 +783,15 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await page.getByRole('button', { name: 'ارسال 2 مورد' }).click()
     await expect(page.locator('.gp-title')).toHaveCount(0, { timeout: 30000 })
 
+    const albumBubble = page.locator('.message-bubble.album-bubble').filter({ hasText: albumCaption }).first()
+    await expect(albumBubble).toBeVisible({ timeout: 30000 })
+    await expect(albumBubble.locator('.media-caption')).toHaveText(albumCaption)
     await expect(page.locator('.messages-container [data-media-msg-id]')).toHaveCount(1, { timeout: 30000 })
     await expect(page.locator('.messages-container video')).toHaveCount(1, { timeout: 30000 })
 
-    await expect
-      .poll(async () => {
-        const messages = await fetchDirectMessages(request, actor, peer.userId)
-        return messages.map((message) => message.message_type)
-      }, { timeout: 90000 })
-      .toEqual(expect.arrayContaining(['image', 'video']))
+    const albumMessages = await waitForDirectAlbumCaption(request, actor, peer.userId, albumCaption)
+    expect(albumMessages.filter((message) => message.parsedContent?.caption === albumCaption)).toHaveLength(1)
+    expect(albumMessages.find((message) => message.parsedContent?.caption === albumCaption)?.parsedContent?.album_index).toBe(0)
 
     await page.locator('.messages-container img[data-media-msg-id]').first().click()
     await expect(page.locator('.lightbox-overlay')).toBeVisible({ timeout: 30000 })
