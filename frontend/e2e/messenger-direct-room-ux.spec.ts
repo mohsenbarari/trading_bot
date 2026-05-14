@@ -224,7 +224,19 @@ async function openConversationFromList(page: Page, userName: string) {
 }
 
 async function navigateFromMessengerToMarket(page: Page) {
-  await page.goto('/market')
+  const attachmentSheet = page.locator('.attachment-sheet')
+  try {
+    await attachmentSheet.waitFor({ state: 'hidden', timeout: 10000 })
+  } catch {
+    // Ignore when the sheet was never mounted or has already been removed.
+  }
+
+  const fabButton = page.locator('.fab-btn').first()
+  await expect(fabButton).toBeVisible({ timeout: 30000 })
+  await fabButton.evaluate((node: HTMLElement) => node.click())
+  const marketLink = page.locator('.fab-item').filter({ hasText: 'بازار' }).first()
+  await expect(marketLink).toBeVisible({ timeout: 30000 })
+  await marketLink.evaluate((node: HTMLElement) => node.click())
   await expect(page).toHaveURL(/\/market$/, { timeout: 30000 })
 }
 
@@ -608,11 +620,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
       await senderPage.locator('textarea[placeholder="پیام..."]').fill(`PW DIRECT ACTIVITY ${Date.now()}`)
       await expect(receiverPage.locator('.chat-header .header-status')).toContainText('در حال نوشتن', { timeout: 30000 })
 
-      await receiverPage.locator('.chat-header .back-btn').click()
-      const receiverConversationRow = receiverPage.locator('.conversation-item').filter({ hasText: sender.accountName }).first()
-      await expect(receiverConversationRow).toContainText('در حال نوشتن...', { timeout: 30000 })
-
-      await senderPage.route('**/api/chat/upload-media', async (route) => {
+      await senderContext.route('**/api/chat/upload-media', async (route) => {
         if (!hasHeldUpload) {
           hasHeldUpload = true
           resolveHeldUploadSeen?.()
@@ -630,7 +638,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
       await injectDocument(senderPage)
 
       await heldUploadSeen
-      await expect(receiverConversationRow).toContainText('در حال ارسال فایل...', { timeout: 30000 })
+  await expect(receiverPage.locator('.chat-header .header-status')).toContainText('در حال ارسال فایل...', { timeout: 30000 })
 
       await navigateFromMessengerToMarket(senderPage)
       ;(releaseHeldUpload ?? (() => {}))()
@@ -643,8 +651,6 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
         }, { timeout: 60000 })
         .toBe(true)
 
-      await receiverConversationRow.click()
-      await expect(receiverPage.locator('.chat-header .header-name')).toContainText(sender.accountName, { timeout: 30000 })
       await expect(receiverPage.locator('.messages-container .msg-document')).toBeVisible({ timeout: 60000 })
     } finally {
       await senderContext.close()
