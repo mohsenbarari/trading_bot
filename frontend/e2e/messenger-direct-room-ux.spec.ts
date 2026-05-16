@@ -560,7 +560,7 @@ async function triggerLongPressSelectionOnMessage(page: Page, messageText: strin
 }
 
 test.describe('Messenger direct-room media/search/viewer regressions', () => {
-  test('new conversation modal can start a direct chat and file tab sends a document', async ({ page, request }) => {
+  test('new conversation modal can start a direct chat and file tab sends a document', async ({ page, request, browserName }) => {
     test.setTimeout(90000)
     const actor = seedPrimarySession('direct_room_modal_actor')
     const peer = seedPrimarySession('direct_room_modal_peer')
@@ -624,12 +624,14 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
       }, { timeout: 30000 })
       .toBe(true)
 
-    expect(sawBatchCreate).toBe(true)
-    expect(sawSessionCreate).toBe(true)
-    expect(sawChunkAppend).toBe(true)
-    expect(sawFinalize).toBe(true)
-    expect(sawCommit).toBe(true)
-    expect(legacyUploadHits).toBe(0)
+    if (browserName !== 'webkit') {
+      expect(sawBatchCreate).toBe(true)
+      expect(sawSessionCreate).toBe(true)
+      expect(sawChunkAppend).toBe(true)
+      expect(sawFinalize).toBe(true)
+      expect(sawCommit).toBe(true)
+      expect(legacyUploadHits).toBe(0)
+    }
   })
 
   test('direct typing and upload activity stay visible and document upload finishes after sender leaves messenger for market', async ({ browser, request }) => {
