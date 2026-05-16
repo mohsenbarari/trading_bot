@@ -1304,9 +1304,13 @@ export function useChatMedia(options: UseChatMediaOptions) {
             let width = 0
             let height = 0
             let seekScheduled = false
+            let fallbackTimeout: ReturnType<typeof setTimeout> | null = null
 
             const cleanup = () => {
-                clearTimeout(fallbackTimeout)
+                if (fallbackTimeout !== null) {
+                    clearTimeout(fallbackTimeout)
+                    fallbackTimeout = null
+                }
                 signal?.removeEventListener('abort', handleAbort)
                 video.onloadedmetadata = null
                 video.onloadeddata = null
@@ -1363,6 +1367,11 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
             const handleAbort = () => fail(new Error('UploadCancelled'))
 
+            if (signal?.aborted) {
+                handleAbort()
+                return
+            }
+
             signal?.addEventListener('abort', handleAbort, { once: true })
 
             video.preload = 'auto'
@@ -1370,7 +1379,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             video.playsInline = true
             video.src = srcUrl
 
-            const fallbackTimeout = setTimeout(() => {
+            fallbackTimeout = setTimeout(() => {
                 console.warn("Video preview preprocessing timed out after 3s.");
                 finish({ thumbnailDataUrl: '', width, height })
             }, 3000);
