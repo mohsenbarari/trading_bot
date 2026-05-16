@@ -8,7 +8,7 @@ import { useChatMedia } from './useChatMedia'
 const mediaMocks = vi.hoisted(() => ({
   submitUpload: vi.fn(async () => {}),
   cancelUpload: vi.fn(),
-  getPendingForUser: vi.fn(() => []),
+  getPendingForUser: vi.fn<(userId: number) => any[]>(() => []),
   buildOptimisticMessageFromUpload: vi.fn((upload: any) => ({
     id: upload.id,
     sender_id: upload.senderId,
@@ -23,7 +23,7 @@ const mediaMocks = vi.hoisted(() => ({
   uploadHandler: null as null | ((event: any) => void),
 
   cancelDocumentDownload: vi.fn(),
-  getCompletedDocumentDownloadUrl: vi.fn(() => ''),
+  getCompletedDocumentDownloadUrl: vi.fn<(fileId: string) => string>(() => ''),
   getPendingDocumentDownloadsForUser: vi.fn(() => []),
   startDocumentDownload: vi.fn(async () => {}),
   documentHandler: null as null | ((event: any) => void),

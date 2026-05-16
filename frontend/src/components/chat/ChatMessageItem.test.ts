@@ -587,7 +587,7 @@ describe('ChatMessageItem.vue', () => {
 
     await chips[0]!.trigger('click')
     expect(reactiveWrapper.emitted('toggle-reaction')).toEqual([[
-      { msg: (reactiveWrapper.props() as Record<string, unknown>).msg, emoji: '🔥' },
+      { msg: (reactiveWrapper.props() as unknown as Record<string, unknown>).msg, emoji: '🔥' },
     ]])
 
     const selectionWrapper = mount(ChatMessageItem, {
@@ -611,7 +611,7 @@ describe('ChatMessageItem.vue', () => {
     })
 
     await selectionWrapper.get('.reaction-chip').trigger('click')
-    expect(selectionWrapper.emitted('select')).toEqual([[(selectionWrapper.props() as Record<string, unknown>).msg]])
+    expect(selectionWrapper.emitted('select')).toEqual([[(selectionWrapper.props() as unknown as Record<string, unknown>).msg]])
     expect(selectionWrapper.emitted('toggle-reaction')).toBeUndefined()
   })
 
