@@ -1,0 +1,198 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import CreateInvitationView from './CreateInvitationView.vue'
+
+const createInvitationMocks = vi.hoisted(() => ({
+  apiFetchMock: vi.fn(),
+}))
+
+vi.mock('../utils/auth', () => ({
+  apiFetch: createInvitationMocks.apiFetchMock,
+}))
+
+function makeJsonResponse(payload: unknown, ok = true, status = ok ? 200 : 400) {
+  return {
+    ok,
+    status,
+    json: async () => payload,
+  }
+}
+
+function installClipboard(writeText?: ReturnType<typeof vi.fn>) {
+  Object.defineProperty(window.navigator, 'clipboard', {
+    configurable: true,
+    value: writeText ? { writeText } : undefined,
+  })
+}
+
+function installExecCommand(result: boolean | Error) {
+  const execCommand = vi.fn(() => {
+    if (result instanceof Error) {
+      throw result
+    }
+    return result
+  })
+  Object.defineProperty(document, 'execCommand', {
+    configurable: true,
+    value: execCommand,
+  })
+  return execCommand
+}
+
+async function mountView(props: Partial<{ apiBaseUrl: string; jwtToken: string | null }> = {}) {
+  const wrapper = mount(CreateInvitationView, {
+    props: {
+      apiBaseUrl: '',
+      jwtToken: 'jwt-token',
+      ...props,
+    },
+  })
+  await flushPromises()
+  return wrapper
+}
+
+async function fillInviteForm(wrapper: ReturnType<typeof mount>, mobile = '09123456789') {
+  await wrapper.get('#account_name').setValue('alireza')
+  await wrapper.get('#mobile_number').setValue(mobile)
+  await wrapper.get('#role').setValue('مدیر میانی')
+}
+
+describe('CreateInvitationView.vue', () => {
+  beforeEach(() => {
+    createInvitationMocks.apiFetchMock.mockReset()
+    vi.useFakeTimers()
+    installClipboard(vi.fn().mockResolvedValue(undefined))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('blocks invite creation when the admin is not authenticated', async () => {
+    const wrapper = await mountView({ jwtToken: null })
+
+    await wrapper.get('form').trigger('submit.prevent')
+
+    expect(createInvitationMocks.apiFetchMock).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('❌ خطا: شما احراز هویت نشده‌اید.')
+  })
+
+  it('rejects invalid mobile numbers before calling the API', async () => {
+    const wrapper = await mountView()
+    await fillInviteForm(wrapper, '۰۹۱۲۳')
+
+    await wrapper.get('form').trigger('submit.prevent')
+
+    expect(createInvitationMocks.apiFetchMock).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('❌ شماره موبایل نامعتبر است.')
+  })
+
+  it('normalizes Persian digits, creates the invite, and derives a local web link from short_link', async () => {
+    createInvitationMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
+        short_link: 'https://coin.gold-trade.ir/invite/abc?foo=1',
+      }),
+    )
+
+    const wrapper = await mountView()
+    await fillInviteForm(wrapper, '۰۹۱۲۳۴۵۶۷۸۹')
+
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/', {
+      method: 'POST',
+      body: JSON.stringify({
+        account_name: 'alireza',
+        mobile_number: '09123456789',
+        role: 'مدیر میانی',
+      }),
+    })
+    const textInputs = wrapper.findAll('.success-box input[readonly]')
+    expect(wrapper.text()).toContain('✅ لینک دعوت با موفقیت ایجاد شد:')
+    expect((textInputs[0]!.element as HTMLInputElement).value).toBe('https://t.me/mbmtrading1_bot?start=invite-token')
+    expect((textInputs[1]!.element as HTMLInputElement).value).toBe(`${window.location.origin}/invite/abc?foo=1`)
+  })
+
+  it('renders backend error details with strong markup when invite creation is rejected', async () => {
+    createInvitationMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({ detail: 'خطا **مهم**' }, false, 409),
+    )
+
+    const wrapper = await mountView()
+    await fillInviteForm(wrapper)
+
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.get('.result-box.error').html()).toContain('<strong>مهم</strong>')
+    expect(wrapper.text()).toContain('❌ خطا مهم')
+  })
+
+  it('shows thrown request errors when the API call itself fails', async () => {
+    createInvitationMocks.apiFetchMock.mockRejectedValue(new Error('network down'))
+
+    const wrapper = await mountView()
+    await fillInviteForm(wrapper)
+
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('❌ network down')
+  })
+
+  it('copies the Telegram invite link through navigator.clipboard and clears the toast after the timeout', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    installClipboard(writeText)
+    createInvitationMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
+        short_link: '',
+      }),
+    )
+
+    const wrapper = await mountView()
+    await fillInviteForm(wrapper)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    await wrapper.get('.copy-btn').trigger('click')
+    await flushPromises()
+
+    expect(writeText).toHaveBeenCalledWith('https://t.me/mbmtrading1_bot?start=invite-token')
+    expect(wrapper.get('.copy-btn').text()).toBe('کپی شد!')
+
+    await vi.advanceTimersByTimeAsync(2000)
+
+    expect(wrapper.get('.copy-btn').text()).toBe('کپی')
+  })
+
+  it('falls back to execCommand copy for the web link and resets the form state on demand', async () => {
+    installClipboard(undefined)
+    const execCommand = installExecCommand(true)
+    createInvitationMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
+        short_link: 'https://coin.gold-trade.ir/register/short-code',
+      }),
+    )
+
+    const wrapper = await mountView()
+    await fillInviteForm(wrapper)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    await wrapper.get('.copy-btn.web').trigger('click')
+    await flushPromises()
+
+    expect(execCommand).toHaveBeenCalledWith('copy')
+    expect(wrapper.get('.copy-btn.web').text()).toBe('کپی شد!')
+
+    await wrapper.get('button.secondary').trigger('click')
+
+    expect((wrapper.get('#account_name').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('#mobile_number').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.find('.success-box').exists()).toBe(false)
+  })
+})

@@ -35,6 +35,9 @@ describe('useChatFileHandler.ts', () => {
     localforageInstance.setItem.mockClear()
     localforageInstance.clear.mockClear()
     localforageInstance.iterate.mockClear()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(console, 'info').mockImplementation(() => {})
     vi.resetModules()
 
     Object.defineProperty(URL, 'createObjectURL', {
@@ -142,5 +145,280 @@ describe('useChatFileHandler.ts', () => {
     const sharePayload = shareMock.mock.calls[0]?.[0] as ShareData
     expect(sharePayload.files).toHaveLength(2)
     expect(sharePayload.files?.map((file) => file.name)).toEqual(['alpha.pdf', 'beta.png'])
+  })
+
+  it('prewarms cached files, formats cache size, and clears legacy debug overlays', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+    const debugBox = document.createElement('div')
+    debugBox.id = 'chat-file-debug-box'
+    document.body.appendChild(debugBox)
+    localStorage.setItem('chatFileDebug', '1')
+
+    cachedEntries.set('prewarm-1', {
+      blob: new Blob(['warm'], { type: 'application/pdf' }),
+      fileName: 'warm.pdf',
+      mimeType: 'application/pdf',
+      size: 4,
+      cachedAt: Date.now(),
+    })
+
+    await fileHandler.prewarmFileCache('prewarm-1')
+    expect(fileHandler.isFileCached('prewarm-1')).toBe(true)
+    expect(await fileHandler.getCacheSize()).toBe('0.00 MB')
+
+    fileHandler.initChatFileDebugOverlay()
+    expect(localStorage.getItem('chatFileDebug')).toBeNull()
+    expect(document.getElementById('chat-file-debug-box')).toBeNull()
+  })
+
+  it('downloads uncached files once, reuses the cache, and exposes the wrapper composable api', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+    const anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob(['downloaded'], { type: 'application/octet-stream' }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fileHandler.downloadFileToDisk('disk-1', '/api/chat/files/disk-1', 'archive.zip')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(anchorClickSpy).toHaveBeenCalledTimes(1)
+    expect(fileHandler.isFileCached('disk-1')).toBe(true)
+
+    const api = fileHandler.useChatFileHandler()
+    expect(api.canShareFiles()).toBe(true)
+    expect(api.downloadingFiles).toBeDefined()
+
+    await fileHandler.downloadFileToDisk('disk-1', '/api/chat/files/disk-1', 'archive.zip')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(anchorClickSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns false for unsupported share paths and treats AbortError as a successful multi-share dismissal', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+    const shareMock = navigator.share as ReturnType<typeof vi.fn>
+
+    await fileHandler.seedFileCache('share-1', new Blob(['a'], { type: 'application/octet-stream' }), 'file.bin', 'application/octet-stream')
+
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    })
+    expect(await fileHandler.shareFile('share-1', 'file.bin', 'application/octet-stream')).toBe(false)
+    expect(fileHandler.canShareFiles()).toBe(false)
+
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      writable: true,
+      value: shareMock,
+    })
+    shareMock.mockRejectedValueOnce(new DOMException('dismissed', 'AbortError'))
+
+    const dismissed = await fileHandler.shareMultipleFiles(['share-1'])
+    expect(dismissed).toBe(true)
+  })
+
+  it('throws when the network download fails during open and reports zero bytes for invalid cached entries', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 503 }))
+    vi.stubGlobal('fetch', fetchMock)
+    cachedEntries.set('broken-entry', { nope: true })
+
+    await expect(fileHandler.handleFileClick('missing-1', '/api/chat/files/missing-1', 'missing.pdf')).rejects.toThrow('HTTP 503')
+    expect(await fileHandler.getCacheBytes()).toBe(0)
+    expect(fileHandler.useChatFileHandler().downloadingFiles['missing-1']).toBeUndefined()
+  })
+
+  it('prefetches uncached files for sharing, reuses the cache, and returns false on failed prefetches', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      blob: async () => new Blob(['remote'], { type: 'application/pdf' }),
+    })
+    expect(await fileHandler.shareFile('remote-1', 'remote.pdf', 'application/pdf', '/api/chat/files/remote-1')).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fileHandler.isFileCached('remote-1')).toBe(true)
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 500 })
+    expect(await fileHandler.shareFile('remote-2', 'remote.pdf', 'application/pdf', '/api/chat/files/remote-2')).toBe(false)
+    expect(await fileHandler.shareFile('remote-3', 'remote.pdf', 'application/pdf')).toBe(false)
+    expect(await fileHandler.shareFile('', 'remote.pdf', 'application/pdf')).toBe(false)
+  })
+
+  it('returns false when file sharing is unsupported or canShare probes fail', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    })
+    expect(fileHandler.canShareFiles()).toBe(false)
+
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(async () => {}),
+    })
+    Object.defineProperty(navigator, 'canShare', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => {
+        throw new Error('probe failed')
+      }),
+    })
+    expect(fileHandler.canShareFiles()).toBe(false)
+  })
+
+  it('handles multi-share edge cases and generic share rejections', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+    const shareMock = navigator.share as ReturnType<typeof vi.fn>
+    const canShareMock = navigator.canShare as ReturnType<typeof vi.fn>
+
+    expect(await fileHandler.shareMultipleFiles([])).toBe(false)
+
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    })
+    expect(await fileHandler.shareMultipleFiles(['missing'])).toBe(false)
+
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      writable: true,
+      value: shareMock,
+    })
+    Object.defineProperty(navigator, 'canShare', {
+      configurable: true,
+      writable: true,
+      value: canShareMock,
+    })
+
+    await fileHandler.seedFileCache('multi-1', new Blob(['m1'], { type: 'application/pdf' }), 'm1.pdf', 'application/pdf')
+    canShareMock.mockReturnValueOnce(false)
+    shareMock.mockRejectedValueOnce(new Error('share rejected'))
+
+    expect(await fileHandler.shareMultipleFiles(['multi-1'])).toBe(false)
+  })
+
+  it('surfaces cache clear failures and tolerates cache-size scan failures', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+
+    localforageInstance.iterate.mockRejectedValueOnce(new Error('scan failed'))
+    expect(await fileHandler.getCacheBytes()).toBe(0)
+
+    localforageInstance.clear.mockRejectedValueOnce(new Error('quota exceeded'))
+    await expect(fileHandler.clearFileCache()).rejects.toThrow('quota exceeded')
+    expect(console.error).toHaveBeenCalled()
+  })
+
+  it('falls back from inline open to cached download when opening a blob tab fails and tolerates cache-write failures', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+    const anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementationOnce(() => {
+        throw new Error('popup blocked')
+      })
+      .mockImplementation(() => {})
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob(['pdf'], { type: 'application/pdf' }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fileHandler.seedFileCache('inline-1', new Blob(['inline'], { type: 'application/pdf' }), 'inline.pdf', 'application/pdf')
+    await fileHandler.handleFileClick('inline-1', '/api/chat/files/inline-1', 'inline.pdf')
+
+    expect(anchorClickSpy).toHaveBeenCalledTimes(2)
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
+    expect(console.warn).toHaveBeenCalledWith('[chat-file] openBlobInTab anchor click failed', expect.any(Error))
+
+    localforageInstance.setItem.mockRejectedValueOnce(new Error('quota-full'))
+    await fileHandler.handleFileClick('inline-2', '/api/chat/files/inline-2', 'remote.pdf')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fileHandler.isFileCached('inline-2')).toBe(true)
+    expect(console.warn).toHaveBeenCalledWith('[useChatFileHandler] cache write failed', expect.any(Error))
+  })
+
+  it('covers share fast-path fallback branches for canShare, synchronous throws, async rejects, and File construction failure', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+    const shareMock = navigator.share as ReturnType<typeof vi.fn>
+    const canShareMock = navigator.canShare as ReturnType<typeof vi.fn>
+    const originalFile = File
+
+    await fileHandler.seedFileCache('share-fast', new Blob(['bin'], { type: 'application/octet-stream' }), 'share.bin', 'application/octet-stream')
+
+    canShareMock.mockReturnValueOnce(false)
+    shareMock.mockResolvedValueOnce(undefined)
+    expect(await fileHandler.shareFile('share-fast', 'share.bin', 'application/octet-stream')).toBe(true)
+
+    canShareMock.mockImplementationOnce(() => {
+      throw new Error('probe exploded')
+    })
+    shareMock.mockResolvedValueOnce(undefined)
+    expect(await fileHandler.shareFile('share-fast', 'share.bin', 'application/octet-stream')).toBe(true)
+
+    shareMock.mockImplementationOnce(() => {
+      throw new DOMException('blocked', 'NotAllowedError')
+    })
+    expect(await fileHandler.shareFile('share-fast', 'share.bin', 'application/octet-stream')).toBe(false)
+
+    shareMock.mockRejectedValueOnce(new Error('share rejected'))
+    expect(await fileHandler.shareFile('share-fast', 'share.bin', 'application/octet-stream')).toBe(false)
+
+    Object.defineProperty(globalThis, 'File', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => {
+        throw new Error('file construction failed')
+      }),
+    })
+    expect(await fileHandler.shareFile('share-fast', 'share.bin', 'application/octet-stream')).toBe(false)
+
+    Object.defineProperty(globalThis, 'File', {
+      configurable: true,
+      writable: true,
+      value: originalFile,
+    })
+  })
+
+  it('short-circuits prewarm and share/download requests while a fetch is already in flight', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+    const fetchMock = vi.fn(() => new Promise((resolve) => {
+      setTimeout(() => {
+        resolve({
+          ok: true,
+          blob: async () => new Blob(['remote'], { type: 'application/pdf' }),
+        })
+      }, 0)
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    cachedEntries.set('prewarm-hit', {
+      blob: new Blob(['warm'], { type: 'application/pdf' }),
+      fileName: 'warm.pdf',
+      mimeType: 'application/pdf',
+      size: 4,
+      cachedAt: Date.now(),
+    })
+
+    await fileHandler.prewarmFileCache('prewarm-hit')
+    await fileHandler.prewarmFileCache('prewarm-hit')
+    expect(localforageInstance.getItem).toHaveBeenCalledTimes(1)
+
+    const slowShare = fileHandler.shareFile('slow-share', 'slow.pdf', 'application/pdf', '/api/chat/files/slow-share')
+    expect(await fileHandler.shareFile('slow-share', 'slow.pdf', 'application/pdf', '/api/chat/files/slow-share')).toBe(false)
+    expect(await slowShare).toBe(true)
+
+    const slowDownload = fileHandler.downloadFileToDisk('slow-download', '/api/chat/files/slow-download', 'slow.zip')
+    await fileHandler.downloadFileToDisk('slow-download', '/api/chat/files/slow-download', 'slow.zip')
+    await slowDownload
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })

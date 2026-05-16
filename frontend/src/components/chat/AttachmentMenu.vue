@@ -532,6 +532,7 @@ const locationStatusTone = ref<'info' | 'error'>('info')
 const hasManualLocationSelection = ref(false)
 const hasConfirmedAutoLocation = ref(false)
 let locationWatchId: number | null = null
+let locationAutoLocateTimeout: number | null = null
 let isProgrammaticMapMove = false
 let activeLocationLookupId = 0
 
@@ -1386,12 +1387,18 @@ watch(() => props.allowLocation, (allowLocation) => {
 })
 
 watch(() => activeTab.value, (val) => {
+  if (locationAutoLocateTimeout !== null) {
+    window.clearTimeout(locationAutoLocateTimeout)
+    locationAutoLocateTimeout = null
+  }
+
   if (val === 'location') {
     pushLocationDebug('location-tab-opened', {
       secure: typeof window !== 'undefined' ? window.isSecureContext : false,
     })
     // Optionally trigger map resize to fix leaflet gray rendering
-    setTimeout(() => {
+    locationAutoLocateTimeout = window.setTimeout(() => {
+      locationAutoLocateTimeout = null
       void refreshLocationMapViewport(true)
       goToMyLocation(true) // Automatically try to fetch location on open
     }, 300)
@@ -2297,6 +2304,10 @@ function sendLocation() {
 }
 
 onBeforeUnmount(() => {
+  if (locationAutoLocateTimeout !== null) {
+    window.clearTimeout(locationAutoLocateTimeout)
+    locationAutoLocateTimeout = null
+  }
   clearLocationWatch()
   cleanupCamera(true)
 })

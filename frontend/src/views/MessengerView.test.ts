@@ -38,6 +38,10 @@ vi.mock('../components/ChatView.vue', () => ({
         <span class="stub-accountant">{{ String(currentUserIsAccountant) }}</span>
         <span class="stub-target-id">{{ targetUserId }}</span>
         <span class="stub-target-name">{{ targetUserName }}</span>
+        <button class="emit-public-profile" @click="$emit('navigate', 'public_profile', { id: 88, account_name: 'owner-88' })">public-profile</button>
+        <button class="emit-profile-user-id" @click="$emit('navigate', 'profile', { user_id: 77 })">profile-user-id</button>
+        <button class="emit-invalid-navigate" @click="$emit('navigate', 'dashboard', { id: 11 })">invalid-navigate</button>
+        <button class="emit-back" @click="$emit('back')">back</button>
       </div>
     `,
   },
@@ -79,5 +83,61 @@ describe('MessengerView.vue', () => {
     expect(wrapper.get('.stub-accountant').text()).toBe('true')
     expect(wrapper.get('.stub-target-id').text()).toBe('18')
     expect(wrapper.get('.stub-target-name').text()).toBe('peer-user')
+  })
+
+  it('keeps direct-target props undefined and does not mount ChatView when auth me is not ok', async () => {
+    routeState.query = {} as any
+    apiFetchMock.mockResolvedValue(makeResponse({ detail: 'unauthorized' }, false))
+
+    const wrapper = mount(MessengerView)
+    expect(wrapper.find('.loading-spinner').exists()).toBe(true)
+
+    await flushPromises()
+
+    expect(wrapper.find('.loading-spinner').exists()).toBe(false)
+    expect(wrapper.find('.chat-view-stub').exists()).toBe(false)
+  })
+
+  it('logs fetch failures and still clears the loading state', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    apiFetchMock.mockRejectedValue(new Error('network exploded'))
+
+    const wrapper = mount(MessengerView)
+    await flushPromises()
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.any(Error))
+    expect(wrapper.find('.loading-spinner').exists()).toBe(false)
+    expect(wrapper.find('.chat-view-stub').exists()).toBe(false)
+  })
+
+  it('routes ChatView navigate and back events through the messenger view handlers', async () => {
+    apiFetchMock.mockResolvedValue(makeResponse({
+      id: 42,
+      role: 'عادی',
+      is_accountant: false,
+    }))
+
+    const wrapper = mount(MessengerView)
+    await flushPromises()
+
+    await wrapper.get('.emit-public-profile').trigger('click')
+    expect(routerPushMock).toHaveBeenNthCalledWith(1, {
+      name: 'public-profile',
+      params: { id: '88' },
+      query: { account_name: 'owner-88' },
+    })
+
+    await wrapper.get('.emit-invalid-navigate').trigger('click')
+    expect(routerPushMock).toHaveBeenCalledTimes(1)
+
+    await wrapper.get('.emit-profile-user-id').trigger('click')
+    expect(routerPushMock).toHaveBeenNthCalledWith(2, {
+      name: 'public-profile',
+      params: { id: '77' },
+      query: undefined,
+    })
+
+    await wrapper.get('.emit-back').trigger('click')
+    expect(routerPushMock).toHaveBeenNthCalledWith(3, '/')
   })
 })

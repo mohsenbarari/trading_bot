@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import type { Conversation } from '../../types/chat'
 
@@ -55,6 +55,10 @@ describe('ChatConversationList.vue', () => {
     popBackStateMock.mockReset()
     discardBackStateMock.mockReset()
     buildChatFileUrlMock.mockClear()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('opens the direct-conversation menu and emits delete actions', async () => {
@@ -220,5 +224,153 @@ describe('ChatConversationList.vue', () => {
 
     expect(wrapper.text()).toContain('علی در حال ارسال فایل')
     expect(wrapper.text()).not.toContain('old preview')
+  })
+
+  it('renders avatar images, online state, unread badges, and emits the new-conversation action', async () => {
+    buildChatFileUrlMock.mockReturnValue('https://cdn.example.com/avatar.png')
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [makeConversation({
+          avatar_file_id: 'avatar-1',
+          unread_count: 12,
+          other_user_last_seen_at: new Date(Date.now() - 60_000).toISOString(),
+        })],
+        selectedUserId: null,
+        typingUsers: {},
+        apiBaseUrl: '/api',
+        canStartNewConversation: true,
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { teleport: true, transition: false },
+      },
+    })
+
+    expect(wrapper.get('.conv-avatar-image').attributes('src')).toBe('https://cdn.example.com/avatar.png')
+    expect(wrapper.find('.online-indicator-dot').exists()).toBe(true)
+    expect(wrapper.get('.unread-badge').text()).toBe('۱۲')
+
+    await wrapper.get('.fab-new-chat').trigger('click')
+    expect(wrapper.emitted('new-conversation')).toHaveLength(1)
+  })
+
+  it('suppresses the immediate post-menu click and then restores normal conversation selection after closing', async () => {
+    vi.useFakeTimers()
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const conversation = makeConversation()
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [conversation],
+        selectedUserId: null,
+        typingUsers: {},
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { teleport: true, transition: false },
+      },
+    })
+
+    const item = wrapper.get('.conversation-item')
+    await item.trigger('contextmenu', { clientX: 30, clientY: 40 })
+    await flushPromises()
+    await item.trigger('click')
+    expect(wrapper.emitted('select-conversation')).toBeUndefined()
+
+    await wrapper.get('.conversation-menu-overlay').trigger('click')
+    vi.runAllTimers()
+    await flushPromises()
+
+    expect(popBackStateMock).toHaveBeenCalledTimes(1)
+
+    await item.trigger('click')
+    expect(wrapper.emitted('select-conversation')?.[0]?.[0]).toMatchObject({ id: conversation.id })
+  })
+
+  it('cancels long-press on pointer move but opens the menu after a stable hold', async () => {
+    vi.useFakeTimers()
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [makeConversation()],
+        selectedUserId: null,
+        typingUsers: {},
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { teleport: true, transition: false },
+      },
+    })
+
+    const item = wrapper.get('.conversation-item')
+    item.element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 20, clientY: 20 }))
+    item.element.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 40, clientY: 42 }))
+    vi.advanceTimersByTime(450)
+    await flushPromises()
+    expect(wrapper.find('.conversation-menu-panel').exists()).toBe(false)
+
+    item.element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 24, clientY: 24 }))
+    vi.advanceTimersByTime(420)
+    await flushPromises()
+    expect(wrapper.find('.conversation-menu-panel').exists()).toBe(true)
+  })
+
+  it('shows pin reordering, mark-unread, and mute actions for pinned direct conversations', async () => {
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [
+          makeConversation({ id: 1, is_pinned: true, pin_order: 2, pinned_at: '2026-05-12T10:10:00' }),
+          makeConversation({ id: 2, other_user_id: 22, other_user_name: 'Pinned B', is_pinned: true, pin_order: 1, pinned_at: '2026-05-12T10:09:00' }),
+        ],
+        selectedUserId: null,
+        typingUsers: {},
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { teleport: true, transition: false },
+      },
+    })
+
+    await wrapper.findAll('.conversation-item')[1]!.trigger('contextmenu', { clientX: 60, clientY: 80 })
+    await flushPromises()
+
+    const menuText = wrapper.get('.conversation-menu-panel').text()
+    expect(menuText).toContain('برداشتن سنجاق')
+    expect(menuText).toContain('جابجایی به بالا')
+    expect(menuText).toContain('علامت‌گذاری به‌عنوان خوانده‌نشده')
+    expect(menuText).toContain('بی‌صدا کردن گفتگو')
+  })
+
+  it('shows the empty action state for mandatory channels when no actions are available', async () => {
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [makeConversation({
+          id: 5,
+          chat_id: 33,
+          other_user_id: -33,
+          other_user_name: 'Mandatory Channel',
+          room_kind: 'channel',
+          is_mandatory: true,
+          unread_count: 2,
+        })],
+        selectedUserId: null,
+        typingUsers: {},
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { teleport: true, transition: false },
+      },
+    })
+
+    await wrapper.get('.conversation-item').trigger('contextmenu', { clientX: 80, clientY: 90 })
+    await flushPromises()
+
+    expect(wrapper.get('.conversation-menu-empty').text()).toContain('برای این گفتگو عملیاتی در دسترس نیست')
   })
 })
