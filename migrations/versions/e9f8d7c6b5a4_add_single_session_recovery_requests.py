@@ -28,6 +28,7 @@ recovery_status_enum = postgresql.ENUM(
     "cancelled",
     "expired",
     name="singlesessionrecoverystatus",
+    create_type=False,
 )
 
 
