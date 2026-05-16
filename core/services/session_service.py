@@ -305,6 +305,15 @@ async def approve_login_request(
         await db.commit()
         return {"error": "درخواست منقضی شده است"}
 
+    if hasattr(login_req, "_sa_instance_state"):
+        from core.services.single_session_recovery_service import (
+            get_active_recovery_request_for_login_request,
+        )
+
+        active_recovery = await get_active_recovery_request_for_login_request(db, request_id)
+        if active_recovery is not None:
+            return {"error": "برای این درخواست، مسیر بازیابی نشست فعال شده و تایید از دستگاه قبلی دیگر مجاز نیست"}
+
     # Load user to get max_sessions
     user = (await db.execute(select(User).where(User.id == login_req.user_id))).scalar_one()
     active_sessions = await get_active_sessions(db, login_req.user_id)
@@ -372,6 +381,15 @@ async def reject_login_request(
         return {"error": "درخواست یافت نشد"}
     if login_req.status != LoginRequestStatus.PENDING:
         return {"error": "درخواست قبلاً پردازش شده است"}
+
+    if hasattr(login_req, "_sa_instance_state"):
+        from core.services.single_session_recovery_service import (
+            get_active_recovery_request_for_login_request,
+        )
+
+        active_recovery = await get_active_recovery_request_for_login_request(db, request_id)
+        if active_recovery is not None:
+            return {"error": "برای این درخواست، مسیر بازیابی نشست فعال شده و رد از دستگاه قبلی دیگر مجاز نیست"}
 
     login_req.status = LoginRequestStatus.REJECTED
     login_req.resolved_by_session_id = approver_session.id

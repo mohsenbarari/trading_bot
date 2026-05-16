@@ -12,7 +12,13 @@ from core.db import get_db
 from core.config import settings
 from api.deps import get_current_user
 from models.user import User, UserRole
-from models.session import UserSession, SessionLoginRequest, LoginRequestStatus, Platform
+from models.session import (
+    UserSession,
+    SessionLoginRequest,
+    LoginRequestStatus,
+    Platform,
+    SingleSessionRecoveryRequest,
+)
 from core.services.session_service import (
     get_active_sessions,
     get_session_by_refresh_token,
@@ -23,6 +29,14 @@ from core.services.session_service import (
     force_clear_sessions,
     hash_token,
     get_effective_max_sessions,
+)
+from core.services.single_session_recovery_service import (
+    create_recovery_request,
+    get_active_recovery_request_for_login_request,
+    get_latest_recovery_request_for_login_request,
+    cancel_recovery_request,
+    expire_recovery_request,
+    is_active_recovery_status,
 )
 
 router = APIRouter()
@@ -87,6 +101,22 @@ def login_request_to_dict(r: SessionLoginRequest) -> dict:
     }
 
 
+def recovery_request_to_dict(r: SingleSessionRecoveryRequest) -> dict:
+    return {
+        "id": str(r.id),
+        "status": r.status.value if hasattr(r.status, "value") else str(r.status),
+        "requester_device_name": r.requester_device_name,
+        "requester_ip": r.requester_ip,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "inline_action_expires_at": r.inline_action_expires_at.isoformat() if r.inline_action_expires_at else None,
+        "chat_action_expires_at": r.chat_action_expires_at.isoformat() if r.chat_action_expires_at else None,
+        "identity_requested_at": r.identity_requested_at.isoformat() if r.identity_requested_at else None,
+        "identity_submitted_at": r.identity_submitted_at.isoformat() if r.identity_submitted_at else None,
+        "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+        "cancelled_at": r.cancelled_at.isoformat() if r.cancelled_at else None,
+    }
+
+
 # --- Endpoints ---
 
 @router.get("/login-requests/pending", response_model=List[dict])
@@ -140,6 +170,93 @@ async def get_pending_requests(
             "expires_at": r.expires_at.isoformat() + "Z" if r.expires_at else None,
         })
     return res
+
+
+@router.post("/login-requests/{request_id}/recovery")
+async def start_single_session_recovery(
+    request_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Start the web-only single-session recovery flow for a pending login request."""
+    try:
+        rid = uuid.UUID(request_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="شناسه درخواست نامعتبر است")
+
+    stmt = select(SessionLoginRequest).where(SessionLoginRequest.id == rid)
+    login_req = (await db.execute(stmt)).scalar_one_or_none()
+    if not login_req:
+        raise HTTPException(status_code=404, detail="درخواست یافت نشد")
+
+    latest_recovery = await get_latest_recovery_request_for_login_request(db, rid)
+    if latest_recovery is not None and is_active_recovery_status(latest_recovery.status):
+        return recovery_request_to_dict(latest_recovery)
+
+    if login_req.status != LoginRequestStatus.PENDING:
+        raise HTTPException(status_code=400, detail="برای این درخواست دیگر امکان شروع بازیابی وجود ندارد")
+    if login_req.expires_at.replace(tzinfo=None) < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="مهلت درخواست اولیه تمام شده است")
+
+    stmt_user = select(User).where(User.id == login_req.user_id)
+    user = (await db.execute(stmt_user)).scalar_one_or_none()
+    if not user or user.is_deleted:
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+    if user.role in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER):
+        raise HTTPException(status_code=403, detail="مسیر بازیابی نشست برای مدیران از این endpoint فعال نشده است")
+    if get_effective_max_sessions(user) != 1:
+        raise HTTPException(status_code=400, detail="این مسیر فقط برای کاربران تک‌نشستی فعال است")
+
+    recovery_request = await create_recovery_request(db, login_req)
+    await db.commit()
+    return recovery_request_to_dict(recovery_request)
+
+
+@router.post("/login-requests/{request_id}/recovery/cancel")
+async def cancel_single_session_recovery(
+    request_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Cancel an active single-session recovery flow tied to a login request."""
+    try:
+        rid = uuid.UUID(request_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="شناسه درخواست نامعتبر است")
+
+    recovery_request = await get_active_recovery_request_for_login_request(db, rid)
+    if recovery_request is None:
+        raise HTTPException(status_code=404, detail="درخواست بازیابی فعالی یافت نشد")
+
+    cancel_recovery_request(recovery_request)
+    await db.commit()
+    return {
+        "detail": "درخواست بازیابی لغو شد",
+        "recovery": recovery_request_to_dict(recovery_request),
+    }
+
+
+@router.get("/login-requests/{request_id}/recovery/status")
+async def get_single_session_recovery_status(
+    request_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Poll the latest single-session recovery status for a login request."""
+    try:
+        rid = uuid.UUID(request_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="شناسه درخواست نامعتبر است")
+
+    recovery_request = await get_latest_recovery_request_for_login_request(db, rid)
+    if recovery_request is None:
+        return {"status": "not_started"}
+
+    if (
+        is_active_recovery_status(recovery_request.status)
+        and recovery_request.chat_action_expires_at.replace(tzinfo=None) < datetime.utcnow()
+    ):
+        expire_recovery_request(recovery_request)
+        await db.commit()
+
+    return recovery_request_to_dict(recovery_request)
 
 class VerifySessionRequest(BaseModel):
     refresh_token: str
