@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Boolean, ForeignKey,
-    DateTime, Enum as SAEnum, Text
+    DateTime, Enum as SAEnum, Text, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -122,3 +122,44 @@ class SingleSessionRecoveryRequest(Base):
     user = relationship("User", foreign_keys=[user_id], backref="single_session_recovery_requests")
     session_login_request = relationship("SessionLoginRequest", backref="single_session_recovery_requests")
     decided_by_user = relationship("User", foreign_keys=[decided_by_user_id])
+    admin_targets = relationship(
+        "SingleSessionRecoveryAdminTarget",
+        back_populates="recovery_request",
+        cascade="all, delete-orphan",
+    )
+
+
+class SingleSessionRecoveryAdminTarget(Base):
+    __tablename__ = "single_session_recovery_admin_targets"
+    __table_args__ = (
+        UniqueConstraint(
+            "recovery_request_id",
+            "admin_user_id",
+            name="uq_single_session_recovery_admin_targets_recovery_admin",
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    recovery_request_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("single_session_recovery_requests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    admin_user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    current_action_message_id = Column(
+        Integer,
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    recovery_request = relationship("SingleSessionRecoveryRequest", back_populates="admin_targets")
+    admin_user = relationship("User", foreign_keys=[admin_user_id])
+    current_action_message = relationship("Message", foreign_keys=[current_action_message_id])

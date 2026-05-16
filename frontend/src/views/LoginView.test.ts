@@ -199,7 +199,7 @@ describe('LoginView.vue', () => {
         makeJsonResponse({
           status: 'approval_required',
           login_request_id: 'req-2',
-          expires_at: '2026-05-08T08:10:00.000Z',
+          expires_at: '2099-05-08T08:10:00.000Z',
         }) as any,
       )
       .mockResolvedValueOnce(makeJsonResponse({ status: 'rejected' }) as any)
@@ -224,12 +224,144 @@ describe('LoginView.vue', () => {
 
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
-    vi.advanceTimersByTime(2000)
+    await vi.advanceTimersByTimeAsync(2000)
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenLastCalledWith('/api/sessions/login-requests/req-2/status')
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/login-requests/req-2/status')
     expect(wrapper.text()).toContain('درخواست ورود شما رد شد.')
     expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('starts the recovery flow from the waiting screen and submits identity material', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'approval_required',
+          login_request_id: 'req-recovery',
+          expires_at: '2099-05-08T08:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'identity_verification_requested',
+          chat_action_expires_at: '2099-05-08T10:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'identity_verification_requested',
+          chat_action_expires_at: '2099-05-08T10:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          detail: 'submitted',
+          recovery: {
+            status: 'identity_submitted',
+            chat_action_expires_at: '2099-05-08T10:10:00.000Z',
+          },
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'identity_submitted',
+          chat_action_expires_at: '2099-05-08T10:10:00.000Z',
+        }) as any,
+      )
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+
+    await findButtonByText(wrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/login-requests/req-recovery/recovery', {
+      method: 'POST',
+    })
+    expect(wrapper.text()).toContain('ارسال مدرک احراز هویت')
+
+    const recoveryFile = new File(['card'], 'card.jpg', { type: 'image/jpeg' })
+    const recoveryInput = wrapper.find('input[type="file"][accept="image/*"]')
+    Object.defineProperty(recoveryInput.element, 'files', {
+      configurable: true,
+      value: [recoveryFile],
+    })
+    await recoveryInput.trigger('change')
+    await wrapper.get('textarea').setValue('کارت ملی')
+    await findButtonByText(wrapper, 'ارسال مدارک').trigger('click')
+    await flushPromises()
+
+    const identityCall = fetchMock.mock.calls.find(([url]) => url === '/api/sessions/login-requests/req-recovery/recovery/identity')
+    expect(identityCall).toBeTruthy()
+    const identityBody = identityCall?.[1] && 'body' in identityCall[1] ? identityCall[1].body as FormData : null
+    expect(identityBody?.get('caption')).toBe('کارت ملی')
+    expect(identityBody?.get('file')).toBe(recoveryFile)
+    expect(wrapper.text()).toContain('مدرک ارسال شد')
+    wrapper.unmount()
+  })
+
+  it('completes login from an approved recovery result', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'approval_required',
+          login_request_id: 'req-approved',
+          expires_at: '2099-05-08T08:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'approved',
+          access_token: 'recovery-access',
+          refresh_token: 'recovery-refresh',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'approved',
+          access_token: 'recovery-access',
+          refresh_token: 'recovery-refresh',
+        }) as any,
+      )
+    apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        id: 20,
+        role: 'عادی',
+        full_name: 'علی',
+        account_name: 'ali',
+      }) as any,
+    )
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+    await findButtonByText(wrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('درخواست شما تایید شد')
+    await findButtonByText(wrapper, 'ورود به سامانه').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(localStorage.getItem('auth_token')).toBe('recovery-access')
+    expect(localStorage.getItem('refresh_token')).toBe('recovery-refresh')
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/auth/me')
+    expect(routerPushMock).toHaveBeenCalledWith('/')
     wrapper.unmount()
   })
 
