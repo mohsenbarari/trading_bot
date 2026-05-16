@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
+import OfferPreviewModal from './OfferPreviewModal.vue'
 import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue'
 import { useWebSocket } from '../composables/useWebSocket'
 import { useTradingSort } from '../composables/useTradingSort'
@@ -84,6 +85,29 @@ interface TradeLotSuggestionState {
   sourceSignature?: string | null
 }
 
+interface ParsedOfferPreview {
+  trade_type: 'buy' | 'sell'
+  commodity_id: number
+  commodity_name: string
+  quantity: number
+  price: number
+  is_wholesale: boolean
+  lot_sizes: number[] | null
+  notes: string | null
+}
+
+interface OfferPriceWarning {
+  error_code: string
+  title: string
+  detail: string
+  message: string
+  warning_type: string
+  reference_label: string
+  reference_price: number
+  proposed_price: number
+  difference_percent: number
+}
+
 // State
 const activeTab = ref<'offers' | 'my_offers' | 'my_trades'>(props.initialTab || 'offers')
 const isLoading = ref(true)
@@ -117,6 +141,10 @@ const {
 // Text Offer Mode
 const offerText = ref('')
 const parseError = ref('')
+const pendingOfferPreview = ref<ParsedOfferPreview | null>(null)
+const previewError = ref('')
+const previewWarning = ref<OfferPriceWarning | null>(null)
+const isSubmittingTextOffer = ref(false)
 
 // Trade Modal State
 const showTradeModal = ref(false)
@@ -287,39 +315,78 @@ async function loadTradingSettings() {
   }
 }
 
+function buildOfferCreatePayload(offer: ParsedOfferPreview) {
+  return {
+    offer_type: offer.trade_type,
+    commodity_id: offer.commodity_id,
+    quantity: offer.quantity,
+    price: offer.price,
+    is_wholesale: offer.is_wholesale,
+    lot_sizes: offer.lot_sizes,
+    notes: offer.notes,
+  }
+}
+
+function cancelOfferPreview() {
+  pendingOfferPreview.value = null
+  previewError.value = ''
+  previewWarning.value = null
+}
+
+async function confirmOfferPreview() {
+  if (!pendingOfferPreview.value) return
+  isSubmittingTextOffer.value = true
+  previewError.value = ''
+
+  try {
+    const response = await apiFetch('/api/offers/', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...buildOfferCreatePayload(pendingOfferPreview.value),
+        warning_acknowledged: !!previewWarning.value,
+      }),
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      if (response.status === 409 && payload?.error_code === 'OFFER_PRICE_WARNING' && payload?.warning) {
+        previewWarning.value = payload.warning as OfferPriceWarning
+        return
+      }
+      throw new Error(payload?.detail || `خطا: ${response.status}`)
+    }
+
+    successMessage.value = 'لفظ متنی ثبت شد'
+    offerText.value = ''
+    pendingOfferPreview.value = null
+    previewWarning.value = null
+    await loadOffers()
+  } catch (e: any) {
+    previewError.value = e.message || 'خطا در ثبت لفظ'
+  } finally {
+    isSubmittingTextOffer.value = false
+  }
+}
+
 async function parseAndSubmitTextOffer() {
   if (!offerText.value.trim()) return
-  isLoading.value = true
+  isSubmittingTextOffer.value = true
   parseError.value = ''
+  previewError.value = ''
+  previewWarning.value = null
   try {
     const res = await api('/offers/parse', {
       method: 'POST',
       body: JSON.stringify({ text: offerText.value })
     })
     if (res.success && res.data) {
-       // Submit the parsed offer directly
-       await api('/offers/', {
-         method: 'POST',
-         body: JSON.stringify({
-            offer_type: res.data.trade_type,
-            commodity_id: res.data.commodity_id,
-            quantity: res.data.quantity,
-            price: res.data.price,
-            is_wholesale: res.data.is_wholesale,
-            lot_sizes: res.data.lot_sizes,
-            notes: res.data.notes
-         })
-       })
-       successMessage.value = 'لفظ متنی ثبت شد'
-       offerText.value = ''
-       await loadOffers()
+       pendingOfferPreview.value = res.data as ParsedOfferPreview
     } else {
       parseError.value = res.error || 'خطا در پردازش متن'
     }
   } catch (e: any) {
     parseError.value = e.message
   } finally {
-    isLoading.value = false
+    isSubmittingTextOffer.value = false
   }
 }
 
@@ -823,7 +890,7 @@ watch(activeTab, (val) => {
           <button
             class="send-btn"
             @click="parseAndSubmitTextOffer"
-            :disabled="isLoading || !offerText.trim()"
+            :disabled="isLoading || isSubmittingTextOffer || !offerText.trim()"
             :class="{ 'active': offerText.trim() }"
           >
             <svg viewBox="0 0 24 24" class="send-icon">
@@ -841,6 +908,16 @@ watch(activeTab, (val) => {
       </div>
       <div v-if="parseError" class="parse-error">{{ parseError }}</div>
     </div>
+
+    <OfferPreviewModal
+      v-if="pendingOfferPreview"
+      :offer="pendingOfferPreview"
+      :submitting="isSubmittingTextOffer"
+      :error="previewError"
+      :warning="previewWarning"
+      @confirm="confirmOfferPreview"
+      @cancel="cancelOfferPreview"
+    />
     
     <!-- Trade Modal -->
     <div v-if="showTradeModal && selectedOffer" class="modal-overlay" @click.self="showTradeModal = false">

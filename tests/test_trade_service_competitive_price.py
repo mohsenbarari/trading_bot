@@ -2,7 +2,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from core.services.trade_service import get_quantity_range, validate_competitive_price
+from core.services.trade_service import (
+    BUY_PRICE_WARNING_TYPE,
+    SELL_PRICE_WARNING_TYPE,
+    detect_offer_price_warning,
+    get_quantity_range,
+    validate_competitive_price,
+)
 
 
 def make_result(prices):
@@ -66,7 +72,7 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
             offer_type="sell",
             commodity_id=1,
             quantity=10,
-            proposed_price=100301,
+            proposed_price=100401,
             user_id=7,
         )
 
@@ -81,7 +87,7 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
             offer_type="sell",
             commodity_id=1,
             quantity=10,
-            proposed_price=100300,
+            proposed_price=100400,
             user_id=7,
         )
 
@@ -96,7 +102,7 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
             offer_type="buy",
             commodity_id=1,
             quantity=25,
-            proposed_price=99699,
+            proposed_price=99599,
             user_id=7,
         )
 
@@ -111,12 +117,66 @@ class TradeServiceCompetitivePriceTests(unittest.IsolatedAsyncioTestCase):
             offer_type="buy",
             commodity_id=1,
             quantity=25,
-            proposed_price=99700,
+            proposed_price=99600,
             user_id=7,
         )
 
         self.assertTrue(is_valid)
         self.assertEqual(error, "")
+
+    async def test_detect_offer_price_warning_warns_for_sell_below_lowest_active_price(self):
+        db = SimpleNamespace(execute=AsyncMock(return_value=make_result([100000, 100200, 100300])))
+
+        warning = await detect_offer_price_warning(
+            db=db,
+            offer_type="sell",
+            commodity_id=1,
+            quantity=10,
+            proposed_price=99900,
+            user_id=7,
+        )
+
+        self.assertIsNotNone(warning)
+        self.assertEqual(warning["warning_type"], SELL_PRICE_WARNING_TYPE)
+        self.assertEqual(warning["reference_price"], 100000)
+        self.assertEqual(warning["proposed_price"], 99900)
+
+    async def test_detect_offer_price_warning_warns_for_buy_above_highest_active_price(self):
+        db = SimpleNamespace(execute=AsyncMock(return_value=make_result([100000, 100100, 100300])))
+
+        warning = await detect_offer_price_warning(
+            db=db,
+            offer_type="buy",
+            commodity_id=1,
+            quantity=25,
+            proposed_price=100500,
+            user_id=7,
+        )
+
+        self.assertIsNotNone(warning)
+        self.assertEqual(warning["warning_type"], BUY_PRICE_WARNING_TYPE)
+        self.assertEqual(warning["reference_price"], 100300)
+        self.assertEqual(warning["proposed_price"], 100500)
+
+    async def test_validate_competitive_price_filters_excluded_offers_from_query(self):
+        seen_stmt = {}
+
+        async def fake_execute(stmt):
+            seen_stmt["sql"] = str(stmt)
+            return make_result([100000, 100000, 100000])
+
+        db = SimpleNamespace(execute=AsyncMock(side_effect=fake_execute))
+
+        await validate_competitive_price(
+            db=db,
+            offer_type="sell",
+            commodity_id=1,
+            quantity=10,
+            proposed_price=100400,
+            user_id=7,
+        )
+
+        self.assertIn("exclude_from_competitive_price", seen_stmt["sql"])
 
 
 if __name__ == "__main__":

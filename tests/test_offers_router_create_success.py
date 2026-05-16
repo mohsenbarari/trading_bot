@@ -119,6 +119,9 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
             "core.services.trade_service.validate_competitive_price",
             new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
         ), patch("api.routers.offers.current_server", return_value="iran"), patch(
             "api.routers.offers.send_offer_to_channel",
             new=AsyncMock(return_value=None),
@@ -171,6 +174,9 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
             "core.services.trade_service.validate_competitive_price",
             new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
         ), patch("api.routers.offers.current_server", return_value="foreign"), patch(
             "api.routers.offers.send_offer_to_channel",
             new=AsyncMock(return_value=555),
@@ -236,6 +242,9 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
             "core.services.trade_service.validate_competitive_price",
             new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
         ), patch("api.routers.offers.current_server", return_value="foreign"), patch(
             "api.routers.offers.send_offer_to_channel",
             new=AsyncMock(return_value=None),
@@ -298,6 +307,9 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "core.services.trade_service.validate_competitive_price",
             new=AsyncMock(return_value=(True, None)),
         ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
+        ), patch(
             "api.routers.offers.send_offer_to_channel",
             new=AsyncMock(return_value=None),
         ) as send_mock, patch("core.cache.incr_active_offer_count", new=AsyncMock()) as incr_mock, patch(
@@ -321,6 +333,63 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         counter_mock.assert_awaited_once_with(db, owner_user, "channel_message")
         response_mock.assert_called_once_with(reloaded_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
         self.assertEqual(result, {"id": 120, "user_id": 5})
+
+    async def test_create_offer_flags_acknowledged_warning_offers_for_competitive_exclusion(self):
+        commodity = SimpleNamespace(id=1)
+        reloaded_offer = make_reloaded_offer(offer_id=140)
+        db = FakeDB(
+            get_results=[commodity],
+            execute_results=[FakeExecuteResult(reloaded_offer)],
+        )
+        current_user = make_user()
+        settings = SimpleNamespace(max_active_offers=5)
+        async_settings = SimpleNamespace(offer_expiry_minutes=15)
+        warning_payload = {
+            "error_code": "OFFER_PRICE_WARNING",
+            "warning_type": "sell_below_lowest_active",
+            "title": "هشدار قیمت فروش",
+            "detail": "warn",
+            "message": "warn",
+            "reference_label": "ref",
+            "reference_price": 100000,
+            "proposed_price": 99900,
+            "difference_percent": 0.1,
+        }
+
+        with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=settings,
+        ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=0)), patch(
+            "core.services.trade_service.validate_quantity",
+            return_value=(True, None),
+        ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=warning_payload),
+        ), patch("api.routers.offers.current_server", return_value="foreign"), patch(
+            "api.routers.offers.send_offer_to_channel",
+            new=AsyncMock(return_value=None),
+        ), patch("core.cache.incr_active_offer_count", new=AsyncMock()), patch(
+            "api.routers.offers.increment_user_counter",
+            new=AsyncMock(),
+        ), patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=async_settings),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
+            "api.routers.offers.offer_to_response",
+            return_value={"id": 140},
+        ):
+            await create_offer(
+                make_offer(offer_type="sell", price=99900, warning_acknowledged=True),
+                db=db,
+                context=make_context(current_user),
+            )
+
+        new_offer = db.added[0]
+        self.assertTrue(new_offer.exclude_from_competitive_price)
+        self.assertEqual(new_offer.price_warning_type, "sell_below_lowest_active")
 
 
 if __name__ == "__main__":

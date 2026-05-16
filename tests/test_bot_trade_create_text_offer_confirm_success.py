@@ -89,6 +89,8 @@ class BotTradeCreateTextOfferConfirmSuccessTests(unittest.IsolatedAsyncioTestCas
                 FakeSessionContext(update_session),
             ],
         ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
+            "core.services.trade_service.detect_offer_price_warning", new=AsyncMock(return_value=None)
+        ), patch(
             "core.utils.increment_user_counter", new=AsyncMock()
         ) as increment_mock, patch(
             "bot.handlers.trade_create.settings", SimpleNamespace(channel_id=-100, bot_username="botname")

@@ -1,4 +1,5 @@
 import unittest
+import json
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -222,6 +223,47 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "bad lots")
+
+    async def test_create_offer_returns_warning_response_before_publishing_outlier_offer(self):
+        current_user = make_user()
+        commodity = SimpleNamespace(id=1)
+        db = FakeDB(scalar_result=0, get_result=commodity)
+        settings = SimpleNamespace(max_active_offers=5)
+        warning_payload = {
+            "error_code": "OFFER_PRICE_WARNING",
+            "warning_type": "sell_below_lowest_active",
+            "title": "هشدار قیمت فروش",
+            "detail": "قیمت فروش شما از پایین\u200cترین فروش فعال مشابه پایین\u200cتر است.",
+            "message": "warning message",
+            "reference_label": "پایین\u200cترین قیمت فروش فعال",
+            "reference_price": 100000,
+            "proposed_price": 99900,
+            "difference_percent": 0.1,
+        }
+
+        with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=settings,
+        ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=0)), patch(
+            "core.services.trade_service.validate_quantity",
+            return_value=(True, None),
+        ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=warning_payload),
+        ):
+            response = await create_offer(
+                make_offer(offer_type="sell", price=99900),
+                db=db,
+                context=make_context(current_user),
+            )
+
+        self.assertEqual(response.status_code, 409)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["error_code"], "OFFER_PRICE_WARNING")
+        self.assertEqual(payload["warning"]["reference_price"], 100000)
 
     async def test_create_offer_uses_effective_owner_limits_for_accountant_context(self):
         owner_user = make_user(id=5)

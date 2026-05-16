@@ -55,6 +55,8 @@ class Offer(Base):
     # تعداد و قیمت
     quantity = Column(Integer, nullable=False)  # تعداد اولیه
     price = Column(BigInteger, nullable=False)
+    exclude_from_competitive_price = Column(Boolean, nullable=False, default=False, server_default='false', index=True)
+    price_warning_type = Column(String(64), nullable=True)
     
     # تعداد باقیمانده (برای فروش خُرد)
     remaining_quantity = Column(Integer, nullable=True)

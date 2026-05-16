@@ -82,6 +82,14 @@ function responseOf(data: unknown) {
   }
 }
 
+function errorResponse(status: number, data: unknown) {
+  return {
+    ok: false,
+    status,
+    json: async () => data,
+  }
+}
+
 async function mountMarketView() {
   const MarketView = (await import('./MarketView.vue')).default
   return mount(MarketView, {
@@ -123,6 +131,7 @@ describe('MarketView.vue', () => {
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
       if (path === '/api/auth/me') return responseOf({ id: 77 })
+      if (path === '/api/offers/') return responseOf({ success: true, id: 1001 })
       return responseOf(null)
     })
 
@@ -140,9 +149,6 @@ describe('MarketView.vue', () => {
             notes: 'از متن بازار',
           },
         }
-      }
-      if (path === '/api/offers/' && options?.method === 'POST') {
-        return { success: true, id: 1001 }
       }
       return null
     })
@@ -184,6 +190,7 @@ describe('MarketView.vue', () => {
     await flushPromises()
     marketViewMocks.apiFetchJsonMock.mockClear()
     marketViewMocks.fetchOffersMock.mockClear()
+    marketViewMocks.apiFetchMock.mockClear()
 
     await wrapper.find('.text-offer-input').setValue('خرید طلای آب‌شده 50 عدد 222222')
     await wrapper.find('.send-btn').trigger('click')
@@ -193,7 +200,12 @@ describe('MarketView.vue', () => {
       method: 'POST',
       body: JSON.stringify({ text: 'خرید طلای آب‌شده 50 عدد 222222' }),
     }))
-    expect(marketViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/offers/', expect.objectContaining({
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({
         offer_type: 'buy',
@@ -203,10 +215,61 @@ describe('MarketView.vue', () => {
         is_wholesale: true,
         lot_sizes: null,
         notes: 'از متن بازار',
+        warning_acknowledged: false,
       }),
     }))
     expect((wrapper.find('.text-offer-input').element as HTMLInputElement).value).toBe('')
     expect(marketViewMocks.fetchOffersMock).toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('shows a warning and requires a second confirmation for suspicious prices', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/auth/me') return responseOf({ id: 77 })
+      if (path === '/api/offers/' && options?.method === 'POST') {
+        const body = JSON.parse(String(options.body))
+        if (!body.warning_acknowledged) {
+          return errorResponse(409, {
+            error_code: 'OFFER_PRICE_WARNING',
+            detail: 'warning detail',
+            warning: {
+              error_code: 'OFFER_PRICE_WARNING',
+              title: 'هشدار قیمت فروش',
+              detail: 'قیمت فروش شما از پایین‌ترین فروش فعال مشابه پایین‌تر است.',
+              message: 'warning message',
+              warning_type: 'sell_below_lowest_active',
+              reference_label: 'پایین‌ترین قیمت فروش فعال',
+              reference_price: 100000,
+              proposed_price: 99900,
+              difference_percent: 0.1,
+            },
+          })
+        }
+        return responseOf({ success: true, id: 1002 })
+      }
+      return responseOf(null)
+    })
+
+    await wrapper.find('.text-offer-input').setValue('خرید طلای آب‌شده 50 عدد 222222')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('در نرخ منصفانه لحاظ نخواهد شد')
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    const postCalls = marketViewMocks.apiFetchMock.mock.calls.filter(([path, options]) => path === '/api/offers/' && options?.method === 'POST')
+    expect(postCalls).toHaveLength(2)
+    expect(JSON.parse(String(postCalls[1]![1].body)).warning_acknowledged).toBe(true)
 
     wrapper.unmount()
   })

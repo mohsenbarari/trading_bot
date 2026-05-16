@@ -63,6 +63,8 @@ class BotTradeCreateTextOfferFailureCancelTests(unittest.IsolatedAsyncioTestCase
             "bot.handlers.trade_create.AsyncSessionLocal",
             side_effect=[FakeSessionContext(FakeSession([0])), FakeSessionContext(FakeSession())],
         ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
+            "core.services.trade_service.detect_offer_price_warning", new=AsyncMock(return_value=None)
+        ), patch(
             "bot.handlers.trade_create.settings", SimpleNamespace(channel_id=None, bot_username="botname")
         ):
             await handle_text_offer_confirm(callback, state, user=SimpleNamespace(id=1, limitations_expire_at=None), bot=SimpleNamespace())
@@ -90,6 +92,8 @@ class BotTradeCreateTextOfferFailureCancelTests(unittest.IsolatedAsyncioTestCase
                 FakeSessionContext(rollback_session),
             ],
         ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
+            "core.services.trade_service.detect_offer_price_warning", new=AsyncMock(return_value=None)
+        ), patch(
             "bot.handlers.trade_create.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
         ):
             await handle_text_offer_confirm(callback, state, user=SimpleNamespace(id=1, limitations_expire_at=None), bot=SimpleNamespace(send_message=AsyncMock(side_effect=RuntimeError("boom"))))

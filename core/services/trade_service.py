@@ -5,7 +5,7 @@ Trade Service - منطق مشترک معاملات
 این ماژول شامل توابع محاسبه لات، اعتبارسنجی و پیشنهاد قیمت است
 که هم توسط بات و هم توسط API استفاده می‌شود.
 """
-from typing import Tuple, List, Optional, Union
+from typing import Any, Dict, Tuple, List, Optional, Union
 
 from core.trading_settings import get_trading_settings
 
@@ -20,6 +20,8 @@ __all__ = [
     "validate_price",
     "parse_lot_sizes_text",
     "validate_competitive_price",
+    "detect_offer_price_warning",
+    "PRICE_WARNING_ERROR_CODE",
     "get_quantity_range",
 ]
 
@@ -478,8 +480,12 @@ QUANTITY_RANGES = {
 # حداقل تعداد لفظ مشابه برای اعتبارسنجی
 MIN_SIMILAR_OFFERS = 3
 
-# تحمل قیمت (0.3%)
-PRICE_TOLERANCE = 0.003
+# تحمل قیمت (0.4%)
+PRICE_TOLERANCE = 0.004
+
+PRICE_WARNING_ERROR_CODE = "OFFER_PRICE_WARNING"
+SELL_PRICE_WARNING_TYPE = "sell_below_lowest_active"
+BUY_PRICE_WARNING_TYPE = "buy_above_highest_active"
 
 
 def get_quantity_range(quantity: int) -> Optional[str]:
@@ -498,6 +504,140 @@ def get_quantity_range(quantity: int) -> Optional[str]:
     return None
 
 
+def _get_quantity_bounds(quantity: int) -> Optional[Tuple[int, int]]:
+    qty_range = get_quantity_range(quantity)
+    if qty_range is None:
+        return None
+    return QUANTITY_RANGES[qty_range]
+
+
+async def _get_comparable_active_prices(
+    db,
+    offer_type: str,
+    commodity_id: int,
+    quantity: int,
+    user_id: Optional[int],
+) -> List[int]:
+    from sqlalchemy import select
+    from models.offer import Offer, OfferStatus, OfferType
+
+    quantity_bounds = _get_quantity_bounds(quantity)
+    if quantity_bounds is None:
+        return []
+
+    min_qty, max_qty = quantity_bounds
+    offer_type_enum = OfferType.SELL if offer_type == "sell" else OfferType.BUY
+
+    stmt = select(Offer.price).where(
+        Offer.commodity_id == commodity_id,
+        Offer.offer_type == offer_type_enum,
+        Offer.status == OfferStatus.ACTIVE,
+        Offer.quantity >= min_qty,
+        Offer.quantity <= max_qty,
+        Offer.exclude_from_competitive_price.is_(False),
+    )
+    if user_id is not None:
+        stmt = stmt.where(Offer.user_id != user_id)
+
+    result = await db.execute(stmt)
+    return [row[0] for row in result.fetchall()]
+
+
+def _build_price_warning_payload(
+    *,
+    warning_type: str,
+    offer_type: str,
+    proposed_price: int,
+    reference_price: int,
+    comparable_count: int,
+) -> Dict[str, Any]:
+    if reference_price <= 0:
+        difference_percent = 0.0
+    else:
+        difference_percent = round(abs(proposed_price - reference_price) / reference_price * 100, 2)
+
+    if warning_type == SELL_PRICE_WARNING_TYPE:
+        title = "هشدار قیمت فروش"
+        reference_label = "پایین\u200cترین قیمت فروش فعال"
+        detail = (
+            "قیمت فروش شما از پایین\u200cترین فروش فعال مشابه پایین\u200cتر است. "
+            "اگر قیمت یا حتی کالای لفظ را اشتباه وارد کرده\u200cاید، قبل از انتشار اصلاحش کنید."
+        )
+    else:
+        title = "هشدار قیمت خرید"
+        reference_label = "بالاترین قیمت خرید فعال"
+        detail = (
+            "قیمت خرید شما از بالاترین خرید فعال مشابه بالاتر است. "
+            "اگر قیمت یا حتی کالای لفظ را اشتباه وارد کرده\u200cاید، قبل از انتشار اصلاحش کنید."
+        )
+
+    message = (
+        f"⚠️ {title}\n\n"
+        f"{detail}\n\n"
+        f"{reference_label}: {reference_price:,}\n"
+        f"قیمت شما: {proposed_price:,}\n"
+        f"اختلاف: {difference_percent}%\n\n"
+        "در صورت تایید دوباره، لفظ منتشر می\u200cشود اما در محاسبه نرخ منصفانه لحاظ نخواهد شد."
+    )
+
+    return {
+        "error_code": PRICE_WARNING_ERROR_CODE,
+        "warning_type": warning_type,
+        "offer_type": offer_type,
+        "title": title,
+        "detail": detail,
+        "message": message,
+        "reference_label": reference_label,
+        "reference_price": reference_price,
+        "proposed_price": proposed_price,
+        "difference_amount": abs(proposed_price - reference_price),
+        "difference_percent": difference_percent,
+        "comparable_count": comparable_count,
+    }
+
+
+async def detect_offer_price_warning(
+    db,
+    offer_type: str,
+    commodity_id: int,
+    quantity: int,
+    proposed_price: int,
+    user_id: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    prices = await _get_comparable_active_prices(
+        db=db,
+        offer_type=offer_type,
+        commodity_id=commodity_id,
+        quantity=quantity,
+        user_id=user_id,
+    )
+    if not prices:
+        return None
+
+    if offer_type == "sell":
+        lowest_price = min(prices)
+        if proposed_price < lowest_price:
+            return _build_price_warning_payload(
+                warning_type=SELL_PRICE_WARNING_TYPE,
+                offer_type=offer_type,
+                proposed_price=proposed_price,
+                reference_price=lowest_price,
+                comparable_count=len(prices),
+            )
+        return None
+
+    highest_price = max(prices)
+    if proposed_price > highest_price:
+        return _build_price_warning_payload(
+            warning_type=BUY_PRICE_WARNING_TYPE,
+            offer_type=offer_type,
+            proposed_price=proposed_price,
+            reference_price=highest_price,
+            comparable_count=len(prices),
+        )
+    return None
+
+
 async def validate_competitive_price(
     db,  # AsyncSession
     offer_type: str,
@@ -513,8 +653,8 @@ async def validate_competitive_price(
     
     قوانین:
     - اگر کمتر از 3 لفظ مشابه وجود داشته باشد: تایید می‌شود
-    - فروش: قیمت نباید بیش از 0.3% بالاتر از میانگین باشد
-    - خرید: قیمت نباید بیش از 0.3% پایین‌تر از میانگین باشد
+    - فروش: قیمت نباید بیش از 0.4% بالاتر از میانگین باشد
+    - خرید: قیمت نباید بیش از 0.4% پایین‌تر از میانگین باشد
     
     Args:
         db: AsyncSession دیتابیس
@@ -528,33 +668,17 @@ async def validate_competitive_price(
         (True, "") اگر معتبر باشد
         (False, "پیام خطا") اگر نامعتبر باشد
     """
-    from sqlalchemy import select, func
-    from models.offer import Offer, OfferStatus, OfferType
-    
-    # تعیین رنج تعداد
-    qty_range = get_quantity_range(quantity)
-    if qty_range is None:
+    quantity_bounds = _get_quantity_bounds(quantity)
+    if quantity_bounds is None:
         # اگر خارج از رنج‌های تعریف شده باشد، بدون اعتبارسنجی تایید می‌شود
         return True, ""
-    
-    # محدوده رنج
-    min_qty, max_qty = QUANTITY_RANGES[qty_range]
-    
-    # تبدیل نوع به enum
-    offer_type_enum = OfferType.SELL if offer_type == "sell" else OfferType.BUY
-    
-    # کوئری لفظ‌های مشابه فعال
-    stmt = select(Offer.price).where(
-        Offer.commodity_id == commodity_id,
-        Offer.offer_type == offer_type_enum,
-        Offer.status == OfferStatus.ACTIVE,
-        Offer.quantity >= min_qty,
-        Offer.quantity <= max_qty,
-        Offer.user_id != user_id  # لفظ‌های خود کاربر حذف
+    prices = await _get_comparable_active_prices(
+        db=db,
+        offer_type=offer_type,
+        commodity_id=commodity_id,
+        quantity=quantity,
+        user_id=user_id,
     )
-    
-    result = await db.execute(stmt)
-    prices = [row[0] for row in result.fetchall()]
     
     # اگر کمتر از 3 لفظ مشابه وجود داشته باشد، بدون اعتبارسنجی تایید می‌شود
     if len(prices) < MIN_SIMILAR_OFFERS:
@@ -566,11 +690,11 @@ async def validate_competitive_price(
     
     # اعتبارسنجی بر اساس نوع لفظ
     if offer_type == "sell":
-        # فروش: قیمت نباید بیش از 0.3% بالاتر از میانگین باشد.
+        # فروش: قیمت نباید بیش از 0.4% بالاتر از میانگین باشد.
         if proposed_price * price_count * 1000 > price_sum * (1000 + tolerance_per_thousand):
             return False, "❌ لفظ شما تایید نشد.\nفروشنده‌ای با قیمت پایین‌تر وجود دارد."
     else:
-        # خرید: قیمت نباید بیش از 0.3% پایین‌تر از میانگین باشد.
+        # خرید: قیمت نباید بیش از 0.4% پایین‌تر از میانگین باشد.
         if proposed_price * price_count * 1000 < price_sum * (1000 - tolerance_per_thousand):
             return False, "❌ لفظ شما تایید نشد.\nخریداری با قیمت بالاتر وجود دارد."
     
