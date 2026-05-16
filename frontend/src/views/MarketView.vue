@@ -43,25 +43,6 @@ const tradingSettings = ref<TradingSettings>({
   offer_expiry_minutes: 60
 })
 
-// Offer Creation State
-const showCreateWizard = ref(false)
-const createStep = ref<'commodity' | 'quantity' | 'lot' | 'lotInput' | 'price'>('commodity')
-const newOffer = ref({
-  offer_type: '' as 'buy' | 'sell' | '',
-  commodity_id: 0,
-  commodity_name: '',
-  quantity: null as number | null,
-  price: null as number | null,
-  is_wholesale: true,
-  lot_sizes: null as number[] | null,
-  notes: '',
-  republished_from_id: null as number | null
-})
-const lotSizesText = ref('')
-const suggestedLotText = ref('')
-const quickQuantities = [10, 20, 30, 40, 50, 100]
-const createError = ref('')
-
 // Text Offer State
 const offerText = ref('')
 const parseError = ref('')
@@ -134,129 +115,6 @@ function parseAndSubmitTextOffer() {
   })
   .catch(e => parseError.value = e.message)
   .finally(() => isSubmitting.value = false)
-}
-
-function resetCreateWizard(type: 'buy' | 'sell') {
-  newOffer.value = {
-    offer_type: type,
-    commodity_id: 0,
-    commodity_name: '',
-    quantity: null,
-    price: null,
-    is_wholesale: true,
-    lot_sizes: null,
-    notes: '',
-    republished_from_id: null,
-  }
-  createStep.value = 'commodity'
-  lotSizesText.value = ''
-  suggestedLotText.value = ''
-  createError.value = ''
-}
-
-function startCreateOffer(type: 'buy' | 'sell') {
-  resetCreateWizard(type)
-  showCreateWizard.value = true
-}
-
-function closeWizard() {
-  showCreateWizard.value = false
-  createError.value = ''
-}
-
-function selectCommodity(commodity: Commodity) {
-  newOffer.value.commodity_id = commodity.id
-  newOffer.value.commodity_name = commodity.name
-  createStep.value = 'quantity'
-  createError.value = ''
-}
-
-function selectQuantity(quantity: number) {
-  newOffer.value.quantity = quantity
-  createStep.value = 'lot'
-  createError.value = ''
-}
-
-function confirmQuantity() {
-  if (!newOffer.value.quantity) {
-    createError.value = 'تعداد الزامی است'
-    return
-  }
-  createError.value = ''
-  createStep.value = 'lot'
-}
-
-function selectLotType(wholesale: boolean) {
-  newOffer.value.is_wholesale = wholesale
-  createError.value = ''
-  if (wholesale) {
-    newOffer.value.lot_sizes = null
-    createStep.value = 'price'
-    return
-  }
-
-  createStep.value = 'lotInput'
-  const quantity = newOffer.value.quantity || 0
-  if (quantity > 0) {
-    const firstLot = Math.floor(quantity / 2)
-    const secondLot = quantity - firstLot
-    suggestedLotText.value = `${firstLot} ${secondLot}`.trim()
-  }
-}
-
-function confirmLotSizes() {
-  const rawLotText = (lotSizesText.value || suggestedLotText.value || '').trim()
-  if (!rawLotText) {
-    createError.value = 'لطفا ترکیب را وارد کنید'
-    return
-  }
-
-  const parts = rawLotText.split(/\s+/).map(Number)
-  if (parts.some(Number.isNaN)) {
-    createError.value = 'اعداد نامعتبر'
-    return
-  }
-
-  const quantity = newOffer.value.quantity || 0
-  const sum = parts.reduce((total, amount) => total + amount, 0)
-  if (sum !== quantity) {
-    createError.value = `مجموع (${sum}) با تعداد (${quantity}) برابر نیست`
-    return
-  }
-
-  newOffer.value.lot_sizes = parts
-  createError.value = ''
-  createStep.value = 'price'
-}
-
-async function submitOffer() {
-  if (!newOffer.value.price) {
-    createError.value = 'قیمت الزامی است'
-    return
-  }
-
-  isSubmitting.value = true
-  createError.value = ''
-
-  try {
-    await apiFetchJson('/api/offers/', {
-      method: 'POST',
-      body: JSON.stringify({
-        ...newOffer.value,
-        notes: newOffer.value.notes?.trim() || null,
-      })
-    })
-    successMessage.value = 'لفظ ثبت شد'
-    setTimeout(() => {
-      successMessage.value = ''
-    }, 3000)
-    closeWizard()
-    await fetchOffers()
-  } catch (e: any) {
-    createError.value = e.message || 'خطا در ثبت لفظ'
-  } finally {
-    isSubmitting.value = false
-  }
 }
 
 async function fetchCurrentUser() {
@@ -366,7 +224,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Bottom Action Bar -->
-    <div v-if="!showCreateWizard" class="market-action-bar">
+    <div class="market-action-bar">
         <div class="action-bar-inner">
             <!-- Text Input Row -->
             <div class="input-wrapper">
@@ -387,121 +245,7 @@ onUnmounted(() => {
                 </button>
             </div>
             <div v-if="parseError" class="parse-error">{{ parseError }}</div>
-            <div class="action-buttons">
-              <button class="create-btn buy" @click="startCreateOffer('buy')">
-                <span>🟢</span>
-                <span>ثبت خرید</span>
-              </button>
-              <button class="create-btn sell" @click="startCreateOffer('sell')">
-                <span>🔴</span>
-                <span>ثبت فروش</span>
-              </button>
-            </div>
         </div>
-    </div>
-
-    <div v-if="showCreateWizard" class="wizard-overlay" @click.self="closeWizard">
-      <div class="wizard-modal">
-        <div class="wizard-header">
-          <div class="wizard-title">
-            {{ newOffer.offer_type === 'buy' ? 'ثبت خرید' : 'ثبت فروش' }}
-          </div>
-          <button class="close-btn" @click="closeWizard">
-            <X :size="18" />
-          </button>
-        </div>
-
-        <div class="wizard-body">
-          <div v-if="createError" class="parse-error">{{ createError }}</div>
-
-          <div v-if="createStep === 'commodity'" class="step-content">
-            <div class="step-label">کالا را انتخاب کنید</div>
-            <div class="commodity-selection">
-              <button
-                v-for="commodity in commodities"
-                :key="commodity.id"
-                class="wizard-btn-outline"
-                @click="selectCommodity(commodity)"
-              >
-                {{ commodity.name }}
-              </button>
-            </div>
-          </div>
-
-          <div v-else-if="createStep === 'quantity'" class="step-content">
-            <div class="step-label">تعداد را انتخاب کنید</div>
-            <div class="quick-quantities">
-              <button
-                v-for="quantity in quickQuantities.filter((entry) => entry >= tradingSettings.offer_min_quantity && entry <= tradingSettings.offer_max_quantity)"
-                :key="quantity"
-                class="wizard-btn-quick"
-                @click="selectQuantity(quantity)"
-              >
-                {{ quantity }}
-              </button>
-            </div>
-            <div class="input-group">
-              <input
-                v-model.number="newOffer.quantity"
-                type="number"
-                :min="tradingSettings.offer_min_quantity"
-                :max="tradingSettings.offer_max_quantity"
-                placeholder="0"
-                class="wizard-input"
-              >
-              <button class="wizard-confirm-btn" @click="confirmQuantity">
-                تایید
-              </button>
-            </div>
-          </div>
-
-          <div v-else-if="createStep === 'lot'" class="step-content">
-            <div class="step-label">نوع فروش را انتخاب کنید</div>
-            <div class="lot-types">
-              <button class="lot-type-btn wholesale" @click="selectLotType(true)">
-                <span class="type-title">📦 فروش یکجا</span>
-                <span class="type-desc">{{ newOffer.quantity }} عدد در یک نوبت</span>
-              </button>
-              <button class="lot-type-btn retail" @click="selectLotType(false)">
-                <span class="type-title">🔢 فروش خُرد</span>
-                <span class="type-desc">تقسیم در چند بخش</span>
-              </button>
-            </div>
-          </div>
-
-          <div v-else-if="createStep === 'lotInput'" class="step-content">
-            <div class="step-label">ترکیب خُرد را وارد کنید</div>
-            <div class="info-alert">مجموع بخش‌ها باید {{ newOffer.quantity }} باشد.</div>
-            <input
-              v-model="lotSizesText"
-              type="text"
-              :placeholder="suggestedLotText || '10 15 25'"
-              class="wizard-input"
-            >
-            <button class="wizard-primary-btn" @click="confirmLotSizes">
-              تایید ترکیب
-            </button>
-          </div>
-
-          <div v-else-if="createStep === 'price'" class="step-content">
-            <div class="step-label">قیمت هر واحد را وارد کنید</div>
-            <div class="price-input-wrapper">
-              <input
-                v-model.number="newOffer.price"
-                type="number"
-                placeholder="0"
-                class="wizard-input big"
-              >
-              <div v-if="newOffer.price" class="price-preview">
-                {{ Number(newOffer.price).toLocaleString() }} تومان
-              </div>
-            </div>
-            <button class="wizard-submit-btn" :disabled="isSubmitting || !newOffer.price" @click="submitOffer">
-              {{ isSubmitting ? 'در حال ثبت...' : `ثبت نهایی لفظ ${newOffer.offer_type === 'buy' ? 'خرید' : 'فروش'}` }}
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>

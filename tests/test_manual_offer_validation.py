@@ -170,6 +170,12 @@ class ManualOfferValidationTests(unittest.TestCase):
             offer_parser.extract_price("75800 85900"),
             (None, "❌ چندین قیمت در لفظ وجود دارد (فقط یک عدد 5 یا 6 رقمی مجاز است)"),
         )
+        with patch("bot.utils.offer_parser.validate_price", return_value=(False, "boom")) as validate_price_mock:
+            self.assertEqual(
+                offer_parser.extract_price("75800"),
+                (None, "❌ قیمت یافت نشد (باید عدد 5 یا 6 رقمی باشد)"),
+            )
+            validate_price_mock.assert_called_once_with("75800")
 
         with patch("bot.utils.offer_parser.get_trading_settings", return_value=SimpleNamespace(lot_min_size=5, lot_max_count=2)):
             self.assertEqual(

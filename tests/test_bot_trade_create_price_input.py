@@ -13,6 +13,10 @@ class BotTradeCreatePriceInputTests(unittest.IsolatedAsyncioTestCase):
         await handle_price_input(message, state, user=None, bot=SimpleNamespace())
         message.answer.assert_not_awaited()
 
+        message = SimpleNamespace(text="12ab", answer=AsyncMock())
+        await handle_price_input(message, state, user=SimpleNamespace(id=1), bot=SimpleNamespace())
+        self.assertIn("عدد صحیح", message.answer.await_args.args[0])
+
         message = SimpleNamespace(text="1234", answer=AsyncMock())
         await handle_price_input(message, state, user=SimpleNamespace(id=1), bot=SimpleNamespace())
         self.assertIn("5 یا 6 رقم", message.answer.await_args.args[0])

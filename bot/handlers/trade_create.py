@@ -50,7 +50,7 @@ router = Router()
 
 @router.message(F.text == "📈 معامله")
 async def handle_trade_button(message: types.Message, state: FSMContext, user: Optional[User]):
-    """شروع فرآیند مرحله‌ای ثبت لفظ"""
+    """راهنمای ثبت لفظ متنی به جای فرآیند مرحله‌ای"""
     if not user:
         return
 
@@ -79,9 +79,11 @@ async def handle_trade_button(message: types.Message, state: FSMContext, user: O
 
     await state.clear()
     await message.answer(
-        "📈 **ثبت لفظ جدید**\n\nنوع معامله را انتخاب کنید:",
-        parse_mode="Markdown",
-        reply_markup=get_trade_type_keyboard(),
+        "📝 ثبت لفظ دکمه‌ای غیرفعال شده است.\n\n"
+        "لطفاً لفظ را به صورت متن در همین چت ارسال کنید.\n"
+        "نمونه‌ها:\n"
+        "خ امام 30تا 75800\n"
+        "ف ربع بهار 20 عدد 765000: فقط نقدی",
     )
 
 
@@ -353,8 +355,9 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
         return
 
     price_text = (message.text or "").strip()
-    if not price_text.isdigit() or len(price_text) not in [5, 6]:
-        await message.answer("❌ قیمت باید 5 یا 6 رقم باشد (مثال: 75800 یا 758000)")
+    is_valid, price_error = validate_price(price_text)
+    if not is_valid:
+        await message.answer(price_error.replace("price", "قیمت"))
         return
 
     await state.update_data(price=int(price_text))

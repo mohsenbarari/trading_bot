@@ -69,7 +69,7 @@ function uniquePrice(seed: number) {
 }
 
 test.describe('Market offer creation regressions', () => {
-  test('manual wizard create flow persists a new buy offer', async ({ page, request }) => {
+  test('market page stays text-only and persists a new buy offer from text input', async ({ page, request }) => {
     const tokens = await fetchDevLoginTokens(request)
     const commodity = await fetchFirstCommodity(request)
     const price = uniquePrice(Date.now())
@@ -77,14 +77,14 @@ test.describe('Market offer creation regressions', () => {
     await setAuthTokens(page, tokens)
     await page.goto('/market')
 
-    await page.getByRole('button', { name: /ثبت خرید/ }).click()
-    await page.getByRole('button', { name: commodity.name }).click()
-    await page.getByRole('button', { name: /^10$/ }).click()
-    await page.getByRole('button', { name: /فروش یکجا/ }).click()
-    await page.locator('input[type="number"][placeholder="0"]').fill(String(price))
-    await page.getByRole('button', { name: /ثبت نهایی لفظ خرید/ }).click()
+    await expect(page.getByRole('button', { name: /ثبت خرید/ })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /ثبت فروش/ })).toHaveCount(0)
 
-    await expect(page.getByText('لفظ ثبت شد')).toBeVisible()
+    const offerInput = page.locator('input[type="text"]').first()
+    await offerInput.fill(`خرید ${commodity.name} 10 عدد ${price}`)
+    await offerInput.press('Enter')
+
+    await expect(page.getByText('لفظ متنی ثبت شد')).toBeVisible()
 
     const offers = await fetchMyOffers(request, tokens.access_token)
     expect(
