@@ -5,7 +5,14 @@
 from .user import User
 from .accountant_relation import AccountantRelation, AccountantRelationStatus
 from .invitation import Invitation
-from .session import UserSession, Platform, SessionLoginRequest, LoginRequestStatus
+from .session import (
+    UserSession,
+    Platform,
+    SessionLoginRequest,
+    LoginRequestStatus,
+    SingleSessionRecoveryRequest,
+    SingleSessionRecoveryStatus,
+)
 from .commodity import Commodity, CommodityAlias
 from .notification import Notification
 from .trading_setting import TradingSetting
@@ -40,6 +47,8 @@ __all__ = [
     "Platform",
     "SessionLoginRequest",
     "LoginRequestStatus",
+    "SingleSessionRecoveryRequest",
+    "SingleSessionRecoveryStatus",
     "UserBlock",
     # Commodity
     "Commodity",

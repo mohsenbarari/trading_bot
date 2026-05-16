@@ -26,6 +26,16 @@ class LoginRequestStatus(str, enum.Enum):
     EXPIRED = "expired"
 
 
+class SingleSessionRecoveryStatus(str, enum.Enum):
+    PENDING_ADMIN_REVIEW = "pending_admin_review"
+    IDENTITY_VERIFICATION_REQUESTED = "identity_verification_requested"
+    IDENTITY_SUBMITTED = "identity_submitted"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+
+
 class UserSession(Base):
     __tablename__ = "user_sessions"
 
@@ -71,3 +81,44 @@ class SessionLoginRequest(Base):
     # Relationships
     user = relationship("User", backref="login_requests")
     resolved_by_session = relationship("UserSession")
+
+
+class SingleSessionRecoveryRequest(Base):
+    __tablename__ = "single_session_recovery_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_login_request_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("session_login_requests.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    requester_device_name = Column(String(255), nullable=False, default="Unknown Device")
+    requester_ip = Column(String(45), nullable=True)
+    status = Column(
+        SAEnum(
+            SingleSessionRecoveryStatus,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="singlesessionrecoverystatus",
+        ),
+        nullable=False,
+        default=SingleSessionRecoveryStatus.PENDING_ADMIN_REVIEW,
+        index=True,
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    inline_action_expires_at = Column(DateTime(timezone=True), nullable=False)
+    chat_action_expires_at = Column(DateTime(timezone=True), nullable=False)
+    identity_requested_at = Column(DateTime(timezone=True), nullable=True)
+    identity_submitted_at = Column(DateTime(timezone=True), nullable=True)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    decided_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id], backref="single_session_recovery_requests")
+    session_login_request = relationship("SessionLoginRequest", backref="single_session_recovery_requests")
+    decided_by_user = relationship("User", foreign_keys=[decided_by_user_id])
