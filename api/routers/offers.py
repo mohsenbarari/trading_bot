@@ -9,6 +9,7 @@ from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,6 +63,7 @@ class OfferCreate(BaseModel):
     lot_sizes: Optional[List[int]] = Field(default=None, description="بخش‌ها برای فروش خُرد")
     notes: Optional[str] = Field(default=None, max_length=200)
     republished_from_id: Optional[int] = Field(default=None, description="شناسه لفظ قدیمی برای تکرار")
+    warning_acknowledged: bool = Field(default=False, description="آیا هشدار قیمت غیرعادی توسط کاربر تایید شده است")
 
 
 class OfferResponse(BaseModel):
@@ -298,7 +300,12 @@ async def create_offer(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کالا یافت نشد.")
 
     # ===== اعتبارسنجی‌های مشترک (Shared Service) =====
-    from core.services.trade_service import validate_quantity, validate_price, validate_lot_sizes
+    from core.services.trade_service import (
+        detect_offer_price_warning,
+        validate_quantity,
+        validate_price,
+        validate_lot_sizes,
+    )
     
     # 1. اعتبارسنجی تعداد
     is_valid_qty, err_qty = validate_quantity(offer_data.quantity)
@@ -336,6 +343,24 @@ async def create_offer(
     if not is_valid_comp:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_comp)
 
+    price_warning = await detect_offer_price_warning(
+        db=db,
+        offer_type=offer_data.offer_type,
+        commodity_id=offer_data.commodity_id,
+        quantity=offer_data.quantity,
+        proposed_price=offer_data.price,
+        user_id=owner_user.id,
+    )
+    if price_warning and not offer_data.warning_acknowledged:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "error_code": price_warning["error_code"],
+                "detail": price_warning["detail"],
+                "warning": price_warning,
+            },
+        )
+
     # مدیریت تکرار لفظ قدیمی
     if offer_data.republished_from_id:
         old_offer = await db.get(Offer, offer_data.republished_from_id)
@@ -354,6 +379,8 @@ async def create_offer(
         quantity=offer_data.quantity,
         remaining_quantity=offer_data.quantity,
         price=offer_data.price,
+        exclude_from_competitive_price=bool(price_warning),
+        price_warning_type=price_warning["warning_type"] if price_warning else None,
         is_wholesale=offer_data.is_wholesale,
         lot_sizes=offer_data.lot_sizes,
         original_lot_sizes=offer_data.lot_sizes,  # ذخیره ترکیب اولیه برای تکرار

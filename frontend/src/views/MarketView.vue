@@ -5,6 +5,7 @@ import { useOffers } from '../composables/useOffers'
 import { useTradingSort } from '../composables/useTradingSort'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import OffersList from '../components/OffersList.vue'
+import OfferPreviewModal from '../components/OfferPreviewModal.vue'
 import { apiFetch, apiFetchJson } from '../utils/auth'
 
 interface Commodity {
@@ -18,6 +19,29 @@ interface TradingSettings {
   lot_min_size: number
   lot_max_count: number
   offer_expiry_minutes: number
+}
+
+interface ParsedOfferPreview {
+  trade_type: 'buy' | 'sell'
+  commodity_id: number
+  commodity_name: string
+  quantity: number
+  price: number
+  is_wholesale: boolean
+  lot_sizes: number[] | null
+  notes: string | null
+}
+
+interface OfferPriceWarning {
+  error_code: string
+  title: string
+  detail: string
+  message: string
+  warning_type: string
+  reference_label: string
+  reference_price: number
+  proposed_price: number
+  difference_percent: number
 }
 
 const { offers, isLoading, fetchOffers, startPolling, stopPolling } = useOffers()
@@ -48,6 +72,9 @@ const offerText = ref('')
 const parseError = ref('')
 const isSubmitting = ref(false)
 const successMessage = ref('')
+const pendingOfferPreview = ref<ParsedOfferPreview | null>(null)
+const previewError = ref('')
+const previewWarning = ref<OfferPriceWarning | null>(null)
 
 // Computed
 const randomPlaceholder = computed(() => {
@@ -80,10 +107,65 @@ async function fetchTradingSettings() {
     }
 }
 
+function buildOfferCreatePayload(offer: ParsedOfferPreview) {
+  return {
+    offer_type: offer.trade_type,
+    commodity_id: offer.commodity_id,
+    quantity: offer.quantity,
+    price: offer.price,
+    is_wholesale: offer.is_wholesale,
+    lot_sizes: offer.lot_sizes,
+    notes: offer.notes,
+  }
+}
+
+function cancelOfferPreview() {
+  pendingOfferPreview.value = null
+  previewError.value = ''
+  previewWarning.value = null
+}
+
+async function confirmOfferPreview() {
+  if (!pendingOfferPreview.value) return
+  isSubmitting.value = true
+  previewError.value = ''
+
+  try {
+    const response = await apiFetch('/api/offers/', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...buildOfferCreatePayload(pendingOfferPreview.value),
+        warning_acknowledged: !!previewWarning.value,
+      }),
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      if (response.status === 409 && payload?.error_code === 'OFFER_PRICE_WARNING' && payload?.warning) {
+        previewWarning.value = payload.warning as OfferPriceWarning
+        return
+      }
+      throw new Error(payload?.detail || `خطا: ${response.status}`)
+    }
+
+    successMessage.value = 'لفظ متنی ثبت شد'
+    offerText.value = ''
+    pendingOfferPreview.value = null
+    previewWarning.value = null
+    setTimeout(() => successMessage.value = '', 3000)
+    fetchOffers()
+  } catch (e: any) {
+    previewError.value = e.message || 'خطا در ثبت لفظ'
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
 function parseAndSubmitTextOffer() {
   if (!offerText.value.trim()) return
   isSubmitting.value = true
   parseError.value = ''
+  previewError.value = ''
+  previewWarning.value = null
   
   apiFetchJson('/api/offers/parse', {
       method: 'POST',
@@ -91,27 +173,11 @@ function parseAndSubmitTextOffer() {
   })
   .then(res => {
       if (res.success && res.data) {
-          return apiFetchJson('/api/offers/', {
-             method: 'POST',
-             body: JSON.stringify({
-                offer_type: res.data.trade_type,
-                commodity_id: res.data.commodity_id,
-                quantity: res.data.quantity,
-                price: res.data.price,
-                is_wholesale: res.data.is_wholesale,
-                lot_sizes: res.data.lot_sizes,
-                notes: res.data.notes
-             })
-          })
+          pendingOfferPreview.value = res.data as ParsedOfferPreview
+          return null
       } else {
           throw new Error(res.error || 'خطا در پردازش متن')
       }
-  })
-  .then(() => {
-      successMessage.value = 'لفظ متنی ثبت شد'
-      offerText.value = ''
-      setTimeout(() => successMessage.value = '', 3000)
-      fetchOffers()
   })
   .catch(e => parseError.value = e.message)
   .finally(() => isSubmitting.value = false)
@@ -222,6 +288,16 @@ onUnmounted(() => {
         />
       </div>
     </div>
+
+    <OfferPreviewModal
+      v-if="pendingOfferPreview"
+      :offer="pendingOfferPreview"
+      :submitting="isSubmitting"
+      :error="previewError"
+      :warning="previewWarning"
+      @confirm="confirmOfferPreview"
+      @cancel="cancelOfferPreview"
+    />
 
     <!-- Bottom Action Bar -->
     <div class="market-action-bar">

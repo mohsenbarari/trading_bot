@@ -129,11 +129,23 @@ function buildJsonResponse() {
         },
       }
     }
-    if (path === '/api/offers/' && options?.method === 'POST') {
-      return { success: true, id: 999 }
-    }
     return null
   })
+}
+
+function responseOf(data: unknown) {
+  return {
+    ok: true,
+    json: async () => data,
+  }
+}
+
+function errorResponse(status: number, data: unknown) {
+  return {
+    ok: false,
+    status,
+    json: async () => data,
+  }
 }
 
 async function mountTradingView(overrides: Record<string, unknown> = {}) {
@@ -176,9 +188,9 @@ describe('TradingView.vue', () => {
     tradingViewMocks.wsOnMock.mockReset()
     tradingViewMocks.wsOffMock.mockReset()
     buildJsonResponse()
-    tradingViewMocks.apiFetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({}),
+    tradingViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/offers/' && options?.method === 'POST') return responseOf({ success: true, id: 999 })
+      return responseOf({})
     })
   })
 
@@ -231,6 +243,7 @@ describe('TradingView.vue', () => {
     await flushPromises()
 
     tradingViewMocks.apiFetchJsonMock.mockClear()
+    tradingViewMocks.apiFetchMock.mockClear()
 
     await wrapper.find('.text-offer-input').setValue('خرید طلای آب‌شده 50 عدد 222222')
     await wrapper.find('.send-btn').trigger('click')
@@ -240,7 +253,12 @@ describe('TradingView.vue', () => {
       method: 'POST',
       body: JSON.stringify({ text: 'خرید طلای آب‌شده 50 عدد 222222' }),
     }))
-    expect(tradingViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/offers/', expect.objectContaining({
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    expect(tradingViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({
         offer_type: 'buy',
@@ -250,9 +268,57 @@ describe('TradingView.vue', () => {
         is_wholesale: true,
         lot_sizes: null,
         notes: 'از متن',
+        warning_acknowledged: false,
       }),
     }))
     expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('')
+
+    wrapper.unmount()
+  })
+
+  it('requires a second confirmation when the server returns a price warning', async () => {
+    const wrapper = await mountTradingView()
+    await flushPromises()
+
+    tradingViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/offers/' && options?.method === 'POST') {
+        const body = JSON.parse(String(options.body))
+        if (!body.warning_acknowledged) {
+          return errorResponse(409, {
+            error_code: 'OFFER_PRICE_WARNING',
+            detail: 'warning detail',
+            warning: {
+              error_code: 'OFFER_PRICE_WARNING',
+              title: 'هشدار قیمت خرید',
+              detail: 'قیمت خرید شما از بالاترین خرید فعال مشابه بالاتر است.',
+              message: 'warning message',
+              warning_type: 'buy_above_highest_active',
+              reference_label: 'بالاترین قیمت خرید فعال',
+              reference_price: 100300,
+              proposed_price: 100500,
+              difference_percent: 0.2,
+            },
+          })
+        }
+        return responseOf({ success: true, id: 1000 })
+      }
+      return responseOf({})
+    })
+
+    await wrapper.find('.text-offer-input').setValue('خرید طلای آب‌شده 50 عدد 222222')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('در نرخ منصفانه لحاظ نخواهد شد')
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    const postCalls = tradingViewMocks.apiFetchMock.mock.calls.filter(([path, options]) => path === '/api/offers/' && options?.method === 'POST')
+    expect(postCalls).toHaveLength(2)
+    expect(JSON.parse(String(postCalls[1]![1].body)).warning_acknowledged).toBe(true)
 
     wrapper.unmount()
   })

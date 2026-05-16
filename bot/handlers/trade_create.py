@@ -48,6 +48,17 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+def _get_price_warning_keyboard(confirm_callback_data: str, cancel_callback_data: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⚠️ با وجود هشدار منتشر کن", callback_data=confirm_callback_data),
+                InlineKeyboardButton(text="❌ انصراف", callback_data=cancel_callback_data),
+            ]
+        ]
+    )
+
+
 @router.message(F.text == "📈 معامله")
 async def handle_trade_button(message: types.Message, state: FSMContext, user: Optional[User]):
     """راهنمای ثبت لفظ متنی به جای فرآیند مرحله‌ای"""
@@ -445,13 +456,16 @@ async def _handle_trade_confirm_core(
     increment_user_counter_fn,
     success_message_text: str,
     unexpected_error_prefix: str,
+    warning_confirm_callback_data: str,
+    cancel_callback_data: str,
+    warning_acknowledged: bool = False,
 ) -> None:
     if not user:
         await callback.answer()
         return
 
     from core.trading_settings import get_trading_settings
-    from core.services.trade_service import validate_competitive_price
+    from core.services.trade_service import detect_offer_price_warning, validate_competitive_price
 
     ts = get_trading_settings()
     data = await state.get_data()
@@ -516,6 +530,7 @@ async def _handle_trade_confirm_core(
     lot_sizes = data.get("lot_sizes")
     notes = data.get("notes")
 
+    price_warning = None
     async with AsyncSessionLocal() as session:
         is_valid_comp, err_comp = await validate_competitive_price(
             db=session,
@@ -525,9 +540,29 @@ async def _handle_trade_confirm_core(
             proposed_price=price,
             user_id=user.id,
         )
+        if is_valid_comp:
+            price_warning = await detect_offer_price_warning(
+                db=session,
+                offer_type=trade_type,
+                commodity_id=commodity_id,
+                quantity=quantity,
+                proposed_price=price,
+                user_id=user.id,
+            )
     if not is_valid_comp:
         await callback.message.edit_text(err_comp, parse_mode="Markdown")
         await state.clear()
+        await callback.answer()
+        return
+
+    if price_warning and not warning_acknowledged:
+        await callback.message.edit_text(
+            price_warning["message"],
+            reply_markup=_get_price_warning_keyboard(
+                confirm_callback_data=warning_confirm_callback_data,
+                cancel_callback_data=cancel_callback_data,
+            ),
+        )
         await callback.answer()
         return
 
@@ -554,6 +589,8 @@ async def _handle_trade_confirm_core(
                 quantity=quantity,
                 remaining_quantity=quantity,
                 price=price,
+                exclude_from_competitive_price=bool(price_warning),
+                price_warning_type=price_warning["warning_type"] if price_warning else None,
                 is_wholesale=is_wholesale,
                 lot_sizes=lot_sizes,
                 notes=notes,
@@ -669,6 +706,26 @@ async def handle_trade_confirm(callback: types.CallbackQuery, state: FSMContext,
         increment_user_counter_fn=increment_user_counter,
         success_message_text="✅ لفظ شما با موفقیت در کانال ارسال شد!",
         unexpected_error_prefix="❌ لفظ ثبت نشد",
+        warning_confirm_callback_data=TradeActionCallback(action="confirm_warning").pack(),
+        cancel_callback_data=TradeActionCallback(action="cancel").pack(),
+    )
+
+
+@router.callback_query(TradeActionCallback.filter(F.action == "confirm_warning"))
+async def handle_trade_warning_confirm(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
+    await _handle_trade_confirm_core(
+        callback,
+        state,
+        user,
+        bot,
+        check_user_limits_fn=check_user_limits,
+        to_jalali_str_fn=to_jalali_str,
+        increment_user_counter_fn=increment_user_counter,
+        success_message_text="✅ لفظ شما با موفقیت در کانال ارسال شد!",
+        unexpected_error_prefix="❌ لفظ ثبت نشد",
+        warning_confirm_callback_data=TradeActionCallback(action="confirm_warning").pack(),
+        cancel_callback_data=TradeActionCallback(action="cancel").pack(),
+        warning_acknowledged=True,
     )
 
 
@@ -902,6 +959,30 @@ async def handle_text_offer_confirm(callback: types.CallbackQuery, state: FSMCon
         increment_user_counter_fn=runtime_increment_user_counter,
         success_message_text="✅ لفظ شما با موفقیت در کانال منتشر شد!",
         unexpected_error_prefix="❌ خطا در ارسال به کانال",
+        warning_confirm_callback_data=TextOfferActionCallback(action="confirm_warning").pack(),
+        cancel_callback_data=TextOfferActionCallback(action="cancel").pack(),
+    )
+
+
+@router.callback_query(Trade.awaiting_text_confirm, TextOfferActionCallback.filter(F.action == "confirm_warning"))
+async def handle_text_offer_warning_confirm(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
+    from core.utils import check_user_limits as runtime_check_user_limits
+    from core.utils import increment_user_counter as runtime_increment_user_counter
+    from core.utils import to_jalali_str as runtime_to_jalali_str
+
+    await _handle_trade_confirm_core(
+        callback,
+        state,
+        user,
+        bot,
+        check_user_limits_fn=runtime_check_user_limits,
+        to_jalali_str_fn=runtime_to_jalali_str,
+        increment_user_counter_fn=runtime_increment_user_counter,
+        success_message_text="✅ لفظ شما با موفقیت در کانال منتشر شد!",
+        unexpected_error_prefix="❌ خطا در ارسال به کانال",
+        warning_confirm_callback_data=TextOfferActionCallback(action="confirm_warning").pack(),
+        cancel_callback_data=TextOfferActionCallback(action="cancel").pack(),
+        warning_acknowledged=True,
     )
 
 
