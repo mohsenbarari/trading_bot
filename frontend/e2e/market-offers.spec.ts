@@ -1,3 +1,6 @@
+/// <reference types="node" />
+
+import { execFileSync } from 'child_process'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
@@ -5,6 +8,18 @@ const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 interface AuthTokens {
   access_token: string
   refresh_token: string
+}
+
+interface SeededSessionFixture {
+  userId: number
+  accountName: string
+  accessToken: string
+  refreshToken: string
+}
+
+interface SeededCommoditySessionFixture extends SeededSessionFixture {
+  commodityId: number
+  commodityName: string
 }
 
 interface Commodity {
@@ -17,6 +32,260 @@ interface OfferSummary {
   commodity_name: string
   quantity: number
   price: number
+}
+
+interface PersistedOfferRecord {
+  id: number
+  userId: number
+  offerType: 'buy' | 'sell'
+  price: number
+  quantity: number
+  notes: string | null
+  excludeFromCompetitivePrice: boolean
+  priceWarningType: string | null
+}
+
+function runPythonInApp<T>(script: string): T {
+  const stdout = execFileSync('docker', ['exec', '-i', 'trading_bot_app', 'python', '-'], {
+    input: script,
+    encoding: 'utf8',
+  })
+
+  const lastLine = stdout
+    .split(/\r?\n/)
+    .map((line: string) => line.trim())
+    .filter(Boolean)
+    .at(-1)
+
+  if (!lastLine) {
+    throw new Error('No JSON output returned from trading_bot_app test seed helper')
+  }
+
+  return JSON.parse(lastLine) as T
+}
+
+function seedWarningActorWithComparableOffers(
+  label: string,
+  commodityId: number,
+  comparableOfferType: 'buy' | 'sell',
+  prices: number[],
+  quantity = 10,
+): SeededSessionFixture {
+  return runPythonInApp<SeededSessionFixture>(`
+import asyncio
+import json
+import uuid
+from datetime import timedelta
+
+from core.db import AsyncSessionLocal
+from core.enums import UserRole
+from core.security import create_access_token, create_refresh_token
+from core.services.session_service import hash_token
+from models.offer import Offer, OfferStatus, OfferType
+from models.session import Platform, UserSession
+from models.user import User
+
+label = ${JSON.stringify(label)}
+commodity_id = ${commodityId}
+comparable_offer_type = ${JSON.stringify(comparableOfferType)}
+prices = ${JSON.stringify(prices)}
+quantity = ${quantity}
+
+async def main():
+    suffix = uuid.uuid4().hex[:10]
+    actor_account_name = f"pw_warning_actor_{label}_{suffix}"
+    owner_account_name = f"pw_warning_owner_{label}_{suffix}"
+
+    actor_mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+    owner_mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+
+    async with AsyncSessionLocal() as db:
+        actor = User(
+            account_name=actor_account_name,
+            mobile_number=f"09{actor_mobile_seed:09d}",
+            full_name=actor_account_name,
+            address='Playwright Market Warning Actor',
+            role=UserRole.STANDARD,
+            has_bot_access=True,
+            max_sessions=1,
+        )
+        owner = User(
+            account_name=owner_account_name,
+            mobile_number=f"09{owner_mobile_seed:09d}",
+            full_name=owner_account_name,
+            address='Playwright Market Warning Owner',
+            role=UserRole.STANDARD,
+            has_bot_access=True,
+            max_sessions=1,
+        )
+        db.add_all([actor, owner])
+        await db.flush()
+
+        refresh_token = create_refresh_token(subject=actor.id)
+        session = UserSession(
+            user_id=actor.id,
+            device_name='Playwright Market Warning Device',
+            device_ip='127.0.0.1',
+            platform=Platform.WEB,
+            refresh_token_hash=hash_token(refresh_token),
+            is_primary=True,
+            is_active=True,
+            expires_at=None,
+        )
+        db.add(session)
+        await db.flush()
+
+        access_token = create_access_token(
+            subject=actor.id,
+            expires_delta=timedelta(minutes=60),
+            session_id=str(session.id),
+        )
+
+        offers = []
+        for index, price in enumerate(prices):
+            offers.append(Offer(
+                user_id=owner.id,
+                actor_user_id=owner.id,
+                offer_type=OfferType.BUY if comparable_offer_type == 'buy' else OfferType.SELL,
+                commodity_id=commodity_id,
+                quantity=quantity,
+                remaining_quantity=quantity,
+                price=price,
+                is_wholesale=True,
+                lot_sizes=None,
+                original_lot_sizes=None,
+                notes=f"pw-warning-{label}-{index}",
+                status=OfferStatus.ACTIVE,
+                exclude_from_competitive_price=False,
+            ))
+        db.add_all(offers)
+        await db.commit()
+
+    print(json.dumps({
+        'userId': actor.id,
+        'accountName': actor_account_name,
+        'accessToken': access_token,
+        'refreshToken': refresh_token,
+    }))
+
+asyncio.run(main())
+`)
+}
+
+function seedIsolatedMarketSession(label: string): SeededCommoditySessionFixture {
+  return runPythonInApp<SeededCommoditySessionFixture>(`
+import asyncio
+import json
+import uuid
+from datetime import timedelta
+
+from core.db import AsyncSessionLocal
+from core.enums import UserRole
+from core.security import create_access_token, create_refresh_token
+from core.services.session_service import hash_token
+from models.commodity import Commodity
+from models.session import Platform, UserSession
+from models.user import User
+
+label = ${JSON.stringify(label)}
+
+async def main():
+  suffix = uuid.uuid4().hex[:10]
+  numeric_suffix = int(uuid.uuid4().hex[:8], 16) % 10000
+  account_name = f"pw_market_actor_{label}_{suffix}"
+  commodity_name = f"کالای تست {numeric_suffix}"
+  mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+
+  async with AsyncSessionLocal() as db:
+    commodity = Commodity(name=commodity_name)
+    db.add(commodity)
+    await db.flush()
+
+    actor = User(
+      account_name=account_name,
+      mobile_number=f"09{mobile_seed:09d}",
+      full_name=account_name,
+      address='Playwright Market Isolated Actor',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    db.add(actor)
+    await db.flush()
+
+    refresh_token = create_refresh_token(subject=actor.id)
+    session = UserSession(
+      user_id=actor.id,
+      device_name='Playwright Market Isolated Device',
+      device_ip='127.0.0.1',
+      platform=Platform.WEB,
+      refresh_token_hash=hash_token(refresh_token),
+      is_primary=True,
+      is_active=True,
+      expires_at=None,
+    )
+    db.add(session)
+    await db.flush()
+
+    access_token = create_access_token(
+      subject=actor.id,
+      expires_delta=timedelta(minutes=60),
+      session_id=str(session.id),
+    )
+
+    await db.commit()
+
+  print(json.dumps({
+    'userId': actor.id,
+    'accountName': account_name,
+    'accessToken': access_token,
+    'refreshToken': refresh_token,
+    'commodityId': commodity.id,
+    'commodityName': commodity_name,
+  }))
+
+asyncio.run(main())
+`)
+}
+
+function fetchPersistedOfferByNotes(note: string): PersistedOfferRecord | null {
+  return runPythonInApp<PersistedOfferRecord | null>(`
+import asyncio
+import json
+
+from sqlalchemy import select
+
+from core.db import AsyncSessionLocal
+from models.offer import Offer, OfferType
+
+target_note = ${JSON.stringify(note)}
+
+async def main():
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Offer)
+            .where(Offer.notes == target_note)
+            .order_by(Offer.id.desc())
+        )
+        offer = result.scalars().first()
+
+        if offer is None:
+            print('null')
+            return
+
+        print(json.dumps({
+            'id': offer.id,
+            'userId': offer.user_id,
+            'offerType': 'buy' if offer.offer_type == OfferType.BUY else 'sell',
+            'price': offer.price,
+            'quantity': offer.quantity,
+            'notes': offer.notes,
+            'excludeFromCompetitivePrice': bool(offer.exclude_from_competitive_price),
+            'priceWarningType': offer.price_warning_type,
+        }))
+
+asyncio.run(main())
+`)
 }
 
 async function fetchDevLoginTokens(request: APIRequestContext): Promise<AuthTokens> {
@@ -47,6 +316,15 @@ async function setAuthTokens(page: Page, tokens: AuthTokens) {
   })
 }
 
+async function setSeededSession(page: Page, fixture: SeededSessionFixture) {
+  await page.goto('/login')
+  await page.evaluate(({ accessToken, refreshToken }) => {
+    localStorage.setItem('auth_token', accessToken)
+    localStorage.setItem('refresh_token', refreshToken)
+    localStorage.removeItem('suspended_refresh_token')
+  }, fixture)
+}
+
 async function fetchFirstCommodity(request: APIRequestContext): Promise<Commodity> {
   const response = await request.get(`${BACKEND_BASE_URL}/api/commodities/`)
   expect(response.ok()).toBeTruthy()
@@ -64,33 +342,43 @@ async function fetchMyOffers(request: APIRequestContext, accessToken: string): P
   return response.json() as Promise<OfferSummary[]>
 }
 
+async function openOfferPreview(page: Page, text: string) {
+  const offerInput = page.locator('.text-offer-input').first()
+  await offerInput.fill(text)
+  await offerInput.press('Enter')
+  await expect(page.locator('.offer-preview-card')).toBeVisible()
+}
+
+async function confirmOfferPreview(page: Page) {
+  await page.locator('.offer-preview-confirm').click()
+}
+
 function uniquePrice(seed: number) {
   return 120000 + (seed % 1000)
 }
 
 test.describe('Market offer creation regressions', () => {
   test('market page stays text-only and persists a new buy offer from text input', async ({ page, request }) => {
-    const tokens = await fetchDevLoginTokens(request)
-    const commodity = await fetchFirstCommodity(request)
+    const actor = seedIsolatedMarketSession('buy_text_offer')
     const price = uniquePrice(Date.now())
 
-    await setAuthTokens(page, tokens)
+    await setSeededSession(page, actor)
     await page.goto('/market')
 
     await expect(page.getByRole('button', { name: /ثبت خرید/ })).toHaveCount(0)
     await expect(page.getByRole('button', { name: /ثبت فروش/ })).toHaveCount(0)
 
-    const offerInput = page.locator('input[type="text"]').first()
-    await offerInput.fill(`خرید ${commodity.name} 10 عدد ${price}`)
-    await offerInput.press('Enter')
+    await openOfferPreview(page, `خرید ${actor.commodityName} 10 عدد ${price}`)
+    await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
+    await confirmOfferPreview(page)
 
     await expect(page.getByText('لفظ متنی ثبت شد')).toBeVisible()
 
-    const offers = await fetchMyOffers(request, tokens.access_token)
+    const offers = await fetchMyOffers(request, actor.accessToken)
     expect(
       offers.some((offer) =>
         offer.offer_type === 'buy'
-        && offer.commodity_name === commodity.name
+        && offer.commodity_name === actor.commodityName
         && Number(offer.quantity) === 10
         && Number(offer.price) === price,
       ),
@@ -98,27 +386,91 @@ test.describe('Market offer creation regressions', () => {
   })
 
   test('text offer submission parses and persists a new sell offer', async ({ page, request }) => {
-    const tokens = await fetchDevLoginTokens(request)
-    const commodity = await fetchFirstCommodity(request)
+    const actor = seedIsolatedMarketSession('sell_text_offer')
     const price = uniquePrice(Date.now() + 111)
 
-    await setAuthTokens(page, tokens)
+    await setSeededSession(page, actor)
     await page.goto('/market')
 
-    const offerInput = page.locator('input[type="text"]').first()
-    await offerInput.fill(`فروش ${commodity.name} 12 عدد ${price}`)
-    await offerInput.press('Enter')
+    await openOfferPreview(page, `فروش ${actor.commodityName} 12 عدد ${price}`)
+    await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
+    await confirmOfferPreview(page)
 
     await expect(page.getByText('لفظ متنی ثبت شد')).toBeVisible()
 
-    const offers = await fetchMyOffers(request, tokens.access_token)
+    const offers = await fetchMyOffers(request, actor.accessToken)
     expect(
       offers.some((offer) =>
         offer.offer_type === 'sell'
-        && offer.commodity_name === commodity.name
+        && offer.commodity_name === actor.commodityName
         && Number(offer.quantity) === 12
         && Number(offer.price) === price,
       ),
     ).toBeTruthy()
+  })
+
+  test('sell outlier warning requires a second confirmation and persists exclusion flags', async ({ page, request }) => {
+    const commodity = await fetchFirstCommodity(request)
+    const actor = seedWarningActorWithComparableOffers('sell_warning', commodity.id, 'sell', [100000, 100500, 101000])
+    const uniqueNote = `pw_warn_sell_${Date.now()}`
+
+    await setSeededSession(page, actor)
+    await page.goto('/market')
+
+    await openOfferPreview(page, `فروش ${commodity.name} 10 عدد 99900: ${uniqueNote}`)
+    await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
+    await confirmOfferPreview(page)
+
+    await expect(page.getByRole('heading', { name: 'هشدار قیمت فروش' })).toBeVisible()
+    await expect(page.getByText('پایین‌ترین قیمت فروش فعال')).toBeVisible()
+    await expect(page.getByText('در نرخ منصفانه لحاظ نخواهد شد.')).toBeVisible()
+    await expect(page.locator('.offer-preview-confirm')).toHaveText('با وجود هشدار منتشر کن')
+
+    await confirmOfferPreview(page)
+    await expect(page.getByText('لفظ متنی ثبت شد')).toBeVisible()
+
+    await expect
+      .poll(() => fetchPersistedOfferByNotes(uniqueNote), { timeout: 30000 })
+      .toMatchObject({
+        userId: actor.userId,
+        offerType: 'sell',
+        price: 99900,
+        quantity: 10,
+        excludeFromCompetitivePrice: true,
+        priceWarningType: 'sell_below_lowest_active',
+      })
+  })
+
+  test('buy outlier warning requires a second confirmation and persists exclusion flags', async ({ page, request }) => {
+    const commodity = await fetchFirstCommodity(request)
+    const actor = seedWarningActorWithComparableOffers('buy_warning', commodity.id, 'buy', [100000, 100500, 101000])
+    const uniqueNote = `pw_warn_buy_${Date.now()}`
+    const warningPrice = 999999
+
+    await setSeededSession(page, actor)
+    await page.goto('/market')
+
+    await openOfferPreview(page, `خرید ${commodity.name} 10 عدد ${warningPrice}: ${uniqueNote}`)
+    await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
+    await confirmOfferPreview(page)
+
+    await expect(page.getByRole('heading', { name: 'هشدار قیمت خرید' })).toBeVisible()
+    await expect(page.getByText('بالاترین قیمت خرید فعال')).toBeVisible()
+    await expect(page.getByText('در نرخ منصفانه لحاظ نخواهد شد.')).toBeVisible()
+    await expect(page.locator('.offer-preview-confirm')).toHaveText('با وجود هشدار منتشر کن')
+
+    await confirmOfferPreview(page)
+    await expect(page.getByText('لفظ متنی ثبت شد')).toBeVisible()
+
+    await expect
+      .poll(() => fetchPersistedOfferByNotes(uniqueNote), { timeout: 30000 })
+      .toMatchObject({
+        userId: actor.userId,
+        offerType: 'buy',
+        price: warningPrice,
+        quantity: 10,
+        excludeFromCompetitivePrice: true,
+        priceWarningType: 'buy_above_highest_active',
+      })
   })
 })
