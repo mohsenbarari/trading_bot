@@ -7,7 +7,18 @@ import { primeCurrentUserSummary } from '../utils/currentUser'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
 const router = useRouter()
-const step = ref<'mobile' | 'otp' | 'waiting_approval'>('mobile')
+type LoginStep =
+  | 'mobile'
+  | 'otp'
+  | 'waiting_approval'
+  | 'recovery_waiting'
+  | 'recovery_identity'
+  | 'recovery_submitted'
+  | 'recovery_approved'
+  | 'recovery_rejected'
+  | 'recovery_expired'
+
+const step = ref<LoginStep>('mobile')
 const loading = ref(false)
 const error = ref('')
 const isStandalone = ref(false)
@@ -31,6 +42,18 @@ const approvalExpiresAt = ref<string | null>(null)
 const approvalCountdown = ref(0)
 let approvalTimerInterval: any = null
 let approvalPollInterval: any = null
+
+// Recovery flow state
+const recoveryStatus = ref<string | null>(null)
+const recoveryCountdown = ref(0)
+const recoveryFile = ref<File | null>(null)
+const recoveryCaption = ref('')
+const recoveryApprovedTokens = ref<{ access_token: string; refresh_token?: string | null } | null>(null)
+const recoveryFileInput = ref<HTMLInputElement | null>(null)
+const recoveryCameraInput = ref<HTMLInputElement | null>(null)
+const recoveryDocumentInput = ref<HTMLInputElement | null>(null)
+let recoveryTimerInterval: any = null
+let recoveryPollInterval: any = null
 
 async function completeAuthenticatedLogin(data: { access_token: string; refresh_token?: string | null }) {
   localStorage.setItem('auth_token', data.access_token)
@@ -69,6 +92,21 @@ const formattedTimer = computed(() => {
   const s = (countdown.value % 60).toString().padStart(2, '0')
   return `${m}:${s}`
 })
+
+function formatCountdown(seconds: number) {
+  const safeSeconds = Math.max(0, seconds)
+  const hours = Math.floor(safeSeconds / 3600)
+  const minutes = Math.floor((safeSeconds % 3600) / 60)
+  const remainingSeconds = safeSeconds % 60
+  if (hours > 0) {
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`
+  }
+  return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`
+}
+
+const formattedApprovalTimer = computed(() => formatCountdown(approvalCountdown.value))
+const formattedRecoveryTimer = computed(() => formatCountdown(recoveryCountdown.value))
+const selectedRecoveryFileName = computed(() => recoveryFile.value?.name || '')
 
 const lastMethod = ref<'telegram' | 'sms' | null>(null)
 
@@ -219,8 +257,8 @@ async function verifyOtp() {
 }
 
 function startApprovalPolling() {
-  // Start countdown (120s)
-  approvalCountdown.value = 120
+  const expiresAtMs = approvalExpiresAt.value ? new Date(approvalExpiresAt.value).getTime() : Date.now() + (120 * 1000)
+  approvalCountdown.value = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000))
   if (approvalTimerInterval) clearInterval(approvalTimerInterval)
   approvalTimerInterval = setInterval(() => {
     approvalCountdown.value--
@@ -260,10 +298,276 @@ function startApprovalPolling() {
   }, 2000)
 }
 
-function stopApprovalPolling() {
+function stopApprovalPolling(preserveRequestId = false) {
   if (approvalTimerInterval) { clearInterval(approvalTimerInterval); approvalTimerInterval = null }
   if (approvalPollInterval) { clearInterval(approvalPollInterval); approvalPollInterval = null }
-  loginRequestId.value = null
+  if (!preserveRequestId) {
+    loginRequestId.value = null
+  }
+}
+
+function stopRecoveryPolling(preserveRequestId = false) {
+  if (recoveryTimerInterval) { clearInterval(recoveryTimerInterval); recoveryTimerInterval = null }
+  if (recoveryPollInterval) { clearInterval(recoveryPollInterval); recoveryPollInterval = null }
+  recoveryCountdown.value = 0
+  if (!preserveRequestId) {
+    loginRequestId.value = null
+  }
+}
+
+function clearRecoveryDraft() {
+  recoveryStatus.value = null
+  recoveryFile.value = null
+  recoveryCaption.value = ''
+  recoveryApprovedTokens.value = null
+  if (recoveryFileInput.value) recoveryFileInput.value.value = ''
+  if (recoveryCameraInput.value) recoveryCameraInput.value.value = ''
+  if (recoveryDocumentInput.value) recoveryDocumentInput.value.value = ''
+}
+
+function startRecoveryCountdown(expiresAt?: string | null) {
+  if (recoveryTimerInterval) clearInterval(recoveryTimerInterval)
+
+  const fallbackSeconds = 2 * 60 * 60
+  if (expiresAt) {
+    recoveryCountdown.value = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000))
+  } else {
+    recoveryCountdown.value = fallbackSeconds
+  }
+
+  if (recoveryCountdown.value <= 0) {
+    stopRecoveryPolling(true)
+    step.value = 'recovery_expired'
+    return
+  }
+
+  recoveryTimerInterval = setInterval(() => {
+    recoveryCountdown.value--
+    if (recoveryCountdown.value <= 0) {
+      clearInterval(recoveryTimerInterval)
+      recoveryTimerInterval = null
+      stopRecoveryPolling(true)
+      step.value = 'recovery_expired'
+    }
+  }, 1000)
+}
+
+function parseResponseError(data: any, fallback: string) {
+  if (data && typeof data.detail === 'string' && data.detail.trim()) {
+    return data.detail
+  }
+  return fallback
+}
+
+function applyRecoveryStatus(data: any) {
+  const nextStatus = typeof data?.status === 'string' ? data.status : null
+  recoveryStatus.value = nextStatus
+
+  const expiresAt = typeof data?.chat_action_expires_at === 'string'
+    ? data.chat_action_expires_at
+    : (typeof data?.inline_action_expires_at === 'string' ? data.inline_action_expires_at : null)
+
+  if (nextStatus === 'pending_admin_review') {
+    step.value = 'recovery_waiting'
+    startRecoveryCountdown(expiresAt)
+    return
+  }
+
+  if (nextStatus === 'identity_verification_requested') {
+    step.value = 'recovery_identity'
+    startRecoveryCountdown(expiresAt)
+    return
+  }
+
+  if (nextStatus === 'identity_submitted') {
+    step.value = 'recovery_submitted'
+    startRecoveryCountdown(expiresAt)
+    return
+  }
+
+  if (nextStatus === 'approved') {
+    stopRecoveryPolling(true)
+    recoveryApprovedTokens.value = data?.access_token
+      ? {
+          access_token: data.access_token,
+          refresh_token: data.refresh_token || null,
+        }
+      : null
+    step.value = 'recovery_approved'
+    return
+  }
+
+  if (nextStatus === 'rejected') {
+    stopRecoveryPolling(true)
+    step.value = 'recovery_rejected'
+    return
+  }
+
+  if (nextStatus === 'expired') {
+    stopRecoveryPolling(true)
+    step.value = 'recovery_expired'
+    return
+  }
+
+  if (nextStatus === 'cancelled') {
+    stopRecoveryPolling()
+    clearRecoveryDraft()
+    form.code = ''
+    step.value = 'mobile'
+    error.value = 'درخواست بازیابی لغو شد. برای ادامه دوباره کد تایید دریافت کنید.'
+  }
+}
+
+async function pollRecoveryStatusOnce() {
+  if (!loginRequestId.value) return
+
+  try {
+    const res = await fetch(`/api/sessions/login-requests/${loginRequestId.value}/recovery/status`)
+    if (!res.ok) return
+    const data = await res.json()
+    applyRecoveryStatus(data)
+  } catch {
+    // Ignore polling errors.
+  }
+}
+
+function startRecoveryPolling() {
+  void pollRecoveryStatusOnce()
+  if (recoveryPollInterval) clearInterval(recoveryPollInterval)
+  recoveryPollInterval = setInterval(() => {
+    void pollRecoveryStatusOnce()
+  }, 2000)
+}
+
+async function startRecoveryFlow() {
+  if (!loginRequestId.value || loading.value) return
+
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await fetch(`/api/sessions/login-requests/${loginRequestId.value}/recovery`, {
+      method: 'POST',
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(parseResponseError(data, 'شروع مسیر بازیابی ممکن نشد'))
+    }
+
+    stopApprovalPolling(true)
+    applyRecoveryStatus(data)
+    startRecoveryPolling()
+  } catch (e: any) {
+    error.value = e.message
+  } finally {
+    loading.value = false
+  }
+}
+
+async function cancelRecoveryFlow() {
+  if (!loginRequestId.value || loading.value) return
+
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await fetch(`/api/sessions/login-requests/${loginRequestId.value}/recovery/cancel`, {
+      method: 'POST',
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(parseResponseError(data, 'لغو درخواست بازیابی ممکن نشد'))
+    }
+
+    stopApprovalPolling()
+    stopRecoveryPolling()
+    clearRecoveryDraft()
+    form.code = ''
+    step.value = 'mobile'
+    error.value = 'درخواست بازیابی لغو شد. برای ادامه دوباره کد تایید دریافت کنید.'
+  } catch (e: any) {
+    error.value = e.message
+  } finally {
+    loading.value = false
+  }
+}
+
+function setRecoveryFile(file: File | null) {
+  recoveryFile.value = file
+  if (file) {
+    error.value = ''
+  }
+}
+
+function handleRecoveryFileInput(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0] || null
+  setRecoveryFile(file)
+}
+
+function openRecoveryPicker(kind: 'gallery' | 'camera' | 'file') {
+  if (kind === 'gallery') {
+    recoveryFileInput.value?.click()
+    return
+  }
+  if (kind === 'camera') {
+    recoveryCameraInput.value?.click()
+    return
+  }
+  recoveryDocumentInput.value?.click()
+}
+
+async function submitRecoveryIdentity() {
+  if (!loginRequestId.value) return
+  if (!recoveryFile.value) {
+    error.value = 'ابتدا تصویر یا فایل مدرک را انتخاب کنید.'
+    return
+  }
+
+  loading.value = true
+  error.value = ''
+  try {
+    const formData = new FormData()
+    formData.set('file', recoveryFile.value)
+    const trimmedCaption = recoveryCaption.value.trim()
+    if (trimmedCaption) {
+      formData.set('caption', trimmedCaption)
+    }
+
+    const res = await fetch(`/api/sessions/login-requests/${loginRequestId.value}/recovery/identity`, {
+      method: 'POST',
+      body: formData,
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(parseResponseError(data, 'ارسال مدرک ممکن نشد'))
+    }
+
+    setRecoveryFile(null)
+    recoveryCaption.value = ''
+    applyRecoveryStatus(data?.recovery || data)
+    startRecoveryPolling()
+  } catch (e: any) {
+    error.value = e.message
+  } finally {
+    loading.value = false
+  }
+}
+
+async function enterWithApprovedRecovery() {
+  if (!recoveryApprovedTokens.value?.access_token) {
+    error.value = 'توکن ورود آماده نیست. لطفاً دوباره تلاش کنید.'
+    return
+  }
+
+  await completeAuthenticatedLogin(recoveryApprovedTokens.value)
+}
+
+function restartLoginFlow() {
+  stopApprovalPolling()
+  stopRecoveryPolling()
+  clearRecoveryDraft()
+  form.code = ''
+  error.value = ''
+  step.value = 'mobile'
 }
 
 function installPWA() {
@@ -394,11 +698,16 @@ onUnmounted(() => {
   if (ac) ac.abort();
   if (timerInterval) clearInterval(timerInterval)
   stopApprovalPolling()
+  stopRecoveryPolling()
   clearBackStack()
 })
 
 // Back to mobile step (UI-initiated via "ویرایش شماره" button)
 function goBackToMobile() {
+  stopApprovalPolling()
+  stopRecoveryPolling()
+  clearRecoveryDraft()
+  form.code = ''
   step.value = 'mobile'
   error.value = ''
   popBackState()
@@ -536,11 +845,159 @@ function goBackToMobile() {
               </p>
               <div v-if="approvalCountdown > 0" class="inline-flex items-center gap-2 text-sm font-mono text-amber-600 bg-amber-50 px-4 py-2 rounded-full">
                 <Clock :size="16" />
-                <span>{{ Math.floor(approvalCountdown / 60).toString().padStart(2, '0') }}:{{ (approvalCountdown % 60).toString().padStart(2, '0') }}</span>
+                <span>{{ formattedApprovalTimer }}</span>
               </div>
             </div>
-            <button @click="stopApprovalPolling(); step = 'otp'; error = ''" class="text-xs text-gray-500 hover:text-gray-700 transition-colors">
-              بازگشت به مرحله قبل
+            <div class="space-y-3">
+              <button
+                @click="startRecoveryFlow"
+                :disabled="loading"
+                class="w-full py-3 rounded-xl border border-amber-200 text-amber-700 font-bold text-sm bg-amber-50 hover:bg-amber-100 transition-colors disabled:opacity-50"
+              >
+                به دستگاه قبلی دسترسی ندارم
+              </button>
+              <button @click="stopApprovalPolling(); step = 'otp'; error = ''" class="text-xs text-gray-500 hover:text-gray-700 transition-colors">
+                بازگشت به مرحله قبل
+              </button>
+            </div>
+          </div>
+
+          <div v-else-if="step === 'recovery_waiting'" key="recovery-waiting" class="space-y-6 text-center">
+            <div class="flex flex-col items-center gap-4">
+              <div class="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center animate-pulse">
+                <Loader2 class="w-8 h-8 text-amber-500 animate-spin" />
+              </div>
+              <h3 class="text-lg font-bold text-gray-800">در حال بررسی توسط مدیریت</h3>
+              <p class="text-sm text-gray-500 leading-relaxed">
+                درخواست شما برای بررسی توسط تیم مدیریت ثبت شد.
+                <br/>نتیجه از طریق پیامک و همین صفحه به شما اعلام می‌شود.
+              </p>
+              <div v-if="recoveryCountdown > 0" class="inline-flex items-center gap-2 text-sm font-mono text-amber-600 bg-amber-50 px-4 py-2 rounded-full">
+                <Clock :size="16" />
+                <span>{{ formattedRecoveryTimer }}</span>
+              </div>
+            </div>
+            <button @click="cancelRecoveryFlow" class="text-xs text-gray-500 hover:text-gray-700 transition-colors">
+              انصراف از درخواست
+            </button>
+          </div>
+
+          <div v-else-if="step === 'recovery_identity'" key="recovery-identity" class="space-y-5 text-right">
+            <div class="text-center space-y-3">
+              <h3 class="text-lg font-bold text-gray-800">ارسال مدرک احراز هویت</h3>
+              <p class="text-sm text-gray-500 leading-relaxed">
+                تیم مدیریت برای ادامه بررسی، تصویر کارت شناسایی یا فایل مدرک شما را نیاز دارد.
+                <br/>در صورت تمایل می‌توانید توضیح کوتاه هم همراه آن ارسال کنید.
+              </p>
+              <div v-if="recoveryCountdown > 0" class="inline-flex items-center gap-2 text-sm font-mono text-amber-600 bg-amber-50 px-4 py-2 rounded-full">
+                <Clock :size="16" />
+                <span>{{ formattedRecoveryTimer }}</span>
+              </div>
+            </div>
+
+            <div class="space-y-3">
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <button @click="openRecoveryPicker('gallery')" type="button" class="py-3 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50 transition-colors">
+                  گالری
+                </button>
+                <button @click="openRecoveryPicker('camera')" type="button" class="py-3 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50 transition-colors">
+                  دوربین
+                </button>
+                <button @click="openRecoveryPicker('file')" type="button" class="py-3 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50 transition-colors">
+                  فایل
+                </button>
+              </div>
+
+              <div class="rounded-xl border border-dashed border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-gray-600 text-center min-h-[58px] flex items-center justify-center">
+                <span v-if="selectedRecoveryFileName">{{ selectedRecoveryFileName }}</span>
+                <span v-else>هنوز فایلی انتخاب نشده است</span>
+              </div>
+
+              <textarea
+                v-model="recoveryCaption"
+                rows="3"
+                class="input-premium !min-h-[96px] !py-3"
+                placeholder="توضیح اختیاری..."
+              />
+            </div>
+
+            <div class="space-y-3 text-center">
+              <button @click="submitRecoveryIdentity" :disabled="loading" class="btn-primary group relative overflow-hidden">
+                <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+                <Loader2 v-if="loading" class="animate-spin" />
+                <span v-else>ارسال مدارک</span>
+              </button>
+              <button @click="cancelRecoveryFlow" class="text-xs text-gray-500 hover:text-gray-700 transition-colors">
+                انصراف از درخواست
+              </button>
+            </div>
+          </div>
+
+          <div v-else-if="step === 'recovery_submitted'" key="recovery-submitted" class="space-y-6 text-center">
+            <div class="flex flex-col items-center gap-4">
+              <div class="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center animate-pulse">
+                <Loader2 class="w-8 h-8 text-amber-500 animate-spin" />
+              </div>
+              <h3 class="text-lg font-bold text-gray-800">مدرک ارسال شد</h3>
+              <p class="text-sm text-gray-500 leading-relaxed">
+                مدارک شما برای بررسی ارسال شد.
+                <br/>نتیجه از طریق پیامک و همین صفحه به شما اعلام می‌شود.
+              </p>
+              <div v-if="recoveryCountdown > 0" class="inline-flex items-center gap-2 text-sm font-mono text-amber-600 bg-amber-50 px-4 py-2 rounded-full">
+                <Clock :size="16" />
+                <span>{{ formattedRecoveryTimer }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="step === 'recovery_approved'" key="recovery-approved" class="space-y-6 text-center">
+            <div class="flex flex-col items-center gap-4">
+              <div class="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center">
+                <span class="text-3xl">✓</span>
+              </div>
+              <h3 class="text-lg font-bold text-gray-800">درخواست شما تایید شد</h3>
+              <p class="text-sm text-gray-500 leading-relaxed">
+                اطلاعات لاگین دستگاه قبلی شما منقضی شد.
+                <br/>اکنون می‌توانید وارد سامانه شوید.
+              </p>
+            </div>
+            <button @click="enterWithApprovedRecovery" :disabled="loading" class="btn-primary group relative overflow-hidden">
+              <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+              <span>ورود به سامانه</span>
+            </button>
+          </div>
+
+          <div v-else-if="step === 'recovery_rejected'" key="recovery-rejected" class="space-y-6 text-center">
+            <div class="flex flex-col items-center gap-4">
+              <div class="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center">
+                <span class="text-3xl">✕</span>
+              </div>
+              <h3 class="text-lg font-bold text-gray-800">درخواست شما رد شد</h3>
+              <p class="text-sm text-gray-500 leading-relaxed">
+                درخواست بازیابی نشست توسط تیم مدیریت رد شد.
+                <br/>در صورت نیاز می‌توانید دوباره درخواست خود را ثبت کنید.
+              </p>
+            </div>
+            <button @click="restartLoginFlow" class="btn-primary group relative overflow-hidden">
+              <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+              <span>شروع دوباره</span>
+            </button>
+          </div>
+
+          <div v-else-if="step === 'recovery_expired'" key="recovery-expired" class="space-y-6 text-center">
+            <div class="flex flex-col items-center gap-4">
+              <div class="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
+                <Clock class="w-8 h-8 text-gray-500" />
+              </div>
+              <h3 class="text-lg font-bold text-gray-800">مهلت درخواست به پایان رسید</h3>
+              <p class="text-sm text-gray-500 leading-relaxed">
+                برای این درخواست در مهلت تعیین‌شده پاسخی ثبت نشد.
+                <br/>در صورت نیاز می‌توانید دوباره درخواست خود را ثبت کنید.
+              </p>
+            </div>
+            <button @click="restartLoginFlow" class="btn-primary group relative overflow-hidden">
+              <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+              <span>شروع دوباره</span>
             </button>
           </div>
 
@@ -555,6 +1012,10 @@ function goBackToMobile() {
         </transition>
 
       </div>
+
+      <input ref="recoveryFileInput" type="file" accept="image/*" class="hidden" @change="handleRecoveryFileInput" />
+      <input ref="recoveryCameraInput" type="file" accept="image/*" capture="environment" class="hidden" @change="handleRecoveryFileInput" />
+      <input ref="recoveryDocumentInput" type="file" accept="image/*,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="hidden" @change="handleRecoveryFileInput" />
       
       <!-- Footer Info -->
       <div class="text-center mt-8 text-xs text-gray-400 font-medium opacity-60 flex flex-col gap-2 relative z-50">

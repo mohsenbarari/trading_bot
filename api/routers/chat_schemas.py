@@ -55,6 +55,19 @@ class MessageReactionRead(BaseModel):
     user_id: int
 
 
+class RecoveryActionRead(BaseModel):
+    recovery_id: str
+    status: str
+    prompt_type: Literal["initial_request", "identity_submitted"]
+    expires_at: Optional[datetime] = None
+    can_approve: bool = False
+    can_reject: bool = False
+    can_request_identity: bool = False
+    current_action_message_id: Optional[int] = None
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+
+
 class MessageRead(BaseModel):
     """خواندن پیام"""
 
@@ -82,6 +95,7 @@ class MessageRead(BaseModel):
     sender_highlight_accountant_relation_display_name: Optional[str] = None
     reply_to_message: Optional[MessageReplyRead] = None
     reactions: List[MessageReactionRead] = Field(default_factory=list)
+    recovery_action: Optional[RecoveryActionRead] = None
 
     class Config:
         from_attributes = True

@@ -63,6 +63,10 @@ def make_recovery(**overrides):
     now = datetime.utcnow()
     data = {
         "id": uuid.uuid4(),
+        "user_id": 7,
+        "user": make_user(),
+        "session_login_request_id": uuid.uuid4(),
+        "session_login_request": SimpleNamespace(status=LoginRequestStatus.PENDING),
         "status": SingleSessionRecoveryStatus.PENDING_ADMIN_REVIEW,
         "requester_device_name": "Chrome on Windows",
         "requester_ip": "8.8.8.8",
@@ -142,9 +146,22 @@ class SessionsRouterSingleSessionRecoveryTests(unittest.IsolatedAsyncioTestCase)
             "api.routers.sessions.create_recovery_request",
             new=AsyncMock(return_value=created),
         ) as create_mock:
-            result = await start_single_session_recovery(str(rid_uuid), db=db)
+            with patch(
+                "api.routers.sessions.list_recovery_admin_users",
+                new=AsyncMock(return_value=[make_user(id=90, role=UserRole.SUPER_ADMIN)]),
+            ), patch(
+                "api.routers.sessions._deliver_initial_recovery_messages",
+                new=AsyncMock(),
+            ) as deliver_mock:
+                result = await start_single_session_recovery(str(rid_uuid), db=db)
 
         create_mock.assert_awaited_once_with(db, login_req)
+        deliver_mock.assert_awaited_once_with(
+            db,
+            created,
+            unittest.mock.ANY,
+            unittest.mock.ANY,
+        )
         db.commit.assert_awaited_once()
         self.assertEqual(result["status"], SingleSessionRecoveryStatus.PENDING_ADMIN_REVIEW.value)
 
@@ -167,7 +184,13 @@ class SessionsRouterSingleSessionRecoveryTests(unittest.IsolatedAsyncioTestCase)
         with patch(
             "api.routers.sessions.get_active_recovery_request_for_login_request",
             new=AsyncMock(return_value=recovery),
-        ), patch("api.routers.sessions.cancel_recovery_request") as cancel_mock:
+        ), patch("api.routers.sessions.cancel_recovery_request") as cancel_mock, patch(
+            "api.routers.sessions._clear_recovery_admin_action_messages",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.sessions._publish_recovery_prompt_updates",
+            new=AsyncMock(),
+        ):
             result = await cancel_single_session_recovery(str(rid), db=db)
 
         cancel_mock.assert_called_once_with(recovery)
@@ -192,7 +215,13 @@ class SessionsRouterSingleSessionRecoveryTests(unittest.IsolatedAsyncioTestCase)
         with patch(
             "api.routers.sessions.get_latest_recovery_request_for_login_request",
             new=AsyncMock(return_value=expired_candidate),
-        ), patch("api.routers.sessions.expire_recovery_request") as expire_mock:
+        ), patch("api.routers.sessions.expire_recovery_request") as expire_mock, patch(
+            "api.routers.sessions._clear_recovery_admin_action_messages",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.sessions._publish_recovery_prompt_updates",
+            new=AsyncMock(),
+        ):
             result = await get_single_session_recovery_status(str(rid), db=db)
 
         expire_mock.assert_called_once_with(expired_candidate)

@@ -11,6 +11,7 @@ from .session import (
     SessionLoginRequest,
     LoginRequestStatus,
     SingleSessionRecoveryRequest,
+    SingleSessionRecoveryAdminTarget,
     SingleSessionRecoveryStatus,
 )
 from .commodity import Commodity, CommodityAlias
@@ -48,6 +49,7 @@ __all__ = [
     "SessionLoginRequest",
     "LoginRequestStatus",
     "SingleSessionRecoveryRequest",
+    "SingleSessionRecoveryAdminTarget",
     "SingleSessionRecoveryStatus",
     "UserBlock",
     # Commodity

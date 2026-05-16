@@ -37,6 +37,19 @@ export interface MessageReaction {
     user_id: number
 }
 
+export interface RecoveryAction {
+    recovery_id: string
+    status: string
+    prompt_type: 'initial_request' | 'identity_submitted'
+    expires_at?: string | null
+    can_approve?: boolean
+    can_reject?: boolean
+    can_request_identity?: boolean
+    current_action_message_id?: number | null
+    user_id?: number | null
+    user_name?: string | null
+}
+
 export interface Message {
     id: number
     sender_id: number
@@ -70,6 +83,7 @@ export interface Message {
     sender_highlight_accountant_user_id?: number | null
     sender_highlight_accountant_relation_display_name?: string | null
     reactions?: MessageReaction[]
+    recovery_action?: RecoveryAction | null
     reply_to_message?: {
         id: number
         sender_id: number

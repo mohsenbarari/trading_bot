@@ -16,8 +16,10 @@ import CreateChannelView from './CreateChannelView.vue'
 import AttachmentMenu from './chat/AttachmentMenu.vue'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
+import { useWebSocket } from '../composables/useWebSocket'
 
 import type { ChatForwardTarget, Conversation, Message, MessageReaction, PinnedMessageState } from '../types/chat'
+import { WS_NOTIFICATION_EVENTS } from '../types/notifications'
 import { useChatMedia } from '../composables/chat/useChatMedia'
 import { useChatWebSocket } from '../composables/chat/useChatWebSocket'
 import { useChatMessages } from '../composables/chat/useChatMessages'
@@ -52,6 +54,7 @@ const props = defineProps<{
 const router = useRouter()
 const route = useRoute()
 const notificationStore = useNotificationStore()
+const { on: onGlobalWs, off: offGlobalWs } = useWebSocket()
 
 // Emits
 const emit = defineEmits<{
@@ -2556,6 +2559,46 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
   }
 }
 
+async function handleRecoveryAction(payload: {
+  action: 'approve' | 'reject' | 'request_identity'
+  recoveryId: string
+  userId?: number | null
+}) {
+  const actionPath = payload.action === 'approve'
+    ? 'approve'
+    : payload.action === 'reject'
+      ? 'reject'
+      : 'request-identity'
+
+  try {
+    const response = await apiFetch(`/sessions/recovery/${payload.recoveryId}/${actionPath}`, {
+      method: 'POST',
+    })
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data?.detail || 'انجام این عملیات ممکن نشد')
+    }
+
+    if (selectedUserId.value && selectedRoomKind.value === 'direct') {
+      void loadMessages(selectedUserId.value, true)
+    }
+  } catch (err: any) {
+    window.alert(err?.message || 'انجام این عملیات ممکن نشد')
+  }
+}
+
+function handleRecoveryRealtimeUpdate(payload: { user_id?: number | string }) {
+  const recoveryUserId = Number(payload?.user_id)
+  if (!Number.isFinite(recoveryUserId)) {
+    return
+  }
+  if (selectedRoomKind.value !== 'direct' || selectedUserId.value !== recoveryUserId) {
+    return
+  }
+
+  void loadMessages(recoveryUserId, true)
+}
+
 const handleReplyMessage = () => {
   const msg = contextMenu.value.message
   if (!msg) return
@@ -2813,6 +2856,7 @@ onMounted(async () => {
     openConversationFromRoute(props.targetUserId, props.targetUserName || '')
   }
   
+  onGlobalWs(WS_NOTIFICATION_EVENTS.sessionRecoveryUpdate, handleRecoveryRealtimeUpdate)
   startPolling()
   updateIsMobile()
   window.addEventListener('resize', updateIsMobile)
@@ -2988,6 +3032,7 @@ onUnmounted(() => {
   messagesContainerResizeObserver?.disconnect()
   messagesContainerResizeObserver = null
   window.removeEventListener('resize', updateIsMobile)
+  offGlobalWs(WS_NOTIFICATION_EVENTS.sessionRecoveryUpdate, handleRecoveryRealtimeUpdate)
   stopPolling()
   stopStatusPolling()
   clearBackStack()
@@ -3176,6 +3221,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
                 @delete-album-item="handleAlbumDeleteItem"
                 @toggle-album-download-item="handleAlbumDownloadItemToggle"
                 @toggle-reaction="handleMessageReactionToggle"
+                @recovery-action="handleRecoveryAction"
                 @open-public-profile="openPublicProfile"
                 :on-load="() => hydrateRenderedMedia(item)"
               />

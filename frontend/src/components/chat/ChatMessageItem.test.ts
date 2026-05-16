@@ -615,6 +615,31 @@ describe('ChatMessageItem.vue', () => {
     expect(selectionWrapper.emitted('toggle-reaction')).toBeUndefined()
   })
 
+  it('renders recovery action buttons and emits the selected recovery action payload', async () => {
+    const wrapper = mountTextMessage({
+      recovery_action: {
+        recovery_id: 'rec-1',
+        user_id: 55,
+        can_approve: true,
+        can_reject: true,
+        can_request_identity: true,
+      },
+    })
+
+    await wrapper.get('button').trigger('click')
+    await wrapper.get('button:nth-of-type(2)').trigger('click')
+    await wrapper.get('button:nth-of-type(3)').trigger('click')
+
+    expect(wrapper.text()).toContain('درخواست مدرک')
+    expect(wrapper.text()).toContain('رد درخواست')
+    expect(wrapper.text()).toContain('تایید درخواست')
+    expect(wrapper.emitted('recovery-action')).toEqual([
+      [{ action: 'request_identity', recoveryId: 'rec-1', msg: (wrapper.props() as unknown as Record<string, unknown>).msg, userId: 55 }],
+      [{ action: 'reject', recoveryId: 'rec-1', msg: (wrapper.props() as unknown as Record<string, unknown>).msg, userId: 55 }],
+      [{ action: 'approve', recoveryId: 'rec-1', msg: (wrapper.props() as unknown as Record<string, unknown>).msg, userId: 55 }],
+    ])
+  })
+
   it('shares media by seeding the unified file cache from an existing local blob URL', async () => {
     chatMessageItemMocks.canShareFilesMock.mockReturnValue(true)
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

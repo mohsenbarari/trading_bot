@@ -1,15 +1,24 @@
 <script setup lang="ts">
-import { X, Check, Smartphone } from 'lucide-vue-next'
+import { computed } from 'vue'
+import { X, Check, Smartphone, ShieldAlert, Image } from 'lucide-vue-next'
 import { useSessionApprovalRuntime } from '../composables/useSessionApprovalRuntime'
 
 const {
   approve,
+  approveRecovery,
   countdown,
   loading,
+  openRecoveryThread,
+  pendingRecovery,
   pendingRequest,
   reject,
+  rejectRecovery,
+  requestRecoveryIdentity,
   showModal,
 } = useSessionApprovalRuntime()
+
+const isRecoveryPrompt = computed(() => Boolean(pendingRecovery.value))
+const isIdentitySubmittedPrompt = computed(() => pendingRecovery.value?.prompt_type === 'identity_submitted')
 </script>
 
 <template>
@@ -20,26 +29,36 @@ const {
           <!-- Header -->
           <div class="bg-gradient-to-r from-amber-500 to-amber-600 p-5 text-center">
             <div class="w-14 h-14 bg-white/20 rounded-full mx-auto flex items-center justify-center mb-3">
-              <Smartphone class="w-7 h-7 text-white" />
+              <Image v-if="isIdentitySubmittedPrompt" class="w-7 h-7 text-white" />
+              <ShieldAlert v-else-if="isRecoveryPrompt" class="w-7 h-7 text-white" />
+              <Smartphone v-else class="w-7 h-7 text-white" />
             </div>
-            <h3 class="text-white font-bold text-lg">درخواست ورود جدید</h3>
+            <h3 class="text-white font-bold text-lg">
+              <template v-if="isIdentitySubmittedPrompt">مدرک هویتی دریافت شد</template>
+              <template v-else-if="isRecoveryPrompt">درخواست بازیابی نشست</template>
+              <template v-else>درخواست ورود جدید</template>
+            </h3>
           </div>
 
           <!-- Body -->
           <div class="p-5 space-y-4">
             <div class="bg-gray-50 rounded-xl p-4 space-y-2 text-sm text-right">
               <div class="flex justify-between items-center">
-                <span class="font-mono text-xs text-gray-500 dir-ltr">{{ pendingRequest?.device_ip || '—' }}</span>
+                <span class="font-mono text-xs text-gray-500 dir-ltr">{{ pendingRecovery?.requester_ip || pendingRequest?.device_ip || '—' }}</span>
                 <span class="text-gray-600 font-medium">آی‌پی</span>
               </div>
               <div class="flex justify-between items-center">
-                <span class="text-gray-700">{{ pendingRequest?.device_name || 'دستگاه ناشناس' }}</span>
+                <span class="text-gray-700">{{ pendingRecovery?.requester_device_name || pendingRequest?.device_name || 'دستگاه ناشناس' }}</span>
                 <span class="text-gray-600 font-medium">دستگاه</span>
+              </div>
+              <div v-if="pendingRecovery?.user_name" class="flex justify-between items-center">
+                <span class="text-gray-700">{{ pendingRecovery.user_name }}</span>
+                <span class="text-gray-600 font-medium">کاربر</span>
               </div>
             </div>
 
-            <p class="text-xs text-gray-500 text-center">
-              آیا اجازه ورود از این دستگاه را می‌دهید؟
+            <p class="text-xs text-gray-500 text-center leading-relaxed">
+              {{ pendingRecovery?.message || 'آیا اجازه ورود از این دستگاه را می‌دهید؟' }}
             </p>
 
             <div v-if="countdown > 0" class="text-center text-xs text-gray-400 font-mono">
@@ -47,7 +66,43 @@ const {
             </div>
 
             <!-- Actions -->
-            <div class="flex gap-3">
+            <div v-if="isIdentitySubmittedPrompt" class="flex gap-3">
+              <button
+                @click="openRecoveryThread"
+                :disabled="loading"
+                class="flex-1 py-3 rounded-xl bg-amber-500 text-white font-bold text-sm hover:bg-amber-600 transition-colors disabled:opacity-50"
+              >
+                <Image class="w-4 h-4 inline-block ml-1" />
+                مشاهده تصویر کارت شناسایی
+              </button>
+            </div>
+            <div v-else-if="isRecoveryPrompt" class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <button
+                @click="rejectRecovery"
+                :disabled="loading"
+                class="py-3 rounded-xl border border-red-200 text-red-600 font-bold text-sm hover:bg-red-50 transition-colors disabled:opacity-50"
+              >
+                <X class="w-4 h-4 inline-block ml-1" />
+                رد
+              </button>
+              <button
+                @click="requestRecoveryIdentity"
+                :disabled="loading"
+                class="py-3 rounded-xl border border-amber-200 text-amber-700 font-bold text-sm hover:bg-amber-50 transition-colors disabled:opacity-50"
+              >
+                <Image class="w-4 h-4 inline-block ml-1" />
+                درخواست مدرک
+              </button>
+              <button
+                @click="approveRecovery"
+                :disabled="loading"
+                class="py-3 rounded-xl bg-emerald-500 text-white font-bold text-sm hover:bg-emerald-600 transition-colors disabled:opacity-50"
+              >
+                <Check class="w-4 h-4 inline-block ml-1" />
+                تایید
+              </button>
+            </div>
+            <div v-else class="flex gap-3">
               <button
                 @click="reject"
                 :disabled="loading"

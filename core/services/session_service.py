@@ -314,42 +314,15 @@ async def approve_login_request(
         if active_recovery is not None:
             return {"error": "برای این درخواست، مسیر بازیابی نشست فعال شده و تایید از دستگاه قبلی دیگر مجاز نیست"}
 
-    # Load user to get max_sessions
-    user = (await db.execute(select(User).where(User.id == login_req.user_id))).scalar_one()
-    active_sessions = await get_active_sessions(db, login_req.user_id)
-    max_sessions_allowed = 1 if await _is_accountant_user(db, user.id) else get_effective_max_sessions(user)
-
-    # Determine how many sessions to evict to make room for the new one
-    num_to_evict = max(0, len(active_sessions) - max_sessions_allowed + 1)
-    
-    for _ in range(num_to_evict):
-        if not active_sessions: 
-            break
-        non_primary = [s for s in active_sessions if not s.is_primary]
-        if non_primary:
-            # Evict newest non-primary session
-            to_evict = non_primary[-1]
-        else:
-            # Reached max_sessions and only primary left, we must evict the primary to respect the limit
-            primaries = [s for s in active_sessions if s.is_primary]
-            to_evict = primaries[-1] if primaries else active_sessions[-1]
-            
-        await deactivate_session(db, to_evict)
-        active_sessions.remove(to_evict)
-
-    has_primary = any(s.is_primary for s in active_sessions)
-
     # Mark request as approved
     login_req.status = LoginRequestStatus.APPROVED
     login_req.resolved_by_session_id = approver_session.id
 
-    # Create new session
-    new_session = await create_session(
-        db, login_req.user_id, refresh_token,
-        login_req.requester_device_name,
-        login_req.requester_ip,
-        platform,
-        is_primary=(not has_primary),
+    new_session = await provision_session_for_login_request(
+        db,
+        login_request=login_req,
+        refresh_token=refresh_token,
+        platform=platform,
         home_server=home_server or login_req.requester_home_server,
     )
 
@@ -365,6 +338,46 @@ async def approve_login_request(
         logger.warning(f"Failed to publish login approved event: {e}")
     
     return {"session": new_session}
+
+
+async def provision_session_for_login_request(
+    db: AsyncSession,
+    *,
+    login_request: SessionLoginRequest,
+    refresh_token: str,
+    platform: Platform = Platform.WEB,
+    home_server: Optional[str] = None,
+) -> UserSession:
+    """Create the admitted session for one already-authorized login request without committing."""
+    user = (await db.execute(select(User).where(User.id == login_request.user_id))).scalar_one()
+    active_sessions = await get_active_sessions(db, login_request.user_id)
+    max_sessions_allowed = 1 if await _is_accountant_user(db, user.id) else get_effective_max_sessions(user)
+
+    num_to_evict = max(0, len(active_sessions) - max_sessions_allowed + 1)
+    for _ in range(num_to_evict):
+        if not active_sessions:
+            break
+        non_primary = [session for session in active_sessions if not session.is_primary]
+        if non_primary:
+            to_evict = non_primary[-1]
+        else:
+            primaries = [session for session in active_sessions if session.is_primary]
+            to_evict = primaries[-1] if primaries else active_sessions[-1]
+
+        await deactivate_session(db, to_evict)
+        active_sessions.remove(to_evict)
+
+    has_primary = any(session.is_primary for session in active_sessions)
+    return await create_session(
+        db,
+        login_request.user_id,
+        refresh_token,
+        login_request.requester_device_name,
+        login_request.requester_ip,
+        platform,
+        is_primary=(not has_primary),
+        home_server=home_server or login_request.requester_home_server,
+    )
 
 
 async def reject_login_request(

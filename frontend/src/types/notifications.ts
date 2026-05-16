@@ -2,6 +2,7 @@ export const WS_NOTIFICATION_EVENTS = {
     appMessage: 'message',
     chatMessage: 'chat:message',
     sessionLoginRequest: 'session:login_request',
+    sessionRecoveryUpdate: 'session:single_session_recovery',
     sessionRevoked: 'session:revoked',
     wsReconnect: 'ws:reconnect',
 } as const
@@ -64,6 +65,24 @@ export interface SessionLoginRequestPayload {
     device_name?: string
     device_ip?: string
     expires_at?: string
+}
+
+export interface SessionRecoveryPromptPayload {
+    recovery_id?: string
+    status?: string
+    prompt_type?: 'initial_request' | 'identity_submitted'
+    user_id?: number
+    user_name?: string
+    requester_device_name?: string
+    requester_ip?: string
+    inline_action_expires_at?: string
+    chat_action_expires_at?: string
+    current_action_message_id?: number | null
+    can_approve?: boolean
+    can_reject?: boolean
+    can_request_identity?: boolean
+    visible?: boolean
+    message?: string
 }
 
 export interface BrowserNotificationClickDetail {

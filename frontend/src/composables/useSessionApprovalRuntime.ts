@@ -1,7 +1,12 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { apiFetch } from '../utils/auth'
 import { useWebSocket } from './useWebSocket'
-import { type SessionLoginRequestPayload, WS_NOTIFICATION_EVENTS } from '../types/notifications'
+import {
+    type SessionLoginRequestPayload,
+    type SessionRecoveryPromptPayload,
+    WS_NOTIFICATION_EVENTS,
+} from '../types/notifications'
 
 interface SessionSummary {
     is_current?: boolean
@@ -13,9 +18,11 @@ const INITIAL_PENDING_FETCH_DELAY_MS = 1000
 
 export function useSessionApprovalRuntime() {
     const { on, off } = useWebSocket()
+    const router = useRouter()
 
-    const showModal = ref(false)
     const pendingRequest = ref<SessionLoginRequestPayload | null>(null)
+    const pendingRecovery = ref<SessionRecoveryPromptPayload | null>(null)
+    const showModal = ref(false)
     const loading = ref(false)
     const countdown = ref(0)
 
@@ -32,8 +39,9 @@ export function useSessionApprovalRuntime() {
     }
 
     const closeModal = () => {
-        showModal.value = false
         pendingRequest.value = null
+        pendingRecovery.value = null
+        showModal.value = false
         clearCountdown()
         countdown.value = 0
     }
@@ -63,9 +71,45 @@ export function useSessionApprovalRuntime() {
     }
 
     const showPendingRequest = (request: SessionLoginRequestPayload) => {
+        pendingRecovery.value = null
         pendingRequest.value = request
         showModal.value = true
         startCountdown(request.expires_at)
+    }
+
+    const showPendingRecovery = (prompt: SessionRecoveryPromptPayload) => {
+        pendingRequest.value = null
+        pendingRecovery.value = prompt
+        showModal.value = true
+        startCountdown(prompt.inline_action_expires_at || prompt.chat_action_expires_at)
+    }
+
+    const closeRecoveryPrompt = () => {
+        pendingRecovery.value = null
+        if (!pendingRequest.value) {
+            showModal.value = false
+            clearCountdown()
+            countdown.value = 0
+        }
+    }
+
+    const fetchPendingRecoveries = async () => {
+        if (!hasAuthToken() || showModal.value) return false
+
+        try {
+            const response = await apiFetch('/api/sessions/recovery/pending')
+            if (!response.ok) return false
+
+            const data = await response.json()
+            if (Array.isArray(data) && data.length > 0) {
+                showPendingRecovery(data[0] as SessionRecoveryPromptPayload)
+                return true
+            }
+        } catch {
+            // Ignore for non-admin sessions.
+        }
+
+        return false
     }
 
     const fetchPendingRequests = async () => {
@@ -81,6 +125,13 @@ export function useSessionApprovalRuntime() {
             }
         } catch {
             // Ignore here; the endpoint can fail for non-primary devices.
+        }
+    }
+
+    const fetchPendingPrompts = async () => {
+        const hasRecoveryPrompt = await fetchPendingRecoveries()
+        if (!hasRecoveryPrompt) {
+            await fetchPendingRequests()
         }
     }
 
@@ -107,6 +158,19 @@ export function useSessionApprovalRuntime() {
         showPendingRequest(request)
     }
 
+    const handleRecoveryPrompt = (prompt: SessionRecoveryPromptPayload) => {
+        if (!hasAuthToken()) return
+
+        if (prompt?.visible === false) {
+            if (pendingRecovery.value?.recovery_id === prompt.recovery_id) {
+                closeRecoveryPrompt()
+            }
+            return
+        }
+
+        showPendingRecovery(prompt)
+    }
+
     const approve = async () => {
         const requestId = pendingRequest.value?.request_id
         if (!requestId) return
@@ -116,7 +180,12 @@ export function useSessionApprovalRuntime() {
             await apiFetch(`/api/sessions/login-requests/${requestId}/approve`, {
                 method: 'POST'
             })
-            closeModal()
+            pendingRequest.value = null
+            if (!pendingRecovery.value) {
+                showModal.value = false
+                clearCountdown()
+                countdown.value = 0
+            }
         } catch (error) {
             console.error('Approve error:', error)
         } finally {
@@ -133,7 +202,12 @@ export function useSessionApprovalRuntime() {
             await apiFetch(`/api/sessions/login-requests/${requestId}/reject`, {
                 method: 'POST'
             })
-            closeModal()
+            pendingRequest.value = null
+            if (!pendingRecovery.value) {
+                showModal.value = false
+                clearCountdown()
+                countdown.value = 0
+            }
         } catch (error) {
             console.error('Reject error:', error)
         } finally {
@@ -141,27 +215,94 @@ export function useSessionApprovalRuntime() {
         }
     }
 
+    const approveRecovery = async () => {
+        const recoveryId = pendingRecovery.value?.recovery_id
+        if (!recoveryId) return
+
+        loading.value = true
+        try {
+            await apiFetch(`/api/sessions/recovery/${recoveryId}/approve`, {
+                method: 'POST',
+            })
+            closeRecoveryPrompt()
+        } catch (error) {
+            console.error('Recovery approve error:', error)
+        } finally {
+            loading.value = false
+        }
+    }
+
+    const rejectRecovery = async () => {
+        const recoveryId = pendingRecovery.value?.recovery_id
+        if (!recoveryId) return
+
+        loading.value = true
+        try {
+            await apiFetch(`/api/sessions/recovery/${recoveryId}/reject`, {
+                method: 'POST',
+            })
+            closeRecoveryPrompt()
+        } catch (error) {
+            console.error('Recovery reject error:', error)
+        } finally {
+            loading.value = false
+        }
+    }
+
+    const requestRecoveryIdentity = async () => {
+        const recoveryId = pendingRecovery.value?.recovery_id
+        if (!recoveryId) return
+
+        loading.value = true
+        try {
+            await apiFetch(`/api/sessions/recovery/${recoveryId}/request-identity`, {
+                method: 'POST',
+            })
+            closeRecoveryPrompt()
+        } catch (error) {
+            console.error('Recovery request-identity error:', error)
+        } finally {
+            loading.value = false
+        }
+    }
+
+    const openRecoveryThread = async () => {
+        const targetUserId = pendingRecovery.value?.user_id
+        if (!targetUserId) return
+
+        await router.push({
+            path: '/chat',
+            query: {
+                user_id: String(targetUserId),
+                user_name: pendingRecovery.value?.user_name || undefined,
+            },
+        })
+        closeRecoveryPrompt()
+    }
+
     const handleVisibilityChange = () => {
         if (document.visibilityState === 'visible') {
-            void fetchPendingRequests()
+            void fetchPendingPrompts()
         }
     }
 
     onMounted(() => {
         if (hasAuthToken()) {
             initialFetchTimeout = window.setTimeout(() => {
-                void fetchPendingRequests()
+                void fetchPendingPrompts()
             }, INITIAL_PENDING_FETCH_DELAY_MS)
         }
 
         on(WS_NOTIFICATION_EVENTS.sessionLoginRequest, handleLoginRequest)
-        on(WS_NOTIFICATION_EVENTS.wsReconnect, fetchPendingRequests)
+        on(WS_NOTIFICATION_EVENTS.sessionRecoveryUpdate, handleRecoveryPrompt)
+        on(WS_NOTIFICATION_EVENTS.wsReconnect, fetchPendingPrompts)
         document.addEventListener('visibilitychange', handleVisibilityChange)
     })
 
     onBeforeUnmount(() => {
         off(WS_NOTIFICATION_EVENTS.sessionLoginRequest, handleLoginRequest)
-        off(WS_NOTIFICATION_EVENTS.wsReconnect, fetchPendingRequests)
+        off(WS_NOTIFICATION_EVENTS.sessionRecoveryUpdate, handleRecoveryPrompt)
+        off(WS_NOTIFICATION_EVENTS.wsReconnect, fetchPendingPrompts)
         document.removeEventListener('visibilitychange', handleVisibilityChange)
 
         if (initialFetchTimeout !== null) {
@@ -174,10 +315,15 @@ export function useSessionApprovalRuntime() {
 
     return {
         approve,
+        approveRecovery,
         countdown,
         loading,
+        openRecoveryThread,
+        pendingRecovery,
         pendingRequest,
         reject,
+        rejectRecovery,
+        requestRecoveryIdentity,
         showModal,
     }
 }

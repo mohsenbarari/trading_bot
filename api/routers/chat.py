@@ -130,6 +130,9 @@ from core.services.accountant_chat_contract import (
     collect_message_identity_user_ids,
     load_accountant_chat_identity_map,
 )
+from core.services.single_session_recovery_service import (
+    build_recovery_action_map_for_admin_messages,
+)
 from core.services.chat_service import (
     apply_direct_message_delete,
     apply_direct_message_edit,
@@ -595,7 +598,11 @@ async def search_messages(
     )
     result = await db.execute(query)
     messages = result.scalars().all()
-    return await _serialize_direct_messages_with_accountant_contract(db, messages)
+    return await _serialize_direct_messages_with_accountant_contract(
+        db,
+        messages,
+        viewer_user_id=current_user.id,
+    )
 
 
 @router.get("/messages/{user_id}", response_model=List[MessageRead])
@@ -632,14 +639,22 @@ async def get_messages(
         
         # Combine: older reversed (to be asc) + newer
         messages = list(reversed(older_msgs)) + list(newer_msgs)
-        return await _serialize_direct_messages_with_accountant_contract(db, messages)
+        return await _serialize_direct_messages_with_accountant_contract(
+            db,
+            messages,
+            viewer_user_id=current_user.id,
+        )
 
     result = await db.execute(stmt_older)
     messages = result.scalars().all()
     
     # معکوس کردن برای نمایش صعودی
     messages = list(reversed(messages))
-    return await _serialize_direct_messages_with_accountant_contract(db, messages)
+    return await _serialize_direct_messages_with_accountant_contract(
+        db,
+        messages,
+        viewer_user_id=current_user.id,
+    )
 
 
 @router.post("/typing", status_code=status.HTTP_204_NO_CONTENT)
@@ -707,6 +722,8 @@ def _optional_attr(obj: object, name: str):
 async def _enrich_direct_message_reads(
     db: AsyncSession,
     messages: list[MessageRead],
+    *,
+    viewer_user_id: int | None = None,
 ) -> list[MessageRead]:
     if not messages:
         return messages
@@ -714,15 +731,35 @@ async def _enrich_direct_message_reads(
         db,
         collect_message_identity_user_ids(messages),
     )
-    return [
-        MessageRead(**apply_accountant_identity_to_message_payload(message.model_dump(), identity_map))
+    normalized_messages = [
+        apply_accountant_identity_to_message_payload(message.model_dump(), identity_map)
         for message in messages
+    ]
+
+    recovery_action_map: dict[int, dict[str, object]] = {}
+    if viewer_user_id is not None and hasattr(db, "execute"):
+        recovery_action_map = await build_recovery_action_map_for_admin_messages(
+            db,
+            admin_user_id=viewer_user_id,
+            message_ids=[message.id for message in messages],
+        )
+
+    return [
+        MessageRead(
+            **{
+                **payload,
+                "recovery_action": recovery_action_map.get(int(payload["id"])),
+            }
+        )
+        for payload in normalized_messages
     ]
 
 
 async def _serialize_direct_message_with_accountant_contract(
     db: AsyncSession,
     message: Message,
+    *,
+    viewer_user_id: int | None = None,
 ) -> MessageRead:
     return (
         await _enrich_direct_message_reads(
@@ -733,6 +770,7 @@ async def _serialize_direct_message_with_accountant_contract(
                     serializer=MessageRead.from_orm_with_forwarding,
                 )
             ],
+            viewer_user_id=viewer_user_id,
         )
     )[0]
 
@@ -740,12 +778,18 @@ async def _serialize_direct_message_with_accountant_contract(
 async def _serialize_direct_messages_with_accountant_contract(
     db: AsyncSession,
     messages: list[Message],
+    *,
+    viewer_user_id: int | None = None,
 ) -> list[MessageRead]:
     serialized_messages = serialize_direct_messages_for_response(
         messages,
         serializer=MessageRead.from_orm_with_forwarding,
     )
-    return await _enrich_direct_message_reads(db, serialized_messages)
+    return await _enrich_direct_message_reads(
+        db,
+        serialized_messages,
+        viewer_user_id=viewer_user_id,
+    )
 
 
 def _build_direct_message_accountant_serializer(identity_map):
@@ -1397,7 +1441,11 @@ async def get_room_messages(
             before_id=before_id,
             around_id=around_id,
         )
-    return await _serialize_direct_messages_with_accountant_contract(db, messages)
+    return await _serialize_direct_messages_with_accountant_contract(
+        db,
+        messages,
+        viewer_user_id=current_user.id,
+    )
 
 
 @router.post("/rooms/{chat_id}/send", response_model=MessageRead)
@@ -1419,7 +1467,11 @@ async def send_room_message(
             reply_to_message_id=data.reply_to_message_id,
             forwarded_from_id=data.forwarded_from_id,
         )
-        response_message = await _serialize_direct_message_with_accountant_contract(db, message)
+        response_message = await _serialize_direct_message_with_accountant_contract(
+            db,
+            message,
+            viewer_user_id=current_user.id,
+        )
         identity_map = await load_accountant_chat_identity_map(
             db,
             collect_message_identity_user_ids([response_message]),
@@ -1441,7 +1493,11 @@ async def send_room_message(
             reply_to_message_id=data.reply_to_message_id,
             forwarded_from_id=data.forwarded_from_id,
         )
-        response_message = await _serialize_direct_message_with_accountant_contract(db, message)
+        response_message = await _serialize_direct_message_with_accountant_contract(
+            db,
+            message,
+            viewer_user_id=current_user.id,
+        )
         identity_map = await load_accountant_chat_identity_map(
             db,
             collect_message_identity_user_ids([response_message]),
@@ -1517,7 +1573,11 @@ async def send_message(
     )
     if message is None:
         raise HTTPException(status_code=500, detail="Failed to persist message")
-    response_message = await _serialize_direct_message_with_accountant_contract(db, message)
+    response_message = await _serialize_direct_message_with_accountant_contract(
+        db,
+        message,
+        viewer_user_id=current_user.id,
+    )
     identity_map = await load_accountant_chat_identity_map(
         db,
         collect_message_identity_user_ids([response_message]),
@@ -1550,7 +1610,11 @@ async def update_message(
         actor_id=current_user.id,
         content=data.content,
     )
-    return await _serialize_direct_message_with_accountant_contract(db, msg)
+    return await _serialize_direct_message_with_accountant_contract(
+        db,
+        msg,
+        viewer_user_id=current_user.id,
+    )
 
 
 @router.post("/messages/{message_id}/reaction", response_model=MessageRead)
@@ -1581,6 +1645,13 @@ async def toggle_message_reaction(
     reaction_payload = MessageRead(
         **apply_accountant_identity_to_message_payload(reaction_payload.model_dump(), identity_map)
     )
+    reaction_payload = (
+        await _enrich_direct_message_reads(
+            db,
+            [reaction_payload],
+            viewer_user_id=current_user.id,
+        )
+    )[0]
     reaction_chat = await db.get(Chat, updated_message.chat_id) if updated_message.chat_id else None
     if reaction_chat is not None and reaction_chat.type == ChatType.CHANNEL and not reaction_chat.is_deleted:
         await publish_channel_reaction_event(
@@ -1965,7 +2036,11 @@ async def commit_upload_batch_endpoint(
         batch=batch,
         current_user=current_user,
     )
-    serialized_messages = await _serialize_direct_messages_with_accountant_contract(db, commit_result.messages)
+    serialized_messages = await _serialize_direct_messages_with_accountant_contract(
+        db,
+        commit_result.messages,
+        viewer_user_id=current_user.id,
+    )
     serialized_by_id = {message.id: message for message in serialized_messages}
 
     def _serializer(message: Message) -> MessageRead:

@@ -60,7 +60,7 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
             publisher=unittest.mock.ANY,
             sender_name=None,
         )
-        serialize_mock.assert_awaited_once_with(db, message)
+        serialize_mock.assert_awaited_once_with(db, message, viewer_user_id=5)
         self.assertIs(result, serialized)
 
     async def test_send_message_raises_500_when_persist_returns_none(self):
@@ -102,7 +102,7 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
             )
 
         edit_mock.assert_awaited_once_with(db, message_id=44, actor_id=5, content="edited")
-        serialize_mock.assert_awaited_once_with(db, updated)
+        serialize_mock.assert_awaited_once_with(db, updated, viewer_user_id=5)
         self.assertIs(result, serialized)
 
         with patch("api.routers.chat.apply_direct_message_delete", new=AsyncMock()) as delete_mock:

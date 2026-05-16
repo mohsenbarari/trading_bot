@@ -2,21 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import and_, desc, select
+from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.session import (
     SessionLoginRequest,
+    SingleSessionRecoveryAdminTarget,
     SingleSessionRecoveryRequest,
     SingleSessionRecoveryStatus,
 )
+from models.user import User, UserRole
 
 
 INLINE_ACTION_WINDOW_SECONDS = 30
 CHAT_ACTION_WINDOW_SECONDS = 2 * 60 * 60
+ADMIN_RECOVERY_ROLES = frozenset({UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER})
 
 ACTIVE_SINGLE_SESSION_RECOVERY_STATUSES = frozenset(
     {
@@ -97,6 +102,252 @@ def _ensure_status(
         raise InvalidSingleSessionRecoveryTransition(
             f"Cannot {action_label} from status {recovery_request.status.value}"
         )
+
+
+def get_recovery_requester_display_name(user: User | object) -> str:
+    for field_name in ("full_name", "account_name", "mobile_number"):
+        value = getattr(user, field_name, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    user_id = getattr(user, "id", None)
+    if user_id is not None:
+        return f"کاربر {user_id}"
+    return "کاربر"
+
+
+def build_initial_recovery_request_text(display_name: str) -> str:
+    return (
+        f"کاربر [{display_name}] بعلت عدم دسترسی به دستگاه قبلی خود؛ درخواست منقضی کردن "
+        f"اطلاعات لاگین خود از دستگاه قدیم و لاگین کردن در دستگاه جدید را دارد."
+    )
+
+
+def build_identity_submitted_text(display_name: str) -> str:
+    return f"کاربر [{display_name}] مدارک احراز هویت خود را برای بررسی ارسال کرده است."
+
+
+def build_identity_requested_sms_text() -> str:
+    return (
+        "برای ادامه بررسی درخواست ورود از دستگاه جدید، تیم مدیریت نیاز به احراز هویت شما از طریق "
+        "ارسال تصویر کارت شناسایی دارد. برای ادامه، وارد سامانه شوید و مدارک را ارسال کنید."
+    )
+
+
+def build_identity_submitted_sms_text() -> str:
+    return "مدارک احراز هویت شما برای تیم مدیریت ارسال شد و در حال بررسی است. نتیجه از طریق پیامک به شما اعلام میشود."
+
+
+def build_recovery_approved_sms_text(*, after_identity_review: bool) -> str:
+    if after_identity_review:
+        return (
+            "درخواست شما پس از بررسی مدارک احراز هویت تایید شد. اطلاعات لاگین دستگاه قبلی شما منقضی شد و اکنون میتوانید وارد سامانه شوید."
+        )
+    return (
+        "درخواست شما برای ورود از دستگاه جدید تایید شد. اطلاعات لاگین دستگاه قبلی شما منقضی شد و اکنون میتوانید وارد سامانه شوید."
+    )
+
+
+def build_recovery_rejected_sms_text(*, after_identity_review: bool) -> str:
+    if after_identity_review:
+        return "درخواست شما پس از بررسی مدارک احراز هویت توسط تیم مدیریت رد شد. در صورت نیاز میتوانید دوباره درخواست خود را ثبت کنید."
+    return "درخواست شما برای ورود از دستگاه جدید توسط تیم مدیریت رد شد. در صورت نیاز میتوانید دوباره درخواست خود را ثبت کنید."
+
+
+def build_recovery_expired_sms_text() -> str:
+    return (
+        "مهلت بررسی درخواست شما برای ورود از دستگاه جدید به پایان رسید و پاسخی از تیم مدیریت دریافت نشد. "
+        "در صورت نیاز میتوانید دوباره درخواست خود را ثبت کنید."
+    )
+
+
+def should_show_inline_recovery_prompt(
+    recovery_request: SingleSessionRecoveryRequest,
+    admin_target: SingleSessionRecoveryAdminTarget | object,
+    *,
+    now: Optional[datetime] = None,
+) -> bool:
+    current_time = _utcnow(now)
+    if recovery_request.inline_action_expires_at.replace(tzinfo=None) <= current_time:
+        return False
+    if recovery_request.status == SingleSessionRecoveryStatus.PENDING_ADMIN_REVIEW:
+        return True
+    if recovery_request.status == SingleSessionRecoveryStatus.IDENTITY_SUBMITTED:
+        return getattr(admin_target, "current_action_message_id", None) is not None
+    return False
+
+
+def build_recovery_message_action_payload(
+    *,
+    recovery_request: SingleSessionRecoveryRequest,
+    requester_user: User | object,
+    current_action_message_id: int,
+) -> dict[str, object]:
+    prompt_type = "identity_submitted"
+    can_request_identity = False
+    if recovery_request.status == SingleSessionRecoveryStatus.PENDING_ADMIN_REVIEW:
+        prompt_type = "initial_request"
+        can_request_identity = True
+
+    return {
+        "recovery_id": str(recovery_request.id),
+        "status": recovery_request.status.value,
+        "prompt_type": prompt_type,
+        "expires_at": recovery_request.chat_action_expires_at.isoformat()
+        if recovery_request.chat_action_expires_at
+        else None,
+        "can_approve": True,
+        "can_reject": True,
+        "can_request_identity": can_request_identity,
+        "current_action_message_id": current_action_message_id,
+        "user_id": getattr(requester_user, "id", None),
+        "user_name": get_recovery_requester_display_name(requester_user),
+    }
+
+
+async def list_recovery_admin_users(db: AsyncSession) -> list[User]:
+    result = await db.execute(
+        select(User).where(
+            and_(
+                User.is_deleted == False,
+                User.role.in_(tuple(ADMIN_RECOVERY_ROLES)),
+            )
+        )
+    )
+    users = list(result.scalars().all())
+    return sorted(
+        users,
+        key=lambda user: (0 if user.role == UserRole.SUPER_ADMIN else 1, getattr(user, "id", 0)),
+    )
+
+
+async def list_recovery_admin_targets(
+    db: AsyncSession,
+    recovery_request_id,
+) -> list[SingleSessionRecoveryAdminTarget]:
+    result = await db.execute(
+        select(SingleSessionRecoveryAdminTarget)
+        .options(
+            joinedload(SingleSessionRecoveryAdminTarget.recovery_request).joinedload(
+                SingleSessionRecoveryRequest.user
+            ),
+            joinedload(SingleSessionRecoveryAdminTarget.recovery_request).joinedload(
+                SingleSessionRecoveryRequest.session_login_request
+            ),
+        )
+        .where(SingleSessionRecoveryAdminTarget.recovery_request_id == recovery_request_id)
+        .order_by(SingleSessionRecoveryAdminTarget.created_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_recovery_admin_target(
+    db: AsyncSession,
+    *,
+    recovery_id,
+    admin_user_id: int,
+) -> Optional[SingleSessionRecoveryAdminTarget]:
+    result = await db.execute(
+        select(SingleSessionRecoveryAdminTarget)
+        .options(
+            joinedload(SingleSessionRecoveryAdminTarget.recovery_request).joinedload(
+                SingleSessionRecoveryRequest.user
+            ),
+            joinedload(SingleSessionRecoveryAdminTarget.recovery_request).joinedload(
+                SingleSessionRecoveryRequest.session_login_request
+            ),
+        )
+        .where(
+            and_(
+                SingleSessionRecoveryAdminTarget.recovery_request_id == recovery_id,
+                SingleSessionRecoveryAdminTarget.admin_user_id == admin_user_id,
+            )
+        )
+        .limit(1)
+    )
+    return result.scalars().first()
+
+
+async def list_pending_admin_recovery_targets(
+    db: AsyncSession,
+    *,
+    admin_user_id: int,
+    now: Optional[datetime] = None,
+) -> list[tuple[SingleSessionRecoveryAdminTarget, SingleSessionRecoveryRequest, User]]:
+    current_time = _utcnow(now)
+    result = await db.execute(
+        select(SingleSessionRecoveryAdminTarget, SingleSessionRecoveryRequest, User)
+        .join(
+            SingleSessionRecoveryRequest,
+            SingleSessionRecoveryAdminTarget.recovery_request_id == SingleSessionRecoveryRequest.id,
+        )
+        .join(User, User.id == SingleSessionRecoveryRequest.user_id)
+        .where(
+            and_(
+                SingleSessionRecoveryAdminTarget.admin_user_id == admin_user_id,
+                SingleSessionRecoveryRequest.status.in_(
+                    (
+                        SingleSessionRecoveryStatus.PENDING_ADMIN_REVIEW,
+                        SingleSessionRecoveryStatus.IDENTITY_SUBMITTED,
+                    )
+                ),
+                SingleSessionRecoveryRequest.inline_action_expires_at > current_time,
+            )
+        )
+        .order_by(desc(SingleSessionRecoveryRequest.created_at))
+    )
+
+    rows: list[tuple[SingleSessionRecoveryAdminTarget, SingleSessionRecoveryRequest, User]] = []
+    for admin_target, recovery_request, requester_user in result.all():
+        if should_show_inline_recovery_prompt(recovery_request, admin_target, now=current_time):
+            rows.append((admin_target, recovery_request, requester_user))
+    return rows
+
+
+async def build_recovery_action_map_for_admin_messages(
+    db: AsyncSession,
+    *,
+    admin_user_id: int,
+    message_ids: Sequence[int],
+    now: Optional[datetime] = None,
+) -> dict[int, dict[str, object]]:
+    normalized_message_ids = sorted({int(message_id) for message_id in message_ids if int(message_id) > 0})
+    if not normalized_message_ids:
+        return {}
+
+    current_time = _utcnow(now)
+    result = await db.execute(
+        select(SingleSessionRecoveryAdminTarget, SingleSessionRecoveryRequest, User)
+        .join(
+            SingleSessionRecoveryRequest,
+            SingleSessionRecoveryAdminTarget.recovery_request_id == SingleSessionRecoveryRequest.id,
+        )
+        .join(User, User.id == SingleSessionRecoveryRequest.user_id)
+        .where(
+            and_(
+                SingleSessionRecoveryAdminTarget.admin_user_id == admin_user_id,
+                SingleSessionRecoveryAdminTarget.current_action_message_id.in_(normalized_message_ids),
+                SingleSessionRecoveryRequest.chat_action_expires_at > current_time,
+                SingleSessionRecoveryRequest.status.in_(
+                    (
+                        SingleSessionRecoveryStatus.PENDING_ADMIN_REVIEW,
+                        SingleSessionRecoveryStatus.IDENTITY_SUBMITTED,
+                    )
+                ),
+            )
+        )
+    )
+
+    action_map: dict[int, dict[str, object]] = {}
+    for admin_target, recovery_request, requester_user in result.all():
+        current_action_message_id = getattr(admin_target, "current_action_message_id", None)
+        if current_action_message_id is None:
+            continue
+        action_map[int(current_action_message_id)] = build_recovery_message_action_payload(
+            recovery_request=recovery_request,
+            requester_user=requester_user,
+            current_action_message_id=int(current_action_message_id),
+        )
+    return action_map
 
 
 async def get_active_recovery_request_for_login_request(

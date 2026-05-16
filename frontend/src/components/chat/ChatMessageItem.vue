@@ -352,6 +352,46 @@
           </svg>
         </span>
       </div>
+
+      <div
+        v-if="recoveryAction"
+        class="mt-3 flex flex-wrap gap-2"
+        :class="isSent ? 'justify-start' : 'justify-end'"
+        data-context-ignore
+        data-swipe-ignore
+        @click.stop
+      >
+        <button
+          v-if="recoveryAction.can_request_identity"
+          type="button"
+          class="px-3 py-1.5 rounded-full text-xs font-bold border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors"
+          data-context-ignore
+          data-swipe-ignore
+          @click.stop="handleRecoveryActionClick('request_identity')"
+        >
+          درخواست مدرک
+        </button>
+        <button
+          v-if="recoveryAction.can_reject"
+          type="button"
+          class="px-3 py-1.5 rounded-full text-xs font-bold border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
+          data-context-ignore
+          data-swipe-ignore
+          @click.stop="handleRecoveryActionClick('reject')"
+        >
+          رد درخواست
+        </button>
+        <button
+          v-if="recoveryAction.can_approve"
+          type="button"
+          class="px-3 py-1.5 rounded-full text-xs font-bold border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors"
+          data-context-ignore
+          data-swipe-ignore
+          @click.stop="handleRecoveryActionClick('approve')"
+        >
+          تایید درخواست
+        </button>
+      </div>
     </div>
 
     <TransitionGroup
@@ -382,7 +422,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAudioStore } from '../../stores/audio'
-import type { Message, MessageReaction } from '../../types/chat'
+import type { Message, MessageReaction, RecoveryAction } from '../../types/chat'
 import ChatAlbumLayout from './ChatAlbumLayout.vue'
 import { resolveForwardedProfileTarget } from '../../utils/accountantChatIdentity'
 import { observeVisibility } from '../../utils/sharedVisibilityObserver'
@@ -453,6 +493,7 @@ const emit = defineEmits<{
   (e: 'delete-album-item', msg: any): void
   (e: 'toggle-album-download-item', msg: any): void
   (e: 'toggle-reaction', payload: { msg: any, emoji: string }): void
+  (e: 'recovery-action', payload: { action: 'approve' | 'reject' | 'request_identity'; recoveryId: string; msg: any; userId?: number | null }): void
   (e: 'open-public-profile', payload: { id: number; account_name: string; highlight_accountant_user_id?: number | null; highlight_accountant_relation_display_name?: string | null }): void
 }>()
 
@@ -470,6 +511,7 @@ const isSelected = computed(() => props.selectedMessages.includes(props.msg.id))
 const canOpenForwardedProfile = computed(() => {
   return resolveForwardedProfileTarget(props.msg) !== null
 })
+const recoveryAction = computed<RecoveryAction | null>(() => props.msg?.recovery_action || null)
 const groupedReactions = computed(() => {
   if (props.msg.is_deleted || !Array.isArray(props.msg.reactions) || props.msg.reactions.length === 0) {
     return [] as Array<{ emoji: string, count: number, reactedByCurrentUser: boolean, sortOrder: number }>
@@ -1348,6 +1390,19 @@ function handleForwardedProfileClick() {
   }
 
   emit('open-public-profile', target)
+}
+
+function handleRecoveryActionClick(action: 'approve' | 'reject' | 'request_identity') {
+  if (!recoveryAction.value?.recovery_id) {
+    return
+  }
+
+  emit('recovery-action', {
+    action,
+    recoveryId: recoveryAction.value.recovery_id,
+    msg: props.msg,
+    userId: recoveryAction.value.user_id ?? null,
+  })
 }
 
 const handleWrapperClick = (e: MouseEvent) => {
