@@ -1234,7 +1234,7 @@ test.describe('Channel media regressions', () => {
       if (browserName !== 'webkit') {
         await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال ارسال فایل...`, { timeout: 30000 })
       } else {
-        await expect(senderPage.locator('.messages-container .sending-status-wrapper').first()).toBeVisible({ timeout: 30000 })
+        await expect(senderPage.locator('.messages-container [data-media-msg-id]').first()).toBeVisible({ timeout: 30000 })
       }
 
       await navigateFromMessengerToMarket(senderPage)
