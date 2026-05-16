@@ -213,106 +213,15 @@ describe('TradingView.vue', () => {
     wrapper.unmount()
   })
 
-  it('walks the wholesale create-offer wizard and submits the previewed offer', async () => {
+  it('keeps offer creation text-only and does not render wizard actions', async () => {
     const wrapper = await mountTradingView()
     await flushPromises()
 
-    tradingViewMocks.apiFetchJsonMock.mockClear()
-
-    await wrapper.find('.action-btn.buy').trigger('click')
-    await flushPromises()
-    await wrapper.findAll('.commodity-btn')[0]!.trigger('click')
-    await flushPromises()
-    await wrapper.findAll('.qty-btn')[0]!.trigger('click')
-    await flushPromises()
-    await wrapper.find('.lot-btn.wholesale').trigger('click')
-    await flushPromises()
-
-    await wrapper.find('.price-input').setValue('123456')
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
-
-    await wrapper.find('.notes-input').setValue('یادداشت تست')
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('.preview-card').text()).toContain('🟢 خرید')
-    expect(wrapper.find('.preview-card').text()).toContain('سکه')
-    expect(wrapper.find('.preview-card').text()).toContain('123,456')
-
-    await wrapper.find('.submit-btn').trigger('click')
-    await flushPromises()
-
-    expect(tradingViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/offers/', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({
-        offer_type: 'buy',
-        commodity_id: 1,
-        commodity_name: 'سکه',
-        quantity: 10,
-        price: 123456,
-        is_wholesale: true,
-        lot_sizes: null,
-        notes: 'یادداشت تست',
-        republished_from_id: null,
-      }),
-    }))
-
-    wrapper.unmount()
-  })
-
-  it('validates retail lot input before submitting a retail offer', async () => {
-    const wrapper = await mountTradingView()
-    await flushPromises()
-
-    tradingViewMocks.apiFetchJsonMock.mockClear()
-
-    await wrapper.find('.action-btn.sell').trigger('click')
-    await flushPromises()
-    await wrapper.findAll('.commodity-btn')[1]!.trigger('click')
-    await flushPromises()
-    await wrapper.findAll('.qty-btn')[0]!.trigger('click')
-    await flushPromises()
-    await wrapper.find('.lot-btn.retail').trigger('click')
-    await flushPromises()
-
-    await wrapper.find('.lot-input').setValue('4 3')
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('.wizard-error').text()).toContain('مجموع (7) با تعداد (10) برابر نیست')
-
-    await wrapper.find('.lot-input').setValue('4 6')
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
-
-    await wrapper.find('.price-input').setValue('333333')
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
-    await wrapper.find('.confirm-btn').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('.preview-card').text()).toContain('خُرد')
-    expect(wrapper.find('.preview-card').text()).toContain('4')
-    expect(wrapper.find('.preview-card').text()).toContain('6')
-
-    await wrapper.find('.submit-btn').trigger('click')
-    await flushPromises()
-
-    expect(tradingViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/offers/', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({
-        offer_type: 'sell',
-        commodity_id: 2,
-        commodity_name: 'طلای آب‌شده',
-        quantity: 10,
-        price: 333333,
-        is_wholesale: false,
-        lot_sizes: [4, 6],
-        notes: '',
-        republished_from_id: null,
-      }),
-    }))
+    expect(wrapper.find('.action-btn.buy').exists()).toBe(false)
+    expect(wrapper.find('.action-btn.sell').exists()).toBe(false)
+    expect(wrapper.find('.wizard-overlay').exists()).toBe(false)
+    expect(wrapper.find('.text-offer-input').exists()).toBe(true)
+    expect(wrapper.find('.send-btn').exists()).toBe(true)
 
     wrapper.unmount()
   })
@@ -375,7 +284,7 @@ describe('TradingView.vue', () => {
     wrapper.unmount()
   })
 
-  it('expires active offers and reopens expired offers from the my-offers tab', async () => {
+  it('expires active offers and shows a text-only retry note for expired offers', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const repeatedOffer = {
       ...myOffersFixture[0],
@@ -418,11 +327,8 @@ describe('TradingView.vue', () => {
 
     const repeatedWrapper = await mountTradingView({ initialTab: 'my_offers' })
     await flushPromises()
-    await repeatedWrapper.find('.repeat-btn').trigger('click')
-    await flushPromises()
-
-    expect(repeatedWrapper.find('.preview-card').text()).toContain('طلای آب‌شده')
-    expect(repeatedWrapper.find('.preview-card').text()).toContain('لفظ تکراری')
+  expect(repeatedWrapper.text()).toContain('ثبت مجدد فقط با متن')
+  expect(repeatedWrapper.find('.repeat-btn').exists()).toBe(false)
 
     confirmSpy.mockRestore()
     repeatedWrapper.unmount()

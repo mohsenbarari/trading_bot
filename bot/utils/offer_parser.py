@@ -7,6 +7,7 @@ from typing import Optional, Tuple, List
 from sqlalchemy import select
 from models.commodity import Commodity, CommodityAlias
 from core.db import AsyncSessionLocal
+from core.services.trade_service import validate_price
 from core.trading_settings import get_trading_settings
 
 
@@ -168,7 +169,7 @@ def extract_price(text: str) -> Tuple[Optional[int], Optional[str]]:
     Returns: (price, error_message)
     """
     all_numbers = re.findall(r'\d+', text)
-    price_candidates = [n for n in all_numbers if len(n) in [5, 6]]
+    price_candidates = [n for n in all_numbers if validate_price(n)[0]]
     
     if not price_candidates:
         return None, "❌ قیمت یافت نشد (باید عدد 5 یا 6 رقمی باشد)"

@@ -211,82 +211,15 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
-  it('runs the wholesale create-offer wizard and submits the final offer', async () => {
+  it('keeps market offer creation text-only and hides wizard actions', async () => {
     const wrapper = await mountMarketView()
     await flushPromises()
-    marketViewMocks.apiFetchJsonMock.mockClear()
 
-    await wrapper.find('.create-btn.buy').trigger('click')
-    await flushPromises()
-    await wrapper.findAll('.wizard-btn-outline')[0]!.trigger('click')
-    await flushPromises()
-    await wrapper.findAll('.wizard-btn-quick')[0]!.trigger('click')
-    await flushPromises()
-    await wrapper.find('.lot-type-btn.wholesale').trigger('click')
-    await flushPromises()
-    await wrapper.find('.wizard-input.big').setValue('123456')
-    await wrapper.find('.wizard-submit-btn').trigger('click')
-    await flushPromises()
-
-    expect(marketViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/offers/', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({
-        offer_type: 'buy',
-        commodity_id: 1,
-        commodity_name: 'سکه',
-        quantity: 10,
-        price: 123456,
-        is_wholesale: true,
-        lot_sizes: null,
-        notes: null,
-        republished_from_id: null,
-      }),
-    }))
+    expect(wrapper.find('.create-btn.buy').exists()).toBe(false)
+    expect(wrapper.find('.create-btn.sell').exists()).toBe(false)
+    expect(wrapper.find('.wizard-overlay').exists()).toBe(false)
 
     wrapper.unmount()
   })
 
-  it('validates retail lot input before submitting a retail market offer', async () => {
-    const wrapper = await mountMarketView()
-    await flushPromises()
-    marketViewMocks.apiFetchJsonMock.mockClear()
-
-    await wrapper.find('.create-btn.sell').trigger('click')
-    await flushPromises()
-    await wrapper.findAll('.wizard-btn-outline')[1]!.trigger('click')
-    await flushPromises()
-    await wrapper.findAll('.wizard-btn-quick')[0]!.trigger('click')
-    await flushPromises()
-    await wrapper.find('.lot-type-btn.retail').trigger('click')
-    await flushPromises()
-
-    await wrapper.find('.wizard-input').setValue('3 3')
-    await wrapper.find('.wizard-primary-btn').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('.parse-error').text()).toContain('مجموع (6) با تعداد (10) برابر نیست')
-
-    await wrapper.find('.wizard-input').setValue('4 6')
-    await wrapper.find('.wizard-primary-btn').trigger('click')
-    await flushPromises()
-    await wrapper.find('.wizard-input.big').setValue('333333')
-    await wrapper.find('.wizard-submit-btn').trigger('click')
-    await flushPromises()
-
-    expect(marketViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/offers/', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({
-        offer_type: 'sell',
-        commodity_id: 2,
-        commodity_name: 'طلای آب‌شده',
-        quantity: 10,
-        price: 333333,
-        is_wholesale: false,
-        lot_sizes: [4, 6],
-        notes: null,
-        republished_from_id: null,
-      }),
-    }))
-
-    wrapper.unmount()
-  })
 })

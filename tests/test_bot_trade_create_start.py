@@ -30,11 +30,10 @@ class BotTradeCreateStartTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("1405/02/18 - 12:00", restricted_text)
 
         allowed_user = SimpleNamespace(role=UserRole.STANDARD, trading_restricted_until=None)
-        with patch("bot.handlers.trade_create.get_trade_type_keyboard", return_value="KB"):
-            await handle_trade_button(message, state, user=allowed_user)
+        await handle_trade_button(message, state, user=allowed_user)
         state.clear.assert_awaited_once()
-        self.assertIn("ثبت لفظ جدید", message.answer.await_args_list[-1].args[0])
-        self.assertEqual(message.answer.await_args_list[-1].kwargs["reply_markup"], "KB")
+        self.assertIn("ثبت لفظ دکمه‌ای غیرفعال شده", message.answer.await_args_list[-1].args[0])
+        self.assertIn("خ امام 30تا 75800", message.answer.await_args_list[-1].args[0])
 
 
 if __name__ == "__main__":
