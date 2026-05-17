@@ -1,5 +1,6 @@
 import { ref } from 'vue';
 import type { RouteLocationNormalized, NavigationGuardNext } from 'vue-router';
+import { isAdminRoleValue, readCachedCurrentUserRole } from './adminAccess';
 
 export const isAppConnecting = ref(false);
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -97,8 +98,47 @@ export async function isAuthenticated(): Promise<boolean> {
     return false;
 }
 
+function cacheCurrentUserSummaryFromAuthMe(payload: any) {
+    if (!payload || typeof payload !== 'object') return;
+
+    let existing: Record<string, unknown> = {};
+    try {
+        existing = JSON.parse(localStorage.getItem('current_user_summary') || '{}');
+    } catch {
+        existing = {};
+    }
+
+    localStorage.setItem('current_user_summary', JSON.stringify({
+        ...existing,
+        id: payload.id,
+        role: payload.role,
+        account_name: payload.account_name,
+        is_accountant: payload.is_accountant,
+    }));
+}
+
 export function isAdmin(): boolean {
-    return true;
+    return isAdminRoleValue(readCachedCurrentUserRole());
+}
+
+async function ensureAdminAccess(): Promise<boolean> {
+    const cachedRole = readCachedCurrentUserRole();
+    if (cachedRole) {
+        return isAdminRoleValue(cachedRole);
+    }
+
+    try {
+        const response = await apiFetch('/api/auth/me');
+        if (!response.ok) {
+            return false;
+        }
+
+        const data = await response.json();
+        cacheCurrentUserSummaryFromAuthMe(data);
+        return isAdminRoleValue(data?.role);
+    } catch {
+        return false;
+    }
 }
 
 export async function authGuard(
@@ -122,7 +162,7 @@ export async function authGuard(
             return next('/login');
         }
     } 
-    if (meta.requiresAdmin && !isAdmin()) {
+    if (meta.requiresAdmin && !(await ensureAdminAccess())) {
         return next('/dashboard');
     }
     next();

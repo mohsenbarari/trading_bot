@@ -51,9 +51,28 @@ class BotAdminUsersSettingsMenuTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.admin_users.get_user_profile_text", new=AsyncMock(return_value="PROFILE")
         ), patch("bot.handlers.admin_users.get_user_settings_keyboard", return_value="KB") as keyboard_mock:
             await handle_user_settings(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
-        keyboard_mock.assert_called_once_with(9, is_restricted=True, has_limitations=True, can_block=True, max_blocked=5)
+        keyboard_mock.assert_called_once_with(9, is_restricted=True, has_limitations=True, can_block=True, max_blocked=5, can_edit_role=True)
         message.edit_text.assert_awaited_once_with("PROFILE", reply_markup="KB", parse_mode="Markdown")
         callback.answer.assert_awaited_once()
+
+    async def test_middle_manager_cannot_open_settings_for_admin_target(self):
+        target_user = SimpleNamespace(
+            id=9,
+            role=UserRole.MIDDLE_MANAGER,
+            trading_restricted_until=None,
+            max_daily_trades=None,
+            max_active_commodities=None,
+            max_daily_requests=None,
+            can_block_users=True,
+            max_blocked_users=5,
+        )
+        callback = SimpleNamespace(data="user_settings_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(target_user)):
+            await handle_user_settings(callback, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER))
+
+        callback.answer.assert_awaited_once_with("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+        callback.message.edit_text.assert_not_awaited()
 
 
 if __name__ == "__main__":

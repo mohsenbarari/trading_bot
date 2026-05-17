@@ -15,7 +15,7 @@ from core.services.accountant_relation_service import (
 from models.invitation import Invitation
 from models.user import User, UserRole
 from core.config import settings
-from api.deps import get_current_user, verify_super_admin
+from api.deps import get_current_user, verify_admin_user
 from core.sms import send_invitation_sms
 from core.connectivity import is_internet_connected
 
@@ -44,7 +44,7 @@ def generate_short_code():
 async def create_invitation(
     invite: InvitationCreate,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(verify_super_admin)
+    admin: User = Depends(verify_admin_user)
 ):
     # Normalize mobile (simple check)
     mobile = invite.mobile_number
@@ -59,6 +59,9 @@ async def create_invitation(
     existing_user = (await db.execute(stmt)).scalar_one_or_none()
     if existing_user:
         raise HTTPException(status_code=400, detail="کاربری با این نام کاربری یا موبایل قبلاً ثبت شده است")
+
+    if getattr(admin, "role", UserRole.SUPER_ADMIN) == UserRole.MIDDLE_MANAGER and invite.role not in (UserRole.WATCH, UserRole.STANDARD):
+        raise HTTPException(status_code=403, detail="مدیر میانی فقط می‌تواند کاربران عادی یا تماشا را دعوت کند")
 
     # Check active invitation
     stmt = select(Invitation).where(

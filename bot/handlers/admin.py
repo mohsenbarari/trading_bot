@@ -14,6 +14,7 @@ from core.config import settings
 from core.utils import normalize_account_name, normalize_persian_numerals
 from bot.states import InvitationCreation
 from bot.keyboards import (
+    get_invitable_roles_for_admin,
     get_role_selection_keyboard, 
     get_commodity_fsm_cancel_keyboard,
     get_admin_panel_keyboard 
@@ -28,8 +29,31 @@ from schemas import InvitationCreate
 
 router = Router()
 
+
+def _can_manage_invitations(user: Optional[User]) -> bool:
+    return bool(user and user.role in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER))
+
+
+def _deserialize_user_role(raw_role: object) -> Optional[UserRole]:
+    if isinstance(raw_role, UserRole):
+        return raw_role
+    if isinstance(raw_role, str):
+        try:
+            return UserRole(raw_role)
+        except ValueError:
+            try:
+                return UserRole[raw_role]
+            except KeyError:
+                return None
+    return None
+
 # --- ۱. تابع کمکی (اصلاح شد) ---
-async def _return_to_admin_panel(message: types.Message | types.CallbackQuery, state: FSMContext, bot: Bot):
+async def _return_to_admin_panel(
+    message: types.Message | types.CallbackQuery,
+    state: FSMContext,
+    bot: Bot,
+    user_role: Optional[UserRole] = None,
+):
     """
     لنگر قبلی را حذف می‌کند و لنگر پنل مدیریت را ارسال می‌کند.
     """
@@ -51,12 +75,15 @@ async def _return_to_admin_panel(message: types.Message | types.CallbackQuery, s
             await bot.delete_message(chat_id, last_anchor_id)
         except Exception:
             pass
+
+    if user_role is None:
+        user_role = _deserialize_user_role(data.get("inviter_role"))
             
     # --- ارسال لنگر جدید پنل مدیریت ---
     return_msg = await bot.send_message(
         chat_id=chat_id,
         text="...بازگشت به پنل مدیریت",
-        reply_markup=get_admin_panel_keyboard()
+        reply_markup=get_admin_panel_keyboard(user_role)
     )
     
     # --- ذخیره ID لنگر جدید ---
@@ -65,7 +92,7 @@ async def _return_to_admin_panel(message: types.Message | types.CallbackQuery, s
 # --- شروع FSM ---
 @router.message(F.text == "➕ ارسال لینک دعوت")
 async def start_invitation_creation(message: types.Message, state: FSMContext, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN:
+    if not _can_manage_invitations(user):
         return
         
     
@@ -76,11 +103,11 @@ async def start_invitation_creation(message: types.Message, state: FSMContext, u
         reply_markup=get_commodity_fsm_cancel_keyboard(),
         parse_mode="Markdown"
     )
-    await state.update_data(last_prompt_message_id=prompt_msg.message_id)
+    await state.update_data(last_prompt_message_id=prompt_msg.message_id, inviter_role=user.role.value)
 
 @router.callback_query(F.data == "create_invitation_inline")
 async def start_invitation_creation_inline(callback: types.CallbackQuery, state: FSMContext, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN:
+    if not _can_manage_invitations(user):
         await callback.answer("شما مجاز به این کار نیستید.", show_alert=True)
         return
     
@@ -91,7 +118,7 @@ async def start_invitation_creation_inline(callback: types.CallbackQuery, state:
         reply_markup=get_commodity_fsm_cancel_keyboard(),
         parse_mode="Markdown"
     )
-    await state.update_data(last_prompt_message_id=callback.message.message_id)
+    await state.update_data(last_prompt_message_id=callback.message.message_id, inviter_role=user.role.value)
     await callback.answer()
 
 # --- دریافت نام کاربری ---
@@ -157,11 +184,12 @@ async def process_invitation_mobile(message: types.Message, state: FSMContext):
     normalized_mobile = normalize_persian_numerals(mobile_number_raw)
     await state.update_data(mobile_number=normalized_mobile)
     await state.set_state(InvitationCreation.awaiting_role)
+    inviter_role = _deserialize_user_role(data.get("inviter_role"))
     
     prompt_msg = await message.answer(
         f"✅ شماره موبایل `{normalized_mobile}` ثبت شد.\n"
         "لطفاً **نقش (سطح دسترسی)** کاربر را انتخاب کنید:",
-        reply_markup=get_role_selection_keyboard(),
+        reply_markup=get_role_selection_keyboard(get_invitable_roles_for_admin(inviter_role)),
         parse_mode="Markdown"
     )
     await state.update_data(last_prompt_message_id=prompt_msg.message_id)
@@ -169,7 +197,7 @@ async def process_invitation_mobile(message: types.Message, state: FSMContext):
 # --- دریافت نقش و ایجاد دعوت‌نامه ---
 @router.callback_query(InvitationCreation.awaiting_role)
 async def process_invitation_role(callback: types.CallbackQuery, state: FSMContext, user: Optional[User], bot: Bot):
-    if not user or user.role != UserRole.SUPER_ADMIN:
+    if not _can_manage_invitations(user):
         await callback.answer("عدم دسترسی", show_alert=True)
         return
 
@@ -190,6 +218,10 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
         await callback.answer("نقش انتخاب شده نامعتبر است.", show_alert=True)
         return
 
+    if role not in get_invitable_roles_for_admin(user.role):
+        await callback.answer("این نقش برای شما مجاز نیست.", show_alert=True)
+        return
+
     account_name = data.get("account_name")
     mobile_number = data.get("mobile_number")
 
@@ -197,7 +229,7 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
 
     if not account_name or not mobile_number:
         error_msg = await callback.message.answer("خطایی رخ داد، اطلاعات ناقص است. لطفاً دوباره تلاش کنید.")
-        await _return_to_admin_panel(callback, state, bot)
+        await _return_to_admin_panel(callback, state, bot, user.role)
         return
 
     invitation_data = InvitationCreate(
@@ -258,7 +290,7 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
                 parse_mode=None
             )
             
-    await _return_to_admin_panel(callback, state, bot)
+    await _return_to_admin_panel(callback, state, bot, user.role)
     await callback.answer()
 
 # --- هندلر لغو عملیات ---
@@ -266,6 +298,7 @@ async def process_invitation_role(callback: types.CallbackQuery, state: FSMConte
 async def cancel_invitation_creation(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     data = await state.get_data()
     last_prompt_id = data.get("last_prompt_message_id")
+    inviter_role = _deserialize_user_role(data.get("inviter_role"))
 
     await state.clear()
     
@@ -277,5 +310,5 @@ async def cancel_invitation_creation(callback: types.CallbackQuery, state: FSMCo
 
     cancel_msg = await callback.message.answer("عملیات لغو شد.")
     
-    await _return_to_admin_panel(callback, state, bot)
+    await _return_to_admin_panel(callback, state, bot, inviter_role)
     await callback.answer("لغو شد")

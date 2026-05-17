@@ -62,6 +62,7 @@ describe('CreateInvitationView.vue', () => {
     createInvitationMocks.apiFetchMock.mockReset()
     vi.useFakeTimers()
     installClipboard(vi.fn().mockResolvedValue(undefined))
+    localStorage.clear()
   })
 
   afterEach(() => {
@@ -194,5 +195,15 @@ describe('CreateInvitationView.vue', () => {
     expect((wrapper.get('#account_name').element as HTMLInputElement).value).toBe('')
     expect((wrapper.get('#mobile_number').element as HTMLInputElement).value).toBe('')
     expect(wrapper.find('.success-box').exists()).toBe(false)
+  })
+
+  it('limits invite role choices for cached middle managers', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
+
+    const wrapper = await mountView()
+    const roleOptions = wrapper.findAll('#role option').map((option) => (option.element as HTMLOptionElement).value)
+
+    expect(roleOptions).toEqual(['تماشا', 'عادی'])
+    expect((wrapper.get('#role').element as HTMLSelectElement).value).toBe('عادی')
   })
 })

@@ -34,7 +34,8 @@ class BotAdminUsersBlockCustomTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_admin_max_block_custom_and_process_custom_value(self):
         state = SimpleNamespace(update_data=AsyncMock(), set_state=AsyncMock())
         callback = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock(), data="admin_max_block_custom_9")
-        await handle_admin_max_block_custom(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=state)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(SimpleNamespace(id=9, role=UserRole.STANDARD))):
+            await handle_admin_max_block_custom(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=state)
         state.update_data.assert_awaited_once_with(custom_max_block_user_id=9)
         state.set_state.assert_awaited_once_with(UserManagement.awaiting_custom_max_block)
         callback.answer.assert_awaited_once()
@@ -54,7 +55,7 @@ class BotAdminUsersBlockCustomTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("بین 1 تا 100", message.answer.await_args.args[0])
         anchor_mock.assert_awaited_once_with(state, 51, message.bot, 1)
 
-        target_user = SimpleNamespace(id=9, account_name="ali", can_block_users=True, max_blocked_users=5)
+        target_user = SimpleNamespace(id=9, role=UserRole.STANDARD, account_name="ali", can_block_users=True, max_blocked_users=5)
         session = FakeSession(target_user)
         success_msg = SimpleNamespace(message_id=52)
         message = SimpleNamespace(

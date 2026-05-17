@@ -143,7 +143,7 @@ class BotAdminUsersLimitFlowTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.admin_users.get_user_settings_keyboard", return_value="KB") as keyboard_mock:
             await handle_limit_cancel(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=SimpleNamespace())
         clear_mock.assert_awaited_once()
-        keyboard_mock.assert_called_once_with(9, is_restricted=True, has_limitations=True, can_block=True, max_blocked=5)
+        keyboard_mock.assert_called_once_with(9, is_restricted=True, has_limitations=True, can_block=True, max_blocked=5, can_edit_role=True)
         callback.answer.assert_awaited_once_with("عملیات لغو شد.")
 
 

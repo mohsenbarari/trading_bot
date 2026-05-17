@@ -5,6 +5,12 @@ from core.enums import UserRole
 from core.config import settings
 from math import ceil
 
+
+def get_invitable_roles_for_admin(user_role: UserRole | None) -> list[UserRole]:
+    if user_role == UserRole.MIDDLE_MANAGER:
+        return [UserRole.WATCH, UserRole.STANDARD]
+    return [UserRole.WATCH, UserRole.STANDARD, UserRole.POLICE, UserRole.MIDDLE_MANAGER]
+
 # --- توابع کیبورد دائمی ---
 def get_create_token_inline_keyboard() -> InlineKeyboardMarkup | None:
     buttons = [[InlineKeyboardButton(text="➕ ارسال لینک دعوت (شیشه‌ای)", callback_data="create_invitation_inline")]]
@@ -13,7 +19,7 @@ def get_create_token_inline_keyboard() -> InlineKeyboardMarkup | None:
 def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> ReplyKeyboardMarkup:
     keyboard_layout = []
     row_2_buttons = []
-    if user_role == UserRole.SUPER_ADMIN:
+    if user_role in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER):
         row_2_buttons.append(KeyboardButton(text="🔐 پنل مدیریت")) 
     row_2_buttons.append(KeyboardButton(text="👤 پنل کاربر"))
     # دکمه تنظیمات فقط برای کاربران با نقش عادی در منوی اصلی
@@ -32,14 +38,14 @@ def get_user_panel_keyboard(user_role: UserRole = None) -> ReplyKeyboardMarkup:
     keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
-def get_admin_panel_keyboard() -> ReplyKeyboardMarkup:
-    keyboard_layout = [
-        [KeyboardButton(text="➕ ارسال لینک دعوت")],
-        [KeyboardButton(text="📦 مدیریت کالاها")],
-        [KeyboardButton(text="👥 مدیریت کاربران")],
-        [KeyboardButton(text="⚙️ تنظیمات سیستم")],
-        [KeyboardButton(text="🔙 بازگشت")]
-    ]
+def get_admin_panel_keyboard(user_role: UserRole | None = None) -> ReplyKeyboardMarkup:
+    keyboard_layout = [[KeyboardButton(text="➕ ارسال لینک دعوت")], [KeyboardButton(text="👥 مدیریت کاربران")]]
+
+    if user_role != UserRole.MIDDLE_MANAGER:
+        keyboard_layout.insert(1, [KeyboardButton(text="📦 مدیریت کالاها")])
+        keyboard_layout.insert(3, [KeyboardButton(text="⚙️ تنظیمات سیستم")])
+
+    keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
 # --- تابع جدید برای کیبورد مدیریت کاربران ---
@@ -120,7 +126,14 @@ def get_user_profile_return_keyboard(user_id: int, back_to_page: int = 1, is_res
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def get_user_settings_keyboard(user_id: int, is_restricted: bool = False, has_limitations: bool = False, can_block: bool = True, max_blocked: int = 10) -> InlineKeyboardMarkup:
+def get_user_settings_keyboard(
+    user_id: int,
+    is_restricted: bool = False,
+    has_limitations: bool = False,
+    can_block: bool = True,
+    max_blocked: int = 10,
+    can_edit_role: bool = True,
+) -> InlineKeyboardMarkup:
     # تعیین متن دکمه تنظیمات بلاک
     block_status = "فعال" if can_block else "غیرفعال"
     block_settings_text = f"🚫 تنظیمات بلاک ({block_status} - {max_blocked})"
@@ -130,12 +143,14 @@ def get_user_settings_keyboard(user_id: int, is_restricted: bool = False, has_li
             InlineKeyboardButton(text="🤖 تغییر دسترسی بات", callback_data=f"user_toggle_bot_{user_id}")
         ],
         [
-            InlineKeyboardButton(text="✏️ ویرایش نقش", callback_data=f"user_edit_role_{user_id}")
-        ],
-        [
             InlineKeyboardButton(text=block_settings_text, callback_data=f"user_block_settings_{user_id}")
         ],
     ]
+
+    if can_edit_role:
+        keyboard.insert(1, [
+            InlineKeyboardButton(text="✏️ ویرایش نقش", callback_data=f"user_edit_role_{user_id}")
+        ])
     
     keyboard.append([
         InlineKeyboardButton(text="🔙 بازگشت", callback_data=f"user_profile_{user_id}")
@@ -169,11 +184,10 @@ def get_block_duration_keyboard(user_id: int) -> InlineKeyboardMarkup:
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def get_role_selection_keyboard() -> InlineKeyboardMarkup:
+def get_role_selection_keyboard(allowed_roles: list[UserRole] | None = None) -> InlineKeyboardMarkup:
     buttons = []
-    for role in UserRole:
-        if role != UserRole.SUPER_ADMIN:
-            buttons.append([InlineKeyboardButton(text=role.value, callback_data=f"set_role_{role.name}")])
+    for role in allowed_roles or get_invitable_roles_for_admin(None):
+        buttons.append([InlineKeyboardButton(text=role.value, callback_data=f"set_role_{role.name}")])
     # دکمه انصراف برای فلو دعوت‌نامه
     buttons.append([InlineKeyboardButton(text="❌ انصراف", callback_data="comm_fsm_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

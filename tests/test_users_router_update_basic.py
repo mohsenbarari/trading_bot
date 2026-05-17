@@ -58,6 +58,33 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
             await update_user(5, schemas.UserUpdate(), db=FakeDB(None))
         self.assertEqual(exc_info.exception.status_code, 404)
 
+    async def test_middle_manager_cannot_change_roles(self):
+        user = make_user()
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await update_user(
+                5,
+                schemas.UserUpdate(role=UserRole.STANDARD),
+                db=FakeDB(user),
+                actor=SimpleNamespace(role=UserRole.MIDDLE_MANAGER),
+            )
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, 'فقط مدیر ارشد می‌تواند نقش کاربر را تغییر دهد')
+
+    async def test_middle_manager_cannot_manage_admin_targets(self):
+        user = make_user(role=UserRole.MIDDLE_MANAGER)
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await terminate_user_sessions(
+                5,
+                db=FakeDB(user),
+                actor=SimpleNamespace(role=UserRole.MIDDLE_MANAGER),
+            )
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, 'مدیر میانی فقط می‌تواند کاربران غیرادمین را مدیریت کند')
+
     async def test_update_user_updates_role_bot_access_and_owner_limits(self):
         user = make_user()
         db = FakeDB(user)

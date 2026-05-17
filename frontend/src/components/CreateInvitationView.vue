@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue';
 import { apiFetch } from '../utils/auth';
+import { getInvitableRoleOptions } from '../utils/adminAccess';
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -10,10 +11,13 @@ const props = defineProps<{
 // emit دیگر استفاده نمی‌شود
 // const emit = defineEmits(['invite-created']);
 
+const availableRoles = getInvitableRoleOptions();
+const defaultInviteRole = availableRoles.find((role) => role.value === 'عادی')?.value ?? availableRoles[0]?.value ?? 'عادی';
+
 const invite = reactive({
   account_name: '',
   mobile_number: '',
-  role: 'عادی',
+  role: defaultInviteRole,
 });
 
 const resultMessage = ref('');
@@ -26,7 +30,7 @@ const webCopyMessage = ref('');
 function resetForm() {
   invite.account_name = '';
   invite.mobile_number = '';
-  invite.role = 'عادی';
+  invite.role = defaultInviteRole;
   resultMessage.value = '';
   inviteLink.value = '';
   webLink.value = '';
@@ -182,10 +186,7 @@ function normalizeMobile(mobile: string): string {
       <div class="form-group">
         <label for="role">نقش</label>
         <select v-model="invite.role" id="role">
-          <option value="تماشا">تماشا</option>
-          <option value="عادی">عادی</option>
-          <option value="پلیس">پلیس</option>
-          <option value="مدیر میانی">مدیر میانی</option>
+          <option v-for="role in availableRoles" :key="role.value" :value="role.value">{{ role.label }}</option>
         </select>
       </div>
       <div class="form-actions">

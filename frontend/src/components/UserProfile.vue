@@ -5,6 +5,7 @@ import DatePicker from 'vue3-persian-datetime-picker';
 import { ArrowRight, ChevronLeft } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
 import { useUserProfileTiming } from '../composables/useUserProfileTiming';
+import { isCachedMiddleManager } from '../utils/adminAccess';
 
 const props = defineProps<{
   user: any;
@@ -43,6 +44,7 @@ const canBlockUsers = ref(props.user?.can_block_users ?? true);
 const editMaxBlockedUsers = ref(props.user?.max_blocked_users ?? 10);
 const hasBotAccess = ref(props.user?.has_bot_access ?? true);
 const isTerminatingSessions = ref(false);
+const canEditRole = !isCachedMiddleManager();
 
 // --- Date Picker Logic ---
 const showCustomDateInput = ref(false);
@@ -248,6 +250,7 @@ const restrictionText = computed(() => {
 });
 
 async function saveRole() {
+  if (!canEditRole) return;
   if (!props.jwtToken) return;
   isLoading.value = true;
   try {
@@ -746,7 +749,7 @@ async function deleteUser() {
       </div>
 
       <!-- ویرایش نقش (مودال داخلی) -->
-      <div v-if="isEditingRole" class="edit-section">
+      <div v-if="isEditingRole && canEditRole" class="edit-section">
         <div class="form-group">
             <label>انتخاب نقش جدید:</label>
             <select v-model="selectedRole" class="form-select">
@@ -771,7 +774,7 @@ async function deleteUser() {
             <button @click="toggleBotAccess" class="menu-button">
                 🤖 تغییر دسترسی بات ({{ hasBotAccess ? 'فعال' : 'غیرفعال' }})
             </button>
-            <button @click="isEditingRole = true" class="menu-button">✏️ ویرایش نقش</button>
+            <button v-if="canEditRole" @click="isEditingRole = true" class="menu-button">✏️ ویرایش نقش</button>
             
             <button v-if="!hasLimitations" @click="openLimitationsModal" class="menu-button">⚠️ اعمال محدودیت</button>
             <button v-else @click="removeLimitations" class="menu-button unlimit-btn">

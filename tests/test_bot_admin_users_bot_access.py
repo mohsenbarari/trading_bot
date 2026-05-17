@@ -62,7 +62,7 @@ class BotAdminUsersBotAccessTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(notify_mock.await_args.kwargs["level"], expected_level)
             self.assertEqual(notify_mock.await_args.kwargs["category"], NotificationCategory.SYSTEM)
             telegram_mock.assert_awaited_once()
-            keyboard_mock.assert_called_once_with(user_id=9, is_restricted=True, has_limitations=True)
+            keyboard_mock.assert_called_once_with(user_id=9, is_restricted=True, has_limitations=True, can_edit_role=True)
             callback.answer.assert_awaited_once_with(f"✅ دسترسی بات {expected_status} شد.", show_alert=True)
 
         callback = SimpleNamespace(data="user_toggle_bot_9", answer=AsyncMock())

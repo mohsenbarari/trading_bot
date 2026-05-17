@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { isAdminRoleValue } from '../utils/adminAccess';
 
 const props = defineProps<{
   userRole: string;
@@ -12,6 +13,8 @@ const toggleButtonText = computed(() => {
   return props.isTradePageVisible ? 'بستن صفحه معاملات' : 'مشاهده صفحه معاملات';
 });
 
+const isAdminUser = computed(() => isAdminRoleValue(props.userRole));
+
 </script>
 
 <template>
@@ -21,7 +24,7 @@ const toggleButtonText = computed(() => {
       معامله
     </button>
     
-    <div v-if="userRole === 'مدیر ارشد'" class="admin-layout">
+    <div v-if="isAdminUser" class="admin-layout">
       <div class="bottom-row three-cols">
         <button @click="emit('navigate', 'profile')">
           <span>👤</span>
