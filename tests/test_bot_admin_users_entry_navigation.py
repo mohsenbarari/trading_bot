@@ -62,7 +62,7 @@ class BotAdminUsersEntryNavigationTests(unittest.IsolatedAsyncioTestCase):
             await handle_users_list_command(message, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=state)
         delete_mock.assert_awaited_once_with(message)
         clear_mock.assert_awaited_once_with(state)
-        show_mock.assert_awaited_once_with(message.bot, 1, state, page=1)
+        show_mock.assert_awaited_once_with(message.bot, 1, state, page=1, actor=SimpleNamespace(role=UserRole.SUPER_ADMIN))
 
         callback = SimpleNamespace(
             data="users_page_3",
@@ -72,7 +72,7 @@ class BotAdminUsersEntryNavigationTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch("bot.handlers.admin_users.show_users_list", new=AsyncMock()) as show_mock:
             await handle_users_pagination(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=state)
-        show_mock.assert_awaited_once_with(callback.bot, 2, state, 3, message_id_to_edit=88)
+        show_mock.assert_awaited_once_with(callback.bot, 2, state, 3, message_id_to_edit=88, actor=SimpleNamespace(role=UserRole.SUPER_ADMIN))
         callback.answer.assert_awaited_once()
 
     async def test_handle_view_user_profile_handles_missing_user_and_success(self):

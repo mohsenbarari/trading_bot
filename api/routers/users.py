@@ -12,10 +12,10 @@ from core.services.chat_room_service import sync_mandatory_channel_for_user_stat
 from core.services.session_service import force_clear_sessions
 from core.services.user_deletion_service import delete_user_account
 from models.user import User
-from api.deps import verify_super_admin_or_dev_key
+from api.deps import verify_admin_or_dev_key
 
 from core.utils import create_user_notification, send_telegram_notification, to_jalali_str
-from core.enums import NotificationLevel, NotificationCategory
+from core.enums import NotificationLevel, NotificationCategory, UserRole
 import schemas
 
 
@@ -197,10 +197,38 @@ async def send_delayed_removal_notification_api(
     if telegram_id is not None and msg is not None:
         await send_telegram_notification(telegram_id, msg)
 
-router = APIRouter(
-    tags=["Users Management"],
-    dependencies=[Depends(verify_super_admin_or_dev_key)]
-)
+ADMIN_ROLE_VALUES = {UserRole.SUPER_ADMIN.value, UserRole.MIDDLE_MANAGER.value}
+
+
+def _normalize_actor(actor):
+    return actor if getattr(actor, "role", None) is not None else None
+
+
+def _role_value(role) -> str | None:
+    if role is None:
+        return None
+    return getattr(role, "value", role)
+
+
+def _is_admin_role(role) -> bool:
+    return _role_value(role) in ADMIN_ROLE_VALUES
+
+
+def _ensure_actor_can_manage_target(actor, target_user: User):
+    actor = _normalize_actor(actor)
+    if actor is None:
+        return None
+
+    if _role_value(actor.role) == UserRole.MIDDLE_MANAGER.value and _is_admin_role(target_user.role):
+        raise HTTPException(
+            status_code=403,
+            detail="مدیر میانی فقط می‌تواند کاربران غیرادمین را مدیریت کند",
+        )
+
+    return actor
+
+
+router = APIRouter(tags=["Users Management"])
 
 @router.get("/", response_model=List[schemas.UserRead])
 async def read_all_users(
@@ -208,13 +236,18 @@ async def read_all_users(
     limit: int = 100,
     search: Optional[str] = Query(None, min_length=1),
     include_deleted: bool = Query(False, description="Include soft-deleted users"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    actor = Depends(verify_admin_or_dev_key),
 ):
-    """دریافت لیست کاربران با قابلیت جستجو (فقط برای مدیر ارشد)"""
+    """دریافت لیست کاربران با قابلیت جستجو."""
     query = select(User).order_by(User.id.desc())
+    actor = _normalize_actor(actor)
     
     if not include_deleted:
         query = query.where(User.is_deleted == False)
+
+    if actor is not None and _role_value(actor.role) == UserRole.MIDDLE_MANAGER.value:
+        query = query.where(~User.role.in_([UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER]))
     
     if search:
         search_pattern = f"%{search}%"
@@ -232,19 +265,30 @@ async def read_all_users(
     return users
 
 @router.get("/{user_id}", response_model=schemas.UserRead)
-async def read_user(user_id: int, db: AsyncSession = Depends(get_db)):
+async def read_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    actor = Depends(verify_admin_or_dev_key),
+):
     """دریافت اطلاعات یک کاربر خاص"""
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    _ensure_actor_can_manage_target(actor, user)
     return user
 
 @router.put("/{user_id}", response_model=schemas.UserRead)
-async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSession = Depends(get_db)):
+async def update_user(
+    user_id: int,
+    user_update: schemas.UserUpdate,
+    db: AsyncSession = Depends(get_db),
+    actor = Depends(verify_admin_or_dev_key),
+):
     """ویرایش اطلاعات کاربر (نقش، دسترسی بات، مسدودیت و محدودیت‌ها)"""
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    actor = _ensure_actor_can_manage_target(actor, user)
     
     update_data = user_update.model_dump(exclude_unset=True)
     old_role = user.role
@@ -254,6 +298,8 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
     
     # --- 1. Role Update ---
     if 'role' in update_data:
+        if actor is not None and _role_value(actor.role) != UserRole.SUPER_ADMIN.value:
+            raise HTTPException(status_code=403, detail="فقط مدیر ارشد می‌تواند نقش کاربر را تغییر دهد")
         user.role = update_data['role']
     
     # --- 2. Bot Access ---
@@ -338,13 +384,18 @@ async def update_user(user_id: int, user_update: schemas.UserUpdate, db: AsyncSe
     return user
 
 @router.delete("/{user_id}")
-async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    actor = Depends(verify_admin_or_dev_key),
+):
     """حذف نرم کاربر (Soft Delete) با تراکنش اتمیک"""
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
+    _ensure_actor_can_manage_target(actor, user)
 
     try:
         await delete_user_account(db, user)
@@ -358,11 +409,16 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{user_id}/sessions/terminate-all")
-async def terminate_user_sessions(user_id: int, db: AsyncSession = Depends(get_db)):
+async def terminate_user_sessions(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    actor = Depends(verify_admin_or_dev_key),
+):
     """پایان دادن فوری به تمام نشست‌های فعال یک کاربر"""
     user = await db.get(User, user_id)
     if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
+    _ensure_actor_can_manage_target(actor, user)
 
     terminated_count = await force_clear_sessions(db, user.id)
     return {

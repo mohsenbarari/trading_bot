@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from bot.handlers.admin import process_invitation_mobile
 from bot.states import InvitationCreation
+from core.enums import UserRole
 
 
 class FakeState:
@@ -38,14 +39,17 @@ class BotAdminMobileTests(unittest.IsolatedAsyncioTestCase):
         await process_invitation_mobile(message, state)
         self.assertIn("شماره موبایل نامعتبر", message.answer.await_args.args[0])
 
-        state = FakeState({"last_prompt_message_id": 50})
+        state = FakeState({"last_prompt_message_id": 50, "inviter_role": UserRole.MIDDLE_MANAGER.value})
         message = make_message("۰۹۱۲۳۴۵۶۷۸۹")
-        with patch("bot.handlers.admin.normalize_persian_numerals", return_value="09123456789"):
+        with patch("bot.handlers.admin.normalize_persian_numerals", return_value="09123456789"), patch(
+            "bot.handlers.admin.get_role_selection_keyboard", return_value="KB"
+        ) as role_keyboard_mock:
             await process_invitation_mobile(message, state)
 
         self.assertEqual(state.updated[0], {"mobile_number": "09123456789"})
         self.assertEqual(state.states, [InvitationCreation.awaiting_role])
         self.assertIn("نقش", message.answer.await_args.args[0])
+        role_keyboard_mock.assert_called_once_with([UserRole.WATCH, UserRole.STANDARD])
 
 
 if __name__ == "__main__":

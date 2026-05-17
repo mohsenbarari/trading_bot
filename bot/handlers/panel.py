@@ -57,14 +57,14 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
 # --- هندلر پنل مدیریت ---
 @router.message(F.text == "🔐 پنل مدیریت")
 async def show_admin_panel_and_change_keyboard(message: types.Message, state: FSMContext, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN:
+    if not user or user.role not in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER):
         return
     
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     
     anchor_msg = await message.answer(
         "وارد پنل مدیریت شدید.",
-        reply_markup=get_admin_panel_keyboard()
+        reply_markup=get_admin_panel_keyboard(user.role)
     )
     set_anchor(message.chat.id, anchor_msg.message_id)
 

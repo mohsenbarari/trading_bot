@@ -60,7 +60,7 @@ class BotAdminUsersUnblockUnlimitTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(target_user.trading_restricted_until)
         session.commit.assert_awaited_once()
         create_task_mock.assert_called_once()
-        keyboard_mock.assert_called_once_with(9, is_restricted=False, has_limitations=True)
+        keyboard_mock.assert_called_once_with(9, is_restricted=False, has_limitations=True, can_edit_role=True)
         callback.answer.assert_awaited_once_with("✅ رفع مسدودیت انجام شد.", show_alert=True)
 
         callback = SimpleNamespace(data="user_unblock_9", answer=AsyncMock())
@@ -105,7 +105,7 @@ class BotAdminUsersUnblockUnlimitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(target_user.channel_messages_count, 0)
         session.commit.assert_awaited_once()
         create_task_mock.assert_called_once()
-        keyboard_mock.assert_called_once_with(9, is_restricted=True, has_limitations=False)
+        keyboard_mock.assert_called_once_with(9, is_restricted=True, has_limitations=False, can_edit_role=True)
         callback.answer.assert_awaited_once_with("✅ محدودیت‌ها برداشته شد.", show_alert=True)
 
         callback = SimpleNamespace(data="user_unlimit_9", answer=AsyncMock())

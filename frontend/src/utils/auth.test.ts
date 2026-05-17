@@ -132,8 +132,34 @@ describe('auth utils', () => {
 
     next.mockClear()
     localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 3600))
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
     await authGuard({ path: '/admin', meta: { requiresAdmin: true } } as any, {} as any, next)
     expect(next).toHaveBeenLastCalledWith()
+
+    next.mockClear()
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'عادی' }))
+    await authGuard({ path: '/admin', meta: { requiresAdmin: true } } as any, {} as any, next)
+    expect(next).toHaveBeenLastCalledWith('/dashboard')
+  })
+
+  it('authGuard fetches /api/auth/me when admin cache is missing', async () => {
+    const token = makeJwt(Math.floor(Date.now() / 1000) + 3600)
+    localStorage.setItem('auth_token', token)
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ id: 7, role: 'مدیر میانی', account_name: 'manager7' }))
+
+    const { authGuard } = await import(authModulePath)
+    const next = vi.fn()
+
+    await authGuard({ path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any, {} as any, next)
+
+    expect(next).toHaveBeenLastCalledWith()
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/me', expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: `Bearer ${token}` }),
+    }))
+    expect(JSON.parse(localStorage.getItem('current_user_summary') || '{}')).toMatchObject({
+      role: 'مدیر میانی',
+      account_name: 'manager7',
+    })
   })
 
   it('apiFetch refreshes on 401 and retries the original request with the new token', async () => {

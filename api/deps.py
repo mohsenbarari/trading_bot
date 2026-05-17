@@ -157,6 +157,17 @@ async def verify_super_admin(
         )
     return current_user
 
+
+async def verify_admin_user(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    if current_user.role not in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The user doesn't have enough privileges"
+        )
+    return current_user
+
 async def verify_super_admin_or_dev_key(
     token: Optional[str] = Depends(oauth2_scheme_optional),
     dev_key: Optional[str] = Security(api_key_header),
@@ -175,6 +186,28 @@ async def verify_super_admin_or_dev_key(
         if user.role == UserRole.SUPER_ADMIN:
             return user
             
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Not authenticated"
+    )
+
+
+async def verify_admin_or_dev_key(
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    dev_key: Optional[str] = Security(api_key_header),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Allow access if user is SUPER_ADMIN/MIDDLE_MANAGER OR if valid DEV_API_KEY is provided.
+    """
+    if dev_key and dev_key == settings.dev_api_key:
+        return None
+
+    if token:
+        user = await get_current_user(db, token)
+        if user.role in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER):
+            return user
+
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Not authenticated"

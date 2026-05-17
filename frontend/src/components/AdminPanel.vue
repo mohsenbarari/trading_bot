@@ -1,5 +1,24 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { isCachedMiddleManager } from '../utils/adminAccess'
+
 defineEmits(['navigate']);
+
+const actions = computed(() => {
+  if (isCachedMiddleManager()) {
+    return [
+      { key: 'create_invitation', label: '➕ ارسال لینک دعوت', variant: 'primary' },
+      { key: 'manage_users', label: '👥 مدیریت کاربران', variant: 'secondary' },
+    ]
+  }
+
+  return [
+    { key: 'create_invitation', label: '➕ ارسال لینک دعوت', variant: 'primary' },
+    { key: 'manage_commodities', label: '📦 مدیریت کالاها', variant: 'secondary' },
+    { key: 'manage_users', label: '👥 مدیریت کاربران', variant: 'secondary' },
+    { key: 'settings', label: '⚙️ تنظیمات سیستم', variant: 'secondary' },
+  ]
+})
 </script>
 
 <template>
@@ -10,20 +29,14 @@ defineEmits(['navigate']);
       <p>لطفاً بخش مورد نظر خود را انتخاب کنید:</p>
       
       <div class="button-group">
-        <button class="admin-action-btn primary" @click="$emit('navigate', 'create_invitation')">
-          ➕ ارسال لینک دعوت
-        </button>
-        
-        <button class="admin-action-btn secondary" @click="$emit('navigate', 'manage_commodities')">
-          📦 مدیریت کالاها
-        </button>
-
-        <button class="admin-action-btn secondary" @click="$emit('navigate', 'manage_users')">
-          👥 مدیریت کاربران
-        </button>
-        
-        <button class="admin-action-btn secondary" @click="$emit('navigate', 'settings')">
-          ⚙️ تنظیمات سیستم
+        <button
+          v-for="action in actions"
+          :key="action.key"
+          class="admin-action-btn"
+          :class="action.variant"
+          @click="$emit('navigate', action.key)"
+        >
+          {{ action.label }}
         </button>
       </div>
       <div class="version-tag">UI v1.4</div>

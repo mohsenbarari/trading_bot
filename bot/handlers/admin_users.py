@@ -35,6 +35,35 @@ from bot.states import UserManagement, UserLimitations
 logger = logging.getLogger(__name__)
 router = Router()
 USERS_PER_PAGE = 10
+ADMIN_MANAGEMENT_ROLES = {UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER}
+ADMIN_ROLE_VALUES = {UserRole.SUPER_ADMIN.value, UserRole.MIDDLE_MANAGER.value}
+
+
+def _can_open_user_management(user: Optional[User]) -> bool:
+    return bool(user and user.role in ADMIN_MANAGEMENT_ROLES)
+
+
+def _can_edit_target_role(user: Optional[User]) -> bool:
+    return bool(user and user.role == UserRole.SUPER_ADMIN)
+
+
+def _is_admin_role_value(role: object) -> bool:
+    normalized = getattr(role, "value", role)
+    return normalized in ADMIN_ROLE_VALUES
+
+
+def _can_manage_target_user(actor: Optional[User], target_user: Optional[User]) -> bool:
+    if not actor or not target_user:
+        return False
+    if actor.role == UserRole.SUPER_ADMIN:
+        return True
+    return not _is_admin_role_value(target_user.role)
+
+
+def _apply_user_management_scope(stmt, actor: Optional[User]):
+    if actor and actor.role == UserRole.MIDDLE_MANAGER:
+        return stmt.where(User.role.notin_([UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER]))
+    return stmt
 
 # --- توابع کمکی مدیریت پیام ---
 
@@ -133,16 +162,26 @@ async def send_delayed_removal_notification(user_id: int, telegram_id: int, is_b
 
 # --- توابع نمایش (Views) ---
 
-async def show_users_list(bot: Bot, chat_id: int, state: FSMContext, page: int, message_id_to_edit: int = None):
+async def show_users_list(
+    bot: Bot,
+    chat_id: int,
+    state: FSMContext,
+    page: int,
+    message_id_to_edit: int = None,
+    actor: Optional[User] = None,
+):
     """لیست کاربران را نمایش می‌دهد."""
     try:
         async with AsyncSessionLocal() as session:
             # فقط کاربران فعال (حذف نشده) نمایش داده شوند
             count_stmt = select(func.count()).select_from(User).where(User.is_deleted == False)
+            count_stmt = _apply_user_management_scope(count_stmt, actor)
             total_count = (await session.execute(count_stmt)).scalar()
             
             offset = (page - 1) * USERS_PER_PAGE
-            stmt = select(User).where(User.is_deleted == False).order_by(User.id.desc()).offset(offset).limit(USERS_PER_PAGE)
+            stmt = select(User).where(User.is_deleted == False).order_by(User.id.desc())
+            stmt = _apply_user_management_scope(stmt, actor)
+            stmt = stmt.offset(offset).limit(USERS_PER_PAGE)
             users = (await session.execute(stmt)).scalars().all()
 
         if not users:
@@ -219,7 +258,8 @@ async def get_user_profile_text(target_user: User) -> str:
 
 @router.message(F.text == "👥 مدیریت کاربران")
 async def handle_users_menu(message: types.Message, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     await delete_user_message(message)
     
     msg = await message.answer(
@@ -233,23 +273,26 @@ async def handle_users_menu(message: types.Message, user: Optional[User], state:
 
 @router.message(F.text == "📋 لیست کاربران")
 async def handle_users_list_command(message: types.Message, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     await delete_user_message(message)
     await clear_state_retain_anchors(state)
     
-    await show_users_list(message.bot, message.chat.id, state, page=1)
+    await show_users_list(message.bot, message.chat.id, state, page=1, actor=user)
 
 @router.callback_query(F.data.startswith("users_page_"))
 async def handle_users_pagination(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     page = int(callback.data.split("_")[-1])
-    await show_users_list(callback.bot, callback.message.chat.id, state, page, message_id_to_edit=callback.message.message_id)
+    await show_users_list(callback.bot, callback.message.chat.id, state, page, message_id_to_edit=callback.message.message_id, actor=user)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("user_profile_"))
 async def handle_view_user_profile(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
 
     target_user_id = int(callback.data.split("_")[-1])
     
@@ -259,6 +302,9 @@ async def handle_view_user_profile(callback: types.CallbackQuery, user: Optional
     
     if not target_user:
         await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+        return
+    if not _can_manage_target_user(user, target_user):
+        await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
         return
 
     profile_text = await get_user_profile_text(target_user)
@@ -297,7 +343,8 @@ async def handle_view_user_profile(callback: types.CallbackQuery, user: Optional
 
 @router.message(F.text == "🔙 بازگشت به پنل مدیریت")
 async def handle_back_to_admin(message: types.Message, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     await delete_user_message(message)
     
     data = await state.get_data()
@@ -314,14 +361,15 @@ async def handle_back_to_admin(message: types.Message, user: Optional[User], sta
     
     msg = await message.answer(
         "به پنل مدیریت بازگشتید.",
-        reply_markup=get_admin_panel_keyboard()
+        reply_markup=get_admin_panel_keyboard(user.role)
     )
 
 # --- جستجوی کاربر ---
 
 @router.message(F.text == "🔍 جستجوی کاربر")
 async def start_search_user(message: types.Message, state: FSMContext, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     await delete_user_message(message)
     
     await state.set_state(UserManagement.awaiting_search_query)
@@ -342,7 +390,8 @@ async def start_search_user(message: types.Message, state: FSMContext, user: Opt
 # 👇 هندلر جدید برای لغو عملیات جستجوی کاربر
 @router.callback_query(F.data == "user_search_cancel")
 async def handle_user_search_cancel(query: types.CallbackQuery, state: FSMContext, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     await clear_state_retain_anchors(state)
     
@@ -360,7 +409,7 @@ async def handle_user_search_cancel(query: types.CallbackQuery, state: FSMContex
 
 @router.message(UserManagement.awaiting_search_query)
 async def process_search_query(message: types.Message, state: FSMContext, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN:
+    if not _can_open_user_management(user):
         await state.clear()
         return
     
@@ -392,7 +441,7 @@ async def process_search_query(message: types.Message, state: FSMContext, user: 
         )
         user_found = (await session.execute(stmt)).scalar_one_or_none()
 
-    if not user_found:
+    if not user_found or not _can_manage_target_user(user, user_found):
         msg = await message.answer(
             f"❌ کاربری با نام کاربری یا شماره موبایل **'{query_text}'** یافت نشد.",
             reply_markup=get_users_management_keyboard(),
@@ -423,7 +472,8 @@ async def process_search_query(message: types.Message, state: FSMContext, user: 
 
 @router.callback_query(F.data.startswith("user_settings_"))
 async def handle_user_settings(callback: types.CallbackQuery, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
     
@@ -437,6 +487,9 @@ async def handle_user_settings(callback: types.CallbackQuery, user: Optional[Use
         
     if not target_user:
         await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+        return
+    if not _can_manage_target_user(user, target_user):
+        await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
         return
 
     profile_text = await get_user_profile_text(target_user)
@@ -462,7 +515,8 @@ async def handle_user_settings(callback: types.CallbackQuery, user: Optional[Use
                 is_restricted=is_restricted, 
                 has_limitations=has_limitations,
                 can_block=target_user.can_block_users,
-                max_blocked=target_user.max_blocked_users
+                max_blocked=target_user.max_blocked_users,
+                can_edit_role=_can_edit_target_role(user),
             ),
             parse_mode="Markdown"
         )
@@ -473,11 +527,20 @@ async def handle_user_settings(callback: types.CallbackQuery, user: Optional[Use
 
 @router.callback_query(F.data.startswith("user_block_") & ~F.data.startswith("user_block_settings_"))
 async def handle_user_block_actions(callback: types.CallbackQuery, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     # هندل کردن درخواست اولیه بلاک (نمایش منوی زمان)
     if callback.data.startswith("user_block_") and not callback.data.startswith("user_block_apply_"):
         target_user_id = int(callback.data.split("_")[-1])
+        async with AsyncSessionLocal() as session:
+            target_user = (await session.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+        if not target_user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        if not _can_manage_target_user(user, target_user):
+            await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+            return
         await callback.message.edit_text(
             "⏳ **مدت زمان مسدودیت را انتخاب کنید:**",
             reply_markup=get_block_duration_keyboard(target_user_id),
@@ -497,6 +560,9 @@ async def handle_user_block_actions(callback: types.CallbackQuery, user: Optiona
             target_user = (await session.execute(stmt)).scalar_one_or_none()
             
             if target_user:
+                if not _can_manage_target_user(user, target_user):
+                    await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                    return
                 if minutes == 0:
                     # نامحدود (100 سال) - استفاده از utcnow (naive)
                     target_user.trading_restricted_until = datetime.utcnow() + timedelta(days=36500)
@@ -545,7 +611,7 @@ async def handle_user_block_actions(callback: types.CallbackQuery, user: Optiona
                 profile_text = await get_user_profile_text(target_user)
                 await callback.message.edit_text(
                     profile_text,
-                    reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=True, has_limitations=has_limitations),
+                    reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=True, has_limitations=has_limitations, can_edit_role=_can_edit_target_role(user)),
                     parse_mode="Markdown"
                 )
                 await callback.answer(msg_text, show_alert=True)
@@ -556,7 +622,8 @@ async def handle_user_block_actions(callback: types.CallbackQuery, user: Optiona
 
 @router.callback_query(F.data.startswith("user_unblock_"))
 async def handle_user_unblock(callback: types.CallbackQuery, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
     
@@ -565,6 +632,9 @@ async def handle_user_unblock(callback: types.CallbackQuery, user: Optional[User
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
         if target_user:
+            if not _can_manage_target_user(user, target_user):
+                await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                return
             telegram_id = target_user.telegram_id  # ذخیره قبل از commit
             target_user.trading_restricted_until = None
             await session.commit()
@@ -583,7 +653,7 @@ async def handle_user_unblock(callback: types.CallbackQuery, user: Optional[User
             profile_text = await get_user_profile_text(target_user)
             await callback.message.edit_text(
                 profile_text,
-                reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=False, has_limitations=has_limitations),
+                reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=False, has_limitations=has_limitations, can_edit_role=_can_edit_target_role(user)),
                 parse_mode="Markdown"
             )
             await callback.answer("✅ رفع مسدودیت انجام شد.", show_alert=True)
@@ -594,7 +664,8 @@ async def handle_user_unblock(callback: types.CallbackQuery, user: Optional[User
 @router.callback_query(F.data.startswith("user_unlimit_"))
 async def handle_user_unlimit(callback: types.CallbackQuery, user: Optional[User]):
     """رفع محدودیت‌های کاربر"""
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
     
@@ -603,6 +674,9 @@ async def handle_user_unlimit(callback: types.CallbackQuery, user: Optional[User
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
         if target_user:
+            if not _can_manage_target_user(user, target_user):
+                await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                return
             telegram_id = target_user.telegram_id  # ذخیره قبل از commit
             # حذف تمام محدودیت‌ها
             target_user.max_daily_trades = None
@@ -627,7 +701,7 @@ async def handle_user_unlimit(callback: types.CallbackQuery, user: Optional[User
             profile_text = await get_user_profile_text(target_user)
             await callback.message.edit_text(
                 profile_text,
-                reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=is_restricted, has_limitations=False),
+                reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=is_restricted, has_limitations=False, can_edit_role=_can_edit_target_role(user)),
                 parse_mode="Markdown"
             )
             await callback.answer("✅ محدودیت‌ها برداشته شد.", show_alert=True)
@@ -691,7 +765,8 @@ async def handle_set_user_role(callback: types.CallbackQuery, user: Optional[Use
 
 @router.callback_query(F.data.startswith("user_toggle_bot_"))
 async def handle_user_toggle_bot(callback: types.CallbackQuery, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
     
@@ -700,6 +775,9 @@ async def handle_user_toggle_bot(callback: types.CallbackQuery, user: Optional[U
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
         if target_user:
+            if not _can_manage_target_user(user, target_user):
+                await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                return
             target_user.has_bot_access = not target_user.has_bot_access
             await session.commit()
             
@@ -750,7 +828,7 @@ async def handle_user_toggle_bot(callback: types.CallbackQuery, user: Optional[U
             try:
                 await callback.message.edit_text(
                     profile_text,
-                    reply_markup=get_user_settings_keyboard(user_id=target_user.id, is_restricted=is_restricted, has_limitations=has_limitations),
+                    reply_markup=get_user_settings_keyboard(user_id=target_user.id, is_restricted=is_restricted, has_limitations=has_limitations, can_edit_role=_can_edit_target_role(user)),
                     parse_mode="Markdown"
                 )
             except TelegramBadRequest:
@@ -763,9 +841,18 @@ async def handle_user_toggle_bot(callback: types.CallbackQuery, user: Optional[U
 
 @router.callback_query(F.data.startswith("user_ask_delete_"))
 async def handle_user_delete_request(callback: types.CallbackQuery, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
+    async with AsyncSessionLocal() as session:
+        target_user = (await session.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+    if not target_user:
+        await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+        return
+    if not _can_manage_target_user(user, target_user):
+        await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+        return
     
     await callback.message.edit_text(
         "⚠️ **آیا از حذف این کاربر اطمینان دارید؟**\n\n"
@@ -777,7 +864,8 @@ async def handle_user_delete_request(callback: types.CallbackQuery, user: Option
 
 @router.callback_query(F.data.startswith("user_delete_confirm_"))
 async def handle_user_delete_confirm(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
     
@@ -786,6 +874,9 @@ async def handle_user_delete_confirm(callback: types.CallbackQuery, user: Option
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
         if target_user and not target_user.is_deleted:
+            if not _can_manage_target_user(user, target_user):
+                await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                return
             try:
                 await delete_user_account(session, target_user)
             except Exception as e:
@@ -795,10 +886,10 @@ async def handle_user_delete_confirm(callback: types.CallbackQuery, user: Option
             await callback.answer("✅ کاربر با موفقیت حذف شد.")
             
             # بازگشت به لیست کاربران
-            await show_users_list(callback.bot, callback.message.chat.id, state, page=1, message_id_to_edit=callback.message.message_id)
+            await show_users_list(callback.bot, callback.message.chat.id, state, page=1, message_id_to_edit=callback.message.message_id, actor=user)
         else:
             await callback.answer("❌ کاربر یافت نشد یا قبلاً حذف شده است.", show_alert=True)
-            await show_users_list(callback.bot, callback.message.chat.id, state, page=1, message_id_to_edit=callback.message.message_id)
+            await show_users_list(callback.bot, callback.message.chat.id, state, page=1, message_id_to_edit=callback.message.message_id, actor=user)
 
 # --- هندلرهای محدودسازی کاربر (رویکرد جدید با دکمه‌ها) ---
 
@@ -819,13 +910,22 @@ def get_limit_panel_text(max_trades, max_commodities, max_requests):
 
 @router.callback_query(F.data.startswith("user_limit_"))
 async def handle_user_limit_start(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     # Handle duration selection
     if callback.data.startswith("user_limit_dur_"):
         parts = callback.data.split("_")
         target_user_id = int(parts[3])
         minutes = int(parts[4])
+        async with AsyncSessionLocal() as session:
+            target_user = (await session.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+        if not target_user:
+            await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+            return
+        if not _can_manage_target_user(user, target_user):
+            await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+            return
         
         # ذخیره مدت زمان
         if minutes == 0:
@@ -853,6 +953,14 @@ async def handle_user_limit_start(callback: types.CallbackQuery, user: Optional[
     
     # Initial request (show duration keyboard)
     target_user_id = int(callback.data.split("_")[-1])
+    async with AsyncSessionLocal() as session:
+        target_user = (await session.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+    if not target_user:
+        await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+        return
+    if not _can_manage_target_user(user, target_user):
+        await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+        return
     await callback.message.edit_text(
         "⏳ **مدت زمان محدودیت را انتخاب کنید:**",
         reply_markup=get_limit_duration_keyboard(target_user_id),
@@ -862,9 +970,18 @@ async def handle_user_limit_start(callback: types.CallbackQuery, user: Optional[
 
 @router.callback_query(F.data.startswith("limit_set_trades_"))
 async def handle_set_trades(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
+    async with AsyncSessionLocal() as session:
+        target_user = (await session.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+    if not target_user:
+        await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+        return
+    if not _can_manage_target_user(user, target_user):
+        await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+        return
     await state.update_data(limit_editing="trades")
     await state.set_state(UserLimitations.awaiting_limit_value)
     
@@ -877,9 +994,18 @@ async def handle_set_trades(callback: types.CallbackQuery, user: Optional[User],
 
 @router.callback_query(F.data.startswith("limit_set_commodities_"))
 async def handle_set_commodities(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
+    async with AsyncSessionLocal() as session:
+        target_user = (await session.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+    if not target_user:
+        await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+        return
+    if not _can_manage_target_user(user, target_user):
+        await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+        return
     await state.update_data(limit_editing="commodities")
     await state.set_state(UserLimitations.awaiting_limit_value)
     
@@ -892,9 +1018,18 @@ async def handle_set_commodities(callback: types.CallbackQuery, user: Optional[U
 
 @router.callback_query(F.data.startswith("limit_set_requests_"))
 async def handle_set_requests(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
+    async with AsyncSessionLocal() as session:
+        target_user = (await session.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+    if not target_user:
+        await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+        return
+    if not _can_manage_target_user(user, target_user):
+        await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+        return
     await state.update_data(limit_editing="requests")
     await state.set_state(UserLimitations.awaiting_limit_value)
     
@@ -907,7 +1042,7 @@ async def handle_set_requests(callback: types.CallbackQuery, user: Optional[User
 
 @router.message(UserLimitations.awaiting_limit_value)
 async def process_limit_value(message: types.Message, state: FSMContext, user: Optional[User]):
-    if not user or user.role != UserRole.SUPER_ADMIN:
+    if not _can_open_user_management(user):
         await state.clear()
         return
     
@@ -953,7 +1088,8 @@ async def process_limit_value(message: types.Message, state: FSMContext, user: O
 @router.callback_query(F.data.startswith("limit_confirm_"))
 async def handle_limit_confirm(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
     """تایید و اعمال محدودیت‌ها"""
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     data = await state.get_data()
     target_user_id = data.get("limit_target_user_id")
@@ -972,6 +1108,9 @@ async def handle_limit_confirm(callback: types.CallbackQuery, user: Optional[Use
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
         if target_user:
+            if not _can_manage_target_user(user, target_user):
+                await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                return
             target_user.max_daily_trades = max_trades
             target_user.max_active_commodities = max_commodities
             target_user.max_daily_requests = max_requests
@@ -1029,7 +1168,8 @@ async def handle_limit_confirm(callback: types.CallbackQuery, user: Optional[Use
 @router.callback_query(F.data.startswith("limit_cancel_"))
 async def handle_limit_cancel(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
     """انصراف از اعمال محدودیت"""
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
     
@@ -1040,6 +1180,9 @@ async def handle_limit_cancel(callback: types.CallbackQuery, user: Optional[User
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
         if target_user:
+            if not _can_manage_target_user(user, target_user):
+                await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                return
             is_restricted = target_user.trading_restricted_until and target_user.trading_restricted_until > datetime.utcnow()
             has_limitations = (
                 target_user.max_daily_trades is not None or
@@ -1055,7 +1198,8 @@ async def handle_limit_cancel(callback: types.CallbackQuery, user: Optional[User
                     is_restricted=is_restricted, 
                     has_limitations=has_limitations,
                     can_block=target_user.can_block_users,
-                    max_blocked=target_user.max_blocked_users
+                    max_blocked=target_user.max_blocked_users,
+                    can_edit_role=_can_edit_target_role(user),
                 ),
                 parse_mode="Markdown"
             )
@@ -1068,7 +1212,8 @@ async def handle_limit_cancel(callback: types.CallbackQuery, user: Optional[User
 @router.callback_query(F.data.startswith("user_block_settings_"))
 async def handle_user_block_settings(callback: types.CallbackQuery, user: Optional[User]):
     """نمایش منوی تنظیمات قابلیت بلاک برای کاربر"""
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
     
@@ -1078,6 +1223,9 @@ async def handle_user_block_settings(callback: types.CallbackQuery, user: Option
         
     if not target_user:
         await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+        return
+    if not _can_manage_target_user(user, target_user):
+        await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
         return
     
     text = (
@@ -1106,7 +1254,8 @@ async def handle_user_block_settings(callback: types.CallbackQuery, user: Option
 @router.callback_query(F.data.startswith("admin_toggle_block_"))
 async def handle_admin_toggle_block(callback: types.CallbackQuery, user: Optional[User]):
     """تغییر وضعیت قابلیت بلاک کاربر"""
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
     
@@ -1115,6 +1264,9 @@ async def handle_admin_toggle_block(callback: types.CallbackQuery, user: Optiona
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
         if target_user:
+            if not _can_manage_target_user(user, target_user):
+                await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                return
             target_user.can_block_users = not target_user.can_block_users
             await session.commit()
             
@@ -1148,9 +1300,18 @@ async def handle_admin_toggle_block(callback: types.CallbackQuery, user: Optiona
 @router.callback_query(F.data.startswith("admin_set_max_block_"))
 async def handle_admin_set_max_block(callback: types.CallbackQuery, user: Optional[User]):
     """نمایش گزینه‌های سقف بلاک"""
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
+    async with AsyncSessionLocal() as session:
+        target_user = (await session.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+    if not target_user:
+        await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+        return
+    if not _can_manage_target_user(user, target_user):
+        await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+        return
     
     await callback.message.edit_text(
         "🔢 **سقف بلاک را انتخاب کنید:**\n\n"
@@ -1164,7 +1325,8 @@ async def handle_admin_set_max_block(callback: types.CallbackQuery, user: Option
 @router.callback_query(F.data.startswith("admin_max_block_set_"))
 async def handle_admin_max_block_set(callback: types.CallbackQuery, user: Optional[User]):
     """اعمال سقف بلاک جدید"""
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     parts = callback.data.split("_")
     target_user_id = int(parts[4])
@@ -1175,6 +1337,9 @@ async def handle_admin_max_block_set(callback: types.CallbackQuery, user: Option
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
         if target_user:
+            if not _can_manage_target_user(user, target_user):
+                await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                return
             target_user.max_blocked_users = new_max
             await session.commit()
             
@@ -1206,9 +1371,18 @@ async def handle_admin_max_block_set(callback: types.CallbackQuery, user: Option
 @router.callback_query(F.data.startswith("admin_max_block_custom_"))
 async def handle_admin_max_block_custom(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
     """درخواست ورود عدد دلخواه برای سقف بلاک"""
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     target_user_id = int(callback.data.split("_")[-1])
+    async with AsyncSessionLocal() as session:
+        target_user = (await session.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+    if not target_user:
+        await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
+        return
+    if not _can_manage_target_user(user, target_user):
+        await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+        return
     
     await state.update_data(custom_max_block_user_id=target_user_id)
     await state.set_state(UserManagement.awaiting_custom_max_block)
@@ -1224,7 +1398,8 @@ async def handle_admin_max_block_custom(callback: types.CallbackQuery, user: Opt
 @router.message(UserManagement.awaiting_custom_max_block)
 async def process_custom_max_block(message: types.Message, user: Optional[User], state: FSMContext):
     """پردازش عدد دلخواه سقف بلاک"""
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not _can_open_user_management(user):
+        return
     
     await delete_user_message(message)
     
@@ -1251,6 +1426,10 @@ async def process_custom_max_block(message: types.Message, user: Optional[User],
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
         if target_user:
+            if not _can_manage_target_user(user, target_user):
+                msg = await message.answer("❌ شما مجاز به مدیریت این کاربر نیستید.")
+                await update_anchor(state, msg.message_id, message.bot, message.chat.id)
+                return
             target_user.max_blocked_users = new_max
             await session.commit()
             

@@ -13,6 +13,10 @@ class BotKeyboardsTests(unittest.TestCase):
         super_admin_texts = [button.text for row in super_admin_menu.keyboard for button in row]
         self.assertIn('🔐 پنل مدیریت', super_admin_texts)
 
+        middle_manager_menu = keyboards.get_persistent_menu_keyboard(UserRole.MIDDLE_MANAGER, 'https://mini-app')
+        middle_manager_texts = [button.text for row in middle_manager_menu.keyboard for button in row]
+        self.assertIn('🔐 پنل مدیریت', middle_manager_texts)
+
         standard_menu = keyboards.get_persistent_menu_keyboard(UserRole.STANDARD, 'https://mini-app')
         standard_texts = [button.text for row in standard_menu.keyboard for button in row]
         self.assertIn('⚙️ تنظیمات', standard_texts)
@@ -26,6 +30,10 @@ class BotKeyboardsTests(unittest.TestCase):
         admin_panel = keyboards.get_admin_panel_keyboard()
         admin_texts = [button.text for row in admin_panel.keyboard for button in row]
         self.assertIn('👥 مدیریت کاربران', admin_texts)
+
+        middle_admin_panel = keyboards.get_admin_panel_keyboard(UserRole.MIDDLE_MANAGER)
+        middle_admin_texts = [button.text for row in middle_admin_panel.keyboard for button in row]
+        self.assertEqual(middle_admin_texts, ['➕ ارسال لینک دعوت', '👥 مدیریت کاربران', '🔙 بازگشت'])
 
         users_management = keyboards.get_users_management_keyboard()
         management_texts = [button.text for row in users_management.keyboard for button in row]
@@ -58,6 +66,10 @@ class BotKeyboardsTests(unittest.TestCase):
         role_values = [row[0].text for row in role_select.inline_keyboard[:-1]]
         self.assertNotIn(UserRole.SUPER_ADMIN.value, role_values)
         self.assertEqual(role_select.inline_keyboard[-1][0].callback_data, 'comm_fsm_cancel')
+
+        middle_role_select = keyboards.get_role_selection_keyboard(keyboards.get_invitable_roles_for_admin(UserRole.MIDDLE_MANAGER))
+        middle_role_values = [row[0].text for row in middle_role_select.inline_keyboard[:-1]]
+        self.assertEqual(middle_role_values, [UserRole.WATCH.value, UserRole.STANDARD.value])
 
         role_edit = keyboards.get_user_role_edit_keyboard(9)
         self.assertEqual(role_edit.inline_keyboard[-1][0].callback_data, 'user_profile_9')

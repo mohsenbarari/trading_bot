@@ -61,6 +61,19 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "کاربری با این نام کاربری یا موبایل قبلاً ثبت شده است")
 
+    async def test_middle_manager_can_only_invite_watch_or_standard(self):
+        admin = SimpleNamespace(id=1, role=UserRole.MIDDLE_MANAGER)
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await create_invitation(
+                InvitationCreate(account_name="user1", mobile_number="09120000000", role=UserRole.POLICE),
+                db=FakeDB([FakeExecuteResult(None)]),
+                admin=admin,
+            )
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "مدیر میانی فقط می‌تواند کاربران عادی یا تماشا را دعوت کند")
+
     async def test_create_invitation_returns_existing_active_invitation(self):
         admin = SimpleNamespace(id=1)
         active_invitation = SimpleNamespace(

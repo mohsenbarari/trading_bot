@@ -47,6 +47,11 @@ class BotAdminRoleTests(unittest.IsolatedAsyncioTestCase):
         await process_invitation_role(callback, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), bot=SimpleNamespace())
         self.assertIn("نامعتبر", callback.answer.await_args.args[0])
 
+        callback = make_callback(data="set_role_POLICE")
+        state = FakeState({"last_prompt_message_id": 10})
+        await process_invitation_role(callback, state, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER), bot=SimpleNamespace())
+        self.assertIn("مجاز نیست", callback.answer.await_args.args[0])
+
     async def test_process_invitation_role_handles_missing_data_success_and_existing_active_link(self):
         bot = SimpleNamespace(get_me=AsyncMock(return_value=SimpleNamespace(username="botname")))
         callback = make_callback(data="set_role_STANDARD")

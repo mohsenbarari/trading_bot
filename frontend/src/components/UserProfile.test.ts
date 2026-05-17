@@ -66,6 +66,7 @@ function findButtonByText(wrapper: ReturnType<typeof mount>, text: string) {
 describe('UserProfile.vue', () => {
   beforeEach(() => {
     apiFetchMock.mockReset()
+    localStorage.clear()
     vi.spyOn(window, 'alert').mockImplementation(() => {})
     vi.spyOn(window, 'confirm').mockImplementation(() => true)
   })
@@ -389,6 +390,29 @@ describe('UserProfile.vue', () => {
 
     await securedWrapper.find('.sessions-config-box .inline-edit').trigger('click')
     expect(window.alert).toHaveBeenCalledWith('به دلایل امنیتی، تعداد نشست‌های مجاز برای مدیران سایت نمی‌تواند بیش از ۱ باشد.')
+  })
+
+  it('hides role editing for middle managers in admin view', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
+    const user = makeUser({ id: 31 })
+
+    const UserProfile = (await import('./UserProfile.vue')).default
+    const wrapper = mount(UserProfile, {
+      props: {
+        user,
+        isAdminView: true,
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    await wrapper.get('.settings-btn').trigger('click')
+
+    expect(wrapper.text()).not.toContain('ویرایش نقش')
   })
 
   it('requires explicit custom dates before saving manual limitations or manual blocks', async () => {
