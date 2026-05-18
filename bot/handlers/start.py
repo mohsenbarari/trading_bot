@@ -19,7 +19,7 @@ from core.services.accountant_relation_service import (
 )
 from core.services.chat_room_service import ensure_mandatory_channel_membership
 from models.invitation import Invitation
-from models.user import User
+from models.user import User, set_legacy_has_bot_access_compatibility
 from bot.states import Registration
 from bot.keyboards import get_share_contact_keyboard, get_persistent_menu_keyboard
 from bot.handlers.link_account import prompt_contact_for_account_link
@@ -331,8 +331,8 @@ async def handle_address(message: types.Message, state: FSMContext):
             mobile_number=invitation.mobile_number,
             address=address,
             role=invitation.role,
-            has_bot_access=True
         )
+        set_legacy_has_bot_access_compatibility(new_user, enabled=True)
 
         invitation.is_used = True
         session.add(new_user)

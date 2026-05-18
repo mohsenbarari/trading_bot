@@ -258,7 +258,40 @@ const restrictionText = computed(() => {
 
 const isAccountInactive = computed(() => (props.user?.account_status ?? accountStatus.value) === 'inactive');
 
-const accountStatusText = computed(() => (isAccountInactive.value ? '⛔ غیرفعال' : '✅ فعال'));
+function formatAccountStatusDate(value: string | null | undefined) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleDateString('fa-IR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Tehran',
+  });
+}
+
+const globalLockGraceExpiresAtText = computed(() => formatAccountStatusDate(props.user?.global_lock_grace_expires_at));
+const globalWebLockedAtText = computed(() => formatAccountStatusDate(props.user?.global_web_locked_at));
+
+const accountStatusText = computed(() => {
+  if (!isAccountInactive.value) return '✅ فعال';
+  if (globalWebLockedAtText.value) return '⛔ غیرفعال (قفل کامل)';
+  if (globalLockGraceExpiresAtText.value) return '⛔ غیرفعال (در مهلت فعال‌سازی)';
+  return '⛔ غیرفعال';
+});
+
+const accountStatusDetailText = computed(() => {
+  if (!isAccountInactive.value) return null;
+  if (globalWebLockedAtText.value) {
+    return `قفل سراسری وب/پیام‌رسان از ${globalWebLockedAtText.value}`;
+  }
+  if (globalLockGraceExpiresAtText.value) {
+    return `پایان مهلت فعال‌سازی: ${globalLockGraceExpiresAtText.value}`;
+  }
+  return 'این حساب از بازار خارج شده و تا فعال‌سازی مجدد، دسترسی معاملاتی ندارد.';
+});
 
 async function saveRole() {
   if (!canEditRole) return;
@@ -657,6 +690,10 @@ async function deleteUser() {
           <span class="label">وضعیت حساب</span>
           <span class="value">{{ accountStatusText }}</span>
       </div>
+        <div v-if="accountStatusDetailText" class="detail-item account-status-detail-row">
+          <span class="label">جزئیات وضعیت</span>
+          <span class="value">{{ accountStatusDetailText }}</span>
+        </div>
       <div class="detail-item">
           <span class="label">وضعیت معاملات</span>
           <span class="value" :class="{ 'text-red': isRestricted }">{{ restrictionText }}</span>

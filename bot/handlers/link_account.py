@@ -7,7 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.user import User
+from models.user import User, set_legacy_has_bot_access_compatibility
 from core.config import settings
 from core.db import get_db
 from core.services.accountant_relation_service import is_user_accountant
@@ -77,7 +77,7 @@ async def finalize_account_link(
         user.full_name = message.from_user.full_name
     if address is not None:
         user.address = address
-    user.has_bot_access = True
+    set_legacy_has_bot_access_compatibility(user, enabled=True)
 
     await ensure_mandatory_channel_membership(db, user=user)
     await db.commit()

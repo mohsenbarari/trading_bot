@@ -8,38 +8,46 @@ from models.user import UserRole
 
 
 def make_user(**overrides):
-    return SimpleNamespace(
-        id=7,
-        telegram_id=None,
-        username=None,
-        full_name="علی رضایی",
-        account_name="ali",
-        mobile_number="09120000000",
-        role=UserRole.STANDARD,
-        has_bot_access=True,
-        is_deleted=False,
-        avatar_file_id=None,
-        created_at=datetime(2026, 5, 12, 8, 0, tzinfo=timezone.utc),
-        trading_restricted_until=None,
-        max_daily_trades=None,
-        max_active_commodities=None,
-        max_daily_requests=None,
-        limitations_expire_at=None,
-        trades_count=0,
-        commodities_traded_count=0,
-        channel_messages_count=0,
-        last_seen_at=None,
-        can_block_users=True,
-        max_blocked_users=10,
-        max_sessions=1,
-        max_accountants=3,
-        **overrides,
-    )
+    data = {
+        'id': 7,
+        'telegram_id': None,
+        'username': None,
+        'full_name': "علی رضایی",
+        'account_name': "ali",
+        'mobile_number': "09120000000",
+        'role': UserRole.STANDARD,
+        'account_status': 'active',
+        'messenger_grace_expires_at': None,
+        'messenger_blocked_at': None,
+        'has_bot_access': True,
+        'is_deleted': False,
+        'avatar_file_id': None,
+        'created_at': datetime(2026, 5, 12, 8, 0, tzinfo=timezone.utc),
+        'trading_restricted_until': None,
+        'max_daily_trades': None,
+        'max_active_commodities': None,
+        'max_daily_requests': None,
+        'limitations_expire_at': None,
+        'trades_count': 0,
+        'commodities_traded_count': 0,
+        'channel_messages_count': 0,
+        'last_seen_at': None,
+        'can_block_users': True,
+        'max_blocked_users': 10,
+        'max_sessions': 1,
+        'max_accountants': 3,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
 
 
 class AuthRouterCurrentUserContractTests(unittest.IsolatedAsyncioTestCase):
     async def test_read_users_me_includes_accountant_state(self):
-        user = make_user()
+        user = make_user(
+            account_status='inactive',
+            messenger_grace_expires_at=datetime(2026, 5, 20, 8, 0, tzinfo=timezone.utc),
+            messenger_blocked_at=datetime(2026, 5, 21, 8, 0, tzinfo=timezone.utc),
+        )
 
         with patch("api.routers.auth.is_user_accountant", new=AsyncMock(return_value=True)) as accountant_mock:
             result = await read_users_me(current_user=user, db=object())
@@ -48,6 +56,8 @@ class AuthRouterCurrentUserContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.id, 7)
         self.assertTrue(result.is_accountant)
         self.assertEqual(result.account_name, "ali")
+        self.assertEqual(result.global_lock_grace_expires_at, user.messenger_grace_expires_at)
+        self.assertEqual(result.global_web_locked_at, user.messenger_blocked_at)
 
     async def test_update_my_avatar_preserves_accountant_state_in_response(self):
         user = make_user()

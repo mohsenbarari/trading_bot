@@ -82,3 +82,7 @@ class User(Base):
             self.account_name = f"{self.account_name}_del_{self.id}"
             self.mobile_number = f"{self.mobile_number}_del_{self.id}"
         self.telegram_id = None
+
+
+def set_legacy_has_bot_access_compatibility(user: User | object, *, enabled: bool) -> None:
+    setattr(user, "has_bot_access", bool(enabled))

@@ -7,6 +7,8 @@ export interface CurrentUserSummary {
   full_name?: string | null
   account_name?: string | null
   account_status?: string | null
+  global_lock_grace_expires_at?: string | null
+  global_web_locked_at?: string | null
   is_accountant?: boolean
 }
 
@@ -28,6 +30,10 @@ function normalizeCurrentUserSummary(raw: unknown): CurrentUserSummary | null {
     full_name: typeof user.full_name === 'string' ? user.full_name : null,
     account_name: typeof user.account_name === 'string' ? user.account_name : null,
     account_status: typeof user.account_status === 'string' ? user.account_status : null,
+    global_lock_grace_expires_at:
+      typeof user.global_lock_grace_expires_at === 'string' ? user.global_lock_grace_expires_at : null,
+    global_web_locked_at:
+      typeof user.global_web_locked_at === 'string' ? user.global_web_locked_at : null,
     is_accountant: user.is_accountant === true,
   }
 }

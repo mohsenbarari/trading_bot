@@ -22,6 +22,8 @@ describe('currentUser utils', () => {
       full_name: 'علی',
       account_name: 'ali',
       account_status: 'inactive',
+      global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
+      global_web_locked_at: '2026-05-21T12:00:00Z',
       is_accountant: true,
     })
 
@@ -31,10 +33,14 @@ describe('currentUser utils', () => {
       full_name: 'علی',
       account_name: 'ali',
       account_status: 'inactive',
+      global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
+      global_web_locked_at: '2026-05-21T12:00:00Z',
       is_accountant: true,
     })
     expect(readCachedCurrentUserSummary()).toMatchObject({
       account_status: 'inactive',
+      global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
+      global_web_locked_at: '2026-05-21T12:00:00Z',
       is_accountant: true,
     })
   })
@@ -48,6 +54,8 @@ describe('currentUser utils', () => {
         full_name: 'مینا',
         account_name: 'mina',
         account_status: 'active',
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
         is_accountant: false,
       }),
     })
@@ -60,6 +68,8 @@ describe('currentUser utils', () => {
       id: 9,
       role: 'مدیر ارشد',
       account_status: 'active',
+      global_lock_grace_expires_at: null,
+      global_web_locked_at: null,
       is_accountant: false,
     })
   })

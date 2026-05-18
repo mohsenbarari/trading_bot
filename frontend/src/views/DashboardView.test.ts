@@ -57,7 +57,8 @@ describe('DashboardView.vue', () => {
         full_name: 'رضا محمدی',
         account_name: 'reza12',
         account_status: 'active',
-        has_bot_access: true,
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
         trading_restricted_until: null,
       }),
     )
@@ -86,7 +87,8 @@ describe('DashboardView.vue', () => {
         full_name: 'کاربر مسدود',
         account_name: 'blocked13',
         account_status: 'inactive',
-        has_bot_access: true,
+        global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
+        global_web_locked_at: null,
         trading_restricted_until: '2026-05-20T12:00:00Z',
       }),
     )
@@ -94,30 +96,33 @@ describe('DashboardView.vue', () => {
     const wrapper = await mountView()
 
     expect(wrapper.text()).toContain('حساب کاربری غیرفعال شده است')
+    expect(wrapper.text()).toContain('اگر حساب تا')
     expect(wrapper.text()).not.toContain('معاملات محدود شده')
 
     await wrapper.get('.hero-btn').trigger('click')
     expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalled()
   })
 
-  it('ignores the legacy bot-access flag for dashboard warnings', async () => {
+  it('shows the stronger lock copy when the account is already globally locked', async () => {
     dashboardViewMocks.apiFetchMock.mockResolvedValue(
       makeJsonResponse({
         id: 16,
-        full_name: 'کاربر بات',
-        account_name: 'bot16',
-        account_status: 'active',
-        has_bot_access: false,
+        full_name: 'کاربر قفل‌شده',
+        account_name: 'locked16',
+        account_status: 'inactive',
+        global_lock_grace_expires_at: '2026-05-16T12:00:00Z',
+        global_web_locked_at: '2026-05-17T12:00:00Z',
         trading_restricted_until: null,
       }),
     )
 
     const wrapper = await mountView()
 
-    expect(wrapper.text()).not.toContain('دسترسی ربات محدود شده است')
+    expect(wrapper.text()).toContain('حساب کاربری قفل شده است')
+    expect(wrapper.text()).toContain('نشست‌های وب و پیام‌رسان این حساب')
 
     await wrapper.get('.hero-btn').trigger('click')
-    expect(dashboardViewMocks.routerPushMock).toHaveBeenCalledWith('/market')
+    expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalled()
   })
 
   it('shows the restricted trading warning with a formatted deadline when the user is temporarily restricted', async () => {
@@ -127,7 +132,8 @@ describe('DashboardView.vue', () => {
         full_name: 'کاربر محدود',
         account_name: 'limited14',
         account_status: 'active',
-        has_bot_access: true,
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
         trading_restricted_until: '2026-05-20T12:00:00Z',
       }),
     )
@@ -145,7 +151,8 @@ describe('DashboardView.vue', () => {
         full_name: 'کاربر خروج',
         account_name: 'logout15',
         account_status: 'active',
-        has_bot_access: true,
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
         trading_restricted_until: null,
       }))
       .mockResolvedValueOnce(makeJsonResponse([
