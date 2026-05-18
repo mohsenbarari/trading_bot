@@ -100,6 +100,9 @@ Behavioral rules:
 - session logic supports primary and secondary devices
 - pending login approvals are meaningful only for the primary device
 - session suspension exists as a soft re-authentication path rather than forcing immediate hard logout under stale-session conditions
+- `account_status` is the access-control authority for active/inactive users
+- the API exposes `global_lock_grace_expires_at` and `global_web_locked_at` as authoritative aliases of the legacy DB-backed `messenger_grace_expires_at` and `messenger_blocked_at` fields
+- `has_bot_access` is legacy compatibility only for onboarding/accountant bootstrap and sync payload continuity; do not use it for runtime gating
 
 Source of truth:
 - `api/routers/auth.py`
