@@ -237,4 +237,151 @@ describe('CommodityManager.vue', () => {
 
     wrapper.unmount()
   })
+
+  it('renders fetch and manage-alias failures with readable error details', async () => {
+    commodityManagerMocks.apiFetchMock.mockResolvedValueOnce(responseOf({ detail: 'list failed' }, false, 500))
+    const wrapper = await mountCommodityManager()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('خطا در بارگیری لیست کالاها')
+    wrapper.unmount()
+
+    commodityManagerMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/commodities/' && !options?.method) return responseOf(commoditiesState)
+      if (path === '/api/commodities/1' && !options?.method) return responseOf({ detail: 'commodity missing' }, false, 404)
+      return responseOf({}, true)
+    })
+
+    const manageWrapper = await mountCommodityManager()
+    await flushPromises()
+    await manageWrapper.find('.list-item-btn').trigger('click')
+    await flushPromises()
+
+    expect(manageWrapper.text()).toContain('خطا در دریافت اطلاعات کالا')
+    expect(manageWrapper.text()).toContain('افزودن کالای جدید')
+
+    manageWrapper.unmount()
+  })
+
+  it('keeps add/edit forms open when APIs return structured validation errors', async () => {
+    const wrapper = await mountCommodityManager()
+    await flushPromises()
+
+    commodityManagerMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      const method = options?.method || 'GET'
+      if (path === '/api/commodities/' && method === 'GET') return responseOf(commoditiesState)
+      if (path === '/api/commodities/' && method === 'POST') return responseOf({ detail: { name: ['duplicate'] } }, false, 422)
+      if (path === '/api/commodities/1' && method === 'GET') return responseOf(commoditiesState[0])
+      if (path === '/api/commodities/1' && method === 'PUT') return responseOf({ detail: { name: ['too short'] } }, false, 422)
+      return responseOf({ detail: 'unexpected' }, false, 500)
+    })
+
+    await wrapper.find('.action-btn.primary-soft').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.ds-input')[0]!.setValue('سکه امامی')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('duplicate')
+    expect(wrapper.text()).toContain('افزودن کالا')
+
+    commodityManagerMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      const method = options?.method || 'GET'
+      if (path === '/api/commodities/' && method === 'GET') return responseOf(commoditiesState)
+      if (path === '/api/commodities/1' && method === 'GET') return responseOf(commoditiesState[0])
+      if (path === '/api/commodities/1' && method === 'PUT') return responseOf({ detail: { name: ['too short'] } }, false, 422)
+      return responseOf({ detail: 'unexpected' }, false, 500)
+    })
+
+    await wrapper.find('.ds-btn.secondary').trigger('click')
+    await flushPromises()
+    await wrapper.find('.list-item-btn').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.action-btn')[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('.ds-input').setValue('x')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('too short')
+    expect(wrapper.text()).toContain('ویرایش نام کالا')
+
+    wrapper.unmount()
+  })
+
+  it('validates alias input and reports partial alias add failures', async () => {
+    const wrapper = await mountCommodityManager()
+    await flushPromises()
+
+    await wrapper.find('.list-item-btn').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.action-btn')[0]!.trigger('click')
+    await flushPromises()
+    await wrapper.find('.ds-input').setValue('   ')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('لطفاً حداقل یک نام مستعار وارد کنید.')
+
+    commodityManagerMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      const method = options?.method || 'GET'
+      if (path === '/api/commodities/1' && method === 'GET') return responseOf(commoditiesState[0])
+      if (path === '/api/commodities/1/aliases' && method === 'POST') {
+        const payload = JSON.parse(options!.body as string)
+        if (payload.alias === 'خراب') return responseOf({ detail: 'تکراری' }, false, 409)
+        return responseOf({ id: aliasId++, alias: payload.alias, commodity_id: 1 })
+      }
+      return responseOf(commoditiesState)
+    })
+
+    await wrapper.find('.ds-input').setValue('درست - خراب')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(commodityManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/1/aliases', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ alias: 'درست' }),
+    }))
+    expect(commodityManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/1/aliases', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ alias: 'خراب' }),
+    }))
+    expect(wrapper.text()).toContain('افزودن نام مستعار جدید')
+
+    wrapper.unmount()
+  })
+
+  it('returns to alias management when delete operations fail', async () => {
+    const wrapper = await mountCommodityManager()
+    await flushPromises()
+
+    await wrapper.find('.list-item-btn').trigger('click')
+    await flushPromises()
+
+    commodityManagerMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      const method = options?.method || 'GET'
+      if (path === '/api/commodities/1' && method === 'GET') return responseOf(commoditiesState[0])
+      if (path === '/api/commodities/1' && method === 'DELETE') return responseOf({ detail: 'کالا وابسته است' }, false, 400)
+      if (path === '/api/commodities/aliases/11' && method === 'DELETE') return responseOf({ detail: 'نام مستعار وابسته است' }, false, 400)
+      return responseOf(commoditiesState)
+    })
+
+    await wrapper.find('.action-btn.danger-soft').trigger('click')
+    await flushPromises()
+    await wrapper.find('.ds-btn.danger').trigger('click')
+    await flushPromises()
+
+    expect(commodityManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/1', { method: 'DELETE' })
+    expect(wrapper.text()).toContain('سکه امامی')
+
+    await wrapper.find('.icon-btn.delete').trigger('click')
+    await flushPromises()
+    await wrapper.find('.ds-btn.danger').trigger('click')
+    await flushPromises()
+
+    expect(commodityManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/aliases/11', { method: 'DELETE' })
+    expect(wrapper.text()).toContain('امامی')
+
+    wrapper.unmount()
+  })
 })

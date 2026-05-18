@@ -159,6 +159,8 @@ describe('useChatMedia', () => {
   const originalCreateObjectURL = URL.createObjectURL
   const originalRevokeObjectURL = URL.revokeObjectURL
   const originalCreateImageBitmap = globalThis.createImageBitmap
+  const originalRequestAnimationFrame = globalThis.requestAnimationFrame
+  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame
   const originalImage = globalThis.Image
   const originalFileReader = globalThis.FileReader
   const originalIndexedDB = globalThis.indexedDB
@@ -421,6 +423,11 @@ describe('useChatMedia', () => {
       writable: true,
       value: vi.fn(),
     })
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0)
+      return 1
+    })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
   })
 
   afterEach(() => {
@@ -439,6 +446,26 @@ describe('useChatMedia', () => {
       })
     } else {
       Reflect.deleteProperty(globalThis, 'createImageBitmap')
+    }
+
+    if (originalRequestAnimationFrame) {
+      Object.defineProperty(globalThis, 'requestAnimationFrame', {
+        configurable: true,
+        writable: true,
+        value: originalRequestAnimationFrame,
+      })
+    } else {
+      Reflect.deleteProperty(globalThis, 'requestAnimationFrame')
+    }
+
+    if (originalCancelAnimationFrame) {
+      Object.defineProperty(globalThis, 'cancelAnimationFrame', {
+        configurable: true,
+        writable: true,
+        value: originalCancelAnimationFrame,
+      })
+    } else {
+      Reflect.deleteProperty(globalThis, 'cancelAnimationFrame')
     }
 
     if (originalImage) {
@@ -515,6 +542,288 @@ describe('useChatMedia', () => {
 
     mediaMocks.uploadHandler?.({ type: 'cancelled', userId: -7, optimisticId: -33 })
     expect(vm.messages.some((message: Message) => message.id === -33)).toBe(false)
+  })
+
+  it('covers media helper branches for file normalization, metadata, capability, and payload parsing', async () => {
+    const { wrapper } = mountHarness([
+      makeImageMessage(1),
+      makeImageMessage(2),
+      makeImageMessage(3, { content: JSON.stringify({ file_id: 'file-3' }), is_error: true }),
+    ])
+    const vm = wrapper.vm as any
+    const hooks = vm.__testHooks
+
+    expect(hooks.formatFileSizeMb(1024 * 1024)).toBe('1.0MB')
+    expect(hooks.buildUploadTooLargeMessage()).toContain('50MB')
+    expect(hooks.buildUploadTooLargeMessage(52 * 1024 * 1024)).toContain('52.0MB')
+    expect(hooks.isHeicLikeFile(new File(['x'], 'photo.HEIC', { type: '' }))).toBe(true)
+    expect(hooks.isHeicLikeFile(new File(['x'], 'photo.jpg', { type: 'image/jpeg' }))).toBe(false)
+    expect(hooks.buildConvertedImageName('IMG_1001.HEIC')).toBe('IMG_1001.jpg')
+    expect(hooks.buildConvertedImageName('')).toMatch(/^image_\d+\.jpg$/)
+
+    const editedFile = new File(['edited'], 'edited.png', { type: 'image/png' }) as File & { __chatEditedImage?: boolean }
+    Object.defineProperty(editedFile, '__chatEditedImage', { value: true })
+    expect(hooks.isEditedImageUploadFile(editedFile)).toBe(true)
+    await expect(hooks.normalizeImageUploadFile(editedFile)).resolves.toBe(editedFile)
+    const regularFile = new File(['regular'], 'regular.png', { type: 'image/png' })
+    await expect(hooks.normalizeImageUploadFile(regularFile)).resolves.toBe(regularFile)
+    const heicFile = new File(['heic'], 'ios.heic', { type: 'image/heic' })
+    await expect(hooks.normalizeImageUploadFile(heicFile)).resolves.toMatchObject({
+      name: 'ios.jpg',
+      type: 'image/jpeg',
+    })
+    expect(heicMocks.convert).toHaveBeenCalledWith(expect.objectContaining({ blob: heicFile, toType: 'image/jpeg' }))
+
+    expect(hooks.getScaledDimensions(4000, 2000, 1000)).toEqual({ width: 1000, height: 500 })
+    expect(hooks.getScaledDimensions(500, 300, 1000)).toEqual({ width: 500, height: 300 })
+    expect(hooks.appendAlbumMetadata({}, 'image', 'album-x', 4)).toEqual({ album_id: 'album-x', album_index: 4 })
+    expect(hooks.appendAlbumMetadata({}, 'document', 'album-x', 4)).toEqual({})
+    expect(hooks.appendCaptionMetadata({}, 'video', 'caption')).toEqual({ caption: 'caption' })
+    expect(hooks.appendCaptionMetadata({}, 'voice', 'caption')).toEqual({})
+    expect(hooks.getAlbumIdFromMessage(null)).toBeNull()
+    expect(hooks.getAlbumIdFromMessage({ content: '{bad' })).toBeNull()
+    expect(hooks.getAlbumIdFromMessage(makeImageMessage(1))).toBe('album-1')
+
+    expect(hooks.getAdaptiveHydrationLimit({ tier: 'strong' })).toBe(3)
+    expect(hooks.getAdaptiveHydrationLimit({ tier: 'mid' })).toBe(2)
+    expect(hooks.getAdaptiveHydrationLimit({ tier: 'weak' })).toBe(1)
+    expect(hooks.getAdaptivePreprocessLimit(10, 'image')).toBe(1)
+    expect(hooks.getAdaptivePreprocessLimit(1, 'document')).toBe(2)
+    expect(hooks.getAdaptiveUploadLimit(1, 'voice')).toBe(1)
+    expect(hooks.getAdaptiveUploadLimit(2, 'image')).toBe(1)
+
+    expect(hooks.buildMediaLoadKey('file-1', true)).toBe('file-1:network')
+    expect(hooks.getFileId('')).toBe('')
+    expect(hooks.getFileId('{bad')).toBe('')
+    expect(hooks.getFileId(JSON.stringify({ file_id: 'abc' }))).toBe('abc')
+    expect(hooks.getDocumentFileName(makeDocumentMessage(7, { content: '{}' }))).toBe('file_7')
+    expect(hooks.parseMediaPayload('{bad')).toEqual({})
+    expect(hooks.parseMediaPayload(JSON.stringify({ file_id: 'abc' }))).toEqual({ file_id: 'abc' })
+    expect(hooks.buildAuthenticatedMediaUrl('')).toBe('')
+    expect(hooks.buildAuthenticatedMediaUrl('abc')).toBe('https://coin.test/api/chat/files/abc?token=jwt')
+    expect(hooks.getAlbumIndexFromMessage(makeImageMessage(1))).toBe(0)
+    expect(hooks.getAlbumIndexFromMessage(makeImageMessage(4, { content: JSON.stringify({ file_id: 'file-4' }) }))).toBe(Number.MAX_SAFE_INTEGER)
+    expect(hooks.getAlbumMessages(makeImageMessage(2)).map((message: Message) => message.id)).toEqual([1, 2])
+  })
+
+  it('derives strong client capability limits and uses the second createImageBitmap fallback', async () => {
+    Object.defineProperty(navigator, 'hardwareConcurrency', {
+      configurable: true,
+      value: 10,
+    })
+    Object.defineProperty(navigator, 'deviceMemory', {
+      configurable: true,
+      value: 8,
+    })
+    Object.defineProperty(navigator, 'connection', {
+      configurable: true,
+      value: { effectiveType: '4g', saveData: false },
+    })
+    preprocessMocks.canUseImagePreprocessWorker.mockReturnValue(true)
+    preprocessMocks.getRecommendedImagePreprocessParallelism.mockReturnValue(2)
+
+    const capabilityHarness = mountHarness([])
+    const capabilityHooks = (capabilityHarness.wrapper.vm as any).__testHooks
+    expect(capabilityHooks.getMediaClientCapability()).toMatchObject({
+      tier: 'strong',
+      cpuCount: 10,
+      deviceMemory: 8,
+      effectiveType: '4g',
+      saveData: false,
+      hasWorkerPreprocess: true,
+    })
+    expect(capabilityHooks.getAdaptivePreprocessLimit(9, 'image')).toBe(2)
+    expect(capabilityHooks.getAdaptivePreprocessLimit(4, 'image')).toBe(3)
+    expect(capabilityHooks.getAdaptivePreprocessLimit(1, 'video')).toBe(2)
+    expect(capabilityHooks.getAdaptivePreprocessLimit(1, 'document')).toBe(4)
+    expect(capabilityHooks.getAdaptiveUploadLimit(9, 'image')).toBe(2)
+    expect(capabilityHooks.getAdaptiveUploadLimit(3, 'image')).toBe(3)
+    expect(capabilityHooks.getAdaptiveUploadLimit(1, 'document')).toBe(2)
+
+    preprocessMocks.canUseImagePreprocessWorker.mockReturnValue(false)
+    const bitmapClose = vi.fn()
+    Object.defineProperty(globalThis, 'createImageBitmap', {
+      configurable: true,
+      writable: true,
+      value: vi.fn()
+        .mockRejectedValueOnce(new Error('option unsupported'))
+        .mockResolvedValueOnce({ width: 3000, height: 1500, close: bitmapClose }),
+    })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D))
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function toBlob(callback: BlobCallback) {
+      callback(new Blob(['fallback-bitmap'], { type: 'image/jpeg' }))
+    })
+
+    const uploadHarness = mountHarness([])
+    const uploadVm = uploadHarness.wrapper.vm as any
+    await uploadVm.handleMediaUploadWrapper(new File([new Blob(['raw'])], 'fallback.jpg', { type: 'image/jpeg' }))
+    await flushPromises()
+
+    expect(globalThis.createImageBitmap).toHaveBeenCalledTimes(2)
+    expect(bitmapClose).toHaveBeenCalled()
+    expect(mediaMocks.submitUpload).toHaveBeenCalledWith(expect.objectContaining({
+      msgType: 'image',
+      width: 1920,
+      height: 960,
+    }))
+  })
+
+  it('covers nativeImageCompress image fallback, null-blob rejection, and image decode failure', async () => {
+    Object.defineProperty(globalThis, 'createImageBitmap', {
+      configurable: true,
+      writable: true,
+      value: vi.fn()
+        .mockRejectedValueOnce(new Error('option unsupported'))
+        .mockRejectedValueOnce(new Error('bitmap failed')),
+    })
+    installImageConstructor({ width: 2400, height: 1200 })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D))
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function toBlob(callback: BlobCallback) {
+      callback(new Blob(['fallback-image'], { type: 'image/jpeg' }))
+    })
+
+    const { wrapper } = mountHarness([])
+    const hooks = (wrapper.vm as any).__testHooks
+
+    await expect(hooks.nativeImageCompress(new File(['img'], 'fallback.jpg', { type: 'image/jpeg' }), 1000, 0.7)).resolves.toMatchObject({
+      width: 1000,
+      height: 500,
+    })
+
+    ;(globalThis.createImageBitmap as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      width: 400,
+      height: 200,
+      close: vi.fn(),
+    })
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementationOnce(function toBlob(callback: BlobCallback) {
+      callback(null)
+    })
+    await expect(hooks.nativeImageCompress(new File(['img'], 'null-blob.jpg', { type: 'image/jpeg' }))).rejects.toThrow('Canvas toBlob failed')
+
+    Object.defineProperty(globalThis, 'createImageBitmap', {
+      configurable: true,
+      writable: true,
+      value: vi.fn()
+        .mockRejectedValueOnce(new Error('option unsupported'))
+        .mockRejectedValueOnce(new Error('bitmap failed')),
+    })
+    installImageConstructor({ emitError: true })
+    await expect(hooks.nativeImageCompress(new File(['img'], 'broken.jpg', { type: 'image/jpeg' }))).rejects.toThrow('image decode failed')
+  })
+
+  it('covers scheduler, cache, cancellation, hydration, and lightbox helper branches', async () => {
+    const { wrapper } = mountHarness([
+      makeImageMessage(11, { local_blob_url: undefined }),
+      makeImageMessage(12, { local_blob_url: undefined }),
+      makeDocumentMessage(13, { is_downloading: true, download_progress: 44 }),
+    ])
+    const vm = wrapper.vm as any
+    const hooks = vm.__testHooks
+
+    const firstPreprocess = hooks.runAdaptivePreprocessTask(1, async () => 'first')
+    const secondPreprocess = hooks.runAdaptivePreprocessTask(1, async () => 'second')
+    await expect(firstPreprocess).resolves.toBe('first')
+    await expect(secondPreprocess).resolves.toBe('second')
+
+    const uploadAbortController = new AbortController()
+    uploadAbortController.abort()
+    await expect(hooks.runAdaptiveUploadTask(1, async () => 'never', uploadAbortController.signal)).rejects.toThrow('UploadCancelled')
+    await expect(hooks.runAdaptiveUploadTask(1, async () => 'uploaded')).resolves.toBe('uploaded')
+
+    let releaseQueuedUpload: (() => void) | null = null
+    const firstUpload = hooks.runAdaptiveUploadTask(1, () => new Promise((resolve) => {
+      releaseQueuedUpload = () => resolve('first-upload')
+    }))
+    const queuedAbortController = new AbortController()
+    const queuedUpload = hooks.runAdaptiveUploadTask(1, async () => 'second-upload', queuedAbortController.signal)
+    queuedAbortController.abort()
+    await expect(queuedUpload).rejects.toThrow('UploadCancelled')
+    releaseQueuedUpload?.()
+    await expect(firstUpload).resolves.toBe('first-upload')
+
+    hooks.setCachedMediaUrl('cached-1', 'blob:first')
+    hooks.setCachedMediaUrl('cached-1', 'blob:first')
+    hooks.setCachedMediaUrl('cached-1', 'blob:second')
+    expect(vm.imageCache['cached-1']).toBe('blob:second')
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first')
+
+    hooks.scheduleMediaHydration('', 'image', { allowNetwork: true })
+    hooks.scheduleMediaHydration(JSON.stringify({ file_id: 'cached-1' }), 'image', { allowNetwork: true })
+    hooks.scheduleMediaHydration(JSON.stringify({ file_id: 'queued-1' }), 'image', { allowNetwork: true })
+    hooks.scheduleMediaHydration(JSON.stringify({ file_id: 'queued-1' }), 'image', { allowNetwork: true })
+    expect(hooks.state.hydrationQueue.length).toBe(1)
+    expect(hooks.state.pendingHydrationKeys.has('queued-1:network')).toBe(true)
+
+    hooks.cancelDocumentDownload(13)
+    expect(mediaMocks.cancelDocumentDownload).toHaveBeenCalledWith(13)
+    expect(vm.messages.find((message: Message) => message.id === 13)).toMatchObject({ is_downloading: false, download_progress: 0 })
+    hooks.cancelDocumentDownload(999)
+    hooks.cancelMediaDownload(999)
+
+    expect(await hooks.buildLightboxMediaItem({ ...vm.messages[0], content: '{}' })).toBeNull()
+    const lightboxItem = await hooks.buildLightboxMediaItem(vm.messages[0])
+    expect(lightboxItem).toMatchObject({ msgId: 11, fileId: 'file-11', url: 'https://coin.test/api/chat/files/file-11?token=jwt' })
+
+    const abortedVideoController = new AbortController()
+    abortedVideoController.abort()
+    await expect(hooks.preprocessVideoPreview('blob:video', abortedVideoController.signal)).rejects.toThrow('UploadCancelled')
+  })
+
+  it('falls back when video preview capture throws during seek scheduling or timing out cleanup', async () => {
+    vi.useFakeTimers()
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const seekFailureVideo = createFakeVideoElement({ width: 800, height: 400, duration: 2 })
+      Object.defineProperty(seekFailureVideo, 'currentTime', {
+        configurable: true,
+        get: () => 0,
+        set: () => {
+          throw new Error('seek failed')
+        },
+      })
+      installVideoElementFactory([seekFailureVideo])
+      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({
+        drawImage: vi.fn(),
+      } as unknown as CanvasRenderingContext2D))
+      vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(() => {
+        throw new Error('canvas encode failed')
+      })
+
+      const firstHarness = mountHarness([])
+      const firstHooks = (firstHarness.wrapper.vm as any).__testHooks
+      const seekFailurePromise = firstHooks.preprocessVideoPreview('blob:seek-fail')
+      await vi.advanceTimersByTimeAsync(3000)
+      await expect(seekFailurePromise).resolves.toEqual({
+        thumbnailDataUrl: '',
+        width: 800,
+        height: 400,
+      })
+
+      const timeoutVideo = createFakeVideoElement({ suppressAutomaticEvents: true })
+      ;(timeoutVideo.pause as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        throw new Error('pause failed')
+      })
+      installVideoElementFactory([timeoutVideo])
+
+      const secondHarness = mountHarness([])
+      const secondHooks = (secondHarness.wrapper.vm as any).__testHooks
+      const timeoutPromise = secondHooks.preprocessVideoPreview('blob:timeout')
+      await vi.advanceTimersByTimeAsync(3000)
+      await expect(timeoutPromise).resolves.toEqual({
+        thumbnailDataUrl: '',
+        width: 0,
+        height: 0,
+      })
+      expect(warnSpy).toHaveBeenCalledWith('Video preview preprocessing timed out after 3s.')
+    } finally {
+      warnSpy.mockRestore()
+      vi.useRealTimers()
+    }
   })
 
   it('handles upload sent events without local blobs and ignores malformed cache payloads', async () => {
@@ -596,6 +905,55 @@ describe('useChatMedia', () => {
       is_downloading: false,
       download_progress: 0,
     })
+  })
+
+  it('skips document downloads with no resolvable target and aborts a previous media download when retried', async () => {
+    const noTargetHarness = mountHarness([
+      makeDocumentMessage(22, { sender_id: 5, receiver_id: 0 }),
+    ], null)
+    const noTargetVm = noTargetHarness.wrapper.vm as any
+    await noTargetVm.downloadMedia(noTargetVm.messages[0])
+    expect(mediaMocks.startDocumentDownload).not.toHaveBeenCalled()
+
+    const imageMessage = makeImageMessage(23, { local_blob_url: undefined })
+    const { wrapper } = mountHarness([imageMessage])
+    const vm = wrapper.vm as any
+    let firstSignal: AbortSignal | undefined
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!firstSignal) {
+        firstSignal = init?.signal
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            const abortError = new Error('aborted') as Error & { name: string }
+            abortError.name = 'AbortError'
+            reject(abortError)
+          }, { once: true })
+        })
+      }
+
+      return Promise.resolve({
+        ok: true,
+        headers: { get: () => null },
+        body: null,
+        blob: async () => new Blob(['second-download'], { type: 'image/png' }),
+      } as Response)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('indexedDB', {
+      open: () => {
+        throw new Error('indexeddb unavailable')
+      },
+    })
+
+    const firstDownload = vm.downloadMedia(vm.messages[0])
+    await nextTick()
+    const secondDownload = vm.downloadMedia(vm.messages[0])
+    await Promise.all([firstDownload, secondDownload])
+    await flushPromises()
+
+    expect(firstSignal?.aborted).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(vm.imageCache['file-23']).toBe('blob:generated-media')
   })
 
   it('applies document download progress/error events and ignores unrelated download events', async () => {
@@ -1303,6 +1661,21 @@ describe('useChatMedia', () => {
       width: 960,
       height: 540,
     }))
+  })
+
+  it('returns an empty video thumbnail when canvas context is unavailable during preview extraction', async () => {
+    installVideoElementFactory([
+      createFakeVideoElement({ width: 640, height: 360, duration: 0 }),
+    ])
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+
+    const { wrapper } = mountHarness([])
+    const hooks = (wrapper.vm as any).__testHooks
+    await expect(hooks.preprocessVideoPreview('blob:preview-no-context')).resolves.toEqual({
+      thumbnailDataUrl: '',
+      width: 640,
+      height: 360,
+    })
   })
 
   it('falls back to video metadata probing when preview extraction cannot determine final dimensions', async () => {

@@ -123,7 +123,7 @@ class ChatServiceWrapperTests(unittest.IsolatedAsyncioTestCase):
         await publish_direct_read_event(other_user_id=20, reader_id=10, publisher=publisher)
 
         self.assertEqual([call.args[0] for call in publisher.await_args_list], [20, 20, 10, 20, 20])
-        self.assertEqual(publisher.await_args_list[0].args[1], "chat:typing")
+        self.assertEqual(publisher.await_args_list[0].args[1], "chat:activity")
         self.assertEqual(publisher.await_args_list[1].args[1], "chat:message")
         self.assertEqual(publisher.await_args_list[2].args[1], "chat:reaction")
         self.assertEqual(publisher.await_args_list[3].args[1], "chat:reaction")

@@ -285,6 +285,14 @@ describe('ChatView.vue', () => {
     return exposed.startNewChat
   }
 
+  function getChatViewTestHooks(wrapper: Awaited<ReturnType<typeof mountChatView>>) {
+    const exposed = wrapper.vm.$.exposed as { __testHooks?: any } | null
+    if (!exposed?.__testHooks) {
+      throw new Error('ChatView test hooks are unavailable in test harness')
+    }
+    return exposed.__testHooks
+  }
+
   function buildMessage(overrides: Record<string, unknown> = {}) {
     return {
       id: 11,
@@ -343,7 +351,7 @@ describe('ChatView.vue', () => {
     })
 
     wrapper.unmount()
-  })
+  }, 10000)
 
   it('keeps bottom messages anchored when the messages container height changes', async () => {
     chatViewMocks.messagesSeed = [buildMessage({ id: 31 })]
@@ -369,6 +377,291 @@ describe('ChatView.vue', () => {
     expect(container.scrollTop).toBe(600)
 
     wrapper.unmount()
+  })
+
+  it('covers exposed helper branches for payload normalization, local actions, and ordering', async () => {
+    const warnSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const freshMessage = buildCurrentUserMessage(501, 'پیام تازه')
+    const oldMessage = buildCurrentUserMessage(502, 'پیام قدیمی')
+    oldMessage.created_at = '2020-01-01T00:00:00Z'
+    const albumA = buildImageMessage({
+      id: 601,
+      sender_id: 55,
+      receiver_id: 7,
+      created_at: '2026-05-12T10:00:01Z',
+      content: JSON.stringify({ file_id: 'a', album_id: 'album-a', album_index: 1 }),
+    })
+    const albumB = buildImageMessage({
+      id: 602,
+      sender_id: 55,
+      receiver_id: 7,
+      created_at: '2026-05-12T10:00:00Z',
+      content: JSON.stringify({ file_id: 'b', album_id: 'album-a', album_index: 0 }),
+    })
+    chatViewMocks.messagesSeed = [freshMessage, oldMessage, albumA, albumB]
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 55,
+        other_user_id: 55,
+        other_user_name: 'Target User',
+        last_message_at: '2026-05-12T10:00:00Z',
+        unread_count: 0,
+        room_kind: 'direct',
+        is_pinned: true,
+        pin_order: 4,
+      },
+      {
+        id: 56,
+        other_user_id: -12,
+        chat_id: 12,
+        other_user_name: 'کانال',
+        last_message_at: '2026-05-12T09:00:00Z',
+        unread_count: 0,
+        room_kind: 'channel',
+        is_mandatory: true,
+      },
+    ]
+
+    const wrapper = await mountChatView({ targetUserId: 55, targetUserName: 'Target User' })
+    await flushPromises()
+    const hooks = getChatViewTestHooks(wrapper)
+
+    expect(hooks.normalizeLocationPayload(null)).toBeNull()
+    expect(hooks.normalizeLocationPayload({ latitude: '35.7', longitude: '51.4', snapshot_id: 9 })).toEqual({
+      lat: 35.7,
+      lng: 51.4,
+      snapshot_id: 9,
+    })
+    expect(hooks.normalizeLocationPayload({ lat: 'bad', lng: 51 })).toBeNull()
+    hooks.handleLocationClick(buildMessage({ message_type: 'location', content: JSON.stringify({ lat: 1, lng: 2 }) }))
+    expect(hooks.state.selectedLocation.value).toEqual({ lat: 1, lng: 2 })
+    hooks.closeLocationModal()
+    expect(hooks.state.selectedLocation.value).toBeNull()
+    hooks.handleLocationClick(buildMessage({ message_type: 'location', content: '{bad json' }))
+    expect(warnSpy).toHaveBeenCalled()
+
+    hooks.handleCancelSend({ id: -700, message_type: 'text' })
+    hooks.handleCancelSend({ id: -701, message_type: 'image' })
+    hooks.handleCancelDownload({ id: 1, message_type: 'document' })
+    hooks.handleCancelDownload({ id: 2, message_type: 'image' })
+    expect(chatViewMocks.cancelTextMessageMock).toHaveBeenCalledWith(-700)
+    expect(chatViewMocks.cancelUploadMock).toHaveBeenCalledWith(-701)
+    expect(chatViewMocks.cancelDocumentDownloadMock).toHaveBeenCalledWith(1)
+    expect(chatViewMocks.cancelMediaDownloadMock).toHaveBeenCalledWith(2)
+
+    expect(hooks.isPersistedMessageId(5)).toBe(true)
+    expect(hooks.isPersistedMessageId(-1)).toBe(false)
+    expect(hooks.isDeletableMessage(freshMessage)).toBe(true)
+    expect(hooks.isDeletableMessage(oldMessage)).toBe(false)
+    expect(hooks.normalizeMessageIds([1, 1, Number.NaN, 2])).toEqual([1, 2])
+    expect(hooks.normalizeMessageReactions([{ emoji: '🔥', user_id: '55' }, null, { emoji: '', user_id: 7 }])).toEqual([
+      { emoji: '🔥', user_id: 55 },
+    ])
+    expect(hooks.buildOptimisticMessageReactions([{ emoji: '👍', user_id: 7 }], 7, '👍')).toEqual([])
+    expect(hooks.buildOptimisticMessageReactions([], 7, '🔥')).toEqual([{ emoji: '🔥', user_id: 7 }])
+
+    expect(hooks.getPinnedMessagePreview(null)).toBe('')
+    expect(hooks.getPinnedMessagePreview({ ...freshMessage, is_deleted: true })).toBe('پیام حذف شد')
+    expect(hooks.getPinnedMessagePreview({ ...freshMessage, message_type: 'image' })).toBe('تصویر')
+    expect(hooks.getPinnedMessagePreview({ ...freshMessage, message_type: 'document', content: JSON.stringify({ file_name: 'doc.pdf' }) })).toBe('doc.pdf')
+    expect(hooks.getPinnedMessagePreview({ ...freshMessage, message_type: 'document', content: '{bad' })).toBe('فایل')
+
+    expect(hooks.isMandatoryPinnedConversation(chatViewMocks.conversationsSeed[1])).toBe(true)
+    expect(hooks.isConversationPinned(chatViewMocks.conversationsSeed[0])).toBe(true)
+    expect(hooks.getNextLocalPinOrder()).toBe(5)
+    expect(hooks.compareConversationActivity({ last_message_at: '' }, { last_message_at: '2026-01-01T00:00:00Z' })).toBe(1)
+    expect(hooks.compareConversationActivity({ last_message_at: '2026-01-02T00:00:00Z' }, { last_message_at: '2026-01-01T00:00:00Z' })).toBe(-1)
+    expect(hooks.isSameConversation(chatViewMocks.conversationsSeed[0], { ...chatViewMocks.conversationsSeed[0] })).toBe(true)
+    hooks.patchConversationState(chatViewMocks.conversationsSeed[0], { is_muted: true })
+    expect(hooks.state.conversations.value.find((conversation: any) => conversation.other_user_id === 55)?.is_muted).toBe(true)
+
+    expect(hooks.getAlbumMeta(freshMessage)).toEqual({ albumId: null, albumIndex: Number.MAX_SAFE_INTEGER })
+    expect(hooks.getAlbumMeta(albumA)).toEqual({ albumId: 'album-a', albumIndex: 1 })
+    expect(hooks.getAlbumMessagesForMessage(albumA).map((message: any) => message.id)).toEqual([602, 601])
+    expect(hooks.getContextMenuMessageIds(albumA)).toEqual([602, 601])
+    expect(hooks.buildForwardContent(freshMessage, 'new-album')).toBe(freshMessage.content)
+    expect(JSON.parse(hooks.buildForwardContent(albumA, null))).not.toHaveProperty('album_id')
+    expect(JSON.parse(hooks.buildForwardContent(albumA, 'forwarded', 3))).toMatchObject({ album_id: 'forwarded', album_index: 3 })
+    expect(hooks.prepareForwardBatch([601, 602])).toHaveLength(2)
+
+    expect(hooks.formatTime('2026-05-12T10:15:00Z')).toContain('۱۰')
+    expect(hooks.formatDateForSeparator('')).toBe('')
+    expect(hooks.isUserOnline(new Date().toISOString())).toBe(true)
+    expect(hooks.isUserOnline(null)).toBe(false)
+
+    hooks.toggleSelection(501)
+    expect(hooks.state.selectedMessages.value).toContain(501)
+    hooks.toggleSelection(501)
+    expect(hooks.state.selectedMessages.value).not.toContain(501)
+    hooks.startAlbumDownloadSelection(albumA, [601, 602])
+    expect(hooks.state.selectionModePurpose.value).toBe('album-download')
+    expect(hooks.isAlbumInDownloadSelection({ type: 'album', messages: [albumA, albumB] })).toBe(true)
+    hooks.handleAlbumDownloadItemToggle(albumA)
+    expect(hooks.state.selectedMessages.value).toEqual([602])
+    hooks.startAlbumForwardSelection(albumA, [601, 602])
+    expect(hooks.state.selectionModePurpose.value).toBe('album-forward')
+    hooks.startAlbumShareSelection(albumA, [601])
+    expect(hooks.state.selectionModePurpose.value).toBe('album-share')
+    hooks.handleGroupedItemSelection({ type: 'album', messages: [albumA, albumB] })
+    expect(hooks.state.selectedMessages.value.length).toBeGreaterThan(0)
+
+    hooks.hydrateRenderedMedia({ type: 'album', messages: [albumA, { ...albumB, message_type: 'video' }] })
+    hooks.hydrateRenderedMedia(freshMessage)
+    expect(chatViewMocks.scheduleMediaHydrationMock).toHaveBeenCalled()
+
+    warnSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('covers scroll metric helper branches and selection-anchor restoration', async () => {
+    chatViewMocks.hasOlderMessagesValue = true
+    chatViewMocks.isLoadingOlderMessagesValue = true
+    chatViewMocks.loadOlderMessagesMock.mockResolvedValueOnce(2)
+    chatViewMocks.messagesSeed = [buildMessage({ id: 701 })]
+    const wrapper = await mountChatView({ targetUserId: 55, targetUserName: 'Target User' })
+    await flushPromises()
+    const hooks = getChatViewTestHooks(wrapper)
+    const container = wrapper.get('.messages-container').element as HTMLElement
+    let clientHeight = 400
+    let scrollHeight = 1000
+    Object.defineProperty(container, 'clientHeight', { configurable: true, get: () => clientHeight })
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, get: () => scrollHeight })
+    container.scrollTop = 520
+
+    expect(hooks.captureMessagesContainerMetrics(null)).toBeNull()
+    expect(hooks.captureMessagesContainerMetrics(container)).toEqual({ clientHeight: 400, scrollHeight: 1000, scrollTop: 520 })
+    hooks.syncMessagesContainerMetrics(container)
+    clientHeight = 300
+    scrollHeight = 1000
+    hooks.handleMessagesContainerResize()
+    expect(container.scrollTop).toBe(620)
+    container.scrollTop = 100
+
+    const target = document.createElement('div')
+    target.id = 'msg-701'
+    document.body.appendChild(target)
+    container.getBoundingClientRect = vi.fn(() => ({ top: 100, bottom: 500, left: 0, right: 0, width: 0, height: 400 } as DOMRect))
+    target.getBoundingClientRect = vi.fn(() => ({ top: 150, bottom: 180, left: 0, right: 0, width: 0, height: 30 } as DOMRect))
+    hooks.captureSelectionAnchor(701)
+    expect(hooks.state.pendingSelectionAnchor()).toMatchObject({ messageId: 701, offsetTop: 50, userId: 55 })
+    target.getBoundingClientRect = vi.fn(() => ({ top: 250, bottom: 280, left: 0, right: 0, width: 0, height: 30 } as DOMRect))
+    expect(hooks.restorePendingSelectionAnchor(container, 55)).toBe(true)
+    expect(container.scrollTop).toBe(200)
+    expect(hooks.restorePendingSelectionAnchor(container, 55)).toBe(false)
+
+    container.scrollTop = 0
+    scrollHeight = 1200
+    chatViewMocks.isLoadingOlderMessagesValue = false
+    await hooks.handleMessagesScroll()
+    await flushPromises()
+    expect(chatViewMocks.loadOlderMessagesMock).toHaveBeenCalledWith(55)
+
+    wrapper.unmount()
+  })
+
+  it('covers exposed send, forward, recovery, and navigation orchestration branches', async () => {
+    vi.useFakeTimers()
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    chatViewMocks.messagesSeed = [
+      buildMessage({ id: 901, sender_id: 55, receiver_id: 7, content: 'forward me' }),
+    ]
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 55,
+        other_user_id: 55,
+        other_user_name: 'Target User',
+        last_message_at: '2026-05-12T10:00:00Z',
+        unread_count: 0,
+        room_kind: 'direct',
+      },
+      {
+        id: 88,
+        other_user_id: -88,
+        chat_id: 88,
+        other_user_name: 'Group Room',
+        last_message_at: '2026-05-12T09:00:00Z',
+        unread_count: 0,
+        room_kind: 'group',
+      },
+    ]
+
+    const wrapper = await mountChatView({ targetUserId: 55, targetUserName: 'Target User' })
+    await flushPromises()
+    const hooks = getChatViewTestHooks(wrapper)
+
+    await hooks.handleSendVoice(new Blob(['voice'], { type: 'audio/webm' }), 1234)
+    expect(chatViewMocks.handleMediaUploadWrapperMock).toHaveBeenCalledWith(
+      expect.objectContaining({ name: expect.stringMatching(/^voice_\d+\.webm$/), durationMs: 1234 }),
+      null,
+      0,
+      1,
+      { roomKindOverride: 'direct' },
+    )
+
+    chatViewMocks.apiFetchMock.mockResolvedValueOnce(buildMessage({ id: 902, message_type: 'location', content: JSON.stringify({ lat: 35.7, lng: 51.4 }) }))
+    await hooks.handleSendLocation(35.7, 51.4)
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/send', {
+      method: 'POST',
+      body: JSON.stringify({ receiver_id: 55, content: JSON.stringify({ lat: 35.7, lng: 51.4 }), message_type: 'location' }),
+    })
+    expect(hooks.state.messages.value.some((message: any) => message.id === 902)).toBe(true)
+
+    hooks.state.forwardMessageIds.value = [901]
+    chatViewMocks.apiFetchMock.mockClear()
+    await hooks.forwardSelectedMessages({ kind: 'bot' as any, id: 1, title: 'Unsupported' })
+    expect(alertSpy).toHaveBeenCalledWith('هدایت پیام به این مقصد هنوز فعال نشده است')
+    expect(chatViewMocks.apiFetchMock).not.toHaveBeenCalled()
+
+    hooks.state.forwardMessageIds.value = [901]
+    chatViewMocks.apiFetchMock.mockResolvedValue({})
+    await hooks.forwardSelectedMessages({ kind: 'group', id: 88, title: 'Group Room' })
+    await flushPromises()
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/rooms/88/send', {
+      method: 'POST',
+      body: JSON.stringify({ content: 'forward me', message_type: 'text', forwarded_from_id: 55 }),
+    })
+    expect(hooks.state.selectedUserId.value).toBe(-88)
+    expect(hooks.state.selectedUserName.value).toBe('Group Room')
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(-88)
+
+    hooks.state.forwardMessageIds.value = [901]
+    chatViewMocks.apiFetchMock.mockRejectedValueOnce(new Error('forward failed'))
+    await hooks.forwardSelectedMessages({ kind: 'user', id: 91, title: 'User 91' })
+    expect(alertSpy).toHaveBeenCalledWith('خطا در هدایت پیام‌ها')
+
+    hooks.state.selectedUserId.value = 55
+    chatViewMocks.apiFetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+    await hooks.handleRecoveryAction({ action: 'approve', recoveryId: 'rec-1', userId: 55 })
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/sessions/recovery/rec-1/approve', { method: 'POST' })
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55, true)
+
+    chatViewMocks.apiFetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({ detail: 'denied' }) })
+    await hooks.handleRecoveryAction({ action: 'request_identity', recoveryId: 'rec-2', userId: 55 })
+    expect(alertSpy).toHaveBeenCalledWith('denied')
+
+    chatViewMocks.loadMessagesMock.mockClear()
+    hooks.handleRecoveryRealtimeUpdate({ user_id: '55' })
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55, true)
+    hooks.handleRecoveryRealtimeUpdate({ user_id: 'bad' })
+    hooks.handleRecoveryRealtimeUpdate({ user_id: '91' })
+
+    hooks.goBack()
+    expect(hooks.state.selectedUserId.value).toBeNull()
+    hooks.goBack()
+    expect(wrapper.emitted('back')).toBeTruthy()
+
+    hooks.openPublicProfile({ id: 91, account_name: 'owner-91' })
+    await vi.runAllTimersAsync()
+    expect(chatViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'public-profile',
+      params: { id: '91' },
+      query: { account_name: 'owner-91' },
+    })
+    hooks.handleTypingForCurrentRoom()
+
+    alertSpy.mockRestore()
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 
   it('renders pinned document previews and unpins from the banner', async () => {
@@ -533,6 +826,45 @@ describe('ChatView.vue', () => {
     await wrapper.get('.open-group-creation').trigger('click')
 
     expect(document.body.textContent).toContain('حسابدار در این فاز اجازه ساخت گروه جدید را ندارد')
+
+    wrapper.unmount()
+  })
+
+  it('opens the new conversation modal and routes its create-group action into the group manager', async () => {
+    const wrapper = await mountChatView({}, {
+      ChatNewConversationModal: {
+        props: ['show'],
+        template: `<div>
+          <span class="new-chat-modal-state">{{ String(show) }}</span>
+          <button class="close-new-chat-modal" @click="$emit('close')">close</button>
+          <button class="create-group-from-new-chat" @click="$emit('create-group')">group</button>
+        </div>`,
+      },
+      ChatGroupManagerModal: {
+        props: ['show'],
+        template: '<div class="group-manager-open-state">{{ String(show) }}</div>',
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.new-chat-modal-state').text()).toBe('false')
+    expect(wrapper.get('.group-manager-open-state').text()).toBe('false')
+
+    await wrapper.get('.open-new-conversation').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.new-chat-modal-state').text()).toBe('true')
+
+    await wrapper.get('.close-new-chat-modal').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.new-chat-modal-state').text()).toBe('false')
+
+    await wrapper.get('.open-new-conversation').trigger('click')
+    await flushPromises()
+    await wrapper.get('.create-group-from-new-chat').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.new-chat-modal-state').text()).toBe('false')
+    expect(wrapper.get('.group-manager-open-state').text()).toBe('true')
 
     wrapper.unmount()
   })
@@ -1057,6 +1389,39 @@ describe('ChatView.vue', () => {
       method: 'POST',
       body: JSON.stringify({ pinned: true }),
     })
+
+    wrapper.unmount()
+  })
+
+  it('reports pin-message failures through the inline toast', async () => {
+    chatViewMocks.messagesSeed = [buildMessage()]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    }, {
+      ChatMessageItem: {
+        props: ['msg'],
+        template: '<button class="message-click-action" @click="emitClick">message</button>',
+        methods: {
+          emitClick(this: { $emit: (event: string, ...args: unknown[]) => void; msg: unknown }) {
+            this.$emit('click-message', new MouseEvent('click', { clientX: 250, clientY: 260 }), this.msg)
+          },
+        },
+      },
+      ChatContextMenu: {
+        template: '<button class="menu-pin-action" @click="$emit(\'pin-message\')">pin</button>',
+      },
+    })
+    await flushPromises()
+
+    chatViewMocks.apiFetchMock.mockRejectedValueOnce(new Error('pin failed'))
+    await wrapper.get('.message-click-action').trigger('click')
+    await flushPromises()
+    await wrapper.get('.menu-pin-action').trigger('click')
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('pin failed')
 
     wrapper.unmount()
   })
@@ -2161,6 +2526,135 @@ describe('ChatView.vue', () => {
     wrapper.unmount()
   })
 
+  it('opens channel creation only for super admins and refreshes the selected title when the channel manager closes', async () => {
+    const deniedWrapper = await mountChatView({ currentUserRole: 'عادی' }, {
+      ChatHeader: {
+        template: '<div><button class="open-channel-creation" @click="$emit(\'create-channel\')">channel</button></div>',
+      },
+    })
+    await flushPromises()
+
+    await deniedWrapper.get('.open-channel-creation').trigger('click')
+    await flushPromises()
+
+    expect(deniedWrapper.find('.channel-manager-overlay').exists()).toBe(false)
+    deniedWrapper.unmount()
+
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 23,
+        other_user_id: -23,
+        other_user_name: 'کانال فعال',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'channel',
+        chat_id: 23,
+      },
+    ]
+
+    const wrapper = await mountChatView({
+      currentUserRole: 'مدیر ارشد',
+      targetUserId: -23,
+      targetUserName: 'کانال فعال',
+    }, {
+      ChatHeader: {
+        props: ['selectedUserName'],
+        template: `<div>
+          <span class="chat-header-name">{{ selectedUserName }}</span>
+          <button class="open-room-manager" @click="$emit('manage-room')">manage</button>
+          <button class="open-channel-creation" @click="$emit('create-channel')">channel</button>
+        </div>`,
+      },
+      CreateChannelView: {
+        props: ['initialChannelId'],
+        template: `<div>
+          <span class="channel-manager-id">{{ initialChannelId ?? 'none' }}</span>
+          <button class="close-channel-manager" @click="$emit('close')">close</button>
+        </div>`,
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('.open-channel-creation').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.channel-manager-overlay').exists()).toBe(true)
+    expect(wrapper.get('.channel-manager-id').text()).toBe('none')
+
+    await wrapper.get('.close-channel-manager').trigger('click')
+    await flushPromises()
+    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(wrapper.find('.channel-manager-overlay').exists()).toBe(false)
+
+    await wrapper.get('.open-room-manager').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.channel-manager-id').text()).toBe('23')
+
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 23,
+        other_user_id: -23,
+        other_user_name: 'کانال به‌روزشده',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'channel',
+        chat_id: 23,
+      },
+    ]
+
+    chatViewMocks.loadConversationsMock.mockClear()
+    await wrapper.get('.close-channel-manager').trigger('click')
+    await flushPromises()
+
+    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.channel-manager-overlay').exists()).toBe(false)
+    expect(wrapper.get('.chat-header-name').text()).toContain('کانال به‌روزشده')
+
+    wrapper.unmount()
+  })
+
+  it('clears attachment and sticker overlays when selecting a channel conversation from the list', async () => {
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 23,
+        other_user_id: -23,
+        other_user_name: 'کانال فعال',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'channel',
+        chat_id: 23,
+      },
+    ]
+
+    const wrapper = await mountChatView({}, {
+      ChatConversationList: {
+        props: ['conversations'],
+        template: '<button class="select-channel-conversation" @click="$emit(\'select-conversation\', conversations[0])">select</button>',
+      },
+    })
+    await flushPromises()
+    const hooks = getChatViewTestHooks(wrapper)
+
+    hooks.state.showAttachmentMenu.value = true
+    hooks.state.showStickerPicker.value = true
+    chatViewMocks.loadMessagesMock.mockClear()
+
+    await wrapper.get('.select-channel-conversation').trigger('click')
+    await flushPromises()
+
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(-23)
+    expect(hooks.state.selectedUserId.value).toBe(-23)
+    expect(hooks.state.showAttachmentMenu.value).toBe(false)
+    expect(hooks.state.showStickerPicker.value).toBe(false)
+
+    wrapper.unmount()
+  })
+
   it('clears the active channel conversation when the channel manager emits left', async () => {
     chatViewMocks.conversationsSeed = [
       {
@@ -2652,6 +3146,147 @@ describe('ChatView.vue', () => {
     expect(confirmSpy).toHaveBeenCalled()
     expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/messages/11', { method: 'DELETE' })
     expect(chatViewMocks.closeLightboxMock).toHaveBeenCalled()
+
+    confirmSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('covers context-menu share branches for non-shareable, unseeded, and unsupported media', async () => {
+    const mountShareHarness = async (message: ReturnType<typeof buildMessage>) => {
+      chatViewMocks.messagesSeed = [message]
+      const wrapper = await mountChatView({
+        targetUserId: 55,
+        targetUserName: 'Target User',
+      }, {
+        ChatMessageItem: {
+          props: ['msg'],
+          template: '<button class="message-click-action" @click="emitClick">message</button>',
+          methods: {
+            emitClick(this: { $emit: (event: string, ...args: unknown[]) => void; msg: unknown }) {
+              this.$emit('click-message', new MouseEvent('click', { clientX: 470, clientY: 340 }), this.msg)
+            },
+          },
+        },
+        ChatContextMenu: {
+          template: '<button class="menu-share-action" @click="$emit(\'share\')">share</button>',
+        },
+      })
+      await flushPromises()
+      await wrapper.get('.message-click-action').trigger('click')
+      await flushPromises()
+      return wrapper
+    }
+
+    const textWrapper = await mountShareHarness(buildMessage({ content: 'plain text', message_type: 'text' }))
+    await textWrapper.get('.menu-share-action').trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('این پیام قابل اشتراک‌گذاری نیست')
+    textWrapper.unmount()
+
+    chatViewMocks.seedFileCacheMock.mockClear()
+    chatViewMocks.shareFileMock.mockClear()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('missing', { status: 404 })))
+    const unseededWrapper = await mountShareHarness(buildImageMessage({ content: JSON.stringify({ file_id: 'missing-img' }) }))
+    await unseededWrapper.get('.menu-share-action').trigger('click')
+    await flushPromises()
+    expect(chatViewMocks.shareFileMock).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('اشتراک‌گذاری این فایل در این مرورگر پشتیبانی نمی‌شود')
+    unseededWrapper.unmount()
+
+    chatViewMocks.imageCacheState = { 'img-unsupported': 'blob:unsupported-image' }
+    chatViewMocks.shareFileMock.mockResolvedValueOnce(false)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['image'], { type: 'image/jpeg' }), { status: 200 })))
+    const unsupportedWrapper = await mountShareHarness(buildImageMessage({ content: JSON.stringify({ file_id: 'img-unsupported' }) }))
+    await unsupportedWrapper.get('.menu-share-action').trigger('click')
+    await flushPromises()
+    expect(chatViewMocks.seedFileCacheMock).toHaveBeenCalledWith(
+      'img-unsupported',
+      expect.anything(),
+      '01_img-unsupported.jpg',
+      expect.any(String),
+    )
+    expect(chatViewMocks.shareFileMock).toHaveBeenCalledWith(
+      'img-unsupported',
+      '01_img-unsupported.jpg',
+      'image/jpeg',
+      '/api/chat/files/img-unsupported?token=jwt-token',
+    )
+    expect(document.body.textContent).toContain('اشتراک‌گذاری این فایل در این مرورگر پشتیبانی نمی‌شود')
+    unsupportedWrapper.unmount()
+  })
+
+  it('covers direct album action helpers and empty album selection exits', async () => {
+    const mediaMessage = buildImageMessage({
+      id: 77,
+      sender_id: 7,
+      receiver_id: 55,
+      created_at: new Date().toISOString(),
+      content: JSON.stringify({ file_id: 'img-77' }),
+    })
+    chatViewMocks.messagesSeed = [mediaMessage]
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    }, {
+      ChatInputBar: {
+        props: ['replyingToMessage', 'isSelectionMode', 'selectedMessagesCount'],
+        template: '<div class="input-state">{{ replyingToMessage?.id ?? "none" }}|{{ String(isSelectionMode) }}|{{ selectedMessagesCount }}</div>',
+      },
+      ChatForwardModal: {
+        props: ['showForwardModal'],
+        template: '<div class="forward-modal-state">{{ String(showForwardModal) }}</div>',
+      },
+    })
+    await flushPromises()
+    const hooks = getChatViewTestHooks(wrapper)
+
+    hooks.handleAlbumReplyItem(mediaMessage)
+    await flushPromises()
+    expect(wrapper.get('.input-state').text()).toContain('77')
+
+    hooks.handleAlbumForwardItem(mediaMessage)
+    await flushPromises()
+    expect(wrapper.get('.forward-modal-state').text()).toBe('true')
+    hooks.closeForwardModal()
+
+    chatViewMocks.apiFetchMock.mockClear()
+    await hooks.handleAlbumDeleteItem(mediaMessage)
+    await flushPromises()
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/messages/77', { method: 'DELETE' })
+
+    hooks.state.selectedMessages.value = []
+    hooks.state.selectionModePurpose.value = 'album-forward'
+    hooks.handleForwardSelectedAlbumMessages()
+    await flushPromises()
+    expect(wrapper.get('.input-state').text()).toContain('false|0')
+
+    hooks.state.selectedMessages.value = []
+    hooks.state.selectionModePurpose.value = 'album-share'
+    await hooks.handleShareSelectedAlbumMessages()
+    await flushPromises()
+    expect(wrapper.get('.input-state').text()).toContain('false|0')
+
+    hooks.state.contextMenu.value = {
+      visible: true,
+      message: mediaMessage,
+      messageIds: [77],
+      x: 0,
+      y: 0,
+    }
+    hooks.handleShareAlbum()
+    expect(hooks.state.contextMenu.value.visible).toBe(false)
+
+    hooks.state.contextMenu.value = {
+      visible: true,
+      message: mediaMessage,
+      messageIds: [77],
+      x: 0,
+      y: 0,
+    }
+    hooks.goBack()
+    expect(hooks.state.contextMenu.value.visible).toBe(false)
 
     confirmSpy.mockRestore()
     wrapper.unmount()

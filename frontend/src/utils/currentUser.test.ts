@@ -63,4 +63,67 @@ describe('currentUser utils', () => {
       is_accountant: false,
     })
   })
+
+  it('normalizes invalid cache values, clears state, and reuses cached summaries', async () => {
+    const {
+      cacheCurrentUserSummary,
+      clearCurrentUserSummary,
+      currentUserSummary,
+      isAdminRole,
+      primeCurrentUserSummary,
+      readCachedCurrentUserSummary,
+    } = await import('./currentUser')
+
+    localStorage.setItem('current_user_summary', '{broken-json')
+    expect(readCachedCurrentUserSummary()).toBeNull()
+
+    expect(cacheCurrentUserSummary({ role: '' })).toBeNull()
+    expect(localStorage.getItem('current_user_summary')).toBeNull()
+
+    const normalized = cacheCurrentUserSummary({ id: '42', role: 'مدیر میانی', account_name: 99 })
+    expect(normalized).toMatchObject({ id: 42, role: 'مدیر میانی', account_name: null })
+    expect(isAdminRole(normalized?.role)).toBe(true)
+
+    const cached = await primeCurrentUserSummary(false)
+    expect(cached).toEqual(normalized)
+    expect(apiFetchMock).not.toHaveBeenCalled()
+
+    clearCurrentUserSummary()
+    expect(currentUserSummary.value).toBeNull()
+    expect(readCachedCurrentUserSummary()).toBeNull()
+    expect(isAdminRole('عادی')).toBe(false)
+    expect(isAdminRole(undefined)).toBe(false)
+  })
+
+  it('shares in-flight prime requests and keeps or clears cache on failure responses', async () => {
+    let resolveProfile!: (response: unknown) => void
+    apiFetchMock.mockReturnValueOnce(new Promise((resolve) => {
+      resolveProfile = resolve
+    }))
+
+    const { cacheCurrentUserSummary, primeCurrentUserSummary, readCachedCurrentUserSummary } = await import('./currentUser')
+    const first = primeCurrentUserSummary(true)
+    const second = primeCurrentUserSummary(true)
+    resolveProfile({
+      ok: true,
+      json: async () => ({ id: 5, role: 'عادی', full_name: 'User Five' }),
+    })
+
+    await expect(first).resolves.toMatchObject({ id: 5, role: 'عادی' })
+    await expect(second).resolves.toMatchObject({ id: 5, role: 'عادی' })
+    expect(apiFetchMock).toHaveBeenCalledTimes(1)
+
+    cacheCurrentUserSummary({ id: 6, role: 'عادی', account_name: 'kept' })
+    apiFetchMock.mockResolvedValueOnce({ ok: false, status: 500 })
+    await expect(primeCurrentUserSummary(true)).resolves.toMatchObject({ id: 6, account_name: 'kept' })
+    expect(readCachedCurrentUserSummary()).toMatchObject({ id: 6 })
+
+    apiFetchMock.mockResolvedValueOnce({ ok: false, status: 403 })
+    await expect(primeCurrentUserSummary(true)).resolves.toBeNull()
+    expect(readCachedCurrentUserSummary()).toBeNull()
+
+    cacheCurrentUserSummary({ id: 7, role: 'عادی', account_name: 'fallback' })
+    apiFetchMock.mockRejectedValueOnce(new Error('offline'))
+    await expect(primeCurrentUserSummary(true)).resolves.toMatchObject({ id: 7, account_name: 'fallback' })
+  })
 })

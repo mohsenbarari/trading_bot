@@ -491,4 +491,172 @@ describe('CreateChannelView.vue', () => {
     expect(wrapper.text()).toContain('ساخت کانال جدید')
   })
 
+  it('covers exposed helper, guard, and error branches without widening the UI flow', async () => {
+    vi.useFakeTimers()
+    apiFetchJsonMock.mockImplementation(async (url: string) => {
+      if (url === '/api/chat/channels') return []
+      if (url === '/api/chat/channels/99/members') throw new Error('members unavailable')
+      if (url.startsWith('/api/chat/channels/invite-candidates?')) throw new Error('candidates unavailable')
+      throw new Error(`Unhandled apiFetchJson call: ${url}`)
+    })
+
+    apiFetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/chat/channels') return makeResponse({ detail: 'create failed' }, false, 400)
+      if (url === '/api/chat/channels/99') return makeResponse({ detail: 'save failed' }, false, 400)
+      if (url === '/api/chat/channels/99/members/3') return makeResponse({ detail: 'mutate failed' }, false, 400)
+      if (url === '/api/chat/channels/99/unfollow') return makeResponse({ detail: 'leave failed' }, false, 400)
+      if (url === '/api/chat/channels/99/members/bulk') return makeResponse({ detail: 'bulk failed' }, false, 400)
+      throw new Error(`Unhandled apiFetch call: ${url}`)
+    })
+
+    const CreateChannelView = (await import('./CreateChannelView.vue')).default
+    const wrapper = mount(CreateChannelView, {
+      props: {
+        apiBaseUrl: '',
+        jwtToken: 'token',
+        currentUserId: 1,
+        showCloseButton: true,
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as Record<string, any>
+    const creator = {
+      user_id: 1,
+      account_name: 'owner1',
+      full_name: 'Owner One',
+      mobile_number: '09120000001',
+      avatar_file_id: null,
+      role: 'admin' as const,
+      joined_at: '2026-05-12T10:00:00',
+      is_channel_creator: true,
+    }
+    const admin = {
+      user_id: 2,
+      account_name: 'admin2',
+      full_name: 'Admin Two',
+      mobile_number: '09120000002',
+      avatar_file_id: 'avatar-2',
+      role: 'admin' as const,
+      joined_at: '2026-05-12T10:01:00',
+      is_channel_creator: false,
+    }
+    const member = {
+      user_id: 3,
+      account_name: 'member3',
+      full_name: 'Member Three',
+      mobile_number: '09120000003',
+      avatar_file_id: null,
+      role: 'member' as const,
+      joined_at: '2026-05-12T10:02:00',
+      is_channel_creator: false,
+    }
+    const channel = {
+      id: 99,
+      type: 'channel' as const,
+      title: 'Managed Channel',
+      description: 'Details',
+      avatar_file_id: 'avatar-99',
+      created_by_id: 1,
+      is_system: false,
+      is_mandatory: false,
+      member_count: 3,
+      created_at: '2026-05-12T10:00:00',
+    }
+
+    expect(vm.normalizeSearch('  Owner  ')).toBe('owner')
+    expect([member, admin, creator].sort(vm.compareMemberOrder).map((item) => item.user_id)).toEqual([1, 2, 3])
+    expect(vm.getChannelKindLabel({ ...channel, is_mandatory: true })).toBe('اجباری')
+    expect(vm.getChannelKindLabel({ ...channel, is_system: true })).toBe('سیستمی')
+    expect(vm.getChannelKindLabel(channel)).toBe('اختیاری')
+    expect(vm.getChannelMemberBadges(creator)[0]).toMatchObject({ label: 'owner', tone: 'creator' })
+    expect(vm.getPromotableMemberBadges(member)[0]).toMatchObject({ label: 'member', tone: 'member' })
+    expect(vm.getPrimaryUserName('account-only', '')).toBe('account-only')
+    expect(vm.getUserAvatarUrl('avatar-2')).toBe('')
+
+    vm.activeChannel = channel
+    vm.members = [member, admin, creator]
+    vm.memberQuery = 'three'
+    vm.adminQuery = 'admin'
+    await flushPromises()
+
+    expect(vm.filteredMembers.map((item: typeof member) => item.user_id)).toEqual([3])
+    expect(vm.filteredAdmins.map((item: typeof admin) => item.user_id)).toEqual([2])
+    expect(vm.promotableMembers.map((item: typeof member) => item.user_id)).toEqual([])
+    expect(vm.canDemoteMember(creator)).toBe(false)
+    expect(vm.canDemoteMember(member)).toBe(false)
+    expect(vm.canDemoteMember(admin)).toBe(true)
+    expect(vm.canRemoveMember(creator)).toBe(false)
+    expect(vm.canRemoveMember(admin)).toBe(true)
+    expect(vm.getMemberGuardReason(creator)).toContain('سازنده')
+
+    vm.members = [creator]
+    await flushPromises()
+    expect(vm.canRemoveMember({ ...creator, user_id: 4, is_channel_creator: false })).toBe(false)
+    expect(vm.getMemberGuardReason({ ...creator, user_id: 4, is_channel_creator: false })).toContain('حداقل')
+
+    vm.selectedUserIds = new Set([2])
+    vm.handleToggleSelectAll()
+    expect(vm.selectAllActiveUsers).toBe(true)
+    expect(vm.selectedUserIds.size).toBe(0)
+    vm.toggleUser(3)
+    expect(vm.selectedUserIds.size).toBe(0)
+    vm.handleToggleSelectAll()
+    vm.toggleUser(3)
+    expect(vm.selectedUserIds.has(3)).toBe(true)
+    vm.toggleUser(3)
+    expect(vm.selectedUserIds.has(3)).toBe(false)
+
+    vm.activeChannel = { ...channel, is_mandatory: true }
+    vm.page = 'add-members'
+    await vm.loadCandidates('x')
+    expect(vm.candidates).toEqual([])
+    expect(vm.activeTotal).toBe(0)
+
+    vm.activeChannel = channel
+    await vm.loadMembers()
+    expect(vm.errorMessage).toContain('members unavailable')
+    await vm.loadCandidates('x')
+    expect(vm.errorMessage).toContain('candidates unavailable')
+
+    vm.title = ''
+    await vm.createChannel()
+    expect(apiFetchMock).not.toHaveBeenCalledWith('/api/chat/channels', expect.objectContaining({ method: 'POST' }))
+    vm.title = 'Bad Channel'
+    await vm.createChannel()
+    expect(vm.errorMessage).toBe('create failed')
+
+    await vm.updateChannelDetails()
+    expect(vm.errorMessage).toBe('save failed')
+    vm.activeChannel = channel
+    vm.selectAllActiveUsers = false
+    vm.selectedUserIds = new Set([3])
+    await vm.submitMembers()
+    expect(vm.errorMessage).toBe('bulk failed')
+    await vm.removeMember(member)
+    expect(vm.errorMessage).toBe('mutate failed')
+    await vm.unfollowCurrentChannel()
+    expect(vm.errorMessage).toBe('leave failed')
+
+    vm.activeChannel = channel
+    vm.pageHistory = ['home']
+    expect(vm.handleManagerBack()).toBe(true)
+    expect(vm.activeChannel).toBeNull()
+    expect(vm.page).toBe('home')
+
+    vm.openMemberProfile({ user_id: 0, account_name: 'bad' })
+    expect(routerPushMock).not.toHaveBeenCalledWith(expect.objectContaining({ params: { id: '0' } }))
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
 })

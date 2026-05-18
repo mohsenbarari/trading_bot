@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
@@ -32,7 +32,13 @@ vi.mock('../../utils/audioRecorder', () => ({
   },
 }))
 
+let resizeObserverCallback: ResizeObserverCallback | null = null
+
 class ResizeObserverMock {
+  constructor(callback: ResizeObserverCallback) {
+    resizeObserverCallback = callback
+  }
+
   observe() {}
   unobserve() {}
   disconnect() {}
@@ -68,6 +74,8 @@ function mountInputBar(overrides: Record<string, unknown> = {}) {
       },
       stubs: {
         EmojiStickerPicker: {
+          name: 'EmojiStickerPicker',
+          props: ['open', 'currentUserId', 'currentStickerCount', 'maxStickerCount', 'closeOnSelect', 'panelHeight', 'disableTransition'],
           template: `
             <div class="emoji-sticker-picker-stub">
               <button class="insert-sticker-btn" @click="$emit('insert', '🔥')">insert</button>
@@ -83,18 +91,31 @@ function mountInputBar(overrides: Record<string, unknown> = {}) {
 describe('ChatInputBar.vue', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    vi.useRealTimers()
     chatInputBarMocks.recorderStart.mockReset()
     chatInputBarMocks.recorderStart.mockResolvedValue(undefined)
     chatInputBarMocks.recorderStop.mockReset()
     chatInputBarMocks.recorderStop.mockResolvedValue(new Blob(['voice'], { type: 'audio/webm' }))
     chatInputBarMocks.recorderCancel.mockReset()
     chatInputBarMocks.lastTick = null
+    resizeObserverCallback = null
+    visualViewportMock.height = 900
+    visualViewportMock.width = 400
+    visualViewportMock.offsetTop = 0
+    visualViewportMock.addEventListener.mockReset()
+    visualViewportMock.removeEventListener.mockReset()
     Object.defineProperty(window, 'visualViewport', {
       configurable: true,
       value: visualViewportMock,
     })
     vi.stubGlobal('ResizeObserver', ResizeObserverMock)
     vi.spyOn(window, 'alert').mockImplementation(() => {})
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    document.body.innerHTML = ''
   })
 
   it('renders the single-selection action bar and emits every supported action', async () => {
@@ -477,5 +498,266 @@ describe('ChatInputBar.vue', () => {
     await flushPromises()
 
     expect(wrapper.emitted('update:stickerPickerOpen')).toContainEqual([false])
+  })
+
+  it('preserves composer scroll position across textarea focus and emits typing on input', async () => {
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      modelValue: 'draft',
+    })
+    const textarea = wrapper.get('textarea')
+    const inputContainer = wrapper.get('.input-container').element as HTMLElement
+    const originalGetComputedStyle = window.getComputedStyle
+
+    Object.defineProperty(window, 'scrollX', { configurable: true, value: 14 })
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 28 })
+    Object.defineProperty(inputContainer, 'scrollHeight', { configurable: true, value: 600 })
+    Object.defineProperty(inputContainer, 'clientHeight', { configurable: true, value: 200 })
+    Object.defineProperty(inputContainer, 'scrollWidth', { configurable: true, value: 500 })
+    Object.defineProperty(inputContainer, 'clientWidth', { configurable: true, value: 150 })
+    inputContainer.scrollTop = 77
+    inputContainer.scrollLeft = 9
+
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element: Element) => {
+      if (element === inputContainer) {
+        return { overflowY: 'auto', overflowX: 'scroll' } as CSSStyleDeclaration
+      }
+      return originalGetComputedStyle(element)
+    })
+    const scrollToSpy = vi.mocked(window.scrollTo)
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
+      callback(0)
+      return 1
+    })
+
+    await textarea.trigger('mousedown')
+    inputContainer.scrollTop = 0
+    inputContainer.scrollLeft = 0
+    await textarea.trigger('focus')
+
+    expect(inputContainer.scrollTop).toBe(77)
+    expect(inputContainer.scrollLeft).toBe(9)
+    expect(scrollToSpy).toHaveBeenCalledWith(14, 28)
+
+    await textarea.setValue('updated draft')
+
+    expect(wrapper.emitted('typing')).toBeTruthy()
+    expect(wrapper.emitted('update:modelValue')).toContainEqual(['updated draft'])
+  })
+
+  it('uses the keyboard env probe for picker sizing and finalizes picker-to-keyboard return on viewport resize', async () => {
+    vi.stubGlobal('CSS', {
+      supports: vi.fn(() => true),
+    })
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      stickerPickerOpen: true,
+    })
+
+    expect(resizeObserverCallback).toBeTruthy()
+    resizeObserverCallback?.([
+      { contentRect: { height: 288 } as DOMRectReadOnly } as ResizeObserverEntry,
+    ], {} as ResizeObserver)
+    await nextTick()
+
+    const picker = wrapper.findComponent({ name: 'EmojiStickerPicker' })
+    expect(picker.props('panelHeight')).toBe('max(0px, calc(288px - env(keyboard-inset-height, 0px)))')
+
+    await wrapper.get('.emoji-btn').trigger('click')
+    expect(wrapper.emitted('update:stickerPickerOpen')).toContainEqual([false])
+    await wrapper.setProps({ stickerPickerOpen: false })
+
+    const resizeHandler = visualViewportMock.addEventListener.mock.calls.find(([eventName]) => eventName === 'resize')?.[1]
+    expect(resizeHandler).toBeTruthy()
+    visualViewportMock.height = 620
+    ;(resizeHandler as EventListener)(new Event('resize'))
+    await nextTick()
+
+    expect(picker.props('open')).toBe(false)
+  })
+
+  it('clears pending picker state when editing or selection mode starts', async () => {
+    const editingWrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      stickerPickerOpen: true,
+    })
+
+    await editingWrapper.setProps({
+      editingMessage: {
+        id: 201,
+        sender_id: 7,
+        content: 'old text',
+        message_type: 'text',
+      },
+    })
+
+    expect(editingWrapper.emitted('update:stickerPickerOpen')).toContainEqual([false])
+
+    const selectionWrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      stickerPickerOpen: true,
+    })
+
+    await selectionWrapper.setProps({
+      isSelectionMode: true,
+      selectedMessages: [7],
+    })
+
+    expect(selectionWrapper.emitted('update:stickerPickerOpen')).toContainEqual([false])
+  })
+
+  it('supports selected-range and grapheme backspace while ignoring shift-enter sends', async () => {
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      modelValue: 'hello world',
+      stickerPickerOpen: true,
+    })
+    const textarea = wrapper.get('textarea').element as HTMLTextAreaElement
+
+    textarea.focus()
+    textarea.setSelectionRange(0, 5)
+    await wrapper.get('textarea').trigger('select')
+    await wrapper.find('.backspace-sticker-btn').trigger('click')
+
+    expect(wrapper.emitted('update:modelValue')).toContainEqual([' world'])
+
+    await wrapper.setProps({ modelValue: 'A🔥' })
+    await nextTick()
+    textarea.focus()
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    await wrapper.get('textarea').trigger('keyup')
+    await wrapper.find('.backspace-sticker-btn').trigger('click')
+
+    expect(wrapper.emitted('update:modelValue')).toContainEqual(['A'])
+
+    await wrapper.get('textarea').trigger('keydown.enter', {
+      preventDefault: vi.fn(),
+      shiftKey: true,
+    })
+    expect(wrapper.emitted('send-text')).toBeUndefined()
+  })
+
+  it('falls back to plain focus and disables rich controls when requested', async () => {
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      modelValue: 'focus me',
+      disableRichComposer: true,
+      allowVoiceRecording: false,
+    })
+    const textarea = wrapper.get('textarea').element as HTMLTextAreaElement
+    const vm = wrapper.vm as unknown as {
+      focusInput: (options?: { cursorToEnd?: boolean }) => void
+    }
+    let focusCalls = 0
+    vi.spyOn(textarea, 'focus').mockImplementation(((options?: FocusOptions) => {
+      focusCalls += 1
+      if (options?.preventScroll) {
+        throw new Error('preventScroll unsupported')
+      }
+    }) as HTMLTextAreaElement['focus'])
+    const setSelectionRangeSpy = vi.spyOn(textarea, 'setSelectionRange')
+
+    expect(wrapper.find('.attach-btn').exists()).toBe(false)
+    expect(wrapper.find('.voice-btn').exists()).toBe(false)
+
+    vm.focusInput({ cursorToEnd: true })
+    await nextTick()
+
+    expect(focusCalls).toBe(2)
+    expect(setSelectionRangeSpy).toHaveBeenCalledWith(textarea.value.length, textarea.value.length)
+  })
+
+  it('uses fallback picker sizing when env support is unavailable and cleans viewport listeners on unmount', async () => {
+    vi.stubGlobal('CSS', {
+      supports: vi.fn(() => false),
+    })
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      stickerPickerOpen: true,
+    })
+
+    const picker = wrapper.findComponent({ name: 'EmojiStickerPicker' })
+    expect(picker.props('panelHeight')).toBe(336)
+
+    wrapper.unmount()
+    expect(visualViewportMock.removeEventListener).toHaveBeenCalledWith('resize', expect.any(Function))
+    expect(visualViewportMock.removeEventListener).toHaveBeenCalledWith('scroll', expect.any(Function))
+  })
+
+  it('handles throwing CSS support probes and env-probe entries without content', async () => {
+    vi.stubGlobal('CSS', {
+      supports: vi.fn(() => {
+        throw new Error('css probe failed')
+      }),
+    })
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      stickerPickerOpen: true,
+    })
+
+    const picker = wrapper.findComponent({ name: 'EmojiStickerPicker' })
+  expect(picker.props('panelHeight')).toBe(336)
+
+    resizeObserverCallback?.([], {} as ResizeObserver)
+    await nextTick()
+  expect(picker.props('panelHeight')).toBe(336)
+
+    resizeObserverCallback?.([
+      { contentRect: { height: 180 } as DOMRectReadOnly } as ResizeObserverEntry,
+    ], {} as ResizeObserver)
+    await nextTick()
+    expect(wrapper.findComponent({ name: 'EmojiStickerPicker' }).props('panelHeight')).toBe('max(0px, calc(180px - env(keyboard-inset-height, 0px)))')
+  })
+
+  it('summarizes remaining media types and keeps empty send/voice guards inert', async () => {
+    for (const [messageType, expected] of [
+      ['image', 'تصویر'],
+      ['video', 'ویدیو'],
+      ['voice', 'پیام صوتی'],
+      ['sticker', 'استیکر'],
+    ] as const) {
+      const wrapper = mountInputBar({
+        isSelectionMode: false,
+        selectedMessages: [],
+        replyingToMessage: {
+          id: 77,
+          sender_id: 12,
+          content: '{}',
+          message_type: messageType,
+        },
+      })
+
+      expect(wrapper.find('.reply-banner-text').text()).toContain(expected)
+      wrapper.unmount()
+    }
+
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      modelValue: '   ',
+    })
+    const vm = wrapper.vm as unknown as {
+      stopVoiceRecording: () => Promise<void>
+      cancelVoiceRecording: () => void
+    }
+
+    await wrapper.get('textarea').trigger('keydown.enter', {
+      preventDefault: vi.fn(),
+      shiftKey: false,
+    })
+    expect(wrapper.emitted('send-text')).toBeUndefined()
+
+    await vm.stopVoiceRecording()
+    vm.cancelVoiceRecording()
+    expect(chatInputBarMocks.recorderStop).not.toHaveBeenCalled()
+    expect(chatInputBarMocks.recorderCancel).not.toHaveBeenCalled()
   })
 })
