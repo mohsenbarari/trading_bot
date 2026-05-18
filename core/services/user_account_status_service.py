@@ -20,12 +20,18 @@ from models.user import User
 
 logger = logging.getLogger(__name__)
 
-INACTIVE_MESSENGER_GRACE_PERIOD = timedelta(days=2)
-MESSENGER_BLOCK_LOOP_INTERVAL_SECONDS = 300
+INACTIVE_GLOBAL_LOCK_GRACE_PERIOD = timedelta(days=2)
+GLOBAL_LOCK_LOOP_INTERVAL_SECONDS = 300
+
+# Backward-compatible names for the existing DB fields and older imports. The
+# policy is now global web lock after grace; column names remain unchanged.
+INACTIVE_MESSENGER_GRACE_PERIOD = INACTIVE_GLOBAL_LOCK_GRACE_PERIOD
+MESSENGER_BLOCK_LOOP_INTERVAL_SECONDS = GLOBAL_LOCK_LOOP_INTERVAL_SECONDS
 
 INACTIVE_USER_NOTIFICATION = (
     "ℹ️ *اطلاعیه*\n\n"
-    "حساب کاربری شما غیرفعال شد. دسترسی شما به بازار بسته و دسترسی شما به پیامرسان در صورت عدم فعالسازی حساب شما؛ بعداز 2 روز مسدود خواهد شد"
+    "حساب کاربری شما غیرفعال شد. دسترسی شما به بازار بسته شد. "
+    "اگر حساب تا 2 روز آینده دوباره فعال نشود، همه نشست‌های وب و پیام‌رسان شما تا زمان فعال‌سازی مجدد بسته می‌شود."
 )
 
 REACTIVATED_USER_NOTIFICATION = (
@@ -34,10 +40,12 @@ REACTIVATED_USER_NOTIFICATION = (
     "دسترسی شما به بازار دوباره باز شد."
 )
 
-MESSENGER_BLOCKED_NOTIFICATION = (
+GLOBAL_LOCKED_NOTIFICATION = (
     "⛔ *اطلاعیه*\n\n"
-    "به دلیل فعال نشدن حساب در مهلت دو روزه، دسترسی پیام‌رسان شما تا زمان فعال‌سازی مجدد حساب مسدود شد."
+    "به دلیل فعال نشدن حساب در مهلت دو روزه، دسترسی وب و پیام‌رسان شما تا زمان فعال‌سازی مجدد حساب بسته شد."
 )
+
+MESSENGER_BLOCKED_NOTIFICATION = GLOBAL_LOCKED_NOTIFICATION
 
 
 @dataclass(slots=True)
@@ -77,7 +85,7 @@ def is_user_trade_blocked(user: User | object | None) -> bool:
     return is_user_market_blocked(user)
 
 
-def is_user_messenger_blocked(user: User | object | None, *, now: datetime | None = None) -> bool:
+def is_user_global_web_locked(user: User | object | None, *, now: datetime | None = None) -> bool:
     if get_user_account_status(user) != UserAccountStatus.INACTIVE:
         return False
 
@@ -90,6 +98,10 @@ def is_user_messenger_blocked(user: User | object | None, *, now: datetime | Non
 
     comparison_now = now or _utcnow_naive()
     return grace_expires_at <= comparison_now
+
+
+def is_user_messenger_blocked(user: User | object | None, *, now: datetime | None = None) -> bool:
+    return is_user_global_web_locked(user, now=now)
 
 
 async def _build_activation_join_line(user_id: int) -> str | None:
@@ -140,7 +152,7 @@ async def transition_user_account_status(
 
         user.account_status = UserAccountStatus.INACTIVE
         user.deactivated_at = now
-        user.messenger_grace_expires_at = now + INACTIVE_MESSENGER_GRACE_PERIOD
+        user.messenger_grace_expires_at = now + INACTIVE_GLOBAL_LOCK_GRACE_PERIOD
         user.messenger_blocked_at = None
 
         await _notify_user_and_optional_telegram(
@@ -210,7 +222,7 @@ async def transition_user_account_status(
     )
 
 
-async def mark_due_users_messenger_blocked(db: AsyncSession, *, limit: int = 100) -> int:
+async def mark_due_users_globally_locked(db: AsyncSession, *, limit: int = 100) -> int:
     now = _utcnow_naive()
     stmt = (
         select(User)
@@ -234,7 +246,7 @@ async def mark_due_users_messenger_blocked(db: AsyncSession, *, limit: int = 100
             db,
             user.id,
             user.telegram_id,
-            MESSENGER_BLOCKED_NOTIFICATION,
+            GLOBAL_LOCKED_NOTIFICATION,
             level=NotificationLevel.WARNING,
         )
 
@@ -247,7 +259,7 @@ async def mark_due_users_messenger_blocked(db: AsyncSession, *, limit: int = 100
                 db,
                 accountant_user.id,
                 accountant_user.telegram_id,
-                MESSENGER_BLOCKED_NOTIFICATION,
+                GLOBAL_LOCKED_NOTIFICATION,
                 level=NotificationLevel.WARNING,
             )
 
@@ -257,3 +269,7 @@ async def mark_due_users_messenger_blocked(db: AsyncSession, *, limit: int = 100
             logger.exception("Failed to revoke active sessions for messenger-blocked user %s", user.id)
 
     return len(due_users)
+
+
+async def mark_due_users_messenger_blocked(db: AsyncSession, *, limit: int = 100) -> int:
+    return await mark_due_users_globally_locked(db, limit=limit)

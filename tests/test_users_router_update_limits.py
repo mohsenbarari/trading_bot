@@ -55,8 +55,8 @@ class UsersRouterUpdateLimitsTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.users.sync_mandatory_channel_for_user_state_change", new=AsyncMock()) as mandatory_sync_mock, patch("core.cache.invalidate_user_cache", new=AsyncMock()), patch(
             "api.routers.users.send_block_notification", new=AsyncMock()
         ) as block_mock, patch("api.routers.users.send_limitation_notification", new=AsyncMock()) as limit_mock, patch(
-            "api.routers.users.send_bot_access_notification", new=AsyncMock()
-        ) as bot_mock, patch("api.routers.users.asyncio.create_task") as create_task_mock:
+            "api.routers.users.asyncio.create_task"
+        ) as create_task_mock:
             await update_user(5, schemas.UserUpdate(trading_restricted_until=until), db=db)
 
         mandatory_sync_mock.assert_awaited_once_with(
@@ -68,7 +68,6 @@ class UsersRouterUpdateLimitsTests(unittest.IsolatedAsyncioTestCase):
         )
         block_mock.assert_awaited_once_with(db, user, until)
         limit_mock.assert_awaited_once_with(db, user, ["A: 1"])
-        bot_mock.assert_not_awaited()
         create_task_mock.assert_not_called()
 
     async def test_update_user_schedules_unblock_and_unlimit_tasks(self):
@@ -86,8 +85,8 @@ class UsersRouterUpdateLimitsTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.users.sync_mandatory_channel_for_user_state_change", new=AsyncMock()) as mandatory_sync_mock, patch("core.cache.invalidate_user_cache", new=AsyncMock()), patch(
             "api.routers.users.send_block_notification", new=AsyncMock()
         ), patch("api.routers.users.send_limitation_notification", new=AsyncMock()), patch(
-            "api.routers.users.send_bot_access_notification", new=AsyncMock()
-        ), patch("api.routers.users.asyncio.create_task", side_effect=fake_create_task) as create_task_mock:
+            "api.routers.users.asyncio.create_task", side_effect=fake_create_task
+        ) as create_task_mock:
             await update_user(5, schemas.UserUpdate(trading_restricted_until=None), db=db)
 
         mandatory_sync_mock.assert_awaited_once_with(

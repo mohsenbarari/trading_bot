@@ -36,7 +36,7 @@ from core.services.session_service import (
     handle_login_session,
     hash_token,
 )
-from core.services.user_account_status_service import get_user_account_status, is_user_messenger_blocked
+from core.services.user_account_status_service import get_user_account_status, is_user_global_web_locked
 from core.services.avatar_service import resolve_owned_avatar_file_id
 from models.session import Platform, UserSession
 import uuid
@@ -354,7 +354,7 @@ async def refresh_access_token(
         if user.is_deleted:
             raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
 
-        if is_user_messenger_blocked(user):
+        if is_user_global_web_locked(user):
             _raise_inactive_account_error()
         
         # Validate session exists and is active

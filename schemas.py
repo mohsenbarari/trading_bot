@@ -144,7 +144,11 @@ class UserPublicRead(BaseModel):
 class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
     account_status: Optional[UserAccountStatus] = None
-    has_bot_access: Optional[bool] = None
+    has_bot_access: Optional[bool] = Field(
+        default=None,
+        deprecated=True,
+        description="Legacy compatibility only; account_status is the runtime authority.",
+    )
     trading_restricted_until: Optional[datetime] = None
     
     # Limitations

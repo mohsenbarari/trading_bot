@@ -3,6 +3,7 @@ import { computed, ref, onMounted } from 'vue';
 import { ChevronDown, ChevronLeft, User as UserIcon, Activity, ArrowRight, ChevronRight } from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import OwnerAccountantManagerModal from './OwnerAccountantManagerModal.vue';
+import UserProfile from './UserProfile.vue';
 import { isAdminRoleValue, readCachedCurrentUserRole } from '../utils/adminAccess';
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
 
@@ -79,6 +80,10 @@ const openSections = ref({
 const avatarBusy = ref(false);
 const avatarInput = ref<HTMLInputElement | null>(null);
 const showAccountantManager = ref(false);
+const showAdminUserManager = ref(false);
+const adminUserData = ref<any>(null);
+const adminUserLoading = ref(false);
+const adminUserError = ref('');
 const isOwnProfile = computed(() => {
   if (!profileData.value) return false;
   return Number(profileData.value.id) === Number(props.viewerUserId);
@@ -167,7 +172,7 @@ const adminActionCards = computed<ProfileActionCard[]>(() => {
   ];
 });
 
-onMounted(async () => {
+async function loadProfile() {
   if (!props.user?.id || !props.jwtToken) {
     error.value = 'اطلاعات کاربر نامعتبر است.';
     isLoading.value = false;
@@ -192,7 +197,9 @@ onMounted(async () => {
   } finally {
     isLoading.value = false;
   }
-});
+}
+
+onMounted(loadProfile);
 
 function parseApiError(payload: unknown, fallback: string) {
   if (typeof payload === 'object' && payload && 'detail' in payload) {
@@ -293,6 +300,46 @@ async function loadMutualTrades() {
     }
 }
 
+async function openAdminUserManager() {
+  if (!profileData.value || !props.jwtToken || adminUserLoading.value) return;
+
+  adminUserLoading.value = true;
+  adminUserError.value = '';
+  try {
+    const response = await fetch(`${props.apiBaseUrl}/api/users/${profileData.value.id}`, {
+      headers: {
+        'Authorization': `Bearer ${props.jwtToken}`,
+      },
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(parseApiError(payload, 'خطا در دریافت تنظیمات کاربر'));
+    }
+
+    adminUserData.value = payload;
+    showAdminUserManager.value = true;
+  } catch (e: any) {
+    adminUserError.value = e?.message || 'خطا در دریافت تنظیمات کاربر';
+  } finally {
+    adminUserLoading.value = false;
+  }
+}
+
+async function closeAdminUserManager() {
+  showAdminUserManager.value = false;
+  adminUserData.value = null;
+  await loadProfile();
+}
+
+function handleAdminUserManagerNavigate(view: string) {
+  if (view === 'manage_users') {
+    void closeAdminUserManager();
+    return;
+  }
+
+  emit('navigate', view);
+}
+
 function handleActionClick(action: ProfileActionCard) {
   if (!profileData.value) return;
   
@@ -301,7 +348,7 @@ function handleActionClick(action: ProfileActionCard) {
   } else if (action.key === 'settings') {
     emit('navigate', 'settings');
   } else if (action.key === 'admin_settings') {
-    emit('navigate', 'settings', { userId: profileData.value.id, userName: profileData.value.account_name });
+    void openAdminUserManager();
   } else if (action.key === 'add_customer') {
     alert('قابلیت افزودن مشتری به زودی اضافه خواهد شد.');
   } else if (action.key === 'add_accountant') {
@@ -480,15 +527,17 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
       </section>
 
       <section v-if="showAdminSections && adminActionCards.length > 0" class="profile-section owner-profile-section">
+        <p v-if="adminUserError" class="admin-user-error">{{ adminUserError }}</p>
         <div class="action-grid single-column">
           <button
             v-for="action in adminActionCards"
             :key="action.key"
             class="settings-btn"
+            :disabled="adminUserLoading"
             @click="handleActionClick(action)"
           >
             <span class="stat-icon">{{ action.icon }}</span>
-            <span class="stat-label">{{ action.label }}</span>
+            <span class="stat-label">{{ adminUserLoading ? 'در حال بارگذاری...' : action.label }}</span>
           </button>
         </div>
       </section>
@@ -556,6 +605,22 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
       v-if="showAccountantManager"
       @close="showAccountantManager = false"
     />
+
+    <Teleport to="body">
+      <div v-if="showAdminUserManager" class="admin-user-modal-overlay" @click.self="closeAdminUserManager">
+        <div class="admin-user-modal">
+          <button type="button" class="admin-user-modal-close" @click="closeAdminUserManager" aria-label="بستن">×</button>
+          <UserProfile
+            v-if="adminUserData"
+            :user="adminUserData"
+            :isAdminView="true"
+            :apiBaseUrl="props.apiBaseUrl"
+            :jwtToken="props.jwtToken"
+            @navigate="handleAdminUserManagerNavigate"
+          />
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -677,6 +742,56 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 .profile-avatar-btn.secondary {
   background: var(--ds-bg-hover);
   color: var(--ds-danger-500);
+}
+
+.admin-user-error {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--ds-danger-600, #dc2626);
+  font-size: 0.88rem;
+  text-align: center;
+}
+
+.admin-user-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(10px);
+}
+
+.admin-user-modal {
+  position: relative;
+  width: min(100%, 640px);
+  max-height: min(92vh, 860px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 22px;
+  background: var(--ds-bg-card, #fff);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+}
+
+.admin-user-modal-close {
+  position: sticky;
+  top: 10px;
+  right: calc(100% - 48px);
+  z-index: 2;
+  width: 38px;
+  height: 38px;
+  margin: 10px 10px -48px auto;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--ds-text-primary, #111827);
+  font-size: 1.45rem;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .hidden-avatar-input {

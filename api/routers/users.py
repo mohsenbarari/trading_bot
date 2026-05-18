@@ -129,33 +129,6 @@ async def send_limitation_notification(
         await send_telegram_notification(user.telegram_id, message)
 
 
-async def send_bot_access_notification(
-    db: AsyncSession, 
-    user: User, 
-    access_granted: bool
-) -> None:
-    """ارسال نوتیفیکیشن تغییر دسترسی بات"""
-    if access_granted:
-        message = (
-            "✅ *اطلاعیه*\n\n"
-            "دسترسی شما به ربات تلگرام مجدداً فعال شد.\n\n"
-            "اکنون می‌توانید از تمام امکانات بات استفاده کنید."
-        )
-        level = NotificationLevel.SUCCESS
-    else:
-        message = (
-            "ℹ️ *اطلاعیه*\n\n"
-            "دسترسی شما به ربات تلگرام محدود شده است.\n\n"
-            "شما همچنان می‌توانید از طریق *MiniApp* به سیستم دسترسی داشته باشید.\n\n"
-            "برای اطلاعات بیشتر با پشتیبانی تماس بگیرید."
-        )
-        level = NotificationLevel.INFO
-    
-    await create_user_notification(db, user.id, message, level, NotificationCategory.SYSTEM)
-    if user.telegram_id is not None:
-        await send_telegram_notification(user.telegram_id, message)
-
-
 async def send_delayed_removal_notification_api(
     db_session_factory,
     user_id: int,
@@ -285,7 +258,7 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
     actor = Depends(verify_admin_or_dev_key),
 ):
-    """ویرایش اطلاعات کاربر (نقش، دسترسی بات، مسدودیت و محدودیت‌ها)"""
+    """ویرایش اطلاعات کاربر (نقش، وضعیت حساب، مسدودیت و محدودیت‌ها)"""
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -303,13 +276,7 @@ async def update_user(
             raise HTTPException(status_code=403, detail="فقط مدیر ارشد می‌تواند نقش کاربر را تغییر دهد")
         user.role = update_data['role']
     
-    # --- 2. Bot Access ---
-    old_bot_access = user.has_bot_access
-    if 'has_bot_access' in update_data:
-        user.has_bot_access = False if accountant_user else update_data['has_bot_access']
-    bot_access_changed = old_bot_access != user.has_bot_access
-
-    # --- 2b. Reversible Account Status ---
+    # --- 2. Reversible Account Status ---
     if 'account_status' in update_data:
         target_status = update_data['account_status']
         if target_status is not None:
@@ -383,10 +350,6 @@ async def update_user(
     # رفع محدودیت (با تاخیر)
     if unlimit_needed:
         asyncio.create_task(send_delayed_removal_notification_api(get_db, user.id, user.telegram_id, is_block=False))
-    
-    # تغییر دسترسی بات
-    if bot_access_changed:
-        await send_bot_access_notification(db, user, user.has_bot_access)
     
     return user
 

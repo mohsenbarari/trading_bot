@@ -4,7 +4,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
-from core.services.user_account_status_service import is_user_messenger_blocked
+from core.services.user_account_status_service import is_user_global_web_locked
 from models.user import User
 
 
@@ -48,10 +48,10 @@ class AuthMiddleware(BaseMiddleware):
             # تا در تمام handler ها در دسترس باشد.
             data["user"] = user
             
-            # بررسی دسترسی بات
-            if user and is_user_messenger_blocked(user):
+            # بررسی قفل سراسری حساب بعد از پایان مهلت غیرفعال‌سازی
+            if user and is_user_global_web_locked(user):
                 restricted_message = (
-                    "⛔ دسترسی پیام‌رسان شما به دلیل غیرفعال بودن حساب مسدود شده است.\n\n"
+                    "⛔ دسترسی شما به دلیل غیرفعال بودن حساب بسته شده است.\n\n"
                     "پس از فعال‌سازی مجدد حساب، دسترسی شما باز می‌شود."
                 )
                 if inner_event is not None:
@@ -61,18 +61,4 @@ class AuthMiddleware(BaseMiddleware):
                         await inner_event.answer(restricted_message, show_alert=True)
                 return
 
-            if user and not user.has_bot_access:
-                # کاربر دسترسی به بات ندارد - پیام مناسب نمایش بده
-                restricted_message = (
-                    "⚠️ دسترسی شما به ربات محدود شده است.\n\n"
-                    "لطفاً از طریق MiniApp به سیستم دسترسی پیدا کنید.\n"
-                    "برای اطلاعات بیشتر با پشتیبانی تماس بگیرید."
-                )
-                if inner_event is not None:
-                    if isinstance(inner_event, Message):
-                        await inner_event.answer(restricted_message)
-                    elif isinstance(inner_event, CallbackQuery):
-                        await inner_event.answer(restricted_message, show_alert=True)
-                return  # جلوی ادامه پردازش را بگیر
-            
             return await handler(event, data)
