@@ -4,6 +4,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery, Update
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+from core.services.user_account_status_service import is_user_messenger_blocked
 from models.user import User
 
 
@@ -48,6 +49,18 @@ class AuthMiddleware(BaseMiddleware):
             data["user"] = user
             
             # بررسی دسترسی بات
+            if user and is_user_messenger_blocked(user):
+                restricted_message = (
+                    "⛔ دسترسی پیام‌رسان شما به دلیل غیرفعال بودن حساب مسدود شده است.\n\n"
+                    "پس از فعال‌سازی مجدد حساب، دسترسی شما باز می‌شود."
+                )
+                if inner_event is not None:
+                    if isinstance(inner_event, Message):
+                        await inner_event.answer(restricted_message)
+                    elif isinstance(inner_event, CallbackQuery):
+                        await inner_event.answer(restricted_message, show_alert=True)
+                return
+
             if user and not user.has_bot_access:
                 # کاربر دسترسی به بات ندارد - پیام مناسب نمایش بده
                 restricted_message = (

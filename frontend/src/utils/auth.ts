@@ -112,9 +112,24 @@ function cacheCurrentUserSummaryFromAuthMe(payload: any) {
         ...existing,
         id: payload.id,
         role: payload.role,
+        full_name: payload.full_name,
         account_name: payload.account_name,
+        account_status: payload.account_status,
         is_accountant: payload.is_accountant,
     }));
+}
+
+function readCachedCurrentUserAccountStatus(): string | null {
+    try {
+        const raw = JSON.parse(localStorage.getItem('current_user_summary') || '{}');
+        return typeof raw.account_status === 'string' ? raw.account_status : null;
+    } catch {
+        return null;
+    }
+}
+
+function isInactiveAccountStatus(status: string | null | undefined): boolean {
+    return status === 'inactive';
 }
 
 export function isAdmin(): boolean {
@@ -141,6 +156,26 @@ async function ensureAdminAccess(): Promise<boolean> {
     }
 }
 
+async function ensureMarketAccess(): Promise<boolean> {
+    const cachedStatus = readCachedCurrentUserAccountStatus();
+    if (cachedStatus) {
+        return !isInactiveAccountStatus(cachedStatus);
+    }
+
+    try {
+        const response = await apiFetch('/api/auth/me');
+        if (!response.ok) {
+            return true;
+        }
+
+        const data = await response.json();
+        cacheCurrentUserSummaryFromAuthMe(data);
+        return !isInactiveAccountStatus(data?.account_status);
+    } catch {
+        return true;
+    }
+}
+
 export async function authGuard(
     to: RouteLocationNormalized,
     from: RouteLocationNormalized,
@@ -162,6 +197,9 @@ export async function authGuard(
             return next('/login');
         }
     } 
+    if (meta.requiresMarketAccess && !(await ensureMarketAccess())) {
+        return next('/');
+    }
     if (meta.requiresAdmin && !(await ensureAdminAccess())) {
         return next('/dashboard');
     }

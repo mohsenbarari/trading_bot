@@ -15,8 +15,10 @@ const isRestricted = computed(() => {
   return new Date(user.value.trading_restricted_until) > new Date()
 })
 
-const isBlocked = computed(() => {
-  return user.value && !user.value.has_bot_access
+const isInactiveAccount = computed(() => user.value?.account_status === 'inactive')
+
+const isLegacyBotRestricted = computed(() => {
+  return !!user.value && !user.value.has_bot_access && !isInactiveAccount.value
 })
 
 const restrictedUntil = computed(() => {
@@ -66,6 +68,11 @@ async function logout() {
   forceLogout()
 }
 
+function openMarket() {
+  if (isInactiveAccount.value) return
+  router.push('/market')
+}
+
 onMounted(fetchUser)
 </script>
 
@@ -105,13 +112,23 @@ onMounted(fetchUser)
       </header>
 
       <!-- ═══ Blocked Warning ═══ -->
-      <div v-if="isBlocked" class="alert-card alert-blocked">
+      <div v-if="isInactiveAccount" class="alert-card alert-blocked">
         <div class="alert-icon blocked-icon">
           <Ban :size="28" />
         </div>
         <div class="alert-body">
-          <h3>حساب کاربری مسدود شده</h3>
-          <p>دسترسی شما به سیستم توسط مدیریت مسدود شده است. برای اطلاعات بیشتر با پشتیبانی تماس بگیرید.</p>
+          <h3>حساب کاربری غیرفعال شده است</h3>
+          <p>دسترسی شما به بازار بسته شده است. برای فعال‌سازی مجدد با مدیریت تماس بگیرید.</p>
+        </div>
+      </div>
+
+      <div v-else-if="isLegacyBotRestricted" class="alert-card alert-blocked">
+        <div class="alert-icon blocked-icon">
+          <Ban :size="28" />
+        </div>
+        <div class="alert-body">
+          <h3>دسترسی ربات محدود شده است</h3>
+          <p>دسترسی شما به ربات محدود شده است، اما هنوز می‌توانید از بخش‌های وب استفاده کنید.</p>
         </div>
       </div>
 
@@ -130,7 +147,7 @@ onMounted(fetchUser)
       <main class="main-section">
 
         <!-- Market Entry — Hero Button -->
-        <button class="hero-btn" @click="router.push('/market')">
+        <button class="hero-btn" :disabled="isInactiveAccount" @click="openMarket">
           <div class="hero-btn-bg"></div>
           <div class="hero-btn-content">
             <div class="hero-icon">
@@ -173,6 +190,11 @@ onMounted(fetchUser)
   margin: 0 auto;
   display: flex;
   flex-direction: column;
+}
+
+.hero-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* ═══ Top Bar ═══ */

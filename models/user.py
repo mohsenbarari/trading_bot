@@ -2,6 +2,7 @@ import enum
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Boolean, Enum, BigInteger, Text, DateTime, ForeignKey
 from sqlalchemy.sql import func
+from core.enums import UserAccountStatus
 from .database import Base
 
 class UserRole(str, enum.Enum):
@@ -26,6 +27,10 @@ class User(Base):
     address = Column(Text, nullable=False)
     avatar_file_id = Column(String(36), ForeignKey("chat_files.id"), nullable=True)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.WATCH)
+    account_status = Column(Enum(UserAccountStatus), nullable=False, default=UserAccountStatus.ACTIVE, index=True)
+    deactivated_at = Column(DateTime, nullable=True)
+    messenger_grace_expires_at = Column(DateTime, nullable=True, index=True)
+    messenger_blocked_at = Column(DateTime, nullable=True)
     has_bot_access = Column(Boolean, default=True, nullable=False)
     
     is_deleted = Column(Boolean, default=False, index=True)

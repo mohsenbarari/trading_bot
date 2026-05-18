@@ -1,0 +1,253 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+
+from aiogram import Bot
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from bot.utils.channel_invites import build_channel_join_request_line
+from core.config import settings
+from core.enums import NotificationCategory, NotificationLevel, UserAccountStatus
+from core.services.accountant_relation_service import list_active_accountants_for_owner
+from core.services.user_deletion_service import remove_user_from_telegram_channel
+from core.utils import create_user_notification, send_telegram_notification, utc_now
+from models.user import User
+
+
+logger = logging.getLogger(__name__)
+
+INACTIVE_MESSENGER_GRACE_PERIOD = timedelta(days=2)
+MESSENGER_BLOCK_LOOP_INTERVAL_SECONDS = 300
+
+INACTIVE_USER_NOTIFICATION = (
+    "ℹ️ *اطلاعیه*\n\n"
+    "حساب کاربری شما غیرفعال شد. دسترسی شما به بازار بسته و دسترسی شما به پیامرسان در صورت عدم فعالسازی حساب شما؛ بعداز 2 روز مسدود خواهد شد"
+)
+
+REACTIVATED_USER_NOTIFICATION = (
+    "✅ *اطلاعیه*\n\n"
+    "حساب کاربری شما مجدداً فعال شد.\n"
+    "دسترسی شما به بازار دوباره باز شد."
+)
+
+MESSENGER_BLOCKED_NOTIFICATION = (
+    "⛔ *اطلاعیه*\n\n"
+    "به دلیل فعال نشدن حساب در مهلت دو روزه، دسترسی پیام‌رسان شما تا زمان فعال‌سازی مجدد حساب مسدود شد."
+)
+
+
+@dataclass(slots=True)
+class UserAccountStatusTransitionResult:
+    changed: bool
+    user_id: int
+    account_status: UserAccountStatus
+    deactivated_at: datetime | None
+    messenger_grace_expires_at: datetime | None
+    messenger_blocked_at: datetime | None
+
+
+def _utcnow_naive() -> datetime:
+    return utc_now().replace(tzinfo=None)
+
+
+def get_user_account_status(user: User | object | None) -> UserAccountStatus:
+    raw_status = getattr(user, "account_status", None)
+    if isinstance(raw_status, UserAccountStatus):
+        return raw_status
+    if raw_status is None:
+        return UserAccountStatus.ACTIVE
+
+    normalized_value = getattr(raw_status, "value", raw_status)
+    try:
+        return UserAccountStatus(normalized_value)
+    except ValueError:
+        logger.warning("Unknown user account status %r, defaulting to active", normalized_value)
+        return UserAccountStatus.ACTIVE
+
+
+def is_user_market_blocked(user: User | object | None) -> bool:
+    return get_user_account_status(user) == UserAccountStatus.INACTIVE
+
+
+def is_user_trade_blocked(user: User | object | None) -> bool:
+    return is_user_market_blocked(user)
+
+
+def is_user_messenger_blocked(user: User | object | None, *, now: datetime | None = None) -> bool:
+    if get_user_account_status(user) != UserAccountStatus.INACTIVE:
+        return False
+
+    if getattr(user, "messenger_blocked_at", None) is not None:
+        return True
+
+    grace_expires_at = getattr(user, "messenger_grace_expires_at", None)
+    if grace_expires_at is None:
+        return False
+
+    comparison_now = now or _utcnow_naive()
+    return grace_expires_at <= comparison_now
+
+
+async def _build_activation_join_line(user_id: int) -> str | None:
+    bot: Bot | None = None
+    try:
+        if settings.bot_token:
+            bot = Bot(token=settings.bot_token)
+        return await build_channel_join_request_line(bot, user_id=user_id)
+    except Exception:
+        logger.exception("Failed to build channel join line for reactivated user %s", user_id)
+        return None
+    finally:
+        if bot is not None:
+            await bot.session.close()
+
+
+async def _notify_user_and_optional_telegram(
+    db: AsyncSession,
+    user_id: int,
+    telegram_id: int | None,
+    message: str,
+    *,
+    level: NotificationLevel,
+) -> None:
+    await create_user_notification(db, user_id, message, level, NotificationCategory.SYSTEM)
+    if telegram_id is not None:
+        await send_telegram_notification(telegram_id, message)
+
+
+async def transition_user_account_status(
+    db: AsyncSession,
+    user: User,
+    target_status: UserAccountStatus,
+) -> UserAccountStatusTransitionResult:
+    current_status = get_user_account_status(user)
+    now = _utcnow_naive()
+
+    if target_status == UserAccountStatus.INACTIVE:
+        if current_status == UserAccountStatus.INACTIVE:
+            return UserAccountStatusTransitionResult(
+                changed=False,
+                user_id=user.id,
+                account_status=current_status,
+                deactivated_at=getattr(user, "deactivated_at", None),
+                messenger_grace_expires_at=getattr(user, "messenger_grace_expires_at", None),
+                messenger_blocked_at=getattr(user, "messenger_blocked_at", None),
+            )
+
+        user.account_status = UserAccountStatus.INACTIVE
+        user.deactivated_at = now
+        user.messenger_grace_expires_at = now + INACTIVE_MESSENGER_GRACE_PERIOD
+        user.messenger_blocked_at = None
+
+        await _notify_user_and_optional_telegram(
+            db,
+            user.id,
+            user.telegram_id,
+            INACTIVE_USER_NOTIFICATION,
+            level=NotificationLevel.WARNING,
+        )
+
+        if user.telegram_id is not None:
+            try:
+                await remove_user_from_telegram_channel(user.telegram_id)
+            except Exception:
+                logger.exception("Failed to remove inactive user %s from Telegram channel", user.id)
+
+        return UserAccountStatusTransitionResult(
+            changed=True,
+            user_id=user.id,
+            account_status=user.account_status,
+            deactivated_at=user.deactivated_at,
+            messenger_grace_expires_at=user.messenger_grace_expires_at,
+            messenger_blocked_at=user.messenger_blocked_at,
+        )
+
+    stale_status_fields_present = any(
+        getattr(user, field_name, None) is not None
+        for field_name in ("deactivated_at", "messenger_grace_expires_at", "messenger_blocked_at")
+    )
+    if current_status == UserAccountStatus.ACTIVE and not stale_status_fields_present:
+        return UserAccountStatusTransitionResult(
+            changed=False,
+            user_id=user.id,
+            account_status=current_status,
+            deactivated_at=None,
+            messenger_grace_expires_at=None,
+            messenger_blocked_at=None,
+        )
+
+    user.account_status = UserAccountStatus.ACTIVE
+    user.deactivated_at = None
+    user.messenger_grace_expires_at = None
+    user.messenger_blocked_at = None
+
+    await _notify_user_and_optional_telegram(
+        db,
+        user.id,
+        None,
+        REACTIVATED_USER_NOTIFICATION,
+        level=NotificationLevel.SUCCESS,
+    )
+
+    if user.telegram_id is not None:
+        telegram_message = REACTIVATED_USER_NOTIFICATION
+        join_line = await _build_activation_join_line(user.id)
+        if join_line:
+            telegram_message = f"{telegram_message}\n\n{join_line}"
+        await send_telegram_notification(user.telegram_id, telegram_message)
+
+    return UserAccountStatusTransitionResult(
+        changed=True,
+        user_id=user.id,
+        account_status=user.account_status,
+        deactivated_at=None,
+        messenger_grace_expires_at=None,
+        messenger_blocked_at=None,
+    )
+
+
+async def mark_due_users_messenger_blocked(db: AsyncSession, *, limit: int = 100) -> int:
+    now = _utcnow_naive()
+    stmt = (
+        select(User)
+        .where(
+            User.is_deleted == False,
+            User.account_status == UserAccountStatus.INACTIVE,
+            User.messenger_grace_expires_at.is_not(None),
+            User.messenger_grace_expires_at <= now,
+            User.messenger_blocked_at.is_(None),
+        )
+        .order_by(User.messenger_grace_expires_at.asc(), User.id.asc())
+        .limit(limit)
+    )
+    due_users = list((await db.execute(stmt)).scalars().all())
+    if not due_users:
+        return 0
+
+    for user in due_users:
+        user.messenger_blocked_at = now
+        await _notify_user_and_optional_telegram(
+            db,
+            user.id,
+            user.telegram_id,
+            MESSENGER_BLOCKED_NOTIFICATION,
+            level=NotificationLevel.WARNING,
+        )
+
+        accountant_relations = await list_active_accountants_for_owner(db, user.id)
+        for relation in accountant_relations:
+            accountant_user = getattr(relation, "accountant_user", None)
+            if accountant_user is None:
+                continue
+            await _notify_user_and_optional_telegram(
+                db,
+                accountant_user.id,
+                accountant_user.telegram_id,
+                MESSENGER_BLOCKED_NOTIFICATION,
+                level=NotificationLevel.WARNING,
+            )
+
+    return len(due_users)

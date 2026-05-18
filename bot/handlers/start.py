@@ -12,6 +12,7 @@ import logging
 
 from core.db import AsyncSessionLocal
 from core.config import settings
+from core.services.user_account_status_service import is_user_market_blocked
 from core.services.accountant_relation_service import (
     get_pending_accountant_relation_by_invitation_token,
     is_accountant_invitation_token,
@@ -381,18 +382,24 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
         )
         user = (await session.execute(stmt)).scalar_one_or_none()
 
-    if not user or not user.has_bot_access:
+    if not user or not user.has_bot_access or is_user_market_blocked(user):
         await join_request.bot.decline_chat_join_request(
             chat_id=join_request.chat.id,
             user_id=join_request.from_user.id,
         )
+        decline_text = (
+            "❌ درخواست عضویت شما تایید نشد.\n\n"
+            "ابتدا ثبت‌نام یا لینک‌کردن حساب خود در ربات را کامل کنید و سپس دوباره تلاش کنید."
+        )
+        if user and is_user_market_blocked(user):
+            decline_text = (
+                "❌ درخواست عضویت شما تایید نشد.\n\n"
+                "حساب شما غیرفعال است و تا زمان فعال‌سازی مجدد، امکان عضویت در کانال معاملات را ندارید."
+            )
         try:
             await join_request.bot.send_message(
                 chat_id=join_request.user_chat_id,
-                text=(
-                    "❌ درخواست عضویت شما تایید نشد.\n\n"
-                    "ابتدا ثبت‌نام یا لینک‌کردن حساب خود در ربات را کامل کنید و سپس دوباره تلاش کنید."
-                ),
+                text=decline_text,
             )
         except Exception:
             logger.exception("Failed to notify declined channel join request user")

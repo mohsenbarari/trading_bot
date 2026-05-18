@@ -8,6 +8,7 @@ import pytz
 
 from core.db import get_db
 from core.services.accountant_relation_service import is_user_accountant
+from core.services.user_account_status_service import transition_user_account_status
 from core.services.chat_room_service import sync_mandatory_channel_for_user_state_change
 from core.services.session_service import force_clear_sessions
 from core.services.user_deletion_service import delete_user_account
@@ -15,7 +16,7 @@ from models.user import User
 from api.deps import verify_admin_or_dev_key
 
 from core.utils import create_user_notification, send_telegram_notification, to_jalali_str
-from core.enums import NotificationLevel, NotificationCategory, UserRole
+from core.enums import NotificationLevel, NotificationCategory, UserRole, UserAccountStatus
 import schemas
 
 
@@ -307,6 +308,12 @@ async def update_user(
     if 'has_bot_access' in update_data:
         user.has_bot_access = False if accountant_user else update_data['has_bot_access']
     bot_access_changed = old_bot_access != user.has_bot_access
+
+    # --- 2b. Reversible Account Status ---
+    if 'account_status' in update_data:
+        target_status = update_data['account_status']
+        if target_status is not None:
+            await transition_user_account_status(db, user, UserAccountStatus(target_status))
     
     # --- 3. Trading Restriction (مسدودیت) ---
     block_notification_needed = False

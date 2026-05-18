@@ -17,6 +17,7 @@ from core.events import setup_event_listeners
 from core.connectivity import connectivity_monitor_loop
 from core.offer_expiry import offer_expiry_loop
 from core.session_expiry import session_expiry_loop
+from core.user_account_status_loop import user_account_status_loop
 from core.services.chat_room_service import ensure_mandatory_channel_rollout
 import asyncio
 import schemas
@@ -50,6 +51,7 @@ async def lifespan(app: FastAPI):
     # Start offer auto-expiry background task
     asyncio.create_task(offer_expiry_loop())
     asyncio.create_task(session_expiry_loop())
+    asyncio.create_task(user_account_status_loop())
     
     yield
     

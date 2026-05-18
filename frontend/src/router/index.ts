@@ -26,7 +26,7 @@ const router = createRouter({
       path: '/market',
       name: 'market',
       component: () => import('../views/MarketView.vue'),
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true, requiresMarketAccess: true }
     },
     {
       path: '/chat',

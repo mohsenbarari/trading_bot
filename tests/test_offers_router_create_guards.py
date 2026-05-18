@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 from api.routers.offers import OfferCreate, create_offer
-from core.enums import UserRole
+from core.enums import UserAccountStatus, UserRole
 
 
 class FakeDB:
@@ -41,6 +41,7 @@ def make_user(**overrides):
     data = {
         "id": 5,
         "role": UserRole.STANDARD,
+        "account_status": UserAccountStatus.ACTIVE,
         "trading_restricted_until": None,
     }
     data.update(overrides)
@@ -67,6 +68,15 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             await create_offer(make_offer(), db=FakeDB(), context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertIn("حساب شما مسدود است", exc_info.exception.detail)
+
+    async def test_create_offer_rejects_inactive_users(self):
+        inactive_user = make_user(account_status=UserAccountStatus.INACTIVE)
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await create_offer(make_offer(), db=FakeDB(), context=make_context(inactive_user))
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "حساب شما غیرفعال است و دسترسی شما به بازار بسته شده است.")
 
     async def test_create_offer_rejects_user_limit_failures(self):
         current_user = make_user()

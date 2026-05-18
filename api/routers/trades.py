@@ -28,6 +28,7 @@ from core.services.trade_service import (
     get_available_trade_amounts,
     validate_offer_trade_amount,
 )
+from core.services.user_account_status_service import is_user_trade_blocked
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
 from models.trade import Trade, TradeType, TradeStatus
@@ -347,6 +348,12 @@ async def _execute_trade_authoritatively(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="شما دسترسی به بخش معاملات را ندارید."
+        )
+
+    if is_user_trade_blocked(owner_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="حساب شما غیرفعال است و امکان انجام معامله ندارید.",
         )
     
     # بررسی مسدودیت (قبل از قفل)

@@ -20,6 +20,7 @@ from core.config import settings
 from core.trading_settings import get_trading_settings
 from core.utils import check_user_limits, increment_user_counter, to_jalali_str
 from core.services.trade_service import get_available_trade_amounts
+from core.services.user_account_status_service import is_user_market_blocked
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
 from models.commodity import Commodity
@@ -242,6 +243,12 @@ async def create_offer(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="شما دسترسی به بخش معاملات را ندارید."
+        )
+
+    if is_user_market_blocked(owner_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="حساب شما غیرفعال است و دسترسی شما به بازار بسته شده است.",
         )
     
     # بررسی مسدودیت
