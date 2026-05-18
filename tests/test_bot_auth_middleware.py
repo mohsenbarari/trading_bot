@@ -117,17 +117,17 @@ class BotAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(data['user'], user)
         handler.assert_awaited_once_with(event, data)
 
-    async def test_middleware_blocks_bot_restricted_message_and_callback(self):
-        restricted_user = MagicMock(
+    async def test_middleware_ignores_legacy_bot_access_flag(self):
+        legacy_restricted_user = MagicMock(
             has_bot_access=False,
             account_status=UserAccountStatus.ACTIVE,
             messenger_blocked_at=None,
             messenger_grace_expires_at=None,
         )
         session = AsyncMock()
-        session.execute = AsyncMock(return_value=_ExecuteResult(restricted_user))
+        session.execute = AsyncMock(return_value=_ExecuteResult(legacy_restricted_user))
         middleware = auth_middleware.AuthMiddleware(session_pool=MagicMock(return_value=_AsyncSessionContext(session)))
-        handler = AsyncMock()
+        handler = AsyncMock(return_value='allowed')
 
         original_message = auth_middleware.Message
         original_callback = auth_middleware.CallbackQuery
@@ -139,16 +139,18 @@ class BotAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
 
             message = FakeMessage(11)
             callback = FakeCallbackQuery(12)
-            await middleware(handler, message, {})
-            await middleware(handler, callback, {})
+            result_message = await middleware(handler, message, {})
+            result_callback = await middleware(handler, callback, {})
         finally:
             auth_middleware.Message = original_message
             auth_middleware.CallbackQuery = original_callback
             auth_middleware.Update = original_update
 
-        message.answer.assert_awaited_once()
-        callback.answer.assert_awaited_once()
-        handler.assert_not_awaited()
+        self.assertEqual(result_message, 'allowed')
+        self.assertEqual(result_callback, 'allowed')
+        message.answer.assert_not_awaited()
+        callback.answer.assert_not_awaited()
+        self.assertEqual(handler.await_count, 2)
 
     async def test_middleware_blocks_inactive_messenger_users(self):
         blocked_user = MagicMock(
@@ -171,7 +173,7 @@ class BotAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
             auth_middleware.Message = original_message
 
         message.answer.assert_awaited_once()
-        self.assertIn("پیام‌رسان", message.answer.await_args.args[0])
+        self.assertIn("غیرفعال", message.answer.await_args.args[0])
         handler.assert_not_awaited()
 
 

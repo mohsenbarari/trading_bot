@@ -24,7 +24,7 @@ class _ExecuteResult:
 
 
 class UserAccountStatusHelperTests(unittest.TestCase):
-    def test_helper_defaults_and_messenger_block_logic(self):
+    def test_helper_defaults_and_global_lock_logic(self):
         user = SimpleNamespace(account_status=None, messenger_grace_expires_at=None, messenger_blocked_at=None)
         self.assertEqual(status_service.get_user_account_status(user), UserAccountStatus.ACTIVE)
         self.assertFalse(status_service.is_user_market_blocked(user))
@@ -35,6 +35,7 @@ class UserAccountStatusHelperTests(unittest.TestCase):
             messenger_grace_expires_at=now - timedelta(minutes=1),
             messenger_blocked_at=None,
         )
+        self.assertTrue(status_service.is_user_global_web_locked(inactive_user, now=now))
         self.assertTrue(status_service.is_user_messenger_blocked(inactive_user, now=now))
 
 
@@ -66,7 +67,7 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.changed)
         self.assertEqual(user.account_status, UserAccountStatus.INACTIVE)
         self.assertEqual(user.deactivated_at, now)
-        self.assertEqual(user.messenger_grace_expires_at, now + status_service.INACTIVE_MESSENGER_GRACE_PERIOD)
+        self.assertEqual(user.messenger_grace_expires_at, now + status_service.INACTIVE_GLOBAL_LOCK_GRACE_PERIOD)
         self.assertIsNone(user.messenger_blocked_at)
         self.assertEqual(create_notification.await_args.args[1], 7)
         self.assertEqual(create_notification.await_args.args[3], NotificationLevel.WARNING)
@@ -129,7 +130,7 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user.messenger_grace_expires_at, existing_grace)
         create_notification.assert_not_awaited()
 
-    async def test_mark_due_users_messenger_blocked_marks_owner_and_notifies_accountants(self):
+    async def test_mark_due_users_globally_locked_marks_owner_and_notifies_accountants(self):
         now = datetime(2026, 5, 18, 12, 0, 0)
         owner = SimpleNamespace(
             id=11,
@@ -157,7 +158,7 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
             "core.services.user_account_status_service.send_telegram_notification",
             new=AsyncMock(),
         ) as send_telegram:
-            blocked_count = await status_service.mark_due_users_messenger_blocked(db)
+            blocked_count = await status_service.mark_due_users_globally_locked(db)
 
         self.assertEqual(blocked_count, 1)
         self.assertEqual(owner.messenger_blocked_at, now)

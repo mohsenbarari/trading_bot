@@ -382,7 +382,7 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
         )
         user = (await session.execute(stmt)).scalar_one_or_none()
 
-    if not user or not user.has_bot_access or is_user_market_blocked(user):
+    if not user or is_user_market_blocked(user):
         await join_request.bot.decline_chat_join_request(
             chat_id=join_request.chat.id,
             user_id=join_request.from_user.id,

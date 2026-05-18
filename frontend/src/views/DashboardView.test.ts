@@ -100,7 +100,7 @@ describe('DashboardView.vue', () => {
     expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalled()
   })
 
-  it('shows the legacy bot restriction warning separately from inactive status', async () => {
+  it('ignores the legacy bot-access flag for dashboard warnings', async () => {
     dashboardViewMocks.apiFetchMock.mockResolvedValue(
       makeJsonResponse({
         id: 16,
@@ -114,7 +114,10 @@ describe('DashboardView.vue', () => {
 
     const wrapper = await mountView()
 
-    expect(wrapper.text()).toContain('دسترسی ربات محدود شده است')
+    expect(wrapper.text()).not.toContain('دسترسی ربات محدود شده است')
+
+    await wrapper.get('.hero-btn').trigger('click')
+    expect(dashboardViewMocks.routerPushMock).toHaveBeenCalledWith('/market')
   })
 
   it('shows the restricted trading warning with a formatted deadline when the user is temporarily restricted', async () => {

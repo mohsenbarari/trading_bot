@@ -17,24 +17,24 @@ class _AsyncSessionContext:
 
 
 class CoreUserAccountStatusLoopTests(unittest.IsolatedAsyncioTestCase):
-    async def test_finalize_due_user_messenger_blocks_returns_zero_when_nothing_changes(self):
+    async def test_finalize_due_user_global_locks_returns_zero_when_nothing_changes(self):
         session = AsyncMock()
         with patch.object(user_account_status_loop, "AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
-            "core.user_account_status_loop.mark_due_users_messenger_blocked",
+            "core.user_account_status_loop.mark_due_users_globally_locked",
             new=AsyncMock(return_value=0),
         ):
-            result = await user_account_status_loop.finalize_due_user_messenger_blocks()
+            result = await user_account_status_loop.finalize_due_user_global_locks()
 
         self.assertEqual(result, 0)
         session.commit.assert_not_awaited()
 
-    async def test_finalize_due_user_messenger_blocks_commits_when_users_are_marked(self):
+    async def test_finalize_due_user_global_locks_commits_when_users_are_marked(self):
         session = AsyncMock()
         with patch.object(user_account_status_loop, "AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
-            "core.user_account_status_loop.mark_due_users_messenger_blocked",
+            "core.user_account_status_loop.mark_due_users_globally_locked",
             new=AsyncMock(return_value=3),
         ):
-            result = await user_account_status_loop.finalize_due_user_messenger_blocks()
+            result = await user_account_status_loop.finalize_due_user_global_locks()
 
         self.assertEqual(result, 3)
         session.commit.assert_awaited_once()
@@ -44,7 +44,7 @@ class CoreUserAccountStatusLoopTests(unittest.IsolatedAsyncioTestCase):
             raise asyncio.CancelledError()
 
         with patch(
-            "core.user_account_status_loop.finalize_due_user_messenger_blocks",
+            "core.user_account_status_loop.finalize_due_user_global_locks",
             new=AsyncMock(side_effect=RuntimeError("boom")),
         ), patch(
             "core.user_account_status_loop.asyncio.sleep",

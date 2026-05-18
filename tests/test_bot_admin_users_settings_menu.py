@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot.handlers.admin_users import handle_user_settings
-from core.enums import UserRole
+from core.enums import UserAccountStatus, UserRole
 
 
 class FakeScalarOneResult:
@@ -38,6 +38,7 @@ class BotAdminUsersSettingsMenuTests(unittest.IsolatedAsyncioTestCase):
 
         target_user = SimpleNamespace(
             id=9,
+            account_status=UserAccountStatus.ACTIVE,
             trading_restricted_until=datetime.utcnow() + timedelta(days=1),
             max_daily_trades=1,
             max_active_commodities=2,
@@ -51,7 +52,7 @@ class BotAdminUsersSettingsMenuTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.admin_users.get_user_profile_text", new=AsyncMock(return_value="PROFILE")
         ), patch("bot.handlers.admin_users.get_user_settings_keyboard", return_value="KB") as keyboard_mock:
             await handle_user_settings(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
-        keyboard_mock.assert_called_once_with(9, is_restricted=True, has_limitations=True, can_block=True, max_blocked=5, can_edit_role=True)
+        keyboard_mock.assert_called_once_with(9, account_status=UserAccountStatus.ACTIVE, is_restricted=True, has_limitations=True, can_block=True, max_blocked=5, can_edit_role=True)
         message.edit_text.assert_awaited_once_with("PROFILE", reply_markup="KB", parse_mode="Markdown")
         callback.answer.assert_awaited_once()
 
@@ -59,6 +60,7 @@ class BotAdminUsersSettingsMenuTests(unittest.IsolatedAsyncioTestCase):
         target_user = SimpleNamespace(
             id=9,
             role=UserRole.MIDDLE_MANAGER,
+            account_status=UserAccountStatus.ACTIVE,
             trading_restricted_until=None,
             max_daily_trades=None,
             max_active_commodities=None,

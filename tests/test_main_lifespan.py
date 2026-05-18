@@ -47,7 +47,8 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         rollout_mock.assert_awaited_once_with(session)
         session.commit.assert_awaited_once()
         close_redis_mock.assert_awaited_once()
-        self.assertEqual(len(created), 3)
+        self.assertEqual(len(created), 4)
+        self.assertIn("user_account_status_loop", created)
 
     async def test_lifespan_skips_connectivity_monitor_outside_iran(self):
         created = []
@@ -75,7 +76,8 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
 
         rollout_mock.assert_awaited_once_with(session)
         session.commit.assert_awaited_once()
-        self.assertEqual(len(created), 2)
+        self.assertEqual(len(created), 3)
+        self.assertIn("user_account_status_loop", created)
 
 
 if __name__ == "__main__":

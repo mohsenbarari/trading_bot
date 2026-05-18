@@ -69,7 +69,7 @@ class ChannelJoinRequestTests(unittest.IsolatedAsyncioTestCase):
         join_request = make_join_request()
         user = SimpleNamespace(
             telegram_id=7,
-            has_bot_access=True,
+            has_bot_access=False,
             is_deleted=False,
             account_status=UserAccountStatus.ACTIVE,
         )

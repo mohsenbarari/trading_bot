@@ -187,7 +187,7 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.emitted('navigate')?.[0]).toEqual(['chat', { userId: 30, userName: 'plain30' }])
   })
 
-  it('shows the admin settings action for admin viewers on other profiles', async () => {
+  it('opens a local admin user manager for admin viewers on other profiles', async () => {
     localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر ارشد' }))
 
     const fetchMock = vi.mocked(fetch)
@@ -204,6 +204,19 @@ describe('PublicProfile.vue', () => {
       highlight_accountant_relation_display_name: null,
       accountant_relations: [],
     }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 61,
+      account_name: 'managed61',
+      mobile_number: '09121110000',
+      role: 'عادی',
+      account_status: 'active',
+      has_bot_access: false,
+      trading_restricted_until: null,
+      max_sessions: 1,
+      max_accountants: 3,
+      can_block_users: true,
+      max_blocked_users: 10,
+    }))
 
     const PublicProfile = (await import('./PublicProfile.vue')).default
     const wrapper = mount(PublicProfile, {
@@ -215,8 +228,14 @@ describe('PublicProfile.vue', () => {
       },
       global: {
         stubs: {
+          Teleport: true,
           LoadingSkeleton: true,
           OwnerAccountantManagerModal: true,
+          UserProfile: {
+            props: ['user'],
+            emits: ['navigate'],
+            template: '<div class="user-profile-stub"><span>{{ user.account_name }}</span><button @click="$emit(\'navigate\', \'manage_users\')">close user profile</button></div>',
+          },
         },
       },
     })
@@ -226,8 +245,20 @@ describe('PublicProfile.vue', () => {
     const adminSettingsButton = wrapper.findAll('button').find((button) => button.text().includes('تنظیمات کاربر'))
     expect(adminSettingsButton).toBeTruthy()
     await adminSettingsButton!.trigger('click')
+    await flushPromises()
 
-    expect(wrapper.emitted('navigate')?.[0]).toEqual(['settings', { userId: 61, userName: 'managed61' }])
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/users/61', expect.objectContaining({
+      headers: {
+        Authorization: 'Bearer token',
+      },
+    }))
+    expect(wrapper.find('.user-profile-stub').exists()).toBe(true)
+    expect(wrapper.text()).toContain('managed61')
+    expect(wrapper.emitted('navigate')).toBeUndefined()
+
+    await wrapper.get('.user-profile-stub button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.user-profile-stub').exists()).toBe(false)
   })
 
   it('clears the owner avatar through the authenticated avatar endpoint', async () => {

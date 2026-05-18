@@ -17,10 +17,6 @@ const isRestricted = computed(() => {
 
 const isInactiveAccount = computed(() => user.value?.account_status === 'inactive')
 
-const isLegacyBotRestricted = computed(() => {
-  return !!user.value && !user.value.has_bot_access && !isInactiveAccount.value
-})
-
 const restrictedUntil = computed(() => {
   if (!user.value?.trading_restricted_until) return ''
   const d = new Date(user.value.trading_restricted_until)
@@ -119,16 +115,6 @@ onMounted(fetchUser)
         <div class="alert-body">
           <h3>حساب کاربری غیرفعال شده است</h3>
           <p>دسترسی شما به بازار بسته شده است. برای فعال‌سازی مجدد با مدیریت تماس بگیرید.</p>
-        </div>
-      </div>
-
-      <div v-else-if="isLegacyBotRestricted" class="alert-card alert-blocked">
-        <div class="alert-icon blocked-icon">
-          <Ban :size="28" />
-        </div>
-        <div class="alert-body">
-          <h3>دسترسی ربات محدود شده است</h3>
-          <p>دسترسی شما به ربات محدود شده است، اما هنوز می‌توانید از بخش‌های وب استفاده کنید.</p>
         </div>
       </div>
 

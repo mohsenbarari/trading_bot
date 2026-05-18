@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot.handlers.admin_users import handle_user_block_actions
-from core.enums import UserRole
+from core.enums import UserAccountStatus, UserRole
 
 
 class FakeScalarOneResult:
@@ -33,7 +33,7 @@ class FakeSession:
 class BotAdminUsersBlockActionsTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_user_block_actions_shows_duration_menu(self):
         callback = SimpleNamespace(data="user_block_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(SimpleNamespace(id=9, role=UserRole.STANDARD))), patch(
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(SimpleNamespace(id=9, role=UserRole.STANDARD, account_status=UserAccountStatus.ACTIVE))), patch(
             "bot.handlers.admin_users.get_block_duration_keyboard", return_value="KB"
         ) as keyboard_mock:
             await handle_user_block_actions(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
@@ -53,6 +53,7 @@ class BotAdminUsersBlockActionsTests(unittest.IsolatedAsyncioTestCase):
             target_user = SimpleNamespace(
                 id=9,
                 role=UserRole.STANDARD,
+                account_status=UserAccountStatus.ACTIVE,
                 telegram_id=123,
                 trading_restricted_until=None,
                 max_daily_trades=None,
@@ -73,7 +74,7 @@ class BotAdminUsersBlockActionsTests(unittest.IsolatedAsyncioTestCase):
             session.commit.assert_awaited_once()
             notify_mock.assert_awaited_once()
             telegram_mock.assert_awaited_once()
-            keyboard_mock.assert_called_once_with(9, is_restricted=True, has_limitations=False, can_edit_role=True)
+            keyboard_mock.assert_called_once_with(9, account_status=UserAccountStatus.ACTIVE, is_restricted=True, has_limitations=False, can_edit_role=True)
             callback.message.edit_text.assert_awaited_once_with("PROFILE", reply_markup="KB", parse_mode="Markdown")
             self.assertIn(expected_answer, callback.answer.await_args.args[0])
 

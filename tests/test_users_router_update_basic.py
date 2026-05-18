@@ -89,7 +89,7 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, 'مدیر میانی فقط می‌تواند کاربران غیرادمین را مدیریت کند')
 
-    async def test_update_user_updates_role_bot_access_and_owner_limits(self):
+    async def test_update_user_updates_role_ignores_legacy_bot_access_and_owner_limits(self):
         user = make_user()
         db = FakeDB(user)
         update = schemas.UserUpdate(role=UserRole.STANDARD, has_bot_access=False, max_sessions=99, max_accountants=6)
@@ -98,18 +98,16 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.users.track_limitation_changes", return_value=([], False, False)
         ), patch(
             "api.routers.users.sync_mandatory_channel_for_user_state_change", new=AsyncMock()
-        ) as mandatory_sync_mock, patch(
-            "api.routers.users.invalidate_user_cache", new=AsyncMock(), create=True
-        ) as invalidate_mock, patch("core.cache.invalidate_user_cache", new=AsyncMock()) as cache_mock, patch(
-            "api.routers.users.send_bot_access_notification", new=AsyncMock()
-        ) as bot_notify_mock, patch("api.routers.users.send_block_notification", new=AsyncMock()) as block_mock, patch(
+        ) as mandatory_sync_mock, patch("core.cache.invalidate_user_cache", new=AsyncMock()) as cache_mock, patch(
+            "api.routers.users.send_block_notification", new=AsyncMock()
+        ) as block_mock, patch(
             "api.routers.users.send_limitation_notification", new=AsyncMock()
         ) as limit_mock, patch("api.routers.users.asyncio.create_task") as create_task_mock:
             result = await update_user(5, update, db=db)
 
         self.assertIs(result, user)
         self.assertEqual(user.role, UserRole.STANDARD)
-        self.assertFalse(user.has_bot_access)
+        self.assertTrue(user.has_bot_access)
         self.assertEqual(user.max_sessions, 3)
         self.assertEqual(user.max_accountants, 6)
         self.assertEqual(db.commits, 1)
@@ -122,7 +120,6 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
             previous_deleted_at=None,
         )
         cache_mock.assert_awaited_once_with(999)
-        bot_notify_mock.assert_awaited_once_with(db, user, False)
         block_mock.assert_not_awaited()
         limit_mock.assert_not_awaited()
         create_task_mock.assert_not_called()
@@ -140,8 +137,6 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.users.sync_mandatory_channel_for_user_state_change", new=AsyncMock()
         ), patch(
             "core.cache.invalidate_user_cache", new=AsyncMock()
-        ), patch(
-            "api.routers.users.send_bot_access_notification", new=AsyncMock()
         ), patch(
             "api.routers.users.send_block_notification", new=AsyncMock()
         ), patch(
@@ -166,8 +161,6 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.cache.invalidate_user_cache", new=AsyncMock()
         ), patch(
-            "api.routers.users.send_bot_access_notification", new=AsyncMock()
-        ), patch(
             "api.routers.users.send_block_notification", new=AsyncMock()
         ), patch(
             "api.routers.users.send_limitation_notification", new=AsyncMock()
@@ -178,7 +171,7 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(user.can_block_users)
         self.assertEqual(user.max_blocked_users, 100)
 
-    async def test_update_user_clamps_accountant_bot_access_and_session_cap(self):
+    async def test_update_user_ignores_legacy_bot_access_and_clamps_accountant_session_cap(self):
         user = make_user(has_bot_access=False, max_sessions=1)
         db = FakeDB(user)
         db.execute = AsyncMock()
@@ -191,8 +184,6 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.cache.invalidate_user_cache", new=AsyncMock()
         ), patch(
-            "api.routers.users.send_bot_access_notification", new=AsyncMock()
-        ) as bot_notify_mock, patch(
             "api.routers.users.send_block_notification", new=AsyncMock()
         ), patch(
             "api.routers.users.send_limitation_notification", new=AsyncMock()
@@ -202,7 +193,6 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(result, user)
         self.assertFalse(user.has_bot_access)
         self.assertEqual(user.max_sessions, 1)
-        bot_notify_mock.assert_not_awaited()
 
     async def test_terminate_user_sessions_raises_404_for_missing_or_deleted_user(self):
         with self.assertRaises(HTTPException) as exc_info:

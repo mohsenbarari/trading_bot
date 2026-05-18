@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot.handlers.admin_users import handle_user_unblock, handle_user_unlimit
-from core.enums import UserRole
+from core.enums import UserAccountStatus, UserRole
 
 
 def consume_task(coro):
@@ -39,6 +39,7 @@ class BotAdminUsersUnblockUnlimitTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_user_unblock_handles_success_and_missing_user(self):
         target_user = SimpleNamespace(
             id=9,
+            account_status=UserAccountStatus.ACTIVE,
             telegram_id=123,
             trading_restricted_until=datetime.utcnow() + timedelta(days=1),
             max_daily_trades=1,
@@ -60,7 +61,7 @@ class BotAdminUsersUnblockUnlimitTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(target_user.trading_restricted_until)
         session.commit.assert_awaited_once()
         create_task_mock.assert_called_once()
-        keyboard_mock.assert_called_once_with(9, is_restricted=False, has_limitations=True, can_edit_role=True)
+        keyboard_mock.assert_called_once_with(9, account_status=UserAccountStatus.ACTIVE, is_restricted=False, has_limitations=True, can_edit_role=True)
         callback.answer.assert_awaited_once_with("✅ رفع مسدودیت انجام شد.", show_alert=True)
 
         callback = SimpleNamespace(data="user_unblock_9", answer=AsyncMock())
@@ -71,6 +72,7 @@ class BotAdminUsersUnblockUnlimitTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_user_unlimit_resets_limits_and_handles_missing_user(self):
         target_user = SimpleNamespace(
             id=9,
+            account_status=UserAccountStatus.ACTIVE,
             telegram_id=123,
             trading_restricted_until=datetime.utcnow() + timedelta(days=1),
             max_daily_trades=1,
@@ -105,7 +107,7 @@ class BotAdminUsersUnblockUnlimitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(target_user.channel_messages_count, 0)
         session.commit.assert_awaited_once()
         create_task_mock.assert_called_once()
-        keyboard_mock.assert_called_once_with(9, is_restricted=True, has_limitations=False, can_edit_role=True)
+        keyboard_mock.assert_called_once_with(9, account_status=UserAccountStatus.ACTIVE, is_restricted=True, has_limitations=False, can_edit_role=True)
         callback.answer.assert_awaited_once_with("✅ محدودیت‌ها برداشته شد.", show_alert=True)
 
         callback = SimpleNamespace(data="user_unlimit_9", answer=AsyncMock())

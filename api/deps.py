@@ -10,7 +10,7 @@ from core import security
 from core.config import settings
 from core.db import get_db
 from core.services.accountant_relation_service import EffectiveOwnerActor, resolve_effective_owner_actor
-from core.services.user_account_status_service import is_user_messenger_blocked
+from core.services.user_account_status_service import is_user_global_web_locked
 from models.session import UserSession
 from models.user import User, UserRole
 from datetime import datetime
@@ -110,7 +110,7 @@ async def get_current_user(
     if user.is_deleted:
         raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
 
-    if is_user_messenger_blocked(user):
+    if is_user_global_web_locked(user):
         raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
         
     # Check if admin must change password (prevent doing anything else)
