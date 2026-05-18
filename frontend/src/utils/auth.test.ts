@@ -201,6 +201,8 @@ describe('auth utils', () => {
       role: 'عادی',
       account_name: 'inactive9',
       account_status: 'inactive',
+      global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
+      global_web_locked_at: null,
     }))
 
     const { authGuard } = await import(authModulePath)
@@ -211,6 +213,8 @@ describe('auth utils', () => {
     expect(next).toHaveBeenLastCalledWith('/')
     expect(JSON.parse(localStorage.getItem('current_user_summary') || '{}')).toMatchObject({
       account_status: 'inactive',
+      global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
+      global_web_locked_at: null,
     })
   })
 

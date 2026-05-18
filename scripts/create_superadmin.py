@@ -9,7 +9,7 @@ project_root = current_dir.parent
 sys.path.append(str(project_root))
 
 from core.db import AsyncSessionLocal, init_db
-from models.user import User, UserRole
+from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
 from sqlalchemy import select
 from core.security import get_password_hash
 from core.services.chat_room_service import ensure_mandatory_channel_membership
@@ -33,11 +33,11 @@ async def create_superadmin(mobile: str, account_name: str, temp_password: str):
             role=UserRole.SUPER_ADMIN,
             full_name=account_name,
             address="System Default",
-            has_bot_access=False,
             telegram_id=None,
             must_change_password=True,
             admin_password_hash=get_password_hash(temp_password)
         )
+        set_legacy_has_bot_access_compatibility(admin_user, enabled=False)
         
         db.add(admin_user)
         try:

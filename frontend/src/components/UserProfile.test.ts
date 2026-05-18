@@ -173,17 +173,25 @@ describe('UserProfile.vue', () => {
   })
 
   it('lets admins toggle account status, edit role, and delete the user from the settings flow', async () => {
-    const user = makeUser({ id: 18 })
+    const user = makeUser({
+      id: 18,
+      global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
+      global_web_locked_at: null,
+    })
 
     apiFetchMock
       .mockResolvedValueOnce(makeResponse({
         ...user,
         account_status: 'inactive',
+        global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
+        global_web_locked_at: null,
       }))
       .mockResolvedValueOnce(makeResponse({
         ...user,
         account_status: 'inactive',
         role: 'پلیس',
+        global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
+        global_web_locked_at: null,
       }))
       .mockResolvedValueOnce({ ok: true })
 
@@ -204,6 +212,9 @@ describe('UserProfile.vue', () => {
     await wrapper.get('.settings-btn').trigger('click')
   await findButtonByText(wrapper, 'تغییر وضعیت حساب').trigger('click')
     await flushPromises()
+
+    expect(wrapper.text()).toContain('در مهلت فعال‌سازی')
+    expect(wrapper.text()).toContain('پایان مهلت فعال‌سازی')
 
     await findButtonByText(wrapper, 'ویرایش نقش').trigger('click')
     await wrapper.get('.form-select').setValue('پلیس')
@@ -228,6 +239,32 @@ describe('UserProfile.vue', () => {
     expect(user.account_status).toBe('inactive')
     expect(user.role).toBe('پلیس')
     expect(wrapper.emitted('navigate')).toContainEqual(['manage_users'])
+  })
+
+  it('renders the stronger account-status detail when the account is globally locked', async () => {
+    const user = makeUser({
+      id: 19,
+      account_status: 'inactive',
+      global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
+      global_web_locked_at: '2026-05-21T08:00:00Z',
+    })
+
+    const UserProfile = (await import('./UserProfile.vue')).default
+    const wrapper = mount(UserProfile, {
+      props: {
+        user,
+        isAdminView: true,
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('غیرفعال (قفل کامل)')
+    expect(wrapper.text()).toContain('قفل سراسری وب/پیام‌رسان')
   })
 
   it('lets admins apply and remove limitations, then block and unblock the user', async () => {

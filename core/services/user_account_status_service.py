@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot
 from sqlalchemy import select
@@ -62,6 +62,14 @@ def _utcnow_naive() -> datetime:
     return utc_now().replace(tzinfo=None)
 
 
+def _normalize_comparable_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
 def get_user_account_status(user: User | object | None) -> UserAccountStatus:
     raw_status = getattr(user, "account_status", None)
     if isinstance(raw_status, UserAccountStatus):
@@ -92,11 +100,11 @@ def is_user_global_web_locked(user: User | object | None, *, now: datetime | Non
     if getattr(user, "messenger_blocked_at", None) is not None:
         return True
 
-    grace_expires_at = getattr(user, "messenger_grace_expires_at", None)
+    grace_expires_at = _normalize_comparable_datetime(getattr(user, "messenger_grace_expires_at", None))
     if grace_expires_at is None:
         return False
 
-    comparison_now = now or _utcnow_naive()
+    comparison_now = _normalize_comparable_datetime(now or _utcnow_naive())
     return grace_expires_at <= comparison_now
 
 

@@ -115,6 +115,8 @@ function cacheCurrentUserSummaryFromAuthMe(payload: any) {
         full_name: payload.full_name,
         account_name: payload.account_name,
         account_status: payload.account_status,
+        global_lock_grace_expires_at: payload.global_lock_grace_expires_at,
+        global_web_locked_at: payload.global_web_locked_at,
         is_accountant: payload.is_accountant,
     }));
 }

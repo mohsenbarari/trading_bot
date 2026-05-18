@@ -17,6 +17,32 @@ const isRestricted = computed(() => {
 
 const isInactiveAccount = computed(() => user.value?.account_status === 'inactive')
 
+const isGloballyLockedAccount = computed(() => Boolean(user.value?.global_web_locked_at))
+
+const globalLockGraceExpiresAtText = computed(() => {
+  if (!user.value?.global_lock_grace_expires_at) return ''
+  const value = new Date(user.value.global_lock_grace_expires_at)
+  if (Number.isNaN(value.getTime())) return ''
+  return value.toLocaleDateString('fa-IR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+})
+
+const inactiveAccountMessage = computed(() => {
+  if (!isInactiveAccount.value) return ''
+  if (isGloballyLockedAccount.value) {
+    return 'نشست‌های وب و پیام‌رسان این حساب تا زمان فعال‌سازی مجدد بسته شده است.'
+  }
+  if (globalLockGraceExpiresAtText.value) {
+    return `دسترسی شما به بازار بسته شده است. اگر حساب تا ${globalLockGraceExpiresAtText.value} دوباره فعال نشود، همه نشست‌های وب و پیام‌رسان شما هم بسته می‌شود.`
+  }
+  return 'دسترسی شما به بازار بسته شده است. برای فعال‌سازی مجدد با مدیریت تماس بگیرید.'
+})
+
 const restrictedUntil = computed(() => {
   if (!user.value?.trading_restricted_until) return ''
   const d = new Date(user.value.trading_restricted_until)
@@ -113,8 +139,8 @@ onMounted(fetchUser)
           <Ban :size="28" />
         </div>
         <div class="alert-body">
-          <h3>حساب کاربری غیرفعال شده است</h3>
-          <p>دسترسی شما به بازار بسته شده است. برای فعال‌سازی مجدد با مدیریت تماس بگیرید.</p>
+          <h3>{{ isGloballyLockedAccount ? 'حساب کاربری قفل شده است' : 'حساب کاربری غیرفعال شده است' }}</h3>
+          <p>{{ inactiveAccountMessage }}</p>
         </div>
       </div>
 

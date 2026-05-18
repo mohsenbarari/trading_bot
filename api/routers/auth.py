@@ -10,7 +10,7 @@ import hashlib
 import hmac
 import time
 from core.db import get_db
-from models.user import User, UserRole
+from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
 from models.accountant_relation import AccountantRelationStatus
 from models.invitation import Invitation
 from core.security import (
@@ -254,11 +254,11 @@ async def register_complete(
         role=inv.role,
         full_name=inv.account_name, # Temporary full name
         address=req.address,
-        has_bot_access=False if accountant_relation else True,
         telegram_id=None, # Web only user
         home_server=_login_home_server(raw_request),
         max_sessions=1,
     )
+    set_legacy_has_bot_access_compatibility(new_user, enabled=accountant_relation is None)
     
     db.add(new_user)
     

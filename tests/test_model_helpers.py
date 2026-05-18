@@ -1,10 +1,11 @@
 import unittest
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from models.database import get_db
 from models.trading_setting import TradingSetting
-from models.user import User, UserRole
+from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
 from models.user_block import UserBlock
 
 
@@ -45,6 +46,22 @@ class UserSoftDeleteTests(unittest.TestCase):
         self.assertEqual(user.account_name, 'fresh_user')
         self.assertEqual(user.mobile_number, '09999999999')
         self.assertIsNone(user.telegram_id)
+
+    def test_set_legacy_has_bot_access_compatibility_updates_real_and_fake_users(self):
+        persisted_user = User(
+            account_name='compat_user',
+            mobile_number='09120000000',
+            full_name='Compat User',
+            address='Tehran',
+            role=UserRole.STANDARD,
+        )
+        fake_user = SimpleNamespace(has_bot_access=True)
+
+        set_legacy_has_bot_access_compatibility(persisted_user, enabled=False)
+        set_legacy_has_bot_access_compatibility(fake_user, enabled=False)
+
+        self.assertFalse(persisted_user.has_bot_access)
+        self.assertFalse(fake_user.has_bot_access)
 
 
 class ModelReprTests(unittest.TestCase):

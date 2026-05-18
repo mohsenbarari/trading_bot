@@ -8,7 +8,7 @@ from sqlalchemy import select
 # ایمپورت‌های مورد نیاز برای ساخت کاربر
 from core.db import AsyncSessionLocal
 from core.services.chat_room_service import ensure_mandatory_channel_membership
-from models.user import User
+from models.user import User, set_legacy_has_bot_access_compatibility
 from core.enums import UserRole
 
 # سعی می‌کنیم توابع نرمال‌سازی را ایمپورت کنیم، اگر نبودند ساده عمل می‌کنیم
@@ -97,9 +97,9 @@ async def create_super_admin_async():
             telegram_id=telegram_id,
             address="System Default",
             role=UserRole.SUPER_ADMIN, # نقش ادمین ارشد
-            has_bot_access=True,
             username=None # اختیاری
         )
+        set_legacy_has_bot_access_compatibility(new_admin, enabled=True)
         
         session.add(new_admin)
         await session.flush()

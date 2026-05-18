@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -45,6 +45,15 @@ class UserAccountStatusHelperTests(unittest.TestCase):
             messenger_blocked_at=None,
         )
         self.assertFalse(status_service.is_user_global_web_locked(inactive_without_grace, now=now))
+
+        aware_now = datetime(2026, 5, 18, 12, 0, 0, tzinfo=timezone.utc)
+        inactive_user_with_aware_grace = SimpleNamespace(
+            account_status=UserAccountStatus.INACTIVE,
+            messenger_grace_expires_at=aware_now - timedelta(minutes=1),
+            messenger_blocked_at=None,
+        )
+        self.assertTrue(status_service.is_user_global_web_locked(inactive_user_with_aware_grace, now=now))
+        self.assertTrue(status_service.is_user_global_web_locked(inactive_user_with_aware_grace, now=aware_now))
 
     def test_helper_normalizes_unknown_status_to_active(self):
         user = SimpleNamespace(account_status="archived")
