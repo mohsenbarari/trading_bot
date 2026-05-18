@@ -3,16 +3,27 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AdminView from './AdminView.vue'
 
 const adminViewMocks = vi.hoisted(() => ({
+  route: {
+    query: {} as Record<string, string>,
+  },
   routerPushMock: vi.fn(),
+  routerReplaceMock: vi.fn(),
   pushBackStateMock: vi.fn(),
   popBackStateMock: vi.fn(),
   clearBackStackMock: vi.fn(),
+  apiFetchMock: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
+  useRoute: () => adminViewMocks.route,
   useRouter: () => ({
     push: adminViewMocks.routerPushMock,
+    replace: adminViewMocks.routerReplaceMock,
   }),
+}))
+
+vi.mock('../utils/auth', () => ({
+  apiFetch: adminViewMocks.apiFetchMock,
 }))
 
 vi.mock('../composables/useBackButton', () => ({
@@ -23,10 +34,13 @@ vi.mock('../composables/useBackButton', () => ({
 
 describe('AdminView.vue', () => {
   beforeEach(() => {
+    adminViewMocks.route.query = {}
     adminViewMocks.routerPushMock.mockReset()
+    adminViewMocks.routerReplaceMock.mockReset()
     adminViewMocks.pushBackStateMock.mockReset()
     adminViewMocks.popBackStateMock.mockReset()
     adminViewMocks.clearBackStackMock.mockReset()
+    adminViewMocks.apiFetchMock.mockReset()
     localStorage.clear()
     localStorage.setItem('auth_token', 'admin-jwt-token')
   })
@@ -119,6 +133,25 @@ describe('AdminView.vue', () => {
       params: { id: '88' },
       query: { account_name: 'owner-88' },
     })
+  })
+
+  it('loads the admin user profile directly from the route query handoff', async () => {
+    adminViewMocks.route.query = {
+      section: 'user_profile',
+      user_id: '91',
+      account_name: 'route-user',
+    }
+    adminViewMocks.apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 91, account_name: 'route-user' }),
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/91')
+    expect(wrapper.text()).toContain('پروفایل کاربر')
+    expect(wrapper.get('.user-profile-stub').text()).toBe('route-user')
   })
 
   it('clears the custom back stack on unmount', async () => {

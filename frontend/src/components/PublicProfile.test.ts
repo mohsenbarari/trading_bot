@@ -25,6 +25,7 @@ describe('PublicProfile.vue', () => {
     uploadAvatarImageMock.mockReset()
     vi.stubGlobal('fetch', vi.fn())
     vi.stubGlobal('alert', vi.fn())
+    localStorage.clear()
   })
 
   it('shows owner-resolution context when the public profile resolves from an accountant', async () => {
@@ -184,6 +185,49 @@ describe('PublicProfile.vue', () => {
     await messageButton!.trigger('click')
 
     expect(wrapper.emitted('navigate')?.[0]).toEqual(['chat', { userId: 30, userName: 'plain30' }])
+  })
+
+  it('shows the admin settings action for admin viewers on other profiles', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر ارشد' }))
+
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 61,
+      account_name: 'managed61',
+      avatar_file_id: null,
+      mobile_number: '09121110000',
+      address: 'تهران',
+      created_at_jalali: '۱۴۰۵/۰۲/۰۱',
+      trades_count: 1,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 61, account_name: 'managed61' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const adminSettingsButton = wrapper.findAll('button').find((button) => button.text().includes('تنظیمات کاربر'))
+    expect(adminSettingsButton).toBeTruthy()
+    await adminSettingsButton!.trigger('click')
+
+    expect(wrapper.emitted('navigate')?.[0]).toEqual(['settings', { userId: 61, userName: 'managed61' }])
   })
 
   it('clears the owner avatar through the authenticated avatar endpoint', async () => {

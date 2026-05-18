@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, ChevronLeft } from 'lucide-vue-next'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
+import { apiFetch } from '../utils/auth'
 import AdminPanel from '../components/AdminPanel.vue'
 import UserManager from '../components/UserManager.vue'
 import CommodityManager from '../components/CommodityManager.vue'
@@ -12,20 +13,78 @@ import CreateChannelView from '../components/CreateChannelView.vue'
 import UserProfile from '../components/UserProfile.vue'
 
 const router = useRouter()
+const route = useRoute()
 const currentSection = ref('menu')
 const jwtToken = ref<string | null>(null)
 const apiBaseUrl = '' // Relative path for proxy
 const selectedUserForProfile = ref<any>(null)
+const isLoadingRouteUserProfile = ref(false)
+
+function getRouteUserProfileId(): number | null {
+  if (route.query.section !== 'user_profile') {
+    return null
+  }
+
+  const normalized = Number(route.query.user_id)
+  return Number.isInteger(normalized) && normalized > 0 ? normalized : null
+}
+
+function shouldClearRouteUserProfile(): boolean {
+  return route.query.section === 'user_profile' || typeof route.query.user_id === 'string'
+}
+
+async function loadRouteUserProfile(userId: number) {
+  if (selectedUserForProfile.value?.id === userId && currentSection.value === 'user_profile') {
+    return
+  }
+
+  isLoadingRouteUserProfile.value = true
+  try {
+    const response = await apiFetch(`/api/users/${userId}`)
+    if (!response.ok) {
+      goToMenu()
+      return
+    }
+
+    selectedUserForProfile.value = await response.json()
+    currentSection.value = 'user_profile'
+  } catch {
+    goToMenu()
+  } finally {
+    isLoadingRouteUserProfile.value = false
+  }
+}
 
 onMounted(() => {
   jwtToken.value = localStorage.getItem('auth_token')
   // Router guard handles redirect to login if token is missing/expired
+  const routeUserId = getRouteUserProfileId()
+  if (routeUserId) {
+    void loadRouteUserProfile(routeUserId)
+  }
 })
+
+watch(
+  () => [route.query.section, route.query.user_id],
+  ([section, userId]) => {
+    if (section !== 'user_profile') {
+      return
+    }
+
+    const normalized = Number(userId)
+    if (Number.isInteger(normalized) && normalized > 0) {
+      void loadRouteUserProfile(normalized)
+    }
+  }
+)
 
 function goToMenu() {
   currentSection.value = 'menu'
   selectedUserForProfile.value = null
   popBackState()
+  if (shouldClearRouteUserProfile()) {
+    void router.replace({ name: 'admin' })
+  }
 }
 
 function handleNavigate(section: string, data?: any) {
@@ -143,6 +202,10 @@ onUnmounted(() => clearBackStack())
                     @navigate="handleNavigate"
                 />
 
+                <div v-else-if="currentSection === 'user_profile' && isLoadingRouteUserProfile" class="admin-route-loading">
+                  در حال بارگذاری پروفایل کاربر...
+                </div>
+
                 <TradingSettings 
                    v-else-if="currentSection === 'settings'" 
                    :apiBaseUrl="apiBaseUrl" 
@@ -186,6 +249,12 @@ onUnmounted(() => clearBackStack())
   max-width: var(--ds-page-max-width);
   margin: 0 auto;
   width: 100%;
+}
+
+.admin-route-loading {
+  padding: 1rem;
+  text-align: center;
+  color: var(--ds-text-secondary);
 }
 
 .fade-enter-active,

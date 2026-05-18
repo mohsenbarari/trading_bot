@@ -3,6 +3,7 @@ import { computed, ref, onMounted } from 'vue';
 import { ChevronDown, ChevronLeft, User as UserIcon, Activity, ArrowRight, ChevronRight } from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import OwnerAccountantManagerModal from './OwnerAccountantManagerModal.vue';
+import { isAdminRoleValue, readCachedCurrentUserRole } from '../utils/adminAccess';
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
 
 const props = defineProps<{
@@ -60,7 +61,7 @@ interface ProfileStatCard {
 }
 
 interface ProfileActionCard {
-  key: 'message' | 'settings' | 'add_customer' | 'add_accountant';
+  key: 'message' | 'settings' | 'admin_settings' | 'add_customer' | 'add_accountant';
   icon: string;
   label: string;
 }
@@ -82,8 +83,10 @@ const isOwnProfile = computed(() => {
   if (!profileData.value) return false;
   return Number(profileData.value.id) === Number(props.viewerUserId);
 });
+const viewerIsAdmin = computed(() => isAdminRoleValue(readCachedCurrentUserRole()));
 const showVisitorSections = computed(() => !isOwnProfile.value);
 const showOwnerSections = computed(() => isOwnProfile.value);
+const showAdminSections = computed(() => !isOwnProfile.value && viewerIsAdmin.value);
 const profileAvatarUrl = computed(() => buildChatFileUrl(profileData.value?.avatar_file_id ?? null, props.apiBaseUrl));
 const accountantRelations = computed<PublicAccountantRelationSummary[]>(() => {
   return Array.isArray(profileData.value?.accountant_relations) ? profileData.value!.accountant_relations! : [];
@@ -151,6 +154,16 @@ const ownerOnlyActions = computed<ProfileActionCard[]>(() => {
       icon: '💼',
       label: 'حسابداران',
     }
+  ];
+});
+const adminActionCards = computed<ProfileActionCard[]>(() => {
+  if (!showAdminSections.value) return [];
+  return [
+    {
+      key: 'admin_settings',
+      icon: '🛠️',
+      label: 'تنظیمات کاربر',
+    },
   ];
 });
 
@@ -287,6 +300,8 @@ function handleActionClick(action: ProfileActionCard) {
     emit('navigate', 'chat', { userId: profileData.value.id, userName: profileData.value.account_name });
   } else if (action.key === 'settings') {
     emit('navigate', 'settings');
+  } else if (action.key === 'admin_settings') {
+    emit('navigate', 'settings', { userId: profileData.value.id, userName: profileData.value.account_name });
   } else if (action.key === 'add_customer') {
     alert('قابلیت افزودن مشتری به زودی اضافه خواهد شد.');
   } else if (action.key === 'add_accountant') {
@@ -456,6 +471,20 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
             v-for="action in visitorActionCards"
             :key="action.key"
             class="settings-btn visitor-action-btn"
+            @click="handleActionClick(action)"
+          >
+            <span class="stat-icon">{{ action.icon }}</span>
+            <span class="stat-label">{{ action.label }}</span>
+          </button>
+        </div>
+      </section>
+
+      <section v-if="showAdminSections && adminActionCards.length > 0" class="profile-section owner-profile-section">
+        <div class="action-grid single-column">
+          <button
+            v-for="action in adminActionCards"
+            :key="action.key"
+            class="settings-btn"
             @click="handleActionClick(action)"
           >
             <span class="stat-icon">{{ action.icon }}</span>

@@ -1,7 +1,7 @@
 # trading_bot/bot/keyboards.py (کد کامل و به‌روزرسانی شده)
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
-from core.enums import UserRole
+from core.enums import UserRole, UserAccountStatus
 from core.config import settings
 from math import ceil
 
@@ -128,19 +128,24 @@ def get_user_profile_return_keyboard(user_id: int, back_to_page: int = 1, is_res
 
 def get_user_settings_keyboard(
     user_id: int,
+    account_status: UserAccountStatus | str | None = None,
     is_restricted: bool = False,
     has_limitations: bool = False,
     can_block: bool = True,
     max_blocked: int = 10,
     can_edit_role: bool = True,
 ) -> InlineKeyboardMarkup:
+    normalized_status = getattr(account_status, "value", account_status) or UserAccountStatus.ACTIVE.value
+    is_inactive = normalized_status == UserAccountStatus.INACTIVE.value
+
     # تعیین متن دکمه تنظیمات بلاک
     block_status = "فعال" if can_block else "غیرفعال"
     block_settings_text = f"🚫 تنظیمات بلاک ({block_status} - {max_blocked})"
+    account_status_text = "🔁 فعال کردن حساب" if is_inactive else "🔁 غیرفعال کردن حساب"
 
     keyboard = [
         [
-            InlineKeyboardButton(text="🤖 تغییر دسترسی بات", callback_data=f"user_toggle_bot_{user_id}")
+            InlineKeyboardButton(text=account_status_text, callback_data=f"user_toggle_account_status_{user_id}")
         ],
         [
             InlineKeyboardButton(text=block_settings_text, callback_data=f"user_block_settings_{user_id}")

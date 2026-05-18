@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from jose import JWTError
 
 from api import deps
+from core.enums import UserAccountStatus
 from models.user import UserRole
 
 
@@ -103,6 +104,25 @@ class ApiDepsTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as ctx:
                 await deps.get_current_user(db=db, token='token')
         self.assertEqual(ctx.exception.detail, 'REQUIRES_PASSWORD_CHANGE')
+
+        blocked_user = SimpleNamespace(
+            id=3,
+            telegram_id=None,
+            is_deleted=False,
+            account_status=UserAccountStatus.INACTIVE,
+            messenger_blocked_at=object(),
+            messenger_grace_expires_at=datetime.utcnow() - timedelta(minutes=5),
+            must_change_password=False,
+            role=UserRole.STANDARD,
+            last_seen_at=datetime.utcnow(),
+        )
+        db.execute = AsyncMock(return_value=_ResultStub(blocked_user))
+
+        with patch('api.deps.jwt.decode', return_value={'sub': '3'}):
+            with self.assertRaises(HTTPException) as ctx:
+                await deps.get_current_user(db=db, token='token')
+        self.assertEqual(ctx.exception.status_code, 403)
+        self.assertEqual(ctx.exception.detail, 'حساب کاربری غیرفعال شده است')
 
     async def test_optional_and_admin_dependencies(self):
         db = AsyncMock()

@@ -10,6 +10,7 @@ from typing import Optional, List
 from sqlalchemy import select, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.enums import UserAccountStatus
 from models.session import UserSession, SessionLoginRequest, LoginRequestStatus, Platform
 from models.user import User, UserRole
 from core.trading_settings import get_trading_settings_async
@@ -20,6 +21,13 @@ logger = logging.getLogger(__name__)
 LOGIN_REQUEST_TIMEOUT_SECONDS = 120
 # Session blacklist TTL: must match access token lifetime (60 min)
 SESSION_BLACKLIST_TTL = 3600
+ACCOUNT_INACTIVE_BLOCK_REASON = "ACCOUNT_INACTIVE"
+
+
+def _is_inactive_account(user: User | object | None) -> bool:
+    raw_status = getattr(user, "account_status", None)
+    normalized = getattr(raw_status, "value", raw_status)
+    return normalized == UserAccountStatus.INACTIVE.value
 
 
 def hash_token(token: str) -> str:
@@ -143,6 +151,9 @@ async def handle_login_session(
     - {"action": "approval_required", "request": SessionLoginRequest}
     - {"action": "blocked", "reason": str}
     """
+    if _is_inactive_account(user):
+        return {"action": "blocked", "reason": ACCOUNT_INACTIVE_BLOCK_REASON}
+
     max_sessions = 1 if await _is_accountant_user(db, user.id) else get_effective_max_sessions(user)
     
     # Attempt to revive suspended session
@@ -314,6 +325,10 @@ async def approve_login_request(
         if active_recovery is not None:
             return {"error": "برای این درخواست، مسیر بازیابی نشست فعال شده و تایید از دستگاه قبلی دیگر مجاز نیست"}
 
+    user = (await db.execute(select(User).where(User.id == login_req.user_id))).scalar_one_or_none()
+    if not user or _is_inactive_account(user):
+        return {"error": "حساب کاربری غیرفعال شده است"}
+
     # Mark request as approved
     login_req.status = LoginRequestStatus.APPROVED
     login_req.resolved_by_session_id = approver_session.id
@@ -322,6 +337,7 @@ async def approve_login_request(
         db,
         login_request=login_req,
         refresh_token=refresh_token,
+        user=user,
         platform=platform,
         home_server=home_server or login_req.requester_home_server,
     )
@@ -345,11 +361,13 @@ async def provision_session_for_login_request(
     *,
     login_request: SessionLoginRequest,
     refresh_token: str,
+    user: Optional[User] = None,
     platform: Platform = Platform.WEB,
     home_server: Optional[str] = None,
 ) -> UserSession:
     """Create the admitted session for one already-authorized login request without committing."""
-    user = (await db.execute(select(User).where(User.id == login_request.user_id))).scalar_one()
+    if user is None:
+        user = (await db.execute(select(User).where(User.id == login_request.user_id))).scalar_one()
     active_sessions = await get_active_sessions(db, login_request.user_id)
     max_sessions_allowed = 1 if await _is_accountant_user(db, user.id) else get_effective_max_sessions(user)
 

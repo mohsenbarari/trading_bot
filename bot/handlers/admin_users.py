@@ -12,9 +12,10 @@ import logging
 from datetime import datetime, timedelta
 
 from core.db import AsyncSessionLocal
+from core.services.user_account_status_service import get_user_account_status, transition_user_account_status
 from core.services.user_deletion_service import delete_user_account
 from models.user import User
-from core.enums import UserRole, NotificationLevel, NotificationCategory
+from core.enums import UserRole, NotificationLevel, NotificationCategory, UserAccountStatus
 from core.utils import normalize_account_name, normalize_persian_numerals, to_jalali_str, create_user_notification, send_telegram_notification
 from bot.keyboards import (
     get_users_management_keyboard, 
@@ -247,8 +248,8 @@ async def get_user_profile_text(target_user: User) -> str:
         f"🆔 **نام کاربری:** `{target_user.account_name or '---'}`\n"
         f"📱 **شماره موبایل:** `{target_user.mobile_number or '---'}`\n"
         f"🔰 **سطح دسترسی:** {target_user.role.value}\n"
-        f"🤖 **دسترسی بات:** {'✅ فعال' if target_user.has_bot_access else '❌ غیرفعال'}\n"
-        f"🔒 **وضعیت حساب:** {restriction_text}\n"
+        f"🔁 **وضعیت حساب:** {'✅ فعال' if get_user_account_status(target_user) == UserAccountStatus.ACTIVE else '⛔ غیرفعال'}\n"
+        f"🔒 **وضعیت معاملات:** {restriction_text}\n"
         f"📅 **تاریخ عضویت:** {join_date}\n"
         f"{limitations_text}"
     )
@@ -468,7 +469,7 @@ async def process_search_query(message: types.Message, state: FSMContext, user: 
         )
         await update_anchor(state, msg.message_id, message.bot, message.chat.id)
 
-# --- هندلرهای مدیریت کاربر (ویرایش نقش، دسترسی بات، حذف) ---
+# --- هندلرهای مدیریت کاربر (ویرایش نقش، وضعیت حساب، حذف) ---
 
 @router.callback_query(F.data.startswith("user_settings_"))
 async def handle_user_settings(callback: types.CallbackQuery, user: Optional[User]):
@@ -511,7 +512,8 @@ async def handle_user_settings(callback: types.CallbackQuery, user: Optional[Use
         await callback.message.edit_text(
             profile_text,
             reply_markup=get_user_settings_keyboard(
-                target_user_id, 
+                target_user_id,
+                account_status=target_user.account_status,
                 is_restricted=is_restricted, 
                 has_limitations=has_limitations,
                 can_block=target_user.can_block_users,
@@ -611,7 +613,7 @@ async def handle_user_block_actions(callback: types.CallbackQuery, user: Optiona
                 profile_text = await get_user_profile_text(target_user)
                 await callback.message.edit_text(
                     profile_text,
-                    reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=True, has_limitations=has_limitations, can_edit_role=_can_edit_target_role(user)),
+                    reply_markup=get_user_settings_keyboard(target_user.id, account_status=target_user.account_status, is_restricted=True, has_limitations=has_limitations, can_edit_role=_can_edit_target_role(user)),
                     parse_mode="Markdown"
                 )
                 await callback.answer(msg_text, show_alert=True)
@@ -653,7 +655,7 @@ async def handle_user_unblock(callback: types.CallbackQuery, user: Optional[User
             profile_text = await get_user_profile_text(target_user)
             await callback.message.edit_text(
                 profile_text,
-                reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=False, has_limitations=has_limitations, can_edit_role=_can_edit_target_role(user)),
+                reply_markup=get_user_settings_keyboard(target_user.id, account_status=target_user.account_status, is_restricted=False, has_limitations=has_limitations, can_edit_role=_can_edit_target_role(user)),
                 parse_mode="Markdown"
             )
             await callback.answer("✅ رفع مسدودیت انجام شد.", show_alert=True)
@@ -701,7 +703,7 @@ async def handle_user_unlimit(callback: types.CallbackQuery, user: Optional[User
             profile_text = await get_user_profile_text(target_user)
             await callback.message.edit_text(
                 profile_text,
-                reply_markup=get_user_settings_keyboard(target_user.id, is_restricted=is_restricted, has_limitations=False, can_edit_role=_can_edit_target_role(user)),
+                reply_markup=get_user_settings_keyboard(target_user.id, account_status=target_user.account_status, is_restricted=is_restricted, has_limitations=False, can_edit_role=_can_edit_target_role(user)),
                 parse_mode="Markdown"
             )
             await callback.answer("✅ محدودیت‌ها برداشته شد.", show_alert=True)
@@ -763,8 +765,8 @@ async def handle_set_user_role(callback: types.CallbackQuery, user: Optional[Use
         else:
             await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
 
-@router.callback_query(F.data.startswith("user_toggle_bot_"))
-async def handle_user_toggle_bot(callback: types.CallbackQuery, user: Optional[User]):
+@router.callback_query(F.data.startswith("user_toggle_account_status_"))
+async def handle_user_toggle_account_status(callback: types.CallbackQuery, user: Optional[User]):
     if not _can_open_user_management(user):
         return
     
@@ -778,37 +780,11 @@ async def handle_user_toggle_bot(callback: types.CallbackQuery, user: Optional[U
             if not _can_manage_target_user(user, target_user):
                 await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
                 return
-            target_user.has_bot_access = not target_user.has_bot_access
+
+            current_status = get_user_account_status(target_user)
+            target_status = UserAccountStatus.INACTIVE if current_status == UserAccountStatus.ACTIVE else UserAccountStatus.ACTIVE
+            await transition_user_account_status(session, target_user, target_status)
             await session.commit()
-            
-            # ارسال نوتیفیکیشن به کاربر
-            if not target_user.has_bot_access:
-                # دسترسی بات محدود شد
-                bot_access_message = (
-                    "ℹ️ *اطلاعیه*\n\n"
-                    "دسترسی شما به ربات تلگرام محدود شده است.\n\n"
-                    "شما همچنان می‌توانید از طریق *MiniApp* به سیستم دسترسی داشته باشید.\n\n"
-                    "برای اطلاعات بیشتر با پشتیبانی تماس بگیرید."
-                )
-                await create_user_notification(
-                    session, target_user.id, bot_access_message,
-                    level=NotificationLevel.INFO,
-                    category=NotificationCategory.SYSTEM
-                )
-                await send_telegram_notification(target_user.telegram_id, bot_access_message)
-            else:
-                # دسترسی بات فعال شد
-                bot_access_message = (
-                    "✅ *اطلاعیه*\n\n"
-                    "دسترسی شما به ربات تلگرام مجدداً فعال شد.\n\n"
-                    "اکنون می‌توانید از تمام امکانات بات استفاده کنید."
-                )
-                await create_user_notification(
-                    session, target_user.id, bot_access_message,
-                    level=NotificationLevel.SUCCESS,
-                    category=NotificationCategory.SYSTEM
-                )
-                await send_telegram_notification(target_user.telegram_id, bot_access_message)
             
             # بازگشت به منوی تنظیمات (چون از آنجا آمده‌ایم)
             profile_text = await get_user_profile_text(target_user)
@@ -828,14 +804,14 @@ async def handle_user_toggle_bot(callback: types.CallbackQuery, user: Optional[U
             try:
                 await callback.message.edit_text(
                     profile_text,
-                    reply_markup=get_user_settings_keyboard(user_id=target_user.id, is_restricted=is_restricted, has_limitations=has_limitations, can_edit_role=_can_edit_target_role(user)),
+                    reply_markup=get_user_settings_keyboard(user_id=target_user.id, account_status=target_user.account_status, is_restricted=is_restricted, has_limitations=has_limitations, can_edit_role=_can_edit_target_role(user)),
                     parse_mode="Markdown"
                 )
             except TelegramBadRequest:
                 pass
             
-            status = "فعال" if target_user.has_bot_access else "غیرفعال"
-            await callback.answer(f"✅ دسترسی بات {status} شد.", show_alert=True)
+            status = "فعال" if get_user_account_status(target_user) == UserAccountStatus.ACTIVE else "غیرفعال"
+            await callback.answer(f"✅ وضعیت حساب {status} شد.", show_alert=True)
         else:
             await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
 

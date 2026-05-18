@@ -38,6 +38,7 @@ function makeUser(overrides: Record<string, unknown> = {}) {
     account_name: 'owner12',
     mobile_number: '09120000000',
     role: 'عادی',
+    account_status: 'active',
     has_bot_access: true,
     can_block_users: true,
     max_blocked_users: 10,
@@ -167,17 +168,17 @@ describe('UserProfile.vue', () => {
     expect(user.max_blocked_users).toBe(25)
   })
 
-  it('lets admins toggle bot access, edit role, and delete the user from the settings flow', async () => {
+  it('lets admins toggle account status, edit role, and delete the user from the settings flow', async () => {
     const user = makeUser({ id: 18 })
 
     apiFetchMock
       .mockResolvedValueOnce(makeResponse({
         ...user,
-        has_bot_access: false,
+        account_status: 'inactive',
       }))
       .mockResolvedValueOnce(makeResponse({
         ...user,
-        has_bot_access: false,
+        account_status: 'inactive',
         role: 'پلیس',
       }))
       .mockResolvedValueOnce({ ok: true })
@@ -197,7 +198,7 @@ describe('UserProfile.vue', () => {
     })
 
     await wrapper.get('.settings-btn').trigger('click')
-    await findButtonByText(wrapper, 'تغییر دسترسی بات').trigger('click')
+  await findButtonByText(wrapper, 'تغییر وضعیت حساب').trigger('click')
     await flushPromises()
 
     await findButtonByText(wrapper, 'ویرایش نقش').trigger('click')
@@ -211,7 +212,7 @@ describe('UserProfile.vue', () => {
 
     expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/users/18', {
       method: 'PUT',
-      body: JSON.stringify({ has_bot_access: false }),
+      body: JSON.stringify({ account_status: 'inactive' }),
     })
     expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/users/18', {
       method: 'PUT',
@@ -220,7 +221,7 @@ describe('UserProfile.vue', () => {
     expect(apiFetchMock).toHaveBeenNthCalledWith(3, '/api/users/18', {
       method: 'DELETE',
     })
-    expect(user.has_bot_access).toBe(false)
+    expect(user.account_status).toBe('inactive')
     expect(user.role).toBe('پلیس')
     expect(wrapper.emitted('navigate')).toContainEqual(['manage_users'])
   })
