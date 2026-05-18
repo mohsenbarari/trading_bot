@@ -28,6 +28,7 @@ class UserAccountStatusHelperTests(unittest.TestCase):
         user = SimpleNamespace(account_status=None, messenger_grace_expires_at=None, messenger_blocked_at=None)
         self.assertEqual(status_service.get_user_account_status(user), UserAccountStatus.ACTIVE)
         self.assertFalse(status_service.is_user_market_blocked(user))
+        self.assertFalse(status_service.is_user_trade_blocked(user))
 
         now = datetime(2026, 5, 18, 12, 0, 0)
         inactive_user = SimpleNamespace(
@@ -38,8 +39,47 @@ class UserAccountStatusHelperTests(unittest.TestCase):
         self.assertTrue(status_service.is_user_global_web_locked(inactive_user, now=now))
         self.assertTrue(status_service.is_user_messenger_blocked(inactive_user, now=now))
 
+        inactive_without_grace = SimpleNamespace(
+            account_status=UserAccountStatus.INACTIVE,
+            messenger_grace_expires_at=None,
+            messenger_blocked_at=None,
+        )
+        self.assertFalse(status_service.is_user_global_web_locked(inactive_without_grace, now=now))
+
+    def test_helper_normalizes_unknown_status_to_active(self):
+        user = SimpleNamespace(account_status="archived")
+
+        with patch.object(status_service.logger, "warning") as warning:
+            self.assertEqual(status_service.get_user_account_status(user), UserAccountStatus.ACTIVE)
+
+        warning.assert_called_once()
+
 
 class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_build_activation_join_line_closes_bot_and_tolerates_failures(self):
+        bot = SimpleNamespace(session=SimpleNamespace(close=AsyncMock()))
+
+        with patch.object(status_service.settings, "bot_token", "123:abc"), patch(
+            "core.services.user_account_status_service.Bot",
+            return_value=bot,
+        ) as bot_factory, patch(
+            "core.services.user_account_status_service.build_channel_join_request_line",
+            new=AsyncMock(return_value="join-line"),
+        ) as build_line:
+            self.assertEqual(await status_service._build_activation_join_line(5), "join-line")
+
+        bot_factory.assert_called_once_with(token="123:abc")
+        build_line.assert_awaited_once_with(bot, user_id=5)
+        bot.session.close.assert_awaited_once()
+
+        with patch.object(status_service.settings, "bot_token", ""), patch(
+            "core.services.user_account_status_service.build_channel_join_request_line",
+            new=AsyncMock(side_effect=RuntimeError("join failed")),
+        ), patch.object(status_service.logger, "exception") as log_exception:
+            self.assertIsNone(await status_service._build_activation_join_line(6))
+
+        log_exception.assert_called_once()
+
     async def test_transition_user_account_status_deactivates_and_notifies(self):
         now = datetime(2026, 5, 18, 12, 0, 0)
         user = SimpleNamespace(
@@ -74,6 +114,31 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create_notification.await_args.args[4], NotificationCategory.SYSTEM)
         send_telegram.assert_awaited_once()
         remove_from_channel.assert_awaited_once_with(71)
+
+    async def test_transition_user_account_status_logs_channel_removal_failure(self):
+        user = SimpleNamespace(
+            id=17,
+            telegram_id=171,
+            account_status=UserAccountStatus.ACTIVE,
+            deactivated_at=None,
+            messenger_grace_expires_at=None,
+            messenger_blocked_at=None,
+        )
+
+        with patch(
+            "core.services.user_account_status_service.create_user_notification",
+            new=AsyncMock(),
+        ), patch(
+            "core.services.user_account_status_service.send_telegram_notification",
+            new=AsyncMock(),
+        ), patch(
+            "core.services.user_account_status_service.remove_user_from_telegram_channel",
+            new=AsyncMock(side_effect=RuntimeError("telegram cleanup failed")),
+        ), patch.object(status_service.logger, "exception") as log_exception:
+            result = await status_service.transition_user_account_status(SimpleNamespace(), user, UserAccountStatus.INACTIVE)
+
+        self.assertTrue(result.changed)
+        log_exception.assert_called_once()
 
     async def test_transition_user_account_status_reactivates_and_attaches_join_line(self):
         user = SimpleNamespace(
@@ -130,6 +195,29 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user.messenger_grace_expires_at, existing_grace)
         create_notification.assert_not_awaited()
 
+    async def test_transition_user_account_status_is_idempotent_for_clean_active_state(self):
+        user = SimpleNamespace(
+            id=10,
+            telegram_id=101,
+            account_status=UserAccountStatus.ACTIVE,
+            deactivated_at=None,
+            messenger_grace_expires_at=None,
+            messenger_blocked_at=None,
+        )
+
+        with patch(
+            "core.services.user_account_status_service.create_user_notification",
+            new=AsyncMock(),
+        ) as create_notification, patch(
+            "core.services.user_account_status_service.send_telegram_notification",
+            new=AsyncMock(),
+        ) as send_telegram:
+            result = await status_service.transition_user_account_status(SimpleNamespace(), user, UserAccountStatus.ACTIVE)
+
+        self.assertFalse(result.changed)
+        create_notification.assert_not_awaited()
+        send_telegram.assert_not_awaited()
+
     async def test_mark_due_users_globally_locked_marks_owner_and_notifies_accountants(self):
         now = datetime(2026, 5, 18, 12, 0, 0)
         owner = SimpleNamespace(
@@ -165,3 +253,34 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create_notification.await_count, 2)
         self.assertEqual(send_telegram.await_count, 2)
         force_clear_sessions.assert_awaited_once_with(db, owner.id)
+
+    async def test_mark_due_users_globally_locked_handles_empty_and_failure_branches(self):
+        empty_db = SimpleNamespace(execute=AsyncMock(return_value=_ExecuteResult([])))
+        self.assertEqual(await status_service.mark_due_users_globally_locked(empty_db), 0)
+
+        due_user = SimpleNamespace(
+            id=21,
+            telegram_id=None,
+            account_status=UserAccountStatus.INACTIVE,
+            messenger_grace_expires_at=datetime(2026, 5, 18, 11, 0, 0),
+            messenger_blocked_at=None,
+            is_deleted=False,
+        )
+        db = SimpleNamespace(execute=AsyncMock(return_value=_ExecuteResult([due_user])))
+
+        with patch.object(status_service, "_utcnow_naive", return_value=datetime(2026, 5, 18, 12, 0, 0)), patch.object(
+            status_service,
+            "list_active_accountants_for_owner",
+            new=AsyncMock(return_value=[SimpleNamespace(accountant_user=None)]),
+        ), patch(
+            "core.services.user_account_status_service.force_clear_sessions",
+            new=AsyncMock(side_effect=RuntimeError("session revoke failed")),
+        ), patch(
+            "core.services.user_account_status_service.create_user_notification",
+            new=AsyncMock(),
+        ) as create_notification, patch.object(status_service.logger, "exception") as log_exception:
+            blocked_count = await status_service.mark_due_users_messenger_blocked(db, limit=5)
+
+        self.assertEqual(blocked_count, 1)
+        create_notification.assert_awaited_once()
+        log_exception.assert_called_once()

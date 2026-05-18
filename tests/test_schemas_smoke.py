@@ -47,6 +47,8 @@ class SchemaSmokeTests(unittest.TestCase):
         created_at = datetime(2026, 5, 1, 10, 30, 0)
         restricted_until = datetime(2026, 5, 2, 11, 45, 0)
         limitations_expire_at = datetime(2026, 5, 3, 12, 15, 0)
+        grace_expires_at = datetime(2026, 5, 4, 13, 0, 0)
+        locked_at = datetime(2026, 5, 5, 14, 30, 0)
 
         user = UserRead(
             id=1,
@@ -56,6 +58,8 @@ class SchemaSmokeTests(unittest.TestCase):
             account_name='demo-user',
             mobile_number='09123456789',
             role=UserRole.STANDARD,
+            messenger_grace_expires_at=grace_expires_at,
+            messenger_blocked_at=locked_at,
             has_bot_access=True,
             is_deleted=False,
             created_at=created_at,
@@ -84,6 +88,8 @@ class SchemaSmokeTests(unittest.TestCase):
         )
 
         self.assertEqual(user.created_at_jalali, to_jalali_str(created_at))
+        self.assertEqual(user.global_lock_grace_expires_at, grace_expires_at)
+        self.assertEqual(user.global_web_locked_at, locked_at)
         self.assertEqual(user.trading_restricted_until_jalali, to_jalali_str(restricted_until))
         self.assertEqual(user.limitations_expire_at_jalali, to_jalali_str(limitations_expire_at))
         self.assertEqual(public_user.created_at_jalali, to_jalali_str(created_at))

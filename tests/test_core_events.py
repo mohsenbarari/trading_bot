@@ -141,6 +141,10 @@ class CoreEventsTests(unittest.TestCase):
             account_name='acct',
             address='addr',
             role=SimpleNamespace(value='admin'),
+            account_status=SimpleNamespace(value='inactive'),
+            deactivated_at=now,
+            messenger_grace_expires_at=now,
+            messenger_blocked_at=now,
             has_bot_access=True,
             admin_password_hash='hash',
             must_change_password=False,
@@ -360,6 +364,10 @@ class CoreEventsTests(unittest.TestCase):
                 account_name='acct',
                 address='addr',
                 role=SimpleNamespace(value='admin'),
+                account_status=SimpleNamespace(value='inactive'),
+                deactivated_at=now,
+                messenger_grace_expires_at=now,
+                messenger_blocked_at=now,
                 has_bot_access=True,
                 admin_password_hash='hash',
                 must_change_password=False,
@@ -385,6 +393,11 @@ class CoreEventsTests(unittest.TestCase):
             registry[('User', 'after_update')](None, connection, user)
 
         self.assertGreaterEqual(log_change.call_count, 8)
+        user_payloads = [call.args[4] for call in log_change.call_args_list if call.args[1] == 'users']
+        self.assertTrue(user_payloads)
+        for payload in user_payloads:
+            self.assertEqual(payload['global_lock_grace_expires_at'], payload['messenger_grace_expires_at'])
+            self.assertEqual(payload['global_web_locked_at'], payload['messenger_blocked_at'])
         publish_event_sync.assert_any_call('offer:created', unittest.mock.ANY)
         publish_event_sync.assert_any_call('offer:updated', unittest.mock.ANY)
         publish_event_sync.assert_any_call('offer:expired', {'id': 1})

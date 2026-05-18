@@ -75,9 +75,21 @@ class UserRead(UserBase):
     role: UserRole
     account_status: UserAccountStatus = UserAccountStatus.ACTIVE
     deactivated_at: datetime | None = None
-    messenger_grace_expires_at: datetime | None = None
-    messenger_blocked_at: datetime | None = None
-    has_bot_access: bool
+    messenger_grace_expires_at: datetime | None = Field(
+        default=None,
+        deprecated=True,
+        description="Legacy compatibility field. Use global_lock_grace_expires_at.",
+    )
+    messenger_blocked_at: datetime | None = Field(
+        default=None,
+        deprecated=True,
+        description="Legacy compatibility field. Use global_web_locked_at.",
+    )
+    has_bot_access: bool = Field(
+        ...,
+        deprecated=True,
+        description="Legacy compatibility field. account_status/global lock state is the runtime authority.",
+    )
     is_accountant: bool = False
     is_deleted: bool = False
     avatar_file_id: str | None = None
@@ -106,6 +118,14 @@ class UserRead(UserBase):
     @computed_field
     def created_at_jalali(self) -> str | None:
         return to_jalali_str(self.created_at)
+
+    @computed_field
+    def global_lock_grace_expires_at(self) -> datetime | None:
+        return self.messenger_grace_expires_at
+
+    @computed_field
+    def global_web_locked_at(self) -> datetime | None:
+        return self.messenger_blocked_at
 
     @computed_field
     def trading_restricted_until_jalali(self) -> str | None:
