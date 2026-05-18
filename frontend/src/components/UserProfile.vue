@@ -42,7 +42,7 @@ const editMaxSessions = ref(props.user?.max_sessions ?? 1);
 const editMaxAccountants = ref(props.user?.max_accountants ?? 3);
 const canBlockUsers = ref(props.user?.can_block_users ?? true);
 const editMaxBlockedUsers = ref(props.user?.max_blocked_users ?? 10);
-const hasBotAccess = ref(props.user?.has_bot_access ?? true);
+const accountStatus = ref(props.user?.account_status ?? 'active');
 const isTerminatingSessions = ref(false);
 const canEditRole = !isCachedMiddleManager();
 
@@ -90,6 +90,13 @@ watch(
   () => props.user?.max_blocked_users,
   (value) => {
     editMaxBlockedUsers.value = value ?? 10;
+  }
+);
+
+watch(
+  () => props.user?.account_status,
+  (value) => {
+    accountStatus.value = value ?? 'active';
   }
 );
 
@@ -249,6 +256,10 @@ const restrictionText = computed(() => {
   return `⛔ تا ${props.user.trading_restricted_until_jalali}`;
 });
 
+const isAccountInactive = computed(() => (props.user?.account_status ?? accountStatus.value) === 'inactive');
+
+const accountStatusText = computed(() => (isAccountInactive.value ? '⛔ غیرفعال' : '✅ فعال'));
+
 async function saveRole() {
   if (!canEditRole) return;
   if (!props.jwtToken) return;
@@ -270,22 +281,22 @@ async function saveRole() {
   }
 }
 
-async function toggleBotAccess() {
+async function toggleAccountStatus() {
   if (!props.jwtToken) return;
-  if (!confirm(`آیا از ${hasBotAccess.value ? 'غیرفعال' : 'فعال'} کردن دسترسی بات اطمینان دارید؟`)) return;
+  if (!confirm(`آیا از ${isAccountInactive.value ? 'فعال' : 'غیرفعال'} کردن حساب اطمینان دارید؟`)) return;
   
   isLoading.value = true;
   try {
-    const newValue = !hasBotAccess.value;
+    const newValue = isAccountInactive.value ? 'active' : 'inactive';
     const response = await apiFetch(`/api/users/${props.user.id}`, {
       method: 'PUT',
-      body: JSON.stringify({ has_bot_access: newValue })
+      body: JSON.stringify({ account_status: newValue })
     });
     if (!response.ok) throw new Error('خطا در تغییر دسترسی');
     const updatedUser = await response.json();
     Object.assign(props.user, updatedUser);
-    hasBotAccess.value = newValue;
-    alert(`دسترسی بات ${newValue ? 'فعال' : 'غیرفعال'} شد.`);
+    accountStatus.value = newValue;
+    alert(`وضعیت حساب ${newValue === 'active' ? 'فعال' : 'غیرفعال'} شد.`);
   } catch (e) {
     alert('خطا در تغییر دسترسی');
   } finally {
@@ -643,11 +654,11 @@ async function deleteUser() {
           <span class="value">{{ user.role }}</span>
       </div>
       <div class="detail-item">
-          <span class="label">دسترسی بات</span>
-          <span class="value">{{ user.has_bot_access ? '✅ فعال' : '❌ غیرفعال' }}</span>
+          <span class="label">وضعیت حساب</span>
+          <span class="value">{{ accountStatusText }}</span>
       </div>
       <div class="detail-item">
-          <span class="label">وضعیت حساب</span>
+          <span class="label">وضعیت معاملات</span>
           <span class="value" :class="{ 'text-red': isRestricted }">{{ restrictionText }}</span>
       </div>
       
@@ -771,8 +782,8 @@ async function deleteUser() {
         </div>
 
         <div v-else class="settings-menu">
-            <button @click="toggleBotAccess" class="menu-button">
-                🤖 تغییر دسترسی بات ({{ hasBotAccess ? 'فعال' : 'غیرفعال' }})
+          <button @click="toggleAccountStatus" class="menu-button">
+            🔁 تغییر وضعیت حساب ({{ isAccountInactive ? 'غیرفعال' : 'فعال' }})
             </button>
             <button v-if="canEditRole" @click="isEditingRole = true" class="menu-button">✏️ ویرایش نقش</button>
             

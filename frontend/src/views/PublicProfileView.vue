@@ -69,6 +69,18 @@ function handleNavigate(view: string, payload?: { userId?: number; userName?: st
     return
   }
 
+  if (view === 'settings' && payload?.userId) {
+    router.push({
+      name: 'admin',
+      query: {
+        section: 'user_profile',
+        user_id: String(payload.userId),
+        ...(payload.userName ? { account_name: payload.userName } : {}),
+      },
+    })
+    return
+  }
+
   const canGoBack = typeof window !== 'undefined' && Boolean(window.history.state?.back)
   if (canGoBack) {
     router.back()

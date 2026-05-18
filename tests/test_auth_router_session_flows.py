@@ -12,6 +12,7 @@ from api.routers.auth import (
     refresh_access_token,
     setup_admin_password,
 )
+from core.enums import UserAccountStatus
 
 
 class FakeExecuteResult:
@@ -116,6 +117,25 @@ class AuthRouterSessionFlowTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once()
         self.assertEqual(result["access_token"], "new-access")
         self.assertEqual(result["refresh_token"], "good")
+
+    async def test_refresh_access_token_rejects_users_whose_messenger_access_is_now_blocked(self):
+        req = RefreshTokenRequest(refresh_token="good")
+        payload = {"type": "refresh", "sub": 5}
+        user = SimpleNamespace(
+            id=5,
+            is_deleted=False,
+            home_server="foreign",
+            account_status=UserAccountStatus.INACTIVE,
+            messenger_blocked_at=datetime.now(timezone.utc),
+            messenger_grace_expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        )
+
+        with patch("jose.jwt.decode", return_value=payload):
+            with self.assertRaises(HTTPException) as exc_info:
+                await refresh_access_token(req, db=FakeDB([FakeExecuteResult(user)]))
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "حساب کاربری غیرفعال شده است")
 
     async def test_setup_admin_password_rejects_invalid_token_and_missing_requirement(self):
         req = SetupPasswordRequest(password="secret1")

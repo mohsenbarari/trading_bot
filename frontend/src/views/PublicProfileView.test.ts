@@ -142,6 +142,31 @@ describe('PublicProfileView.vue', () => {
     })
   })
 
+  it('routes admin settings navigation requests through the admin user-profile handoff query contract', async () => {
+    const PublicProfileView = (await import('./PublicProfileView.vue')).default
+    const wrapper = mount(PublicProfileView, {
+      global: {
+        stubs: {
+          PublicProfile: {
+            name: 'PublicProfile',
+            template: '<button class="settings-nav" @click="$emit(\'navigate\', \'settings\', { userId: 66, userName: \'managed66\' })">settings</button>',
+          },
+        },
+      },
+    })
+
+    await wrapper.get('.settings-nav').trigger('click')
+
+    expect(publicProfileViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'admin',
+      query: {
+        section: 'user_profile',
+        user_id: '66',
+        account_name: 'managed66',
+      },
+    })
+  })
+
   it('uses router.back for non-chat navigation when browser history has a back entry', async () => {
     window.history.replaceState({ back: '/chat' }, '', '/users/44')
 

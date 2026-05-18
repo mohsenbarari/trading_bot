@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from core.services import session_service
 from models.session import LoginRequestStatus, Platform
+from core.enums import UserAccountStatus
 from models.user import UserRole
 
 
@@ -146,6 +147,15 @@ class HandleLoginSessionTests(unittest.IsolatedAsyncioTestCase):
             home_server="foreign",
         )
         db.commit.assert_awaited_once()
+
+    async def test_blocks_inactive_users_before_creating_any_session(self):
+        db = SimpleNamespace(commit=AsyncMock())
+        user = SimpleNamespace(id=13, role=UserRole.STANDARD, max_sessions=3, account_status=UserAccountStatus.INACTIVE)
+
+        result = await session_service.handle_login_session(db, user, "refresh-inactive")
+
+        self.assertEqual(result, {"action": "blocked", "reason": session_service.ACCOUNT_INACTIVE_BLOCK_REASON})
+        db.commit.assert_not_awaited()
 
     async def test_creates_non_primary_session_when_under_limit(self):
         db = SimpleNamespace(commit=AsyncMock())
@@ -414,6 +424,27 @@ class ApproveAndRevocationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(login_req.status, LoginRequestStatus.EXPIRED)
         db.commit.assert_awaited_once()
 
+    async def test_approve_login_request_rejects_inactive_user(self):
+        request_id = uuid.uuid4()
+        login_req = SimpleNamespace(
+            id=request_id,
+            user_id=41,
+            status=LoginRequestStatus.PENDING,
+            expires_at=datetime.utcnow() + timedelta(seconds=60),
+        )
+        inactive_user = SimpleNamespace(id=41, account_status=UserAccountStatus.INACTIVE)
+        db = SimpleNamespace(
+            execute=AsyncMock(side_effect=[scalar_one_or_none_result(login_req), scalar_one_or_none_result(inactive_user)]),
+            commit=AsyncMock(),
+        )
+        approver_session = SimpleNamespace(id=uuid.uuid4())
+
+        result = await session_service.approve_login_request(db, request_id, approver_session, "refresh-inactive")
+
+        self.assertEqual(result, {"error": "حساب کاربری غیرفعال شده است"})
+        self.assertEqual(login_req.status, LoginRequestStatus.PENDING)
+        db.commit.assert_not_awaited()
+
     async def test_approve_login_request_evicts_newest_non_primary_and_creates_session(self):
         request_id = uuid.uuid4()
         login_req = SimpleNamespace(
@@ -431,7 +462,7 @@ class ApproveAndRevocationTests(unittest.IsolatedAsyncioTestCase):
         newest_non_primary = SimpleNamespace(id=uuid.uuid4(), is_primary=False)
         new_session = SimpleNamespace(id=uuid.uuid4())
         db = SimpleNamespace(
-            execute=AsyncMock(side_effect=[scalar_one_or_none_result(login_req), scalar_one_result(user)]),
+            execute=AsyncMock(side_effect=[scalar_one_or_none_result(login_req), scalar_one_or_none_result(user)]),
             commit=AsyncMock(),
         )
         approver_session = SimpleNamespace(id=uuid.uuid4())
@@ -648,7 +679,7 @@ class SessionServiceAdditionalCoverageTests(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(id=41, role=UserRole.STANDARD, max_sessions=1)
         new_session = SimpleNamespace(id=uuid.uuid4())
         db = SimpleNamespace(
-            execute=AsyncMock(side_effect=[scalar_one_or_none_result(pending_request), scalar_one_result(user)]),
+            execute=AsyncMock(side_effect=[scalar_one_or_none_result(pending_request), scalar_one_or_none_result(user)]),
             commit=AsyncMock(),
         )
 
@@ -714,7 +745,7 @@ class SessionServiceAdditionalCoverageTests(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(id=42, role=UserRole.STANDARD, max_sessions=2)
         new_session = SimpleNamespace(id=uuid.uuid4())
         db = SimpleNamespace(
-            execute=AsyncMock(side_effect=[scalar_one_or_none_result(pending_request), scalar_one_result(user)]),
+            execute=AsyncMock(side_effect=[scalar_one_or_none_result(pending_request), scalar_one_or_none_result(user)]),
             commit=AsyncMock(),
         )
 

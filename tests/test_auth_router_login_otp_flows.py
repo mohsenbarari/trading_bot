@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 from api.routers.auth import OTPRequest, OTPVerify, request_otp, resend_otp_sms, verify_otp
+from core.enums import UserAccountStatus
 from models.session import Platform
 
 
@@ -69,6 +70,15 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
             await request_otp(
                 OTPRequest(mobile_number="09120000000"),
                 db=FakeDB([FakeExecuteResult(deleted_user)]),
+            )
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "حساب کاربری غیرفعال شده است")
+
+        inactive_user = SimpleNamespace(is_deleted=False, telegram_id=None, account_status=UserAccountStatus.INACTIVE)
+        with self.assertRaises(HTTPException) as exc_info:
+            await request_otp(
+                OTPRequest(mobile_number="09120000000"),
+                db=FakeDB([FakeExecuteResult(inactive_user)]),
             )
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "حساب کاربری غیرفعال شده است")
@@ -183,6 +193,15 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as exc_info:
                 await verify_otp(request, raw_request=make_request(), db=FakeDB([FakeExecuteResult(None)]))
         self.assertEqual(exc_info.exception.status_code, 404)
+
+        inactive_user = SimpleNamespace(id=7, home_server="foreign", account_status=UserAccountStatus.INACTIVE)
+        redis = FakeRedis({"otp:09120000000": "12345"})
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await verify_otp(request, raw_request=make_request(), db=FakeDB([FakeExecuteResult(inactive_user)]))
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "حساب کاربری غیرفعال شده است")
+        self.assertEqual(redis.delete_calls, ["otp:09120000000", "otp_limit:09120000000"])
 
         user = SimpleNamespace(id=7, home_server="foreign")
         redis = FakeRedis({"otp:09120000000": "12345"})

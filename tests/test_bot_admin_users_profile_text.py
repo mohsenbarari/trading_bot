@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from bot.handlers.admin_users import get_user_profile_text
-from core.enums import UserRole
+from core.enums import UserAccountStatus, UserRole
 
 
 class BotAdminUsersProfileTextTests(unittest.IsolatedAsyncioTestCase):
@@ -14,7 +14,7 @@ class BotAdminUsersProfileTextTests(unittest.IsolatedAsyncioTestCase):
             account_name="ali",
             mobile_number="0912",
             role=UserRole.STANDARD,
-            has_bot_access=True,
+            account_status=UserAccountStatus.ACTIVE,
             created_at=now,
             trading_restricted_until=now + timedelta(days=1),
             max_daily_trades=2,
@@ -30,6 +30,7 @@ class BotAdminUsersProfileTextTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ali", text)
         self.assertIn("✅ فعال", text)
         self.assertIn("restriction", text)
+        self.assertIn("وضعیت معاملات", text)
         self.assertIn("معاملات روزانه: 2", text)
         self.assertIn("انقضا: expire", text)
 
@@ -39,7 +40,7 @@ class BotAdminUsersProfileTextTests(unittest.IsolatedAsyncioTestCase):
             account_name=None,
             mobile_number=None,
             role=UserRole.STANDARD,
-            has_bot_access=False,
+            account_status=UserAccountStatus.INACTIVE,
             created_at=None,
             trading_restricted_until=now - timedelta(days=1),
             max_daily_trades=None,
@@ -51,7 +52,7 @@ class BotAdminUsersProfileTextTests(unittest.IsolatedAsyncioTestCase):
             datetime_mock.utcnow.return_value = now
             text = await get_user_profile_text(user)
         self.assertIn("آزاد (منقضی شده)", text)
-        self.assertIn("❌ غیرفعال", text)
+        self.assertIn("⛔ غیرفعال", text)
 
 
 if __name__ == "__main__":

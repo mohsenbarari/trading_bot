@@ -1,6 +1,6 @@
 import unittest
 
-from core.enums import UserRole
+from core.enums import UserAccountStatus, UserRole
 from bot import keyboards
 
 
@@ -59,8 +59,13 @@ class BotKeyboardsTests(unittest.TestCase):
     def test_user_settings_and_role_keyboards(self):
         settings_keyboard = keyboards.get_user_settings_keyboard(5, can_block=False, max_blocked=3)
         texts = [button.text for row in settings_keyboard.inline_keyboard for button in row]
-        self.assertIn('🤖 تغییر دسترسی بات', texts)
+        self.assertIn('🔁 غیرفعال کردن حساب', texts)
         self.assertIn('🚫 تنظیمات بلاک (غیرفعال - 3)', texts)
+
+        inactive_settings_keyboard = keyboards.get_user_settings_keyboard(5, account_status=UserAccountStatus.INACTIVE)
+        inactive_texts = [button.text for row in inactive_settings_keyboard.inline_keyboard for button in row]
+        self.assertIn('🔁 فعال کردن حساب', inactive_texts)
+        self.assertEqual(inactive_settings_keyboard.inline_keyboard[0][0].callback_data, 'user_toggle_account_status_5')
 
         role_select = keyboards.get_role_selection_keyboard()
         role_values = [row[0].text for row in role_select.inline_keyboard[:-1]]

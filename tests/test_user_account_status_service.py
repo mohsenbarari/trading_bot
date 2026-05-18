@@ -148,6 +148,9 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
             "list_active_accountants_for_owner",
             new=AsyncMock(return_value=[relation]),
         ), patch(
+            "core.services.user_account_status_service.force_clear_sessions",
+            new=AsyncMock(return_value=2),
+        ) as force_clear_sessions, patch(
             "core.services.user_account_status_service.create_user_notification",
             new=AsyncMock(),
         ) as create_notification, patch(
@@ -160,3 +163,4 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(owner.messenger_blocked_at, now)
         self.assertEqual(create_notification.await_count, 2)
         self.assertEqual(send_telegram.await_count, 2)
+        force_clear_sessions.assert_awaited_once_with(db, owner.id)

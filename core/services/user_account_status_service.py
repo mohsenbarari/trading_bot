@@ -12,6 +12,7 @@ from bot.utils.channel_invites import build_channel_join_request_line
 from core.config import settings
 from core.enums import NotificationCategory, NotificationLevel, UserAccountStatus
 from core.services.accountant_relation_service import list_active_accountants_for_owner
+from core.services.session_service import force_clear_sessions
 from core.services.user_deletion_service import remove_user_from_telegram_channel
 from core.utils import create_user_notification, send_telegram_notification, utc_now
 from models.user import User
@@ -249,5 +250,10 @@ async def mark_due_users_messenger_blocked(db: AsyncSession, *, limit: int = 100
                 MESSENGER_BLOCKED_NOTIFICATION,
                 level=NotificationLevel.WARNING,
             )
+
+        try:
+            await force_clear_sessions(db, user.id)
+        except Exception:
+            logger.exception("Failed to revoke active sessions for messenger-blocked user %s", user.id)
 
     return len(due_users)

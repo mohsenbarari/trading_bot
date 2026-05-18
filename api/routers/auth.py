@@ -29,7 +29,14 @@ from api.deps import get_current_user, oauth2_scheme
 import schemas
 
 
-from core.services.session_service import handle_login_session, get_session_by_refresh_token, hash_token, get_active_sessions
+from core.services.session_service import (
+    ACCOUNT_INACTIVE_BLOCK_REASON,
+    get_active_sessions,
+    get_session_by_refresh_token,
+    handle_login_session,
+    hash_token,
+)
+from core.services.user_account_status_service import get_user_account_status, is_user_messenger_blocked
 from core.services.avatar_service import resolve_owned_avatar_file_id
 from models.session import Platform, UserSession
 import uuid
@@ -45,6 +52,16 @@ from core.services.accountant_relation_service import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _raise_inactive_account_error() -> None:
+    raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
+
+
+def _raise_for_session_blocked_reason(reason: str) -> None:
+    if reason == ACCOUNT_INACTIVE_BLOCK_REASON:
+        _raise_inactive_account_error()
+    raise HTTPException(status_code=429, detail=reason)
 
 
 def _extract_device_info(request) -> dict:
@@ -336,6 +353,9 @@ async def refresh_access_token(
         
         if user.is_deleted:
             raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
+
+        if is_user_messenger_blocked(user):
+            _raise_inactive_account_error()
         
         # Validate session exists and is active
         session = await get_session_by_refresh_token(db, req.refresh_token)
@@ -470,6 +490,9 @@ async def request_otp(
 
     if result.is_deleted:
         raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
+
+    if get_user_account_status(result).value == "inactive":
+        _raise_inactive_account_error()
 
     # Rate limiting
     redis = await get_redis()
@@ -614,6 +637,11 @@ async def verify_otp(
     
     if not user:
         raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+
+    if get_user_account_status(user).value == "inactive":
+        await redis.delete(otp_key)
+        await redis.delete(f"otp_limit:{mobile}")
+        _raise_inactive_account_error()
         
     # پاک کردن کد OTP
     await redis.delete(otp_key)
@@ -642,7 +670,7 @@ async def verify_otp(
     )
     
     if session_result["action"] == "blocked":
-        raise HTTPException(status_code=429, detail=session_result["reason"])
+        _raise_for_session_blocked_reason(session_result["reason"])
     
     if session_result["action"] == "approval_required":
         login_req = session_result["request"]
@@ -684,6 +712,7 @@ async def webapp_login(
 
     # Parse and validate init_data
     try:
+        blocked_error = None
         from urllib.parse import parse_qsl
         parsed_data = dict(parse_qsl(init_data))
         hash_val = parsed_data.pop('hash')
@@ -736,7 +765,10 @@ async def webapp_login(
         )
         
         if session_result["action"] == "blocked":
-            raise HTTPException(status_code=429, detail=session_result["reason"])
+            if session_result["reason"] == ACCOUNT_INACTIVE_BLOCK_REASON:
+                blocked_error = HTTPException(status_code=403, detail="INACTIVE_ACCOUNT_BLOCKED")
+            else:
+                blocked_error = HTTPException(status_code=429, detail=session_result["reason"])
         
         if session_result["action"] == "approval_required":
             login_req = session_result["request"]
@@ -746,6 +778,9 @@ async def webapp_login(
                 "message": "درخواست ورود شما ارسال شد. منتظر تایید از دستگاه اصلی باشید.",
                 "expires_at": login_req.expires_at.isoformat(),
             }
+
+        if blocked_error is not None:
+            raise blocked_error
         
         session_id = str(session_result["session"].id) if session_result.get("session") else None
         access_token = create_access_token(subject=user.id, session_id=session_id, server_id=login_home_server)
@@ -755,6 +790,11 @@ async def webapp_login(
             "refresh_token": refresh_token,
             "token_type": "bearer"
         }
+    except HTTPException as exc:
+        if exc.detail == "INACTIVE_ACCOUNT_BLOCKED":
+            raise HTTPException(status_code=403, detail="User is blocked")
+        logger.error(f"WebApp login error: {exc}")
+        raise HTTPException(status_code=400, detail="Authentication failed")
         
     except Exception as e:
         logger.error(f"WebApp login error: {e}")

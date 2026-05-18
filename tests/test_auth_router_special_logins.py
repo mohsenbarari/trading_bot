@@ -211,6 +211,24 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_webapp_login_returns_blocked_for_inactive_accounts(self):
+        request = make_request(headers={"user-agent": "Telegram"}, host="10.0.0.8")
+        init_data = build_webapp_init_data("bot-token", {"id": 123})
+        user = SimpleNamespace(id=7, telegram_id=123, is_deleted=False, home_server="iran")
+
+        with patch.object(auth.settings, "bot_token", "bot-token"), patch(
+            "api.routers.auth.create_refresh_token",
+            return_value="refresh-token",
+        ), patch(
+            "api.routers.auth.handle_login_session",
+            new=AsyncMock(return_value={"action": "blocked", "reason": auth.ACCOUNT_INACTIVE_BLOCK_REASON}),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await webapp_login(WebAppLogin(init_data=init_data), raw_request=request, db=FakeDB([FakeExecuteResult(user)]))
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "User is blocked")
+
 
 if __name__ == "__main__":
     unittest.main()
