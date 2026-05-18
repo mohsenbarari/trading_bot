@@ -5,8 +5,8 @@ const tradingViewMocks = vi.hoisted(() => ({
   apiFetchJsonMock: vi.fn(),
   apiFetchMock: vi.fn(),
   wsConnectMock: vi.fn(),
-  wsOnMock: vi.fn(),
-  wsOffMock: vi.fn(),
+  wsOnMock: vi.fn((_event: string, _handler: (payload: unknown) => void) => {}),
+  wsOffMock: vi.fn((_event: string, _handler: (payload: unknown) => void) => {}),
 }))
 
 vi.mock('../composables/useWebSocket', () => ({
@@ -20,15 +20,32 @@ vi.mock('../composables/useWebSocket', () => ({
 vi.mock('../composables/useTradingSort', async () => {
   const { computed, ref } = await import('vue')
   return {
-    useTradingSort: (offers: { value: any[] }) => ({
-      filterType: ref<'all' | 'buy' | 'sell'>('all'),
-      sortCommodity: ref(''),
-      sortDirection: ref<'none' | 'asc' | 'desc'>('none'),
-      showSortPanel: ref(false),
-      filteredOffers: computed(() => offers.value),
-      toggleSort: vi.fn(),
-      clearSort: vi.fn(),
-    }),
+    useTradingSort: (offers: { value: any[] }) => {
+      const sortCommodity = ref('')
+      const sortDirection = ref<'none' | 'asc' | 'desc'>('none')
+      return {
+        filterType: ref<'all' | 'buy' | 'sell'>('all'),
+        sortCommodity,
+        sortDirection,
+        showSortPanel: ref(false),
+        filteredOffers: computed(() => offers.value),
+        toggleSort: vi.fn((commodityName: string) => {
+          if (sortCommodity.value !== commodityName) {
+            sortCommodity.value = commodityName
+            sortDirection.value = 'asc'
+          } else if (sortDirection.value === 'asc') {
+            sortDirection.value = 'desc'
+          } else {
+            sortCommodity.value = ''
+            sortDirection.value = 'none'
+          }
+        }),
+        clearSort: vi.fn(() => {
+          sortCommodity.value = ''
+          sortDirection.value = 'none'
+        }),
+      }
+    },
   }
 })
 
@@ -445,6 +462,197 @@ describe('TradingView.vue', () => {
         quantity: 5,
       }),
     }))
+    expect(wrapper.find('.trade-lot-suggestion-alert-stub').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('renders timer styles, sort state, and websocket/poll refresh branches', async () => {
+    vi.setSystemTime(new Date('2030-01-01T00:00:00Z'))
+    const nowSeconds = Math.floor(Date.now() / 1000)
+    let offersState = [
+      { ...offersFixture[0], id: 401, expires_at_ts: nowSeconds + 5400, remaining_quantity: 9, quantity: 9, price: 101000 },
+      { ...offersFixture[0], id: 402, expires_at_ts: nowSeconds + 3600, remaining_quantity: 8, quantity: 8, price: 102000 },
+      { ...offersFixture[0], id: 403, expires_at_ts: nowSeconds + 1800, remaining_quantity: 7, quantity: 7, price: 103000 },
+      { ...offersFixture[0], id: 404, expires_at_ts: nowSeconds + 600, remaining_quantity: 6, quantity: 6, price: 104000 },
+      { ...offersFixture[0], id: 405, is_own_offer: true, expires_at_ts: nowSeconds + 600, remaining_quantity: 5, quantity: 5, price: 105000 },
+    ]
+    tradingViewMocks.apiFetchJsonMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/offers/' && (!options?.method || options.method === 'GET')) return offersState
+      if (path === '/api/offers/my?since_hours=2') return myOffersFixture
+      if (path === '/api/trades/my') return myTradesFixture
+      if (path === '/api/commodities/') return commoditiesFixture
+      if (path === '/api/trading-settings/') return { ...tradingSettingsFixture, offer_expiry_minutes: 90 }
+      return null
+    })
+
+    const wrapper = await mountTradingView()
+    await flushPromises()
+
+    expect(wrapper.findAll('.timer-bar-track')).toHaveLength(5)
+    expect(wrapper.findAll('.offer-card.timer-critical')).toHaveLength(2)
+    expect((wrapper.find('.offer-card.has-timer').element as HTMLElement).style.getPropertyValue('--timer-color')).toContain('hsl(')
+
+    await wrapper.find('.sort-toggle-btn').trigger('click')
+    expect(wrapper.find('.sort-panel').exists()).toBe(true)
+    await wrapper.findAll('.sort-chip')[0]!.trigger('click')
+    expect(wrapper.find('.sort-hint').text()).toContain('ارزان‌ترین اول')
+    await wrapper.findAll('.sort-chip')[0]!.trigger('click')
+    expect(wrapper.find('.sort-hint').text()).toContain('گران‌ترین اول')
+    await wrapper.find('.sort-clear-btn').trigger('click')
+    expect(wrapper.find('.sort-hint').exists()).toBe(false)
+
+    const handlers = new Map<string, (payload: unknown) => void>(tradingViewMocks.wsOnMock.mock.calls as [string, (payload: unknown) => void][]) 
+    handlers.get('offer:expired')?.({ id: 401 })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('101,000')
+
+    tradingViewMocks.apiFetchJsonMock.mockClear()
+    handlers.get('offer:created')?.({ id: 999 })
+    handlers.get('offer:updated')?.({ id: 402 })
+    handlers.get('trade:created')?.({ id: 1 })
+    await flushPromises()
+    expect(tradingViewMocks.apiFetchJsonMock.mock.calls.filter(([path]) => path === '/api/offers/').length).toBeGreaterThanOrEqual(3)
+
+    await wrapper.findAll('.tabs button')[1]!.trigger('click')
+    await flushPromises()
+    tradingViewMocks.apiFetchJsonMock.mockClear()
+    handlers.get('offer:updated')?.({ id: 202 })
+    await flushPromises()
+    expect(tradingViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/offers/my?since_hours=2', {})
+
+    await wrapper.findAll('.tabs button')[2]!.trigger('click')
+    await flushPromises()
+    tradingViewMocks.apiFetchJsonMock.mockClear()
+    handlers.get('trade:created')?.({ id: 301 })
+    vi.advanceTimersByTime(3000)
+    await flushPromises()
+    expect(tradingViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/trades/my', {})
+
+    offersState = []
+    await wrapper.findAll('.tabs button')[0]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('هیچ لفظ فعالی وجود ندارد')
+
+    wrapper.unmount()
+    expect(tradingViewMocks.wsOffMock).toHaveBeenCalledWith('offer:expired', expect.any(Function))
+  })
+
+  it('surfaces parse failures, non-warning publish failures, and preview cancel state', async () => {
+    const wrapper = await mountTradingView()
+    await flushPromises()
+
+    tradingViewMocks.apiFetchJsonMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/offers/parse' && options?.method === 'POST') {
+        return { success: false, error: 'متن قابل پردازش نیست' }
+      }
+      if (path === '/api/offers/' && (!options?.method || options.method === 'GET')) return offersFixture
+      if (path === '/api/commodities/') return commoditiesFixture
+      if (path === '/api/trading-settings/') return tradingSettingsFixture
+      return null
+    })
+
+    await wrapper.find('.text-offer-input').setValue('متن ناقص')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.parse-error').text()).toBe('متن قابل پردازش نیست')
+
+    tradingViewMocks.apiFetchJsonMock.mockImplementationOnce(async () => {
+      throw new Error('parse exploded')
+    })
+    await wrapper.find('.text-offer-input').setValue('متن خراب')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.parse-error').text()).toBe('parse exploded')
+
+    tradingViewMocks.apiFetchJsonMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/offers/parse' && options?.method === 'POST') {
+        return {
+          success: true,
+          data: {
+            trade_type: 'sell',
+            commodity_name: 'سکه',
+            commodity_id: 1,
+            quantity: 2,
+            price: 120000,
+            is_wholesale: false,
+            lot_sizes: [1, 1],
+            notes: null,
+          },
+        }
+      }
+      if (path === '/api/offers/' && (!options?.method || options.method === 'GET')) return offersFixture
+      if (path === '/api/commodities/') return commoditiesFixture
+      if (path === '/api/trading-settings/') return tradingSettingsFixture
+      return null
+    })
+    tradingViewMocks.apiFetchMock.mockResolvedValueOnce(errorResponse(422, { detail: 'قیمت نامعتبر است' }))
+
+    await wrapper.find('.text-offer-input').setValue('فروش سکه 2 عدد 120000')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.offer-preview-error').text()).toBe('قیمت نامعتبر است')
+
+    await wrapper.find('.offer-preview-cancel').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('keeps lot suggestions synchronized with changing offers and closes stale suggestions', async () => {
+    let offersState = [{
+      ...offersFixture[0],
+      is_wholesale: false,
+      lot_sizes: [5, 15],
+      remaining_quantity: 20,
+      quantity: 20,
+    }]
+    tradingViewMocks.apiFetchJsonMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/offers/' && (!options?.method || options.method === 'GET')) return offersState
+      if (path === '/api/commodities/') return commoditiesFixture
+      if (path === '/api/trading-settings/') return tradingSettingsFixture
+      return null
+    })
+    tradingViewMocks.apiFetchMock.mockResolvedValue({
+      ok: false,
+      json: async () => ({
+        error_code: 'TRADE_LOT_UNAVAILABLE',
+        offer_id: 101,
+        offer_type: 'sell',
+        commodity_name: 'سکه',
+        price: 123456,
+        remaining_quantity: 20,
+        available_lots: [5, 15],
+      }),
+    })
+
+    const wrapper = await mountTradingView()
+    await flushPromises()
+    await wrapper.findAll('.trade-btn')[0]!.trigger('click')
+    await wrapper.find('.confirm-trade-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.trade-lot-summary').text()).toBe('15 + 5')
+
+    offersState = [{
+      ...offersState[0]!,
+      is_wholesale: false,
+      remaining_quantity: 10,
+      quantity: 20,
+      lot_sizes: [4, 6],
+    }]
+    const handlers = new Map<string, (payload: unknown) => void>(tradingViewMocks.wsOnMock.mock.calls as [string, (payload: unknown) => void][]) 
+    handlers.get('offer:updated')?.({ id: 101 })
+    await flushPromises()
+    expect(wrapper.find('.trade-lot-summary').text()).toBe('10 + 6 + 4')
+
+    offersState = []
+    handlers.get('offer:updated')?.({ id: 101 })
+    await flushPromises()
     expect(wrapper.find('.trade-lot-suggestion-alert-stub').exists()).toBe(false)
 
     wrapper.unmount()

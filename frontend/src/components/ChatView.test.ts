@@ -1,26 +1,34 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as chatRoomRouting from '../utils/chatRoomRouting'
 
 const chatViewMocks = vi.hoisted(() => ({
   routeState: {
     path: '/chat',
-    query: {} as Record<string, string>,
+    query: {} as Record<string, string | string[] | null | undefined>,
   },
   routerReplaceMock: vi.fn(),
   routerPushMock: vi.fn(),
-  apiFetchMock: vi.fn(async () => ({})),
+  apiFetchMock: vi.fn(async (_url: string, _options?: RequestInit) => ({})),
   loadConversationsMock: vi.fn(),
   loadMessagesMock: vi.fn(),
   conversationsSeed: [] as any[],
   messagesSeed: [] as any[],
   imageCacheState: {} as Record<string, string>,
   downloadMediaMock: vi.fn(),
+  scheduleMediaHydrationMock: vi.fn(),
   openMediaLightboxMock: vi.fn(),
   handleMediaUploadWrapperMock: vi.fn(),
+  cancelUploadMock: vi.fn(),
   setLightboxIndexMock: vi.fn(),
   closeLightboxMock: vi.fn(),
   cancelDocumentDownloadMock: vi.fn(),
   cancelMediaDownloadMock: vi.fn(),
+  cancelTextMessageMock: vi.fn(),
+  loadOlderMessagesMock: vi.fn(async () => 0),
+  hasOlderMessagesValue: false,
+  isLoadingOlderMessagesValue: false,
+  scrollToMessageMock: vi.fn(),
   pushBackStateMock: vi.fn(),
   popBackStateMock: vi.fn(),
   clearBackStackMock: vi.fn(),
@@ -29,6 +37,18 @@ const chatViewMocks = vi.hoisted(() => ({
   shareMultipleFilesMock: vi.fn(),
   shareFileMock: vi.fn(),
 }))
+
+let chatViewResizeObserverCallback: ResizeObserverCallback | null = null
+
+class ChatViewResizeObserverMock {
+  constructor(callback: ResizeObserverCallback) {
+    chatViewResizeObserverCallback = callback
+  }
+
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({
@@ -64,11 +84,11 @@ vi.mock('../composables/chat/useChatMessages', () => ({
       options.messages.value = [...chatViewMocks.messagesSeed]
       return [...chatViewMocks.messagesSeed]
     }),
-    loadOlderMessages: vi.fn(async () => 0),
+    loadOlderMessages: chatViewMocks.loadOlderMessagesMock,
     markAsRead: vi.fn(),
     sendMessage: vi.fn(),
     sendMediaMessage: vi.fn(),
-    cancelTextMessage: vi.fn(),
+    cancelTextMessage: chatViewMocks.cancelTextMessageMock,
     cancelEdit: vi.fn(),
     handleReply: vi.fn((msg: any) => {
       options.replyingToMessage.value = msg
@@ -80,8 +100,8 @@ vi.mock('../composables/chat/useChatMessages', () => ({
     stopPolling: vi.fn(),
     startStatusPolling: vi.fn(),
     stopStatusPolling: vi.fn(),
-    hasOlderMessages: { value: false },
-    isLoadingOlderMessages: { value: false },
+    hasOlderMessages: { get value() { return chatViewMocks.hasOlderMessagesValue } },
+    isLoadingOlderMessages: { get value() { return chatViewMocks.isLoadingOlderMessagesValue } },
   }),
 }))
 
@@ -90,10 +110,10 @@ vi.mock('../composables/chat/useChatMedia', async () => {
   return {
     useChatMedia: () => ({
       imageCache: ref(chatViewMocks.imageCacheState),
-      scheduleMediaHydration: vi.fn(),
+      scheduleMediaHydration: chatViewMocks.scheduleMediaHydrationMock,
       downloadMedia: chatViewMocks.downloadMediaMock,
       lightboxMedia: ref(null),
-      cancelUpload: vi.fn(),
+      cancelUpload: chatViewMocks.cancelUploadMock,
       cancelDocumentDownload: chatViewMocks.cancelDocumentDownloadMock,
       cancelMediaDownload: chatViewMocks.cancelMediaDownloadMock,
       handleMediaClick: chatViewMocks.openMediaLightboxMock,
@@ -126,7 +146,7 @@ vi.mock('../composables/chat/useChatScroll', async () => {
       forceScrollToBottom: vi.fn(),
       handleScroll: vi.fn(),
       scrollToUnreadOrBottom: vi.fn(),
-      scrollToMessage: vi.fn(),
+      scrollToMessage: chatViewMocks.scrollToMessageMock,
     }),
   }
 })
@@ -153,6 +173,10 @@ describe('ChatView.vue', () => {
   beforeEach(() => {
     chatViewMocks.routeState.query = {}
     chatViewMocks.routerReplaceMock.mockReset()
+    chatViewMocks.routerReplaceMock.mockImplementation(async ({ path, query }: { path: string, query?: Record<string, string> }) => {
+      chatViewMocks.routeState.path = path
+      chatViewMocks.routeState.query = { ...(query ?? {}) }
+    })
     chatViewMocks.routerPushMock.mockReset()
     chatViewMocks.apiFetchMock.mockReset()
     chatViewMocks.apiFetchMock.mockResolvedValue({})
@@ -162,12 +186,20 @@ describe('ChatView.vue', () => {
     chatViewMocks.messagesSeed = []
     chatViewMocks.imageCacheState = {}
     chatViewMocks.downloadMediaMock.mockReset()
+    chatViewMocks.scheduleMediaHydrationMock.mockReset()
     chatViewMocks.openMediaLightboxMock.mockReset()
     chatViewMocks.handleMediaUploadWrapperMock.mockReset()
+    chatViewMocks.cancelUploadMock.mockReset()
     chatViewMocks.setLightboxIndexMock.mockReset()
     chatViewMocks.closeLightboxMock.mockReset()
     chatViewMocks.cancelDocumentDownloadMock.mockReset()
     chatViewMocks.cancelMediaDownloadMock.mockReset()
+    chatViewMocks.cancelTextMessageMock.mockReset()
+    chatViewMocks.loadOlderMessagesMock.mockReset()
+    chatViewMocks.loadOlderMessagesMock.mockResolvedValue(0)
+    chatViewMocks.hasOlderMessagesValue = false
+    chatViewMocks.isLoadingOlderMessagesValue = false
+    chatViewMocks.scrollToMessageMock.mockReset()
     chatViewMocks.pushBackStateMock.mockReset()
     chatViewMocks.popBackStateMock.mockReset()
     chatViewMocks.clearBackStackMock.mockReset()
@@ -175,6 +207,17 @@ describe('ChatView.vue', () => {
     chatViewMocks.seedFileCacheMock.mockReset()
     chatViewMocks.shareMultipleFilesMock.mockReset()
     chatViewMocks.shareFileMock.mockReset()
+    chatViewResizeObserverCallback = null
+    vi.stubGlobal('ResizeObserver', ChatViewResizeObserverMock)
+    vi.mocked(chatRoomRouting.resolveRoomConversationKey).mockImplementation((kind, id) => (
+      kind === 'group' || kind === 'channel' ? -Number(id) : Number(id)
+    ))
+    vi.mocked(chatRoomRouting.buildChatSendEndpoint).mockImplementation((conversationId) => (
+      conversationId < 0 ? `/chat/rooms/${Math.abs(conversationId)}/send` : '/chat/send'
+    ))
+    vi.mocked(chatRoomRouting.buildChatSendBody).mockImplementation((conversationId, payload) => (
+      conversationId < 0 ? { ...payload } : { receiver_id: conversationId, ...payload }
+    ))
     document.body.innerHTML = ''
 
     Object.defineProperty(navigator, 'clipboard', {
@@ -274,6 +317,178 @@ describe('ChatView.vue', () => {
       created_at: new Date().toISOString(),
     })
   }
+
+  it('syncs selected conversation route while preserving unrelated array query values', async () => {
+    chatViewMocks.routeState.query = {
+      user_id: ['12'],
+      user_name: ['قدیمی'],
+      keep: ['yes'],
+      empty: [''],
+    } as any
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    })
+    await flushPromises()
+
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55)
+    expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      path: '/chat',
+      query: {
+        keep: 'yes',
+        user_id: '55',
+        user_name: 'Target User',
+      },
+    })
+
+    wrapper.unmount()
+  })
+
+  it('keeps bottom messages anchored when the messages container height changes', async () => {
+    chatViewMocks.messagesSeed = [buildMessage({ id: 31 })]
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    })
+    await flushPromises()
+
+    const container = wrapper.get('.messages-container').element as HTMLElement
+    let clientHeight = 400
+    let scrollHeight = 1000
+    Object.defineProperty(container, 'clientHeight', { configurable: true, get: () => clientHeight })
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, get: () => scrollHeight })
+    container.scrollTop = 520
+
+    expect(chatViewResizeObserverCallback).toBeTruthy()
+    chatViewResizeObserverCallback?.([], {} as ResizeObserver)
+    clientHeight = 320
+    scrollHeight = 1000
+    chatViewResizeObserverCallback?.([], {} as ResizeObserver)
+
+    expect(container.scrollTop).toBe(600)
+
+    wrapper.unmount()
+  })
+
+  it('renders pinned document previews and unpins from the banner', async () => {
+    const pinnedDoc = buildCurrentUserMessage(81, JSON.stringify({ file_name: 'invoice.pdf' }))
+    pinnedDoc.message_type = 'document'
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 55,
+        other_user_id: 55,
+        other_user_name: 'Target User',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'direct',
+      },
+    ]
+    chatViewMocks.apiFetchMock
+      .mockResolvedValueOnce({ message: pinnedDoc })
+      .mockResolvedValueOnce({ message: null })
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.pinned-message-meta').text()).toBe('برای رفتن به پیام ضربه بزنید')
+    expect(wrapper.get('.pinned-message-preview').text()).toBe('invoice.pdf')
+
+    await wrapper.get('.pinned-message-dismiss').trigger('click')
+    await flushPromises()
+
+    expect(chatViewMocks.apiFetchMock).toHaveBeenLastCalledWith('/chat/messages/81/pin', {
+      method: 'POST',
+      body: JSON.stringify({ pinned: false }),
+    })
+    expect(wrapper.find('.pinned-message-banner').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('rolls back optimistic reactions when the reaction request fails', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    chatViewMocks.messagesSeed = [buildMessage({ reactions: [{ emoji: '👍', user_id: 7 }] })]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    }, {
+      ChatMessageItem: {
+        props: ['msg'],
+        template: '<button class="message-reaction-action" @click="$emit(\'toggle-reaction\', { msg, emoji: \'🔥\' })">{{ (msg.reactions || []).map((item) => item.emoji).join(\',\') }}</button>',
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.message-reaction-action').text()).toBe('👍')
+    chatViewMocks.apiFetchMock.mockRejectedValueOnce(new Error('reaction failed'))
+
+    await wrapper.get('.message-reaction-action').trigger('click')
+    await flushPromises()
+
+    expect(alertSpy).toHaveBeenCalledWith('خطا در ثبت ری‌اکشن')
+    expect(errorSpy).toHaveBeenCalled()
+    expect(wrapper.get('.message-reaction-action').text()).toBe('👍')
+
+    alertSpy.mockRestore()
+    errorSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('cancels local-only selected messages without calling the delete API', async () => {
+    chatViewMocks.messagesSeed = [
+      buildCurrentUserMessage(-101, 'در حال ارسال'),
+      buildImageMessage({
+        id: -102,
+        sender_id: 7,
+        receiver_id: 55,
+        created_at: new Date().toISOString(),
+        content: JSON.stringify({ file_id: 'local-image' }),
+      }),
+    ]
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    }, {
+      ChatMessageItem: {
+        props: ['msg'],
+        template: '<button class="select-message-action" @click="$emit(\'select\', msg)">{{ msg.id }}</button>',
+      },
+      ChatInputBar: {
+        props: ['selectedMessagesCount', 'isSelectionMode'],
+        template: '<div><span class="chat-input-bar-state">{{ String(isSelectionMode) }}|{{ selectedMessagesCount }}</span><button class="delete-selected-action" @click="$emit(\'delete-selected\')">delete</button></div>',
+      },
+    })
+    await flushPromises()
+
+    const selectButtons = wrapper.findAll('.select-message-action')
+    await selectButtons[0]!.trigger('click')
+    await selectButtons[1]!.trigger('click')
+    await flushPromises()
+
+    chatViewMocks.apiFetchMock.mockClear()
+    await wrapper.get('.delete-selected-action').trigger('click')
+    await flushPromises()
+
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(chatViewMocks.cancelTextMessageMock).toHaveBeenCalledWith(-101)
+    expect(chatViewMocks.cancelUploadMock).toHaveBeenCalledWith(-102)
+    expect(chatViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/chat/messages/-101', { method: 'DELETE' })
+    expect(chatViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/chat/messages/-102', { method: 'DELETE' })
+    expect(wrapper.get('.chat-input-bar-state').text()).toBe('false|0')
+
+    confirmSpy.mockRestore()
+    wrapper.unmount()
+  })
 
   it('blocks accountants from starting a brand-new direct chat through startNewChat', async () => {
     const wrapper = await mountChatView({ currentUserIsAccountant: true })
@@ -386,6 +601,123 @@ describe('ChatView.vue', () => {
         highlight_accountant_relation_display_name: 'حسابدار فروش',
       },
     })
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('runs global search and opens the selected direct conversation around the result', async () => {
+    vi.useFakeTimers()
+    chatViewMocks.apiFetchMock.mockImplementation(async (url: string, _options?: RequestInit) => {
+      if (url.startsWith('/chat/search')) {
+        return [buildMessage({ id: 44, sender_id: 55, receiver_id: 7 })]
+      }
+      return {}
+    })
+
+    const wrapper = await mountChatView({}, {
+      ChatHeader: {
+        props: ['isSearchActive', 'searchResults'],
+        template: `<div>
+          <button class="toggle-search-action" @click="$emit('toggle-search')">toggle</button>
+          <button class="search-action" @click="$emit('search', 'gold')">search</button>
+          <span class="search-state">{{ String(isSearchActive) }}|{{ searchResults.length }}</span>
+        </div>`,
+      },
+      ChatSearchGlobalList: {
+        props: ['searchResults'],
+        template: '<button class="global-search-result" @click="$emit(\'select-result\', searchResults[0])">open</button>',
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('.toggle-search-action').trigger('click')
+    await wrapper.get('.search-action').trigger('click')
+    await vi.advanceTimersByTimeAsync(500)
+    await flushPromises()
+
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/search?q=gold')
+    expect(wrapper.get('.search-state').text()).toBe('true|1')
+
+    await wrapper.get('.global-search-result').trigger('click')
+    await flushPromises()
+
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55, false, 44)
+    expect(chatViewMocks.pushBackStateMock).toHaveBeenCalled()
+    expect(chatViewMocks.scrollToMessageMock).toHaveBeenCalledWith(44)
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('navigates in-chat search results and toggles the in-chat result list', async () => {
+    vi.useFakeTimers()
+    chatViewMocks.apiFetchMock.mockImplementation(async (url: string, _options?: RequestInit) => {
+      if (url.startsWith('/chat/search')) {
+        return [
+          buildMessage({ id: 91, sender_id: 55, receiver_id: 7 }),
+          buildMessage({ id: 92, sender_id: 55, receiver_id: 7 }),
+        ]
+      }
+      return {}
+    })
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    }, {
+      ChatHeader: {
+        props: ['isSearchActive', 'searchResults'],
+        template: `<div>
+          <button class="toggle-search-action" @click="$emit('toggle-search')">toggle</button>
+          <button class="search-action" @click="$emit('search', 'gold')">search</button>
+          <span class="search-state">{{ String(isSearchActive) }}|{{ searchResults.length }}</span>
+        </div>`,
+      },
+      ChatSearchBottomBar: {
+        props: ['showInChatSearchList'],
+        template: `<div>
+          <span class="bottom-search-state">{{ String(showInChatSearchList) }}</span>
+          <button class="next-search-action" @click="$emit('next')">next</button>
+          <button class="prev-search-action" @click="$emit('prev')">prev</button>
+          <button class="toggle-search-list-action" @click="$emit('toggle-list')">list</button>
+        </div>`,
+      },
+      ChatSearchGlobalList: {
+        props: ['searchResults'],
+        template: '<button class="in-chat-search-result" @click="$emit(\'select-result\', searchResults[1])">open</button>',
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('.toggle-search-action').trigger('click')
+    await wrapper.get('.search-action').trigger('click')
+    await vi.advanceTimersByTimeAsync(500)
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/search?q=gold&chat_id=55')
+    expect(chatViewMocks.scrollToMessageMock).toHaveBeenCalledWith(91)
+
+    chatViewMocks.loadMessagesMock.mockClear()
+    await wrapper.get('.next-search-action').trigger('click')
+    await flushPromises()
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55, false, 92)
+    expect(chatViewMocks.scrollToMessageMock).toHaveBeenCalledWith(92)
+
+    await wrapper.get('.toggle-search-list-action').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.bottom-search-state').text()).toBe('true')
+
+    await wrapper.get('.in-chat-search-result').trigger('click')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(250)
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55, false, 92)
+    expect(chatViewMocks.scrollToMessageMock).toHaveBeenCalledWith(92)
+
+    await wrapper.get('.toggle-search-list-action').trigger('click')
+    await vi.advanceTimersByTimeAsync(150)
+    expect(chatViewMocks.scrollToMessageMock).toHaveBeenCalled()
 
     wrapper.unmount()
     vi.useRealTimers()
@@ -1143,6 +1475,347 @@ describe('ChatView.vue', () => {
 
     expect(wrapper.get('.forward-modal-state').text()).toBe('true')
 
+    wrapper.unmount()
+  })
+
+  it('forwards a full image album to both direct and group targets with fresh album metadata', async () => {
+    vi.stubGlobal('crypto', { randomUUID: () => 'forwarded-album-1' })
+
+    chatViewMocks.messagesSeed = [
+      buildImageMessage({
+        id: 21,
+        sender_id: 55,
+        receiver_id: 7,
+        content: JSON.stringify({ file_id: 'img-1', album_id: 'source-album', album_index: 0 }),
+      }),
+      buildImageMessage({
+        id: 22,
+        sender_id: 55,
+        receiver_id: 7,
+        content: JSON.stringify({ file_id: 'img-2', album_id: 'source-album', album_index: 1 }),
+      }),
+    ]
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 66,
+        other_user_id: 66,
+        other_user_name: 'Direct Target',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'direct',
+      },
+      {
+        id: 88,
+        other_user_id: -88,
+        other_user_name: 'Group Target',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'group',
+        chat_id: 88,
+      },
+    ]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Source User',
+    }, {
+      ChatMessageItem: {
+        props: ['msg'],
+        template: `<div>
+          <template v-if="msg.type === 'album'">
+            <button class="select-message-action" @click="$emit('select', msg.messages[0])">{{ msg.messages[0].id }}</button>
+            <button class="select-message-action" @click="$emit('select', msg.messages[1])">{{ msg.messages[1].id }}</button>
+          </template>
+          <button v-else class="select-message-action" @click="$emit('select', msg)">{{ msg.id }}</button>
+        </div>`,
+      },
+      ChatInputBar: {
+        template: '<button class="forward-selected-action" @click="$emit(\'forward-selected\')">forward</button>',
+      },
+      ChatForwardModal: {
+        props: ['showForwardModal'],
+        template: `<div>
+          <span class="forward-modal-state">{{ String(showForwardModal) }}</span>
+          <button class="emit-forward-targets" @click="$emit('forward-to', [
+            { kind: 'user', id: 66, title: 'Direct Target' },
+            { kind: 'group', id: 88, title: 'Group Target' }
+          ])">send</button>
+        </div>`,
+      },
+    })
+    await flushPromises()
+
+    const selectButtons = wrapper.findAll('.select-message-action')
+    await selectButtons[0]!.trigger('click')
+    await flushPromises()
+    await wrapper.get('.forward-selected-action').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.forward-modal-state').text()).toBe('true')
+
+    chatViewMocks.apiFetchMock.mockClear()
+    await wrapper.get('.emit-forward-targets').trigger('click')
+    await flushPromises()
+
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledTimes(4)
+    const calls = chatViewMocks.apiFetchMock.mock.calls as unknown as Array<[string, { body: string }]>
+    expect(calls.map(call => call[0])).toEqual([
+      '/chat/send',
+      '/chat/send',
+      '/chat/rooms/88/send',
+      '/chat/rooms/88/send',
+    ])
+    const directBodies = calls.slice(0, 2).map(call => JSON.parse(call[1].body))
+    const groupBodies = calls.slice(2).map(call => JSON.parse(call[1].body))
+    expect(directBodies.map(body => body.receiver_id)).toEqual([66, 66])
+    expect([...directBodies, ...groupBodies].map(body => body.forwarded_from_id)).toEqual([55, 55, 55, 55])
+    expect([...directBodies, ...groupBodies].map(body => JSON.parse(body.content).album_id)).toEqual([
+      'forwarded-album-1',
+      'forwarded-album-1',
+      'forwarded-album-1',
+      'forwarded-album-1',
+    ])
+    expect([...directBodies, ...groupBodies].map(body => JSON.parse(body.content).album_index)).toEqual([0, 1, 0, 1])
+    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('strips album metadata when forwarding only one media item from an album', async () => {
+    chatViewMocks.messagesSeed = [
+      buildImageMessage({
+        id: 21,
+        sender_id: 55,
+        receiver_id: 7,
+        content: JSON.stringify({ file_id: 'img-1', album_id: 'source-album', album_index: 0 }),
+      }),
+    ]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Source User',
+    }, {
+      ChatMessageItem: {
+        props: ['msg'],
+        template: '<button class="select-message-action" @click="$emit(\'select\', msg)">{{ msg.id }}</button>',
+      },
+      ChatInputBar: {
+        template: '<button class="forward-selected-action" @click="$emit(\'forward-selected\')">forward</button>',
+      },
+      ChatForwardModal: {
+        template: '<button class="emit-forward-target" @click="$emit(\'forward-to\', { kind: \'user\', id: 66, title: \'Direct Target\' })">send</button>',
+      },
+    })
+    await flushPromises()
+
+    await wrapper.findAll('.select-message-action')[0]!.trigger('click')
+    await flushPromises()
+    await wrapper.get('.forward-selected-action').trigger('click')
+    await flushPromises()
+
+    chatViewMocks.apiFetchMock.mockClear()
+    await wrapper.get('.emit-forward-target').trigger('click')
+    await flushPromises()
+
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledTimes(1)
+    const body = JSON.parse((chatViewMocks.apiFetchMock.mock.calls as unknown as Array<[string, { body: string }]>)[0]![1].body)
+    const content = JSON.parse(body.content)
+    expect(content.file_id).toBe('img-1')
+    expect(content.album_id).toBeUndefined()
+    expect(content.album_index).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  it('alerts and skips forwarding when every selected target is unsupported', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    chatViewMocks.messagesSeed = [buildCurrentUserMessage(11, 'پیام برای هدایت')]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Source User',
+    }, {
+      ChatMessageItem: {
+        props: ['msg'],
+        template: '<button class="select-message-action" @click="$emit(\'select\', msg)">{{ msg.id }}</button>',
+      },
+      ChatInputBar: {
+        template: '<button class="forward-selected-action" @click="$emit(\'forward-selected\')">forward</button>',
+      },
+      ChatForwardModal: {
+        template: '<button class="emit-unsupported-forward" @click="$emit(\'forward-to\', { kind: \'bot\', id: 3, title: \'Unsupported\' })">send</button>',
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('.select-message-action').trigger('click')
+    await flushPromises()
+    await wrapper.get('.forward-selected-action').trigger('click')
+    await flushPromises()
+
+    chatViewMocks.apiFetchMock.mockClear()
+    await wrapper.get('.emit-unsupported-forward').trigger('click')
+    await flushPromises()
+
+    expect(alertSpy).toHaveBeenCalledWith('هدایت پیام به این مقصد هنوز فعال نشده است')
+    expect(chatViewMocks.apiFetchMock).not.toHaveBeenCalled()
+
+    alertSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('reports mixed unsupported forward targets after sending to supported targets', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    chatViewMocks.messagesSeed = [buildCurrentUserMessage(11, 'پیام برای هدایت')]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Source User',
+    }, {
+      ChatMessageItem: {
+        props: ['msg'],
+        template: '<button class="select-message-action" @click="$emit(\'select\', msg)">{{ msg.id }}</button>',
+      },
+      ChatInputBar: {
+        template: '<button class="forward-selected-action" @click="$emit(\'forward-selected\')">forward</button>',
+      },
+      ChatForwardModal: {
+        template: `<button class="emit-mixed-forward" @click="$emit('forward-to', [
+          { kind: 'user', id: 66, title: 'Direct Target' },
+          { kind: 'bot', id: 3, title: 'Unsupported' }
+        ])">send</button>`,
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('.select-message-action').trigger('click')
+    await flushPromises()
+    await wrapper.get('.forward-selected-action').trigger('click')
+    await flushPromises()
+
+    chatViewMocks.apiFetchMock.mockClear()
+    await wrapper.get('.emit-mixed-forward').trigger('click')
+    await flushPromises()
+
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledTimes(1)
+    expect(alertSpy).toHaveBeenCalledWith('برخی مقصدها هنوز برای هدایت پشتیبانی نمی‌شوند')
+
+    alertSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('reports total and partial forward failures without blocking successful targets', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    chatViewMocks.messagesSeed = [buildCurrentUserMessage(11, 'پیام برای هدایت')]
+
+    const failedWrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Source User',
+    }, {
+      ChatMessageItem: {
+        props: ['msg'],
+        template: '<button class="select-message-action" @click="$emit(\'select\', msg)">{{ msg.id }}</button>',
+      },
+      ChatInputBar: {
+        template: '<button class="forward-selected-action" @click="$emit(\'forward-selected\')">forward</button>',
+      },
+      ChatForwardModal: {
+        template: '<button class="emit-failed-forward" @click="$emit(\'forward-to\', { kind: \'user\', id: 66, title: \'Direct Target\' })">send</button>',
+      },
+    })
+    await flushPromises()
+
+    await failedWrapper.get('.select-message-action').trigger('click')
+    await flushPromises()
+    await failedWrapper.get('.forward-selected-action').trigger('click')
+    await flushPromises()
+    chatViewMocks.apiFetchMock.mockRejectedValueOnce(new Error('send failed'))
+
+    await failedWrapper.get('.emit-failed-forward').trigger('click')
+    await flushPromises()
+
+    expect(alertSpy).toHaveBeenCalledWith('خطا در هدایت پیام‌ها')
+    failedWrapper.unmount()
+
+    alertSpy.mockClear()
+    chatViewMocks.messagesSeed = [buildCurrentUserMessage(12, 'پیام دوم')]
+    const partialWrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Source User',
+    }, {
+      ChatMessageItem: {
+        props: ['msg'],
+        template: '<button class="select-message-action" @click="$emit(\'select\', msg)">{{ msg.id }}</button>',
+      },
+      ChatInputBar: {
+        template: '<button class="forward-selected-action" @click="$emit(\'forward-selected\')">forward</button>',
+      },
+      ChatForwardModal: {
+        template: `<button class="emit-partial-forward" @click="$emit('forward-to', [
+          { kind: 'user', id: 66, title: 'Direct Target' },
+          { kind: 'group', id: 88, title: 'Group Target' }
+        ])">send</button>`,
+      },
+    })
+    await flushPromises()
+
+    await partialWrapper.get('.select-message-action').trigger('click')
+    await flushPromises()
+    await partialWrapper.get('.forward-selected-action').trigger('click')
+    await flushPromises()
+    chatViewMocks.apiFetchMock
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error('group failed'))
+
+    await partialWrapper.get('.emit-partial-forward').trigger('click')
+    await flushPromises()
+
+    expect(alertSpy).toHaveBeenCalledWith('بخشی از پیام‌ها برای این مقاصد هدایت نشدند: Group Target')
+    expect(errorSpy).toHaveBeenCalled()
+
+    partialWrapper.unmount()
+    alertSpy.mockRestore()
+    errorSpy.mockRestore()
+  })
+
+  it('routes recovery actions through the session recovery API and reports failures inline', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    chatViewMocks.messagesSeed = [buildMessage()]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Recovery User',
+    }, {
+      ChatMessageItem: {
+        template: `<div>
+          <button class="recovery-approve" @click="$emit('recovery-action', { action: 'approve', recoveryId: 'rec-1' })">approve</button>
+          <button class="recovery-identity" @click="$emit('recovery-action', { action: 'request_identity', recoveryId: 'rec-2' })">identity</button>
+        </div>`,
+      },
+    })
+    await flushPromises()
+
+    chatViewMocks.apiFetchMock.mockClear()
+    chatViewMocks.loadMessagesMock.mockClear()
+    chatViewMocks.apiFetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+    await wrapper.get('.recovery-approve').trigger('click')
+    await flushPromises()
+
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/sessions/recovery/rec-1/approve', { method: 'POST' })
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55, true)
+
+    chatViewMocks.apiFetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({ detail: 'نیاز به مدرک' }) })
+    await wrapper.get('.recovery-identity').trigger('click')
+    await flushPromises()
+
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/sessions/recovery/rec-2/request-identity', { method: 'POST' })
+    expect(alertSpy).toHaveBeenCalledWith('نیاز به مدرک')
+
+    alertSpy.mockRestore()
     wrapper.unmount()
   })
 
@@ -2103,5 +2776,249 @@ describe('ChatView.vue', () => {
     anchorClickSpy.mockRestore()
     wrapper.unmount()
     vi.useRealTimers()
+  })
+
+  it('runs global search and opens the matching direct conversation result', async () => {
+    vi.useFakeTimers()
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 55,
+        other_user_id: 55,
+        other_user_name: 'Search Target',
+        last_message_content: 'needle',
+        last_message_type: 'text',
+        last_message_at: '2026-05-12T10:00:00',
+        unread_count: 0,
+      },
+    ]
+    const resultMessage = buildMessage({ id: 71, sender_id: 55, receiver_id: 7, content: 'needle result' })
+
+    const wrapper = await mountChatView({}, {
+      ChatHeader: {
+        props: ['isSearchActive', 'searchResults'],
+        template: '<div><span class="search-state">{{ String(isSearchActive) }}|{{ searchResults.length }}</span><button class="toggle-search" @click="$emit(\'toggle-search\')">search</button><button class="run-search" @click="$emit(\'search\', \'needle\')">run</button></div>',
+      },
+      ChatSearchGlobalList: {
+        props: ['searchResults'],
+        template: '<button class="global-search-result" @click="$emit(\'select-result\', searchResults[0])">open</button>',
+      },
+    })
+    await flushPromises()
+
+    chatViewMocks.apiFetchMock.mockClear()
+    chatViewMocks.apiFetchMock.mockResolvedValueOnce([resultMessage])
+
+    await wrapper.get('.toggle-search').trigger('click')
+    await wrapper.get('.run-search').trigger('click')
+    await vi.advanceTimersByTimeAsync(500)
+    await flushPromises()
+
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/search?q=needle')
+    expect(wrapper.get('.search-state').text()).toBe('true|1')
+
+    await wrapper.get('.global-search-result').trigger('click')
+    await flushPromises()
+
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenLastCalledWith(55, false, 71)
+    expect(chatViewMocks.pushBackStateMock).toHaveBeenCalled()
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('navigates in-chat search results, loads missing targets, and toggles the list overlay', async () => {
+    vi.useFakeTimers()
+    chatViewMocks.messagesSeed = [buildMessage({ id: 11, sender_id: 55, receiver_id: 7, content: 'loaded result' })]
+    const searchResults = [
+      buildMessage({ id: 11, sender_id: 55, receiver_id: 7, content: 'loaded result' }),
+      buildMessage({ id: 99, sender_id: 55, receiver_id: 7, content: 'older missing result' }),
+    ]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Search Target',
+    }, {
+      ChatHeader: {
+        props: ['isSearchActive', 'searchResults', 'currentSearchIndex'],
+        template: '<div><span class="search-state">{{ String(isSearchActive) }}|{{ searchResults.length }}|{{ currentSearchIndex }}</span><button class="toggle-search" @click="$emit(\'toggle-search\')">search</button><button class="run-search" @click="$emit(\'search\', \'needle\')">run</button></div>',
+      },
+      ChatSearchBottomBar: {
+        props: ['currentSearchIndex', 'totalResults', 'showInChatSearchList'],
+        template: '<div><span class="bottom-search-state">{{ currentSearchIndex }}|{{ totalResults }}|{{ String(showInChatSearchList) }}</span><button class="next-result" @click="$emit(\'next\')">next</button><button class="prev-result" @click="$emit(\'prev\')">prev</button><button class="toggle-result-list" @click="$emit(\'toggle-list\')">list</button></div>',
+      },
+      ChatSearchGlobalList: {
+        props: ['searchResults'],
+        template: '<button class="in-chat-result" @click="$emit(\'select-result\', searchResults[1])">select</button>',
+      },
+    })
+    await flushPromises()
+
+    chatViewMocks.apiFetchMock.mockClear()
+    chatViewMocks.loadMessagesMock.mockClear()
+    chatViewMocks.apiFetchMock.mockResolvedValueOnce(searchResults)
+
+    await wrapper.get('.toggle-search').trigger('click')
+    await wrapper.get('.run-search').trigger('click')
+    await vi.advanceTimersByTimeAsync(500)
+    await flushPromises()
+
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/search?q=needle&chat_id=55')
+    expect(wrapper.get('.bottom-search-state').text()).toBe('0|2|false')
+
+    await wrapper.get('.next-result').trigger('click')
+    await flushPromises()
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55, false, 99)
+    expect(wrapper.get('.bottom-search-state').text()).toBe('1|2|false')
+
+    await wrapper.get('.toggle-result-list').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.in-chat-result').exists()).toBe(true)
+
+    chatViewMocks.loadMessagesMock.mockClear()
+    await wrapper.get('.in-chat-result').trigger('click')
+    await flushPromises()
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55, false, 99)
+    expect(wrapper.get('.bottom-search-state').text()).toBe('1|2|false')
+
+    await wrapper.get('.prev-result').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.bottom-search-state').text()).toBe('0|2|false')
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('routes cancel-send and cancel-download events by message type', async () => {
+    const textMessage = buildMessage({ id: 31, message_type: 'text' })
+    const imageMessage = buildImageMessage({ id: 32, content: JSON.stringify({ file_id: 'img-32' }) })
+    const documentMessage = buildMessage({
+      id: 33,
+      message_type: 'document',
+      content: JSON.stringify({ file_id: 'doc-33', file_name: 'doc.pdf' }),
+    })
+    chatViewMocks.messagesSeed = [textMessage, imageMessage, documentMessage]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    }, {
+      ChatMessageItem: {
+        props: ['msg'],
+        template: `<div>
+          <button class="cancel-send-action" @click="$emit('cancel-send', msg)">cancel send</button>
+          <button class="cancel-download-action" @click="$emit('cancel-download', msg)">cancel download</button>
+        </div>`,
+      },
+    })
+    await flushPromises()
+
+    const cancelSendButtons = wrapper.findAll('.cancel-send-action')
+    await cancelSendButtons[0]!.trigger('click')
+    await cancelSendButtons[1]!.trigger('click')
+
+    expect(chatViewMocks.cancelTextMessageMock).toHaveBeenCalledWith(31)
+    expect(chatViewMocks.cancelUploadMock).toHaveBeenCalledWith(32)
+
+    const cancelDownloadButtons = wrapper.findAll('.cancel-download-action')
+    await cancelDownloadButtons[2]!.trigger('click')
+    await cancelDownloadButtons[1]!.trigger('click')
+
+    expect(chatViewMocks.cancelDocumentDownloadMock).toHaveBeenCalledWith(33)
+    expect(chatViewMocks.cancelMediaDownloadMock).toHaveBeenCalledWith(32)
+
+    wrapper.unmount()
+  })
+
+  it('groups album media and hydrates rendered media through the message on-load callback', async () => {
+    const albumImage = buildImageMessage({
+      id: 41,
+      content: JSON.stringify({ file_id: 'img-41', album_id: 'album-hydrate', album_index: 1 }),
+      created_at: '2026-05-10T10:00:00Z',
+    })
+    const albumVideo = buildImageMessage({
+      id: 42,
+      message_type: 'video',
+      content: JSON.stringify({ file_id: 'vid-42', album_id: 'album-hydrate', album_index: 0 }),
+      created_at: '2026-05-10T09:59:00Z',
+    })
+    const documentMessage = buildMessage({
+      id: 43,
+      message_type: 'document',
+      content: JSON.stringify({ file_id: 'doc-43', file_name: 'doc.pdf' }),
+      created_at: '2026-05-11T10:00:00Z',
+    })
+    chatViewMocks.messagesSeed = [albumImage, albumVideo, documentMessage]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    }, {
+      ChatMessageItem: {
+        props: ['msg', 'isAlbum', 'albumItems', 'onLoad'],
+        template: `<button class="hydrate-action" @click="onLoad?.()">
+          {{ isAlbum ? 'album:' + albumItems.map((item) => item.id).join(',') : 'single:' + msg.id }}
+        </button>`,
+      },
+    })
+    await flushPromises()
+
+    const hydrateButtons = wrapper.findAll('.hydrate-action')
+    expect(hydrateButtons.map((button) => button.text())).toEqual([
+      'album:42,41',
+      'single:43',
+    ])
+
+    await hydrateButtons[0]!.trigger('click')
+    await hydrateButtons[1]!.trigger('click')
+
+    expect(chatViewMocks.scheduleMediaHydrationMock).toHaveBeenCalledWith(
+      albumVideo.content,
+      'video',
+      { allowNetwork: false },
+    )
+    expect(chatViewMocks.scheduleMediaHydrationMock).toHaveBeenCalledWith(
+      albumImage.content,
+      'image',
+      { allowNetwork: true },
+    )
+    expect(chatViewMocks.scheduleMediaHydrationMock).toHaveBeenCalledWith(
+      documentMessage.content,
+      'document',
+    )
+
+    wrapper.unmount()
+  })
+
+  it('loads older messages near the top and keeps the scroll anchor stable after prepend', async () => {
+    chatViewMocks.hasOlderMessagesValue = true
+    chatViewMocks.loadOlderMessagesMock.mockResolvedValue(2)
+    chatViewMocks.messagesSeed = [buildMessage({ id: 51 })]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    }, {
+      ChatMessageItem: {
+        props: ['msg'],
+        template: '<div :id="`msg-${msg.id}`" class="scroll-message">{{ msg.id }}</div>',
+      },
+    })
+    await flushPromises()
+
+    const container = wrapper.get('.messages-container').element as HTMLElement
+    let scrollHeight = 1000
+    Object.defineProperty(container, 'clientHeight', { configurable: true, get: () => 400 })
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, get: () => scrollHeight })
+    container.scrollTop = 24
+
+    const scrollPromise = wrapper.get('.messages-container').trigger('scroll')
+    scrollHeight = 1220
+    await scrollPromise
+    await flushPromises()
+
+    expect(chatViewMocks.loadOlderMessagesMock).toHaveBeenCalledWith(55)
+    expect(container.scrollTop).toBe(244)
+
+    wrapper.unmount()
   })
 })
