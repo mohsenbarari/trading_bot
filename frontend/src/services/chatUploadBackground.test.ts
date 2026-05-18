@@ -433,6 +433,15 @@ describe('chatUploadBackground', () => {
     expect(statefulUpload.fileId).toBeUndefined()
   })
 
+  it('guards pre-init helper access and missing navigator globals', async () => {
+    const service = await importFreshModule()
+    const hooks = service.__chatUploadBackgroundTestHooks
+
+    vi.stubGlobal('navigator', undefined as any)
+    expect(hooks.canUseUploadServiceWorker()).toBe(false)
+    await expect(hooks.uploadApiFetch('/needs-init')).rejects.toThrow('[uploadService] not initialized')
+  })
+
   it('persists, restores, lists, and deletes upload records through IndexedDB helpers', async () => {
     const { records, deletedIds } = installIndexedDb([])
     class ImmediateFileReader {
@@ -495,6 +504,67 @@ describe('chatUploadBackground', () => {
 
     const throwingDb = { transaction: () => { throw new Error('tx failed') } } as unknown as IDBDatabase
     await expect(hooks.putRecord(throwingDb, documentUpload as any)).resolves.toBe(false)
+  })
+
+  it('restores queued album uploads on init and drops un-restorable persisted records', async () => {
+    installIndexedDb([
+      {
+        id: -942,
+        userId: -77,
+        roomKind: 'channel',
+        senderId: 15,
+        msgType: 'image',
+        file: new Blob(['queued'], { type: 'image/png' }),
+        fileName: 'queued-album.png',
+        mimeType: 'image/png',
+        thumbnail: '',
+        width: 120,
+        height: 80,
+        albumId: 'persisted-album',
+        albumIndex: 0,
+        albumSize: 1,
+        phase: 'queued',
+        progress: 0,
+        uploadedBytes: 0,
+        totalBytes: 6,
+        createdAt: '2026-05-14T00:00:00Z',
+      },
+      {
+        id: -943,
+        userId: 77,
+        roomKind: 'direct',
+        senderId: 15,
+        msgType: 'document',
+        file: undefined,
+        fileName: 'missing.bin',
+        mimeType: 'application/octet-stream',
+        thumbnail: '',
+        width: 0,
+        height: 0,
+        albumId: null,
+        albumIndex: 0,
+        albumSize: 1,
+        phase: 'queued',
+        progress: 0,
+        uploadedBytes: 0,
+        totalBytes: 0,
+        createdAt: '2026-05-14T00:00:00Z',
+      },
+    ])
+
+    const service = await importFreshModule()
+    const hooks = service.__chatUploadBackgroundTestHooks
+
+    MockXHR.enqueueScenario(() => {})
+
+    await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+
+    expect(hooks.state.albumBatches.get('persisted-album')?.optimisticIds.has(-942)).toBe(true)
+    expect(hooks.state.pendingUploads.get(-942)?.localBlobUrl).toBe('blob:restored-upload')
+    await expect(hooks.idbGet(-943)).resolves.toBeNull()
+
+    service.cancelUpload(-942)
+    await vi.runAllTimersAsync()
   })
 
   it('parses upload API responses and maps server errors', async () => {
@@ -625,6 +695,102 @@ describe('chatUploadBackground', () => {
       'https://coin.test/api/chat/upload-sessions/session-cancel/cancel',
       expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('covers legacy upload transport error branches through direct hook runs', async () => {
+    installIndexedDb([])
+    const service = await importFreshModule()
+    const hooks = service.__chatUploadBackgroundTestHooks
+    const events: any[] = []
+    service.subscribeToUploads((event) => events.push(event))
+    await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+
+    const makeLegacyUpload = (id: number) => ({
+      id,
+      userId: -77,
+      roomKind: 'channel' as const,
+      senderId: 15,
+      msgType: 'image' as const,
+      file: new Blob(['payload'], { type: 'image/png' }),
+      fileName: `legacy-${Math.abs(id)}.png`,
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 120,
+      height: 80,
+      albumId: null,
+      albumIndex: 0,
+      albumSize: 1,
+      phase: 'queued' as const,
+      progress: 0,
+      uploadedBytes: 0,
+      totalBytes: 7,
+      createdAt: '2026-05-14T00:00:00Z',
+    })
+
+    const expiredUpload = makeLegacyUpload(-3441)
+    hooks.state.pendingUploads.set(expiredUpload.id, expiredUpload)
+    MockXHR.enqueueScenario((xhr) => {
+      xhr.status = 401
+      xhr.responseText = '{}'
+      xhr.onload?.()
+    })
+    await hooks.runLegacyUpload(expiredUpload)
+    expect(expiredUpload.phase).toBe('failed')
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error',
+      optimisticId: -3441,
+      errorMessage: 'نشست شما منقضی شده است. لطفاً صفحه را رفرش کنید.',
+    }))
+
+    const tooLargeUpload = makeLegacyUpload(-3442)
+    hooks.state.pendingUploads.set(tooLargeUpload.id, tooLargeUpload)
+    MockXHR.enqueueScenario((xhr) => {
+      xhr.status = 413
+      xhr.responseText = '{}'
+      xhr.onload?.()
+    })
+    await hooks.runLegacyUpload(tooLargeUpload)
+    expect(tooLargeUpload.phase).toBe('failed')
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error',
+      optimisticId: -3442,
+      errorMessage: 'حجم فایل از حد مجاز ۵۰ مگابایت بیشتر است.',
+    }))
+
+    const genericServerUpload = makeLegacyUpload(-3443)
+    hooks.state.pendingUploads.set(genericServerUpload.id, genericServerUpload)
+    MockXHR.enqueueScenario((xhr) => {
+      xhr.status = 422
+      xhr.responseText = 'not-json'
+      xhr.onload?.()
+    })
+    await hooks.runLegacyUpload(genericServerUpload)
+    expect(genericServerUpload.phase).toBe('failed')
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error',
+      optimisticId: -3443,
+      errorMessage: 'خطای سرور (422)',
+    }))
+
+    const retryableUpload = makeLegacyUpload(-3444)
+    hooks.state.pendingUploads.set(retryableUpload.id, retryableUpload)
+    MockXHR.enqueueScenario((xhr) => xhr.onerror?.())
+    await hooks.runLegacyUpload(retryableUpload)
+    expect(retryableUpload.phase).toBe('queued')
+    expect(retryableUpload.retryCount).toBe(1)
+    hooks.state.pendingUploads.delete(retryableUpload.id)
+    await vi.runAllTimersAsync()
+
+    const abortedUpload = makeLegacyUpload(-3445)
+    hooks.state.pendingUploads.set(abortedUpload.id, abortedUpload)
+    MockXHR.enqueueScenario((xhr) => xhr.onabort?.())
+    await hooks.runLegacyUpload(abortedUpload)
+    expect(abortedUpload.phase).toBe('failed')
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error',
+      optimisticId: -3445,
+      errorMessage: 'UploadCancelled',
+    }))
   })
 
   it('covers resumable chunk XHR error branches and service-worker handoff/reclaim paths', async () => {
@@ -1307,6 +1473,145 @@ describe('chatUploadBackground', () => {
 
     service.cancelUpload(-201)
     service.cancelUpload(-202)
+  })
+
+  it('covers eager cancel cleanup with throwing controllers and retry routing branches', async () => {
+    installIndexedDb([])
+    const service = await importFreshModule()
+    const hooks = service.__chatUploadBackgroundTestHooks
+    const events: any[] = []
+    service.subscribeToUploads((event) => events.push(event))
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/api/chat/upload-batches/queued-batch/cancel') && init?.method === 'POST') {
+        return { ok: true, status: 200, json: async () => ({ status: 'cancelled' }) } as Response
+      }
+      if (url.includes('/send')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 9901,
+            sender_id: 15,
+            receiver_id: 77,
+            content: JSON.parse(String(init?.body ?? '{}')).content,
+            message_type: 'image',
+            is_read: false,
+            created_at: '2026-05-14T00:00:00Z',
+          }),
+        } as Response
+      }
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+
+    const queuedDirectUpload = {
+      id: -3491,
+      userId: 77,
+      roomKind: 'direct' as const,
+      senderId: 15,
+      msgType: 'image' as const,
+      file: new Blob(['queued'], { type: 'image/png' }),
+      fileName: 'queued-direct.png',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 120,
+      height: 80,
+      albumId: null,
+      albumIndex: 0,
+      albumSize: 1,
+      phase: 'queued' as const,
+      progress: 0,
+      uploadedBytes: 0,
+      totalBytes: 6,
+      batchId: 'queued-batch',
+      sessionId: 'queued-session',
+      createdAt: '2026-05-14T00:00:00Z',
+    }
+
+    hooks.state.pendingUploads.set(queuedDirectUpload.id, queuedDirectUpload)
+    hooks.state.xhrControllers.set(queuedDirectUpload.id, {
+      abort() {
+        throw new Error('broken xhr abort')
+      },
+    } as any)
+    hooks.state.sendControllers.set(queuedDirectUpload.id, {
+      abort() {
+        throw new Error('broken send abort')
+      },
+    } as any)
+
+    service.cancelUpload(queuedDirectUpload.id)
+    await vi.runAllTimersAsync()
+
+    expect(hooks.state.pendingUploads.has(queuedDirectUpload.id)).toBe(false)
+    expect(events).toContainEqual(expect.objectContaining({ type: 'cancelled', optimisticId: -3491 }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://coin.test/api/chat/upload-batches/queued-batch/cancel',
+      expect.objectContaining({ method: 'POST' }),
+    )
+
+    const retryableFailedUpload = {
+      ...queuedDirectUpload,
+      id: -3492,
+      userId: -77,
+      roomKind: 'channel' as const,
+      fileName: 'retry-channel.png',
+      phase: 'failed' as const,
+      batchId: undefined,
+      sessionId: undefined,
+      errorMessage: 'temporary failure',
+    }
+    hooks.state.pendingUploads.set(retryableFailedUpload.id, retryableFailedUpload)
+    MockXHR.enqueueScenario((xhr) => {
+      xhr.status = 200
+      xhr.responseText = JSON.stringify({
+        file_id: 'retry-file-3492',
+        file_name: 'retry-channel.png',
+        mime_type: 'image/png',
+        thumbnail: '',
+        width: 120,
+        height: 80,
+      })
+      xhr.onload?.()
+    })
+
+    service.retryFailedUpload(retryableFailedUpload.id)
+    await vi.runAllTimersAsync()
+
+    expect(events).toContainEqual(expect.objectContaining({ type: 'sent', optimisticId: -3492 }))
+
+    const retryableAlbumUpload = {
+      ...queuedDirectUpload,
+      id: -3493,
+      userId: -77,
+      roomKind: 'channel' as const,
+      phase: 'failed' as const,
+      fileId: 'existing-file-3493',
+      albumId: 'retry-album',
+      albumIndex: 0,
+      albumSize: 1,
+      batchId: undefined,
+      sessionId: undefined,
+      errorMessage: 'album failure',
+    }
+    hooks.state.pendingUploads.set(retryableAlbumUpload.id, retryableAlbumUpload)
+    hooks.state.albumBatches.set('retry-album', {
+      albumId: 'retry-album',
+      userId: -77,
+      roomKind: 'channel',
+      expectedCount: 1,
+      optimisticIds: new Set([retryableAlbumUpload.id]),
+      commitRetryCount: 0,
+      flushing: false,
+    })
+
+    service.retryFailedUpload(retryableAlbumUpload.id)
+    await Promise.resolve()
+
+    expect(retryableAlbumUpload.errorMessage).toBeUndefined()
   })
 
   it('cancels an active resumable upload and notifies the server batch cancel path', async () => {

@@ -18,7 +18,9 @@ from core.services.chat_upload_session_service import (
     _get_existing_upload_batch_by_idempotency,
     _message_type_from_media_type,
     _normalize_preview_metadata,
+    _persist_batch_direct_message,
     _persist_batch_group_message,
+    _reload_messages_for_delivery,
     _remove_file_if_exists,
     append_upload_chunk,
     cancel_upload_batch,
@@ -29,6 +31,7 @@ from core.services.chat_upload_session_service import (
     finalize_upload_session,
     get_upload_batch_for_current_user,
     get_upload_session_for_current_user,
+    list_upload_batch_sessions,
     persist_chat_media_file_bytes,
     read_upload_chunk_bytes,
     resolve_upload_target,
@@ -368,6 +371,75 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.chat_file.mime_type, "application/pdf")
         self.assertEqual(result.chat_file.thumbnail, "thumb")
 
+    async def test_persist_chat_media_file_bytes_covers_image_transpose_success_and_warning_fallback(self):
+        db = FakeDB()
+        fake_success_file = FakeAsyncFile()
+
+        async def fake_to_thread_success(fn, *args, **kwargs):
+            if getattr(fn, "__name__", "") == "_exif_transpose_sync":
+                return (b"rotated-image", 321, 123)
+            return fn(*args, **kwargs)
+
+        with patch("core.services.chat_upload_session_service._ensure_directory", new=AsyncMock()), patch(
+            "core.services.chat_upload_session_service.asyncio.to_thread",
+            new=AsyncMock(side_effect=fake_to_thread_success),
+        ), patch(
+            "core.services.chat_upload_session_service.magic.from_buffer",
+            return_value="image/png",
+        ), patch(
+            "core.services.chat_upload_session_service.uuid.uuid4",
+            return_value="image-success",
+        ), patch(
+            "core.services.chat_upload_session_service.aiofiles.open",
+            return_value=fake_success_file,
+        ):
+            result = await persist_chat_media_file_bytes(
+                db,
+                uploader_id=5,
+                file_name="photo.png",
+                declared_content_type="image/png",
+                contents=b"raw-image",
+                thumbnail="thumb",
+            )
+
+        fake_success_file.write.assert_awaited_once_with(b"rotated-image")
+        self.assertEqual(result.width, 321)
+        self.assertEqual(result.height, 123)
+        self.assertEqual(result.size, len(b"rotated-image"))
+
+        fake_warning_file = FakeAsyncFile()
+
+        async def fake_to_thread_warning(fn, *args, **kwargs):
+            if getattr(fn, "__name__", "") == "_exif_transpose_sync":
+                raise RuntimeError("transpose failed")
+            return fn(*args, **kwargs)
+
+        with patch("core.services.chat_upload_session_service._ensure_directory", new=AsyncMock()), patch(
+            "core.services.chat_upload_session_service.asyncio.to_thread",
+            new=AsyncMock(side_effect=fake_to_thread_warning),
+        ), patch(
+            "core.services.chat_upload_session_service.magic.from_buffer",
+            return_value="image/png",
+        ), patch(
+            "core.services.chat_upload_session_service.uuid.uuid4",
+            return_value="image-warning",
+        ), patch(
+            "core.services.chat_upload_session_service.aiofiles.open",
+            return_value=fake_warning_file,
+        ), patch("core.services.chat_upload_session_service.logger.warning") as warning_mock:
+            warning_result = await persist_chat_media_file_bytes(
+                db,
+                uploader_id=5,
+                file_name="photo.png",
+                declared_content_type="image/png",
+                contents=b"raw-image",
+            )
+
+        fake_warning_file.write.assert_awaited_once_with(b"raw-image")
+        self.assertIsNone(warning_result.width)
+        self.assertIsNone(warning_result.height)
+        warning_mock.assert_called_once()
+
     async def test_resolve_upload_target_direct_group_and_rejects_channel(self):
         db = FakeDB()
         current_user = SimpleNamespace(id=5)
@@ -508,6 +580,45 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as exc_info:
                 await get_upload_session_for_current_user(db, session_id="foreign-actor", current_user=current_user)
         self.assertEqual(exc_info.exception.status_code, 403)
+
+    async def test_get_upload_batch_and_session_success_and_session_missing_owner_guards(self):
+        current_user = SimpleNamespace(id=5)
+        actor = SimpleNamespace(owner_user=current_user, actor_user=current_user, is_accountant_context=False)
+        db = FakeDB()
+
+        batch = SimpleNamespace(owner_user_id=5, actor_user_id=None)
+        db.get = AsyncMock(return_value=batch)
+        with patch(
+            "core.services.chat_upload_session_service.resolve_effective_owner_actor",
+            new=AsyncMock(return_value=actor),
+        ):
+            self.assertIs(await get_upload_batch_for_current_user(db, batch_id="batch-ok", current_user=current_user), batch)
+
+        db.get = AsyncMock(return_value=None)
+        with patch(
+            "core.services.chat_upload_session_service.resolve_effective_owner_actor",
+            new=AsyncMock(return_value=actor),
+        ):
+            with self.assertRaises(HTTPException) as missing_exc:
+                await get_upload_session_for_current_user(db, session_id="missing-session", current_user=current_user)
+        self.assertEqual(missing_exc.exception.status_code, 404)
+
+        db.get = AsyncMock(return_value=SimpleNamespace(owner_user_id=8, actor_user_id=None))
+        with patch(
+            "core.services.chat_upload_session_service.resolve_effective_owner_actor",
+            new=AsyncMock(return_value=actor),
+        ):
+            with self.assertRaises(HTTPException) as owner_exc:
+                await get_upload_session_for_current_user(db, session_id="foreign-owner", current_user=current_user)
+        self.assertEqual(owner_exc.exception.status_code, 404)
+
+        session = SimpleNamespace(owner_user_id=5, actor_user_id=None)
+        db.get = AsyncMock(return_value=session)
+        with patch(
+            "core.services.chat_upload_session_service.resolve_effective_owner_actor",
+            new=AsyncMock(return_value=actor),
+        ):
+            self.assertIs(await get_upload_session_for_current_user(db, session_id="session-ok", current_user=current_user), session)
 
     async def test_create_upload_session_validation_batch_limits_and_success(self):
         db = FakeDB()
@@ -989,6 +1100,76 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(batch_session.preview_metadata["width"], 320)
         self.assertEqual(batch_session.preview_metadata["height"], 240)
 
+    async def test_finalize_upload_session_covers_batch_uploading_http_passthrough_and_session_listing(self):
+        db = FakeDB()
+        current_user = SimpleNamespace(id=5)
+        batch = SimpleNamespace(id="batch-uploading", status=UploadBatchStatus.UPLOADING, expected_items=2, updated_at=None, last_activity_at=None, expires_at=None)
+        session = SimpleNamespace(
+            id="sess-uploading",
+            status=UploadSessionStatus.UPLOADED,
+            received_bytes=4,
+            total_bytes=4,
+            temp_storage_path="/tmp/sess-uploading.part",
+            original_file_name="photo.jpg",
+            mime_type="image/jpeg",
+            preview_metadata={},
+            final_chat_file_id=None,
+            batch_id="batch-uploading",
+            retry_count=0,
+            last_error=None,
+            expires_at=self._future(),
+        )
+        other_uploading = SimpleNamespace(id="other-uploading", status=UploadSessionStatus.UPLOADING)
+        with patch("core.services.chat_upload_session_service.os.path.exists", return_value=True), patch(
+            "core.services.chat_upload_session_service.aiofiles.open",
+            return_value=FakeAsyncFile(read_result=b"data"),
+        ), patch(
+            "core.services.chat_upload_session_service.persist_chat_media_file_bytes",
+            new=AsyncMock(return_value=SimpleNamespace(chat_file=SimpleNamespace(id="file-uploading", thumbnail=None), width=None, height=None)),
+        ), patch(
+            "core.services.chat_upload_session_service.list_upload_batch_sessions",
+            new=AsyncMock(return_value=[session, other_uploading]),
+        ), patch(
+            "core.services.chat_upload_session_service._remove_file_if_exists",
+            new=AsyncMock(),
+        ):
+            db.get = AsyncMock(return_value=batch)
+            updated = await finalize_upload_session(db, session=session, current_user=current_user)
+
+        self.assertIs(updated, session)
+        self.assertEqual(batch.status, UploadBatchStatus.UPLOADING)
+
+        http_session = SimpleNamespace(
+            id="sess-http",
+            status=UploadSessionStatus.UPLOADED,
+            received_bytes=4,
+            total_bytes=4,
+            temp_storage_path="/tmp/sess-http.part",
+            original_file_name="bad.jpg",
+            mime_type="image/jpeg",
+            preview_metadata={},
+            final_chat_file_id=None,
+            batch_id=None,
+            retry_count=0,
+            last_error=None,
+            expires_at=self._future(),
+        )
+        with patch("core.services.chat_upload_session_service.os.path.exists", return_value=True), patch(
+            "core.services.chat_upload_session_service.aiofiles.open",
+            return_value=FakeAsyncFile(read_result=b"data"),
+        ), patch(
+            "core.services.chat_upload_session_service.persist_chat_media_file_bytes",
+            new=AsyncMock(side_effect=HTTPException(status_code=422, detail="bad media")),
+        ):
+            with self.assertRaises(HTTPException) as http_exc:
+                await finalize_upload_session(db, session=http_session, current_user=current_user)
+        self.assertEqual(http_exc.exception.status_code, 422)
+        self.assertEqual(http_session.status, UploadSessionStatus.FAILED)
+
+        listed = [SimpleNamespace(id="one"), SimpleNamespace(id="two")]
+        db.execute = AsyncMock(return_value=FakeExecuteResult(listed))
+        self.assertEqual(await list_upload_batch_sessions(db, "batch-list"), listed)
+
     def test_build_final_message_content_for_media_variants(self):
         batch = SimpleNamespace(id="album-1", message_kind=UploadBatchMessageKind.ALBUM)
         image_session = SimpleNamespace(
@@ -1162,6 +1343,107 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as exc_info:
                 await commit_upload_batch(db, batch=broken, current_user=current_user)
         self.assertEqual(exc_info.exception.status_code, 500)
+        db.rollback.assert_awaited_once()
+
+    async def test_reload_and_direct_persist_helpers_and_commit_guards(self):
+        db = FakeDB()
+        self.assertEqual(await _reload_messages_for_delivery(db, []), [])
+
+        first = SimpleNamespace(id=101)
+        second = SimpleNamespace(id=202)
+        db.execute = AsyncMock(return_value=FakeExecuteResult([second, first]))
+        self.assertEqual(await _reload_messages_for_delivery(db, [101, 202, 303]), [first, second])
+
+        direct_db = FakeDB()
+        sender = SimpleNamespace(id=5)
+        receiver = SimpleNamespace(id=9)
+        with patch(
+            "core.services.chat_upload_session_service.sync_direct_message_threading",
+            new=AsyncMock(),
+        ) as sync_mock:
+            message = await _persist_batch_direct_message(
+                direct_db,
+                sender=sender,
+                receiver=receiver,
+                content="hello",
+                message_type=_message_type_from_media_type(UploadMediaType.IMAGE),
+            )
+        self.assertIs(direct_db.added[-1], message)
+        sync_mock.assert_awaited_once_with(direct_db, sender=sender, receiver=receiver, message=message)
+
+        current_user = SimpleNamespace(id=5)
+        not_ready_batch = SimpleNamespace(
+            id="batch-not-ready",
+            status=UploadBatchStatus.UPLOADING,
+            room_kind=UploadRoomKind.DIRECT,
+            target_id=9,
+            expected_items=1,
+            message_kind=UploadBatchMessageKind.SINGLE,
+            caption_policy=UploadCaptionPolicy.NONE,
+        )
+        with patch(
+            "core.services.chat_upload_session_service.resolve_upload_target",
+            new=AsyncMock(return_value=(None, SimpleNamespace(room_kind=UploadRoomKind.DIRECT, target_id=9, receiver=receiver, chat=None))),
+        ), patch(
+            "core.services.chat_upload_session_service.list_upload_batch_sessions",
+            new=AsyncMock(return_value=[SimpleNamespace(status=UploadSessionStatus.UPLOADING)]),
+        ):
+            with self.assertRaises(HTTPException) as not_ready_exc:
+                await commit_upload_batch(db, batch=not_ready_batch, current_user=current_user)
+        self.assertEqual(not_ready_exc.exception.status_code, 409)
+
+        wrong_count_batch = SimpleNamespace(
+            id="batch-wrong-count",
+            status=UploadBatchStatus.UPLOADING,
+            room_kind=UploadRoomKind.DIRECT,
+            target_id=9,
+            expected_items=1,
+            message_kind=UploadBatchMessageKind.SINGLE,
+            caption_policy=UploadCaptionPolicy.NONE,
+        )
+        ready_session = SimpleNamespace(status=UploadSessionStatus.READY)
+        with patch(
+            "core.services.chat_upload_session_service.resolve_upload_target",
+            new=AsyncMock(return_value=(None, SimpleNamespace(room_kind=UploadRoomKind.DIRECT, target_id=9, receiver=receiver, chat=None))),
+        ), patch(
+            "core.services.chat_upload_session_service.list_upload_batch_sessions",
+            new=AsyncMock(return_value=[ready_session, ready_session]),
+        ):
+            with self.assertRaises(HTTPException) as count_exc:
+                await commit_upload_batch(db, batch=wrong_count_batch, current_user=current_user)
+        self.assertEqual(count_exc.exception.status_code, 400)
+
+        missing_chat_batch = SimpleNamespace(
+            id="batch-missing-chat",
+            status=UploadBatchStatus.UPLOADED,
+            room_kind=UploadRoomKind.GROUP,
+            target_id=70,
+            expected_items=1,
+            message_kind=UploadBatchMessageKind.SINGLE,
+            caption_policy=UploadCaptionPolicy.NONE,
+            committed_items=0,
+        )
+        group_ready_session = SimpleNamespace(
+            id="group-ready",
+            status=UploadSessionStatus.READY,
+            media_type=UploadMediaType.IMAGE,
+            final_chat_file_id="file-group",
+            original_file_name="photo.jpg",
+            mime_type="image/jpeg",
+            total_bytes=12,
+            preview_metadata={},
+        )
+        db.rollback.reset_mock()
+        with patch(
+            "core.services.chat_upload_session_service.resolve_upload_target",
+            new=AsyncMock(return_value=(None, SimpleNamespace(room_kind=UploadRoomKind.GROUP, target_id=70, receiver=None, chat=None))),
+        ), patch(
+            "core.services.chat_upload_session_service.list_upload_batch_sessions",
+            new=AsyncMock(return_value=[group_ready_session]),
+        ):
+            with self.assertRaises(HTTPException) as chat_exc:
+                await commit_upload_batch(db, batch=missing_chat_batch, current_user=current_user)
+        self.assertEqual(chat_exc.exception.status_code, 500)
         db.rollback.assert_awaited_once()
 
     async def test_cancel_upload_session_batch_and_read_chunk_close_paths(self):

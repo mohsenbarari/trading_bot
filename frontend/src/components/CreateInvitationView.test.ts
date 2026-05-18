@@ -197,6 +197,59 @@ describe('CreateInvitationView.vue', () => {
     expect(wrapper.find('.success-box').exists()).toBe(false)
   })
 
+  it('copies the derived web link through navigator.clipboard and surfaces clipboard failures', async () => {
+    const writeText = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('clipboard denied'))
+    installClipboard(writeText)
+    createInvitationMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
+        short_link: 'https://coin.gold-trade.ir/invite/route-token',
+      }),
+    )
+
+    const wrapper = await mountView()
+    await fillInviteForm(wrapper)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    await wrapper.get('.copy-btn.web').trigger('click')
+    await flushPromises()
+
+    expect(writeText).toHaveBeenNthCalledWith(1, `${window.location.origin}/invite/route-token`)
+    expect(wrapper.get('.copy-btn.web').text()).toBe('کپی شد!')
+
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(wrapper.get('.copy-btn.web').text()).toBe('کپی')
+
+    await wrapper.get('.copy-btn.web').trigger('click')
+    await flushPromises()
+
+    expect(writeText).toHaveBeenNthCalledWith(2, `${window.location.origin}/invite/route-token`)
+    expect(wrapper.get('.copy-btn.web').text()).toBe('خطا')
+
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(wrapper.get('.copy-btn.web').text()).toBe('کپی')
+  })
+
+  it('keeps raw short links when the backend returns a non-URL value', async () => {
+    createInvitationMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
+        short_link: 'not-a-valid-url',
+      }),
+    )
+
+    const wrapper = await mountView()
+    await fillInviteForm(wrapper)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    const textInputs = wrapper.findAll('.success-box input[readonly]')
+    expect((textInputs[1]!.element as HTMLInputElement).value).toBe('not-a-valid-url')
+  })
+
   it('limits invite role choices for cached middle managers', async () => {
     localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
 

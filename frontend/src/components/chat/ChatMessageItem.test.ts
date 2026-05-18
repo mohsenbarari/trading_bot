@@ -338,6 +338,36 @@ describe('ChatMessageItem.vue', () => {
     ])
   })
 
+  it('renders forwarded fallback text, video download badges, voice upload state, and read receipts', async () => {
+    const forwardedWrapper = mountTextMessage({
+      forwarded_from_name: 'حساب بدون پروفایل',
+    })
+    expect(forwardedWrapper.find('.forward-link').exists()).toBe(false)
+    expect(forwardedWrapper.find('.forward-text').text()).toContain('حساب بدون پروفایل')
+
+    const videoWrapper = mountMediaMessage({
+      message_type: 'video',
+      content: JSON.stringify({ file_id: 'video-uncached' }),
+      local_blob_url: '',
+    })
+    expect(videoWrapper.find('.media-type-badge').text()).toContain('ویدئو')
+
+    const voiceUploadingWrapper = mountVoiceMessage({
+      is_sending: true,
+      upload_progress: 55,
+    })
+    expect(voiceUploadingWrapper.find('.msg-voice-uploading').exists()).toBe(true)
+    await voiceUploadingWrapper.get('.msg-voice-uploading').trigger('click')
+    expect(voiceUploadingWrapper.emitted('cancel-send')).toHaveLength(1)
+
+    const readWrapper = mountTextMessage({
+      sender_id: 7,
+      is_read: true,
+    })
+    expect(readWrapper.find('.icon-read').exists()).toBe(true)
+    expect(readWrapper.find('.icon-unread').exists()).toBe(false)
+  })
+
   it('renders captions for single media bubbles', () => {
     const wrapper = mountMediaMessage()
 
@@ -669,6 +699,47 @@ describe('ChatMessageItem.vue', () => {
     expect(selectionWrapper.emitted('toggle-reaction')).toBeUndefined()
   })
 
+  it('covers reaction tie sorting, media size fallbacks, and generic media helper fallbacks', async () => {
+    const { MESSAGE_REACTION_ORDER } = await import('../../utils/messageReactions')
+    MESSAGE_REACTION_ORDER.clear()
+    MESSAGE_REACTION_ORDER.set('😀', 10)
+    MESSAGE_REACTION_ORDER.set('👍', 1)
+
+    const sortedWrapper = mountTextMessage({
+      reactions: [
+        { emoji: '😀', user_id: 18 },
+        { emoji: '😀', user_id: 19 },
+        { emoji: '👍', user_id: 20 },
+        { emoji: '👍', user_id: 21 },
+      ],
+    })
+    const reactionTexts = sortedWrapper.findAll('.reaction-chip').map((chip) => chip.text())
+    expect(reactionTexts[0]).toContain('👍')
+    MESSAGE_REACTION_ORDER.clear()
+
+    const invalidSizeWrapper = mountMediaMessage({
+      content: JSON.stringify({ file_id: 'invalid-size', width: 0, height: 120 }),
+      local_blob_url: 'blob:invalid-size',
+    })
+    expect(invalidSizeWrapper.get('.msg-media-link').attributes('style')).toContain('min-height: 200px')
+
+    const missingSizeWrapper = mountMediaMessage({
+      content: JSON.stringify({ file_id: 'missing-size' }),
+      local_blob_url: 'blob:missing-size',
+    })
+    expect(missingSizeWrapper.get('.msg-media-link').attributes('style')).toContain('min-height: 200px')
+
+    const genericWrapper = mountTextMessage({
+      id: 62,
+      message_type: 'system',
+      content: '',
+    })
+    expect((genericWrapper.vm as any).getMediaMimeFallback()).toBe('application/octet-stream')
+    expect((genericWrapper.vm as any).getMediaFileNameFallback()).toBe('file-media-62')
+    expect((genericWrapper.vm as any).getImageThumbnail('thumb::raw-base64-thumbnail')).toBe('data:image/jpeg;base64,raw-base64-thumbnail')
+    expect((genericWrapper.vm as any).getImageThumbnail('thumb::data:image/png;base64,abc')).toBe('data:image/png;base64,abc')
+  })
+
   it('renders recovery action buttons and emits the selected recovery action payload', async () => {
     const wrapper = mountTextMessage({
       recovery_action: {
@@ -862,6 +933,132 @@ describe('ChatMessageItem.vue', () => {
     )
     expect(document.getElementById('chat-file-share-toast')?.textContent).toContain('اشتراک‌گذاری این فایل در این مرورگر پشتیبانی نمی‌شود')
     document.getElementById('chat-file-share-toast')?.remove()
+  })
+
+  it('falls back when media cache seeding fails and tears down voice audio when the source changes', async () => {
+    chatMessageItemMocks.canShareFilesMock.mockReturnValue(true)
+    const fetchMock = vi.fn(async () => {
+      throw new Error('offline')
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const mediaWrapper = mountMediaMessage()
+    await mediaWrapper.get('.media-share-btn').trigger('click')
+    await flushPromises()
+
+    expect(chatMessageItemMocks.shareFileMock).not.toHaveBeenCalled()
+    expect(document.getElementById('chat-file-share-toast')?.textContent).toContain('اشتراک‌گذاری این فایل در این مرورگر پشتیبانی نمی‌شود')
+    document.getElementById('chat-file-share-toast')?.remove()
+
+    const helperWrapper = mountTextMessage({
+      id: 63,
+      message_type: 'system',
+      content: '',
+    })
+    expect((helperWrapper.vm as any).normalizeComparableUrl('http://[')).toBe('http://[')
+    expect((helperWrapper.vm as any).ensureVoiceAudio()).toBeNull()
+
+    const voiceWrapper = mountVoiceMessage()
+    await voiceWrapper.find('.voice-play-btn').trigger('click')
+    await flushPromises()
+
+    const firstAudio = FakeAudio.instances.at(-1)!
+    const pauseSpy = vi.spyOn(firstAudio, 'pause')
+    const loadSpy = vi.spyOn(firstAudio, 'load')
+
+    firstAudio.duration = 10
+    firstAudio.currentTime = 9.99
+    firstAudio.dispatchEvent(new Event('timeupdate'))
+    firstAudio.dispatchEvent(new Event('pause'))
+    await voiceWrapper.find('.voice-play-btn').trigger('click')
+    await flushPromises()
+    expect(firstAudio.currentTime).toBe(0)
+
+    await voiceWrapper.setProps({
+      msg: buildVoiceMessage({
+        content: JSON.stringify({ file_id: 'voice-52', durationMs: 8000 }),
+      }),
+    })
+    await flushPromises()
+
+    expect(pauseSpy).toHaveBeenCalled()
+    expect(loadSpy).toHaveBeenCalled()
+  })
+
+  it('covers selection and touch guard branches for forwarded profiles, recovery actions, clicks, and context menus', async () => {
+    vi.useFakeTimers()
+
+    const selectionForwardWrapper = mount(ChatMessageItem, {
+      props: {
+        msg: buildTextMessage({
+          forwarded_from_id: 12,
+          forwarded_from_name: 'دفتر حسابدار',
+          forwarded_from_profile_user_id: 88,
+          forwarded_from_profile_account_name: 'owner-88',
+        }),
+        currentUserId: 7,
+        selectedUserName: 'Ali',
+        selectedMessages: [],
+        imageCache: {},
+        isSelectionMode: true,
+      },
+      global: {
+        stubs: {
+          ChatAlbumLayout: {
+            template: '<div class="album-layout-stub"></div>',
+          },
+        },
+      },
+    })
+    await selectionForwardWrapper.get('.forward-link').trigger('click')
+    expect(selectionForwardWrapper.emitted('select')).toHaveLength(1)
+    expect(selectionForwardWrapper.emitted('open-public-profile')).toBeUndefined()
+
+    const missingForwardTargetWrapper = mountTextMessage({
+      forwarded_from_name: 'بدون هدف',
+    })
+    ;(missingForwardTargetWrapper.vm as any).handleForwardedProfileClick()
+    expect(missingForwardTargetWrapper.emitted('open-public-profile')).toBeUndefined()
+
+    const missingRecoveryWrapper = mountTextMessage({
+      recovery_action: {
+        can_approve: true,
+      },
+    })
+    ;(missingRecoveryWrapper.vm as any).handleRecoveryActionClick('approve')
+    expect(missingRecoveryWrapper.emitted('recovery-action')).toBeUndefined()
+
+    const selectionClickWrapper = mountTextMessage()
+    await selectionClickWrapper.setProps({ isSelectionMode: true })
+    await selectionClickWrapper.get('.message-wrapper').trigger('click')
+    expect(selectionClickWrapper.emitted('select')).toHaveLength(1)
+    expect(selectionClickWrapper.emitted('click-message')).toBeUndefined()
+
+    const longPressWrapper = mountTextMessage()
+    await longPressWrapper.get('.message-wrapper').trigger('touchstart', { touches: [makeTouch(1, 1)] })
+    await vi.advanceTimersByTimeAsync(500)
+    await longPressWrapper.get('.message-wrapper').trigger('contextmenu')
+    expect(longPressWrapper.emitted('context-menu')).toBeUndefined()
+    await longPressWrapper.get('.message-wrapper').trigger('touchcancel')
+
+    const guardedContextWrapper = mountDocumentMessage()
+    await guardedContextWrapper.get('.doc-download-icon').trigger('contextmenu')
+    expect(guardedContextWrapper.emitted('context-menu')).toBeUndefined()
+
+    const tinySwipeWrapper = mountTextMessage()
+    await tinySwipeWrapper.get('.message-bubble').trigger('touchstart', { touches: [makeTouch(0, 0)] })
+    await tinySwipeWrapper.get('.message-bubble').trigger('touchmove', { touches: [makeTouch(5, 5)] })
+    await tinySwipeWrapper.get('.message-bubble').trigger('touchend')
+    expect(tinySwipeWrapper.emitted('swipe-reply')).toBeUndefined()
+    expect((tinySwipeWrapper.vm as any).getIconStyle()).toEqual({ opacity: 0, transform: 'scale(0.7)' })
+
+    const shortSwipeWrapper = mountTextMessage({ sender_id: 9 })
+    await shortSwipeWrapper.get('.message-bubble').trigger('touchstart', { touches: [makeTouch(0, 0)] })
+    await shortSwipeWrapper.get('.message-bubble').trigger('touchmove', { touches: [makeTouch(20, 1)] })
+    await shortSwipeWrapper.get('.message-bubble').trigger('touchend')
+    expect(shortSwipeWrapper.emitted('swipe-reply')).toBeUndefined()
+
+    vi.useRealTimers()
   })
 
   it('seeks voice playback from the waveform and pauses when another voice becomes active', async () => {

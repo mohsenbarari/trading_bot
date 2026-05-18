@@ -3,19 +3,23 @@ import uuid
 import unittest
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import HTTPException
 
 from api.routers.sessions import (
+    _build_recovery_action_message_read,
     _build_identity_message_payload,
+    _clear_recovery_admin_action_messages,
     _deliver_identity_submission_messages,
     _deliver_initial_recovery_messages,
     _ensure_recovery_admin_access,
     _expire_recovery_if_needed,
     _get_recovery_token_cache_key,
     _pop_temporary_refresh_token,
+    _publish_plain_direct_message,
     _publish_recovery_prompt_updates,
+    _publish_recovery_action_message,
     _rollback_if_available,
     _store_temporary_refresh_token,
     approve_single_session_recovery,
@@ -179,6 +183,51 @@ class SessionsRouterSingleSessionRecoveryTests(unittest.IsolatedAsyncioTestCase)
         clear_mock.assert_awaited_once_with(db, expired.id)
         publish_mock.assert_awaited_once_with(db, expired, expired_requester)
 
+    async def test_recovery_action_helpers_cover_serialization_publish_and_clear_paths(self):
+        recovery = make_recovery()
+        requester = make_user(id=7, full_name="Requester")
+        message = SimpleNamespace(id=55, receiver_id=90)
+
+        class FakeMessageRead:
+            from_orm_with_forwarding = Mock(return_value=SimpleNamespace(model_dump=lambda: {"id": 55, "kind": "base"}))
+
+            def __init__(self, **payload):
+                self.payload = payload
+
+        with patch("api.routers.sessions.MessageRead", FakeMessageRead), patch(
+            "api.routers.sessions.build_recovery_message_action_payload",
+            return_value={"kind": "recovery", "message_id": 55},
+        ):
+            response = _build_recovery_action_message_read(message, recovery, requester)
+        self.assertEqual(response.payload["recovery_action"], {"kind": "recovery", "message_id": 55})
+
+        with patch("api.routers.sessions.publish_direct_message_event", new=AsyncMock()) as publish_mock:
+            await _publish_plain_direct_message(message, sender_name="Requester")
+        publish_mock.assert_awaited_once_with(
+            receiver_id=90,
+            message=message,
+            serializer=unittest.mock.ANY,
+            publisher=unittest.mock.ANY,
+            sender_name="Requester",
+        )
+
+        fake_response = SimpleNamespace(id=55)
+        with patch("api.routers.sessions._build_recovery_action_message_read", return_value=fake_response) as build_mock, patch(
+            "api.routers.sessions.publish_direct_message_event",
+            new=AsyncMock(),
+        ) as publish_mock:
+            await _publish_recovery_action_message(message, recovery_request=recovery, requester_user=requester)
+        build_mock.assert_called_once_with(message, recovery, requester)
+        publish_kwargs = publish_mock.await_args.kwargs
+        self.assertIs(publish_kwargs["serializer"](message), fake_response)
+
+        first_target = SimpleNamespace(current_action_message_id=101)
+        second_target = SimpleNamespace(current_action_message_id=202)
+        with patch("api.routers.sessions.list_recovery_admin_targets", new=AsyncMock(return_value=[first_target, second_target])):
+            await _clear_recovery_admin_action_messages(FakeDB(), recovery.id)
+        self.assertIsNone(first_target.current_action_message_id)
+        self.assertIsNone(second_target.current_action_message_id)
+
     async def test_identity_payload_delivery_and_admin_access_helpers_cover_edge_paths(self):
         image_file = SimpleNamespace(
             id=uuid.uuid4(),
@@ -291,6 +340,49 @@ class SessionsRouterSingleSessionRecoveryTests(unittest.IsolatedAsyncioTestCase)
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
 
+    async def test_identity_delivery_exception_and_missing_requester_admin_access_paths(self):
+        recovery = make_recovery()
+        requester = make_user(id=7)
+        admin_target = SimpleNamespace(admin_user_id=80, current_action_message_id=None)
+        action_message = SimpleNamespace(id=1200, receiver_id=80)
+        db = FakeDB([FakeExecuteResult(value=make_user(id=80))])
+
+        with patch("api.routers.sessions.list_recovery_admin_targets", new=AsyncMock(return_value=[admin_target])), patch(
+            "api.routers.sessions.persist_sent_direct_message",
+            new=AsyncMock(return_value=action_message),
+        ), patch(
+            "api.routers.sessions._publish_recovery_action_message",
+            new=AsyncMock(side_effect=RuntimeError("publish down")),
+        ), patch(
+            "api.routers.sessions._publish_recovery_prompt_updates",
+            new=AsyncMock(),
+        ) as prompt_publish, patch(
+            "api.routers.sessions._rollback_if_available",
+            new=AsyncMock(),
+        ) as rollback_mock:
+            await _deliver_identity_submission_messages(
+                db,
+                recovery_request=recovery,
+                requester_user=requester,
+                message_type=MessageType.IMAGE,
+                message_content='{"file_id":"1"}',
+                caption_text=None,
+            )
+        rollback_mock.assert_awaited_once_with(db)
+        prompt_publish.assert_awaited_once_with(db, recovery, requester)
+
+        admin = make_user(id=99, role=UserRole.SUPER_ADMIN)
+        missing_requester_recovery = make_recovery(user=None)
+        missing_requester_target = SimpleNamespace(recovery_request=missing_requester_recovery)
+        with patch("api.routers.sessions.get_recovery_admin_target", new=AsyncMock(return_value=missing_requester_target)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await _ensure_recovery_admin_access(
+                    FakeDB([FakeExecuteResult(value=None)]),
+                    recovery_id=uuid.uuid4(),
+                    current_user=admin,
+                )
+        self.assertEqual(exc_info.exception.status_code, 404)
+
     async def test_initial_recovery_message_delivery_handles_missing_targets_and_failures(self):
         requester = make_user(id=7)
         admins = [make_user(id=90), make_user(id=91)]
@@ -401,6 +493,92 @@ class SessionsRouterSingleSessionRecoveryTests(unittest.IsolatedAsyncioTestCase)
         )
         db.commit.assert_awaited_once()
         self.assertEqual(result["status"], SingleSessionRecoveryStatus.PENDING_ADMIN_REVIEW.value)
+
+    async def test_start_cancel_and_status_cover_additional_recovery_edges(self):
+        rid_uuid = uuid.uuid4()
+        expired_login_req = make_login_request(
+            request_id=rid_uuid,
+            expires_at=datetime.utcnow() - timedelta(minutes=1),
+        )
+        with patch(
+            "api.routers.sessions.get_latest_recovery_request_for_login_request",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(HTTPException) as expired_exc:
+                await start_single_session_recovery(str(rid_uuid), db=FakeDB([FakeExecuteResult(value=expired_login_req)]))
+        self.assertEqual(expired_exc.exception.status_code, 400)
+
+        valid_login_req = make_login_request(request_id=rid_uuid)
+        with patch(
+            "api.routers.sessions.get_latest_recovery_request_for_login_request",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(HTTPException) as deleted_exc:
+                await start_single_session_recovery(
+                    str(rid_uuid),
+                    db=FakeDB([FakeExecuteResult(value=valid_login_req), FakeExecuteResult(value=make_user(is_deleted=True))]),
+                )
+        self.assertEqual(deleted_exc.exception.status_code, 404)
+
+        with patch(
+            "api.routers.sessions.get_latest_recovery_request_for_login_request",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.sessions.list_recovery_admin_users",
+            new=AsyncMock(return_value=[]),
+        ):
+            with self.assertRaises(HTTPException) as no_admin_exc:
+                await start_single_session_recovery(
+                    str(rid_uuid),
+                    db=FakeDB([FakeExecuteResult(value=valid_login_req), FakeExecuteResult(value=make_user())]),
+                )
+        self.assertEqual(no_admin_exc.exception.status_code, 503)
+
+        recovery = make_recovery(session_login_request=None, session_login_request_id=uuid.uuid4())
+        login_req = make_login_request(status=LoginRequestStatus.PENDING)
+        db = FakeDB([FakeExecuteResult(value=login_req)])
+        with patch(
+            "api.routers.sessions.get_active_recovery_request_for_login_request",
+            new=AsyncMock(return_value=recovery),
+        ), patch("api.routers.sessions.cancel_recovery_request") as cancel_mock, patch(
+            "api.routers.sessions._clear_recovery_admin_action_messages",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.sessions._publish_recovery_prompt_updates",
+            new=AsyncMock(),
+        ):
+            result = await cancel_single_session_recovery(str(rid_uuid), db=db)
+        cancel_mock.assert_called_once_with(recovery)
+        self.assertEqual(login_req.status, LoginRequestStatus.REJECTED)
+        self.assertEqual(result["detail"], "درخواست بازیابی لغو شد")
+
+        approved_recovery = make_recovery(status=SingleSessionRecoveryStatus.APPROVED)
+        approved_recovery.id = rid_uuid
+        approved_recovery.user_id = 7
+        new_session = SimpleNamespace(
+            id=uuid.uuid4(),
+            home_server="foreign",
+            user_id=7,
+            is_active=True,
+            created_at=datetime.utcnow(),
+        )
+        with patch(
+            "api.routers.sessions.get_latest_recovery_request_for_login_request",
+            new=AsyncMock(return_value=approved_recovery),
+        ), patch(
+            "api.routers.sessions._expire_recovery_if_needed",
+            new=AsyncMock(return_value=False),
+        ), patch("api.routers.sessions.create_access_token", return_value="access-token"), patch(
+            "api.routers.sessions._pop_temporary_refresh_token",
+            new=AsyncMock(return_value="refresh-token"),
+        ):
+            status_result = await get_single_session_recovery_status(
+                str(rid_uuid),
+                db=FakeDB([FakeExecuteResult(value=new_session)]),
+            )
+        self.assertEqual(status_result["access_token"], "access-token")
+        self.assertEqual(status_result["refresh_token"], "refresh-token")
+        self.assertEqual(status_result["token_type"], "bearer")
 
     async def test_cancel_recovery_validates_and_cancels(self):
         with self.assertRaises(HTTPException) as exc_info:
@@ -591,6 +769,184 @@ class SessionsRouterSingleSessionRecoveryTests(unittest.IsolatedAsyncioTestCase)
         self.assertEqual(reject_login_req.status, LoginRequestStatus.REJECTED)
         self.assertEqual(reject_recovery.status, SingleSessionRecoveryStatus.REJECTED)
         self.assertEqual(result["detail"], "درخواست بازیابی رد شد")
+
+    async def test_approve_reject_and_submit_cover_remaining_router_error_and_warning_paths(self):
+        admin = make_user(id=99, role=UserRole.SUPER_ADMIN)
+        requester = make_user(mobile_number="09120000000")
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await approve_single_session_recovery("bad-id", request=SimpleNamespace(), db=FakeDB(), current_user=admin)
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        blocked_approve = make_recovery(status=SingleSessionRecoveryStatus.APPROVED)
+        with patch(
+            "api.routers.sessions._ensure_recovery_admin_access",
+            new=AsyncMock(return_value=(SimpleNamespace(), blocked_approve, requester)),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await approve_single_session_recovery(str(uuid.uuid4()), request=SimpleNamespace(), db=FakeDB(), current_user=admin)
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        missing_login_req_recovery = make_recovery(
+            status=SingleSessionRecoveryStatus.IDENTITY_SUBMITTED,
+            session_login_request=None,
+            session_login_request_id=uuid.uuid4(),
+        )
+        with patch(
+            "api.routers.sessions._ensure_recovery_admin_access",
+            new=AsyncMock(return_value=(SimpleNamespace(), missing_login_req_recovery, requester)),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await approve_single_session_recovery(
+                    str(uuid.uuid4()),
+                    request=SimpleNamespace(),
+                    db=FakeDB([FakeExecuteResult(value=None)]),
+                    current_user=admin,
+                )
+        self.assertEqual(exc_info.exception.status_code, 404)
+
+        login_req = make_login_request(status=LoginRequestStatus.PENDING)
+        approve_recovery = make_recovery(
+            status=SingleSessionRecoveryStatus.IDENTITY_SUBMITTED,
+            session_login_request=login_req,
+        )
+        new_session = SimpleNamespace(
+            id=uuid.uuid4(),
+            device_name="Chrome",
+            device_ip="1.2.3.4",
+            platform=Platform.WEB,
+            home_server="foreign",
+            is_primary=True,
+            is_active=True,
+            created_at=datetime.utcnow(),
+            last_active_at=datetime.utcnow(),
+        )
+        with patch(
+            "api.routers.sessions._ensure_recovery_admin_access",
+            new=AsyncMock(return_value=(SimpleNamespace(), approve_recovery, requester)),
+        ), patch("api.routers.sessions.create_refresh_token", return_value="refresh-token"), patch(
+            "api.routers.sessions.provision_session_for_login_request",
+            new=AsyncMock(return_value=new_session),
+        ), patch(
+            "api.routers.sessions._clear_recovery_admin_action_messages",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.sessions._store_temporary_refresh_token",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.sessions._publish_recovery_prompt_updates",
+            new=AsyncMock(),
+        ), patch("api.routers.sessions.send_sms", side_effect=RuntimeError("sms down")):
+            approve_result = await approve_single_session_recovery(
+                str(uuid.uuid4()),
+                request=SimpleNamespace(client=SimpleNamespace(host="1.2.3.4")),
+                db=FakeDB(),
+                current_user=admin,
+            )
+        self.assertEqual(approve_result["detail"], "درخواست بازیابی تایید شد")
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await reject_single_session_recovery("bad-id", db=FakeDB(), current_user=admin)
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        blocked_reject = make_recovery(status=SingleSessionRecoveryStatus.REJECTED)
+        with patch(
+            "api.routers.sessions._ensure_recovery_admin_access",
+            new=AsyncMock(return_value=(SimpleNamespace(), blocked_reject, requester)),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await reject_single_session_recovery(str(uuid.uuid4()), db=FakeDB(), current_user=admin)
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        reject_login_req = make_login_request(status=LoginRequestStatus.PENDING)
+        reject_recovery = make_recovery(
+            status=SingleSessionRecoveryStatus.IDENTITY_SUBMITTED,
+            session_login_request=None,
+            session_login_request_id=uuid.uuid4(),
+        )
+        with patch(
+            "api.routers.sessions._ensure_recovery_admin_access",
+            new=AsyncMock(return_value=(SimpleNamespace(), reject_recovery, requester)),
+        ), patch(
+            "api.routers.sessions._clear_recovery_admin_action_messages",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.sessions._publish_recovery_prompt_updates",
+            new=AsyncMock(),
+        ), patch("api.routers.sessions.send_sms", side_effect=RuntimeError("sms down")):
+            reject_result = await reject_single_session_recovery(
+                str(uuid.uuid4()),
+                db=FakeDB([FakeExecuteResult(value=reject_login_req)]),
+                current_user=admin,
+            )
+        self.assertEqual(reject_login_req.status, LoginRequestStatus.REJECTED)
+        self.assertEqual(reject_result["detail"], "درخواست بازیابی رد شد")
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await submit_single_session_recovery_identity("bad-id", file=FakeUploadFile(b"x"), db=FakeDB())
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        wrong_state_recovery = make_recovery(status=SingleSessionRecoveryStatus.PENDING_ADMIN_REVIEW)
+        with patch(
+            "api.routers.sessions.get_active_recovery_request_for_login_request",
+            new=AsyncMock(return_value=wrong_state_recovery),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await submit_single_session_recovery_identity(str(uuid.uuid4()), file=FakeUploadFile(b"x"), db=FakeDB())
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        identity_recovery = make_recovery(status=SingleSessionRecoveryStatus.IDENTITY_VERIFICATION_REQUESTED)
+        with patch(
+            "api.routers.sessions.get_active_recovery_request_for_login_request",
+            new=AsyncMock(return_value=identity_recovery),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await submit_single_session_recovery_identity(
+                    str(uuid.uuid4()),
+                    file=FakeUploadFile(b"x"),
+                    db=FakeDB([FakeExecuteResult(value=None)]),
+                )
+        self.assertEqual(exc_info.exception.status_code, 404)
+
+        with patch(
+            "api.routers.sessions.get_active_recovery_request_for_login_request",
+            new=AsyncMock(return_value=identity_recovery),
+        ), patch(
+            "api.routers.sessions._expire_recovery_if_needed",
+            new=AsyncMock(return_value=True),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await submit_single_session_recovery_identity(
+                    str(uuid.uuid4()),
+                    file=FakeUploadFile(b"x"),
+                    db=FakeDB([FakeExecuteResult(value=requester)]),
+                )
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        ok_file = FakeUploadFile(b"img", filename="id.jpg", content_type="image/jpeg")
+        with patch(
+            "api.routers.sessions.get_active_recovery_request_for_login_request",
+            new=AsyncMock(return_value=identity_recovery),
+        ), patch(
+            "api.routers.sessions._expire_recovery_if_needed",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "api.routers.sessions._build_identity_message_payload",
+            new=AsyncMock(return_value=(MessageType.IMAGE, '{"file_id":"1"}', None)),
+        ), patch(
+            "api.routers.sessions._clear_recovery_admin_action_messages",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.sessions._deliver_identity_submission_messages",
+            new=AsyncMock(),
+        ), patch("api.routers.sessions.send_sms", side_effect=RuntimeError("sms down")):
+            submit_result = await submit_single_session_recovery_identity(
+                str(uuid.uuid4()),
+                file=ok_file,
+                db=FakeDB([FakeExecuteResult(value=requester)]),
+            )
+        ok_file.close.assert_awaited_once()
+        self.assertEqual(submit_result["detail"], "مدرک برای بررسی ارسال شد")
 
     async def test_submit_identity_validates_type_builds_payload_and_closes_upload(self):
         rid = uuid.uuid4()

@@ -884,7 +884,42 @@ function focusInput(options?: { cursorToEnd?: boolean }) {
 
 defineExpose({
   focusInput,
-  adjustTextareaHeight: resizeTextarea
+  adjustTextareaHeight: resizeTextarea,
+  __testHooks: {
+    state: {
+      messageInputRef,
+      composerSelectionStart,
+      composerSelectionEnd,
+      keyboardHeight,
+      lastKnownKeyboardHeight,
+      lockedComposerInsetHeight,
+      pendingPickerOpenAfterKeyboardClose,
+      pendingKeyboardReturn,
+      disablePickerTransition,
+      keyboardInsetEnvSupported,
+      envKeyboardInset,
+      envKeyboardInsetMax,
+      viewportBaseHeight,
+      viewportBaseWidth,
+      isChatDebugEnabled,
+      debugTrail,
+      debugState,
+    },
+    captureDebugState,
+    syncDebugWindowHandle,
+    getMeasuredKeyboardInset,
+    captureSelection,
+    getComposerSelection,
+    blurInput,
+    prepareTextareaFocus,
+    prepareStickerToggle,
+    updateKeyboardMetrics,
+    openStickerPickerAfterKeyboardClose,
+    finalizeKeyboardReturn,
+    handleToggleAttachment,
+    handleTextareaFocus,
+    applyComposerValue,
+  }
 })
 
 watch(() => props.modelValue, (value) => {

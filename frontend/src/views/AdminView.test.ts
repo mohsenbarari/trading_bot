@@ -154,6 +154,93 @@ describe('AdminView.vue', () => {
     expect(wrapper.get('.user-profile-stub').text()).toBe('route-user')
   })
 
+  it('renders the route-profile loading state when the profile section is awaiting route data', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    vm.currentSection = 'user_profile'
+    vm.isLoadingRouteUserProfile = true
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('در حال بارگذاری پروفایل کاربر')
+    expect(wrapper.find('.user-profile-stub').exists()).toBe(false)
+  })
+
+  it('falls back to the admin menu when the route profile request is rejected or not found', async () => {
+    adminViewMocks.route.query = {
+      section: 'user_profile',
+      user_id: '52',
+    }
+    adminViewMocks.apiFetchMock.mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({ message: 'missing' }),
+    })
+
+    const notFoundWrapper = mountView()
+    await flushPromises()
+
+    expect(notFoundWrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
+
+    adminViewMocks.route.query = {
+      section: 'user_profile',
+      user_id: '53',
+    }
+    adminViewMocks.apiFetchMock.mockRejectedValueOnce(new Error('network failed'))
+
+    const rejectedWrapper = mountView()
+    await flushPromises()
+
+    expect(rejectedWrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
+  })
+
+  it('ignores invalid public-profile payloads and invalid route profile ids', async () => {
+    adminViewMocks.route.query = {
+      section: 'user_profile',
+      user_id: '0',
+    }
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(adminViewMocks.apiFetchMock).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+
+    const vm = wrapper.vm as any
+    vm.handleOpenPublicProfile()
+    vm.handleOpenPublicProfile({ id: 0, account_name: 'bad-user' })
+    vm.handleOpenPublicProfile({ id: Number.NaN, account_name: 'bad-user' })
+
+    expect(adminViewMocks.routerPushMock).not.toHaveBeenCalled()
+  })
+
+  it('replaces prior back state when switching sub-pages and clears route handoff on admin-panel navigation', async () => {
+    adminViewMocks.route.query = {
+      user_id: '44',
+    }
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    vm.handleNavigate('settings')
+    await flushPromises()
+    vm.handleNavigate('manage_commodities')
+    await flushPromises()
+
+    expect(adminViewMocks.pushBackStateMock).toHaveBeenCalledTimes(2)
+    expect(adminViewMocks.popBackStateMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('مدیریت کالاها')
+
+    vm.handleNavigate('admin_panel')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(adminViewMocks.popBackStateMock).toHaveBeenCalledTimes(2)
+    expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
+  })
+
   it('clears the custom back stack on unmount', async () => {
     const wrapper = mountView()
     await flushPromises()

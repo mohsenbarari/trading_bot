@@ -88,6 +88,14 @@ function mountInputBar(overrides: Record<string, unknown> = {}) {
   })
 }
 
+function getInputBarTestHooks(wrapper: ReturnType<typeof mountInputBar>) {
+  const exposed = wrapper.vm.$.exposed as { __testHooks?: any } | null
+  if (!exposed?.__testHooks) {
+    throw new Error('ChatInputBar test hooks are unavailable in the current harness')
+  }
+  return exposed.__testHooks
+}
+
 describe('ChatInputBar.vue', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -116,6 +124,7 @@ describe('ChatInputBar.vue', () => {
   afterEach(() => {
     vi.useRealTimers()
     document.body.innerHTML = ''
+    delete (window as typeof window & { __chatInputDebug?: unknown }).__chatInputDebug
   })
 
   it('renders the single-selection action bar and emits every supported action', async () => {
@@ -469,6 +478,118 @@ describe('ChatInputBar.vue', () => {
     await nextTick()
     expect(focusSpy).toHaveBeenCalled()
     expect(setSelectionRangeSpy).toHaveBeenCalledWith(textarea.value.length, textarea.value.length)
+  })
+
+  it('covers picker sizing fallbacks, debug window sync, and open/close transient picker helpers', async () => {
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      stickerPickerOpen: true,
+    })
+    const hooks = getInputBarTestHooks(wrapper)
+    const debugWindow = window as typeof window & {
+      __chatInputDebug?: { getSnapshot: () => Record<string, unknown>; getTrail: () => string[] }
+    }
+
+    hooks.state.keyboardInsetEnvSupported.value = false
+    hooks.state.keyboardHeight.value = 144
+    hooks.state.lastKnownKeyboardHeight.value = 188
+    await nextTick()
+
+    const picker = wrapper.findComponent({ name: 'EmojiStickerPicker' })
+    expect(Number(picker.props('panelHeight'))).toBeGreaterThan(0)
+
+    await wrapper.setProps({ stickerPickerOpen: false })
+    hooks.state.lockedComposerInsetHeight.value = 260
+    hooks.state.pendingPickerOpenAfterKeyboardClose.value = true
+    await nextTick()
+
+    const spacer = wrapper.get('.picker-transition-spacer')
+    expect(spacer.attributes('style')).toContain('height: 116px')
+
+    hooks.state.isChatDebugEnabled.value = true
+    hooks.captureDebugState('manual-debug')
+    hooks.syncDebugWindowHandle()
+    expect(debugWindow.__chatInputDebug?.getSnapshot().lastEvent).toBe('manual-debug')
+    expect(debugWindow.__chatInputDebug?.getTrail()[0]).toContain('manual-debug')
+
+    hooks.state.pendingPickerOpenAfterKeyboardClose.value = true
+    hooks.state.pendingKeyboardReturn.value = true
+    hooks.state.disablePickerTransition.value = true
+    hooks.openStickerPickerAfterKeyboardClose()
+    await nextTick()
+    expect(wrapper.emitted('update:stickerPickerOpen')).toContainEqual([true])
+    expect(hooks.state.disablePickerTransition.value).toBe(false)
+
+    await wrapper.setProps({ stickerPickerOpen: true })
+    hooks.state.pendingKeyboardReturn.value = true
+    hooks.state.lockedComposerInsetHeight.value = 144
+    hooks.state.disablePickerTransition.value = true
+    hooks.finalizeKeyboardReturn()
+    expect(hooks.state.pendingKeyboardReturn.value).toBe(false)
+    expect(hooks.state.lockedComposerInsetHeight.value).toBe(0)
+    expect(hooks.state.disablePickerTransition.value).toBe(false)
+    expect(wrapper.emitted('update:stickerPickerOpen')).toContainEqual([false])
+
+    hooks.state.isChatDebugEnabled.value = false
+    hooks.syncDebugWindowHandle()
+    expect(debugWindow.__chatInputDebug).toBeUndefined()
+  })
+
+  it('covers selection capture, attachment toggles, textarea focus swaps, and restored composer selections', async () => {
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      modelValue: 'hello world',
+      stickerPickerOpen: true,
+    })
+    const hooks = getInputBarTestHooks(wrapper)
+    const textarea = wrapper.get('textarea').element as HTMLTextAreaElement
+    const inputContainer = wrapper.get('.input-container').element as HTMLElement
+    const blurSpy = vi.spyOn(textarea, 'blur').mockImplementation(() => {})
+    const setSelectionRangeSpy = vi.spyOn(textarea, 'setSelectionRange')
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
+      callback(0)
+      return 1
+    })
+
+    Object.defineProperty(inputContainer, 'scrollHeight', { configurable: true, value: 300 })
+    Object.defineProperty(inputContainer, 'clientHeight', { configurable: true, value: 120 })
+    Object.defineProperty(inputContainer, 'scrollWidth', { configurable: true, value: 200 })
+    Object.defineProperty(inputContainer, 'clientWidth', { configurable: true, value: 100 })
+    inputContainer.scrollTop = 44
+    inputContainer.scrollLeft = 6
+
+    textarea.focus()
+    textarea.setSelectionRange(2, 5)
+    hooks.captureSelection()
+    expect(hooks.getComposerSelection()).toEqual({ start: 2, end: 5 })
+    setSelectionRangeSpy.mockClear()
+
+    hooks.state.keyboardHeight.value = 180
+    hooks.prepareStickerToggle()
+    expect(hooks.state.lockedComposerInsetHeight.value).toBe(180)
+
+    hooks.handleToggleAttachment()
+    expect(wrapper.emitted('update:stickerPickerOpen')).toContainEqual([false])
+    expect(wrapper.emitted('toggle-attachment')).toHaveLength(1)
+
+    hooks.prepareTextareaFocus()
+    hooks.handleTextareaFocus()
+    await nextTick()
+    expect(blurSpy).not.toHaveBeenCalled()
+    expect(wrapper.emitted('update:stickerPickerOpen')).toContainEqual([false])
+
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => textarea,
+    })
+    hooks.applyComposerValue('hi', 99, 99)
+    await nextTick()
+    expect(setSelectionRangeSpy).toHaveBeenLastCalledWith(11, 11)
+
+    hooks.blurInput()
+    expect(blurSpy).toHaveBeenCalled()
   })
 
   it('switches from the keyboard to the sticker picker and closes the picker again when focusing the textarea', async () => {
