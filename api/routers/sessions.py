@@ -708,7 +708,7 @@ async def request_single_session_recovery_identity(
     if recovery_request.status.value != "pending_admin_review":
         raise HTTPException(status_code=400, detail="در وضعیت فعلی امکان درخواست مدرک وجود ندارد")
 
-    request_identity_verification(recovery_request, decided_by_user_id=current_user.id)
+    request_identity_verification(recovery_request)
     await _clear_recovery_admin_action_messages(db, recovery_request.id)
     await db.commit()
 

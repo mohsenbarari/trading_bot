@@ -181,7 +181,7 @@ class SessionsRouterLoginRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.detail, "درخواست یافت نشد")
 
         login_req = make_login_request(request_id=uuid.UUID(rid))
-        with patch("core.security.create_refresh_token", return_value="refresh-token"), patch(
+        with patch("api.routers.sessions.create_refresh_token", return_value="refresh-token"), patch(
             "api.routers.sessions.approve_login_request",
             new=AsyncMock(return_value={"error": "failed approve"}),
         ):
@@ -205,7 +205,7 @@ class SessionsRouterLoginRequestTests(unittest.IsolatedAsyncioTestCase):
         approved_session = make_session(uuid.uuid4(), is_primary=False, home_server="iran")
         redis = FakeRedis()
 
-        with patch("core.security.create_refresh_token", return_value="refresh-token"), patch(
+        with patch("api.routers.sessions.create_refresh_token", return_value="refresh-token"), patch(
             "api.routers.sessions.approve_login_request",
             new=AsyncMock(return_value={"session": approved_session}),
         ) as approve_mock, patch(
@@ -280,7 +280,7 @@ class SessionsRouterLoginRequestTests(unittest.IsolatedAsyncioTestCase):
         new_session = make_session(uuid.uuid4(), home_server="iran")
         redis = FakeRedis({f"login_req_token:{rid}": "refresh-token"})
 
-        with patch("core.security.create_access_token", return_value="access-token"), patch(
+        with patch("api.routers.sessions.create_access_token", return_value="access-token"), patch(
             "bot.utils.redis_helpers.get_redis",
             new=AsyncMock(return_value=redis),
         ):
