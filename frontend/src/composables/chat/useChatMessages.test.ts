@@ -426,4 +426,155 @@ describe('useChatMessages', () => {
     subject.stopPolling()
     subject.stopStatusPolling()
   })
+
+  it('loads around-message slices, ignores stale loads, and handles message-load errors', async () => {
+    createSubject()
+    messageMocks.apiFetchJson.mockResolvedValueOnce([
+      { id: 88, sender_id: 12, receiver_id: 7, content: 'around', message_type: 'text' },
+    ])
+
+    await subject.loadMessages(12, false, 88)
+    expect(messageMocks.apiFetchJson).toHaveBeenCalledWith(expect.stringContaining('around_id=88'), {})
+    expect((messages.value ?? []).map((message) => message.id)).toEqual([88])
+    expect(subject.hasOlderMessages.value).toBe(true)
+    expect(isLoadingMessages.value).toBe(false)
+
+    let resolveLoad!: (value: any[]) => void
+    messageMocks.apiFetchJson.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveLoad = resolve
+    }))
+    const staleLoad = subject.loadMessages(12)
+    selectedUserId.value = 99
+    resolveLoad([{ id: 99, sender_id: 12, receiver_id: 7, content: 'stale', message_type: 'text' }])
+    await staleLoad
+    expect((messages.value ?? []).map((message) => message.id)).toEqual([88])
+
+    scope?.stop()
+    messages.value = []
+    selectedUserId.value = 12
+    createSubject()
+    messageMocks.apiFetchJson.mockRejectedValueOnce(new Error('history failed'))
+    await subject.loadMessages(12)
+    expect(error.value).toBe('history failed')
+    expect(isLoadingMessages.value).toBe(false)
+  })
+
+  it('updates unread state for silent refreshes and keeps bottom anchoring for outgoing/current-user messages', async () => {
+    createSubject()
+    messages.value = [
+      { id: 1, sender_id: 12, receiver_id: 7, content: 'old', message_type: 'text' },
+    ]
+    isUserAtBottom.value = false
+    messageMocks.apiFetchJson.mockResolvedValueOnce([
+      { id: 1, sender_id: 12, receiver_id: 7, content: 'old', message_type: 'text' },
+      { id: 2, sender_id: 12, receiver_id: 7, content: 'remote', message_type: 'text' },
+    ])
+
+    await subject.loadMessages(12, true)
+    expect(unreadNewMessagesCount.value).toBe(1)
+
+    isUserAtBottom.value = true
+    isViewingReply.value = false
+    messageMocks.apiFetchJson.mockResolvedValueOnce([
+      { id: 1, sender_id: 12, receiver_id: 7, content: 'old', message_type: 'text' },
+      { id: 2, sender_id: 12, receiver_id: 7, content: 'remote', message_type: 'text' },
+      { id: 3, sender_id: 7, receiver_id: 12, content: 'mine', message_type: 'text' },
+    ])
+
+    await subject.loadMessages(12, true)
+    await flushPromises()
+    expect(scrollToBottomMock).toHaveBeenCalled()
+  })
+
+  it('covers older-message guards and all-duplicate pagination responses', async () => {
+    createSubject()
+
+    isLoadingMessages.value = true
+    await expect(subject.loadOlderMessages(12)).resolves.toBe(0)
+    isLoadingMessages.value = false
+
+    messages.value = [{ id: -1, sender_id: 7, receiver_id: 12, content: 'pending', message_type: 'text' }]
+    await expect(subject.loadOlderMessages(12)).resolves.toBe(0)
+    expect(subject.hasOlderMessages.value).toBe(false)
+
+    subject.hasOlderMessages.value = true
+    messages.value = [{ id: 10, sender_id: 12, receiver_id: 7, content: 'current', message_type: 'text' }]
+    selectedUserId.value = 99
+    messageMocks.apiFetchJson.mockResolvedValueOnce([{ id: 9, sender_id: 12, receiver_id: 7, content: 'older', message_type: 'text' }])
+    await expect(subject.loadOlderMessages(12)).resolves.toBe(0)
+
+    selectedUserId.value = 12
+    messageMocks.apiFetchJson.mockResolvedValueOnce([{ id: 10, sender_id: 12, receiver_id: 7, content: 'dupe', message_type: 'text' }])
+    await expect(subject.loadOlderMessages(12)).resolves.toBe(0)
+    expect(messages.value.map((message) => message.id)).toEqual([10])
+  })
+
+  it('covers read failures, edit failures, no-target sends, abort cancellation, and sticker forwarding', async () => {
+    createSubject()
+
+    selectedUserId.value = null
+    await subject.markAsRead()
+    await expect(subject.sendMediaMessage('image', 'file')).resolves.toBeNull()
+    messageInput.value = 'no target'
+    await subject.sendMessage()
+    expect(messageMocks.apiFetchJson).not.toHaveBeenCalled()
+
+    selectedUserId.value = 12
+    messageMocks.apiFetchJson.mockRejectedValueOnce(new Error('read failed'))
+    await subject.markAsRead()
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to mark as read', expect.any(Error))
+
+    messages.value = [{ id: 7, content: 'old', message_type: 'text' }]
+    editingMessage.value = { id: 7, content: 'old', message_type: 'text' }
+    messageInput.value = 'bad edit'
+    messageMocks.apiFetchJson.mockRejectedValueOnce(new Error('edit failed'))
+    await subject.sendMessage()
+    expect(alertSpy).toHaveBeenCalledWith('خطا در ویرایش پیام')
+    editingMessage.value = null
+
+    messageInput.value = 'abort me'
+    messageMocks.apiFetchJson.mockImplementationOnce((_url: string, options?: RequestInit) => new Promise((_resolve, reject) => {
+      options?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))
+    }))
+    const sendPromise = subject.sendMessage()
+    await nextTick()
+    const tempId = messages.value.find((message) => message.id < 0)?.id
+    expect(typeof tempId).toBe('number')
+    subject.cancelTextMessage(tempId!)
+    await sendPromise
+    expect(messages.value.some((message) => message.id === tempId)).toBe(false)
+
+    messageMocks.apiFetchJson.mockResolvedValueOnce({ id: 50, sender_id: 7, receiver_id: 12, content: '🙂', message_type: 'sticker' })
+    subject.sendSticker('🙂')
+    await flushPromises()
+    expect(messages.value.some((message) => message.id === 50)).toBe(true)
+  })
+
+  it('formats target-user status for minutes, today, yesterday, old dates, missing data, and failures', async () => {
+    createSubject()
+    const statuses = [
+      { last_seen_at: '2026-05-14T13:55:00' },
+      { last_seen_at: '2026-05-14T09:15:00Z' },
+      { last_seen_at: '2026-05-13T20:30:00Z' },
+      { last_seen_at: '2026-05-10T08:00:00Z' },
+      {},
+    ]
+    messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
+      if (url === '/api/users-public/12') return statuses.shift()
+      throw new Error('unexpected')
+    })
+
+    for (const expected of ['5 دقیقه پیش', 'امروز 09:15', 'دیروز 20:30', 'آخرین بازدید', 'خیلی وقت پیش']) {
+      subject.startStatusPolling(12)
+      await flushPromises()
+      subject.stopStatusPolling()
+      expect(targetUserStatus.value).toContain(expected)
+    }
+
+    messageMocks.apiFetchJson.mockRejectedValueOnce(new Error('status failed'))
+    subject.startStatusPolling(12)
+    await flushPromises()
+    subject.stopStatusPolling()
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Error fetching status', expect.any(Error))
+  })
 })

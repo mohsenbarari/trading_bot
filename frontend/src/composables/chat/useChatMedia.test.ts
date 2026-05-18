@@ -38,7 +38,7 @@ const preprocessMocks = vi.hoisted(() => ({
 }))
 
 const heicMocks = vi.hoisted(() => ({
-  convert: vi.fn(async () => new Blob(['converted-heic'], { type: 'image/jpeg' })),
+  convert: vi.fn<(options?: unknown) => Promise<Blob | Blob[]>>(async () => new Blob(['converted-heic'], { type: 'image/jpeg' })),
 }))
 
 vi.mock('../../utils/imagePreprocessClient', () => ({
@@ -517,6 +517,42 @@ describe('useChatMedia', () => {
     expect(vm.messages.some((message: Message) => message.id === -33)).toBe(false)
   })
 
+  it('handles upload sent events without local blobs and ignores malformed cache payloads', async () => {
+    const existing = makeImageMessage(-12, {
+      content: JSON.stringify({ placeholder: true }),
+      is_sending: true,
+    })
+    const { wrapper } = mountHarness([existing])
+    await flushPromises()
+    const vm = wrapper.vm as any
+
+    mediaMocks.uploadHandler?.({
+      type: 'sent',
+      userId: -7,
+      optimisticId: -12,
+      serverMessage: makeImageMessage(112, {
+        content: 'not-json',
+        local_blob_url: undefined,
+      }),
+    })
+
+    expect(vm.messages.some((message: Message) => message.id === -12)).toBe(false)
+    expect(vm.messages.find((message: Message) => message.id === 112)?.local_blob_url).toBeUndefined()
+
+    mediaMocks.uploadHandler?.({
+      type: 'sent',
+      userId: -7,
+      optimisticId: -99,
+      serverMessage: makeImageMessage(113, {
+        content: JSON.stringify({ file_id: 'late-file' }),
+        local_blob_url: undefined,
+      }),
+    })
+
+    expect(vm.messages.some((message: Message) => message.id === 113)).toBe(true)
+    expect(vm.imageCache['late-file']).toBeUndefined()
+  })
+
   it('adopts document download state, downloads completed files immediately, and starts background document downloads otherwise', async () => {
     mediaMocks.getPendingDocumentDownloadsForUser.mockReturnValue(
       [{ messageId: 20, progress: 40 }] as any
@@ -557,6 +593,32 @@ describe('useChatMedia', () => {
 
     mediaMocks.documentHandler?.({ type: 'cancelled', userId: -7, messageId: 21, fileId: 'doc-21' })
     expect(vm.messages.find((message: Message) => message.id === 21)).toMatchObject({
+      is_downloading: false,
+      download_progress: 0,
+    })
+  })
+
+  it('applies document download progress/error events and ignores unrelated download events', async () => {
+    const documentMessage = makeDocumentMessage(25)
+    const imageMessage = makeImageMessage(26)
+    const { wrapper } = mountHarness([documentMessage, imageMessage])
+    await flushPromises()
+    const vm = wrapper.vm as any
+
+    mediaMocks.documentHandler?.({ type: 'progress', userId: -77, messageId: 25, fileId: 'doc-25', progress: 80 })
+    expect(vm.messages.find((message: Message) => message.id === 25)?.is_downloading).toBeUndefined()
+
+    mediaMocks.documentHandler?.({ type: 'added', userId: -7, messageId: 26, fileId: 'file-26', progress: 10 })
+    expect(vm.messages.find((message: Message) => message.id === 26)?.is_downloading).toBeUndefined()
+
+    mediaMocks.documentHandler?.({ type: 'progress', userId: -7, messageId: 25, fileId: 'doc-25', progress: 80 })
+    expect(vm.messages.find((message: Message) => message.id === 25)).toMatchObject({
+      is_downloading: true,
+      download_progress: 80,
+    })
+
+    mediaMocks.documentHandler?.({ type: 'error', userId: -7, messageId: 25, fileId: 'doc-25' })
+    expect(vm.messages.find((message: Message) => message.id === 25)).toMatchObject({
       is_downloading: false,
       download_progress: 0,
     })
@@ -698,6 +760,44 @@ describe('useChatMedia', () => {
     expect(hydratedUrl).toBe('blob:generated-media')
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(vm.imageCache['file-71']).toBe('blob:generated-media')
+  })
+
+  it('tracks streaming media download progress before caching the combined blob', async () => {
+    installIndexedDbMock()
+    const imageMessage = makeImageMessage(72, { local_blob_url: undefined, download_progress: 0 })
+    const { wrapper } = mountHarness([imageMessage])
+    const vm = wrapper.vm as any
+    const chunks = [new Uint8Array([1, 2]), new Uint8Array([3, 4, 5, 6])]
+    const reader = {
+      read: vi.fn()
+        .mockResolvedValueOnce({ done: false, value: chunks[0] })
+        .mockResolvedValueOnce({ done: false, value: chunks[1] })
+        .mockResolvedValueOnce({ done: true, value: undefined }),
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      headers: {
+        get: (name: string) => {
+          const normalized = name.toLowerCase()
+          if (normalized === 'content-length') return '6'
+          if (normalized === 'content-type') return 'image/png'
+          return null
+        },
+      },
+      body: {
+        getReader: () => reader,
+      },
+    })))
+
+    await vm.downloadMedia(vm.messages[0])
+    await flushPromises()
+
+    expect(reader.read).toHaveBeenCalledTimes(3)
+    expect(vm.messages[0]).toMatchObject({
+      is_downloading: false,
+      download_progress: 0,
+    })
+    expect(vm.imageCache['file-72']).toBe('blob:generated-media')
   })
 
   it('deduplicates scheduled image hydration work and skips network for images when network hydration is disallowed', async () => {
@@ -1091,6 +1191,28 @@ describe('useChatMedia', () => {
       width: 640,
       height: 320,
     }))
+  })
+
+  it('marks HEIC uploads as failed when conversion returns no blob', async () => {
+    heicMocks.convert.mockResolvedValueOnce([] as unknown as Blob)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { wrapper } = mountHarness([])
+    const vm = wrapper.vm as any
+    const heicFile = new File([new Blob(['heic-image'])], '', { type: 'image/heif' })
+
+    await vm.handleMediaUploadWrapper(heicFile, null, 0, 1, { roomKindOverride: 'direct' })
+    await flushPromises()
+
+    expect(mediaMocks.submitUpload).not.toHaveBeenCalled()
+    expect(vm.error).toContain('تبدیل تصویر HEIC')
+    expect(vm.messages[0]).toMatchObject({
+      is_error: true,
+      is_sending: false,
+      upload_handoff_pending: false,
+    })
+    expect(errorSpy).toHaveBeenCalledWith('HEIC conversion failed:', expect.any(Error))
+
+    errorSpy.mockRestore()
   })
 
   it('keeps edited image uploads as-is while still extracting dimensions and generating thumbnails', async () => {
