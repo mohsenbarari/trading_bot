@@ -140,6 +140,11 @@ describe('auth utils', () => {
     localStorage.setItem('current_user_summary', JSON.stringify({ role: 'عادی' }))
     await authGuard({ path: '/admin', meta: { requiresAdmin: true } } as any, {} as any, next)
     expect(next).toHaveBeenLastCalledWith('/dashboard')
+
+    next.mockClear()
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'عادی', account_status: 'inactive' }))
+    await authGuard({ path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any, {} as any, next)
+    expect(next).toHaveBeenLastCalledWith('/')
   })
 
   it('authGuard fetches /api/auth/me when admin cache is missing', async () => {
@@ -159,6 +164,27 @@ describe('auth utils', () => {
     expect(JSON.parse(localStorage.getItem('current_user_summary') || '{}')).toMatchObject({
       role: 'مدیر میانی',
       account_name: 'manager7',
+    })
+  })
+
+  it('authGuard fetches /api/auth/me when market access cache is missing and blocks inactive users', async () => {
+    const token = makeJwt(Math.floor(Date.now() / 1000) + 3600)
+    localStorage.setItem('auth_token', token)
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({
+      id: 9,
+      role: 'عادی',
+      account_name: 'inactive9',
+      account_status: 'inactive',
+    }))
+
+    const { authGuard } = await import(authModulePath)
+    const next = vi.fn()
+
+    await authGuard({ path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any, {} as any, next)
+
+    expect(next).toHaveBeenLastCalledWith('/')
+    expect(JSON.parse(localStorage.getItem('current_user_summary') || '{}')).toMatchObject({
+      account_status: 'inactive',
     })
   })
 

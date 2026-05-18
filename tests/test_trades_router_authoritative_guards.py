@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import BackgroundTasks, HTTPException
 
 from api.routers.trades import TradeCreate, _execute_trade_authoritatively
-from core.enums import UserRole
+from core.enums import UserAccountStatus, UserRole
 from models.offer import OfferStatus, OfferType
 
 
@@ -48,6 +48,7 @@ def make_user(**overrides):
     data = {
         "id": 5,
         "role": UserRole.STANDARD,
+        "account_status": UserAccountStatus.ACTIVE,
         "trading_restricted_until": None,
         "mobile_number": "09120000000",
         "account_name": "user5",
@@ -103,6 +104,16 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "حساب شما مسدود است.")
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await _execute_trade_authoritatively(
+                trade_data,
+                BackgroundTasks(),
+                db=FakeDB(),
+                context=make_context(make_user(account_status=UserAccountStatus.INACTIVE)),
+            )
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "حساب شما غیرفعال است و امکان انجام معامله ندارید.")
 
         db = FakeDB(execute_results=[FakeExecuteResult(single=make_user())])
         with patch("api.routers.trades.check_user_limits", return_value=(False, "trade blocked")):

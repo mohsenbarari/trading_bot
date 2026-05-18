@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, field_validator, field_serializer, comput
 from typing import List, Optional
 from datetime import datetime
 from core.utils import normalize_persian_numerals, to_jalali_str
-from core.enums import UserRole, NotificationLevel, NotificationCategory
+from core.enums import UserRole, UserAccountStatus, NotificationLevel, NotificationCategory
 from models.accountant_relation import AccountantRelationStatus
 
 # --- Token Schemas ---
@@ -73,6 +73,10 @@ class UserCreate(UserBase):
 class UserRead(UserBase):
     id: int
     role: UserRole
+    account_status: UserAccountStatus = UserAccountStatus.ACTIVE
+    deactivated_at: datetime | None = None
+    messenger_grace_expires_at: datetime | None = None
+    messenger_blocked_at: datetime | None = None
     has_bot_access: bool
     is_accountant: bool = False
     is_deleted: bool = False
@@ -139,6 +143,7 @@ class UserPublicRead(BaseModel):
 
 class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
+    account_status: Optional[UserAccountStatus] = None
     has_bot_access: Optional[bool] = None
     trading_restricted_until: Optional[datetime] = None
     

@@ -18,6 +18,7 @@ from bot.message_manager import (
 from typing import Optional
 from core.enums import UserRole
 from core.config import settings
+from core.services.user_account_status_service import is_user_messenger_blocked
 
 router = Router()
 
@@ -27,6 +28,9 @@ router = Router()
 @router.message(F.text == "👤 پنل کاربر")
 async def show_my_profile_and_change_keyboard(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user: return
+    if is_user_messenger_blocked(user):
+        await message.answer("دسترسی پیام‌رسان شما به دلیل غیرفعال بودن حساب مسدود شده است.")
+        return
     if not user.has_bot_access:
         await message.answer("شما دسترسی لازم برای استفاده از این بخش را ندارید.")
         return

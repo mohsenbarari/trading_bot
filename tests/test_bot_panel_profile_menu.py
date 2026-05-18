@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot.handlers.panel import show_my_profile_and_change_keyboard
+from core.enums import UserAccountStatus
 
 
 class BotPanelProfileMenuTests(unittest.IsolatedAsyncioTestCase):
@@ -11,14 +12,32 @@ class BotPanelProfileMenuTests(unittest.IsolatedAsyncioTestCase):
         await show_my_profile_and_change_keyboard(message, state=SimpleNamespace(), user=None)
         message.answer.assert_not_awaited()
 
-        user = SimpleNamespace(has_bot_access=False)
+        user = SimpleNamespace(
+            has_bot_access=False,
+            account_status=UserAccountStatus.ACTIVE,
+            messenger_blocked_at=None,
+            messenger_grace_expires_at=None,
+        )
         await show_my_profile_and_change_keyboard(message, state=SimpleNamespace(), user=user)
         self.assertIn("دسترسی لازم", message.answer.await_args.args[0])
+
+        message.answer.reset_mock()
+        inactive_user = SimpleNamespace(
+            has_bot_access=True,
+            account_status=UserAccountStatus.INACTIVE,
+            messenger_blocked_at=object(),
+            messenger_grace_expires_at=None,
+        )
+        await show_my_profile_and_change_keyboard(message, state=SimpleNamespace(), user=inactive_user)
+        self.assertIn("پیام‌رسان", message.answer.await_args.args[0])
 
         message = SimpleNamespace(bot=SimpleNamespace(), chat=SimpleNamespace(id=10), answer=AsyncMock(return_value=SimpleNamespace(message_id=77)))
         user = SimpleNamespace(
             id=5,
             has_bot_access=True,
+            account_status=UserAccountStatus.ACTIVE,
+            messenger_blocked_at=None,
+            messenger_grace_expires_at=None,
             account_name="acc",
             full_name="Ali",
             telegram_id=111,

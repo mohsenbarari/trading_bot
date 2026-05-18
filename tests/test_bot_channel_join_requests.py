@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from bot.handlers.start import handle_channel_join_request
 from bot.utils.channel_invites import create_channel_join_request_link
+from core.enums import UserAccountStatus
 
 
 class FakeExecuteResult:
@@ -66,7 +67,12 @@ class ChannelJoinRequestTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_channel_join_request_approves_registered_user(self):
         join_request = make_join_request()
-        user = SimpleNamespace(telegram_id=7, has_bot_access=True, is_deleted=False)
+        user = SimpleNamespace(
+            telegram_id=7,
+            has_bot_access=True,
+            is_deleted=False,
+            account_status=UserAccountStatus.ACTIVE,
+        )
 
         with patch(
             "bot.handlers.start.AsyncSessionLocal",
@@ -96,6 +102,28 @@ class ChannelJoinRequestTests(unittest.IsolatedAsyncioTestCase):
         )
         join_request.bot.approve_chat_join_request.assert_not_awaited()
         self.assertIn("ثبت\u200cنام", join_request.bot.send_message.await_args.kwargs["text"])
+
+    async def test_handle_channel_join_request_declines_inactive_user(self):
+        join_request = make_join_request(user_id=10)
+        user = SimpleNamespace(
+            telegram_id=10,
+            has_bot_access=True,
+            is_deleted=False,
+            account_status=UserAccountStatus.INACTIVE,
+        )
+
+        with patch(
+            "bot.handlers.start.AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(user)),
+        ), patch("bot.handlers.start.settings", SimpleNamespace(channel_id=-1003367566585)):
+            await handle_channel_join_request(join_request)
+
+        join_request.bot.decline_chat_join_request.assert_awaited_once_with(
+            chat_id=-1003367566585,
+            user_id=10,
+        )
+        join_request.bot.approve_chat_join_request.assert_not_awaited()
+        self.assertIn("غیرفعال", join_request.bot.send_message.await_args.kwargs["text"])
 
 
 if __name__ == "__main__":

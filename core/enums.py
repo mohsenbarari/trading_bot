@@ -6,6 +6,7 @@ import enum
 
 __all__ = [
     "UserRole",
+    "UserAccountStatus",
     "NotificationLevel",
     "NotificationCategory",
     "MessageType",
@@ -20,6 +21,11 @@ class UserRole(str, enum.Enum):
     POLICE = "پلیس"
     MIDDLE_MANAGER = "مدیر میانی"
     SUPER_ADMIN = "مدیر ارشد"
+
+
+class UserAccountStatus(str, enum.Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
 
 class NotificationLevel(str, enum.Enum):
     # 👇 مقادیر باید با دیتابیس (مایگریشن) یکسان باشند (حروف بزرگ)

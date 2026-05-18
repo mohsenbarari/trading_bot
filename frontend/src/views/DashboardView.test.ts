@@ -56,6 +56,7 @@ describe('DashboardView.vue', () => {
         id: 12,
         full_name: 'رضا محمدی',
         account_name: 'reza12',
+        account_status: 'active',
         has_bot_access: true,
         trading_restricted_until: null,
       }),
@@ -78,21 +79,42 @@ describe('DashboardView.vue', () => {
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(3, '/market')
   })
 
-  it('shows the blocked warning when the user has lost bot access', async () => {
+  it('shows the inactive warning and blocks market navigation for inactive accounts', async () => {
     dashboardViewMocks.apiFetchMock.mockResolvedValue(
       makeJsonResponse({
         id: 13,
         full_name: 'کاربر مسدود',
         account_name: 'blocked13',
-        has_bot_access: false,
+        account_status: 'inactive',
+        has_bot_access: true,
         trading_restricted_until: '2026-05-20T12:00:00Z',
       }),
     )
 
     const wrapper = await mountView()
 
-    expect(wrapper.text()).toContain('حساب کاربری مسدود شده')
+    expect(wrapper.text()).toContain('حساب کاربری غیرفعال شده است')
     expect(wrapper.text()).not.toContain('معاملات محدود شده')
+
+    await wrapper.get('.hero-btn').trigger('click')
+    expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalled()
+  })
+
+  it('shows the legacy bot restriction warning separately from inactive status', async () => {
+    dashboardViewMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        id: 16,
+        full_name: 'کاربر بات',
+        account_name: 'bot16',
+        account_status: 'active',
+        has_bot_access: false,
+        trading_restricted_until: null,
+      }),
+    )
+
+    const wrapper = await mountView()
+
+    expect(wrapper.text()).toContain('دسترسی ربات محدود شده است')
   })
 
   it('shows the restricted trading warning with a formatted deadline when the user is temporarily restricted', async () => {
@@ -101,6 +123,7 @@ describe('DashboardView.vue', () => {
         id: 14,
         full_name: 'کاربر محدود',
         account_name: 'limited14',
+        account_status: 'active',
         has_bot_access: true,
         trading_restricted_until: '2026-05-20T12:00:00Z',
       }),
@@ -118,6 +141,7 @@ describe('DashboardView.vue', () => {
         id: 15,
         full_name: 'کاربر خروج',
         account_name: 'logout15',
+        account_status: 'active',
         has_bot_access: true,
         trading_restricted_until: null,
       }))

@@ -21,6 +21,7 @@ describe('currentUser utils', () => {
       role: 'عادی',
       full_name: 'علی',
       account_name: 'ali',
+      account_status: 'inactive',
       is_accountant: true,
     })
 
@@ -29,9 +30,11 @@ describe('currentUser utils', () => {
       role: 'عادی',
       full_name: 'علی',
       account_name: 'ali',
+      account_status: 'inactive',
       is_accountant: true,
     })
     expect(readCachedCurrentUserSummary()).toMatchObject({
+      account_status: 'inactive',
       is_accountant: true,
     })
   })
@@ -44,6 +47,7 @@ describe('currentUser utils', () => {
         role: 'مدیر ارشد',
         full_name: 'مینا',
         account_name: 'mina',
+        account_status: 'active',
         is_accountant: false,
       }),
     })
@@ -55,6 +59,7 @@ describe('currentUser utils', () => {
     expect(result).toMatchObject({
       id: 9,
       role: 'مدیر ارشد',
+      account_status: 'active',
       is_accountant: false,
     })
   })

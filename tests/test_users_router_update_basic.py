@@ -8,7 +8,7 @@ from fastapi import HTTPException
 import schemas
 from api.routers.users import update_user
 from api.routers.users import terminate_user_sessions
-from core.enums import UserRole
+from core.enums import UserRole, UserAccountStatus
 
 
 def make_user(**overrides):
@@ -16,6 +16,10 @@ def make_user(**overrides):
         "id": 5,
         "telegram_id": 999,
         "role": UserRole.WATCH,
+        "account_status": UserAccountStatus.ACTIVE,
+        "deactivated_at": None,
+        "messenger_grace_expires_at": None,
+        "messenger_blocked_at": None,
         "is_deleted": False,
         "deleted_at": None,
         "has_bot_access": True,
@@ -122,6 +126,33 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         block_mock.assert_not_awaited()
         limit_mock.assert_not_awaited()
         create_task_mock.assert_not_called()
+
+    async def test_update_user_routes_account_status_through_transition_service(self):
+        user = make_user(account_status=UserAccountStatus.ACTIVE)
+        db = FakeDB(user)
+        update = schemas.UserUpdate(account_status=UserAccountStatus.INACTIVE)
+
+        with patch("api.routers.users.is_user_accountant", new=AsyncMock(return_value=False)), patch(
+            "api.routers.users.track_limitation_changes", return_value=([], False, False)
+        ), patch(
+            "api.routers.users.transition_user_account_status", new=AsyncMock()
+        ) as transition_mock, patch(
+            "api.routers.users.sync_mandatory_channel_for_user_state_change", new=AsyncMock()
+        ), patch(
+            "core.cache.invalidate_user_cache", new=AsyncMock()
+        ), patch(
+            "api.routers.users.send_bot_access_notification", new=AsyncMock()
+        ), patch(
+            "api.routers.users.send_block_notification", new=AsyncMock()
+        ), patch(
+            "api.routers.users.send_limitation_notification", new=AsyncMock()
+        ), patch("api.routers.users.asyncio.create_task"):
+            result = await update_user(5, update, db=db)
+
+        self.assertIs(result, user)
+        transition_mock.assert_awaited_once_with(db, user, UserAccountStatus.INACTIVE)
+        self.assertEqual(db.commits, 1)
+        self.assertEqual(db.refreshes, 1)
 
     async def test_update_user_persists_block_capability_settings(self):
         user = make_user(can_block_users=True, max_blocked_users=10)
