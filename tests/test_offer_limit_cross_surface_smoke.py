@@ -198,6 +198,9 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
             "core.services.trade_service.validate_competitive_price",
             new=AsyncMock(return_value=(True, None)),
         ), patch("api.routers.offers.current_server", return_value="foreign"), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
+        ), patch(
             "api.routers.offers.send_offer_to_channel",
             new=AsyncMock(return_value=777),
         ), patch("api.routers.offers.increment_user_counter", new=AsyncMock()), patch(
@@ -243,6 +246,9 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
             "core.trading_settings._run_async_settings_loader_sync",
             return_value=live_settings,
         ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
+        ), patch(
             "bot.handlers.trade_create.AsyncSessionLocal",
             return_value=FakeSessionContext(ScalarSession([shared_count["value"]])),
         ):
@@ -285,6 +291,9 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.utils.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
             "core.services.trade_service.validate_competitive_price",
             new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
         ), patch("core.utils.increment_user_counter", new=AsyncMock()), patch(
             "bot.handlers.trade_create.settings",
             SimpleNamespace(channel_id=-100, bot_username="botname"),
@@ -311,6 +320,9 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         ), patch("core.cache.set_active_offer_count", new=AsyncMock()), patch(
             "core.trading_settings._run_async_settings_loader_sync",
             return_value=live_settings,
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await create_offer(make_offer(), db=ApiGuardDB(shared_count), current_user=make_user())

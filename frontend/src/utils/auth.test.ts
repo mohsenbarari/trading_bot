@@ -71,6 +71,32 @@ describe('auth utils', () => {
     await expect(tryRefreshToken()).resolves.toBe('network_error')
   })
 
+  it('handles missing refresh tokens, malformed JWTs, and concurrent refresh reuse', async () => {
+    const { isAuthenticated, tryRefreshToken } = await import(authModulePath)
+
+    await expect(tryRefreshToken()).resolves.toBe('auth_error')
+    localStorage.setItem('auth_token', 'not-a-jwt')
+    await expect(isAuthenticated()).resolves.toBe(false)
+
+    localStorage.setItem('refresh_token', 'shared-refresh')
+    let resolveRefresh!: (value: unknown) => void
+    fetchMock.mockReturnValueOnce(new Promise((resolve) => {
+      resolveRefresh = resolve
+    }))
+
+    const first = tryRefreshToken()
+    const second = tryRefreshToken()
+    resolveRefresh({
+      ok: true,
+      json: async () => ({ access_token: 'shared-auth', refresh_token: 'shared-next' }),
+    })
+
+    await expect(first).resolves.toBe('success')
+    await expect(second).resolves.toBe('success')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(localStorage.getItem('auth_token')).toBe('shared-auth')
+  })
+
   it('isAuthenticated returns true for a still-valid access token', async () => {
     const futureExp = Math.floor(Date.now() / 1000) + 3600
     localStorage.setItem('auth_token', makeJwt(futureExp))
@@ -188,6 +214,30 @@ describe('auth utils', () => {
     })
   })
 
+  it('authGuard tolerates broken cache, failed profile fetches, and non-admin fallback responses', async () => {
+    const token = makeJwt(Math.floor(Date.now() / 1000) + 3600)
+    localStorage.setItem('auth_token', token)
+    localStorage.setItem('current_user_summary', '{broken-json')
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ id: 10, role: 'عادی', account_status: 'active' }))
+
+    const { authGuard } = await import(authModulePath)
+    const next = vi.fn()
+
+    await authGuard({ path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any, {} as any, next)
+    expect(next).toHaveBeenLastCalledWith('/dashboard')
+
+    next.mockClear()
+    localStorage.removeItem('current_user_summary')
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({}, 400, false))
+    await authGuard({ path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any, {} as any, next)
+    expect(next).toHaveBeenLastCalledWith()
+
+    next.mockClear()
+    fetchMock.mockRejectedValueOnce(new Error('profile unavailable'))
+    await authGuard({ path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any, {} as any, next)
+    expect(next).toHaveBeenLastCalledWith('/dashboard')
+  })
+
   it('apiFetch refreshes on 401 and retries the original request with the new token', async () => {
     localStorage.setItem('auth_token', 'old-auth')
     localStorage.setItem('refresh_token', 'refresh-token')
@@ -220,6 +270,45 @@ describe('auth utils', () => {
     expect(location.href).toBe('/setup-password')
   })
 
+  it('apiFetch logs out blocked users and logs out after a refreshed request returns 401 again', async () => {
+    localStorage.setItem('auth_token', 'auth-token')
+    localStorage.setItem('refresh_token', 'refresh-token')
+    const location = mockLocation()
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: 'User is blocked' }, 403, false))
+
+    const { apiFetch } = await import(authModulePath)
+    await expect(apiFetch('/api/private')).rejects.toThrow('حساب کاربری شما غیرفعال شده است')
+    expect(location.href).toBe('/login')
+    expect(localStorage.getItem('auth_token')).toBeNull()
+
+    localStorage.setItem('auth_token', 'old-auth')
+    localStorage.setItem('refresh_token', 'refresh-token')
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({}, 401, false))
+      .mockResolvedValueOnce(makeJsonResponse({ access_token: 'new-auth', refresh_token: 'new-refresh' }))
+      .mockResolvedValueOnce(makeJsonResponse({}, 401, false))
+
+    await expect(apiFetch('/api/private')).rejects.toThrow('Unauthorized')
+    expect(location.href).toBe('/login')
+    expect(localStorage.getItem('auth_token')).toBeNull()
+  })
+
+  it('setupExpiryTimer refreshes soon-expiring tokens and suspends explicit auth failures', async () => {
+    vi.useFakeTimers()
+    const location = mockLocation()
+    localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 30))
+    localStorage.setItem('refresh_token', 'refresh-token')
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401 })
+
+    const { setupExpiryTimer } = await import(authModulePath)
+    setupExpiryTimer()
+    await vi.advanceTimersByTimeAsync(30000)
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/refresh', expect.objectContaining({ method: 'POST' }))
+    expect(localStorage.getItem('suspended_refresh_token')).toBe('refresh-token')
+    expect(location.href).toBe('/login')
+  })
+
   it('apiFetch marks the app as reconnecting on network errors and clears it after a successful retry', async () => {
     vi.useFakeTimers()
     localStorage.setItem('auth_token', 'auth-token')
@@ -240,5 +329,16 @@ describe('auth utils', () => {
     expect(isAppConnecting.value).toBe(false)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     warnSpy.mockRestore()
+  })
+
+  it('apiFetchJson returns null for 204 and surfaces response details on failures', async () => {
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse(null, 204))
+      .mockResolvedValueOnce(makeJsonResponse({ detail: 'validation failed' }, 422, false))
+
+    const { apiFetchJson } = await import(authModulePath)
+
+    await expect(apiFetchJson('/api/no-content')).resolves.toBeNull()
+    await expect(apiFetchJson('/api/fail')).rejects.toThrow('validation failed')
   })
 })

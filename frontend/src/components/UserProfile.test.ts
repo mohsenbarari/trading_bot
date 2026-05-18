@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const apiFetchMock = vi.fn()
+const userProfileTimingMocks = vi.hoisted(() => ({
+  parseJalaliToIranISOMock: vi.fn(),
+}))
 
 vi.mock('../utils/auth', () => ({
   apiFetch: apiFetchMock,
@@ -11,7 +14,7 @@ vi.mock('../composables/useUserProfileTiming', () => ({
   useUserProfileTiming: () => ({
     countdownRestriction: null,
     countdownLimitation: null,
-    parseJalaliToIranISO: vi.fn(),
+    parseJalaliToIranISO: userProfileTimingMocks.parseJalaliToIranISOMock,
     toEnglishDigits: (value: string) => value,
   }),
 }))
@@ -67,6 +70,7 @@ function findButtonByText(wrapper: ReturnType<typeof mount>, text: string) {
 describe('UserProfile.vue', () => {
   beforeEach(() => {
     apiFetchMock.mockReset()
+    userProfileTimingMocks.parseJalaliToIranISOMock.mockReset()
     localStorage.clear()
     vi.spyOn(window, 'alert').mockImplementation(() => {})
     vi.spyOn(window, 'confirm').mockImplementation(() => true)
@@ -496,5 +500,143 @@ describe('UserProfile.vue', () => {
     expect(window.alert).toHaveBeenCalledWith('خطا در ذخیره سقف بلاک')
     expect((wrapper.get('.max-accountants-input').element as HTMLInputElement).value).toBe('4')
     expect((wrapper.get('.max-blocked-users-input').element as HTMLInputElement).value).toBe('12')
+  })
+
+  it('covers custom date picker helpers and custom block/limit save branches', async () => {
+    const user = makeUser({ id: 34 })
+    userProfileTimingMocks.parseJalaliToIranISOMock
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce('2031-03-21T08:15:00.000Z')
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce('2031-03-21T08:15:00.000Z')
+    apiFetchMock
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        trading_restricted_until: '2031-03-21T08:15:00.000Z',
+      }))
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        max_daily_trades: 2,
+        max_active_commodities: 3,
+        max_daily_requests: 4,
+        limitations_expire_at: '2031-03-21T08:15:00.000Z',
+      }))
+
+    const UserProfile = (await import('./UserProfile.vue')).default
+    const wrapper = mount(UserProfile, {
+      props: {
+        user,
+        isAdminView: true,
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    const vm = wrapper.vm as unknown as {
+      customDate: string
+      customLimitDate: string
+      limitDurationMinutes: number
+      limitMaxTrades: number
+      limitMaxCommodities: number
+      limitMaxRequests: number
+      pickerStep: number
+      tempDatePart: string
+      tempTimePart: string
+      showBlockDateModal: boolean
+      showLimitDateModal: boolean
+      blockTimePickerRef: { modelValue?: unknown } | null
+      limitTimePickerRef: { modelValue?: unknown } | null
+      initDatePicker: (currentValue: string) => void
+      onDateChange: (value: unknown) => void
+      handleNextStep: () => void
+      handleFinalSubmit: () => void
+      updateDatePart: (value: unknown) => void
+      updateTimePart: (value: unknown) => void
+      blockUser: (minutes: number) => Promise<void>
+      blockUserCustom: () => Promise<void>
+      saveLimitations: () => Promise<void>
+    }
+
+    vm.initDatePicker('invalid-date')
+    expect(vm.tempDatePart).toBeTruthy()
+    expect(vm.tempTimePart).toBeTruthy()
+
+    vm.onDateChange('1409/01/01')
+    vm.tempDatePart = ''
+    vm.handleNextStep()
+    expect(vm.pickerStep).toBe(1)
+    vm.tempDatePart = '1409/01/01'
+    vm.handleNextStep()
+    expect(vm.pickerStep).toBe(2)
+
+    vm.updateDatePart('1409/01/02')
+    vm.updateTimePart('08:15')
+    expect(vm.tempTimePart).toBe('08:15')
+    vm.updateTimePart('8:15 AM')
+    expect(vm.tempTimePart).toBe('08:15')
+    vm.updateTimePart(new Date('2031-03-21T12:45:00Z'))
+    expect(vm.tempTimePart).toBe('12:45')
+    vm.updateTimePart(915)
+    expect(vm.tempTimePart).toBe('915')
+
+    vm.showBlockDateModal = true
+    vm.tempDatePart = ''
+    vm.handleFinalSubmit()
+    expect(window.alert).toHaveBeenCalledWith('لطفاً تاریخ را انتخاب کنید.')
+
+    vm.tempDatePart = '1409/01/01'
+    vm.tempTimePart = ''
+    vm.blockTimePickerRef = { modelValue: '08:15' }
+    vm.handleFinalSubmit()
+    expect(vm.customDate).toBe('1409/01/01 08:15')
+    expect(vm.showBlockDateModal).toBe(false)
+
+    await vm.blockUser(0)
+    await flushPromises()
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/users/34', expect.objectContaining({ method: 'PUT' }))
+
+    vm.customDate = '1409/01/01 08:15'
+    await vm.blockUserCustom()
+    expect(window.alert).toHaveBeenCalledWith('تاریخ نامعتبر است.')
+
+    vm.customDate = '1409/01/01 08:15'
+    await vm.blockUserCustom()
+    await flushPromises()
+    expect(userProfileTimingMocks.parseJalaliToIranISOMock).toHaveBeenCalledWith('1409/01/01 08:15')
+
+    vm.limitDurationMinutes = -1
+    vm.limitMaxTrades = 2
+    vm.limitMaxCommodities = 3
+    vm.limitMaxRequests = 4
+    vm.customLimitDate = '1409/01/01 08:15'
+    await vm.saveLimitations()
+    expect(window.alert).toHaveBeenCalledWith('تاریخ نامعتبر است.')
+
+    vm.showLimitDateModal = true
+    vm.tempDatePart = '1409/01/01'
+    vm.tempTimePart = ''
+    vm.limitTimePickerRef = { modelValue: new Date('2031-03-21T08:15:00Z') }
+    vm.handleFinalSubmit()
+    expect(vm.customLimitDate).toBe('1409/01/01 08:15')
+    expect(vm.showLimitDateModal).toBe(false)
+
+    await vm.saveLimitations()
+    await flushPromises()
+    expect(apiFetchMock.mock.calls).toContainEqual([
+      '/api/users/34',
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          max_daily_trades: 2,
+          max_active_commodities: 3,
+          max_daily_requests: 4,
+          limitations_expire_at: '2031-03-21T08:15:00.000Z',
+        }),
+      },
+    ])
   })
 })

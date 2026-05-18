@@ -57,6 +57,7 @@ vi.mock('../../composables/chat/useChatFileHandler', async () => {
 let nextPlayShouldReject = false
 
 class FakeAudio extends EventTarget {
+  static instances: FakeAudio[] = []
   src: string
   preload = ''
   duration = 8
@@ -66,6 +67,7 @@ class FakeAudio extends EventTarget {
   constructor(src: string) {
     super()
     this.src = src
+    FakeAudio.instances.push(this)
   }
 
   async play() {
@@ -247,6 +249,10 @@ function mountLocationMessage(messageOverrides: Record<string, unknown> = {}) {
   })
 }
 
+function makeTouch(clientX: number, clientY: number) {
+  return { clientX, clientY }
+}
+
 describe('ChatMessageItem.vue', () => {
   const originalAudio = globalThis.Audio
 
@@ -264,6 +270,7 @@ describe('ChatMessageItem.vue', () => {
     chatMessageItemMocks.canShareFilesMock.mockReturnValue(false)
     Object.keys(chatMessageItemMocks.cachedFileRegistry).forEach((key) => delete chatMessageItemMocks.cachedFileRegistry[key])
     nextPlayShouldReject = false
+    FakeAudio.instances = []
     localStorage.setItem('auth_token', 'test-token')
     vi.stubGlobal('Audio', FakeAudio)
     vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -392,6 +399,11 @@ describe('ChatMessageItem.vue', () => {
 
     await locationWrapper.get('.msg-location').trigger('click')
     expect(locationWrapper.emitted('location-click')).toHaveLength(1)
+
+    const fallbackLocationWrapper = mountLocationMessage({
+      content: JSON.stringify({ lat: 35.7, lng: 51.4 }),
+    })
+    expect(fallbackLocationWrapper.find('.location-preview.fallback').exists()).toBe(true)
   })
 
   it('opens document messages through the shared file handler and falls back to legacy download when needed', async () => {
@@ -413,6 +425,48 @@ describe('ChatMessageItem.vue', () => {
     })
     await legacyWrapper.get('.msg-document').trigger('click')
     expect(legacyWrapper.emitted('download')).toHaveLength(1)
+
+    const busyWrapper = mountDocumentMessage({
+      is_downloading: true,
+      download_progress: 12,
+    })
+    await busyWrapper.get('.msg-document').trigger('click')
+    expect(chatMessageItemMocks.handleFileClickMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('formats document variants, busy progress text, and missing file ids', async () => {
+    const noExtensionWrapper = mountDocumentMessage({
+      content: JSON.stringify({ file_id: 'doc-json', file_name: 'payload', mime_type: 'application/json', size: 4096 }),
+    })
+    expect(noExtensionWrapper.find('.doc-extension-badge').text()).toBe('JSON')
+    expect(noExtensionWrapper.find('.doc-icon').classes()).toContain('doc-generic')
+    expect(noExtensionWrapper.find('.doc-size').text()).toContain('4 KB')
+
+    const archiveWrapper = mountDocumentMessage({
+      content: JSON.stringify({ file_id: 'doc-zip', file_name: 'archive.7z', mime_type: 'application/x-7z-compressed' }),
+    })
+    expect(archiveWrapper.find('.doc-icon').classes()).toContain('doc-archive')
+
+    const sendingWrapper = mountDocumentMessage({
+      is_sending: true,
+      upload_loaded: 512,
+      upload_total: 2048,
+    })
+    expect(sendingWrapper.find('.doc-size').text()).toContain('512 Bytes')
+
+    const downloadingWrapper = mountDocumentMessage({
+      is_downloading: true,
+      download_progress: 73,
+    })
+    expect(downloadingWrapper.find('.doc-size').text()).toContain('73%')
+
+    const missingFileIdWrapper = mountDocumentMessage({
+      content: JSON.stringify({ file_name: 'legacy.bin', mime_type: 'application/octet-stream' }),
+    })
+    await missingFileIdWrapper.get('.msg-document').trigger('click')
+    expect(missingFileIdWrapper.emitted('download')).toHaveLength(1)
+    await (missingFileIdWrapper.vm as any).handleDocumentShareClick(new Event('click'))
+    expect(chatMessageItemMocks.shareFileMock).not.toHaveBeenCalledWith('', expect.anything(), expect.anything(), expect.anything())
   })
 
   it('emits the correct cancel event for busy document bubbles', async () => {
@@ -675,5 +729,221 @@ describe('ChatMessageItem.vue', () => {
       'image/jpeg',
       expect.stringContaining('/api/chat/files/image-71?token=test-token'),
     )
+  })
+
+  it('handles wrapper click, context menu, long press selection, and swipe-to-reply gestures', async () => {
+    vi.useFakeTimers()
+    Object.defineProperty(navigator, 'vibrate', {
+      configurable: true,
+      value: vi.fn(),
+    })
+
+    const wrapper = mountTextMessage()
+    await wrapper.get('.message-wrapper').trigger('click')
+    expect(wrapper.emitted('click-message')).toHaveLength(1)
+
+    await wrapper.get('.message-wrapper').trigger('contextmenu')
+    expect(wrapper.emitted('context-menu')).toHaveLength(1)
+
+    await wrapper.get('.message-wrapper').trigger('touchstart', { touches: [makeTouch(10, 20)] })
+    await vi.advanceTimersByTimeAsync(500)
+    expect(navigator.vibrate).toHaveBeenCalledWith(50)
+    expect(wrapper.emitted('select')).toHaveLength(1)
+    await wrapper.get('.message-wrapper').trigger('touchend')
+
+    const receivedSwipeWrapper = mountTextMessage({ id: 62, sender_id: 9 })
+    await receivedSwipeWrapper.get('.message-bubble').trigger('touchstart', { touches: [makeTouch(0, 0)] })
+    await receivedSwipeWrapper.get('.message-bubble').trigger('touchmove', { touches: [makeTouch(160, 4)] })
+    expect(receivedSwipeWrapper.find('.swipe-reply-icon').exists()).toBe(true)
+    await receivedSwipeWrapper.get('.message-bubble').trigger('touchend')
+    expect(receivedSwipeWrapper.emitted('swipe-reply')).toHaveLength(1)
+
+    const sentSwipeWrapper = mountTextMessage({ id: 63, sender_id: 7 })
+    await sentSwipeWrapper.get('.message-bubble').trigger('touchstart', { touches: [makeTouch(160, 0)] })
+    await sentSwipeWrapper.get('.message-bubble').trigger('touchmove', { touches: [makeTouch(0, 4)] })
+    await sentSwipeWrapper.get('.message-bubble').trigger('touchend')
+    expect(sentSwipeWrapper.emitted('swipe-reply')).toHaveLength(1)
+
+    const verticalSwipeWrapper = mountTextMessage({ id: 64, sender_id: 9 })
+    await verticalSwipeWrapper.get('.message-bubble').trigger('touchstart', { touches: [makeTouch(0, 0)] })
+    await verticalSwipeWrapper.get('.message-bubble').trigger('touchmove', { touches: [makeTouch(10, 80)] })
+    await verticalSwipeWrapper.get('.message-bubble').trigger('touchend')
+    expect(verticalSwipeWrapper.emitted('swipe-reply')).toBeUndefined()
+
+    wrapper.unmount()
+    receivedSwipeWrapper.unmount()
+    sentSwipeWrapper.unmount()
+    verticalSwipeWrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('renders highlighted text safely plus sticker, video, cached document, and deferred hydration variants', async () => {
+    const highlightedWrapper = mountTextMessage({
+      content: '<b>needle?</b>',
+    })
+    await highlightedWrapper.setProps({ searchQuery: 'needle?' })
+    expect(highlightedWrapper.html()).toContain('&lt;b&gt;')
+    expect(highlightedWrapper.find('mark.in-bubble-highlight').text()).toBe('needle?')
+
+    const stickerWrapper = mountTextMessage({
+      message_type: 'sticker',
+      content: '🙂',
+    })
+    expect(stickerWrapper.find('.msg-sticker').text()).toBe('🙂')
+
+    const videoWrapper = mountMediaMessage({
+      message_type: 'video',
+      content: JSON.stringify({ file_id: 'video-1', file_name: 'clip.mp4', thumbnail: 'data:image/jpeg;base64,thumb', width: 1920, height: 1080 }),
+      local_blob_url: 'blob:video',
+    })
+    expect(videoWrapper.find('video').attributes('src')).toBe('blob:video')
+    expect(videoWrapper.find('.video-play-indicator').exists()).toBe(true)
+
+    chatMessageItemMocks.cachedFileRegistry['doc-91'] = true
+    const cachedDocWrapper = mountDocumentMessage({
+      content: JSON.stringify({ file_id: 'doc-91', file_name: 'sheet.xlsx', mime_type: 'application/vnd.ms-excel', size: 0 }),
+    })
+    expect(cachedDocWrapper.find('.doc-icon').classes()).toContain('doc-excel')
+    expect(cachedDocWrapper.find('.doc-download-icon').exists()).toBe(false)
+    expect(cachedDocWrapper.find('.doc-extension-badge').text()).toBe('XLSX')
+
+    let visibilityCallback: (() => void) | undefined
+    const onLoad = vi.fn()
+    chatMessageItemMocks.observeVisibilityMock.mockImplementationOnce(((
+      _element: Element,
+      callback: () => void,
+    ) => {
+      visibilityCallback = callback
+      return vi.fn()
+    }) as unknown as () => () => void)
+    const hydratedWrapper = mountMediaMessage({}, { onLoad })
+    visibilityCallback?.()
+    await flushPromises()
+    expect(onLoad).toHaveBeenCalledTimes(1)
+    expect(chatMessageItemMocks.observeVisibilityMock).toHaveBeenCalled()
+    hydratedWrapper.unmount()
+  })
+
+  it('falls back from local media share seeding to the authenticated API and shows a toast on share rejection', async () => {
+    chatMessageItemMocks.canShareFilesMock.mockReturnValue(true)
+    chatMessageItemMocks.shareFileMock.mockResolvedValue(false)
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === 'blob:broken-local') {
+        throw new Error('local blob revoked')
+      }
+      if (url.includes('/api/chat/files/image-71')) {
+        return new Response(new Blob(['api-image'], { type: 'image/webp' }), { status: 200 })
+      }
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const wrapper = mountMediaMessage({}, {
+      imageCache: { 'image-71': 'blob:broken-local' },
+    })
+
+    await wrapper.get('.media-share-btn').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith('blob:broken-local')
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/chat/files/image-71?token=test-token'), { credentials: 'include' })
+    expect(chatMessageItemMocks.seedFileCacheMock).toHaveBeenCalledWith(
+      'image-71',
+      expect.anything(),
+      'image-image-71.jpg',
+      expect.any(String),
+    )
+    expect(chatMessageItemMocks.shareFileMock).toHaveBeenCalledWith(
+      'image-71',
+      'image-image-71.jpg',
+      'image/jpeg',
+      expect.stringContaining('/api/chat/files/image-71?token=test-token'),
+    )
+    expect(document.getElementById('chat-file-share-toast')?.textContent).toContain('اشتراک‌گذاری این فایل در این مرورگر پشتیبانی نمی‌شود')
+    document.getElementById('chat-file-share-toast')?.remove()
+  })
+
+  it('seeks voice playback from the waveform and pauses when another voice becomes active', async () => {
+    const wrapper = mountVoiceMessage()
+    const waveform = wrapper.get('.voice-waveform')
+    Object.defineProperty(waveform.element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 10, width: 100 }),
+    })
+
+    await waveform.trigger('click', { clientX: 60 })
+    await flushPromises()
+
+    expect(chatMessageItemMocks.audioStore!.currentPlayingId).toBe(51)
+    expect(wrapper.findAll('.voice-wave-bar.is-played').length).toBeGreaterThan(0)
+
+    chatMessageItemMocks.audioStore!.setCurrentPlaying(999)
+    await flushPromises()
+
+    expect(wrapper.find('.voice-play-btn').classes()).not.toContain('is-active')
+  })
+
+  it('updates voice loading, progress, ended, and error states from native audio events', async () => {
+    const wrapper = mountVoiceMessage()
+
+    await wrapper.find('.voice-play-btn').trigger('click')
+    await flushPromises()
+
+    const audio = FakeAudio.instances.at(-1)!
+    audio.duration = 10
+    audio.currentTime = 4
+    audio.dispatchEvent(new Event('timeupdate'))
+    await flushPromises()
+    expect(wrapper.find('.voice-time').text()).toBe('0:04')
+    expect(wrapper.findAll('.voice-wave-bar.is-played').length).toBeGreaterThan(0)
+
+    audio.dispatchEvent(new Event('waiting'))
+    await flushPromises()
+    expect(wrapper.find('.voice-state-dot.is-loading').exists()).toBe(true)
+
+    audio.dispatchEvent(new Event('canplay'))
+    await flushPromises()
+    expect(wrapper.find('.voice-state-dot.is-loading').exists()).toBe(false)
+
+    audio.dispatchEvent(new Event('ended'))
+    await flushPromises()
+    expect(chatMessageItemMocks.audioStore!.currentPlayingId).toBeNull()
+    expect(wrapper.find('.voice-time').text()).toBe('0:10')
+
+    await wrapper.find('.voice-play-btn').trigger('click')
+    await flushPromises()
+    const nextAudio = FakeAudio.instances.at(-1)!
+    nextAudio.dispatchEvent(new Event('error'))
+    await flushPromises()
+    expect(wrapper.find('.msg-voice').classes()).toContain('is-error')
+  })
+
+  it('covers media fallback helpers and failed API seeding paths', async () => {
+    chatMessageItemMocks.canShareFilesMock.mockReturnValue(true)
+    localStorage.removeItem('auth_token')
+    const pngWrapper = mountMediaMessage({
+      content: JSON.stringify({ file_id: 'png-1', file_name: 'photo.png' }),
+    })
+    expect((pngWrapper.vm as any).getMediaMimeFallback()).toBe('image/png')
+    expect((pngWrapper.vm as any).getMediaFileNameFallback()).toBe('photo.png')
+    expect((pngWrapper.vm as any).getMediaApiUrl()).toBe('')
+    expect(await (pngWrapper.vm as any).ensureMediaInFileCache()).toBe(false)
+
+    localStorage.setItem('auth_token', 'test-token')
+    const heicWrapper = mountMediaMessage({
+      content: JSON.stringify({ file_id: 'heic-1', file_name: 'capture.heic' }),
+    })
+    expect((heicWrapper.vm as any).getMediaMimeFallback()).toBe('image/heic')
+
+    const voiceWrapper = mountVoiceMessage({
+      content: JSON.stringify({ file_id: 'voice-api' }),
+    })
+    expect((voiceWrapper.vm as any).getMediaMimeFallback()).toBe('audio/webm')
+    expect((voiceWrapper.vm as any).getMediaFileNameFallback()).toBe('voice-voice-api.webm')
+
+    const fetchMock = vi.fn(async () => new Response('not found', { status: 404 }))
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await (voiceWrapper.vm as any).ensureMediaInFileCache()).toBe(false)
   })
 })

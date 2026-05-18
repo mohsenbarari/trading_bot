@@ -65,7 +65,7 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         member_mock.assert_awaited_once_with(db, chat=chat, user_id=5)
         list_mock.assert_awaited_once_with(db, chat=chat, limit=50, before_id=None, around_id=None)
-        serialize_mock.assert_awaited_once_with(db, messages)
+        serialize_mock.assert_awaited_once_with(db, messages, viewer_user_id=5)
         self.assertIs(result, serialized)
 
     async def test_send_room_message_uses_group_branch_and_publishes(self):
@@ -109,7 +109,7 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
             forwarded_from_id=20,
         )
         users_mock.assert_awaited_once_with(db, chat_id=70)
-        serialize_message_mock.assert_awaited_once_with(db, message)
+        serialize_message_mock.assert_awaited_once_with(db, message, viewer_user_id=5)
         publish_mock.assert_awaited_once_with(
             chat=chat,
             message=message,
@@ -160,7 +160,7 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
             forwarded_from_id=None,
         )
         users_mock.assert_awaited_once_with(db, chat_id=71)
-        serialize_message_mock.assert_awaited_once_with(db, message)
+        serialize_message_mock.assert_awaited_once_with(db, message, viewer_user_id=5)
         publish_mock.assert_awaited_once_with(
             chat=chat,
             message=message,

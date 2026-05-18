@@ -965,6 +965,64 @@ describe('AttachmentMenu.vue', () => {
     vi.useRealTimers()
   })
 
+  it('keeps an accurate single GPS reading blocked when the second confirmation never becomes reliable', async () => {
+    vi.useFakeTimers()
+    Object.defineProperty(window, 'isSecureContext', {
+      configurable: true,
+      value: true,
+    })
+
+    const readings = [
+      makeGeoPosition(35.7001, 51.4002, 25),
+      makeGeoPosition(35.70011, 51.40021, 260),
+      makeGeoPosition(35.70012, 51.40022, 22),
+      makeGeoPosition(35.70013, 51.40023, 280),
+    ]
+    const getCurrentPosition = vi.fn((resolve: PositionCallback) => {
+      resolve(readings.shift() ?? makeGeoPosition(35.70014, 51.40024, 250))
+    })
+
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition,
+        watchPosition: vi.fn(() => 41),
+        clearWatch: vi.fn(),
+      },
+    })
+
+    const wrapper = mountAttachmentMenu()
+    const vm = wrapper.vm as unknown as {
+      activeTab: 'gallery' | 'file' | 'location'
+      selectedLatLng: { lat: number; lng: number } | null
+      detectedLocationAccuracyM: number | null
+      hasConfirmedAutoLocation: boolean
+      hasManualLocationSelection: boolean
+      locationStatusMessage: string
+      locationStatusTone: 'info' | 'error'
+      isLocating: boolean
+      canSendLocation: boolean
+      goToMyLocation: (silent?: boolean) => Promise<void>
+    }
+
+    vm.activeTab = 'location'
+    await nextTick()
+    vi.clearAllTimers()
+    await vm.goToMyLocation()
+    await flushPromises()
+
+    expect(getCurrentPosition.mock.calls.length).toBeGreaterThanOrEqual(4)
+    expect(vm.hasConfirmedAutoLocation).toBe(false)
+    expect(vm.hasManualLocationSelection).toBe(false)
+    expect(vm.selectedLatLng).toEqual({ lat: 35.70012, lng: 51.40022 })
+    expect(vm.detectedLocationAccuracyM).toBe(22)
+    expect(vm.locationStatusTone).toBe('error')
+    expect(vm.locationStatusMessage).toContain('تایید دوم')
+    expect(vm.canSendLocation).toBe(false)
+    expect(vm.isLocating).toBe(false)
+    vi.useRealTimers()
+  })
+
   it('switches to native fallback with a descriptive hint when inline camera startup fails', async () => {
     const getUserMedia = vi.fn(async () => {
       throw { name: 'NotAllowedError', message: 'permission denied' }
@@ -1308,6 +1366,106 @@ describe('AttachmentMenu.vue', () => {
     expect(vm.cameraZoomValue).toBe(2)
     expect(warnSpy).toHaveBeenCalledWith('Camera zoom apply failed:', expect.any(Error))
 
+    warnSpy.mockRestore()
+  })
+
+  it('covers camera queue no-ops, capture failures, preview cleanup, and native capture routing', async () => {
+    const photoClick = vi.fn()
+    const videoClick = vi.fn()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const originalRandomUUID = globalThis.crypto.randomUUID
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      configurable: true,
+      value: undefined,
+    })
+
+    const wrapper = mountAttachmentMenu()
+    const vm = wrapper.vm as unknown as {
+      cameraPhotoInput: { click: () => void } | null
+      cameraVideoInput: { click: () => void } | null
+      cameraPreviewRef: HTMLVideoElement | null
+      cameraStream: { getTracks: () => Array<{ stop: () => void }> } | null
+      capturedCameraMedia: Array<{ id: string; file: File; type: 'photo' | 'video'; previewUrl: string }>
+      mediaRecorder: { state: string; onstop: (() => void) | null; stop: () => void } | null
+      createCapturedMediaId: () => string
+      createCameraAlbumId: () => string
+      revokeCapturedMediaPreview: (url?: string) => void
+      removeCapturedMedia: (itemId: string) => void
+      sendCapturedMediaQueue: () => Promise<void>
+      capturePhoto: () => Promise<void>
+      stopCameraTracks: () => void
+      cleanupCamera: (discardRecording?: boolean, clearCapturedMedia?: boolean) => void
+      supportsInlineCameraPreview: () => boolean
+      openNativeCameraCapture: (mode?: 'photo' | 'video') => void
+      attachCameraStream: (stream: MediaStream) => Promise<void>
+      handleCameraZoomInput: (event: Event) => void
+      nudgeCameraZoom: (direction: -1 | 1) => void
+    }
+
+    expect(vm.createCapturedMediaId()).toMatch(/^camera_capture_/)
+    expect(vm.createCameraAlbumId()).toMatch(/^camera_album_/)
+
+    vm.revokeCapturedMediaPreview('https://example.test/file.jpg')
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('https://example.test/file.jpg')
+
+    vm.removeCapturedMedia('missing')
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(expect.stringContaining('missing'))
+
+    await vm.sendCapturedMediaQueue()
+    expect(wrapper.emitted('select-media')).toBeUndefined()
+
+    vm.cameraPhotoInput = { click: photoClick }
+    vm.cameraVideoInput = { click: videoClick }
+    vm.openNativeCameraCapture('photo')
+    vm.openNativeCameraCapture('video')
+    expect(photoClick).toHaveBeenCalledTimes(1)
+    expect(videoClick).toHaveBeenCalledTimes(1)
+
+    expect(vm.supportsInlineCameraPreview()).toBe(false)
+
+    await vm.capturePhoto()
+    expect(window.alert).not.toHaveBeenCalledWith('خطا در ثبت تصویر')
+
+    const pause = vi.fn(() => {
+      throw new Error('pause failed')
+    })
+    const preview = document.createElement('video')
+    Object.defineProperty(preview, 'pause', { configurable: true, value: pause })
+    Object.defineProperty(preview, 'srcObject', { configurable: true, writable: true, value: null })
+    const stop = vi.fn()
+    vm.cameraPreviewRef = preview
+    vm.cameraStream = { getTracks: () => [{ stop }] }
+    vm.stopCameraTracks()
+    expect(stop).toHaveBeenCalled()
+
+    vm.cameraPreviewRef = null
+    await vm.attachCameraStream({} as MediaStream)
+    expect(warnSpy).not.toHaveBeenCalledWith('Camera preview play failed:', expect.anything())
+
+    const failingPreview = document.createElement('video')
+    Object.defineProperty(failingPreview, 'play', { configurable: true, value: vi.fn(async () => { throw new Error('play failed') }) })
+    Object.defineProperty(failingPreview, 'srcObject', { configurable: true, writable: true, value: null })
+    vm.cameraPreviewRef = failingPreview
+    await vm.attachCameraStream({} as MediaStream)
+    expect(warnSpy).toHaveBeenCalledWith('Camera preview play failed:', expect.any(Error))
+
+    vm.handleCameraZoomInput({ target: null } as unknown as Event)
+    vm.handleCameraZoomInput({ target: { value: 'not-a-number' } } as unknown as Event)
+    vm.nudgeCameraZoom(1)
+
+    vm.capturedCameraMedia = [{
+      id: 'keep',
+      file: new File(['keep'], 'keep.jpg', { type: 'image/jpeg' }),
+      type: 'photo',
+      previewUrl: 'blob:keep',
+    }]
+    vm.cleanupCamera(true, false)
+    expect(vm.capturedCameraMedia).toHaveLength(1)
+
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      configurable: true,
+      value: originalRandomUUID,
+    })
     warnSpy.mockRestore()
   })
 
@@ -1770,5 +1928,77 @@ describe('AttachmentMenu.vue', () => {
     expect(deniedVm.locationStatusTone).toBe('error')
     expect(deniedVm.locationStatusMessage).toContain('مسدود است')
     expect(deniedVm.isLocating).toBe(false)
+  })
+
+  it('falls back through precise and watch geolocation paths before blocking unconfirmed accurate fixes', async () => {
+    Object.defineProperty(window, 'isSecureContext', {
+      configurable: true,
+      value: true,
+    })
+
+    const geoTimeout = { code: 3, message: 'timeout', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 } as GeolocationPositionError
+    const geoUnavailable = { code: 2, message: 'unavailable', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 } as GeolocationPositionError
+    const getCurrentPosition = vi.fn((resolve: PositionCallback, reject: PositionErrorCallback) => {
+      const callNumber = getCurrentPosition.mock.calls.length
+      if (callNumber === 1) {
+        reject(geoUnavailable)
+        return
+      }
+      reject(geoTimeout)
+    })
+    const watchPosition = vi.fn((success: PositionCallback) => {
+      const callNumber = watchPosition.mock.calls.length
+      if (callNumber === 1) {
+        success(makeGeoPosition(35.7, 51.4, 320))
+        return 71
+      }
+
+      success(makeGeoPosition(35.7001, 51.4001, 180))
+      success(makeGeoPosition(35.7002, 51.4002, 70))
+      return 72
+    })
+
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: {
+        query: vi.fn(async () => ({ state: 'prompt' })),
+      },
+    })
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition,
+        watchPosition,
+        clearWatch: vi.fn(),
+      },
+    })
+
+    const wrapper = mountAttachmentMenu()
+    const vm = wrapper.vm as unknown as {
+      activeTab: 'gallery' | 'file' | 'location'
+      selectedLatLng: { lat: number; lng: number } | null
+      detectedLocationAccuracyM: number | null
+      hasConfirmedAutoLocation: boolean
+      locationStatusMessage: string
+      locationStatusTone: 'info' | 'error'
+      canSendLocation: boolean
+      isLocating: boolean
+      goToMyLocation: (silent?: boolean) => Promise<void>
+    }
+
+    vm.activeTab = 'location'
+    await nextTick()
+    await vm.goToMyLocation()
+    await flushPromises()
+
+    expect(getCurrentPosition).toHaveBeenCalledTimes(4)
+    expect(watchPosition).toHaveBeenCalledTimes(2)
+    expect(vm.selectedLatLng).toEqual({ lat: 35.7002, lng: 51.4002 })
+    expect(vm.detectedLocationAccuracyM).toBe(70)
+    expect(vm.hasConfirmedAutoLocation).toBe(false)
+    expect(vm.locationStatusTone).toBe('error')
+    expect(vm.locationStatusMessage).toContain('تایید دوم')
+    expect(vm.canSendLocation).toBe(false)
+    expect(vm.isLocating).toBe(false)
   })
 })

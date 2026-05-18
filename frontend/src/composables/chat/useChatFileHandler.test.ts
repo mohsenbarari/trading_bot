@@ -421,4 +421,40 @@ describe('useChatFileHandler.ts', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
+
+  it('covers cache-read failures, no-op ids, healthy seed skips, and object-url revocation timers', async () => {
+    vi.useFakeTimers()
+    const fileHandler = await import('./useChatFileHandler')
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob(['remote'], { type: 'application/pdf' }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fileHandler.handleFileClick('', '/api/chat/files/empty', 'empty.pdf')
+    await fileHandler.downloadFileToDisk('', '/api/chat/files/empty', 'empty.pdf')
+    await fileHandler.prewarmFileCache('')
+    await fileHandler.seedFileCache('', new Blob(['x']), 'x.bin')
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    localforageInstance.getItem.mockRejectedValueOnce(new Error('read failed'))
+    await fileHandler.handleFileClick('read-fail', '/api/chat/files/read-fail', 'read-fail.pdf')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(console.warn).toHaveBeenCalledWith('[useChatFileHandler] cache read failed', expect.any(Error))
+
+    await fileHandler.seedFileCache('healthy', new Blob(['healthy'], { type: 'application/pdf' }), 'healthy.pdf', 'application/pdf')
+    localforageInstance.setItem.mockClear()
+    await fileHandler.seedFileCache('healthy', new Blob(['replacement'], { type: 'application/pdf' }), 'replacement.pdf', 'application/pdf')
+    expect(localforageInstance.setItem).not.toHaveBeenCalled()
+
+    await fileHandler.seedFileCache('zero', new Blob([], { type: 'application/pdf' }), 'zero.pdf', 'application/pdf')
+    await fileHandler.seedFileCache('zero', new Blob(['filled'], { type: 'application/pdf' }), 'filled.pdf', 'application/pdf')
+    expect(fileHandler.isFileCached('zero')).toBe(true)
+
+    await fileHandler.handleFileClick('healthy', '/api/chat/files/healthy', 'healthy.pdf')
+    await fileHandler.downloadFileToDisk('healthy', '/api/chat/files/healthy', 'healthy.pdf')
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(URL.revokeObjectURL).toHaveBeenCalled()
+    vi.useRealTimers()
+  })
 })

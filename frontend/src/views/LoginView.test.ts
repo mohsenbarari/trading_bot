@@ -233,6 +233,156 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   })
 
+  it('completes login when approval polling returns approved tokens', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'approval_required',
+          login_request_id: 'req-approved-poll',
+          expires_at: '2099-05-08T08:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'approved',
+          access_token: 'poll-access',
+          refresh_token: 'poll-refresh',
+        }) as any,
+      )
+    apiFetchMock.mockResolvedValue(
+      makeJsonResponse({ id: 30, role: 'عادی', full_name: 'کاربر', account_name: 'user' }) as any,
+    )
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/login-requests/req-approved-poll/status')
+    expect(localStorage.getItem('auth_token')).toBe('poll-access')
+    expect(localStorage.getItem('refresh_token')).toBe('poll-refresh')
+    expect(routerPushMock).toHaveBeenCalledWith('/')
+    wrapper.unmount()
+  })
+
+  it('handles recovery waiting cancellation and returns to the mobile step', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'approval_required',
+          login_request_id: 'req-cancel-recovery',
+          expires_at: '2099-05-08T08:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'pending_admin_review',
+          chat_action_expires_at: '2099-05-08T10:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'pending_admin_review',
+          chat_action_expires_at: '2099-05-08T10:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(makeJsonResponse({ status: 'cancelled' }) as any)
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+
+    await findButtonByText(wrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/login-requests/req-cancel-recovery/recovery', {
+      method: 'POST',
+    })
+    expect(wrapper.text()).toContain('در حال بررسی توسط مدیریت')
+
+    await findButtonByText(wrapper, 'انصراف از درخواست').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/login-requests/req-cancel-recovery/recovery/cancel', {
+      method: 'POST',
+    })
+    expect(wrapper.text()).toContain('درخواست بازیابی لغو شد')
+    expect(wrapper.find('input[type="tel"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('validates recovery identity uploads and opens every picker input', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'approval_required',
+          login_request_id: 'req-identity-validation',
+          expires_at: '2099-05-08T08:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'identity_verification_requested',
+          chat_action_expires_at: '2099-05-08T10:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'identity_verification_requested',
+          chat_action_expires_at: '2099-05-08T10:10:00.000Z',
+        }) as any,
+      )
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+    await findButtonByText(wrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
+    await flushPromises()
+
+    const hiddenInputs = wrapper.findAll('input[type="file"]')
+    const clickSpies = hiddenInputs.map(input => vi.spyOn(input.element as HTMLInputElement, 'click').mockImplementation(() => {}))
+
+    await findButtonByText(wrapper, 'گالری').trigger('click')
+    await findButtonByText(wrapper, 'دوربین').trigger('click')
+    await findButtonByText(wrapper, 'فایل').trigger('click')
+    clickSpies.forEach(spy => expect(spy).toHaveBeenCalledTimes(1))
+
+    await findButtonByText(wrapper, 'ارسال مدارک').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('ابتدا تصویر یا فایل مدرک را انتخاب کنید')
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      '/api/sessions/login-requests/req-identity-validation/recovery/identity',
+      expect.anything(),
+    )
+
+    clickSpies.forEach(spy => spy.mockRestore())
+    wrapper.unmount()
+  })
+
   it('starts the recovery flow from the waiting screen and submits identity material', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.mocked(fetch)
@@ -432,5 +582,277 @@ describe('LoginView.vue', () => {
 
     fallbackWrapper.unmount()
     wrapper.unmount()
+  })
+
+  it('surfaces request, resend, and verify error branches without leaving the current flow', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: '' }, false, 500) as any)
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    expect(wrapper.text()).toContain('خطا در ارسال کد')
+
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('کد ارسال شده به 09123456789')
+
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('12')
+    await wrapper.get('button.btn-primary').trigger('click')
+    expect(wrapper.text()).toContain('کد احراز هویت نامعتبر است')
+
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: '' }, false, 401) as any)
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('1234')
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('کد نادرست است')
+
+    await vi.advanceTimersByTimeAsync(120000)
+    await flushPromises()
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: '' }, false, 500) as any)
+    await findButtonByText(wrapper, 'ارسال مجدد کد').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('خطا در ارسال کد')
+
+    wrapper.unmount()
+  })
+
+  it('handles approval expiry plus recovery rejected and expired states', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-08T08:00:00.000Z'))
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'approval_required',
+          login_request_id: 'req-expiring',
+          expires_at: '2026-05-08T08:00:01.000Z',
+        }) as any,
+      )
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('زمان انتظار تایید به پایان رسید')
+    expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
+    wrapper.unmount()
+
+    vi.setSystemTime(new Date('2026-05-08T09:00:00.000Z'))
+    fetchMock.mockReset()
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'approval_required',
+          login_request_id: 'req-rejected',
+          expires_at: '2026-05-08T09:05:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'rejected',
+          chat_action_expires_at: '2026-05-08T10:00:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'rejected',
+          chat_action_expires_at: '2026-05-08T10:00:00.000Z',
+        }) as any,
+      )
+
+    const rejectedWrapper = mount(LoginView)
+    await rejectedWrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    await rejectedWrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+    await findButtonByText(rejectedWrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
+    await flushPromises()
+
+    expect(rejectedWrapper.text()).toContain('درخواست شما رد شد')
+    await findButtonByText(rejectedWrapper, 'شروع دوباره').trigger('click')
+    expect(rejectedWrapper.find('input[type="tel"]').exists()).toBe(true)
+    rejectedWrapper.unmount()
+
+    fetchMock.mockReset()
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'approval_required',
+          login_request_id: 'req-expired-recovery',
+          expires_at: '2026-05-08T09:05:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'pending_admin_review',
+          chat_action_expires_at: '2026-05-08T08:59:59.000Z',
+        }) as any,
+      )
+
+    const expiredWrapper = mount(LoginView)
+    await expiredWrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    await expiredWrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+    await findButtonByText(expiredWrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
+    await flushPromises()
+
+    expect(expiredWrapper.text()).toContain('مهلت درخواست به پایان رسید')
+    expiredWrapper.unmount()
+  })
+
+  it('covers recovery request/cancel/identity failure branches and missing approved tokens', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'approval_required',
+          login_request_id: 'req-recovery-errors',
+          expires_at: '2099-05-08T08:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(makeJsonResponse({ detail: '' }, false, 500) as any)
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+    await findButtonByText(wrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('شروع مسیر بازیابی ممکن نشد')
+    wrapper.unmount()
+
+    fetchMock.mockReset()
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'approval_required',
+          login_request_id: 'req-cancel-error',
+          expires_at: '2099-05-08T08:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'identity_verification_requested',
+          chat_action_expires_at: '2099-05-08T10:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'identity_verification_requested',
+          chat_action_expires_at: '2099-05-08T10:10:00.000Z',
+        }) as any,
+      )
+      .mockResolvedValueOnce(makeJsonResponse({ detail: '' }, false, 500) as any)
+      .mockResolvedValueOnce(makeJsonResponse({ detail: '' }, false, 500) as any)
+      .mockResolvedValueOnce(makeJsonResponse({ status: 'approved' }) as any)
+
+    const errorWrapper = mount(LoginView)
+    await errorWrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    await errorWrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+    await findButtonByText(errorWrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
+    await flushPromises()
+
+    await findButtonByText(errorWrapper, 'انصراف از درخواست').trigger('click')
+    await flushPromises()
+    expect(errorWrapper.text()).toContain('لغو درخواست بازیابی ممکن نشد')
+
+    const recoveryFile = new File(['card'], 'card.jpg', { type: 'image/jpeg' })
+    const recoveryInput = errorWrapper.find('input[type="file"][accept="image/*"]')
+    Object.defineProperty(recoveryInput.element, 'files', {
+      configurable: true,
+      value: [recoveryFile],
+    })
+    await recoveryInput.trigger('change')
+    await findButtonByText(errorWrapper, 'ارسال مدارک').trigger('click')
+    await flushPromises()
+    expect(errorWrapper.text()).toContain('ارسال مدرک ممکن نشد')
+
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(errorWrapper.text()).toContain('درخواست شما تایید شد')
+    await findButtonByText(errorWrapper, 'ورود به سامانه').trigger('click')
+    await flushPromises()
+    expect(errorWrapper.text()).toContain('توکن ورود آماده نیست')
+    errorWrapper.unmount()
+  })
+
+  it('initializes install and WebOTP browser hooks including abort cleanup', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+      .mockResolvedValueOnce(makeJsonResponse({ access_token: 'otp-access', refresh_token: 'otp-refresh' }) as any)
+    apiFetchMock.mockResolvedValue(
+      makeJsonResponse({ id: 40, role: 'عادی', full_name: 'وب', account_name: 'web' }) as any,
+    )
+
+    const abortSpy = vi.fn()
+    class AbortControllerMock {
+      signal = {}
+      abort = abortSpy
+    }
+    vi.stubGlobal('AbortController', AbortControllerMock)
+    Object.defineProperty(window, 'OTPCredential', { configurable: true, value: function OTPCredential() {} })
+    Object.defineProperty(navigator, 'credentials', {
+      configurable: true,
+      value: {
+        get: vi.fn(async () => ({ code: '12345' })),
+      },
+    })
+    Object.defineProperty(window.navigator, 'standalone', {
+      configurable: true,
+      value: true,
+    })
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
+    })
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    const deferredPrompt = {
+      preventDefault: vi.fn(),
+      prompt: vi.fn(),
+      userChoice: Promise.resolve({ outcome: 'dismissed' }),
+    }
+    window.dispatchEvent(Object.assign(new Event('beforeinstallprompt'), deferredPrompt))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('برای نصب در iOS')
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(100)
+    await flushPromises()
+    await flushPromises()
+
+    expect(navigator.credentials.get).toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/verify-otp', expect.objectContaining({ method: 'POST' }))
+
+    wrapper.unmount()
+    expect(abortSpy).toHaveBeenCalled()
   })
 })

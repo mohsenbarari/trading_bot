@@ -36,6 +36,7 @@ describe('notification store', () => {
     setActivePinia(createPinia())
     apiFetchMock.mockReset()
     playNotificationSoundMock.mockReset()
+    localStorage.clear()
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   })
 
@@ -162,5 +163,113 @@ describe('notification store', () => {
     expect(store.chatUnreadCount).toBe(2)
     expect(store.unreadChatUserIds).toEqual([5, -22])
     expect(store.mutedConversationIds).toEqual([-22, 9])
+  })
+
+  it('covers unread fallback counts, invalid increments, toast removal, and duplicate notification replacement', async () => {
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+
+    store.syncUnreadChatIds([], 4)
+    expect(store.chatUnreadCount).toBe(4)
+    expect(store.unreadChatUserIds).toEqual([])
+
+    localStorage.setItem('auth_token', 'token')
+    apiFetchMock.mockResolvedValueOnce(makeResponse({ unread_chats_count: 3, conversations_with_unread: [] }))
+    store.incrementChatUnread(null)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(store.chatUnreadCount).toBe(3)
+
+    store.addToast({ title: 'manual', body: 'remove me' })
+    const toastId = store.activeToasts[0]!.id
+    store.removeToast(toastId)
+    expect(store.activeToasts).toEqual([])
+
+    store.addAppNotification({ id: 1, message: 'first', category: 'system', client_received_at: 10 })
+    store.addAppNotification({ id: 1, message: 'updated', category: 'system' })
+    expect(store.appNotifications).toHaveLength(1)
+    expect(store.appNotifications[0]).toMatchObject({ id: 1, message: 'updated', client_received_at: 10 })
+
+    for (let id = 2; id <= 120; id += 1) {
+      store.addAppNotification({ id, message: `n-${id}`, category: 'system' })
+    }
+    expect(store.appNotifications).toHaveLength(100)
+  })
+
+  it('handles notification read/center mutations and restores optimistic state on failures', async () => {
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+    store.addAppNotification({ id: 3, message: 'third', category: 'system', is_read: false })
+    store.addAppNotification({ id: 2, message: 'second', category: 'system', is_read: false })
+    store.addAppNotification({ id: 1, message: 'first', category: 'system', is_read: false })
+
+    apiFetchMock.mockResolvedValueOnce(makeResponse([{ id: 4, message: 'history', category: 'user', is_read: false }]))
+    apiFetchMock.mockResolvedValueOnce(makeResponse({ ok: true }))
+    await store.openNotificationCenter()
+    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/notifications/')
+    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/notifications/mark-all-read', { method: 'POST' })
+    expect(store.appNotifications.every((notification) => notification.is_read)).toBe(true)
+
+    apiFetchMock.mockResolvedValueOnce(makeResponse({}, false))
+    await store.toggleReadStatus(4, false)
+    expect(store.appNotifications.find((notification) => notification.id === 4)?.is_read).toBe(true)
+
+    apiFetchMock.mockResolvedValueOnce(makeResponse({}, true))
+    await store.toggleReadStatus(4, false)
+    expect(store.appNotifications.find((notification) => notification.id === 4)?.is_read).toBe(false)
+
+    await store.toggleReadStatus(999, true)
+    expect(apiFetchMock).toHaveBeenCalledTimes(4)
+  })
+
+  it('restores deleted notifications at previous relative positions and ignores already-restored ids', async () => {
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+    store.addAppNotification({ id: 5, message: 'fifth', category: 'system' })
+    store.addAppNotification({ id: 4, message: 'fourth', category: 'system' })
+    store.addAppNotification({ id: 3, message: 'third', category: 'system' })
+    store.addAppNotification({ id: 2, message: 'second', category: 'system' })
+    store.addAppNotification({ id: 1, message: 'first', category: 'system' })
+
+    apiFetchMock.mockRejectedValueOnce(new Error('delete failed'))
+    const deleteMiddle = store.deleteNotification(3)
+    store.addAppNotification({ id: 2, message: 'second realtime update', category: 'system' })
+    await deleteMiddle
+    expect(store.appNotifications.map((notification) => notification.id)).toEqual([1, 2, 3, 4, 5])
+
+    apiFetchMock.mockRejectedValueOnce(new Error('delete failed'))
+    const deleteFirst = store.deleteNotification(1)
+    store.addAppNotification({ id: 1, message: 'first realtime return', category: 'system' })
+    await deleteFirst
+    expect(store.appNotifications.filter((notification) => notification.id === 1)).toHaveLength(1)
+
+    apiFetchMock.mockRejectedValueOnce(new Error('delete failed'))
+    const deleteLast = store.deleteNotification(5)
+    store.appNotifications = []
+    await deleteLast
+    expect(store.appNotifications.map((notification) => notification.id)).toEqual([5])
+  })
+
+  it('handles initial-count and history API failures without mutating existing state', async () => {
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+
+    await store.fetchInitialCounts()
+    expect(apiFetchMock).not.toHaveBeenCalled()
+
+    localStorage.setItem('auth_token', 'token')
+    apiFetchMock.mockResolvedValueOnce(makeResponse({}, false))
+    await store.fetchInitialCounts()
+    expect(store.chatUnreadCount).toBe(0)
+
+    apiFetchMock.mockRejectedValueOnce(new Error('poll failed'))
+    await store.fetchInitialCounts()
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to fetch initial notification counts:', expect.any(Error))
+
+    store.addAppNotification({ id: 10, message: 'existing', category: 'system' })
+    apiFetchMock.mockRejectedValueOnce(new Error('history failed'))
+    await store.fetchHistory()
+    expect(store.appNotifications.map((notification) => notification.id)).toEqual([10])
+    expect(store.isLoadingHistory).toBe(false)
   })
 })
