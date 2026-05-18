@@ -27,7 +27,16 @@ class User(Base):
     address = Column(Text, nullable=False)
     avatar_file_id = Column(String(36), ForeignKey("chat_files.id"), nullable=True)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.WATCH)
-    account_status = Column(Enum(UserAccountStatus), nullable=False, default=UserAccountStatus.ACTIVE, index=True)
+    account_status = Column(
+        Enum(
+            UserAccountStatus,
+            name="useraccountstatus",
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        nullable=False,
+        default=UserAccountStatus.ACTIVE,
+        index=True,
+    )
     deactivated_at = Column(DateTime, nullable=True)
     messenger_grace_expires_at = Column(DateTime, nullable=True, index=True)
     messenger_blocked_at = Column(DateTime, nullable=True)
