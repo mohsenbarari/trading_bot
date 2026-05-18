@@ -510,4 +510,172 @@ describe('ImageEditorModal.vue', () => {
 
     expect(fallbackWrapper.emitted('confirm')?.[0]).toEqual([file])
   })
+
+  it('covers helper fallbacks for markEditedImage, rotation helpers, and crop confirm failure paths', async () => {
+    const originalDefineProperty = Object.defineProperty
+    const file = new File(['raw-image'], 'fallbacks.png', { type: 'image/png' })
+
+    const helperWrapper = mount(ImageEditorModal, {
+      props: { file },
+    })
+    const helperVm = helperWrapper.vm as any
+
+    const definePropertySpy = vi.spyOn(Object, 'defineProperty').mockImplementationOnce(((target: object, propertyKey: PropertyKey, attributes: PropertyDescriptor) => {
+      if (propertyKey === '__chatEditedImage') {
+        throw new Error('define-property-failed')
+      }
+      return originalDefineProperty(target, propertyKey, attributes)
+    }) as typeof Object.defineProperty)
+
+    const marked = helperVm.markEditedImage(new File(['edited'], 'edited.png', { type: 'image/png' })) as File & Record<string, unknown>
+    expect(marked.__chatEditedImage).toBe(true)
+    definePropertySpy.mockRestore()
+
+    const rotateWrapper = mount(ImageEditorModal, {
+      props: { file },
+    })
+    const rotateVm = rotateWrapper.vm as any
+    await flushPromises()
+    const img = rotateWrapper.get('img')
+    Object.defineProperty(img.element, 'naturalWidth', { configurable: true, value: 200 })
+    Object.defineProperty(img.element, 'naturalHeight', { configurable: true, value: 100 })
+    await img.trigger('load')
+    await flushPromises()
+
+    const rotateCtx = {
+      imageSmoothingEnabled: false,
+      imageSmoothingQuality: 'low',
+      translate: vi.fn(),
+      rotate: vi.fn(),
+      drawImage: vi.fn(),
+    }
+    Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => rotateCtx),
+    })
+
+    expect(rotateVm.normalizeQuarterTurn(10)).toBe(0)
+    await rotateVm.buildRotatedSourceUrl(img.element as HTMLImageElement, 90)
+    expect(rotateCtx.translate).toHaveBeenCalledWith(100, 0)
+    expect(rotateCtx.rotate).toHaveBeenCalledWith(Math.PI / 2)
+
+    rotateCtx.translate.mockClear()
+    rotateCtx.rotate.mockClear()
+    await rotateVm.buildRotatedSourceUrl(img.element as HTMLImageElement, 180)
+    expect(rotateCtx.translate).toHaveBeenCalledWith(200, 100)
+    expect(rotateCtx.rotate).toHaveBeenCalledWith(Math.PI)
+
+    Object.defineProperty(HTMLCanvasElement.prototype, 'toBlob', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => {
+        throw new Error('blob-build-failed')
+      }),
+    })
+    await expect(rotateVm.buildRotatedSourceUrl(img.element as HTMLImageElement, 90)).resolves.toBeNull()
+
+    const cropFallbackWrapper = mount(ImageEditorModal, {
+      props: { file },
+    })
+    await cropFallbackWrapper.find('img').trigger('load')
+    await flushPromises()
+
+    cropperGetCroppedCanvasMock.mockReturnValueOnce(null)
+    await cropFallbackWrapper.find('.action-primary').trigger('click')
+    expect(cropFallbackWrapper.emitted('confirm')?.[0]).toEqual([file])
+
+    const throwingCanvas = document.createElement('canvas')
+    Object.defineProperty(throwingCanvas, 'toBlob', {
+      configurable: true,
+      writable: true,
+      value: () => {
+        throw new Error('canvas-export-failed')
+      },
+    })
+    cropperGetCroppedCanvasMock.mockReturnValueOnce(throwingCanvas)
+    await cropFallbackWrapper.find('.action-primary').trigger('click')
+    expect(cropFallbackWrapper.emitted('confirm')?.[1]).toEqual([file])
+  })
+
+  it('covers annotate helper branches for text-mode cleanup, annotate entry fallback, and direct interaction guards', async () => {
+    const file = new File(['raw-image'], 'annotate-helpers.png', { type: 'image/png' })
+
+    const modeWrapper = mount(ImageEditorModal, {
+      props: { file },
+    })
+    const modeVm = modeWrapper.vm as any
+    modeVm.mode = 'draw'
+    modeVm.pendingTextCreation = true
+    await modeVm.switchMode('crop')
+    expect(modeVm.mode).toBe('crop')
+    expect(modeVm.pendingTextCreation).toBe(false)
+
+    const annotateFallbackWrapper = mount(ImageEditorModal, {
+      props: { file },
+    })
+    const annotateFallbackVm = annotateFallbackWrapper.vm as any
+    await flushPromises()
+    await annotateFallbackWrapper.find('img').trigger('load')
+    await flushPromises()
+    cropperGetCroppedCanvasMock.mockImplementationOnce(() => {
+      throw new Error('no-cropped-canvas')
+    })
+    await expect(annotateFallbackVm.beginAnnotate()).resolves.toBe(false)
+    expect(annotateFallbackVm.annotateStarted).toBe(false)
+
+    const wrapper = mount(ImageEditorModal, {
+      props: { file },
+    })
+    const vm = wrapper.vm as any
+    await flushPromises()
+    await wrapper.find('img').trigger('load')
+    await flushPromises()
+
+    await wrapper.findAll('.mode-tab')[1]!.trigger('click')
+    await flushPromises()
+    const canvas = fabricState.instances.at(-1)!
+
+    const editingText = {
+      type: 'i-text',
+      isEditing: true,
+      exitEditing: vi.fn(),
+      set: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
+      enterEditing: vi.fn(),
+      selectAll: vi.fn(),
+      isType: (type: string) => type === 'i-text',
+      text: 'متن',
+    }
+    canvas.objects = [editingText]
+
+    await vm.switchMode('text')
+    expect(editingText.exitEditing).toHaveBeenCalled()
+
+    const renderCountBeforeNoop = canvas.renderRequests
+    canvas.events['mouse:down']?.({ target: { id: 'existing-target' }, e: new MouseEvent('mousedown') })
+    expect(canvas.renderRequests).toBe(renderCountBeforeNoop)
+
+    vm.pendingTextCreation = false
+    canvas.setActiveObject(editingText)
+    canvas.events['mouse:down']?.({ e: new MouseEvent('mousedown') })
+    expect(canvas.getActiveObject()).toBeNull()
+    expect(canvas.renderRequests).toBeGreaterThan(renderCountBeforeNoop)
+
+    await vm.switchMode('text')
+    canvas.events['mouse:down']?.({ e: new MouseEvent('mousedown') })
+    const createdText = canvas.getObjects().at(-1)
+    expect(createdText).toBeTruthy()
+    createdText.text = '   '
+    createdText.exitEditing()
+    await flushPromises()
+    expect(canvas.getObjects()).not.toContain(createdText)
+
+    await vm.switchMode('text')
+    canvas.events['mouse:down']?.({ e: new MouseEvent('mousedown') })
+    const doubleClickText = canvas.getObjects().at(-1)
+    canvas.events['mouse:dblclick']?.({ target: doubleClickText })
+    expect(doubleClickText.isEditing).toBe(true)
+  })
 })

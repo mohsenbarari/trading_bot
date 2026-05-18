@@ -207,4 +207,119 @@ describe('SettingsView.vue', () => {
 
     wrapper.unmount()
   })
+
+  it('falls back when cache refresh or cache clearing fails and ignores duplicate clear requests while busy', async () => {
+    let rejectClear: ((reason?: unknown) => void) | null = null
+    settingsViewMocks.getCacheSizeMock.mockRejectedValueOnce(new Error('cache-size-failed'))
+    settingsViewMocks.clearFileCacheMock.mockImplementationOnce(() => new Promise((_, reject) => {
+      rejectClear = reject
+    }))
+
+    const wrapper = await mountSettingsView()
+    await flushPromises()
+
+    const accordions = wrapper.findAll('.ds-accordion-header')
+    await accordions[1]!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.storage-value').text()).toBe('0.00 MB')
+
+    const clearButton = wrapper.find('.storage-clear-btn')
+    await clearButton.trigger('click')
+    await clearButton.trigger('click')
+    expect(settingsViewMocks.clearFileCacheMock).toHaveBeenCalledTimes(1)
+
+    rejectClear?.(new Error('clear-cache-failed'))
+    await flushPromises()
+
+    expect(wrapper.find('.storage-feedback').text()).toContain('پاک‌سازی حافظه ناموفق بود.')
+
+    await vi.advanceTimersByTimeAsync(3500)
+    expect(wrapper.find('.storage-feedback').exists()).toBe(false)
+  })
+
+  it('handles short block searches, renders already-blocked results, and surfaces block API failures', async () => {
+    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/sessions/active') return responseOf(sessionsFixture)
+      if (path === '/api/blocks/') return responseOf(blockedUsersFixture)
+      if (path === '/api/blocks/search?q=ab&limit=5') {
+        return responseOf([
+          {
+            id: 77,
+            full_name: 'Already Blocked',
+            account_name: 'already-blocked',
+            mobile_number: '09121111111',
+            is_blocked: true,
+          },
+        ])
+      }
+      if (path === '/api/blocks/search?q=xy&limit=5') return responseOf(searchResultsFixture)
+      if (path === '/api/blocks/99' && options?.method === 'POST') {
+        return responseOf({ detail: 'limit reached' }, false)
+      }
+      return responseOf({})
+    })
+
+    const wrapper = await mountSettingsView()
+    await flushPromises()
+
+    const accordions = wrapper.findAll('.ds-accordion-header')
+    await accordions[2]!.trigger('click')
+    await flushPromises()
+
+    const searchInput = wrapper.find('.search-input-wrapper input')
+    await searchInput.setValue('a')
+    await flushPromises()
+    expect(wrapper.find('.search-results').exists()).toBe(false)
+
+    await searchInput.setValue('ab')
+    await flushPromises()
+    expect(wrapper.find('.already-blocked').text()).toBe('مسدود شده')
+
+    await searchInput.setValue('xy')
+    await flushPromises()
+    await wrapper.find('.btn-block').trigger('click')
+    await flushPromises()
+
+    expect(window.alert).toHaveBeenCalledWith('limit reached')
+  })
+
+  it('surfaces unblock network failures and still force-logs out when no current session exists', async () => {
+    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/sessions/active') {
+        return responseOf([
+          {
+            id: 'session-secondary-only',
+            device_name: 'Android',
+            platform: 'Android',
+            device_ip: '10.0.0.3',
+            is_primary: false,
+            is_current: false,
+          },
+        ])
+      }
+      if (path === '/api/blocks/') return responseOf(blockedUsersFixture)
+      if (path === '/api/blocks/88' && options?.method === 'DELETE') {
+        throw new Error('network failed')
+      }
+      return responseOf({})
+    })
+
+    const wrapper = await mountSettingsView()
+    await flushPromises()
+
+    const accordions = wrapper.findAll('.ds-accordion-header')
+    await accordions[2]!.trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.btn-unblock').trigger('click')
+    await flushPromises()
+    expect(window.alert).toHaveBeenCalledWith('خطا در برقراری ارتباط')
+
+    await wrapper.find('.logout-btn').trigger('click')
+    await flushPromises()
+
+    expect(settingsViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/sessions/session-current', { method: 'DELETE' })
+    expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalled()
+  })
 })

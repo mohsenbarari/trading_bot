@@ -250,4 +250,215 @@ describe('ChatHeader.vue', () => {
     await wrapper.find('.mobile-back-btn').trigger('click')
     expect(wrapper.emitted('toggle-search')).toHaveLength(1)
   })
+
+  it('prefers explicit activity status text, syncs searchQuery props, and formats room member counts', async () => {
+    const ChatHeader = (await import('./ChatHeader.vue')).default
+
+    const activityWrapper = mount(ChatHeader, {
+      props: {
+        isSelectionMode: false,
+        selectedUserId: 12,
+        selectedUserName: 'ali-user',
+        selectedAvatarFileId: null,
+        selectedRoomKind: 'direct',
+        apiBaseUrl: '',
+        targetUserStatus: 'آنلاین',
+        activityStatusText: 'در حال ارسال تصویر...',
+        isTyping: true,
+        totalUnread: 0,
+        isSearchActive: false,
+        searchQuery: 'old',
+        searchResults: [],
+        currentSearchIndex: 0,
+        selectedMessagesCount: 0,
+        isDeleted: false,
+        roomMemberCount: null,
+        isRoomMandatory: false,
+        isRoomSystem: false,
+        canCreateGroup: true,
+        canCreateChannel: true,
+      },
+      global: {
+        directives: {
+          ripple: {},
+          'click-outside': {},
+        },
+      },
+    })
+
+    expect(activityWrapper.text()).toContain('در حال ارسال تصویر')
+
+    const searchWrapper = mount(ChatHeader, {
+      props: {
+        isSelectionMode: false,
+        selectedUserId: 12,
+        selectedUserName: 'ali-user',
+        selectedAvatarFileId: null,
+        selectedRoomKind: 'direct',
+        apiBaseUrl: '',
+        targetUserStatus: 'آنلاین',
+        isTyping: false,
+        totalUnread: 0,
+        isSearchActive: true,
+        searchQuery: 'old',
+        searchResults: [],
+        currentSearchIndex: 0,
+        selectedMessagesCount: 0,
+        isDeleted: false,
+        roomMemberCount: null,
+        isRoomMandatory: false,
+        isRoomSystem: false,
+        canCreateGroup: true,
+        canCreateChannel: true,
+      },
+      global: {
+        directives: {
+          ripple: {},
+          'click-outside': {},
+        },
+      },
+    })
+    await searchWrapper.setProps({ searchQuery: 'fresh-query' })
+    expect((searchWrapper.get('#search-input').element as HTMLInputElement).value).toBe('fresh-query')
+
+    const roomCountWrapper = mount(ChatHeader, {
+      props: {
+        isSelectionMode: false,
+        selectedUserId: -21,
+        selectedUserName: 'Group Alpha',
+        selectedAvatarFileId: null,
+        selectedRoomKind: 'group',
+        apiBaseUrl: '',
+        targetUserStatus: '',
+        activityStatusText: '',
+        isTyping: false,
+        totalUnread: 0,
+        isSearchActive: false,
+        searchQuery: '',
+        searchResults: [],
+        currentSearchIndex: 0,
+        selectedMessagesCount: 0,
+        isDeleted: false,
+        roomMemberCount: 1200,
+        isRoomMandatory: false,
+        isRoomSystem: false,
+        canCreateGroup: true,
+        canCreateChannel: true,
+      },
+      global: {
+        directives: {
+          ripple: {},
+          'click-outside': {},
+        },
+      },
+    })
+
+    expect((roomCountWrapper.vm as any).roomMemberCountText).toBe('۱٬۲۰۰ عضو')
+    expect((roomCountWrapper.vm as any).formatDateForSeparator('2026-05-12T10:00:00.000Z')).not.toBe('')
+    expect((roomCountWrapper.vm as any).formatDateForSeparator('')).toBe('')
+  })
+
+  it('closes the menu through direct close calls, back-state callbacks, and prop watchers', async () => {
+    const ChatHeader = (await import('./ChatHeader.vue')).default
+    const wrapper = mount(ChatHeader, {
+      props: {
+        isSelectionMode: false,
+        selectedUserId: 12,
+        selectedUserName: 'ali-user',
+        selectedAvatarFileId: null,
+        selectedRoomKind: 'direct',
+        apiBaseUrl: '',
+        targetUserStatus: 'آنلاین',
+        isTyping: false,
+        totalUnread: 0,
+        isSearchActive: false,
+        searchQuery: '',
+        searchResults: [],
+        currentSearchIndex: 0,
+        selectedMessagesCount: 0,
+        isDeleted: false,
+        roomMemberCount: null,
+        isRoomMandatory: false,
+        isRoomSystem: false,
+        canCreateGroup: true,
+        canCreateChannel: true,
+      },
+      global: {
+        directives: {
+          ripple: {},
+          'click-outside': {},
+        },
+      },
+    })
+
+    await wrapper.find('.header-menu-container .header-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.header-menu-item').length).toBeGreaterThan(0)
+
+    ;(wrapper.vm as any).closeMenu()
+    await flushPromises()
+    expect(wrapper.findAll('.header-menu-item')).toHaveLength(0)
+
+    await wrapper.find('.header-menu-container .header-btn').trigger('click')
+    await flushPromises()
+    const backCallback = pushBackStateMock.mock.calls.at(-1)?.[0] as (() => void) | undefined
+    expect(backCallback).toBeTypeOf('function')
+    backCallback?.()
+    await flushPromises()
+    expect(wrapper.findAll('.header-menu-item')).toHaveLength(0)
+
+    await wrapper.find('.header-menu-container .header-btn').trigger('click')
+    await flushPromises()
+    await wrapper.setProps({ isSelectionMode: true })
+    await flushPromises()
+    expect(wrapper.findAll('.header-menu-item')).toHaveLength(0)
+    expect(popBackStateMock).toHaveBeenCalled()
+  })
+
+  it('covers menu handler guards for view-profile and create-group actions', async () => {
+    const ChatHeader = (await import('./ChatHeader.vue')).default
+
+    const directWrapper = mount(ChatHeader, {
+      props: {
+        isSelectionMode: false,
+        selectedUserId: 12,
+        selectedUserName: 'ali-user',
+        selectedAvatarFileId: null,
+        selectedRoomKind: 'direct',
+        apiBaseUrl: '',
+        targetUserStatus: 'آنلاین',
+        isTyping: false,
+        totalUnread: 0,
+        isSearchActive: false,
+        searchQuery: '',
+        searchResults: [],
+        currentSearchIndex: 0,
+        selectedMessagesCount: 0,
+        isDeleted: false,
+        roomMemberCount: null,
+        isRoomMandatory: false,
+        isRoomSystem: false,
+        canCreateGroup: false,
+        canCreateChannel: true,
+      },
+      global: {
+        directives: {
+          ripple: {},
+          'click-outside': {},
+        },
+      },
+    })
+
+    await directWrapper.find('.header-menu-container .header-btn').trigger('click')
+    await flushPromises()
+    ;(directWrapper.vm as any).handleMenuViewProfile()
+    await flushPromises()
+    expect(directWrapper.emitted('view-profile')).toHaveLength(1)
+
+    await directWrapper.find('.header-menu-container .header-btn').trigger('click')
+    await flushPromises()
+    ;(directWrapper.vm as any).handleMenuCreateGroup()
+    await flushPromises()
+    expect(directWrapper.emitted('create-group')).toBeUndefined()
+  })
 })

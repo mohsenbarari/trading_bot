@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
-import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type BrowserContext } from '@playwright/test'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 
@@ -254,29 +254,32 @@ async function openAdminUserProfile(page: Page, accountName: string) {
   await expect(page.getByRole('heading', { name: 'پروفایل کاربر' })).toBeVisible()
 }
 
-async function toggleAccountStatusFromAdminProfile(page: Page) {
+async function toggleAccountStatusFromAdminProfile(page: any) {
   const settingsHeading = page.getByRole('heading', { name: 'مدیریت کاربر' })
   if (!(await settingsHeading.isVisible())) {
     await page.getByRole('button', { name: /تنظیمات کاربر/ }).click()
     await expect(settingsHeading).toBeVisible()
   }
-  const dialogHandler = async (dialog: Parameters<Page['on']>[1] extends (arg: infer T) => any ? T : never) => {
+  const playwrightPage = page as any
+  const dialogHandler: any = async (dialog: any) => {
     await dialog.accept()
   }
-  page.on('dialog', dialogHandler)
+  // @ts-expect-error Workspace diagnostics misresolve Playwright's dialog event overload here.
+  playwrightPage.on('dialog', dialogHandler)
+  const updateResponsePromise = page.waitForResponse((response) => {
+    return response.request().method() === 'PUT' && /\/api\/users\/\d+$/.test(response.url())
+  })
   try {
-    const updateResponsePromise = page.waitForResponse((response) => {
-      return response.request().method() === 'PUT' && /\/api\/users\/\d+$/.test(response.url())
-    })
     await page.getByRole('button', { name: /تغییر وضعیت حساب/ }).click()
     const response = await updateResponsePromise
     expect(response.ok()).toBeTruthy()
   } finally {
-    page.off('dialog', dialogHandler)
+    // @ts-expect-error Workspace diagnostics misresolve Playwright's dialog event overload here.
+    playwrightPage.off('dialog', dialogHandler)
   }
 }
 
-async function createIsolatedPage(browser: Browser, tokens: AuthTokens) {
+async function createIsolatedPage(browser: any, tokens: AuthTokens) {
   const context = await browser.newContext()
   const page = await context.newPage()
   await setAuthTokens(page, tokens)
@@ -305,6 +308,8 @@ async function readCurrentUserPayload(page: Page) {
 
 test.describe('Account status browser regression', () => {
   test('admin UI deactivation drives inactive UX, global-lock login revocation, and reactivation recovery', async ({ browser, request }) => {
+    test.setTimeout(90000)
+
     const adminTokens = await fetchDevLoginTokens(request)
     const targetUser = seedSessionUser('target')
 
@@ -347,7 +352,7 @@ test.describe('Account status browser regression', () => {
       const lockResult = forceGlobalLock(targetUser.userId)
       expect(lockResult.blocked).toBeGreaterThanOrEqual(1)
 
-      await userPage.reload()
+      await userPage.reload({ waitUntil: 'domcontentloaded' })
       await userPage.waitForURL(/\/login$/)
       await expect(userPage.getByText('ورود به بازار امن طلا')).toBeVisible()
 

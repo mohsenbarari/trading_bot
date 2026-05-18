@@ -1,3 +1,4 @@
+import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
@@ -441,5 +442,496 @@ describe('ChatGroupManagerModal.vue', () => {
     expect(currentMembers.some((member) => member.user_id === 2)).toBe(false)
     expect(currentGroup.member_count).toBe(2)
     expect(wrapper.emitted('updated')).toHaveLength(5)
+  })
+
+  it('covers filtering, page labels, guard helpers, avatar guards, and manager back-state callbacks', async () => {
+    const groupDetail = {
+      group: {
+        id: 7,
+        title: 'Group Seven',
+        description: 'Example group',
+        avatar_file_id: 'avatar-7',
+        member_count: 3,
+        max_members: 50,
+        current_user_role: 'admin' as const,
+      },
+      members: [
+        {
+          user_id: 2,
+          account_name: 'owner2',
+          full_name: 'Owner Two',
+          mobile_number: '09120000002',
+          avatar_file_id: null,
+          role: 'admin' as const,
+          is_group_creator: true,
+        },
+        {
+          user_id: 3,
+          account_name: 'admin3',
+          full_name: 'Admin Three',
+          mobile_number: '09120000003',
+          avatar_file_id: null,
+          role: 'admin' as const,
+          is_group_creator: false,
+        },
+        {
+          user_id: 4,
+          account_name: 'member4',
+          full_name: 'Member Four',
+          mobile_number: '09120000004',
+          avatar_file_id: null,
+          role: 'member' as const,
+          is_group_creator: false,
+        },
+      ],
+    }
+
+    apiFetchJsonMock.mockImplementation(async (url: string) => {
+      if (url === '/api/users-public/search?limit=100') return []
+      if (url === '/api/chat/groups/7') return groupDetail
+      throw new Error(`Unhandled apiFetchJson call: ${url}`)
+    })
+
+    const ChatGroupManagerModal = (await import('./ChatGroupManagerModal.vue')).default
+
+    const createWrapper = mount(ChatGroupManagerModal, {
+      props: {
+        show: true,
+        currentUserId: 1,
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const createVm = createWrapper.vm as unknown as {
+      page: 'select-members' | 'details'
+      pageTitle: string
+      pageSubtitle: string
+      canGoBack: boolean
+      selectedUserIds: Set<number>
+    }
+
+    expect(createVm.pageTitle).toBe('افزودن اعضا')
+    expect(createVm.pageSubtitle).toContain('اعضایی را که می‌خواهید در گروه باشند انتخاب کنید.')
+    expect(createVm.canGoBack).toBe(false)
+
+    createVm.selectedUserIds = new Set([4])
+    createVm.page = 'details'
+    await nextTick()
+
+    expect(createVm.pageTitle).toBe('اطلاعات گروه')
+    expect(createVm.pageSubtitle).toContain('۱ عضو انتخاب شده')
+    expect(createVm.canGoBack).toBe(true)
+
+    const wrapper = mount(ChatGroupManagerModal, {
+      props: {
+        show: true,
+        groupId: 7,
+        currentUserId: 1,
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    const avatarClick = vi.fn()
+    const wrapperVm = wrapper.vm as unknown as {
+      page: 'overview' | 'edit' | 'members' | 'admins' | 'add-members'
+      pageTitle: string
+      pageSubtitle: string
+      canGoBack: boolean
+      members: Array<{
+        user_id: number
+        account_name: string
+        full_name: string
+        mobile_number: string
+        role: 'admin' | 'member'
+        is_group_creator: boolean
+      }>
+      memberQuery: string
+      adminQuery: string
+      filteredMembers: Array<{ user_id: number }>
+      filteredAdmins: Array<{ user_id: number }>
+      promotableMembers: Array<{ user_id: number }>
+      getMemberGuardReason: (member: {
+        user_id: number
+        account_name: string
+        full_name: string
+        mobile_number: string
+        role: 'admin' | 'member'
+        is_group_creator: boolean
+      }) => string
+      canDemote: (member: {
+        user_id: number
+        account_name: string
+        full_name: string
+        mobile_number: string
+        role: 'admin' | 'member'
+        is_group_creator: boolean
+      }) => boolean
+      canRemove: (member: {
+        user_id: number
+        account_name: string
+        full_name: string
+        mobile_number: string
+        role: 'admin' | 'member'
+        is_group_creator: boolean
+      }) => boolean
+      avatarBusy: boolean
+      avatarInput: { click: () => void } | null
+      triggerAvatarPicker: () => void
+      avatarFileId: string | null
+      clearAvatar: () => void
+      pageHistory: string[]
+      managerBackStateActive: boolean
+      pushManagerBackState: () => void
+      handleBack: (fromBack?: boolean) => boolean
+      requestClose: (fromBack?: boolean) => void
+    }
+
+    expect(wrapperVm.pageTitle).toBe('مدیریت گروه')
+    expect(wrapperVm.pageSubtitle).toContain('۳ عضو')
+    expect(wrapperVm.canGoBack).toBe(false)
+
+    wrapperVm.page = 'edit'
+    await nextTick()
+    expect(wrapperVm.pageTitle).toBe('ویرایش اطلاعات گروه')
+    expect(wrapperVm.pageSubtitle).toContain('نام و توضیحات گروه را دقیقاً از همین صفحه مدیریت کنید.')
+    expect(wrapperVm.canGoBack).toBe(true)
+
+    wrapperVm.page = 'members'
+    wrapperVm.memberQuery = 'four'
+    await nextTick()
+    expect(wrapperVm.filteredMembers.map((member) => member.user_id)).toEqual([4])
+
+    wrapperVm.adminQuery = 'admin three'
+    await nextTick()
+    expect(wrapperVm.filteredAdmins.map((member) => member.user_id)).toEqual([3])
+
+    wrapperVm.adminQuery = 'member four'
+    await nextTick()
+    expect(wrapperVm.promotableMembers.map((member) => member.user_id)).toEqual([4])
+
+    const creator = wrapperVm.members[0]!
+    const otherAdmin = wrapperVm.members[1]!
+    const regularMember = wrapperVm.members[2]!
+    expect(wrapperVm.getMemberGuardReason(creator)).toContain('سازنده گروه')
+    expect(wrapperVm.canDemote(creator)).toBe(false)
+    expect(wrapperVm.canRemove(creator)).toBe(false)
+
+    const selfMember = {
+      user_id: 1,
+      account_name: 'self1',
+      full_name: 'Self One',
+      mobile_number: '09120000001',
+      role: 'member' as const,
+      is_group_creator: false,
+    }
+    expect(wrapperVm.getMemberGuardReason(selfMember)).toContain('برای خروج از گروه')
+    expect(wrapperVm.canRemove(selfMember)).toBe(false)
+
+    wrapperVm.members = [otherAdmin]
+    await nextTick()
+    expect(wrapperVm.getMemberGuardReason(otherAdmin)).toContain('حداقل یک ادمین فعال')
+    expect(wrapperVm.canDemote(otherAdmin)).toBe(false)
+    expect(wrapperVm.canRemove(otherAdmin)).toBe(false)
+
+    wrapperVm.members = [creator, otherAdmin, regularMember]
+    await nextTick()
+    expect(wrapperVm.canRemove(regularMember)).toBe(true)
+
+    wrapperVm.avatarInput = { click: avatarClick }
+    wrapperVm.triggerAvatarPicker()
+    expect(avatarClick).toHaveBeenCalledTimes(1)
+    wrapperVm.avatarBusy = true
+    wrapperVm.triggerAvatarPicker()
+    expect(avatarClick).toHaveBeenCalledTimes(1)
+
+    wrapperVm.avatarFileId = 'avatar-7'
+    wrapperVm.clearAvatar()
+    expect(wrapperVm.avatarFileId).toBe('avatar-7')
+    wrapperVm.avatarBusy = false
+    wrapperVm.clearAvatar()
+    expect(wrapperVm.avatarFileId).toBeNull()
+
+    wrapperVm.page = 'edit'
+    wrapperVm.pageHistory = ['overview']
+    const pushCallsBefore = pushBackStateMock.mock.calls.length
+    wrapperVm.pushManagerBackState()
+    expect(pushBackStateMock.mock.calls.length).toBeGreaterThanOrEqual(pushCallsBefore)
+
+    const backHandler = pushBackStateMock.mock.calls.at(-1)?.[0] as (() => void) | undefined
+    expect(backHandler).toBeTypeOf('function')
+    backHandler?.()
+    await nextTick()
+
+    expect(wrapperVm.page).toBe('overview')
+    expect(pushBackStateMock.mock.calls.length).toBeGreaterThan(pushCallsBefore)
+
+    wrapperVm.managerBackStateActive = true
+    wrapperVm.requestClose()
+    expect(popBackStateMock).toHaveBeenCalled()
+    expect(wrapper.emitted('close')).toBeTruthy()
+
+    wrapperVm.pageHistory = []
+    expect(wrapperVm.handleBack(true)).toBe(false)
+  })
+
+  it('surfaces fallback errors for avatar upload, loading, creation, mutations, and leave failures', async () => {
+    const groupDetail = {
+      group: {
+        id: 7,
+        title: 'Group Seven',
+        description: 'Example group',
+        avatar_file_id: null,
+        member_count: 2,
+        max_members: 50,
+        current_user_role: 'admin' as const,
+      },
+      members: [
+        {
+          user_id: 2,
+          account_name: 'member2',
+          full_name: 'Member Two',
+          mobile_number: '09120000002',
+          avatar_file_id: null,
+          role: 'member' as const,
+          is_group_creator: false,
+        },
+      ],
+    }
+
+    apiFetchJsonMock.mockImplementation(async (url: string) => {
+      if (url === '/api/users-public/search?limit=100') return []
+      if (url === '/api/chat/groups/7') return groupDetail
+      throw new Error(`Unhandled apiFetchJson call: ${url}`)
+    })
+
+    const ChatGroupManagerModal = (await import('./ChatGroupManagerModal.vue')).default
+
+    const createWrapper = mount(ChatGroupManagerModal, {
+      props: {
+        show: true,
+        currentUserId: 1,
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const createVm = createWrapper.vm as unknown as {
+      errorMessage: string
+      title: string
+      selectedUserIds: Set<number>
+      handleAvatarSelected: (event: Event) => Promise<void>
+      loadUsers: (query?: string) => Promise<void>
+      createGroup: () => Promise<void>
+    }
+
+    uploadAvatarImageMock.mockRejectedValueOnce(new Error('avatar failed'))
+    const avatarInput = {
+      files: [new File(['avatar'], 'avatar.png', { type: 'image/png' })],
+      value: 'picked',
+    }
+    await createVm.handleAvatarSelected({ target: avatarInput } as unknown as Event)
+    expect(createVm.errorMessage).toBe('avatar failed')
+    expect(avatarInput.value).toBe('')
+
+    apiFetchJsonMock.mockRejectedValueOnce('users unavailable')
+    await createVm.loadUsers('ali')
+    expect(createVm.errorMessage).toBe('خطا در دریافت کاربران')
+
+    createVm.title = 'Broken Group'
+    createVm.selectedUserIds = new Set([2])
+    apiFetchMock.mockResolvedValueOnce(makeResponse({ detail: 'duplicate title' }, false))
+    await createVm.createGroup()
+    expect(createVm.errorMessage).toBe('duplicate title')
+
+    const wrapper = mount(ChatGroupManagerModal, {
+      props: {
+        show: true,
+        groupId: 7,
+        currentUserId: 1,
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      errorMessage: string
+      title: string
+      description: string
+      selectedUserIds: Set<number>
+      loadGroupDetail: () => Promise<void>
+      updateGroupSettings: () => Promise<void>
+      addSelectedMembers: () => Promise<void>
+      mutateMember: (member: {
+        user_id: number
+        account_name: string
+        full_name: string
+        mobile_number: string
+        role: 'admin' | 'member'
+        is_group_creator: boolean
+      }, endpoint: string, method: string, successText: string) => Promise<void>
+      leaveGroup: () => Promise<void>
+      mutatingUserId: number | null
+    }
+
+    apiFetchJsonMock.mockRejectedValueOnce('detail unavailable')
+    await vm.loadGroupDetail()
+    expect(vm.errorMessage).toBe('خطا در دریافت گروه')
+
+    vm.title = 'Updated Group'
+    vm.description = 'Updated details'
+    apiFetchMock.mockResolvedValueOnce(makeResponse({ detail: 'update blocked' }, false))
+    await vm.updateGroupSettings()
+    expect(vm.errorMessage).toBe('update blocked')
+
+    vm.selectedUserIds = new Set([2])
+    apiFetchMock.mockResolvedValueOnce(makeResponse({ detail: 'add blocked' }, false))
+    await vm.addSelectedMembers()
+    expect(vm.errorMessage).toBe('add blocked')
+
+    const member = {
+      user_id: 2,
+      account_name: 'member2',
+      full_name: 'Member Two',
+      mobile_number: '09120000002',
+      role: 'member' as const,
+      is_group_creator: false,
+    }
+    apiFetchMock.mockResolvedValueOnce(makeResponse({ detail: 'mutation blocked' }, false))
+    await vm.mutateMember(member, '/api/chat/groups/7/members/2', 'DELETE', 'ok')
+    expect(vm.errorMessage).toBe('mutation blocked')
+    expect(vm.mutatingUserId).toBeNull()
+
+    apiFetchMock.mockResolvedValueOnce(makeResponse({ detail: 'leave blocked' }, false))
+    await vm.leaveGroup()
+    expect(vm.errorMessage).toBe('leave blocked')
+  })
+
+  it('reloads search candidates only on searchable pages and resets state when the manager closes', async () => {
+    vi.useFakeTimers()
+
+    const groupDetail = {
+      group: {
+        id: 7,
+        title: 'Group Seven',
+        description: 'Example group',
+        avatar_file_id: null,
+        member_count: 2,
+        max_members: 50,
+        current_user_role: 'admin' as const,
+      },
+      members: [],
+    }
+
+    apiFetchJsonMock.mockImplementation(async (url: string) => {
+      if (url === '/api/chat/groups/7') return groupDetail
+      if (url.startsWith('/api/users-public/search?')) return []
+      throw new Error(`Unhandled apiFetchJson call: ${url}`)
+    })
+
+    const ChatGroupManagerModal = (await import('./ChatGroupManagerModal.vue')).default
+    const wrapper = mount(ChatGroupManagerModal, {
+      props: {
+        show: false,
+        groupId: 7,
+        currentUserId: 1,
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    const vm = wrapper.vm as unknown as {
+      page: 'overview' | 'add-members'
+      directoryQuery: string
+      title: string
+      description: string
+      selectedUserIds: Set<number>
+      managerBackStateActive: boolean
+    }
+
+    expect(pushBackStateMock).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    await flushPromises()
+
+    expect(pushBackStateMock).toHaveBeenCalled()
+    expect(apiFetchJsonMock).toHaveBeenCalledWith('/api/chat/groups/7')
+
+    apiFetchJsonMock.mockClear()
+    vm.page = 'overview'
+    vm.directoryQuery = 'ignored'
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(220)
+    expect(apiFetchJsonMock).not.toHaveBeenCalled()
+
+    vm.page = 'add-members'
+    vm.directoryQuery = 'member search'
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(220)
+
+    expect(apiFetchJsonMock).toHaveBeenCalledWith('/api/users-public/search?limit=100&q=member+search')
+
+    vm.title = 'Dirty title'
+    vm.description = 'Dirty description'
+    vm.selectedUserIds = new Set([3])
+    vm.managerBackStateActive = true
+    await wrapper.setProps({ show: false })
+    await flushPromises()
+
+    expect(popBackStateMock).toHaveBeenCalled()
+    expect(vm.page).toBe('overview')
+    expect(vm.directoryQuery).toBe('')
+    expect(vm.title).toBe('')
+    expect(vm.description).toBe('')
+    expect(vm.selectedUserIds.size).toBe(0)
+
+    vi.useRealTimers()
   })
 })

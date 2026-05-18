@@ -7,6 +7,12 @@ const apiFetchMock = vi.fn()
 const pushBackStateMock = vi.fn()
 const popBackStateMock = vi.fn()
 const clearBackStackMock = vi.fn()
+const originalMatchMedia = window.matchMedia
+const originalDeferredPrompt = (window as any).deferredPrompt
+const originalOTPCredential = (window as any).OTPCredential
+const originalNavigatorCredentials = navigator.credentials
+const originalNavigatorStandalone = (window.navigator as any).standalone
+const originalNavigatorUserAgent = window.navigator.userAgent
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({
@@ -67,6 +73,29 @@ describe('LoginView.vue', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllGlobals()
+    window.matchMedia = originalMatchMedia
+    ;(window as any).deferredPrompt = originalDeferredPrompt ?? null
+
+    if (typeof originalOTPCredential === 'undefined') {
+      Reflect.deleteProperty(window as any, 'OTPCredential')
+    } else {
+      Object.defineProperty(window, 'OTPCredential', { configurable: true, value: originalOTPCredential })
+    }
+
+    if (typeof originalNavigatorCredentials === 'undefined') {
+      Reflect.deleteProperty(navigator, 'credentials')
+    } else {
+      Object.defineProperty(navigator, 'credentials', { configurable: true, value: originalNavigatorCredentials })
+    }
+
+    if (typeof originalNavigatorStandalone === 'undefined') {
+      Reflect.deleteProperty(window.navigator as any, 'standalone')
+    } else {
+      Object.defineProperty(window.navigator, 'standalone', { configurable: true, value: originalNavigatorStandalone })
+    }
+
+    Object.defineProperty(window.navigator, 'userAgent', { configurable: true, value: originalNavigatorUserAgent })
   })
 
   it('moves to the OTP step after a successful OTP request', async () => {
@@ -854,5 +883,140 @@ describe('LoginView.vue', () => {
 
     wrapper.unmount()
     expect(abortSpy).toHaveBeenCalled()
+  })
+
+  it('covers helper branches for OTP reuse, resend failures, approval expiry polling, recovery status helpers, and dev-login errors', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.mocked(fetch)
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+    const vm = wrapper.vm as any
+
+    vm.error = 'stale error'
+    vm.goToOtpStep()
+    const goBack = pushBackStateMock.mock.calls.at(-1)?.[0] as (() => void) | undefined
+    expect(vm.step).toBe('otp')
+    goBack?.()
+    expect(vm.step).toBe('mobile')
+    expect(vm.error).toBe('')
+
+    vm.form.mobile = '09123456789'
+    vm.countdown = 25
+    await vm.requestOtp()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(vm.step).toBe('otp')
+
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: '' }, false, 500) as any)
+    await vm.resendOtpSms()
+    expect(vm.error).toBe('خطا در ارسال پیامک')
+
+    const approvalWrapper = mount(LoginView)
+    const approvalVm = approvalWrapper.vm as any
+    approvalVm.step = 'waiting_approval'
+    approvalVm.loginRequestId = 'req-poll-catch'
+    approvalVm.approvalExpiresAt = '2099-05-08T08:10:00.000Z'
+    fetchMock.mockRejectedValueOnce(new Error('poll failed'))
+    approvalVm.startApprovalPolling()
+    await vi.advanceTimersByTimeAsync(2001)
+    await flushPromises()
+    expect(approvalVm.loginRequestId).toBe('req-poll-catch')
+
+    approvalVm.stopApprovalPolling(true)
+    expect(approvalVm.loginRequestId).toBe('req-poll-catch')
+    approvalVm.stopApprovalPolling()
+    expect(approvalVm.loginRequestId).toBeNull()
+
+    approvalVm.loginRequestId = 'req-recovery-keep'
+    approvalVm.startRecoveryCountdown()
+    expect(approvalVm.recoveryCountdown).toBe(7200)
+
+    approvalVm.loginRequestId = 'req-recovery-expire'
+    approvalVm.startRecoveryCountdown(new Date(Date.now() + 1000).toISOString())
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    expect(approvalVm.step).toBe('recovery_expired')
+
+    expect(approvalVm.parseResponseError({ detail: 'پیام اختصاصی' }, 'fallback')).toBe('پیام اختصاصی')
+    expect(approvalVm.parseResponseError({ detail: '   ' }, 'fallback')).toBe('fallback')
+
+    approvalVm.recoveryApprovedTokens = { access_token: 'stale', refresh_token: 'old' }
+    approvalVm.applyRecoveryStatus({ status: 'approved' })
+    expect(approvalVm.step).toBe('recovery_approved')
+    expect(approvalVm.recoveryApprovedTokens).toBeNull()
+
+    approvalVm.recoveryFile = new File(['identity'], 'card.jpg', { type: 'image/jpeg' })
+    approvalVm.recoveryCaption = 'caption'
+    approvalVm.form.code = '12345'
+    approvalVm.applyRecoveryStatus({ status: 'cancelled' })
+    expect(approvalVm.step).toBe('mobile')
+    expect(approvalVm.form.code).toBe('')
+    expect(approvalVm.error).toContain('درخواست بازیابی لغو شد')
+
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: '' }, false, 403) as any)
+    await approvalVm.startDevLogin()
+    expect(approvalVm.error).toBe('دسترسی مجاز نیست')
+
+    approvalWrapper.unmount()
+    wrapper.unmount()
+  })
+
+  it('hydrates initial install state for iOS and covers WebOTP error plus step-abort cleanup', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.mocked(fetch)
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const abortSpy = vi.fn()
+
+    class AbortControllerMock {
+      signal = {}
+      abort = abortSpy
+    }
+
+    vi.stubGlobal('AbortController', AbortControllerMock)
+    Object.defineProperty(window, 'OTPCredential', { configurable: true, value: function OTPCredential() {} })
+    Object.defineProperty(navigator, 'credentials', {
+      configurable: true,
+      value: {
+        get: vi.fn(async () => {
+          throw new Error('otp failed')
+        }),
+      },
+    })
+    Object.defineProperty(window.navigator, 'standalone', {
+      configurable: true,
+      value: false,
+    })
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
+    })
+
+    ;(window as any).deferredPrompt = {
+      prompt: vi.fn(),
+      userChoice: Promise.resolve({ outcome: 'dismissed' }),
+    }
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+    const vm = wrapper.vm as any
+
+    expect(wrapper.text()).toContain('نصب اپلیکیشن')
+    vm.isIOS = true
+    await (wrapper.vm as any).$nextTick()
+    expect(wrapper.text()).toContain('برای نصب در iOS')
+
+    vm.step = 'otp'
+    await vi.advanceTimersByTimeAsync(100)
+    await flushPromises()
+    expect(navigator.credentials.get).toHaveBeenCalled()
+    expect(consoleLogSpy).toHaveBeenCalledWith('Web OTP Error:', expect.any(Error))
+
+    vm.step = 'mobile'
+    await flushPromises()
+    expect(abortSpy).toHaveBeenCalled()
+
+    wrapper.unmount()
+    consoleLogSpy.mockRestore()
+    fetchMock.mockReset()
   })
 })

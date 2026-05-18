@@ -10,6 +10,7 @@ const chatViewMocks = vi.hoisted(() => ({
   routerReplaceMock: vi.fn(),
   routerPushMock: vi.fn(),
   apiFetchMock: vi.fn(async (_url: string, _options?: RequestInit) => ({})),
+  messagesLogicOptions: null as any,
   loadConversationsMock: vi.fn(),
   loadMessagesMock: vi.fn(),
   conversationsSeed: [] as any[],
@@ -76,6 +77,7 @@ vi.mock('../stores/notifications', () => ({
 
 vi.mock('../composables/chat/useChatMessages', () => ({
   useChatMessages: (options: any) => ({
+    ...(chatViewMocks.messagesLogicOptions = options, {}),
     apiFetch: chatViewMocks.apiFetchMock,
     loadConversations: chatViewMocks.loadConversationsMock.mockImplementation(async () => {
       options.conversations.value = [...chatViewMocks.conversationsSeed]
@@ -180,6 +182,7 @@ describe('ChatView.vue', () => {
     chatViewMocks.routerPushMock.mockReset()
     chatViewMocks.apiFetchMock.mockReset()
     chatViewMocks.apiFetchMock.mockResolvedValue({})
+    chatViewMocks.messagesLogicOptions = null
     chatViewMocks.loadConversationsMock.mockReset()
     chatViewMocks.loadMessagesMock.mockReset()
     chatViewMocks.conversationsSeed = []
@@ -2944,6 +2947,140 @@ describe('ChatView.vue', () => {
     expect(chatViewMocks.apiFetchMock).not.toHaveBeenCalled()
 
     alertSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('bridges focus helpers, closes overlays from back-state callbacks, and handles swipe-to-reply touch hooks', async () => {
+    const focusInputMock = vi.fn()
+    const adjustTextareaHeightMock = vi.fn()
+    const message = buildMessage({ id: 501, sender_id: 55, receiver_id: 7 })
+    chatViewMocks.messagesSeed = [message]
+
+    const wrapper = await mountChatView({}, {
+      ChatHeader: {
+        props: ['isSearchActive'],
+        template: "<div><span class='search-open-state'>{{ String(isSearchActive) }}</span><button class='toggle-search-action' @click=\"$emit('toggle-search')\">search</button></div>",
+      },
+      ChatInputBar: {
+        props: ['replyingToMessage'],
+        methods: {
+          focusInput: focusInputMock,
+          adjustTextareaHeight: adjustTextareaHeightMock,
+        },
+        template: '<div class="chat-input-bridge-stub">{{ replyingToMessage?.id ?? "none" }}</div>',
+      },
+      ChatNewConversationModal: {
+        props: ['show'],
+        template: '<div class="new-chat-modal-state">{{ String(show) }}</div>',
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('.open-new-conversation').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.new-chat-modal-state').text()).toBe('true')
+
+    const newChatBackCallback = chatViewMocks.pushBackStateMock.mock.calls.at(-1)?.[0] as (() => void) | undefined
+    expect(newChatBackCallback).toBeTypeOf('function')
+    newChatBackCallback?.()
+    await flushPromises()
+    expect(wrapper.get('.new-chat-modal-state').text()).toBe('false')
+
+    await wrapper.get('.toggle-search-action').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.search-open-state').text()).toBe('true')
+
+    const searchBackCallback = chatViewMocks.pushBackStateMock.mock.calls.at(-1)?.[0] as (() => void) | undefined
+    expect(searchBackCallback).toBeTypeOf('function')
+    searchBackCallback?.()
+    await flushPromises()
+    expect(wrapper.get('.search-open-state').text()).toBe('false')
+
+    await getExposedStartNewChat(wrapper)(55, 'Target User')
+    await flushPromises()
+
+    chatViewMocks.messagesLogicOptions.focusMessageInput({ cursorToEnd: true })
+    chatViewMocks.messagesLogicOptions.adjustTextareaHeight()
+    expect(focusInputMock).toHaveBeenCalledWith({ cursorToEnd: true })
+    expect(adjustTextareaHeightMock).toHaveBeenCalledTimes(1)
+
+    const hooks = getChatViewTestHooks(wrapper)
+    hooks.handleTouchStart({ touches: [{ clientX: 120 }] } as any, message)
+    hooks.state.longPressTimer.value = window.setTimeout(() => {}, 0)
+    hooks.handleTouchMove({ touches: [{ clientX: 260 }] } as any, message)
+    hooks.handleTouchEnd({} as any, message)
+    await flushPromises()
+
+    expect(hooks.state.longPressTimer.value).toBeNull()
+    expect(wrapper.get('.chat-input-bridge-stub').text()).toContain('501')
+
+    wrapper.unmount()
+  })
+
+  it('renders read-only room composer props and the album-forward selection bar', async () => {
+    const albumMessages = [
+      buildImageMessage({
+        id: 71,
+        sender_id: 55,
+        receiver_id: 7,
+        content: JSON.stringify({ file_id: 'img-a', album_id: 'album-forward', album_index: 0 }),
+      }),
+      buildImageMessage({
+        id: 72,
+        sender_id: 55,
+        receiver_id: 7,
+        content: JSON.stringify({ file_id: 'img-b', album_id: 'album-forward', album_index: 1 }),
+      }),
+    ]
+    chatViewMocks.messagesSeed = albumMessages
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 23,
+        other_user_id: -23,
+        other_user_name: 'کانال فقط‌خواندنی',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'channel',
+        chat_id: 23,
+        can_send: false,
+      },
+    ]
+
+    const wrapper = await mountChatView({
+      targetUserId: -23,
+      targetUserName: 'کانال فقط‌خواندنی',
+    }, {
+      ChatInputBar: {
+        props: ['isReadOnly', 'readOnlyBannerText', 'disableRichComposer', 'allowVoiceRecording'],
+        template: '<div class="room-composer-state">{{ String(isReadOnly) }}|{{ readOnlyBannerText }}|{{ String(disableRichComposer) }}|{{ String(allowVoiceRecording) }}</div>',
+      },
+      AttachmentMenu: {
+        props: ['allowLocation'],
+        template: '<div class="attachment-location-flag">{{ String(allowLocation) }}</div>',
+      },
+      ChatForwardModal: {
+        props: ['showForwardModal'],
+        template: '<div class="forward-modal-state">{{ String(showForwardModal) }}</div>',
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.room-composer-state').text()).toBe('true|فقط مدیران کانال امکان ارسال پیام دارند.|true|false')
+    expect(wrapper.get('.attachment-location-flag').text()).toBe('false')
+
+    const hooks = getChatViewTestHooks(wrapper)
+    hooks.state.selectedMessages.value = [71, 72]
+    hooks.state.selectionModePurpose.value = 'album-forward'
+    hooks.state.activeAlbumSelectionId.value = 'album-forward'
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('2 مدیا برای هدایت انتخاب شده')
+    await wrapper.find('.album-download-selection-bar .selection-action-btn.primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.forward-modal-state').text()).toBe('true')
+
     wrapper.unmount()
   })
 

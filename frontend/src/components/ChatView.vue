@@ -3057,6 +3057,7 @@ defineExpose({
       showStickerPicker,
       selectedUserName,
       selectedRoomKind,
+      longPressTimer,
       pendingSelectionAnchor: () => pendingSelectionAnchor,
     },
     normalizeLocationPayload,
@@ -3127,6 +3128,9 @@ defineExpose({
     viewProfile,
     openPublicProfile,
     handleTypingForCurrentRoom,
+    handleTouchStart,
+    handleTouchMove,
+    handleTouchEnd,
   },
 })
 

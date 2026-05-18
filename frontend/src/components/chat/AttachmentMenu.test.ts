@@ -234,6 +234,9 @@ describe('AttachmentMenu.vue', () => {
   it('falls back to native camera capture when inline camera is unavailable', async () => {
     const inputClickSpy = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {})
     const wrapper = mountAttachmentMenu()
+    const vm = wrapper.vm as unknown as {
+      setCameraMode: (mode: 'photo' | 'video') => Promise<void>
+    }
 
     await wrapper.findAll('.gallery-panel .action-card')[0]!.trigger('click')
     await flushPromises()
@@ -241,8 +244,12 @@ describe('AttachmentMenu.vue', () => {
     expect(wrapper.find('.camera-capture-overlay').exists()).toBe(true)
     expect(wrapper.find('.camera-status-overlay.native').exists()).toBe(true)
 
+    await vm.setCameraMode('video')
+    await flushPromises()
+
     await wrapper.find('.camera-shutter-btn').trigger('click')
     expect(inputClickSpy).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('این صفحه به صورت امن باز نشده است و مرورگر اجازه پیش نمایش داخلی دوربین را نمی دهد.')
   })
 
   it('keeps location send disabled until a manual pin is chosen and then emits the coordinates', async () => {
@@ -376,6 +383,7 @@ describe('AttachmentMenu.vue', () => {
       capturedCameraMedia: Array<{ id: string; file: File; type: 'photo' | 'video'; previewUrl: string }>
       onNativeCameraFile: (event: Event) => void
       editCapturedMedia: (itemId: string) => void
+      onCameraEditCancel: () => void
       onCameraEditConfirm: (editedFile: File) => void
     }
     const photoFile = new File(['photo'], 'photo.jpg', { type: 'image/jpeg' })
@@ -396,6 +404,12 @@ describe('AttachmentMenu.vue', () => {
     const videoId = vm.capturedCameraMedia[1]!.id
 
     vm.editCapturedMedia(videoId)
+    expect(vm.cameraEditingItemId).toBeNull()
+
+    vm.editCapturedMedia(photoId)
+    expect(vm.cameraEditingItemId).toBe(photoId)
+
+    vm.onCameraEditCancel()
     expect(vm.cameraEditingItemId).toBeNull()
 
     vm.editCapturedMedia(photoId)
@@ -516,6 +530,170 @@ describe('AttachmentMenu.vue', () => {
     vm.isRecording = true
     await vm.setCameraMode('photo')
     expect(vm.cameraMode).toBe('video')
+  })
+
+  it('restarts inline camera streams when the facing mode changes', async () => {
+    const { getUserMedia } = installInlineCameraMocks()
+    const wrapper = mountAttachmentMenu()
+    const vm = wrapper.vm as unknown as {
+      activeFacingMode: 'environment' | 'user'
+      openCameraCapture: () => void
+      toggleFacingMode: () => Promise<void>
+    }
+
+    vm.openCameraCapture()
+    await flushPromises()
+
+    const previousCalls = getUserMedia.mock.calls.length
+    await vm.toggleFacingMode()
+    await flushPromises()
+
+    expect(vm.activeFacingMode).toBe('user')
+    expect(getUserMedia.mock.calls.length).toBeGreaterThan(previousCalls)
+  })
+
+  it('recenters auto-pinned location previews from detected coordinates', async () => {
+    const wrapper = mountAttachmentMenu()
+    const invalidateSize = vi.fn()
+    const setView = vi.fn()
+    const setupState = (wrapper.vm as any).$?.setupState as {
+      activeTab: 'gallery' | 'file' | 'location'
+      selectedLatLng: { lat: number; lng: number } | null
+      detectedLocationLatLng: [number, number] | null
+      refreshLocationMapViewport: (recenterAutoPin?: boolean) => Promise<void>
+      getAutoPinnedLatLng: () => [number, number] | null
+    }
+
+    setupState.activeTab = 'location'
+    await nextTick()
+
+    const mapComponent = wrapper.findComponent({ name: 'LMap' })
+    ;(mapComponent.vm as any).leafletObject = {
+      invalidateSize,
+      setView,
+      getZoom: () => 17,
+    }
+    setupState.selectedLatLng = null
+    setupState.detectedLocationLatLng = [35.7219, 51.3347]
+    await nextTick()
+
+    expect(setupState.getAutoPinnedLatLng()).toEqual([35.7219, 51.3347])
+    await setupState.refreshLocationMapViewport(true)
+    expect(invalidateSize).toHaveBeenCalled()
+    expect(setView).toHaveBeenCalledWith([35.7219, 51.3347], 17, { animate: false })
+  })
+
+  it('guards programmatic map moves and stringifies empty debug details', async () => {
+    const wrapper = mountAttachmentMenu()
+    const vm = wrapper.vm as unknown as {
+      mapRef: { leafletObject: { getCenter: () => { lat: number; lng: number } } } | null
+      isProgrammaticMapMove: boolean
+      selectedLatLng: { lat: number; lng: number } | null
+      hasManualLocationSelection: boolean
+      onMapMoveEnd: () => void
+      stringifyLocationDebugDetails: (details?: string | Record<string, unknown>) => string
+    }
+
+    vm.mapRef = {
+      leafletObject: {
+        getCenter: () => ({ lat: 35.7001, lng: 51.4002 }),
+      },
+    }
+
+    vm.isProgrammaticMapMove = true
+    vm.onMapMoveEnd()
+    expect(vm.isProgrammaticMapMove).toBe(false)
+    expect(vm.selectedLatLng).toBeNull()
+
+    vm.onMapMoveEnd()
+    expect(vm.selectedLatLng).toEqual({ lat: 35.7001, lng: 51.4002 })
+    expect(vm.hasManualLocationSelection).toBe(true)
+    expect(vm.stringifyLocationDebugDetails()).toBe('')
+  })
+
+  it('covers watch-position timeout and error helper branches', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountAttachmentMenu()
+    const clearWatch = vi.fn()
+    const vm = wrapper.vm as unknown as {
+      requestWatchPosition: (options: PositionOptions, waitMs?: number) => Promise<GeolocationPosition>
+      requestBestWatchPosition: (
+        options: PositionOptions,
+        waitMs?: number,
+        desiredAccuracyM?: number,
+        onProgress?: (position: GeolocationPosition) => void,
+      ) => Promise<GeolocationPosition>
+    }
+
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: vi.fn(),
+        watchPosition: vi.fn(() => 77),
+        clearWatch,
+      },
+    })
+
+    const timeoutWatchPromise = vm.requestWatchPosition({ enableHighAccuracy: true }, 10).catch((error) => error)
+    await vi.advanceTimersByTimeAsync(11)
+    await expect(timeoutWatchPromise).resolves.toMatchObject({
+      code: 3,
+      message: 'watchPosition timed out',
+    })
+    expect(clearWatch).toHaveBeenCalled()
+
+    const watchError = {
+      code: 2,
+      message: 'position unavailable',
+      PERMISSION_DENIED: 1,
+      POSITION_UNAVAILABLE: 2,
+      TIMEOUT: 3,
+    }
+
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: vi.fn(),
+        watchPosition: vi.fn((_success: unknown, error: (reason: typeof watchError) => void) => {
+          error(watchError)
+          return 88
+        }),
+        clearWatch,
+      },
+    })
+
+    await expect(vm.requestWatchPosition({ enableHighAccuracy: true }, 10).catch((error) => error)).resolves.toBe(watchError)
+
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: vi.fn(),
+        watchPosition: vi.fn(() => 99),
+        clearWatch,
+      },
+    })
+
+    const timeoutBestPromise = vm.requestBestWatchPosition({ enableHighAccuracy: true }, 10).catch((error) => error)
+    await vi.advanceTimersByTimeAsync(11)
+    await expect(timeoutBestPromise).resolves.toMatchObject({
+      code: 3,
+      message: 'watchPosition timed out',
+    })
+
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: vi.fn(),
+        watchPosition: vi.fn((_success: unknown, error: (reason: typeof watchError) => void) => {
+          error(watchError)
+          return 100
+        }),
+        clearWatch,
+      },
+    })
+
+    await expect(vm.requestBestWatchPosition({ enableHighAccuracy: true }, 10).catch((error) => error)).resolves.toBe(watchError)
+    vi.useRealTimers()
   })
 
   it('routes a single standard gallery image into the editor flow after closing the sheet', async () => {
@@ -1043,9 +1221,12 @@ describe('AttachmentMenu.vue', () => {
       cameraFallbackReason: string
       cameraError: string
       openCameraCapture: () => void
+      setCameraMode: (mode: 'photo' | 'video') => Promise<void>
     }
 
     vm.openCameraCapture()
+    await flushPromises()
+    await vm.setCameraMode('video')
     await flushPromises()
 
     expect(getUserMedia).toHaveBeenCalledTimes(1)
@@ -1053,7 +1234,8 @@ describe('AttachmentMenu.vue', () => {
     expect(vm.cameraFallbackReason).toBe('stream-start-failed')
     expect(vm.cameraError).toBe('')
     expect(wrapper.find('.camera-status-overlay.native').exists()).toBe(true)
-    expect(wrapper.text()).toContain('پیش نمایش زنده دوربین در این مرورگر در دسترس نیست.')
+    expect(wrapper.text()).toContain('فیلم برداری زنده داخل اپ در این مرورگر در دسترس نیست.')
+    expect(wrapper.text()).toContain('دسترسی دوربین یا میکروفون برای پیش نمایش داخلی در این مرورگر رد شده است.')
   })
 
   it('alerts and avoids recording when MediaRecorder is unavailable or unsupported', async () => {
@@ -1120,6 +1302,27 @@ describe('AttachmentMenu.vue', () => {
     vm.onTouchEnd()
 
     expect(wrapper.emitted('update:modelValue')).toContainEqual([false])
+
+    const resetWrapper = mountAttachmentMenu()
+    const resetVm = resetWrapper.vm as unknown as {
+      sheetRef: HTMLElement | null
+      onTouchStart: (event: TouchEvent) => void
+      onTouchMove: (event: TouchEvent) => void
+      onTouchEnd: () => void
+    }
+
+    resetVm.sheetRef = resetWrapper.find('.attachment-sheet').element as HTMLElement
+    resetVm.onTouchStart({
+      target: { closest: () => null },
+      touches: [{ clientY: 24 }],
+    } as unknown as TouchEvent)
+    resetVm.onTouchMove({
+      touches: [{ clientY: 80 }],
+    } as unknown as TouchEvent)
+    resetVm.onTouchEnd()
+
+    expect(resetWrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(resetVm.sheetRef?.style.transform || '').toBe('')
 
     const guardedWrapper = mountAttachmentMenu()
     const guardedVm = guardedWrapper.vm as unknown as {
@@ -1459,8 +1662,16 @@ describe('AttachmentMenu.vue', () => {
       type: 'photo',
       previewUrl: 'blob:keep',
     }]
+    vm.mediaRecorder = {
+      state: 'recording',
+      onstop: vi.fn(),
+      stop: vi.fn(() => {
+        throw new Error('stop failed')
+      }),
+    }
     vm.cleanupCamera(true, false)
     expect(vm.capturedCameraMedia).toHaveLength(1)
+    expect(vm.mediaRecorder).toBeNull()
 
     Object.defineProperty(globalThis.crypto, 'randomUUID', {
       configurable: true,

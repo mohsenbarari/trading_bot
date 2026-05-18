@@ -21,12 +21,14 @@ const mediaMocks = vi.hoisted(() => ({
   })),
   waitForReady: vi.fn(async () => {}),
   uploadHandler: null as null | ((event: any) => void),
+  uploadUnsubscribe: vi.fn(),
 
   cancelDocumentDownload: vi.fn(),
   getCompletedDocumentDownloadUrl: vi.fn<(fileId: string) => string>(() => ''),
   getPendingDocumentDownloadsForUser: vi.fn(() => []),
   startDocumentDownload: vi.fn(async () => {}),
   documentHandler: null as null | ((event: any) => void),
+  documentUnsubscribe: vi.fn(),
 }))
 
 const preprocessMocks = vi.hoisted(() => ({
@@ -62,6 +64,7 @@ vi.mock('../../services/chatUploadBackground', () => ({
   subscribeToUploads: (handler: (event: any) => void) => {
     mediaMocks.uploadHandler = handler
     return () => {
+      mediaMocks.uploadUnsubscribe(handler)
       if (mediaMocks.uploadHandler === handler) {
         mediaMocks.uploadHandler = null
       }
@@ -80,6 +83,7 @@ vi.mock('../../services/chatDocumentDownloadBackground', () => ({
   subscribeToDocumentDownloads: (handler: (event: any) => void) => {
     mediaMocks.documentHandler = handler
     return () => {
+      mediaMocks.documentUnsubscribe(handler)
       if (mediaMocks.documentHandler === handler) {
         mediaMocks.documentHandler = null
       }
@@ -392,6 +396,7 @@ describe('useChatMedia', () => {
     mediaMocks.waitForReady.mockReset()
     mediaMocks.waitForReady.mockResolvedValue(undefined)
     mediaMocks.uploadHandler = null
+    mediaMocks.uploadUnsubscribe.mockReset()
 
     mediaMocks.cancelDocumentDownload.mockClear()
     mediaMocks.getCompletedDocumentDownloadUrl.mockReset()
@@ -400,6 +405,7 @@ describe('useChatMedia', () => {
     mediaMocks.getPendingDocumentDownloadsForUser.mockReturnValue([])
     mediaMocks.startDocumentDownload.mockClear()
     mediaMocks.documentHandler = null
+    mediaMocks.documentUnsubscribe.mockReset()
 
     preprocessMocks.canUseImagePreprocessWorker.mockReset()
     preprocessMocks.canUseImagePreprocessWorker.mockReturnValue(false)
@@ -771,6 +777,121 @@ describe('useChatMedia', () => {
     const abortedVideoController = new AbortController()
     abortedVideoController.abort()
     await expect(hooks.preprocessVideoPreview('blob:video', abortedVideoController.signal)).rejects.toThrow('UploadCancelled')
+  })
+
+  it('covers weak capability fallback, preprocess timeout, pending media-load reuse, and non-media clicks', async () => {
+    vi.useFakeTimers()
+
+    const originalRequestIdleCallback = (window as any).requestIdleCallback
+    Object.defineProperty(window, 'requestIdleCallback', {
+      configurable: true,
+      writable: true,
+      value: (callback: IdleRequestCallback) => {
+        callback({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline)
+        return 1
+      },
+    })
+    Reflect.deleteProperty(globalThis, 'requestAnimationFrame')
+
+    installIndexedDbMock({ failOpen: true })
+
+    let resolveFetch: ((value: Response) => void) | null = null
+    let fetchCallCount = 0
+    const fetchMock = vi.fn(() => {
+      fetchCallCount += 1
+      if (fetchCallCount === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFetch = resolve
+        })
+      }
+
+      return Promise.resolve({
+        ok: true,
+        blob: async () => new Blob(['hydrated-image'], { type: 'image/png' }),
+      } as Response)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    try {
+      const { wrapper } = mountHarness([
+        makeImageMessage(141, {
+          local_blob_url: undefined,
+          content: JSON.stringify({ file_id: 'shared-pending' }),
+        }),
+        {
+          ...makeDocumentMessage(142),
+          message_type: 'text',
+          content: 'plain text',
+        } as Message,
+      ])
+      const vm = wrapper.vm as any
+      const hooks = vm.__testHooks
+
+      vi.stubGlobal('navigator', undefined as any)
+      expect(hooks.getMediaClientCapability()).toMatchObject({
+        tier: 'weak',
+        cpuCount: 1,
+        deviceMemory: 0,
+        effectiveType: '',
+        saveData: false,
+        hasWorkerPreprocess: false,
+      })
+
+      const timedOutPreprocess = hooks.runAdaptivePreprocessTask(1, () => new Promise(() => {}))
+      const timedOutExpectation = expect(timedOutPreprocess).rejects.toThrow('Preprocessing step timed out')
+      await vi.advanceTimersByTimeAsync(90_000)
+      await timedOutExpectation
+
+      const firstLoad = vm.loadImageForMessage(JSON.stringify({ file_id: 'shared-pending' }), 'image', {
+        allowNetwork: true,
+      })
+      const secondLoad = vm.loadImageForMessage(JSON.stringify({ file_id: 'shared-pending' }), 'image', {
+        allowNetwork: true,
+      })
+      expect(hooks.state.pendingMediaLoads.size).toBe(1)
+      await flushPromises()
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/chat/files/shared-pending?token=jwt')).length,
+      ).toBe(1)
+
+      resolveFetch?.({
+        ok: true,
+        blob: async () => new Blob(['pending-image'], { type: 'image/png' }),
+      } as Response)
+      await expect(firstLoad).resolves.toBe('blob:generated-media')
+      await expect(secondLoad).resolves.toBe('blob:generated-media')
+
+      vm.scheduleMediaHydration(JSON.stringify({ file_id: 'hydrated-fallback' }), 'image', { allowNetwork: true })
+      await vi.advanceTimersByTimeAsync(0)
+      await flushPromises()
+      expect(fetchMock).toHaveBeenCalledWith('https://coin.test/api/chat/files/hydrated-fallback?token=jwt')
+
+      await vm.handleMediaClick(vm.messages[1])
+      expect(vm.lightboxMedia).toBeNull()
+    } finally {
+      if (originalRequestIdleCallback) {
+        Object.defineProperty(window, 'requestIdleCallback', {
+          configurable: true,
+          writable: true,
+          value: originalRequestIdleCallback,
+        })
+      } else {
+        Reflect.deleteProperty(window, 'requestIdleCallback')
+      }
+      vi.useRealTimers()
+    }
+  })
+
+  it('swallows upload and document unsubscribe failures during unmount', async () => {
+    mediaMocks.uploadUnsubscribe.mockImplementation(() => {
+      throw new Error('upload unsubscribe failed')
+    })
+    mediaMocks.documentUnsubscribe.mockImplementation(() => {
+      throw new Error('document unsubscribe failed')
+    })
+
+    const { wrapper } = mountHarness([makeDocumentMessage(199)])
+    expect(() => wrapper.unmount()).not.toThrow()
   })
 
   it('falls back when video preview capture throws during seek scheduling or timing out cleanup', async () => {

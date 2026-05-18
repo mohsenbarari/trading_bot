@@ -38,6 +38,8 @@ async function loadRouteUserProfile(userId: number) {
     return
   }
 
+  currentSection.value = 'user_profile'
+  selectedUserForProfile.value = null
   isLoadingRouteUserProfile.value = true
   try {
     const response = await apiFetch(`/api/users/${userId}`)

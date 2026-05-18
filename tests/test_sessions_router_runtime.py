@@ -184,6 +184,42 @@ class SessionsRouterRuntimeTests(unittest.IsolatedAsyncioTestCase):
         clear_mock.assert_awaited_once_with(unittest.mock.ANY, 5, exclude_session_id=caller_id)
         self.assertEqual(result, {"detail": "3 نشست پایان یافت"})
 
+    async def test_session_runtime_decode_failure_and_missing_current_session_id_paths(self):
+        current_user = SimpleNamespace(id=5)
+        target_id = uuid.uuid4()
+        sessions = [make_session(target_id)]
+
+        with patch("jose.jwt.decode", side_effect=RuntimeError("bad token")), patch(
+            "api.routers.sessions.get_active_sessions",
+            new=AsyncMock(return_value=sessions),
+        ):
+            result = await list_active_sessions(
+                request=make_request(token="jwt-token"),
+                db=FakeDB(),
+                current_user=current_user,
+            )
+        self.assertFalse(result[0]["is_current"])
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await terminate_session(
+                str(target_id),
+                request=make_request(),
+                db=FakeDB([FakeExecuteResult(make_session(target_id))]),
+                current_user=current_user,
+            )
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "شناسه نشست شما مشخص نیست")
+
+        with patch("jose.jwt.decode", side_effect=RuntimeError("bad token")):
+            with self.assertRaises(HTTPException) as exc_info:
+                await logout_all_sessions(
+                    request=make_request(token="jwt-token"),
+                    db=FakeDB(),
+                    current_user=current_user,
+                )
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "شناسه نشست شما مشخص نیست")
+
 
 if __name__ == "__main__":
     unittest.main()
