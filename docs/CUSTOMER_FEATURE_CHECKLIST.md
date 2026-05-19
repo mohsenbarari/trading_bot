@@ -148,6 +148,28 @@
 
 ## 9. منطق معامله و history
 
+### 9.0. ماتریس نهایی Brokerage / Chained Settlement
+
+- [x] این ماتریس پوشش کامل دسته‌بندی actorها است: offer source فقط می‌تواند `Owner` یا `Tier 1` باشد، چون `Tier 2` حق ثبت آفر ندارد.
+- [x] اگر buy/sell polarity یک حالت برعکس شود، chain actorها عوض نمی‌شود؛ فقط نقش‌های buyer/seller در همان legها بر اساس offer type معکوس می‌شوند و قانون price مربوط به همان offer type اعمال می‌شود.
+- [x] اگر actor عادی customer نداشته باشد، از نظر این ماتریس در دسته‌ی `Owner`/principal مستقیم قرار می‌گیرد.
+- [x] برای نمونه‌های زیر گروه A شامل `رامین` به‌عنوان owner، `سینا` و `سهراب` به‌عنوان `Tier 1`، و `علی` به‌عنوان `Tier 2` است؛ گروه B شامل `مجید` به‌عنوان owner، `پیمان` به‌عنوان `Tier 1`، و `محمد` به‌عنوان `Tier 2` است.
+
+Owner-source cases:
+- [x] حالت 1: source=`Owner` و responder=`Owner` دیگر. نمونه: `مجید ←buyer / رامین ←seller @ 50000`.
+- [x] حالت 2: source=`Owner` و responder=`Tier 1` خودش. نمونه: `رامین ←buyer / سینا ←seller @ 100000`.
+- [x] حالت 3: source=`Owner` و responder=`Tier 1` owner دیگر. نمونه: `پیمان ←buyer / مجید ←seller @ 200000` و `مجید ←buyer / رامین ←seller @ 200000`.
+- [x] حالت 4: source=`Owner` و responder=`Tier 2` خودش. اگر raw buy=`50000` و commission=`0.5%` باشد، طبق قانون confirmed rounding قیمت `49750` به `49700` تبدیل می‌شود و نمونه‌ی نهایی `رامین ←buyer / علی ←seller @ 49700` است.
+- [x] حالت 5: source=`Owner` و responder=`Tier 2` owner دیگر. اگر raw sell=`100000` و commission=`0.7%` باشد، نمونه: `محمد ←buyer / مجید ←seller @ 100700` و `مجید ←buyer / رامین ←seller @ 100000`.
+
+Tier1-source cases:
+- [x] حالت 6: source=`Tier 1` و responder=owner خودش. نمونه: `رامین ←buyer / سینا ←seller @ 200000`.
+- [x] حالت 7: source=`Tier 1` و responder=`Owner` دیگر. نمونه: `سینا ←buyer / رامین ←seller @ 50000` و `رامین ←buyer / مجید ←seller @ 50000`.
+- [x] حالت 8: source=`Tier 1` و responder=`Tier 1` همان owner. نمونه: `سهراب ←buyer / رامین ←seller @ 100000` و `رامین ←buyer / سینا ←seller @ 100000`.
+- [x] حالت 9: source=`Tier 1` و responder=`Tier 1` owner دیگر. نمونه: `سینا ←buyer / رامین ←seller @ 200000`، `رامین ←buyer / مجید ←seller @ 200000`، و `مجید ←buyer / پیمان ←seller @ 200000`.
+- [x] حالت 10: source=`Tier 1` و responder=`Tier 2` همان owner. اگر raw sell=`50000` و commission=`0.5%` باشد، طبق قانون confirmed rounding قیمت `50250` به `50300` تبدیل می‌شود و نمونه‌ی نهایی `علی ←buyer / رامین ←seller @ 50300` و `رامین ←buyer / سینا ←seller @ 50000` است.
+- [x] حالت 11: source=`Tier 1` و responder=`Tier 2` owner دیگر. اگر raw buy=`100000` و commission=`0.7%` باشد، نمونه: `سینا ←buyer / رامین ←seller @ 100000`، `رامین ←buyer / مجید ←seller @ 100000`، و `مجید ←buyer / محمد ←seller @ 99300`.
+
 ### 9.1. قرارداد قطعی اجرای معامله برای Tier 1 (سناریوهای تاییدشده)
 
 - [x] حالت 1 (Tier1 seller vs Tier1 buyer از owner دیگر): chain سه‌مرحله‌ای با قیمت یکسان ثبت می‌شود.
@@ -168,13 +190,14 @@
 - [x] chain اجرای معامله برای `Tier 2` در سناریوهای owner-offer و outsider-offer از سمت responder قطعی شده است.
 - [x] اگر `Tier 2` روی آفر owner خودش request بزند، trade مستقیم owner ↔ customer با همان قیمت projected-to-customer ثبت می‌شود.
 - [x] مثال قطعی: owner=`شهاب` buy raw=`192800`، customer=`محمد` با commission `0.7%` request می‌زند، trade مستقیم `شهاب ←buyer / محمد ←seller @ 191400` ثبت می‌شود.
-- [x] اگر `Tier 2` روی آفر owner یا actor مجازِ بیرون از owner خودش request بزند، execution به chain دو‌مرحله‌ای می‌شکند.
-- [x] در Tier 2، فقط سمت responder mediated می‌شود؛ leg بیرونی همیشه با source actor اصلی آفر روی raw price ثبت می‌شود.
-- [x] در buy-offer بیرونی: customer responder با قیمت viewer-specific به owner خودش trade می‌کند و سپس owner او با raw price به buyer/source actor اصلی trade می‌کند.
+- [x] اگر `Tier 2` روی آفر owner یا actor مجازِ بیرون از owner خودش request بزند، execution بر اساس source category به chain دو یا سه‌مرحله‌ای می‌شکند.
+- [x] در Tier 2، responder همیشه از owner خودش عبور می‌کند؛ اگر source هم customer/`Tier 1` باشد، source side نیز از owner خودش عبور می‌کند.
+- [x] legهای raw همیشه price خام offer را حفظ می‌کنند و leg customer `Tier 2` ↔ owner با `viewer_effective_price` همان customer ثبت می‌شود.
+- [x] در buy-offer بیرونی با source owner/non-customer: customer responder با قیمت viewer-specific به owner خودش trade می‌کند و سپس owner او با raw price به buyer/source actor اصلی trade می‌کند.
 - [x] مثال قطعی: owner=`شهاب` buy raw=`192800`، customer=`علی` با commission `0.5%` request می‌زند، trade1 = `متین ←buyer / علی ←seller @ 191800` و trade2 = `شهاب ←buyer / متین ←seller @ 192800`.
-- [x] در sell-offer بیرونی: customer responder با قیمت viewer-specific از owner خودش buy می‌کند و سپس owner او با raw price از seller/source actor اصلی buy می‌کند.
-- [x] مثال قطعی: `سهراب` که `Tier 1` است sell raw=`53500` publish می‌کند؛ اگر `علی` request بزند trade1 = `علی ←buyer / متین ←seller @ 53800` و trade2 = `متین ←buyer / سهراب ←seller @ 53500` ثبت می‌شود.
-- [x] مثال قطعی: همان sell raw اگر `محمد` request بزند trade1 = `محمد ←buyer / شهاب ←seller @ 53900` و trade2 = `شهاب ←buyer / سهراب ←seller @ 53500` ثبت می‌شود.
+- [x] در sell-offer بیرونی با source owner/non-customer: customer responder با قیمت viewer-specific از owner خودش buy می‌کند و سپس owner او با raw price از seller/source actor اصلی buy می‌کند.
+- [x] اگر source آفر یک `Tier 1` باشد، source-owner نیز در chain حفظ می‌شود؛ نمونه‌های قطعی این حالت در ماتریس 9.0 حالت‌های 10 و 11 ثبت شده‌اند.
+- [x] برای sell-offer بیرونی از source=`Tier 1` و responder=`Tier 2` owner دیگر، mirror حالت 11 اعمال می‌شود: responder customer با `viewer_effective_price` از owner خودش می‌خرد، responder owner با raw price از source owner می‌خرد، و source owner با raw price از source `Tier 1` می‌خرد.
 - [x] اگر owner1 تاریخچه معاملات خودش با user3 را از پروفایل عمومی user3 ببیند، روی معامله‌هایی که مربوط به مشتری1 هستند باید یک تگ کوچک «مشتری» و در کنار آن نام مشتری1 را ببیند.
 - [x] اگر user3 تاریخچه معاملات با owner1 را ببیند، برای همان معامله نباید آن تگ مشتری را ببیند.
 - [x] اگر owner1 در حال مرور تاریخچه معاملات با مشتری1 باشد، در هر معامله باید نام سمت دیگر معامله همراه با یک تگ ریز context نمایش داده شود.
