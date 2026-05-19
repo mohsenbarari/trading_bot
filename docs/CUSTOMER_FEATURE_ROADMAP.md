@@ -131,6 +131,7 @@ validation phase:
 - [x] customer invitation register flow سبز شود.
 - [x] invalid/expired/reused token tests سبز شوند.
 - [x] customer session regression با user عادی مقایسه شود تا محدودیت ناخواسته اضافه نشده باشد.
+- [x] limited live API/runtime smoke برای registration/login customer بدون وابستگی به SMS سبز شود.
 
 ## 5. Phase 4 - Communication Graph and Messenger Restrictions
 
