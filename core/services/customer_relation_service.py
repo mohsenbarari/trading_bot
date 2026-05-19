@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from core.utils import utc_now
+from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.customer_relation import CustomerRelation, CustomerRelationStatus
-from models.user import User
+from models.offer import OfferType
+from models.user import User, UserRole
 
 
 CAPACITY_TRACKED_CUSTOMER_RELATION_STATUSES = (
@@ -20,6 +23,7 @@ CAPACITY_TRACKED_CUSTOMER_RELATION_STATUSES = (
 )
 CUSTOMER_INVITATION_PREFIX = "CUST-"
 CUSTOMER_PENDING_LIFETIME = timedelta(days=2)
+PRICE_ROUNDING_UNIT = Decimal("100")
 
 
 def _utcnow_naive():
@@ -28,6 +32,33 @@ def _utcnow_naive():
 
 def is_customer_invitation_token(token: str | None) -> bool:
     return bool((token or "").startswith(CUSTOMER_INVITATION_PREFIX))
+
+
+def _normalize_offer_type(offer_type: OfferType | str) -> str:
+    value = offer_type.value if hasattr(offer_type, "value") else str(offer_type or "")
+    normalized = value.strip().lower()
+    if normalized not in {OfferType.BUY.value, OfferType.SELL.value}:
+        raise ValueError("offer_type must be 'buy' or 'sell'")
+    return normalized
+
+
+def _normalize_decimal(value: object, *, name: str) -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(f"{name} is invalid") from exc
+
+
+def _normalize_non_negative_int(value: object, *, name: str) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} is invalid") from exc
+    if normalized < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return normalized
 
 
 def get_effective_max_customers(owner_user: User) -> int:
@@ -127,6 +158,23 @@ async def get_active_customer_relation_for_customer(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+async def get_active_customer_relation_for_user(
+    db: AsyncSession,
+    user_id: int,
+) -> CustomerRelation | None:
+    return await get_active_customer_relation_for_customer(db, user_id)
+
+
+async def get_owner_for_customer(
+    db: AsyncSession,
+    customer_user_id: int,
+) -> User | None:
+    relation = await get_active_customer_relation_for_customer(db, customer_user_id)
+    if relation is None:
+        return None
+    return relation.owner_user
+
+
 async def is_user_customer(db: AsyncSession, user_id: int) -> bool:
     return await get_active_customer_relation_for_customer(db, user_id) is not None
 
@@ -197,3 +245,139 @@ async def validate_customer_capacity(
             detail="Owner has reached the maximum number of customers",
         )
     return current_count, max_customers
+
+
+async def validate_owner_customer_capacity(
+    db: AsyncSession,
+    owner_user: User,
+    *,
+    additional_slots: int = 1,
+) -> tuple[int, int]:
+    return await validate_customer_capacity(db, owner_user, additional_slots=additional_slots)
+
+
+def round_customer_price(adjusted_price: Decimal | int | str, offer_type: OfferType | str) -> int:
+    normalized_price = _normalize_decimal(adjusted_price, name="adjusted_price")
+    normalized_offer_type = _normalize_offer_type(offer_type)
+    rounding_mode = ROUND_FLOOR if normalized_offer_type == OfferType.BUY.value else ROUND_CEILING
+    rounded_units = (normalized_price / PRICE_ROUNDING_UNIT).to_integral_value(rounding=rounding_mode)
+    return int(rounded_units * PRICE_ROUNDING_UNIT)
+
+
+def apply_customer_commission(
+    raw_price: Decimal | int | str,
+    rate: Decimal | float | int | str | None,
+    offer_type: OfferType | str,
+) -> int:
+    normalized_price = _normalize_decimal(raw_price, name="raw_price")
+    normalized_offer_type = _normalize_offer_type(offer_type)
+    if normalized_price <= 0:
+        raise ValueError("raw_price must be positive")
+
+    if rate is None:
+        return int(normalized_price)
+
+    normalized_rate = _normalize_decimal(rate, name="rate")
+    if normalized_rate <= 0:
+        return int(normalized_price)
+
+    delta = normalized_price * normalized_rate / Decimal("100")
+    adjusted_price = normalized_price - delta if normalized_offer_type == OfferType.BUY.value else normalized_price + delta
+    return round_customer_price(adjusted_price, normalized_offer_type)
+
+
+def validate_customer_trade_limits(
+    relation: CustomerRelation | object,
+    *,
+    quantity: int | str,
+    trades_today: int = 0,
+    commodity_volume_today: int = 0,
+    now=None,
+) -> None:
+    if relation is None:
+        raise HTTPException(status_code=400, detail="Customer relation is required")
+
+    relation_status = getattr(getattr(relation, "status", None), "value", getattr(relation, "status", None))
+    if relation_status != CustomerRelationStatus.ACTIVE.value:
+        raise HTTPException(status_code=400, detail="Customer relation is not active")
+
+    normalized_quantity = _normalize_non_negative_int(quantity, name="quantity")
+    if normalized_quantity <= 0:
+        raise HTTPException(status_code=400, detail="Trade quantity must be positive")
+
+    current_time = now or _utcnow_naive()
+    restricted_until = getattr(relation, "trading_restricted_until", None)
+    if restricted_until is not None and restricted_until > current_time:
+        raise HTTPException(status_code=400, detail="Customer is temporarily restricted from trading")
+
+    min_trade_quantity = getattr(relation, "min_trade_quantity", None)
+    if min_trade_quantity is not None and normalized_quantity < int(min_trade_quantity):
+        raise HTTPException(status_code=400, detail="Trade quantity is below the customer's minimum limit")
+
+    max_trade_quantity = getattr(relation, "max_trade_quantity", None)
+    if max_trade_quantity is not None and normalized_quantity > int(max_trade_quantity):
+        raise HTTPException(status_code=400, detail="Trade quantity exceeds the customer's maximum limit")
+
+    normalized_trades_today = _normalize_non_negative_int(trades_today, name="trades_today")
+    max_daily_trades = getattr(relation, "max_daily_trades", None)
+    if max_daily_trades is not None and normalized_trades_today >= int(max_daily_trades):
+        raise HTTPException(status_code=400, detail="Customer has reached the daily trade limit")
+
+    normalized_commodity_volume_today = _normalize_non_negative_int(commodity_volume_today, name="commodity_volume_today")
+    max_daily_commodity_volume = getattr(relation, "max_daily_commodity_volume", None)
+    if (
+        max_daily_commodity_volume is not None
+        and normalized_commodity_volume_today + normalized_quantity > int(max_daily_commodity_volume)
+    ):
+        raise HTTPException(status_code=400, detail="Customer has reached the daily commodity volume limit")
+
+
+async def build_allowed_customer_chat_targets(
+    db: AsyncSession,
+    customer_user_id: int,
+) -> list[int]:
+    relation = await get_active_customer_relation_for_customer(db, customer_user_id)
+    if relation is None:
+        return []
+
+    owner_user_id = relation.owner_user_id
+    stmt = (
+        select(User.id)
+        .outerjoin(
+            CustomerRelation,
+            and_(
+                CustomerRelation.customer_user_id == User.id,
+                CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+                CustomerRelation.deleted_at.is_(None),
+            ),
+        )
+        .where(
+            User.is_deleted.is_(False),
+            User.id != customer_user_id,
+            (
+                (User.id == owner_user_id)
+                | (
+                    (User.role == UserRole.SUPER_ADMIN)
+                    & CustomerRelation.id.is_(None)
+                )
+            ),
+        )
+        .order_by(User.id.asc())
+    )
+    allowed_ids = list((await db.execute(stmt)).scalars().all())
+
+    accountant_stmt = (
+        select(AccountantRelation.accountant_user_id)
+        .join(User, User.id == AccountantRelation.accountant_user_id)
+        .where(
+            AccountantRelation.owner_user_id == owner_user_id,
+            AccountantRelation.status == AccountantRelationStatus.ACTIVE,
+            AccountantRelation.deleted_at.is_(None),
+            AccountantRelation.accountant_user_id.is_not(None),
+            User.is_deleted.is_(False),
+        )
+        .order_by(AccountantRelation.accountant_user_id.asc())
+    )
+    accountant_ids = list((await db.execute(accountant_stmt)).scalars().all())
+
+    return sorted({*allowed_ids, *accountant_ids})

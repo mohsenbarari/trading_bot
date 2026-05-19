@@ -41,42 +41,42 @@
 ساخت foundation داده‌ای customer بدون دست‌زدن به behavior فعلی userهای موجود.
 
 خروجی‌های لازم:
-- [ ] مدل relation جدید برای owner ← customer اضافه شود.
-- [ ] سطح customer به‌صورت صریح در مدل داده اضافه شود (`customer_tier`).
-- [ ] migration جدول relation و cap per-owner اضافه شود.
-- [ ] indexها و uniquenessها برای management name و active membership تعریف شود.
-- [ ] fieldهای policy per-customer روی relation تعریف شوند.
+- [x] مدل relation جدید برای owner ← customer اضافه شود.
+- [x] سطح customer به‌صورت صریح در مدل داده اضافه شود (`customer_tier`).
+- [x] migration جدول relation و cap per-owner اضافه شود.
+- [x] indexها و uniquenessها برای management name و active membership تعریف شود.
+- [x] fieldهای policy per-customer روی relation تعریف شوند.
 
 حداقل فیلدهای مورد نیاز relation:
-- [ ] `id`
-- [ ] `owner_user_id`
-- [ ] `customer_user_id`
-- [ ] `created_by_user_id`
-- [ ] `invitation_token`
-- [ ] `management_name`
-- [ ] `customer_tier`
-- [ ] `commission_rate`
-- [ ] `min_trade_quantity`
-- [ ] `max_trade_quantity`
-- [ ] `max_daily_trades`
-- [ ] `max_daily_commodity_volume`
-- [ ] `trading_restricted_until`
-- [ ] `status`
-- [ ] `activated_at`
-- [ ] `deleted_at`
-- [ ] `expires_at` برای pending invite
+- [x] `id`
+- [x] `owner_user_id`
+- [x] `customer_user_id`
+- [x] `created_by_user_id`
+- [x] `invitation_token`
+- [x] `management_name`
+- [x] `customer_tier`
+- [x] `commission_rate`
+- [x] `min_trade_quantity`
+- [x] `max_trade_quantity`
+- [x] `max_daily_trades`
+- [x] `max_daily_commodity_volume`
+- [x] `trading_restricted_until`
+- [x] `status`
+- [x] `activated_at`
+- [x] `deleted_at`
+- [x] `expires_at` برای pending invite
 
 تغییرات تکمیلی روی user:
-- [ ] `users.max_customers` با default `5` اضافه شود.
+- [x] `users.max_customers` با default `5` اضافه شود.
 
 اصل طراحی این فاز:
-- [ ] customer data باید حول relation شکل بگیرد، نه با پر کردن ده‌ها فیلد customer-specific در `users`.
-- [ ] چون customer یک user عادی است، identity اصلی او در `users` باقی می‌ماند.
-- [ ] policyهای owner-specific روی relation قرار می‌گیرند چون اگر روزی customer lifecycle عوض شود، باید از identity user مستقل بمانند.
-- [ ] `commission_rate` برای `Tier 1` nullable/unused است و فقط برای `Tier 2` authoritative خواهد بود.
+- [x] customer data باید حول relation شکل بگیرد، نه با پر کردن ده‌ها فیلد customer-specific در `users`.
+- [x] چون customer یک user عادی است، identity اصلی او در `users` باقی می‌ماند.
+- [x] policyهای owner-specific روی relation قرار می‌گیرند چون اگر روزی customer lifecycle عوض شود، باید از identity user مستقل بمانند.
+- [x] `commission_rate` برای `Tier 1` nullable/unused است و فقط برای `Tier 2` authoritative خواهد بود.
 
 validation phase:
-- [ ] migration head سبز شود.
+- [x] migration head سبز شود.
 - [ ] uniqueness management name در محدوده owner تست شود.
 - [ ] relation activation / deletion / duplicate-active tests سبز شود.
 
@@ -89,28 +89,28 @@ rollback surface:
 ساخت seamهای reusable تا customer logic در routerها duplicate نشود و مثل accountant قابل نگه‌داری بماند.
 
 خروجی‌های لازم:
-- [ ] service جدید `customer_relation_service.py` ساخته شود.
-- [ ] helperهای capacity, active-relation lookup, owner resolution, allowed-communication graph ساخته شود.
+- [x] service جدید `customer_relation_service.py` ساخته شود.
+- [x] helperهای capacity, active-relation lookup, owner resolution, allowed-communication graph ساخته شود.
 - [ ] helperهای shared commission calculation و reverse presentation ساخته شود.
 
 حداقل helperهای لازم:
-- [ ] `get_active_customer_relation_for_user(...)`
-- [ ] `get_owner_for_customer(...)`
-- [ ] `list_active_customers_for_owner(...)`
-- [ ] `validate_owner_customer_capacity(...)`
-- [ ] `validate_customer_trade_limits(...)`
-- [ ] `apply_customer_commission(raw_price, rate, offer_type)`
-- [ ] `round_customer_price(adjusted_price, offer_type)`
-- [ ] `build_allowed_customer_chat_targets(customer_id)`
+- [x] `get_active_customer_relation_for_user(...)`
+- [x] `get_owner_for_customer(...)`
+- [x] `list_active_customers_for_owner(...)`
+- [x] `validate_owner_customer_capacity(...)`
+- [x] `validate_customer_trade_limits(...)`
+- [x] `apply_customer_commission(raw_price, rate, offer_type)`
+- [x] `round_customer_price(adjusted_price, offer_type)`
+- [x] `build_allowed_customer_chat_targets(customer_id)`
 
 اصل طراحی این فاز:
-- [ ] منطق customer نباید بین auth, offers, trades, chat, users_public و frontend هرکدام جداگانه بازنویسی شود.
-- [ ] math کمیسیون باید pure و deterministic باشد تا تمام سناریوهای midpoint و edge-caseها testable باشند.
+- [x] منطق customer نباید بین auth, offers, trades, chat, users_public و frontend هرکدام جداگانه بازنویسی شود.
+- [x] math کمیسیون باید pure و deterministic باشد تا تمام سناریوهای midpoint و edge-caseها testable باشند.
 
 validation phase:
-- [ ] unit testهای pure commission math سبز شوند.
-- [ ] owner resolution و capacity tests سبز شوند.
-- [ ] allowed chat graph tests سبز شوند.
+- [x] unit testهای pure commission math سبز شوند.
+- [x] owner resolution و capacity tests سبز شوند.
+- [x] allowed chat graph tests سبز شوند.
 
 ## 4. Phase 3 - Auth, Register, Session Policy
 

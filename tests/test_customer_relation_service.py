@@ -1,22 +1,32 @@
 import unittest
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from fastapi import HTTPException
 
 from core.services.customer_relation_service import (
+    apply_customer_commission,
+    build_allowed_customer_chat_targets,
     CUSTOMER_INVITATION_PREFIX,
     get_active_customer_relation_for_customer,
+    get_active_customer_relation_for_user,
     get_effective_max_customers,
+    get_owner_for_customer,
     get_pending_customer_relation_by_invitation_token,
     is_customer_invitation_token,
     is_user_customer,
     list_active_customers_for_owner,
     list_owner_customer_relations,
+    round_customer_price,
     sweep_expired_pending_customer_relations,
     validate_customer_capacity,
+    validate_customer_trade_limits,
+    validate_owner_customer_capacity,
 )
+from core.utils import utc_now
 from models.customer_relation import CustomerRelation, CustomerRelationStatus
+from models.offer import OfferType
 
 
 class FakeScalarResult:
@@ -83,6 +93,19 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(result, relation)
 
+    async def test_get_active_customer_relation_for_user_alias_and_owner_lookup(self):
+        owner = SimpleNamespace(id=7)
+        relation = SimpleNamespace(id=41, owner_user=owner, customer_user=SimpleNamespace(id=9))
+
+        alias_db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)])
+        owner_db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)])
+
+        alias_result = await get_active_customer_relation_for_user(alias_db, 9)
+        owner_result = await get_owner_for_customer(owner_db, 9)
+
+        self.assertIs(alias_result, relation)
+        self.assertIs(owner_result, owner)
+
     async def test_list_active_customers_for_owner_returns_rows(self):
         relation_one = SimpleNamespace(id=1)
         relation_two = SimpleNamespace(id=2)
@@ -138,6 +161,15 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current_count, 2)
         self.assertEqual(limit, 4)
 
+    async def test_validate_owner_customer_capacity_alias(self):
+        owner = SimpleNamespace(id=5, max_customers=4)
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[]), FakeExecuteResult(scalar_one_value=2)])
+
+        current_count, limit = await validate_owner_customer_capacity(db, owner)
+
+        self.assertEqual(current_count, 2)
+        self.assertEqual(limit, 4)
+
     async def test_list_owner_customer_relations_commits_expired_rows_then_returns_pending_and_active(self):
         relation_one = SimpleNamespace(id=1)
         relation_two = SimpleNamespace(id=2)
@@ -158,6 +190,101 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)])
 
         self.assertTrue(await is_user_customer(db, 5))
+
+    def test_round_customer_price_uses_buy_floor_and_sell_ceil(self):
+        self.assertEqual(round_customer_price("49750", OfferType.BUY), 49700)
+        self.assertEqual(round_customer_price("50250", OfferType.SELL), 50300)
+
+    def test_apply_customer_commission_supports_examples_and_zero_rate_passthrough(self):
+        self.assertEqual(apply_customer_commission(50000, "0.5", OfferType.BUY), 49700)
+        self.assertEqual(apply_customer_commission(50000, "0.5", OfferType.SELL), 50300)
+        self.assertEqual(apply_customer_commission(192800, "0.5", OfferType.BUY), 191800)
+        self.assertEqual(apply_customer_commission(53500, "0.5", OfferType.SELL), 53800)
+        self.assertEqual(apply_customer_commission(53500, None, OfferType.SELL), 53500)
+        self.assertEqual(apply_customer_commission(53500, 0, OfferType.SELL), 53500)
+
+    def test_apply_customer_commission_rejects_invalid_inputs(self):
+        with self.assertRaises(ValueError):
+            apply_customer_commission(0, "0.5", OfferType.BUY)
+        with self.assertRaises(ValueError):
+            apply_customer_commission(50000, "bad", OfferType.BUY)
+        with self.assertRaises(ValueError):
+            round_customer_price("50000", "invalid")
+
+    def test_validate_customer_trade_limits_accepts_valid_relation(self):
+        relation = SimpleNamespace(
+            status=CustomerRelationStatus.ACTIVE,
+            trading_restricted_until=None,
+            min_trade_quantity=5,
+            max_trade_quantity=20,
+            max_daily_trades=3,
+            max_daily_commodity_volume=30,
+        )
+
+        validate_customer_trade_limits(
+            relation,
+            quantity=10,
+            trades_today=2,
+            commodity_volume_today=15,
+            now=utc_now().replace(tzinfo=None),
+        )
+
+    def test_validate_customer_trade_limits_enforces_status_restriction_and_caps(self):
+        now = utc_now().replace(tzinfo=None)
+        inactive_relation = SimpleNamespace(status=CustomerRelationStatus.PENDING)
+        with self.assertRaises(HTTPException) as exc_info:
+            validate_customer_trade_limits(inactive_relation, quantity=5, now=now)
+        self.assertEqual(exc_info.exception.detail, "Customer relation is not active")
+
+        restricted_relation = SimpleNamespace(
+            status=CustomerRelationStatus.ACTIVE,
+            trading_restricted_until=now + timedelta(hours=1),
+            min_trade_quantity=None,
+            max_trade_quantity=None,
+            max_daily_trades=None,
+            max_daily_commodity_volume=None,
+        )
+        with self.assertRaises(HTTPException) as exc_info:
+            validate_customer_trade_limits(restricted_relation, quantity=5, now=now)
+        self.assertEqual(exc_info.exception.detail, "Customer is temporarily restricted from trading")
+
+        capped_relation = SimpleNamespace(
+            status=CustomerRelationStatus.ACTIVE,
+            trading_restricted_until=None,
+            min_trade_quantity=5,
+            max_trade_quantity=20,
+            max_daily_trades=3,
+            max_daily_commodity_volume=30,
+        )
+        with self.assertRaises(HTTPException) as exc_info:
+            validate_customer_trade_limits(capped_relation, quantity=4, now=now)
+        self.assertEqual(exc_info.exception.detail, "Trade quantity is below the customer's minimum limit")
+
+        with self.assertRaises(HTTPException) as exc_info:
+            validate_customer_trade_limits(capped_relation, quantity=21, now=now)
+        self.assertEqual(exc_info.exception.detail, "Trade quantity exceeds the customer's maximum limit")
+
+        with self.assertRaises(HTTPException) as exc_info:
+            validate_customer_trade_limits(capped_relation, quantity=5, trades_today=3, now=now)
+        self.assertEqual(exc_info.exception.detail, "Customer has reached the daily trade limit")
+
+        with self.assertRaises(HTTPException) as exc_info:
+            validate_customer_trade_limits(capped_relation, quantity=16, trades_today=1, commodity_volume_today=15, now=now)
+        self.assertEqual(exc_info.exception.detail, "Customer has reached the daily commodity volume limit")
+
+    async def test_build_allowed_customer_chat_targets_includes_owner_accountants_and_super_admin_without_customers(self):
+        relation = SimpleNamespace(owner_user_id=7)
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(scalar_one_value=relation),
+                FakeExecuteResult(values=[7, 40]),
+                FakeExecuteResult(values=[11, 12]),
+            ]
+        )
+
+        result = await build_allowed_customer_chat_targets(db, 9)
+
+        self.assertEqual(result, [7, 11, 12, 40])
 
 
 if __name__ == "__main__":
