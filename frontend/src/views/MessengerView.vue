@@ -78,6 +78,7 @@ function handleBack() {
         :currentUserId="user.id"
         :currentUserRole="user.role || null"
         :currentUserIsAccountant="user.is_accountant === true"
+        :currentUserIsCustomer="user.is_customer === true"
         :targetUserId="targetUserId"
         :targetUserName="targetUserName"
         @navigate="handleNavigate"

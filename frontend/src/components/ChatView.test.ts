@@ -248,6 +248,7 @@ describe('ChatView.vue', () => {
         currentUserId: 7,
         currentUserRole: 'عادی',
         currentUserIsAccountant: false,
+        currentUserIsCustomer: false,
         ...overrides,
       },
       global: {
@@ -829,6 +830,17 @@ describe('ChatView.vue', () => {
     await wrapper.get('.open-group-creation').trigger('click')
 
     expect(document.body.textContent).toContain('حسابدار در این فاز اجازه ساخت گروه جدید را ندارد')
+
+    wrapper.unmount()
+  })
+
+  it('blocks customers from starting group creation from the header action', async () => {
+    const wrapper = await mountChatView({ currentUserIsCustomer: true })
+    await flushPromises()
+
+    await wrapper.get('.open-group-creation').trigger('click')
+
+    expect(document.body.textContent).toContain('مشتری در این فاز اجازه ساخت گروه جدید را ندارد')
 
     wrapper.unmount()
   })

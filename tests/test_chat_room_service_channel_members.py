@@ -67,8 +67,12 @@ class ChatRoomServiceChannelMembersTests(unittest.IsolatedAsyncioTestCase):
 
         chat = SimpleNamespace(id=5, is_mandatory=False, updated_at=None)
         db = FakeDB(execute_results=[FakeExecuteResult(values=[])])
-        with self.assertRaises(HTTPException) as exc_info:
-            await bulk_add_channel_members(db, chat=chat, user_ids=[0, -1, 1, 1], select_all_active_users=False)
+        with patch(
+            "core.services.chat_room_service._load_active_customer_user_ids",
+            new=AsyncMock(return_value=set()),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await bulk_add_channel_members(db, chat=chat, user_ids=[0, -1, 1, 1], select_all_active_users=False)
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "No active users available to add")
 
@@ -101,6 +105,9 @@ class ChatRoomServiceChannelMembersTests(unittest.IsolatedAsyncioTestCase):
         chat = SimpleNamespace(id=5, is_mandatory=False, updated_at=None)
 
         with patch("core.services.chat_room_service._utcnow", return_value=now), patch(
+            "core.services.chat_room_service._load_active_customer_user_ids",
+            new=AsyncMock(return_value=set()),
+        ), patch(
             "core.services.chat_room_service.count_active_chat_members", new=AsyncMock(return_value=6)
         ):
             summary = await bulk_add_channel_members(
@@ -124,6 +131,25 @@ class ChatRoomServiceChannelMembersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(inactive_member.left_at, None)
         self.assertEqual(chat.updated_at, now)
         db.commit.assert_awaited_once()
+
+    async def test_bulk_add_channel_members_rejects_customer_user_ids(self):
+        chat = SimpleNamespace(id=5, is_mandatory=False, updated_at=None)
+        db = FakeDB()
+
+        with patch(
+            "core.services.chat_room_service._load_active_customer_user_ids",
+            new=AsyncMock(return_value={12}),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await bulk_add_channel_members(
+                    db,
+                    chat=chat,
+                    user_ids=[12, 13],
+                    select_all_active_users=False,
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "Customer users cannot join channels in this phase")
 
     async def test_bulk_add_channel_members_uses_all_active_users_when_requested(self):
         now = datetime(2026, 5, 8, 1, 25, 0)

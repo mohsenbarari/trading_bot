@@ -98,6 +98,7 @@ from core.services.chat_room_service import (
     list_channel_conversations,
     list_active_channel_member_user_ids,
     list_channel_invite_candidates,
+    list_group_member_candidates,
     list_channel_members,
     list_channel_messages,
     list_manageable_channels,
@@ -124,6 +125,7 @@ from core.services.chat_room_service import (
 )
 from core.services.avatar_service import resolve_owned_avatar_file_id
 from core.services.accountant_relation_service import is_user_accountant
+from core.services.customer_relation_service import is_user_customer
 from core.services.accountant_chat_contract import (
     apply_accountant_identity_to_direct_conversation_row,
     apply_accountant_identity_to_message_payload,
@@ -826,6 +828,57 @@ async def get_groups(
     ]
 
 
+@router.get("/groups/member-candidates", response_model=ChannelInviteCandidateListResponse)
+async def get_group_member_candidates(
+    query_text: Optional[str] = Query(default=None, alias="q"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    exclude_chat_id: Optional[int] = Query(default=None),
+    selected_user_ids: List[int] = Query(default=[]),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List eligible group member candidates under customer membership rules."""
+    if exclude_chat_id is None and await is_user_accountant(db, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="حسابدار در این فاز اجازه ساخت گروه جدید را ندارد",
+        )
+    if await is_user_customer(db, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="مشتری در این فاز اجازه ساخت یا مدیریت اعضای گروه را ندارد",
+        )
+    if exclude_chat_id is not None:
+        group = await get_group_or_404(db, exclude_chat_id)
+        await get_active_group_admin_or_403(db, chat=group, user_id=current_user.id)
+
+    page = await list_group_member_candidates(
+        db,
+        current_user=current_user,
+        query_text=query_text,
+        limit=limit,
+        offset=offset,
+        exclude_chat_id=exclude_chat_id,
+        selected_user_ids=selected_user_ids,
+    )
+    return ChannelInviteCandidateListResponse(
+        items=[
+            {
+                "user_id": item.user_id,
+                "account_name": item.account_name,
+                "full_name": item.full_name,
+                "mobile_number": item.mobile_number,
+                "avatar_file_id": _optional_attr(item, "avatar_file_id"),
+                "is_already_member": item.is_already_member,
+            }
+            for item in page.items
+        ],
+        total=page.total,
+        active_total=page.active_total,
+    )
+
+
 @router.post("/groups", response_model=GroupCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_group(
     data: GroupCreateRequest,
@@ -837,6 +890,11 @@ async def create_group(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="حسابدار در این فاز اجازه ساخت گروه جدید را ندارد",
+        )
+    if await is_user_customer(db, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="مشتری در این فاز اجازه ساخت گروه جدید را ندارد",
         )
 
     create_kwargs = {

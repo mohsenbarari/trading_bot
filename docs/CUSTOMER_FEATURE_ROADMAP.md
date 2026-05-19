@@ -143,9 +143,9 @@ validation phase:
 - [x] direct chat creation از سمت owner/accountant و `SUPER_ADMIN` به customerهای مجاز ممکن باشد.
 - [x] customer نتواند با customer دیگر یا user خارج از tree همان owner وارد چت شود.
 - [x] `MIDDLE_MANAGER` در این فاز direct chat مجاز با customer ندارد.
-- [ ] customer نتواند channel member شود.
-- [ ] customer نتواند group جدید بسازد.
-- [ ] group membership rule دقیق enforce شود: owner/accountants + همان customer و نه بیشتر از یک customer.
+- [x] customer نتواند channel member شود.
+- [x] customer نتواند group جدید بسازد.
+- [x] group membership rule دقیق enforce شود: owner/accountants + همان customer و نه بیشتر از یک customer.
 
 اصل طراحی این فاز:
 - [x] deny pathها باید در backend authoritative باشند، نه فقط در frontend.
@@ -156,7 +156,7 @@ validation phase:
 validation phase:
 - [x] direct chat allow/deny matrix سبز شود.
 - [x] matrix باید owner/accountant/same-owner customer/`SUPER_ADMIN`/`MIDDLE_MANAGER` را صریح پوشش دهد.
-- [ ] group creation/member mutation deny matrix سبز شود.
+- [x] group creation/member mutation deny matrix سبز شود.
 - [ ] notification/realtime behavior در chatهای مجاز intact بماند.
 
 ## 6. Phase 5 - منطق قیمت‌گذاری، سناریو محور و exhaustive

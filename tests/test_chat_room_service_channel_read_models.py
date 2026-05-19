@@ -112,12 +112,11 @@ class ChatRoomServiceChannelReadModelsTests(unittest.IsolatedAsyncioTestCase):
     async def test_list_channel_invite_candidates_counts_filters_and_excludes(self):
         users = [
             SimpleNamespace(id=11, account_name="beta", full_name="Beta User", mobile_number="09120000001"),
-            SimpleNamespace(id=10, account_name="gamma", full_name="Gamma User", mobile_number="09120000002"),
         ]
         db = FakeDB(
             execute_results=[
-                FakeExecuteResult(scalar_one_value=15),
-                FakeExecuteResult(scalar_one_value=2),
+                FakeExecuteResult(scalar_one_value=14),
+                FakeExecuteResult(scalar_one_value=1),
                 FakeExecuteResult(scalars=users),
             ]
         )
@@ -132,9 +131,9 @@ class ChatRoomServiceChannelReadModelsTests(unittest.IsolatedAsyncioTestCase):
             )
 
         channel_mock.assert_awaited_once_with(db, 77)
-        self.assertEqual(page.active_total, 15)
-        self.assertEqual(page.total, 2)
-        self.assertEqual([item.user_id for item in page.items], [11, 10])
+        self.assertEqual(page.active_total, 14)
+        self.assertEqual(page.total, 1)
+        self.assertEqual([item.user_id for item in page.items], [11])
         self.assertEqual(page.items[0].account_name, "beta")
         self.assertFalse(page.items[0].is_already_member)
 

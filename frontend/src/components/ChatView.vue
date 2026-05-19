@@ -47,6 +47,7 @@ const props = defineProps<{
   currentUserId: number
   currentUserRole?: string | null
   currentUserIsAccountant?: boolean
+  currentUserIsCustomer?: boolean
   targetUserId?: number
   targetUserName?: string
 }>()
@@ -609,8 +610,9 @@ const selectedRoomIsMandatory = computed(() => !!selectedConversation.value?.is_
 const selectedRoomIsSystem = computed(() => !!selectedConversation.value?.is_system)
 const selectedAvatarFileId = computed(() => selectedConversation.value?.avatar_file_id ?? null)
 const isCurrentUserAccountant = computed(() => props.currentUserIsAccountant === true)
+const isCurrentUserCustomer = computed(() => props.currentUserIsCustomer === true)
 const canStartNewConversation = computed(() => !isCurrentUserAccountant.value)
-const canCreateGroup = computed(() => !isCurrentUserAccountant.value)
+const canCreateGroup = computed(() => !isCurrentUserAccountant.value && !isCurrentUserCustomer.value)
 const canCreateOptionalChannel = computed(() => (props.currentUserRole ?? null) === 'مدیر ارشد')
 
 const canSendToSelectedRoom = computed(() => {
@@ -1693,7 +1695,11 @@ function openNewConversation() {
 
 function openGroupCreation() {
   if (!canCreateGroup.value) {
-    showInlineToast('حسابدار در این فاز اجازه ساخت گروه جدید را ندارد')
+    showInlineToast(
+      isCurrentUserCustomer.value
+        ? 'مشتری در این فاز اجازه ساخت گروه جدید را ندارد'
+        : 'حسابدار در این فاز اجازه ساخت گروه جدید را ندارد'
+    )
     return
   }
   showNewChatModal.value = false

@@ -364,16 +364,40 @@ function toggleCandidate(userId: number) {
   if (next.has(userId)) next.delete(userId)
   else next.add(userId)
   selectedUserIds.value = next
+  void loadUsers(directoryQuery.value)
+}
+
+function buildGroupCandidateUrl(query = '') {
+  const params = new URLSearchParams({ limit: '100' })
+  if (props.groupId) params.set('exclude_chat_id', String(props.groupId))
+  const trimmed = query.trim()
+  if (trimmed) params.set('q', trimmed)
+  Array.from(selectedUserIds.value)
+    .sort((left, right) => left - right)
+    .forEach((userId) => params.append('selected_user_ids', String(userId)))
+  return `/api/chat/groups/member-candidates?${params.toString()}`
 }
 
 async function loadUsers(query = '') {
   isLoadingUsers.value = true
   try {
-    const params = new URLSearchParams({ limit: '100' })
-    const trimmed = query.trim()
-    if (trimmed) params.set('q', trimmed)
-    const data = await apiFetchJson(`/api/users-public/search?${params.toString()}`) as PublicUser[]
-    candidates.value = Array.isArray(data) ? data : []
+    const data = await apiFetchJson(buildGroupCandidateUrl(query)) as
+      | PublicUser[]
+      | { items?: Array<PublicUser | { user_id: number; account_name: string; full_name?: string; mobile_number?: string; avatar_file_id?: string | null }> }
+    const rawItems = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.items)
+        ? data.items
+        : []
+    candidates.value = rawItems
+      .map((item) => ({
+        id: Number((item as PublicUser).id ?? (item as { user_id: number }).user_id),
+        account_name: item.account_name,
+        full_name: item.full_name,
+        mobile_number: item.mobile_number,
+        avatar_file_id: item.avatar_file_id ?? null,
+      }))
+      .filter((item) => Number.isInteger(item.id) && item.id > 0)
   } catch (error) {
     setError(error, 'خطا در دریافت کاربران')
   } finally {

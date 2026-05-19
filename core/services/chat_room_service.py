@@ -14,11 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, joinedload
 
 from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType, MessageType
+from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.chat import Chat
 from models.chat_member import ChatMember
+from models.customer_relation import CustomerRelation, CustomerRelationStatus
 from models.message import Message
 from models.user import User, UserRole
 from core.services.chat_service import get_next_chat_member_pin_order
+from core.services.customer_relation_service import is_user_customer
 
 SerializedMessageT = TypeVar("SerializedMessageT")
 RoomEventPublisher = Callable[[int, str, dict], object]
@@ -205,6 +208,173 @@ MANDATORY_CHANNEL_LOCK_KEY = 362514001
 
 def _membership_status_for_user(user: User) -> ChatMembershipStatus:
     return ChatMembershipStatus.INACTIVE if getattr(user, "is_deleted", False) else ChatMembershipStatus.ACTIVE
+
+
+def _normalize_positive_user_ids(user_ids: Sequence[object]) -> list[int]:
+    normalized: list[int] = []
+    seen_user_ids: set[int] = set()
+    for raw_user_id in user_ids:
+        try:
+            user_id = int(raw_user_id)
+        except (TypeError, ValueError):
+            continue
+        if user_id <= 0 or user_id in seen_user_ids:
+            continue
+        seen_user_ids.add(user_id)
+        normalized.append(user_id)
+    return normalized
+
+
+async def _load_active_customer_owner_map(
+    db: AsyncSession,
+    user_ids: Sequence[object],
+) -> dict[int, int]:
+    normalized_user_ids = _normalize_positive_user_ids(user_ids)
+    if not normalized_user_ids:
+        return {}
+
+    stmt = select(CustomerRelation.customer_user_id, CustomerRelation.owner_user_id).where(
+        CustomerRelation.customer_user_id.in_(normalized_user_ids),
+        CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+        CustomerRelation.deleted_at.is_(None),
+        CustomerRelation.customer_user_id.is_not(None),
+    )
+    result = await db.execute(stmt)
+    return {
+        int(customer_user_id): int(owner_user_id)
+        for customer_user_id, owner_user_id in result.all()
+        if customer_user_id is not None and owner_user_id is not None
+    }
+
+
+async def _load_active_accountant_owner_map(
+    db: AsyncSession,
+    user_ids: Sequence[object],
+) -> dict[int, int]:
+    normalized_user_ids = _normalize_positive_user_ids(user_ids)
+    if not normalized_user_ids:
+        return {}
+
+    stmt = select(AccountantRelation.accountant_user_id, AccountantRelation.owner_user_id).where(
+        AccountantRelation.accountant_user_id.in_(normalized_user_ids),
+        AccountantRelation.status == AccountantRelationStatus.ACTIVE,
+        AccountantRelation.deleted_at.is_(None),
+        AccountantRelation.accountant_user_id.is_not(None),
+    )
+    result = await db.execute(stmt)
+    return {
+        int(accountant_user_id): int(owner_user_id)
+        for accountant_user_id, owner_user_id in result.all()
+        if accountant_user_id is not None and owner_user_id is not None
+    }
+
+
+async def _load_active_customer_user_ids(
+    db: AsyncSession,
+    user_ids: Sequence[object],
+) -> set[int]:
+    return set((await _load_active_customer_owner_map(db, user_ids)).keys())
+
+
+def _resolve_customer_group_owner_scope(
+    user_id: int,
+    *,
+    customer_owner_by_user_id: dict[int, int],
+    accountant_owner_by_user_id: dict[int, int],
+) -> int:
+    return (
+        customer_owner_by_user_id.get(user_id)
+        or accountant_owner_by_user_id.get(user_id)
+        or user_id
+    )
+
+
+async def _validate_customer_group_membership_context(
+    db: AsyncSession,
+    member_user_ids: Sequence[object],
+) -> None:
+    normalized_user_ids = _normalize_positive_user_ids(member_user_ids)
+    if not normalized_user_ids:
+        return
+
+    customer_owner_by_user_id = await _load_active_customer_owner_map(db, normalized_user_ids)
+    customer_user_ids = [user_id for user_id in normalized_user_ids if user_id in customer_owner_by_user_id]
+    if not customer_user_ids:
+        return
+
+    if len(customer_user_ids) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Customer groups may include only one active customer",
+        )
+
+    accountant_owner_by_user_id = await _load_active_accountant_owner_map(db, normalized_user_ids)
+    allowed_owner_id = customer_owner_by_user_id[customer_user_ids[0]]
+    invalid_user_ids = [
+        user_id
+        for user_id in normalized_user_ids
+        if user_id not in customer_owner_by_user_id
+        and _resolve_customer_group_owner_scope(
+            user_id,
+            customer_owner_by_user_id=customer_owner_by_user_id,
+            accountant_owner_by_user_id=accountant_owner_by_user_id,
+        )
+        != allowed_owner_id
+    ]
+    if invalid_user_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="Customer groups may only include the owner, same-owner accountants, and that customer",
+        )
+
+
+def _is_group_candidate_allowed(
+    *,
+    candidate_user_id: int,
+    context_user_ids: Sequence[object],
+    customer_owner_by_user_id: dict[int, int],
+    accountant_owner_by_user_id: dict[int, int],
+) -> bool:
+    normalized_context_user_ids = _normalize_positive_user_ids(context_user_ids)
+    context_customer_user_ids = [
+        user_id for user_id in normalized_context_user_ids if user_id in customer_owner_by_user_id
+    ]
+
+    if len(context_customer_user_ids) > 1:
+        return candidate_user_id in context_customer_user_ids
+
+    if context_customer_user_ids:
+        if candidate_user_id in customer_owner_by_user_id:
+            return candidate_user_id == context_customer_user_ids[0]
+        allowed_owner_id = customer_owner_by_user_id[context_customer_user_ids[0]]
+        return (
+            _resolve_customer_group_owner_scope(
+                candidate_user_id,
+                customer_owner_by_user_id=customer_owner_by_user_id,
+                accountant_owner_by_user_id=accountant_owner_by_user_id,
+            )
+            == allowed_owner_id
+        )
+
+    if candidate_user_id not in customer_owner_by_user_id:
+        return True
+
+    candidate_owner_id = customer_owner_by_user_id[candidate_user_id]
+    for user_id in normalized_context_user_ids:
+        if user_id in customer_owner_by_user_id:
+            if user_id != candidate_user_id:
+                return False
+            continue
+        if (
+            _resolve_customer_group_owner_scope(
+                user_id,
+                customer_owner_by_user_id=customer_owner_by_user_id,
+                accountant_owner_by_user_id=accountant_owner_by_user_id,
+            )
+            != candidate_owner_id
+        ):
+            return False
+    return True
 
 
 async def _list_mandatory_channels(db: AsyncSession) -> list[Chat]:
@@ -599,6 +769,11 @@ async def create_group_chat(
         member_users = list(result.scalars().all())
         if len(member_users) != len(normalized_member_ids):
             raise HTTPException(status_code=400, detail="Some selected group members are invalid")
+
+    if await is_user_customer(db, creator.id):
+        raise HTTPException(status_code=403, detail="Customer users cannot create group chats in this phase")
+
+    await _validate_customer_group_membership_context(db, [creator.id, *normalized_member_ids])
 
     now = _utcnow()
     chat = Chat(
@@ -1049,6 +1224,9 @@ async def add_group_member(
     max_members = int(chat.max_members or GROUP_MAX_MEMBERS)
     if member_count >= max_members:
         raise HTTPException(status_code=400, detail=f"Group member limit exceeded ({max_members})")
+
+    active_member_user_ids = await list_active_room_member_user_ids(db, chat_id=chat.id)
+    await _validate_customer_group_membership_context(db, [*active_member_user_ids, user_id])
 
     now = _utcnow()
     if member is None:
@@ -1596,7 +1774,15 @@ async def list_channel_invite_candidates(
 ) -> ChannelInviteCandidatePage:
     """List active project users for the channel member picker."""
     normalized_query = _clean_text(query_text)
-    active_total_stmt = select(func.count(User.id)).where(User.is_deleted.is_(False))
+    active_customer_user_ids = select(CustomerRelation.customer_user_id).where(
+        CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+        CustomerRelation.deleted_at.is_(None),
+        CustomerRelation.customer_user_id.is_not(None),
+    )
+    active_total_stmt = select(func.count(User.id)).where(
+        User.is_deleted.is_(False),
+        ~User.id.in_(active_customer_user_ids),
+    )
     active_total_result = await db.execute(active_total_stmt)
     active_total = int(active_total_result.scalar_one() or 0)
 
@@ -1611,7 +1797,10 @@ async def list_channel_invite_candidates(
             )
         )
 
-    filters = [User.is_deleted.is_(False)]
+    filters = [
+        User.is_deleted.is_(False),
+        ~User.id.in_(active_customer_user_ids),
+    ]
     if normalized_query:
         search_pattern = f"%{normalized_query}%"
         filters.append(
@@ -1670,7 +1859,15 @@ async def bulk_add_channel_members(
         )
 
     if select_all_active_users:
-        target_stmt = select(User.id).where(User.is_deleted.is_(False)).order_by(User.id.asc())
+        active_customer_user_ids = select(CustomerRelation.customer_user_id).where(
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+            CustomerRelation.deleted_at.is_(None),
+            CustomerRelation.customer_user_id.is_not(None),
+        )
+        target_stmt = select(User.id).where(
+            User.is_deleted.is_(False),
+            ~User.id.in_(active_customer_user_ids),
+        ).order_by(User.id.asc())
         target_result = await db.execute(target_stmt)
         target_user_ids = [int(user_id) for user_id in target_result.scalars().all()]
     else:
@@ -1681,6 +1878,13 @@ async def bulk_add_channel_members(
                 continue
             seen_user_ids.add(user_id)
             target_user_ids.append(user_id)
+
+        customer_user_ids = await _load_active_customer_user_ids(db, target_user_ids)
+        if customer_user_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="Customer users cannot join channels in this phase",
+            )
 
     if not target_user_ids:
         raise HTTPException(status_code=400, detail="No users selected")
@@ -1750,6 +1954,86 @@ async def bulk_add_channel_members(
         already_member_count=already_member_count,
         member_count=member_count,
         select_all_active_users=select_all_active_users,
+    )
+
+
+async def list_group_member_candidates(
+    db: AsyncSession,
+    *,
+    current_user: User,
+    query_text: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    exclude_chat_id: int | None = None,
+    selected_user_ids: Sequence[object] | None = None,
+) -> ChannelInviteCandidatePage:
+    """List eligible project users for group member selection under customer membership rules."""
+    normalized_query = _clean_text(query_text)
+    normalized_selected_user_ids = _normalize_positive_user_ids(selected_user_ids or [])
+
+    excluded_member_user_ids: set[int] = set()
+    if exclude_chat_id is not None:
+        excluded_member_user_ids = set(await list_active_room_member_user_ids(db, chat_id=exclude_chat_id))
+
+    filters = [
+        User.is_deleted.is_(False),
+        User.id != current_user.id,
+    ]
+    if excluded_member_user_ids:
+        filters.append(~User.id.in_(excluded_member_user_ids))
+    if normalized_query:
+        search_pattern = f"%{normalized_query}%"
+        filters.append(
+            or_(
+                User.full_name.ilike(search_pattern),
+                User.account_name.ilike(search_pattern),
+                User.mobile_number.ilike(search_pattern),
+            )
+        )
+
+    result = await db.execute(select(User).where(*filters).order_by(User.id.desc()))
+    users = list(result.scalars().all())
+    context_user_ids = _normalize_positive_user_ids([
+        current_user.id,
+        *excluded_member_user_ids,
+        *normalized_selected_user_ids,
+    ])
+    scoped_user_ids = _normalize_positive_user_ids([
+        *context_user_ids,
+        *(user.id for user in users),
+    ])
+    customer_owner_by_user_id = await _load_active_customer_owner_map(db, scoped_user_ids)
+    accountant_owner_by_user_id = await _load_active_accountant_owner_map(db, scoped_user_ids)
+    selected_user_id_set = set(normalized_selected_user_ids)
+
+    filtered_users = [
+        user
+        for user in users
+        if user.id in selected_user_id_set
+        or _is_group_candidate_allowed(
+            candidate_user_id=user.id,
+            context_user_ids=context_user_ids,
+            customer_owner_by_user_id=customer_owner_by_user_id,
+            accountant_owner_by_user_id=accountant_owner_by_user_id,
+        )
+    ]
+
+    paged_users = filtered_users[offset: offset + limit]
+    total = len(filtered_users)
+    return ChannelInviteCandidatePage(
+        items=[
+            ChannelInviteCandidate(
+                user_id=user.id,
+                account_name=user.account_name,
+                full_name=user.full_name,
+                mobile_number=user.mobile_number,
+                avatar_file_id=getattr(user, "avatar_file_id", None),
+                is_already_member=False,
+            )
+            for user in paged_users
+        ],
+        total=total,
+        active_total=total,
     )
 
 

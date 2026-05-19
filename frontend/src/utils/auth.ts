@@ -118,6 +118,7 @@ function cacheCurrentUserSummaryFromAuthMe(payload: any) {
         global_lock_grace_expires_at: payload.global_lock_grace_expires_at,
         global_web_locked_at: payload.global_web_locked_at,
         is_accountant: payload.is_accountant,
+        is_customer: payload.is_customer,
     }));
 }
 

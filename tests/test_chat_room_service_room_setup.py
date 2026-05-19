@@ -11,6 +11,7 @@ from core.services.chat_room_service import (
     MANDATORY_CHANNEL_DESCRIPTION,
     MANDATORY_CHANNEL_TITLE,
     _reload_channel_message,
+    _validate_customer_group_membership_context,
     count_active_chat_admins,
     count_active_chat_members,
     create_group_chat,
@@ -38,10 +39,11 @@ class FakeScalarResult:
 
 
 class FakeExecuteResult:
-    def __init__(self, *, scalar_one_value=None, scalar_one_or_none_value=None, scalars=None):
+    def __init__(self, *, scalar_one_value=None, scalar_one_or_none_value=None, scalars=None, rows=None):
         self._scalar_one_value = scalar_one_value
         self._scalar_one_or_none_value = scalar_one_or_none_value
         self._scalars = scalars or []
+        self._rows = rows or []
 
     def scalar_one(self):
         return self._scalar_one_value
@@ -51,6 +53,9 @@ class FakeExecuteResult:
 
     def scalars(self):
         return FakeScalarResult(self._scalars)
+
+    def all(self):
+        return self._rows
 
 
 class FakeDB:
@@ -177,13 +182,67 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
             await create_group_chat(db, creator=creator, title="Team", member_ids=[10, 11])
         self.assertEqual(exc_info.exception.detail, "Some selected group members are invalid")
 
+    async def test_create_group_chat_rejects_customer_creator(self):
+        creator = SimpleNamespace(id=4)
+        db = FakeDB()
+
+        with patch("core.services.chat_room_service.is_user_customer", new=AsyncMock(return_value=True)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_group_chat(db, creator=creator, title="Team", member_ids=[])
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "Customer users cannot create group chats in this phase")
+
+    async def test_validate_customer_group_membership_context_enforces_single_customer_owner_tree(self):
+        db = FakeDB()
+
+        with patch(
+            "core.services.chat_room_service._load_active_customer_owner_map",
+            new=AsyncMock(return_value={19: 7}),
+        ), patch(
+            "core.services.chat_room_service._load_active_accountant_owner_map",
+            new=AsyncMock(return_value={11: 7}),
+        ):
+            await _validate_customer_group_membership_context(db, [7, 11, 19])
+
+        with patch(
+            "core.services.chat_room_service._load_active_customer_owner_map",
+            new=AsyncMock(return_value={19: 7, 20: 7}),
+        ), patch(
+            "core.services.chat_room_service._load_active_accountant_owner_map",
+            new=AsyncMock(return_value={11: 7}),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await _validate_customer_group_membership_context(db, [7, 11, 19, 20])
+        self.assertEqual(exc_info.exception.detail, "Customer groups may include only one active customer")
+
+        with patch(
+            "core.services.chat_room_service._load_active_customer_owner_map",
+            new=AsyncMock(return_value={19: 7}),
+        ), patch(
+            "core.services.chat_room_service._load_active_accountant_owner_map",
+            new=AsyncMock(return_value={11: 7}),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await _validate_customer_group_membership_context(db, [7, 11, 19, 30])
+        self.assertEqual(
+            exc_info.exception.detail,
+            "Customer groups may only include the owner, same-owner accountants, and that customer",
+        )
+
     async def test_create_group_chat_creates_creator_and_normalized_members(self):
         creator = SimpleNamespace(id=4)
         now = datetime(2026, 5, 8, 2, 10, 0)
         users = [SimpleNamespace(id=10, is_deleted=False), SimpleNamespace(id=11, is_deleted=False)]
         db = FakeDB([FakeExecuteResult(scalars=users)])
 
-        with patch("core.services.chat_room_service._utcnow", return_value=now):
+        with patch("core.services.chat_room_service._utcnow", return_value=now), patch(
+            "core.services.chat_room_service.is_user_customer",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "core.services.chat_room_service._validate_customer_group_membership_context",
+            new=AsyncMock(),
+        ):
             chat = await create_group_chat(
                 db,
                 creator=creator,

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 from core.enums import ChatMemberRole, ChatMembershipStatus
-from core.services.chat_room_service import add_group_member
+from core.services.chat_room_service import add_group_member, list_group_member_candidates
 from models.chat_member import ChatMember
 
 
@@ -74,6 +74,28 @@ class ChatRoomServiceGroupMemberTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "Group member limit exceeded (2)")
 
+    async def test_add_group_member_rejects_invalid_customer_group_membership(self):
+        db = FakeDB(user=SimpleNamespace(id=7, is_deleted=False), member=None)
+        chat = SimpleNamespace(id=10, max_members=50, updated_at=None)
+
+        with patch(
+            "core.services.chat_room_service.count_active_chat_members",
+            new=AsyncMock(return_value=1),
+        ), patch(
+            "core.services.chat_room_service.list_active_room_member_user_ids",
+            new=AsyncMock(return_value=[4, 19]),
+        ), patch(
+            "core.services.chat_room_service._validate_customer_group_membership_context",
+            new=AsyncMock(side_effect=HTTPException(status_code=400, detail="Customer groups may only include the owner, same-owner accountants, and that customer")),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await add_group_member(db, chat=chat, user_id=7)
+
+        self.assertEqual(
+            exc_info.exception.detail,
+            "Customer groups may only include the owner, same-owner accountants, and that customer",
+        )
+
     async def test_add_group_member_creates_new_member_and_commits(self):
         now = datetime(2026, 5, 7, 22, 0, 0)
         db = FakeDB(user=SimpleNamespace(id=7, is_deleted=False), member=None)
@@ -82,6 +104,12 @@ class ChatRoomServiceGroupMemberTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "core.services.chat_room_service.count_active_chat_members",
             new=AsyncMock(side_effect=[1, 2]),
+        ), patch(
+            "core.services.chat_room_service.list_active_room_member_user_ids",
+            new=AsyncMock(return_value=[]),
+        ), patch(
+            "core.services.chat_room_service._validate_customer_group_membership_context",
+            new=AsyncMock(),
         ), patch("core.services.chat_room_service._utcnow", return_value=now):
             summary = await add_group_member(db, chat=chat, user_id=7)
 
@@ -111,6 +139,12 @@ class ChatRoomServiceGroupMemberTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "core.services.chat_room_service.count_active_chat_members",
             new=AsyncMock(side_effect=[1, 2]),
+        ), patch(
+            "core.services.chat_room_service.list_active_room_member_user_ids",
+            new=AsyncMock(return_value=[]),
+        ), patch(
+            "core.services.chat_room_service._validate_customer_group_membership_context",
+            new=AsyncMock(),
         ), patch("core.services.chat_room_service._utcnow", return_value=now):
             summary = await add_group_member(db, chat=chat, user_id=7)
 
@@ -122,6 +156,39 @@ class ChatRoomServiceGroupMemberTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(member.updated_at, now)
         self.assertEqual(chat.updated_at, now)
         db.commit.assert_awaited_once()
+
+    async def test_list_group_member_candidates_filters_by_selected_customer_context(self):
+        current_user = SimpleNamespace(id=7)
+        db = SimpleNamespace(
+            execute=AsyncMock(
+                return_value=SimpleNamespace(
+                    scalars=lambda: SimpleNamespace(
+                        all=lambda: [
+                            SimpleNamespace(id=19, account_name="customer", full_name="Customer User", mobile_number="0912", avatar_file_id=None),
+                            SimpleNamespace(id=11, account_name="accountant", full_name="Accountant User", mobile_number="0913", avatar_file_id=None),
+                            SimpleNamespace(id=30, account_name="outsider", full_name="Outsider User", mobile_number="0914", avatar_file_id=None),
+                            SimpleNamespace(id=20, account_name="second-customer", full_name="Second Customer", mobile_number="0915", avatar_file_id=None),
+                        ]
+                    )
+                )
+            )
+        )
+
+        with patch(
+            "core.services.chat_room_service._load_active_customer_owner_map",
+            new=AsyncMock(return_value={19: 7, 20: 99}),
+        ), patch(
+            "core.services.chat_room_service._load_active_accountant_owner_map",
+            new=AsyncMock(return_value={11: 7}),
+        ):
+            page = await list_group_member_candidates(
+                db,
+                current_user=current_user,
+                selected_user_ids=[19],
+            )
+
+        self.assertEqual([item.user_id for item in page.items], [19, 11])
+        self.assertEqual(page.total, 2)
 
 
 if __name__ == "__main__":
