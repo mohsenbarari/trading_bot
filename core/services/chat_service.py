@@ -20,13 +20,17 @@ from sqlalchemy.orm import aliased, joinedload
 
 from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType, MessageType
 from core.services.accountant_relation_service import get_active_accountant_relation_for_accountant
+from core.services.customer_relation_service import (
+    build_allowed_customer_chat_targets,
+    get_active_customer_relation_for_customer,
+)
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.chat import Chat
 from models.chat_file import ChatFile
 from models.chat_member import ChatMember
 from models.conversation import Conversation
 from models.message import Message
-from models.user import User
+from models.user import User, UserRole
 
 
 SerializedMessageT = TypeVar("SerializedMessageT")
@@ -42,22 +46,77 @@ async def _ensure_direct_chat_initiation_allowed(
     sender: User,
     receiver_id: int,
 ) -> None:
-    relation = await get_active_accountant_relation_for_accountant(db, sender.id)
-    if relation is None:
+    accountant_relation = await get_active_accountant_relation_for_accountant(db, sender.id)
+    customer_permission = await _resolve_customer_direct_chat_initiation_permission(
+        db,
+        sender=sender,
+        receiver_id=receiver_id,
+        accountant_relation=accountant_relation,
+    )
+    if customer_permission is True:
         return
 
-    existing_conversation = await get_existing_direct_conversation(db, sender.id, receiver_id)
-    if existing_conversation is not None:
+    has_existing_thread = await _has_existing_direct_thread(db, sender.id, receiver_id)
+    if customer_permission is False:
+        if has_existing_thread:
+            return
+        raise HTTPException(
+            status_code=403,
+            detail="کاربر مشتری در این فاز اجازه شروع گفتگوی مستقیم با این کاربر را ندارد",
+        )
+
+    if accountant_relation is None:
         return
 
-    existing_chat = await get_existing_direct_chat(db, sender.id, receiver_id)
-    if existing_chat is not None:
+    if has_existing_thread:
         return
 
     raise HTTPException(
         status_code=403,
         detail="حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد",
     )
+
+
+async def _has_existing_direct_thread(
+    db: AsyncSession,
+    user1_id: int,
+    user2_id: int,
+) -> bool:
+    existing_conversation = await get_existing_direct_conversation(db, user1_id, user2_id)
+    if existing_conversation is not None:
+        return True
+
+    existing_chat = await get_existing_direct_chat(db, user1_id, user2_id)
+    return existing_chat is not None
+
+
+async def _resolve_customer_direct_chat_initiation_permission(
+    db: AsyncSession,
+    *,
+    sender: User,
+    receiver_id: int,
+    accountant_relation: AccountantRelation | None,
+) -> bool | None:
+    sender_customer_relation = await get_active_customer_relation_for_customer(db, sender.id)
+    receiver_customer_relation = await get_active_customer_relation_for_customer(db, receiver_id)
+
+    if sender_customer_relation is None and receiver_customer_relation is None:
+        return None
+
+    if sender_customer_relation is not None:
+        allowed_target_ids = await build_allowed_customer_chat_targets(db, sender.id)
+        return receiver_id in allowed_target_ids
+
+    if receiver_customer_relation is None:
+        return None
+
+    if sender.id == receiver_customer_relation.owner_user_id:
+        return True
+    if getattr(sender, "role", None) == UserRole.SUPER_ADMIN:
+        return True
+    if accountant_relation is not None and accountant_relation.owner_user_id == receiver_customer_relation.owner_user_id:
+        return True
+    return False
 
 COMMON_MESSAGE_REACTIONS = (
     "👍",

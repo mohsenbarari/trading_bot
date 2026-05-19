@@ -139,23 +139,23 @@ validation phase:
 پیام‌رسان برای customer «شبیه user عادی ولی در گراف محدودشده» کار کند.
 
 خروجی‌های لازم:
-- [ ] direct chat creation برای customer با owner، accountantهای فعال همان owner، و `SUPER_ADMIN` مجاز شود.
-- [ ] direct chat creation از سمت owner/accountant و `SUPER_ADMIN` به customerهای مجاز ممکن باشد.
-- [ ] customer نتواند با customer دیگر یا user خارج از tree همان owner وارد چت شود.
-- [ ] `MIDDLE_MANAGER` در این فاز direct chat مجاز با customer ندارد.
+- [x] direct chat creation برای customer با owner، accountantهای فعال همان owner، و `SUPER_ADMIN` مجاز شود.
+- [x] direct chat creation از سمت owner/accountant و `SUPER_ADMIN` به customerهای مجاز ممکن باشد.
+- [x] customer نتواند با customer دیگر یا user خارج از tree همان owner وارد چت شود.
+- [x] `MIDDLE_MANAGER` در این فاز direct chat مجاز با customer ندارد.
 - [ ] customer نتواند channel member شود.
 - [ ] customer نتواند group جدید بسازد.
 - [ ] group membership rule دقیق enforce شود: owner/accountants + همان customer و نه بیشتر از یک customer.
 
 اصل طراحی این فاز:
-- [ ] deny pathها باید در backend authoritative باشند، نه فقط در frontend.
-- [ ] frontend فقط UI affordance را پنهان می‌کند؛ rule enforcement باید در router/service لایه chat انجام شود.
+- [x] deny pathها باید در backend authoritative باشند، نه فقط در frontend.
+- [x] frontend فقط UI affordance را پنهان می‌کند؛ rule enforcement باید در router/service لایه chat انجام شود.
 - [ ] چون customer کاربر عادی است، message model, conversation model, read-state, reactions و بقیه runtimeها reuse می‌شوند؛ فقط target graph محدود می‌شود.
-- [ ] چون direct chat فعلی conversation دوطرفه است، مجازبودن `SUPER_ADMIN → customer` باید به‌صورت یک edge دوطرفه در allowed communication graph مدل شود، نه یک send-only استثنای شکننده.
+- [x] چون direct chat فعلی conversation دوطرفه است، مجازبودن `SUPER_ADMIN → customer` باید به‌صورت یک edge دوطرفه در allowed communication graph مدل شود، نه یک send-only استثنای شکننده.
 
 validation phase:
-- [ ] direct chat allow/deny matrix سبز شود.
-- [ ] matrix باید owner/accountant/same-owner customer/`SUPER_ADMIN`/`MIDDLE_MANAGER` را صریح پوشش دهد.
+- [x] direct chat allow/deny matrix سبز شود.
+- [x] matrix باید owner/accountant/same-owner customer/`SUPER_ADMIN`/`MIDDLE_MANAGER` را صریح پوشش دهد.
 - [ ] group creation/member mutation deny matrix سبز شود.
 - [ ] notification/realtime behavior در chatهای مجاز intact بماند.
 
