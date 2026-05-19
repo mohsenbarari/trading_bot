@@ -4,7 +4,7 @@ import { ChevronDown, ChevronLeft, User as UserIcon, Activity, ArrowRight, Chevr
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import OwnerAccountantManagerModal from './OwnerAccountantManagerModal.vue';
 import UserProfile from './UserProfile.vue';
-import { isAdminRoleValue, readCachedCurrentUserRole } from '../utils/adminAccess';
+import { isAdminRoleValue, readCachedCurrentUserRole, SUPER_ADMIN_ROLE } from '../utils/adminAccess';
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
 
 const props = defineProps<{
@@ -31,6 +31,11 @@ interface PublicUser {
   highlight_accountant_user_id?: number | null;
   highlight_accountant_relation_display_name?: string | null;
   accountant_relations?: PublicAccountantRelationSummary[];
+  customer_owner_user_id?: number | null;
+  customer_owner_account_name?: string | null;
+  customer_management_name?: string | null;
+  customer_tier?: 'tier1' | 'tier2' | null;
+  customer_relations?: PublicCustomerRelationSummary[];
 }
 
 interface PublicAccountantRelationSummary {
@@ -38,6 +43,13 @@ interface PublicAccountantRelationSummary {
   accountant_account_name?: string | null;
   relation_display_name: string;
   duty_description?: string | null;
+}
+
+interface PublicCustomerRelationSummary {
+  customer_user_id?: number | null;
+  customer_account_name?: string | null;
+  management_name: string;
+  customer_tier: 'tier1' | 'tier2';
 }
 
 interface MutualTradePreview {
@@ -76,6 +88,7 @@ const openSections = ref({
   info: false,
   history: false,
   accountants: false,
+  customers: false,
 });
 const avatarBusy = ref(false);
 const avatarInput = ref<HTMLInputElement | null>(null);
@@ -84,17 +97,22 @@ const showAdminUserManager = ref(false);
 const adminUserData = ref<any>(null);
 const adminUserLoading = ref(false);
 const adminUserError = ref('');
+const viewerRole = computed(() => readCachedCurrentUserRole());
 const isOwnProfile = computed(() => {
   if (!profileData.value) return false;
   return Number(profileData.value.id) === Number(props.viewerUserId);
 });
-const viewerIsAdmin = computed(() => isAdminRoleValue(readCachedCurrentUserRole()));
+const viewerIsAdmin = computed(() => isAdminRoleValue(viewerRole.value));
+const viewerIsSuperAdmin = computed(() => viewerRole.value === SUPER_ADMIN_ROLE);
 const showVisitorSections = computed(() => !isOwnProfile.value);
 const showOwnerSections = computed(() => isOwnProfile.value);
 const showAdminSections = computed(() => !isOwnProfile.value && viewerIsAdmin.value);
 const profileAvatarUrl = computed(() => buildChatFileUrl(profileData.value?.avatar_file_id ?? null, props.apiBaseUrl));
 const accountantRelations = computed<PublicAccountantRelationSummary[]>(() => {
   return Array.isArray(profileData.value?.accountant_relations) ? profileData.value!.accountant_relations! : [];
+});
+const customerRelations = computed<PublicCustomerRelationSummary[]>(() => {
+  return Array.isArray(profileData.value?.customer_relations) ? profileData.value!.customer_relations! : [];
 });
 const highlightedAccountantUserId = computed(() => {
   const profileValue = Number(profileData.value?.highlight_accountant_user_id);
@@ -117,6 +135,20 @@ const resolvedAccountantContext = computed(() => {
     relationDisplayName,
     accountantUserId: highlightedAccountantUserId.value,
   };
+});
+const customerProfileContext = computed(() => {
+  if (!profileData.value?.customer_management_name || !profileData.value?.customer_tier) {
+    return null;
+  }
+
+  return {
+    ownerAccountName: profileData.value.customer_owner_account_name || null,
+    managementName: profileData.value.customer_management_name,
+    customerTier: profileData.value.customer_tier,
+  };
+});
+const showCustomerListSection = computed(() => {
+  return customerRelations.value.length > 0 && (showOwnerSections.value || viewerIsSuperAdmin.value);
 });
 const sharedStatCards = computed<ProfileStatCard[]>(() => {
   if (!profileData.value) return [];
@@ -191,6 +223,9 @@ async function loadProfile() {
     profileData.value = await response.json();
     if (highlightedAccountantUserId.value && accountantRelations.value.length > 0) {
       openSections.value.accountants = true;
+    }
+    if (showCustomerListSection.value) {
+      openSections.value.customers = true;
     }
   } catch (e: any) {
     error.value = e.message || 'خطا در برقراری ارتباط';
@@ -360,6 +395,12 @@ function isHighlightedAccountant(relation: PublicAccountantRelationSummary) {
   return Number(relation.accountant_user_id) > 0 && Number(relation.accountant_user_id) === Number(highlightedAccountantUserId.value);
 }
 
+function getCustomerTierLabel(tier: PublicCustomerRelationSummary['customer_tier'] | PublicUser['customer_tier']) {
+  if (tier === 'tier2') return 'سطح 2';
+  if (tier === 'tier1') return 'سطح 1';
+  return 'سطح نامشخص';
+}
+
 function getTradeBadgeClass(trade: MutualTradePreview) {
   const type = trade.trade_type?.toUpperCase();
   // We always show the perspective of the VIEWER (the person logged in)
@@ -448,6 +489,17 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
           </p>
         </div>
 
+        <div v-if="customerProfileContext" class="customer-context-banner">
+          <div class="customer-context-title">نمای مشتری</div>
+          <p class="customer-context-copy">
+            این کاربر با عنوان «{{ customerProfileContext.managementName }}»
+            <span v-if="customerProfileContext.ownerAccountName">
+              زیرمجموعه مالک «{{ customerProfileContext.ownerAccountName }}»
+            </span>
+            ثبت شده و در {{ getCustomerTierLabel(customerProfileContext.customerTier) }} قرار دارد.
+          </p>
+        </div>
+
         <div class="ds-accordion mt-4" :class="{ open: openSections.info }">
           <div class="ds-accordion-header" @click="openSections.info = !openSections.info">
             <div class="ds-accordion-header-info">
@@ -506,6 +558,36 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
                   <span v-if="isHighlightedAccountant(relation)" class="public-accountant-highlight-badge">مسیر فعلی</span>
                 </div>
                 <p v-if="relation.duty_description" class="public-accountant-duty">{{ relation.duty_description }}</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="showCustomerListSection" class="profile-section customer-relations-section">
+        <div class="ds-accordion" :class="{ open: openSections.customers }">
+          <div class="ds-accordion-header" @click="openSections.customers = !openSections.customers">
+            <div class="ds-accordion-header-info">
+              <UserIcon :size="18" class="text-amber-600" />
+              <h2>مشتریان این مالک</h2>
+            </div>
+            <ChevronLeft :size="20" class="ds-accordion-icon" />
+          </div>
+
+          <div v-show="openSections.customers" class="ds-accordion-body">
+            <div class="public-customer-list">
+              <article
+                v-for="relation in customerRelations"
+                :key="`${relation.customer_user_id || 'customer'}-${relation.management_name}`"
+                class="public-customer-card"
+              >
+                <div class="public-customer-card-head">
+                  <div>
+                    <h4>{{ relation.management_name }}</h4>
+                    <p class="public-customer-handle">@{{ relation.customer_account_name || 'unknown' }}</p>
+                  </div>
+                  <span class="public-customer-tier-badge">{{ getCustomerTierLabel(relation.customer_tier) }}</span>
+                </div>
               </article>
             </div>
           </div>
@@ -713,6 +795,32 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   font-size: 0.86rem;
   line-height: 1.7;
   color: #78350f;
+}
+
+.customer-context-banner {
+  width: 100%;
+  max-width: min(100%, 520px);
+  margin: 0 auto;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.98), rgba(224, 242, 254, 0.98));
+  box-shadow: 0 10px 28px rgba(59, 130, 246, 0.10);
+  text-align: right;
+}
+
+.customer-context-title {
+  margin-bottom: 6px;
+  font-size: 0.94rem;
+  font-weight: 800;
+  color: #1d4ed8;
+}
+
+.customer-context-copy {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.7;
+  color: #1e3a8a;
 }
 
 .profile-avatar-actions {
@@ -954,11 +1062,24 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   gap: 12px;
 }
 
+.public-customer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .public-accountant-card {
   padding: 14px 16px;
   border-radius: 18px;
   border: 1px solid rgba(245, 158, 11, 0.16);
   background: linear-gradient(180deg, rgba(255, 251, 235, 0.96), rgba(255, 247, 237, 0.98));
+}
+
+.public-customer-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(59, 130, 246, 0.16);
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.98), rgba(224, 242, 254, 0.98));
 }
 
 .public-accountant-card.highlighted {
@@ -973,10 +1094,23 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   gap: 12px;
 }
 
+.public-customer-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .public-accountant-card-head h4 {
   margin: 0;
   font-size: 1rem;
   color: #7c2d12;
+}
+
+.public-customer-card-head h4 {
+  margin: 0;
+  font-size: 1rem;
+  color: #1d4ed8;
 }
 
 .public-accountant-handle {
@@ -987,12 +1121,30 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   text-align: right;
 }
 
+.public-customer-handle {
+  margin: 6px 0 0;
+  font-size: 0.9rem;
+  color: #2563eb;
+  direction: ltr;
+  text-align: right;
+}
+
 .public-accountant-highlight-badge {
   flex-shrink: 0;
   padding: 4px 10px;
   border-radius: 999px;
   background: rgba(217, 119, 6, 0.14);
   color: #9a3412;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.public-customer-tier-badge {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
   font-size: 0.78rem;
   font-weight: 700;
 }

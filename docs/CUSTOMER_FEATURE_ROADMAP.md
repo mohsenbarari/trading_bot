@@ -483,12 +483,12 @@ customer management و customer visibility روی contract فعلی PublicProfil
 
 نتیجه اجرایی برای customer:
 - [ ] customer section owner-only در `PublicProfile.vue` اضافه می‌شود.
-- [ ] فقط `SUPER_ADMIN` باید در همان profile surface customer visibility را ببیند، ولی actionهای owner-only را نه.
-- [ ] `MIDDLE_MANAGER` نباید customer public profile و customer list در public profile owner را ببیند.
+- [x] فقط `SUPER_ADMIN` باید در همان profile surface customer visibility را ببیند، ولی actionهای owner-only را نه.
+- [x] `MIDDLE_MANAGER` نباید customer public profile و customer list در public profile owner را ببیند.
 - [ ] اگر `SUPER_ADMIN` از public profile وارد modal تنظیمات کاربر شد، همان data contract باید customer-related fields را هم در `UserProfile.vue` نشان دهد.
 - [ ] بنابراین customer settings duplication بین `PublicProfile.vue` و `AdminView.vue` ممنوع است؛ منبع مدیریت باید همان `UserProfile.vue` بماند.
-- [ ] برای customer surface نباید از helper عمومی `isAdminRoleValue()` استفاده شود؛ gate این بخش باید صریحاً `SUPER_ADMIN` را از `MIDDLE_MANAGER` جدا کند.
-- [ ] `users_public` و searchهای وابسته به آن باید customer visibility را server-side و relation-aware enforce کنند تا هم public profile نشت نکند و هم featureهای chat/search با rule جدید سازگار بمانند.
+- [x] برای customer surface نباید از helper عمومی `isAdminRoleValue()` استفاده شود؛ gate این بخش باید صریحاً `SUPER_ADMIN` را از `MIDDLE_MANAGER` جدا کند.
+- [x] `users_public` و searchهای وابسته به آن باید customer visibility را server-side و relation-aware enforce کنند تا هم public profile نشت نکند و هم featureهای chat/search با rule جدید سازگار بمانند.
 - [ ] history accordion در public profile برای `SUPER_ADMIN` باید از mutual-history contract فعلی جدا شود و history واقعی user هدف را بارگذاری کند.
 - [ ] buy/sell badge در super-admin profile history باید از perspective همان user هدف محاسبه شود، نه از perspective viewer.
 - [ ] customer-aware rows در super-admin profile history باید context relation را حمل کنند: owner-target → `customer badge + management_name`، customer-target → `owner + tier`.
@@ -496,7 +496,7 @@ customer management و customer visibility روی contract فعلی PublicProfil
 
 خروجی‌های لازم:
 - [ ] owner customer manager modal / section
-- [ ] super-admin-visible customer summary in public profile
+- [x] super-admin-visible customer summary in public profile
 - [ ] `UserProfile.vue` support for `max_customers` and customer-aware admin controls
 - [ ] route/state sync بین public profile و admin user settings برای customer surfaces
 
@@ -504,7 +504,7 @@ validation phase:
 - [ ] owner profile customer CRUD UI سبز شود.
 - [ ] super-admin public-profile → user-settings handoff سبز شود.
 - [ ] super-admin target-user history load/perspective tests سبز شود.
-- [ ] public profile visibility matrix for customer/accountant/admin/user عادی سبز شود.
+- [x] public profile visibility matrix for customer/accountant/admin/user عادی سبز شود.
 
 ## 9. Phase 8 - Sync, Deletion, and Lifecycle Convergence
 

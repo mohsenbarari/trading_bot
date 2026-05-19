@@ -6,6 +6,7 @@ from datetime import datetime
 from core.utils import normalize_persian_numerals, to_jalali_str
 from core.enums import UserRole, UserAccountStatus, NotificationLevel, NotificationCategory
 from models.accountant_relation import AccountantRelationStatus
+from models.customer_relation import CustomerTier
 
 # --- Token Schemas ---
 class Token(BaseModel):
@@ -153,6 +154,11 @@ class UserPublicRead(BaseModel):
     highlight_accountant_user_id: int | None = None
     highlight_accountant_relation_display_name: str | None = None
     accountant_relations: List['PublicAccountantRelationSummary'] = Field(default_factory=list)
+    customer_owner_user_id: int | None = None
+    customer_owner_account_name: str | None = None
+    customer_management_name: str | None = None
+    customer_tier: CustomerTier | None = None
+    customer_relations: List['PublicCustomerRelationSummary'] = Field(default_factory=list)
     
     @computed_field
     def created_at_jalali(self) -> str | None:
@@ -261,6 +267,16 @@ class PublicAccountantRelationSummary(BaseModel):
     accountant_account_name: str | None = None
     relation_display_name: str
     duty_description: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class PublicCustomerRelationSummary(BaseModel):
+    customer_user_id: int | None = None
+    customer_account_name: str | None = None
+    management_name: str
+    customer_tier: CustomerTier
 
     class Config:
         from_attributes = True
