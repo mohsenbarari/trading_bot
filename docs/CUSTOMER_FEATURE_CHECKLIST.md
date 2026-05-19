@@ -155,23 +155,26 @@
 - [x] حالت 3 (owner offer vs Tier1 responder): chain دو‌مرحله‌ای با قیمت یکسان ثبت می‌شود.
 - [x] حالت 4 (owner offer vs Tier1 own-customer): trade مستقیم owner ↔ customer با قیمت یکسان ثبت می‌شود.
 - [x] در تمام حالت‌های Tier 1، نرخ کمیسیون داخل پلتفرم وارد pricing pipeline نمی‌شود.
+- [x] مثال قطعی حالت 1: `سینا` sell raw=`52000` publish می‌کند، `پیمان` request می‌زند، و chain نهایی این است: `پیمان ←buyer / مجید ←seller @ 52000`، `مجید ←buyer / رامین ←seller @ 52000`، `رامین ←buyer / سینا ←seller @ 52000`.
+- [x] مثال قطعی حالت 2: `پیمان` buy raw=`98000` publish می‌کند، `رامین` request می‌زند، و chain نهایی این است: `مجید ←buyer / رامین ←seller @ 98000`، `پیمان ←buyer / مجید ←seller @ 98000`.
+- [x] مثال قطعی حالت 3: `مجید` buy raw=`189600` publish می‌کند، `سینا` request می‌زند، و chain نهایی این است: `رامین ←buyer / سینا ←seller @ 189600`، `مجید ←buyer / رامین ←seller @ 189600`.
+- [x] مثال قطعی حالت 4: `رامین` sell raw=`188000` publish می‌کند، `سینا` request می‌زند، و فقط یک trade مستقیم `سینا ←buyer / رامین ←seller @ 188000` ثبت می‌شود.
 
 - [x] اگر مشتری1 از مشتریان owner1 از user3 کالایی بخرد، از دید business relation این اتفاق به‌صورت «user3 به owner1 فروخته و owner1 به مشتری1 فروخته» تفسیر می‌شود.
 - [x] این relation باید در history و نمایش context معامله منعکس شود.
 - [x] مشتری‌ها نباید مستقیماً با طرف‌های دیگر معامله ثبت‌شده‌ی نهایی داشته باشند؛ معامله باید حتماً از ownerِ همان customer عبور کند و زنجیره‌ی trade rows بر همین اساس ساخته شود.
 - [x] اگر هر دو سمت معامله customer باشند و ownerهای متفاوت داشته باشند، یک معامله business واحد باید به‌صورت زنجیره‌ای در چند trade row ثبت شود، نه یک trade مستقیم customer ↔ customer.
-- [x] مثال قطعی محصول: اگر customer1 کاربرA آفر خرید خام `191500` ثبت کند، این آفر برای همه کاربران غیر از owner او با price projection `190600` منتشر می‌شود و برای customer1 کاربرB با کمیسیون `0.5%` خودش به `189700` نمایش داده می‌شود. اگر customer1 کاربرB روی آن پاسخ دهد، در DB باید 3 trade row ثبت شود: `customerB → ownerB @ 189700`، `ownerB → ownerA @ 190600`، و `ownerA → customerA @ 191500`.
 - [x] نوتیفیکیشن‌ها، history طرفین، و projectionهای UI باید با همین owner-mediated chain هم‌راستا باشند، نه با یک trade مستقیم customer ↔ customer.
 - [x] chain اجرای معامله برای `Tier 2` در سناریوهای owner-offer و outsider-offer از سمت responder قطعی شده است.
 - [x] اگر `Tier 2` روی آفر owner خودش request بزند، trade مستقیم owner ↔ customer با همان قیمت projected-to-customer ثبت می‌شود.
 - [x] مثال قطعی: owner=`شهاب` buy raw=`192800`، customer=`محمد` با commission `0.7%` request می‌زند، trade مستقیم `شهاب ←buyer / محمد ←seller @ 191400` ثبت می‌شود.
 - [x] اگر `Tier 2` روی آفر owner یا actor مجازِ بیرون از owner خودش request بزند، execution به chain دو‌مرحله‌ای می‌شکند.
-- [x] در buy-offer بیرونی: customer responder با قیمت viewer-specific به owner خودش trade می‌کند و سپس owner او با raw price به buyer اصلی trade می‌کند.
+- [x] در Tier 2، فقط سمت responder mediated می‌شود؛ leg بیرونی همیشه با source actor اصلی آفر روی raw price ثبت می‌شود.
+- [x] در buy-offer بیرونی: customer responder با قیمت viewer-specific به owner خودش trade می‌کند و سپس owner او با raw price به buyer/source actor اصلی trade می‌کند.
 - [x] مثال قطعی: owner=`شهاب` buy raw=`192800`، customer=`علی` با commission `0.5%` request می‌زند، trade1 = `متین ←buyer / علی ←seller @ 191800` و trade2 = `شهاب ←buyer / متین ←seller @ 192800`.
-- [x] در sell-offer بیرونی: customer responder با قیمت viewer-specific از owner خودش buy می‌کند و سپس owner او با raw price از seller اصلی buy می‌کند.
-- [x] مثال قطعی: sell raw=`53500` که برای `علی` به `53800` و برای `محمد` به `53900` نمایش داده می‌شود، اگر `علی` request بزند trade1 = `علی ←buyer / متین ←seller @ 53800` و trade2 = `متین ←buyer / seller_raw_source ←seller @ 53500` ثبت می‌شود.
-- [x] مثال قطعی: همان sell raw اگر `محمد` request بزند trade1 = `محمد ←buyer / شهاب ←seller @ 53900` و trade2 = `شهاب ←buyer / seller_raw_source ←seller @ 53500` ثبت می‌شود.
-- [ ] یک ابهام سناریویی هنوز باقی است: در سناریوی دوم، actor اولیه به‌عنوان `سهراب` معرفی شده اما هم‌زمان rule قطعی می‌گوید `Tier 2` مجاز به ثبت آفر نیست. باید روشن شود آیا این سناریو در واقع sellerِ مجاز دیگری را مدنظر دارد، یا قرار است owner بتواند برای `Tier 2` به‌صورت proxy/on-behalf آفر منتشر کند.
+- [x] در sell-offer بیرونی: customer responder با قیمت viewer-specific از owner خودش buy می‌کند و سپس owner او با raw price از seller/source actor اصلی buy می‌کند.
+- [x] مثال قطعی: `سهراب` که `Tier 1` است sell raw=`53500` publish می‌کند؛ اگر `علی` request بزند trade1 = `علی ←buyer / متین ←seller @ 53800` و trade2 = `متین ←buyer / سهراب ←seller @ 53500` ثبت می‌شود.
+- [x] مثال قطعی: همان sell raw اگر `محمد` request بزند trade1 = `محمد ←buyer / شهاب ←seller @ 53900` و trade2 = `شهاب ←buyer / سهراب ←seller @ 53500` ثبت می‌شود.
 - [x] اگر owner1 تاریخچه معاملات خودش با user3 را از پروفایل عمومی user3 ببیند، روی معامله‌هایی که مربوط به مشتری1 هستند باید یک تگ کوچک «مشتری» و در کنار آن نام مشتری1 را ببیند.
 - [x] اگر user3 تاریخچه معاملات با owner1 را ببیند، برای همان معامله نباید آن تگ مشتری را ببیند.
 - [x] اگر owner1 در حال مرور تاریخچه معاملات با مشتری1 باشد، در هر معامله باید نام سمت دیگر معامله همراه با یک تگ ریز context نمایش داده شود.

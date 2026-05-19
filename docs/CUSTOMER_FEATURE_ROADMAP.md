@@ -197,10 +197,9 @@ validation phase:
 - [ ] فقط owner همان customer context tag می‌بیند.
 
 مثال:
-- [ ] customer قیمت فروش خام `199600` ثبت می‌کند.
-- [ ] raw = `52000`.
-- [ ] آفر با `52000` برای همه منتشر می‌شود.
-- [ ] owner همان customer (رامین) تگ مشتری + نام سینا را می‌بیند.
+- [ ] `سینا` sell raw=`52000` ثبت می‌کند.
+- [ ] آفر با `52000` برای همه viewerها منتشر می‌شود.
+- [ ] فقط `رامین` روی همان offer تگ مشتری + نام `سینا` را می‌بیند.
 
 ### 5.4. سناریوی Tier 1 - آفر خرید
 
@@ -212,9 +211,9 @@ validation phase:
 - [ ] فقط owner همان customer context tag می‌بیند.
 
 مثال:
-- [ ] raw = `98000`.
-- [ ] آفر با `98000` برای همه منتشر می‌شود.
-- [ ] owner همان customer (مجید) تگ مشتری + نام پیمان را می‌بیند.
+- [ ] `پیمان` buy raw=`98000` ثبت می‌کند.
+- [ ] آفر با `98000` برای همه viewerها منتشر می‌شود.
+- [ ] فقط `مجید` روی همان offer تگ مشتری + نام `پیمان` را می‌بیند.
 
 ### 5.5. midpoint / rounding
 
@@ -294,11 +293,18 @@ validation phase:
   - [ ] customer buyer vs owner outsider: chain دو‌مرحله‌ای.
   - [ ] owner offer vs customer outsider: chain دو‌مرحله‌ای.
   - [ ] owner offer vs own-customer: trade مستقیم یک‌مرحله‌ای.
+- [ ] Tier 1 canonical examples:
+  - [ ] `سینا sell 52000` + `پیمان request` => `پیمان ↔ مجید @52000`، `مجید ↔ رامین @52000`، `رامین ↔ سینا @52000`.
+  - [ ] `پیمان buy 98000` + `رامین request` => `مجید ↔ رامین @98000`، `پیمان ↔ مجید @98000`.
+  - [ ] `مجید buy 189600` + `سینا request` => `رامین ↔ سینا @189600`، `مجید ↔ رامین @189600`.
+  - [ ] `رامین sell 188000` + `سینا request` => direct `سینا ↔ رامین @188000`.
 - [ ] notificationها، historyها، و UI summaryها باید با همین chainها هم‌راستا باشند.
 - [ ] Tier 2 canonical cases:
   - [ ] owner-offer + own Tier2 responder: direct one-leg trade at `viewer_effective_price`.
   - [ ] outsider buy-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ buyer owner @ raw_price`).
-  - [ ] outsider sell-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ seller_raw_source @ raw_price`).
+  - [ ] outsider sell-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ source seller actor @ raw_price`).
+  - [ ] same-owner Tier1 sell-offer + Tier2 responder: two-leg chain (`Tier2 customer ↔ own owner @ viewer_effective_price`, `own owner ↔ Tier1 source seller @ raw_price`).
+  - [ ] core rule: in Tier 2 execution only the responder side is mediated; the outer/raw leg always terminates on the original source actor of the offer.
 - [ ] notificationها، historyها، و UI summaryها باید این chain را منعکس کنند، نه اینکه یک trade مستقیم customer ↔ customer بسازند.
 
 ### 5.15. سناریوی customer trading restriction
@@ -365,7 +371,8 @@ history باید بسته به viewer یکی یا هر دو را نشان دهد
 - [ ] اگر `Tier 2` روی آفر buy یا sell بیرونی request بزند، history باید دو leg را جدا نگه دارد.
 - [ ] customer فقط leg خودش با owner خودش را می‌بیند.
 - [ ] owner customer هر دو leg را با customer context مناسب می‌بیند.
-- [ ] counterparty بیرونی فقط leg بیرونی owner ↔ owner/raw-source را می‌بیند و customer identity برای او sanitize می‌شود.
+- [ ] counterparty بیرونی فقط leg بیرونی owner ↔ source actor را می‌بیند و customer identity برای او sanitize می‌شود.
+- [ ] اگر source actor یک `Tier 1` seller باشد، leg بیرونی به همان `Tier 1` ختم می‌شود نه به owner او.
 
 ### 7.4. سناریوی counterpart در تاریخچه با owner
 
@@ -523,6 +530,5 @@ release gate:
 - [ ] در سناریوهای یک‌طرف-customer و same-owner-customer-to-customer، تعداد دقیق legs و shape نهایی trade chain چگونه normalize می‌شود؟
 - [ ] fallback naming برای history وقتی customer relation بعداً deleted/revoked می‌شود آیا از soft-deleted relation lookup می‌آید یا از snapshot صریح هنگام trade؟
 - [ ] fair-price customer-aware عمداً deferred است و بعد از تغییر flow اضافه‌کردن customer دوباره بسته خواهد شد.
-- [ ] سناریوی دوم Tier 2 با rule «Tier 2 حق ثبت آفر ندارد» تعارض دارد؛ باید روشن شود actor اولیه seller_raw_source چه کسی است یا آیا owner-side proxy posting برای Tier 2 قرار است وجود داشته باشد.
 
 این موارد challenge جدید محصولی نیستند؛ فقط detailهای implementation-level هستند و باید در phaseهای 4 تا 8 به‌صورت صریح بسته شوند.
