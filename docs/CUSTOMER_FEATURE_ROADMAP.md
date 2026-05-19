@@ -8,6 +8,9 @@
 - [x] دو اصل تفسیری نهایی روشن شده‌اند:
   - [x] مشتری یک کاربر عادی اما محدود است.
   - [x] هر رفتار عادی کاربر برای مشتری مجاز است مگر آن‌جا که محدودیت صریح customer آن را منع کند.
+- [x] contract اجرای معامله‌ی customer روشن شده است: customer هیچ trade مستقیم نهایی با طرف بیرونی ندارد و chain معامله حتماً از owner او عبور می‌کند.
+- [x] contract visibility بازار روشن شده است: role ادمینی به‌تنهایی raw visibility اضافه نمی‌کند و market visibility صرفاً relation-based است.
+- [x] challenge fair-price فعلاً عمداً deferred شده است تا بعد از تغییرات planned در شیوه اضافه‌کردن customer دوباره بسته شود.
 - [x] seamهای مهمی که می‌توان از آن‌ها reuse کرد در پروژه وجود دارند: `accountant_relation_service.py`, `chat_service.py`, `chat_room_service.py`, `session_service.py`, `user_deletion_service.py`, `users_public`, و الگوی `actor_user_id`.
 - [x] در فرانت، پروفایل عمومی و سطح مدیریت ادمین دیگر دو surface جدا و disconnected نیستند؛ `PublicProfile.vue` اکنون می‌تواند `UserProfile.vue` را در modal ادمینی باز کند و این contract باید در طراحی customer نیز حفظ شود.
 
@@ -156,16 +159,19 @@ validation phase:
 - [ ] قیمت ذخیره‌شده در DB برای آفر customer باید «قیمت خام actor» بماند.
 - [ ] کمیسیون یک policy نمایشی/معاملاتی owner روی customer است، نه اینکه raw market data را overwrite کند.
 - [ ] در نتیجه، adjusted price باید در response/runtime محاسبه شود نه اینکه جایگزین raw price در persistence شود.
+- [ ] زنجیره‌ی execution customer باید بتواند هم‌زمان سه لایه قیمت را حمل کند: raw price مبدا، market published price، و customer-viewer price.
 
-### 5.2. دو قیمت هم‌زمان که باید همیشه از هم تفکیک شوند
+### 5.2. سه قیمت هم‌زمان که باید همیشه از هم تفکیک شوند
 
 - [ ] `raw_price`: همان قیمتی که customer یا owner واقعاً ثبت کرده است.
-- [ ] `effective_market_price`: همان قیمتی که viewer مجاز باید در بازار ببیند.
+- [ ] `market_published_price`: همان قیمتی که آفر بعد از اعمال policy customerِ ثبت‌کننده برای عموم market منتشر می‌شود.
+- [ ] `viewer_effective_price`: همان قیمتی که viewer نهایی در UI market می‌بیند؛ برای customer viewer این قیمت می‌تواند یک projection دوم بر اساس policy خود او باشد.
 
 این تفکیک مهم است چون:
 - [ ] customer باید raw_price خودش را ببیند.
-- [ ] owner و admin باید raw_price customer خود را ببینند.
-- [ ] بقیه باید effective_market_price را ببینند.
+- [ ] owner همان customer باید raw_price را ببیند.
+- [ ] هر viewer غیر-owner، از جمله middle admin و super admin، باید فقط market projection را ببیند مگر آن‌که خودش owner همان customer relation باشد.
+- [ ] customer viewer برای آفرهای دیگر market باید `viewer_effective_price` مخصوص خودش را ببیند، نه صرفاً market published price عمومی را.
 
 ### 5.3. سناریوی پایه فروش customer
 
@@ -173,30 +179,34 @@ validation phase:
 - [ ] raw_price همان عددی است که customer وارد کرده است.
 - [ ] برای خود customer: همان raw_price نمایش داده می‌شود.
 - [ ] برای owner همان customer: raw_price نمایش داده می‌شود + badge مشتری.
-- [ ] برای admin: raw_price نمایش داده می‌شود + badge مشتری.
-- [ ] برای هر viewer دیگر: `raw_price + commission` و سپس rounding rule اعمال می‌شود.
+- [ ] برای هر viewer غیر-owner: ابتدا `market_published_price = raw_price + commission(source customer)` و سپس rounding rule اعمال می‌شود.
+- [ ] اگر viewer خودش customer باشد، بعد از آن policy viewer-customer خودش روی market published price اعمال می‌شود تا `viewer_effective_price` شکل بگیرد.
 
 مثال:
 - [ ] customer قیمت فروش خام `199600` ثبت می‌کند.
 - [ ] commission = `0.5%`.
-- [ ] adjusted = `199600 × 1.005 = 200598`.
+- [ ] `market_published_price = 199600 × 1.005 = 200598`.
 - [ ] nearest-100 = `200600`.
-- [ ] customer/owner/admin عدد `199600` را می‌بینند.
-- [ ] سایر viewerها عدد `200600` را می‌بینند.
+- [ ] customer و owner او عدد `199600` را می‌بینند.
+- [ ] سایر viewerهای غیر-customer عدد `200600` را می‌بینند.
+- [ ] اگر viewer یک customer دیگر باشد، price projection دومِ viewer policy روی `200600` اعمال می‌شود.
 
 ### 5.4. سناریوی پایه خرید customer
 
 اگر customer یک آفر خرید ثبت کند:
 - [ ] raw_price همان عدد واردشده است.
 - [ ] برای customer: raw_price.
-- [ ] برای owner/admin: raw_price + badge مشتری.
-- [ ] برای سایر viewerها: `raw_price - commission` و سپس rounding rule.
+- [ ] برای owner همان customer: raw_price + badge مشتری.
+- [ ] برای سایر viewerهای غیر-owner: `market_published_price = raw_price - commission(source customer)` و سپس rounding rule.
+- [ ] برای customer viewerِ دیگر: یک projection دوم بر اساس کمیسیون customer viewer روی market published price اعمال می‌شود.
 
 مثال:
-- [ ] customer قیمت خرید خام `200800` ثبت می‌کند.
-- [ ] commission = `0.5%`.
-- [ ] adjusted = `200800 × 0.995 = 199796`.
-- [ ] nearest-100 = `199800`.
+- [ ] customer قیمت خرید خام `191500` ثبت می‌کند.
+- [ ] commission source customer = `0.5%`.
+- [ ] `market_published_price = 191500 × 0.995 = 190542.5`.
+- [ ] nearest-100 = `190600`.
+- [ ] اگر viewer یک user عادی یا admin unrelated باشد، `190600` را می‌بیند.
+- [ ] اگر viewer یک customer دیگر با commission `0.5%` باشد، `viewer_effective_price = 190600 × 0.995 = 189647` و nearest-100 = `189700` می‌شود.
 
 ### 5.5. سناریوی midpoint در فروش
 
@@ -229,14 +239,16 @@ validation phase:
 
 ### 5.9. وقتی admin market را می‌بیند
 
-- [ ] admin باید با owner همان visibility را نسبت به customer offer داشته باشد.
-- [ ] یعنی raw price customer + badge مشتری برای همه customer offerها.
-- [ ] این requirement باید دقیقاً با contract فعلی `PublicProfile` و `UserProfile` هم‌راستا باشد: admin از public profile بتواند همان تنظیمات/visual context را ببیند که owner در مدیریت user می‌بیند.
+- [ ] در market، admin نباید visibility ویژه صرفاً به خاطر role داشته باشد.
+- [ ] middle admin و super admin در market باید دقیقاً مثل user عادی رفتار کنند مگر آن‌که خودشان owner همان customer relation باشند.
+- [ ] بنابراین raw price customer در market فقط relation-based دیده می‌شود، نه role-based.
+- [ ] contract فعلی `PublicProfile` و `UserProfile` فقط surface مدیریتی/profile را هم‌راستا می‌کند و نباید باعث market-rent شود.
 
 ### 5.10. وقتی customer خودش market را می‌بیند
 
 - [ ] فقط آفر خودش باید raw باشد.
-- [ ] آفرهای بقیه market طبق همان rules عمومی market برای او نمایش داده شوند.
+- [ ] customer market جداگانه‌ای نمی‌بیند.
+- [ ] آفرهای بقیه market برای او با `viewer_effective_price` نمایش داده می‌شوند؛ یعنی market published price هر آفر، دوباره با policy viewer-customer خودش project می‌شود.
 - [ ] customer نباید commission rate خودش را از UI استخراج کند.
 - [ ] بنابراین حتی اگر raw/effective difference برای آفر خودش قابل مقایسه باشد، نباید label یا helper مستقیمی نرخ را افشا کند.
 
@@ -244,13 +256,15 @@ validation phase:
 
 - [ ] نباید بفهمد این آفر متعلق به customer است.
 - [ ] نه badge، نه owner relation، نه management name، نه field اضافی UI.
-- [ ] فقط effective_market_price را می‌بیند.
+- [ ] فقط final viewer-facing price همان viewer را می‌بیند؛ برای user عادی این همان `market_published_price` است.
 
 ### 5.12. سناریوی owner editing customer commission
 
 وقتی owner commission را از `0.5` به `0.8` تغییر می‌دهد:
 - [ ] هیچ raw_price قبلی در DB تغییر نمی‌کند.
-- [ ] همه آفرهای active customer از همان لحظه با commission جدید render می‌شوند.
+- [ ] tradeهای قبلاً ثبت‌شده باید با commission historical خودشان ثابت بمانند و rewrite نشوند.
+- [ ] هر trade جدیدی که بعد از این تغییر ایجاد می‌شود باید با commission جدید محاسبه شود.
+- [ ] اگر آفر active هنوز باز باشد، projectionهای market و viewer برای executionهای آینده باید از لحظه تغییر با policy جدید محاسبه شوند.
 - [ ] helper text فرم باید زنده آپدیت شود.
 - [ ] competitive/fair-price logic باید بداند raw_price کدام است و effective price viewer-facing کدام است.
 
@@ -258,25 +272,26 @@ validation phase:
 
 این حساس‌ترین بخش است.
 
-اصل نهایی:
-- [ ] fair-price باید بر مبنای قیمت‌های قابل مقایسه محاسبه شود، نه قیمت‌های distort شده‌ی warning/excluded.
-- [ ] چون raw_price مبنای واقعی offer owner/customer است، باید تصمیم فنی روشن شود که fair-price روی raw market basis محاسبه شود یا viewer-facing basis.
-- [ ] با توجه به الگوی موجود پروژه و rollout اخیر warningها، direction پیشنهادی roadmap این است:
-  - [ ] persistent fair-price basis = raw comparable prices
-  - [ ] customer commission فقط لایه presentation/visibility و execution-facing adjustment باشد
-  - [ ] offerهای flagged with aggressive warning همچنان از fair-price کنار گذاشته شوند
-
-چرا این direction منطقی است:
-- [ ] اگر fair-price بر مبنای adjusted customer prices محاسبه شود، owner policy خصوصی یک customer روی همه market analytics نشت می‌کند.
-- [ ] اگر fair-price بر raw prices بماند، market baseline خالص‌تر و قابل مقایسه‌تر می‌ماند.
+- [ ] این بخش عمداً deferred شده است.
+- [ ] کاربر اعلام کرده که به‌دلیل تغییر planned در style/flow اضافه‌کردن customer، challenge fair-price customer بعداً دوباره باز و نهایی می‌شود.
+- [ ] تا قبل از آن، roadmap فقط تضمین می‌کند که current aggressive-price warning logic را نشکنیم و در consumerهای customer-compatible path side effect ناخواسته ایجاد نکنیم.
 
 ### 5.14. سناریوی trade execution روی offer customer
 
-اگر user عادی روی آفر customer معامله بزند:
-- [ ] system باید بداند raw stored offer price چیست.
-- [ ] system باید مطابق contract execution مشخص کند counterpart-facing execution بر اساس raw business price انجام می‌شود یا adjusted presented price.
-- [ ] چون customer برای دیگران adjusted price دیده شده، execution summary نباید mismatch فریبنده ایجاد کند.
-- [ ] در implementation phase باید rule صریح انتخاب و در response/notification/history یکنواخت شود.
+- [ ] customer نباید trade مستقیم customer ↔ outsider داشته باشد.
+- [ ] هر execution باید از owner mediation عبور کند.
+- [ ] اگر فقط یک سمت customer باشد، زنجیره execution باید owner همان customer را به‌عنوان واسطه وارد trade rows کند.
+- [ ] اگر هر دو سمت customer و ownerهایشان متفاوت باشند، execution باید به trade chain سه‌مرحله‌ای بشکند.
+- [ ] مثال canonical:
+  - [ ] source offer: customer1 ownerA, BUY, qty=20, raw=`191500`
+  - [ ] source commission ownerA for this customer: `0.5%`
+  - [ ] public market published price for everyone except ownerA and the source customer itself: `190600`
+  - [ ] viewer customer1 ownerB with commission `0.5%` sees `189700`
+  - [ ] persisted trade rows for one completed business action:
+    - [ ] trade1: `customer1 ownerB → ownerB @ 189700`
+    - [ ] trade2: `ownerB → ownerA @ 190600`
+    - [ ] trade3: `ownerA → customer1 ownerA @ 191500`
+- [ ] notificationها، historyها، و UI summaryها باید این chain را منعکس کنند، نه اینکه یک trade مستقیم customer ↔ customer بسازند.
 
 ### 5.15. سناریوی customer trading restriction
 
@@ -290,7 +305,7 @@ validation phase:
 - [ ] pure math tests برای buy/sell, midpoint, non-midpoint, nearest-100.
 - [ ] serializer tests برای owner/admin/customer/public viewer matrix.
 - [ ] market e2e برای raw vs adjusted rendering.
-- [ ] regression برای warning-excluded fair-price path.
+- [ ] regression برای warning/exclusion path بدون reintroduce کردن challenge fair-price.
 
 ## 7. Phase 6 - تاریخچه معامله، سناریو محور و exhaustive
 
@@ -302,6 +317,7 @@ validation phase:
 - [ ] trade از دید actor ممکن است توسط customer انجام شده باشد.
 - [ ] اما از دید business relation، owner مرجع principal آن رابطه است.
 - [ ] history باید این دو لایه را قاطی نکند.
+- [ ] در سناریوهای customer-mediated، history باید بداند که یک business action ممکن است به چند trade row شکسته شده باشد.
 
 ### 7.2. دو حقیقت هم‌زمان در history
 
@@ -320,6 +336,15 @@ history باید بسته به viewer یکی یا هر دو را نشان دهد
 هدف این نمایش:
 - [ ] owner بفهمد این معامله از کانال کدام customer اتفاق افتاده است.
 - [ ] بدون آنکه trade principal owner/user3 از هم بپاشد.
+
+### 7.3.1. سناریوی customer ↔ customer با ownerهای متفاوت
+
+- [ ] اگر یک customer از ownerA و یک customer از ownerB در دو سمت یک business action باشند، history نباید این اتفاق را به‌صورت یک trade مستقیم customer ↔ customer نمایش دهد.
+- [ ] هر طرف باید leg مرتبط با خودش را در history خود ببیند.
+- [ ] ownerA و ownerB باید leg بین‌مالکی (`ownerB ↔ ownerA`) را هم در historyهای مرتبط خود ببینند.
+- [ ] source customer باید leg `ownerA ↔ customerA` را ببیند.
+- [ ] responder customer باید leg `customerB ↔ ownerB` را ببیند.
+- [ ] mutual history بین ownerA و ownerB باید بر leg واسطه‌ای بین دو owner تکیه کند، نه بر customer endpointها.
 
 ### 7.4. سناریوی counterpart در تاریخچه با owner
 
@@ -350,6 +375,7 @@ history باید بسته به viewer یکی یا هر دو را نشان دهد
 - [ ] admin باید همان visibility owner را در history customer-aware داشته باشد.
 - [ ] اگر owner در یک view badge/customer context می‌بیند، admin هم باید ببیند.
 - [ ] این دقیقاً باید با sync اخیر public profile و admin user modal سازگار بماند؛ یعنی جایی که admin از public profile وارد تنظیمات user می‌شود، همان entity/context را ببیند.
+- [ ] این rule history-specific است و نباید به market visibility ویژه برای admin نشت کند.
 
 ### 7.8. سناریوی customer در تاریخچه خودش
 
@@ -369,7 +395,10 @@ history باید بسته به viewer یکی یا هر دو را نشان دهد
 اگر customer relation حذف یا revoke شود:
 - [ ] history گذشته نباید از بین برود.
 - [ ] context tradeهای قبلی باید تا حد امکان preserved بماند.
-- [ ] اگر نمایش نام فعلی customer ممکن نیست، باید fallback stable وجود داشته باشد تا history مبهم نشود.
+- [ ] baseline پروژه برای userهای عادی و middle admin همین الان history-preserving soft delete است: user row حذف فیزیکی نمی‌شود، `account_name/mobile` suffix می‌خورند، trade rows باقی می‌مانند، و frontend suffix را برای display پاک می‌کند.
+- [ ] customer lifecycle هم باید همین اصل را inherit کند: حذف/revoke نباید history را نابود کند.
+- [ ] برای customer-specific context، relation row باید soft-deleted/revoked باقی بماند یا snapshot لازم گرفته شود تا `management_name` historical از بین نرود.
+- [ ] public profile deleted user می‌تواند unavailable شود، اما trade history و display nameهای historical باید پایدار بمانند.
 
 ### 7.11. سناریوی block/restriction propagation در history
 
@@ -469,8 +498,8 @@ release gate:
 
 این‌ها blocker محصولی نیستند، ولی در طراحی فنی باید early explicit شوند:
 
-- [ ] execution contract نهایی بین raw displayed price و trade confirmation payload دقیقاً چگونه در API/history/notification encode می‌شود؟
-- [ ] fallback naming برای history وقتی customer relation بعداً deleted/revoked می‌شود چیست؟
-- [ ] آیا market fair-price persistence دقیقاً روی raw prices خواهد ماند یا در بعضی viewer-facing analytic surfaces adjusted projection جداگانه لازم است؟
+- [ ] در سناریوهای یک‌طرف-customer و same-owner-customer-to-customer، تعداد دقیق legs و shape نهایی trade chain چگونه normalize می‌شود؟
+- [ ] fallback naming برای history وقتی customer relation بعداً deleted/revoked می‌شود آیا از soft-deleted relation lookup می‌آید یا از snapshot صریح هنگام trade؟
+- [ ] fair-price customer-aware عمداً deferred است و بعد از تغییر flow اضافه‌کردن customer دوباره بسته خواهد شد.
 
 این موارد challenge جدید محصولی نیستند؛ فقط detailهای implementation-level هستند و باید در phaseهای 4 تا 8 به‌صورت صریح بسته شوند.
