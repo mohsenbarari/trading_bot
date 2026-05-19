@@ -421,9 +421,10 @@ history باید بسته به viewer یکی یا هر دو را نشان دهد
 
 ### 7.7. سناریوی admin در تاریخچه
 
-- [ ] admin باید همان visibility owner را در history customer-aware داشته باشد.
-- [ ] اگر owner در یک view badge/customer context می‌بیند، admin هم باید ببیند.
-- [ ] این دقیقاً باید با sync اخیر public profile و admin user modal سازگار بماند؛ یعنی جایی که admin از public profile وارد تنظیمات user می‌شود، همان entity/context را ببیند.
+- [ ] `SUPER_ADMIN` باید history واقعی user هدف را در public profile ببیند، نه mutual history با خودش.
+- [ ] اگر owner در یک view badge/customer context می‌بیند، `SUPER_ADMIN` هم باید همان context را ببیند.
+- [ ] `MIDDLE_MANAGER` در public profile فقط mutual history عادی خودش با آن user را می‌بیند و هیچ customer-aware context اضافه‌ای ندارد.
+- [ ] این دقیقاً باید با sync اخیر public profile و admin user modal سازگار بماند؛ یعنی جایی که `SUPER_ADMIN` از public profile وارد تنظیمات user می‌شود، همان entity/context را ببیند.
 - [ ] این rule history-specific است و نباید به market visibility ویژه برای admin نشت کند.
 
 ### 7.8. سناریوی customer در تاریخچه خودش
