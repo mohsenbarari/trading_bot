@@ -751,7 +751,7 @@ describe('useChatMedia', () => {
     if (!releaseQueuedUpload) {
       throw new Error('Expected queued upload release handler')
     }
-    releaseQueuedUpload()
+    (releaseQueuedUpload as () => void)()
     await expect(firstUpload).resolves.toBe('first-upload')
 
     hooks.setCachedMediaUrl('cached-1', 'blob:first')
@@ -854,14 +854,14 @@ describe('useChatMedia', () => {
       expect(hooks.state.pendingMediaLoads.size).toBe(1)
       await flushPromises()
       const sharedPendingFetchCount = fetchMock.mock.calls.reduce((count, call) => (
-        count + (String(call[0]).includes('/api/chat/files/shared-pending?token=jwt') ? 1 : 0)
+        count + (String((call as any[])[0]).includes('/api/chat/files/shared-pending?token=jwt') ? 1 : 0)
       ), 0)
       expect(sharedPendingFetchCount).toBe(1)
 
       if (!resolveFetch) {
         throw new Error('Expected pending media fetch resolver')
       }
-      resolveFetch(new Response(new Blob(['pending-image'], { type: 'image/png' }), {
+      (resolveFetch as (v: Response) => void)(new Response(new Blob(['pending-image'], { type: 'image/png' }), {
         status: 200,
         headers: { 'Content-Type': 'image/png' },
       }))

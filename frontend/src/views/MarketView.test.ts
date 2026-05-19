@@ -354,7 +354,7 @@ describe('MarketView.vue', () => {
     if (!resolveCommodities) {
       throw new Error('Expected commodities resolver')
     }
-    resolveCommodities(responseOf(commoditiesFixture))
+    ;(resolveCommodities as (v: unknown) => void)(responseOf(commoditiesFixture))
     await flushPromises()
 
     await wrapper.findAll('.commodity-btn')[0]!.trigger('click')
