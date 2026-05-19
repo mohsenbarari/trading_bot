@@ -20,7 +20,7 @@ from core.config import settings
 from core.trading_settings import get_trading_settings
 from core.utils import check_user_limits, increment_user_counter, to_jalali_str
 from core.services.trade_service import get_available_trade_amounts
-from core.services.customer_relation_service import build_customer_offer_read_model
+from core.services.customer_relation_service import build_customer_offer_read_model, load_offer_customer_read_context
 from core.services.user_account_status_service import is_user_market_blocked
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
@@ -176,6 +176,32 @@ def offer_to_response(
         created_at=to_jalali_str(offer.created_at) or "",
         expires_at_ts=expires_at_ts
     )
+
+
+async def _serialize_offer_responses(
+    offers: List[Offer],
+    *,
+    db: AsyncSession,
+    start_settings: Optional['TradingSettings'] = None,
+    viewer_user_id: Optional[int] = None,
+    include_owner_identity: bool = False,
+) -> List[OfferResponse]:
+    offer_owner_relation_map, viewer_customer_relation = await load_offer_customer_read_context(
+        db,
+        offer_owner_user_ids={offer.user_id for offer in offers if getattr(offer, "user_id", None) is not None},
+        viewer_user_id=viewer_user_id,
+    )
+    return [
+        offer_to_response(
+            offer,
+            start_settings,
+            viewer_user_id=viewer_user_id,
+            include_owner_identity=include_owner_identity,
+            offer_owner_relation=offer_owner_relation_map.get(getattr(offer, "user_id", None)),
+            viewer_customer_relation=viewer_customer_relation,
+        )
+        for offer in offers
+    ]
 
 
 async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
@@ -524,7 +550,13 @@ async def get_active_offers(
     context = _resolve_offer_owner_context(context, current_user)
     owner_user = context.owner_user
     
-    return [offer_to_response(o, ts, viewer_user_id=owner_user.id, include_owner_identity=False) for o in offers]
+    return await _serialize_offer_responses(
+        offers,
+        db=db,
+        start_settings=ts,
+        viewer_user_id=owner_user.id,
+        include_owner_identity=False,
+    )
 
 
 @router.get("/my", response_model=List[OfferResponse])
@@ -585,7 +617,13 @@ async def get_my_offers(
     from core.trading_settings import get_trading_settings_async
     ts = await get_trading_settings_async()
     
-    return [offer_to_response(o, ts, viewer_user_id=owner_user.id, include_owner_identity=True) for o in offers]
+    return await _serialize_offer_responses(
+        offers,
+        db=db,
+        start_settings=ts,
+        viewer_user_id=owner_user.id,
+        include_owner_identity=True,
+    )
 
 
 @router.delete("/{offer_id}", status_code=status.HTTP_204_NO_CONTENT)

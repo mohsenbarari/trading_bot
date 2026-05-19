@@ -339,6 +339,47 @@ def build_customer_offer_read_model(
     )
 
 
+async def load_offer_customer_read_context(
+    db: AsyncSession,
+    *,
+    offer_owner_user_ids: list[int] | tuple[int, ...] | set[int],
+    viewer_user_id: int | None,
+) -> tuple[dict[int, CustomerRelation], CustomerRelation | None]:
+    normalized_offer_owner_ids: list[int] = []
+    seen_owner_ids: set[int] = set()
+    for raw_user_id in offer_owner_user_ids:
+        try:
+            normalized_user_id = int(raw_user_id)
+        except (TypeError, ValueError):
+            continue
+        if normalized_user_id <= 0 or normalized_user_id in seen_owner_ids:
+            continue
+        seen_owner_ids.add(normalized_user_id)
+        normalized_offer_owner_ids.append(normalized_user_id)
+
+    owner_relation_map: dict[int, CustomerRelation] = {}
+    if normalized_offer_owner_ids:
+        owner_relation_stmt = select(CustomerRelation).where(
+            CustomerRelation.customer_user_id.in_(normalized_offer_owner_ids),
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+            CustomerRelation.deleted_at.is_(None),
+        )
+        owner_relations = list((await db.execute(owner_relation_stmt)).scalars().all())
+        owner_relation_map = {
+            relation.customer_user_id: relation
+            for relation in owner_relations
+            if relation.customer_user_id is not None
+        }
+
+    viewer_relation: CustomerRelation | None = None
+    if viewer_user_id is not None:
+        viewer_relation = owner_relation_map.get(viewer_user_id)
+        if viewer_relation is None:
+            viewer_relation = await get_active_customer_relation_for_customer(db, viewer_user_id)
+
+    return owner_relation_map, viewer_relation
+
+
 def validate_customer_trade_limits(
     relation: CustomerRelation | object,
     *,

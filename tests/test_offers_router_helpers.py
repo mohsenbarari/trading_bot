@@ -238,6 +238,9 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "core.trading_settings.get_trading_settings_async",
             new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=20)),
+        ), patch(
+            "api.routers.offers.load_offer_customer_read_context",
+            new=AsyncMock(return_value=({}, None)),
         ):
             result = await offers_module.get_active_offers(
                 offer_type="sell",
@@ -258,6 +261,9 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "core.trading_settings.get_trading_settings_async",
             new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=20)),
+        ), patch(
+            "api.routers.offers.load_offer_customer_read_context",
+            new=AsyncMock(return_value=({}, None)),
         ):
             result = await offers_module.get_my_offers(
                 status_filter="active",
@@ -279,6 +285,9 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "core.trading_settings.get_trading_settings_async",
             new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=20)),
+        ), patch(
+            "api.routers.offers.load_offer_customer_read_context",
+            new=AsyncMock(return_value=({}, None)),
         ):
             result = await offers_module.get_my_offers(
                 status_filter="cancelled",

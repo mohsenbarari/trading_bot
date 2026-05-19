@@ -39,11 +39,17 @@ interface Offer {
   quantity: number
   remaining_quantity: number
   price: number
+  raw_price?: number
+  market_published_price?: number
+  viewer_effective_price?: number
   is_wholesale: boolean
   lot_sizes: number[] | null
   notes: string | null
   status: string
   channel_message_id: number | null
+  customer_badge_visible?: boolean
+  customer_management_name?: string | null
+  customer_tier?: 'tier1' | 'tier2' | null
   created_at: string
   expires_at_ts?: number
 }
@@ -208,6 +214,17 @@ function getLotButtons(offer: Offer): number[] {
 
 function formatLotSummary(amounts: number[]): string {
   return [...amounts].sort((a, b) => b - a).join(' + ')
+}
+
+function getOfferDisplayPrice(offer: Offer | null | undefined): number {
+  const numeric = Number(offer?.viewer_effective_price ?? offer?.price ?? 0)
+  return Number.isFinite(numeric) ? numeric : 0
+}
+
+function getCustomerTierLabel(tier: Offer['customer_tier']): string {
+  if (tier === 'tier2') return 'سطح 2'
+  if (tier === 'tier1') return 'سطح 1'
+  return 'سطح نامشخص'
 }
 
 function buildOfferSignature(offer: Offer | null): string | null {
@@ -426,7 +443,7 @@ async function executeTrade() {
           offerType: data.offer_type || selectedOffer.value.offer_type || '',
           offerTypeLabel: data.offer_type_label || ((data.offer_type || selectedOffer.value.offer_type) === 'buy' ? 'خرید' : 'فروش'),
           commodityName: data.commodity_name || selectedOffer.value.commodity_name || 'کالا',
-          price: Number(data.price || selectedOffer.value.price || 0),
+          price: Number(data.price ?? getOfferDisplayPrice(selectedOffer.value) ?? 0),
           remainingQuantity: Number(data.remaining_quantity || selectedOffer.value.remaining_quantity || tradeQuantity.value),
           lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? formatLotSummary(data.available_lots) : ''),
           availableLots: data.available_lots,
@@ -484,7 +501,7 @@ function syncTradeSuggestionFromOffers() {
     offerType: sourceOffer.offer_type,
     offerTypeLabel: sourceOffer.offer_type === 'buy' ? 'خرید' : 'فروش',
     commodityName: sourceOffer.commodity_name,
-    price: Number(sourceOffer.price),
+    price: getOfferDisplayPrice(sourceOffer),
     remainingQuantity: remaining,
     lotSummary: formatLotSummary(availableLots),
     availableLots,
@@ -736,7 +753,12 @@ watch(activeTab, (val) => {
             <div class="offer-main">
               <span class="commodity">{{ offer.commodity_name }}</span>
               <span class="quantity">{{ offer.remaining_quantity }} عدد</span>
-              <span class="price">{{ offer.price.toLocaleString() }}</span>
+              <span class="price">{{ getOfferDisplayPrice(offer).toLocaleString() }}</span>
+            </div>
+            <div v-if="offer.customer_badge_visible" class="customer-context-row">
+              <span class="customer-context-badge">مشتری</span>
+              <span v-if="offer.customer_management_name" class="customer-context-name">{{ offer.customer_management_name }}</span>
+              <span v-if="offer.customer_tier" class="customer-context-tier">{{ getCustomerTierLabel(offer.customer_tier) }}</span>
             </div>
             <div v-if="offer.notes" class="offer-notes">
               توضیحات: {{ offer.notes }}
@@ -799,7 +821,7 @@ watch(activeTab, (val) => {
             <div class="offer-main">
               <span class="commodity">{{ offer.commodity_name }}</span>
               <span class="quantity">{{ offer.remaining_quantity }} عدد</span>
-              <span class="price">{{ offer.price.toLocaleString() }}</span>
+              <span class="price">{{ getOfferDisplayPrice(offer).toLocaleString() }}</span>
             </div>
             <div v-if="offer.notes" class="offer-notes">
               توضیحات: {{ offer.notes }}
@@ -928,9 +950,9 @@ watch(activeTab, (val) => {
         
         <div class="modal-body">
           <p><strong>کالا:</strong> {{ selectedOffer.commodity_name }}</p>
-          <p><strong>قیمت:</strong> {{ selectedOffer.price.toLocaleString() }}</p>
+          <p><strong>قیمت:</strong> {{ getOfferDisplayPrice(selectedOffer).toLocaleString() }}</p>
           <p><strong>تعداد:</strong> {{ tradeQuantity }}</p>
-          <p><strong>مجموع:</strong> {{ (selectedOffer.price * tradeQuantity).toLocaleString() }} تومان</p>
+          <p><strong>مجموع:</strong> {{ (getOfferDisplayPrice(selectedOffer) * tradeQuantity).toLocaleString() }} تومان</p>
         </div>
         
         <div class="modal-footer">
@@ -1371,6 +1393,44 @@ watch(activeTab, (val) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.customer-context-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.customer-context-badge,
+.customer-context-tier {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.customer-context-badge {
+  color: #92400e;
+  background: rgba(251, 191, 36, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.customer-context-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.customer-context-tier {
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.22);
 }
 
 .commodity {
