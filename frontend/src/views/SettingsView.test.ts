@@ -229,7 +229,10 @@ describe('SettingsView.vue', () => {
     await clearButton.trigger('click')
     expect(settingsViewMocks.clearFileCacheMock).toHaveBeenCalledTimes(1)
 
-    rejectClear?.(new Error('clear-cache-failed'))
+    if (!rejectClear) {
+      throw new Error('Expected clear-cache rejection handler')
+    }
+    rejectClear(new Error('clear-cache-failed'))
     await flushPromises()
 
     expect(wrapper.find('.storage-feedback').text()).toContain('پاک‌سازی حافظه ناموفق بود.')

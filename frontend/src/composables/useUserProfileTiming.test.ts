@@ -1,12 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent, nextTick, toRef } from 'vue'
+import { defineComponent, nextTick, toRef, type PropType } from 'vue'
 import { mount } from '@vue/test-utils'
 import { useUserProfileTiming } from './useUserProfileTiming'
+
+type TimingHarnessUser = {
+  trading_restricted_until?: string | null
+  limitations_expire_at?: string | null
+}
+
+type TimingHarnessVm = {
+  countdownRestriction: string
+  countdownLimitation: string
+  parseJalaliToIranISO: (value: string) => string
+  toEnglishDigits: (value: string) => string
+}
 
 const TimingHarness = defineComponent({
   props: {
     user: {
-      type: Object,
+      type: Object as PropType<TimingHarnessUser | null>,
       default: null,
     },
   },
@@ -35,12 +47,13 @@ describe('useUserProfileTiming', () => {
     })
 
     await nextTick()
-    expect((wrapper.vm as any).countdownRestriction).toBe('1 ساعت 1 دقیقه 1 ثانیه')
-    expect((wrapper.vm as any).countdownLimitation).toBe('1 دقیقه 1 ثانیه')
+    const vm = wrapper.vm as unknown as TimingHarnessVm
+    expect(vm.countdownRestriction).toBe('1 ساعت 1 دقیقه 1 ثانیه')
+    expect(vm.countdownLimitation).toBe('1 دقیقه 1 ثانیه')
 
     vi.advanceTimersByTime(2000)
     await nextTick()
-    expect((wrapper.vm as any).countdownLimitation).toBe('59 ثانیه')
+    expect(vm.countdownLimitation).toBe('59 ثانیه')
 
     wrapper.unmount()
   })
@@ -56,9 +69,10 @@ describe('useUserProfileTiming', () => {
     })
 
     await nextTick()
-    expect((wrapper.vm as any).countdownRestriction).toBe('دائمی')
-    expect((wrapper.vm as any).toEnglishDigits('۱۲۳۴۵۶۷۸۹۰')).toBe('1234567890')
-    expect((wrapper.vm as any).parseJalaliToIranISO('۱۴۰۳/۰۲/۱۰ 08:30')).toBe('2024-04-29T05:00:00.000Z')
+    const vm = wrapper.vm as unknown as TimingHarnessVm
+    expect(vm.countdownRestriction).toBe('دائمی')
+    expect(vm.toEnglishDigits('۱۲۳۴۵۶۷۸۹۰')).toBe('1234567890')
+    expect(vm.parseJalaliToIranISO('۱۴۰۳/۰۲/۱۰ 08:30')).toBe('2024-04-29T05:00:00.000Z')
 
     wrapper.unmount()
   })
@@ -76,8 +90,9 @@ describe('useUserProfileTiming', () => {
     })
 
     await nextTick()
-    expect((wrapper.vm as any).countdownRestriction).toBe('2 روز 2 ساعت 2 دقیقه')
-    expect((wrapper.vm as any).countdownLimitation).toBe('')
+    const vm = wrapper.vm as unknown as TimingHarnessVm
+    expect(vm.countdownRestriction).toBe('2 روز 2 ساعت 2 دقیقه')
+    expect(vm.countdownLimitation).toBe('')
 
     await wrapper.setProps({
       user: {
@@ -86,14 +101,14 @@ describe('useUserProfileTiming', () => {
       },
     })
     await nextTick()
-    expect((wrapper.vm as any).countdownRestriction).toBe('')
-    expect((wrapper.vm as any).countdownLimitation).toBe('')
+    expect(vm.countdownRestriction).toBe('')
+    expect(vm.countdownLimitation).toBe('')
 
     await wrapper.setProps({ user: null })
     await nextTick()
-    expect((wrapper.vm as any).countdownRestriction).toBe('')
-    expect((wrapper.vm as any).countdownLimitation).toBe('')
-    expect((wrapper.vm as any).toEnglishDigits('')).toBe('')
+    expect(vm.countdownRestriction).toBe('')
+    expect(vm.countdownLimitation).toBe('')
+    expect(vm.toEnglishDigits('')).toBe('')
 
     wrapper.unmount()
   })

@@ -15,7 +15,7 @@ const cropperResetMock = vi.fn()
 const canvasToBlobMock = vi.fn((callback: (blob: Blob | null) => void) => {
   callback(new Blob(['edited-image'], { type: 'image/jpeg' }))
 })
-const cropperGetCroppedCanvasMock = vi.fn(() => {
+const cropperGetCroppedCanvasMock = vi.fn<() => HTMLCanvasElement | null>(() => {
   const canvas = document.createElement('canvas')
   canvas.width = 400
   canvas.height = 300

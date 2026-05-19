@@ -748,7 +748,10 @@ describe('useChatMedia', () => {
     const queuedUpload = hooks.runAdaptiveUploadTask(1, async () => 'second-upload', queuedAbortController.signal)
     queuedAbortController.abort()
     await expect(queuedUpload).rejects.toThrow('UploadCancelled')
-    releaseQueuedUpload?.()
+    if (!releaseQueuedUpload) {
+      throw new Error('Expected queued upload release handler')
+    }
+    releaseQueuedUpload()
     await expect(firstUpload).resolves.toBe('first-upload')
 
     hooks.setCachedMediaUrl('cached-1', 'blob:first')
@@ -850,14 +853,18 @@ describe('useChatMedia', () => {
       })
       expect(hooks.state.pendingMediaLoads.size).toBe(1)
       await flushPromises()
-      expect(
-        fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/chat/files/shared-pending?token=jwt')).length,
-      ).toBe(1)
+      const sharedPendingFetchCount = fetchMock.mock.calls.reduce((count, call) => (
+        count + (String(call[0]).includes('/api/chat/files/shared-pending?token=jwt') ? 1 : 0)
+      ), 0)
+      expect(sharedPendingFetchCount).toBe(1)
 
-      resolveFetch?.({
-        ok: true,
-        blob: async () => new Blob(['pending-image'], { type: 'image/png' }),
-      } as Response)
+      if (!resolveFetch) {
+        throw new Error('Expected pending media fetch resolver')
+      }
+      resolveFetch(new Response(new Blob(['pending-image'], { type: 'image/png' }), {
+        status: 200,
+        headers: { 'Content-Type': 'image/png' },
+      }))
       await expect(firstLoad).resolves.toBe('blob:generated-media')
       await expect(secondLoad).resolves.toBe('blob:generated-media')
 
@@ -1042,7 +1049,7 @@ describe('useChatMedia', () => {
     let firstSignal: AbortSignal | undefined
     const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
       if (!firstSignal) {
-        firstSignal = init?.signal
+        firstSignal = init?.signal ?? undefined
         return new Promise<Response>((_resolve, reject) => {
           init?.signal?.addEventListener('abort', () => {
             const abortError = new Error('aborted') as Error & { name: string }
@@ -1052,12 +1059,10 @@ describe('useChatMedia', () => {
         })
       }
 
-      return Promise.resolve({
-        ok: true,
-        headers: { get: () => null },
-        body: null,
-        blob: async () => new Blob(['second-download'], { type: 'image/png' }),
-      } as Response)
+      return Promise.resolve(new Response(new Blob(['second-download'], { type: 'image/png' }), {
+        status: 200,
+        headers: { 'Content-Type': 'image/png' },
+      }))
     })
     vi.stubGlobal('fetch', fetchMock)
     vi.stubGlobal('indexedDB', {

@@ -351,7 +351,10 @@ describe('MarketView.vue', () => {
     await wrapper.find('.sort-toggle-btn').trigger('click')
     expect(wrapper.find('.panel-loading').exists()).toBe(true)
 
-    resolveCommodities?.(responseOf(commoditiesFixture))
+    if (!resolveCommodities) {
+      throw new Error('Expected commodities resolver')
+    }
+    resolveCommodities(responseOf(commoditiesFixture))
     await flushPromises()
 
     await wrapper.findAll('.commodity-btn')[0]!.trigger('click')
