@@ -219,7 +219,7 @@ validation phase:
 
 - [ ] این بخش فقط برای `Tier 2` کاربرد دارد.
 - [ ] `Tier 1` چون projection کمیسیونی ندارد، midpoint rule در انتشار آفر استفاده نمی‌شود.
-- [ ] سناریوهای قطعی `Tier 2` نشان می‌دهند که rounding دیگر nearest-100 نیست، بلکه direction-fixed است.
+- [ ] سناریوهای قطعی `Tier 2` نشان می‌دهند که rounding authoritative همان direction-fixed است، نه nearest-100.
 
 مثال:
 - [ ] adjusted = `200550`.
@@ -278,11 +278,13 @@ validation phase:
 
 ### 5.13. سناریوی fair-price calculation
 
-این حساس‌ترین بخش است.
+این بخش دیگر challenge محصولی باز ندارد.
 
-- [ ] این بخش عمداً deferred شده است.
-- [ ] کاربر اعلام کرده که به‌دلیل تغییر planned در style/flow اضافه‌کردن customer، challenge fair-price customer بعداً دوباره باز و نهایی می‌شود.
-- [ ] تا قبل از آن، roadmap فقط تضمین می‌کند که current aggressive-price warning logic را نشکنیم و در consumerهای customer-compatible path side effect ناخواسته ایجاد نکنیم.
+- [x] آفرهای `Tier 1` در fair-price / competitive-price دقیقاً باید مثل آفر سایر کاربران رفتار کنند.
+- [x] raw price آفر `Tier 1` همان input authoritative برای fair-price است.
+- [x] `Tier 2` چون offer source نیست، branch جداگانه‌ای در fair-price calculation ندارد.
+- [x] viewer projection مربوط به `Tier 2` فقط concern نمایشی/اجرایی responder است و وارد dataset fair-price offer source نمی‌شود.
+- [ ] roadmap فقط باید تضمین کند که customer rollout current aggressive-price warning logic را برای offer sourceهای مجاز نشکند.
 
 ### 5.14. سناریوی trade execution روی offer customer
 
@@ -332,7 +334,7 @@ validation phase:
 
 ### 5.16. validation phase برای قیمت‌گذاری
 
-- [ ] pure math tests برای buy/sell, midpoint, non-midpoint, nearest-100.
+- [ ] pure math tests برای buy/sell, midpoint, non-midpoint, floor_100/ceil_100.
 - [ ] serializer tests برای owner/admin/customer/public viewer matrix.
 - [ ] market e2e برای raw vs adjusted rendering.
 - [ ] regression برای warning/exclusion path بدون reintroduce کردن challenge fair-price.
@@ -441,7 +443,7 @@ history باید بسته به viewer یکی یا هر دو را نشان دهد
 - [ ] context tradeهای قبلی باید تا حد امکان preserved بماند.
 - [ ] baseline پروژه برای userهای عادی و middle admin همین الان history-preserving soft delete است: user row حذف فیزیکی نمی‌شود، `account_name/mobile` suffix می‌خورند، trade rows باقی می‌مانند، و frontend suffix را برای display پاک می‌کند.
 - [ ] customer lifecycle هم باید همین اصل را inherit کند: حذف/revoke نباید history را نابود کند.
-- [ ] برای customer-specific context، relation row باید soft-deleted/revoked باقی بماند یا snapshot لازم گرفته شود تا `management_name` historical از بین نرود.
+- [ ] برای customer-specific context، همان الگوی existing soft delete authoritative است: relation row باید soft-deleted/revoked باقی بماند تا `management_name` historical از lookup داده‌ی soft-deleted برگردد؛ snapshot trade-time جدید برای این فاز نیاز نیست.
 - [ ] public profile deleted user می‌تواند unavailable شود، اما trade history و display nameهای historical باید پایدار بمانند.
 
 ### 7.11. سناریوی block/restriction propagation در history
@@ -544,7 +546,7 @@ release gate:
 این‌ها blocker محصولی نیستند، ولی در طراحی فنی باید early explicit شوند:
 
 - [x] تعداد دقیق legs و shape نهایی trade chain برای owner/Tier1 source در برابر owner/Tier1/Tier2 responder در ماتریس ۱۱ حالته section 5.14 بسته شد.
-- [ ] fallback naming برای history وقتی customer relation بعداً deleted/revoked می‌شود آیا از soft-deleted relation lookup می‌آید یا از snapshot صریح هنگام trade؟
-- [ ] fair-price customer-aware عمداً deferred است و بعد از تغییر flow اضافه‌کردن customer دوباره بسته خواهد شد.
+- [x] fallback naming برای history وقتی customer relation بعداً deleted/revoked می‌شود از همان soft-deleted relation lookup و الگوی موجود user soft delete می‌آید؛ snapshot trade-time جدید برای این فاز انتخاب نشد.
+- [x] fair-price customer-aware به این صورت بسته شد که `Tier 1` دقیقاً مانند سایر کاربران offer source رفتار می‌کند و `Tier 2` چون offer source نیست، branch مستقلی در fair-price ندارد.
 
 این موارد challenge جدید محصولی نیستند؛ فقط detailهای implementation-level هستند و باید در phaseهای 4 تا 8 به‌صورت صریح بسته شوند.
