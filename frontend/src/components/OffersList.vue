@@ -136,6 +136,17 @@ function getLotSummary(offer: any): string {
   return formatLotSummary(getLotButtons(offer));
 }
 
+function getDisplayedOfferPrice(offer: any): number {
+  const numeric = Number(offer?.viewer_effective_price ?? offer?.price ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function getCustomerTierLabel(tier: string | null | undefined): string {
+  if (tier === 'tier2') return 'سطح 2';
+  if (tier === 'tier1') return 'سطح 1';
+  return 'سطح نامشخص';
+}
+
 function isOwnOffer(offer: any): boolean {
   if (typeof offer?.is_own_offer === 'boolean') {
     return offer.is_own_offer;
@@ -182,7 +193,7 @@ function createTradeSuggestionState(data: any, fallbackOffer?: any): TradeLotSug
     offerType: data.offer_type || sourceOffer?.offer_type || '',
     offerTypeLabel: data.offer_type_label || ((data.offer_type || sourceOffer?.offer_type) === 'buy' ? 'خرید' : 'فروش'),
     commodityName: data.commodity_name || sourceOffer?.commodity_name || 'کالا',
-    price: Number(data.price || sourceOffer?.price || 0),
+    price: Number(data.price ?? getDisplayedOfferPrice(sourceOffer) ?? 0),
     remainingQuantity: Number(data.remaining_quantity || sourceOffer?.remaining_quantity || sourceOffer?.quantity || 0),
     lotSummary: data.lot_summary || (Array.isArray(data.available_lots) ? formatLotSummary(data.available_lots) : ''),
     availableLots: Array.isArray(data.available_lots) ? data.available_lots : [],
@@ -221,7 +232,7 @@ function syncTradeSuggestionFromOffers() {
     offerType: sourceOffer.offer_type || tradeSuggestion.value.offerType,
     offerTypeLabel: sourceOffer.offer_type === 'buy' ? 'خرید' : 'فروش',
     commodityName: sourceOffer.commodity_name || tradeSuggestion.value.commodityName,
-    price: Number(sourceOffer.price || tradeSuggestion.value.price),
+    price: getDisplayedOfferPrice(sourceOffer) || tradeSuggestion.value.price,
     remainingQuantity: remaining,
     lotSummary: formatLotSummary(availableLots),
     availableLots,
@@ -348,7 +359,12 @@ function closeTradeSuggestion() {
             <div class="offer-main">
               <span class="commodity">{{ offer.commodity_name }}</span>
               <span class="quantity-badge">{{ offer.remaining_quantity }} عدد</span>
-              <span class="price">{{ offer.price ? offer.price.toLocaleString() : '---' }}</span>
+              <span class="price">{{ getDisplayedOfferPrice(offer) ? getDisplayedOfferPrice(offer).toLocaleString() : '---' }}</span>
+            </div>
+            <div v-if="offer.customer_badge_visible" class="customer-context-row">
+              <span class="customer-context-badge">مشتری</span>
+              <span v-if="offer.customer_management_name" class="customer-context-name">{{ offer.customer_management_name }}</span>
+              <span v-if="offer.customer_tier" class="customer-context-tier">{{ getCustomerTierLabel(offer.customer_tier) }}</span>
             </div>
             <!-- Lot info indicator -->
             <div v-if="!offer.is_wholesale && offer.lot_sizes && offer.lot_sizes.length > 0" class="lot-info">
@@ -548,6 +564,44 @@ function closeTradeSuggestion() {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.customer-context-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.customer-context-badge,
+.customer-context-tier {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.customer-context-badge {
+  color: #92400e;
+  background: rgba(251, 191, 36, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.customer-context-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ds-text-primary);
+}
+
+.customer-context-tier {
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.22);
 }
 
 .commodity {

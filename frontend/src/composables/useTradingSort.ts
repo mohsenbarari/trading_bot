@@ -7,6 +7,11 @@ type SortableOffer = {
   offer_type: 'buy' | 'sell' | string
   commodity_name: string
   price: number
+  viewer_effective_price?: number | null
+}
+
+function getSortablePrice(offer: SortableOffer): number {
+  return typeof offer.viewer_effective_price === 'number' ? offer.viewer_effective_price : offer.price
 }
 
 export function useTradingSort<T extends SortableOffer>(offers: Ref<T[]>) {
@@ -34,7 +39,9 @@ export function useTradingSort<T extends SortableOffer>(offers: Ref<T[]>) {
         if (!leftMatches && rightMatches) return 1
         if (!leftMatches && !rightMatches) return 0
 
-        return direction === 'asc' ? left.price - right.price : right.price - left.price
+        return direction === 'asc'
+          ? getSortablePrice(left) - getSortablePrice(right)
+          : getSortablePrice(right) - getSortablePrice(left)
       })
     }
 

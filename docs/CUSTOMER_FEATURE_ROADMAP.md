@@ -166,11 +166,11 @@ validation phase:
 
 ### 5.0. رفتار tier-aware
 
-- [ ] `Tier 1`: آفر با raw price منتشر می‌شود و همه viewerها همان raw published price را می‌بینند.
-- [ ] `Tier 1`: owner همان customer روی آفر، تگ «مشتری + management name» می‌بیند.
+- [x] `Tier 1`: آفر با raw price منتشر می‌شود و همه viewerها همان raw published price را می‌بینند.
+- [x] `Tier 1`: owner همان customer روی آفر، تگ «مشتری + management name» می‌بیند.
 - [ ] `Tier 2`: حق ثبت آفر ندارد و فقط request روی آفرهای دیگر می‌زند.
-- [ ] `Tier 2`: pricing projection بر اساس commission policy سیستمی باقی می‌ماند.
-- [ ] `Tier 2`: projection قیمت viewer-specific است؛ دو `Tier 2` با نرخ‌های متفاوت می‌توانند یک آفر واحد را با دو price متفاوت ببینند.
+- [x] `Tier 2`: pricing projection بر اساس commission policy سیستمی باقی می‌ماند.
+- [x] `Tier 2`: projection قیمت viewer-specific است؛ دو `Tier 2` با نرخ‌های متفاوت می‌توانند یک آفر واحد را با دو price متفاوت ببینند.
 
 ### 5.1. اصل بنیادی
 
@@ -187,18 +187,19 @@ validation phase:
 - [x] `viewer_effective_price`: قیمت نهایی نمایش برای viewer.
 
 این تفکیک مهم است چون:
-- [ ] برای `Tier 1`: `raw_price == market_published_price == viewer_effective_price` برای همه viewerها (به‌جز owner tag context).
-- [ ] برای `Tier 2`: projectionهای کمیسیونی فعال هستند و می‌توانند بین این سه لایه اختلاف بسازند.
-- [ ] برای `Tier 2` اگر viewer rate نداشته باشد، `viewer_effective_price == market_published_price`.
+- [x] برای `Tier 1`: `raw_price == market_published_price == viewer_effective_price` برای همه viewerها (به‌جز owner tag context).
+- [x] برای `Tier 2`: projectionهای کمیسیونی فعال هستند و می‌توانند بین این سه لایه اختلاف بسازند.
+- [x] برای `Tier 2` اگر viewer rate نداشته باشد، `viewer_effective_price == market_published_price`.
+- [x] market read path فقط فیلد additive `viewer_effective_price` را برمی‌گرداند و `price` را global نگه می‌دارد؛ frontend market هم display/sort را از `viewer_effective_price ?? price` می‌خواند تا realtime global فعلی نشکند.
 
 ### 5.3. سناریوی Tier 1 - آفر فروش
 
 اگر customer یک آفر فروش ثبت کند:
 - [ ] raw_price همان عددی است که customer وارد کرده است.
-- [ ] برای خود customer: همان raw_price نمایش داده می‌شود.
-- [ ] برای owner همان customer: raw_price نمایش داده می‌شود + badge مشتری.
-- [ ] برای همه viewerها همان raw_price منتشر و نمایش داده می‌شود.
-- [ ] فقط owner همان customer context tag می‌بیند.
+- [x] برای خود customer: همان raw_price نمایش داده می‌شود.
+- [x] برای owner همان customer: raw_price نمایش داده می‌شود + badge مشتری.
+- [x] برای همه viewerها همان raw_price منتشر و نمایش داده می‌شود.
+- [x] فقط owner همان customer context tag می‌بیند.
 
 مثال:
 - [ ] `سینا` sell raw=`52000` ثبت می‌کند.
@@ -209,10 +210,10 @@ validation phase:
 
 اگر customer یک آفر خرید ثبت کند:
 - [ ] raw_price همان عدد واردشده است.
-- [ ] برای customer: raw_price.
-- [ ] برای owner همان customer: raw_price + badge مشتری.
-- [ ] برای همه viewerها همان raw_price منتشر و نمایش داده می‌شود.
-- [ ] فقط owner همان customer context tag می‌بیند.
+- [x] برای customer: raw_price.
+- [x] برای owner همان customer: raw_price + badge مشتری.
+- [x] برای همه viewerها همان raw_price منتشر و نمایش داده می‌شود.
+- [x] فقط owner همان customer context tag می‌بیند.
 
 مثال:
 - [ ] `پیمان` buy raw=`98000` ثبت می‌کند.
@@ -241,32 +242,32 @@ validation phase:
 
 ### 5.8. وقتی owner خودش market را می‌بیند
 
-- [ ] owner برای آفرهای `Tier 1` customer خودش raw view کامل می‌بیند.
+- [x] owner برای آفرهای `Tier 1` customer خودش raw view کامل می‌بیند.
 - [ ] owner برای `Tier 2` market projection مستقلی روی آفر customer-originated ندارد، چون `Tier 2` آفر publish نمی‌کند.
 - [ ] دلیل: owner policy maker است و باید بداند customer چه قیمت خامی ثبت کرده.
-- [ ] owner نباید برای customerهای ownerهای دیگر identity اضافه ببیند.
-- [ ] owner فقط customerهای خودش را با badge مشتری می‌بیند.
+- [x] owner نباید برای customerهای ownerهای دیگر identity اضافه ببیند.
+- [x] owner فقط customerهای خودش را با badge مشتری می‌بیند.
 
 ### 5.9. وقتی admin market را می‌بیند
 
-- [ ] در market، admin نباید visibility ویژه صرفاً به خاطر role داشته باشد.
-- [ ] middle admin و super admin در market باید دقیقاً مثل user عادی رفتار کنند مگر آن‌که خودشان owner همان customer relation باشند.
-- [ ] بنابراین raw price customer در market فقط relation-based دیده می‌شود، نه role-based.
+- [x] در market، admin نباید visibility ویژه صرفاً به خاطر role داشته باشد.
+- [x] middle admin و super admin در market باید دقیقاً مثل user عادی رفتار کنند مگر آن‌که خودشان owner همان customer relation باشند.
+- [x] بنابراین raw price customer در market فقط relation-based دیده می‌شود، نه role-based.
 - [ ] contract فعلی `PublicProfile` و `UserProfile` فقط surface مدیریتی/profile را هم‌راستا می‌کند و نباید باعث market-rent شود.
 
 ### 5.10. وقتی customer خودش market را می‌بیند
 
-- [ ] در `Tier 1` فقط آفر خودش raw نیست؛ کل market با همان raw published price عمومی دیده می‌شود.
-- [ ] در `Tier 2` projection کمیسیونی viewer-facing فعال است.
-- [ ] دو `Tier 2` مختلف می‌توانند هم‌زمان یک آفر واحد را با priceهای متفاوت ببینند.
+- [x] در `Tier 1` فقط آفر خودش raw نیست؛ کل market با همان raw published price عمومی دیده می‌شود.
+- [x] در `Tier 2` projection کمیسیونی viewer-facing فعال است.
+- [x] دو `Tier 2` مختلف می‌توانند هم‌زمان یک آفر واحد را با priceهای متفاوت ببینند.
 - [ ] customer نباید commission rate خودش را از UI استخراج کند.
 - [ ] بنابراین حتی اگر raw/effective difference برای آفر خودش قابل مقایسه باشد، نباید label یا helper مستقیمی نرخ را افشا کند.
 
 ### 5.11. وقتی یک user عادی دیگر market را می‌بیند
 
-- [ ] نباید بفهمد این آفر متعلق به customer است.
-- [ ] نه badge، نه owner relation، نه management name، نه field اضافی UI.
-- [ ] فقط final viewer-facing price همان viewer را می‌بیند؛ برای user عادی این همان `market_published_price` است.
+- [x] نباید بفهمد این آفر متعلق به customer است.
+- [x] نه badge، نه owner relation، نه management name، نه field اضافی UI.
+- [x] فقط final viewer-facing price همان viewer را می‌بیند؛ برای user عادی این همان `market_published_price` است.
 
 ### 5.12. سناریوی owner editing customer commission
 

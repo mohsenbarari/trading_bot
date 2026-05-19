@@ -17,6 +17,7 @@ from core.services.customer_relation_service import (
     get_pending_customer_relation_by_invitation_token,
     is_customer_invitation_token,
     is_user_customer,
+    load_offer_customer_read_context,
     list_active_customers_for_owner,
     list_owner_customer_relations,
     round_customer_price,
@@ -297,6 +298,39 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_build_customer_offer_read_model_rejects_invalid_raw_price(self):
         with self.assertRaises(ValueError):
             build_customer_offer_read_model(raw_price=0, offer_type=OfferType.BUY)
+
+    async def test_load_offer_customer_read_context_reuses_viewer_relation_from_offer_owner_map(self):
+        relation_one = SimpleNamespace(customer_user_id=9, owner_user_id=7, status=CustomerRelationStatus.ACTIVE)
+        relation_two = SimpleNamespace(customer_user_id=12, owner_user_id=8, status=CustomerRelationStatus.ACTIVE)
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[relation_one, relation_two])])
+
+        owner_relation_map, viewer_relation = await load_offer_customer_read_context(
+            db,
+            offer_owner_user_ids={9, 12, 12, -1},
+            viewer_user_id=9,
+        )
+
+        self.assertEqual(owner_relation_map, {9: relation_one, 12: relation_two})
+        self.assertIs(viewer_relation, relation_one)
+
+    async def test_load_offer_customer_read_context_falls_back_to_viewer_relation_lookup(self):
+        owner_relation = SimpleNamespace(customer_user_id=12, owner_user_id=8, status=CustomerRelationStatus.ACTIVE)
+        viewer_relation = SimpleNamespace(customer_user_id=33, owner_user_id=18, status=CustomerRelationStatus.ACTIVE)
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[owner_relation]),
+                FakeExecuteResult(scalar_one_value=viewer_relation),
+            ]
+        )
+
+        owner_relation_map, resolved_viewer_relation = await load_offer_customer_read_context(
+            db,
+            offer_owner_user_ids=[12],
+            viewer_user_id=33,
+        )
+
+        self.assertEqual(owner_relation_map, {12: owner_relation})
+        self.assertIs(resolved_viewer_relation, viewer_relation)
 
     def test_validate_customer_trade_limits_accepts_valid_relation(self):
         relation = SimpleNamespace(

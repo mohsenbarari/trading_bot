@@ -84,11 +84,11 @@ describe('useOffers', () => {
 
   it('starts polling once, reuses the shared interval, and refreshes on created/updated/expired realtime events', async () => {
     useOffersMocks.apiFetch
-      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 7, price: 100 }]), {
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 7, price: 100, viewer_effective_price: 90 }]), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }))
-      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 7, price: 100 }, { id: 8, price: 200 }]), {
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 7, price: 100, viewer_effective_price: 90 }, { id: 8, price: 200 }]), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }))
@@ -102,20 +102,24 @@ describe('useOffers', () => {
 
     expect(useOffersMocks.connect).toHaveBeenCalledTimes(1)
     expect(globalThis.setInterval).toHaveBeenCalledTimes(1)
-    expect(offersApi.offers.value).toEqual([{ id: 7, price: 100 }])
+    expect(offersApi.offers.value).toEqual([{ id: 7, price: 100, viewer_effective_price: 90 }])
 
     offersApi.startPolling()
     expect(globalThis.setInterval).toHaveBeenCalledTimes(1)
 
     emitOfferEvent('offer:created', { id: 8 })
     await flushPromises()
-    expect(offersApi.offers.value).toEqual([{ id: 7, price: 100 }, { id: 8, price: 200 }])
+    expect(offersApi.offers.value).toEqual([{ id: 7, price: 100, viewer_effective_price: 90 }, { id: 8, price: 200 }])
 
     emitOfferEvent('offer:updated', { id: 8, price: 250, remaining_quantity: 5 })
     expect(offersApi.offers.value.find((offer: { id: number }) => offer.id === 8)).toMatchObject({
       id: 8,
       price: 250,
       remaining_quantity: 5,
+    })
+    expect(offersApi.offers.value.find((offer: { id: number }) => offer.id === 7)).toMatchObject({
+      id: 7,
+      viewer_effective_price: 90,
     })
 
     emitOfferEvent('offer:expired', { id: 8 })

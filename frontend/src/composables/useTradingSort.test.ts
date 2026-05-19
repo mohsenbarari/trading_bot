@@ -7,8 +7,8 @@ describe('useTradingSort', () => {
     const offers = ref([
       { id: 1, offer_type: 'sell', commodity_name: 'Gold', price: 300 },
       { id: 2, offer_type: 'buy', commodity_name: 'Coin', price: 200 },
-      { id: 3, offer_type: 'buy', commodity_name: 'Gold', price: 100 },
-      { id: 4, offer_type: 'buy', commodity_name: 'Gold', price: 250 },
+      { id: 3, offer_type: 'buy', commodity_name: 'Gold', price: 100, viewer_effective_price: 140 },
+      { id: 4, offer_type: 'buy', commodity_name: 'Gold', price: 250, viewer_effective_price: 130 },
     ])
 
     const sort = useTradingSort(offers)
@@ -20,11 +20,11 @@ describe('useTradingSort', () => {
     sort.toggleSort('Gold')
     expect(sort.sortCommodity.value).toBe('Gold')
     expect(sort.sortDirection.value).toBe('asc')
-    expect(sort.filteredOffers.value.map((offer) => offer.id)).toEqual([3, 4, 2])
+    expect(sort.filteredOffers.value.map((offer) => offer.id)).toEqual([4, 3, 2])
 
     sort.toggleSort('Gold')
     expect(sort.sortDirection.value).toBe('desc')
-    expect(sort.filteredOffers.value.map((offer) => offer.id)).toEqual([4, 3, 2])
+    expect(sort.filteredOffers.value.map((offer) => offer.id)).toEqual([3, 4, 2])
 
     sort.toggleSort('Gold')
     expect(sort.sortDirection.value).toBe('none')

@@ -242,6 +242,37 @@ describe('TradingView.vue', () => {
     wrapper.unmount()
   })
 
+  it('renders customer context and viewer-specific display pricing on active offers', async () => {
+    tradingViewMocks.apiFetchJsonMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/offers/' && (!options?.method || options.method === 'GET')) {
+        return [
+          {
+            ...offersFixture[0],
+            price: 50000,
+            viewer_effective_price: 49700,
+            customer_badge_visible: true,
+            customer_management_name: 'سینا',
+            customer_tier: 'tier1',
+          },
+        ]
+      }
+      if (path === '/api/commodities/') return commoditiesFixture
+      if (path === '/api/trading-settings/') return tradingSettingsFixture
+      if (path === '/api/offers/my?since_hours=2') return myOffersFixture
+      if (path === '/api/trades/my') return myTradesFixture
+      return null
+    })
+
+    const wrapper = await mountTradingView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('49,700')
+    expect(wrapper.text()).not.toContain('50,000')
+    expect(wrapper.text()).toContain('مشتری')
+    expect(wrapper.text()).toContain('سینا')
+    expect(wrapper.text()).toContain('سطح 1')
+  })
+
   it('surfaces loader errors for each tab and logs commodity/settings fetch failures', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     tradingViewMocks.apiFetchJsonMock.mockImplementation(async (path: string, options?: RequestInit) => {
