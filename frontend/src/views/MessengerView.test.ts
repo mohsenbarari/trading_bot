@@ -30,12 +30,13 @@ vi.mock('vue-router', () => ({
 
 vi.mock('../components/ChatView.vue', () => ({
   default: {
-    props: ['currentUserId', 'currentUserRole', 'currentUserIsAccountant', 'targetUserId', 'targetUserName'],
+    props: ['currentUserId', 'currentUserRole', 'currentUserIsAccountant', 'currentUserIsCustomer', 'targetUserId', 'targetUserName'],
     template: `
       <div class="chat-view-stub">
         <span class="stub-user-id">{{ currentUserId }}</span>
         <span class="stub-role">{{ currentUserRole }}</span>
         <span class="stub-accountant">{{ String(currentUserIsAccountant) }}</span>
+        <span class="stub-customer">{{ String(currentUserIsCustomer) }}</span>
         <span class="stub-target-id">{{ targetUserId }}</span>
         <span class="stub-target-name">{{ targetUserName }}</span>
         <button class="emit-public-profile" @click="$emit('navigate', 'public_profile', { id: 88, account_name: 'owner-88' })">public-profile</button>
@@ -71,6 +72,7 @@ describe('MessengerView.vue', () => {
       id: 42,
       role: 'عادی',
       is_accountant: true,
+      is_customer: false,
     }))
 
     const wrapper = mount(MessengerView)
@@ -81,6 +83,7 @@ describe('MessengerView.vue', () => {
     expect(wrapper.get('.stub-user-id').text()).toBe('42')
     expect(wrapper.get('.stub-role').text()).toBe('عادی')
     expect(wrapper.get('.stub-accountant').text()).toBe('true')
+    expect(wrapper.get('.stub-customer').text()).toBe('false')
     expect(wrapper.get('.stub-target-id').text()).toBe('18')
     expect(wrapper.get('.stub-target-name').text()).toBe('peer-user')
   })
@@ -115,6 +118,7 @@ describe('MessengerView.vue', () => {
       id: 42,
       role: 'عادی',
       is_accountant: false,
+      is_customer: true,
     }))
 
     const wrapper = mount(MessengerView)

@@ -2,6 +2,8 @@ import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
+const GROUP_CANDIDATE_BASE_URL = '/api/chat/groups/member-candidates?limit=100'
+
 const apiFetchMock = vi.fn()
 const apiFetchJsonMock = vi.fn()
 const pushBackStateMock = vi.fn()
@@ -131,23 +133,25 @@ describe('ChatGroupManagerModal.vue', () => {
 
   it('creates a new group with an uploaded avatar and selected initial members', async () => {
     apiFetchJsonMock.mockImplementation(async (url: string) => {
-      if (url === '/api/users-public/search?limit=100') {
-        return [
-          {
-            id: 1,
-            account_name: 'owner1',
-            full_name: 'Owner One',
-            mobile_number: '09120000001',
-            avatar_file_id: null,
-          },
-          {
-            id: 2,
-            account_name: 'member2',
-            full_name: 'Member Two',
-            mobile_number: '09120000002',
-            avatar_file_id: null,
-          },
-        ]
+      if (url === GROUP_CANDIDATE_BASE_URL || url === `${GROUP_CANDIDATE_BASE_URL}&selected_user_ids=2`) {
+        return {
+          items: [
+            {
+              user_id: 1,
+              account_name: 'owner1',
+              full_name: 'Owner One',
+              mobile_number: '09120000001',
+              avatar_file_id: null,
+            },
+            {
+              user_id: 2,
+              account_name: 'member2',
+              full_name: 'Member Two',
+              mobile_number: '09120000002',
+              avatar_file_id: null,
+            },
+          ],
+        }
       }
       throw new Error(`Unhandled apiFetchJson call: ${url}`)
     })
@@ -274,16 +278,21 @@ describe('ChatGroupManagerModal.vue', () => {
           members: currentMembers,
         }
       }
-      if (url === '/api/users-public/search?limit=100') {
-        return [
-          {
-            id: 3,
-            account_name: 'member3',
-            full_name: 'Member Three',
-            mobile_number: '09120000003',
-            avatar_file_id: null,
-          },
-        ]
+      if (
+        url === `${GROUP_CANDIDATE_BASE_URL}&exclude_chat_id=7`
+        || url === `${GROUP_CANDIDATE_BASE_URL}&exclude_chat_id=7&selected_user_ids=3`
+      ) {
+        return {
+          items: [
+            {
+              user_id: 3,
+              account_name: 'member3',
+              full_name: 'Member Three',
+              mobile_number: '09120000003',
+              avatar_file_id: null,
+            },
+          ],
+        }
       }
       throw new Error(`Unhandled apiFetchJson call: ${url}`)
     })
@@ -487,7 +496,7 @@ describe('ChatGroupManagerModal.vue', () => {
     }
 
     apiFetchJsonMock.mockImplementation(async (url: string) => {
-      if (url === '/api/users-public/search?limit=100') return []
+      if (url.startsWith(GROUP_CANDIDATE_BASE_URL)) return { items: [] }
       if (url === '/api/chat/groups/7') return groupDetail
       throw new Error(`Unhandled apiFetchJson call: ${url}`)
     })
@@ -720,7 +729,7 @@ describe('ChatGroupManagerModal.vue', () => {
     }
 
     apiFetchJsonMock.mockImplementation(async (url: string) => {
-      if (url === '/api/users-public/search?limit=100') return []
+      if (url.startsWith(GROUP_CANDIDATE_BASE_URL)) return { items: [] }
       if (url === '/api/chat/groups/7') return groupDetail
       throw new Error(`Unhandled apiFetchJson call: ${url}`)
     })
@@ -864,7 +873,7 @@ describe('ChatGroupManagerModal.vue', () => {
 
     apiFetchJsonMock.mockImplementation(async (url: string) => {
       if (url === '/api/chat/groups/7') return groupDetail
-      if (url.startsWith('/api/users-public/search?')) return []
+      if (url.startsWith(GROUP_CANDIDATE_BASE_URL)) return { items: [] }
       throw new Error(`Unhandled apiFetchJson call: ${url}`)
     })
 
@@ -916,7 +925,7 @@ describe('ChatGroupManagerModal.vue', () => {
     await nextTick()
     await vi.advanceTimersByTimeAsync(220)
 
-    expect(apiFetchJsonMock).toHaveBeenCalledWith('/api/users-public/search?limit=100&q=member+search')
+    expect(apiFetchJsonMock).toHaveBeenCalledWith(`${GROUP_CANDIDATE_BASE_URL}&exclude_chat_id=7&q=member+search`)
 
     vm.title = 'Dirty title'
     vm.description = 'Dirty description'

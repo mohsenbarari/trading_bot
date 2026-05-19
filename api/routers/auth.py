@@ -52,6 +52,7 @@ from core.services.accountant_relation_service import (
 from core.services.customer_relation_service import (
     get_pending_customer_relation_by_invitation_token,
     is_customer_invitation_token,
+    is_user_customer,
 )
 
 
@@ -129,9 +130,9 @@ class RefreshTokenRequest(BaseModel):
 
 # --- Endpoints ---
 
-def _serialize_current_user_response(current_user: User, *, is_accountant: bool) -> schemas.UserRead:
+def _serialize_current_user_response(current_user: User, *, is_accountant: bool, is_customer: bool) -> schemas.UserRead:
     return schemas.UserRead.model_validate(current_user).model_copy(
-        update={"is_accountant": is_accountant}
+        update={"is_accountant": is_accountant, "is_customer": is_customer}
     )
 
 @router.get("/me", response_model=schemas.UserRead)
@@ -143,6 +144,7 @@ async def read_users_me(
     return _serialize_current_user_response(
         current_user,
         is_accountant=await is_user_accountant(db, current_user.id),
+        is_customer=await is_user_customer(db, current_user.id),
     )
 
 
@@ -162,6 +164,7 @@ async def update_my_avatar(
     return _serialize_current_user_response(
         current_user,
         is_accountant=await is_user_accountant(db, current_user.id),
+        is_customer=await is_user_customer(db, current_user.id),
     )
 
 

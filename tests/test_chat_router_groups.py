@@ -10,6 +10,7 @@ from api.routers.chat import (
     create_group,
     delete_group_member,
     demote_group_admin,
+    get_group_member_candidates,
     get_group_detail,
     get_groups,
     patch_group,
@@ -32,6 +33,51 @@ def mutation_summary(*, role=None, removed=False, left=False, member_count=0, un
 
 
 class ChatRouterGroupEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_get_group_member_candidates_serializes_service_page(self):
+        current_user = SimpleNamespace(id=5)
+        page = SimpleNamespace(
+            items=[
+                SimpleNamespace(
+                    user_id=9,
+                    account_name="member9",
+                    full_name="Member Nine",
+                    mobile_number="0912",
+                    avatar_file_id=None,
+                    is_already_member=False,
+                )
+            ],
+            total=1,
+            active_total=1,
+        )
+
+        with patch("api.routers.chat.is_user_accountant", new=AsyncMock(return_value=False)), patch(
+            "api.routers.chat.is_user_customer", new=AsyncMock(return_value=False)
+        ), patch(
+            "api.routers.chat.list_group_member_candidates",
+            new=AsyncMock(return_value=page),
+        ) as list_mock:
+            result = await get_group_member_candidates(
+                query_text="ali",
+                limit=25,
+                offset=5,
+                exclude_chat_id=None,
+                selected_user_ids=[9],
+                current_user=current_user,
+                db=object(),
+            )
+
+        list_mock.assert_awaited_once_with(
+            unittest.mock.ANY,
+            current_user=current_user,
+            query_text="ali",
+            limit=25,
+            offset=5,
+            exclude_chat_id=None,
+            selected_user_ids=[9],
+        )
+        self.assertEqual(result.total, 1)
+        self.assertEqual(result.items[0].user_id, 9)
+
     async def test_get_groups_serializes_group_room_rows(self):
         current_user = SimpleNamespace(id=5)
         db = object()
@@ -83,6 +129,8 @@ class ChatRouterGroupEndpointTests(unittest.IsolatedAsyncioTestCase):
         data = SimpleNamespace(title="Alpha", member_ids=[9, 10])
 
         with patch("api.routers.chat.is_user_accountant", new=AsyncMock(return_value=False)) as accountant_mock, patch(
+            "api.routers.chat.is_user_customer", new=AsyncMock(return_value=False)
+        ) as customer_mock, patch(
             "api.routers.chat.create_group_chat", new=AsyncMock(return_value=group)
         ) as create_mock, patch(
             "api.routers.chat.count_active_chat_members",
@@ -91,6 +139,7 @@ class ChatRouterGroupEndpointTests(unittest.IsolatedAsyncioTestCase):
             result = await create_group(data=data, current_user=current_user, db=db)
 
         accountant_mock.assert_awaited_once_with(db, 5)
+        customer_mock.assert_awaited_once_with(db, 5)
         create_mock.assert_awaited_once_with(db, creator=current_user, title="Alpha", member_ids=[9, 10])
         count_mock.assert_awaited_once_with(db, 77)
         self.assertEqual(result.group.id, 77)
@@ -117,6 +166,28 @@ class ChatRouterGroupEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             exc_info.exception.detail,
             "حسابدار در این فاز اجازه ساخت گروه جدید را ندارد",
+        )
+
+    async def test_create_group_rejects_customer_users(self):
+        current_user = SimpleNamespace(id=5)
+
+        with patch("api.routers.chat.is_user_accountant", new=AsyncMock(return_value=False)), patch(
+            "api.routers.chat.is_user_customer", new=AsyncMock(return_value=True)
+        ), patch(
+            "api.routers.chat.create_group_chat", new=AsyncMock()
+        ) as create_mock:
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_group(
+                    data=SimpleNamespace(title="Alpha", member_ids=[9, 10]),
+                    current_user=current_user,
+                    db=object(),
+                )
+
+        create_mock.assert_not_called()
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(
+            exc_info.exception.detail,
+            "مشتری در این فاز اجازه ساخت گروه جدید را ندارد",
         )
 
     async def test_get_group_detail_serializes_group_and_members(self):

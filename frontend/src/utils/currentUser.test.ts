@@ -13,7 +13,7 @@ describe('currentUser utils', () => {
     localStorage.clear()
   })
 
-  it('cacheCurrentUserSummary persists the accountant flag', async () => {
+  it('cacheCurrentUserSummary persists the accountant and customer flags', async () => {
     const { cacheCurrentUserSummary, readCachedCurrentUserSummary } = await import('./currentUser')
 
     const result = cacheCurrentUserSummary({
@@ -25,6 +25,7 @@ describe('currentUser utils', () => {
       global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
       global_web_locked_at: '2026-05-21T12:00:00Z',
       is_accountant: true,
+      is_customer: true,
     })
 
     expect(result).toMatchObject({
@@ -36,12 +37,14 @@ describe('currentUser utils', () => {
       global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
       global_web_locked_at: '2026-05-21T12:00:00Z',
       is_accountant: true,
+      is_customer: true,
     })
     expect(readCachedCurrentUserSummary()).toMatchObject({
       account_status: 'inactive',
       global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
       global_web_locked_at: '2026-05-21T12:00:00Z',
       is_accountant: true,
+      is_customer: true,
     })
   })
 
@@ -57,6 +60,7 @@ describe('currentUser utils', () => {
         global_lock_grace_expires_at: null,
         global_web_locked_at: null,
         is_accountant: false,
+        is_customer: true,
       }),
     })
 
@@ -71,6 +75,7 @@ describe('currentUser utils', () => {
       global_lock_grace_expires_at: null,
       global_web_locked_at: null,
       is_accountant: false,
+      is_customer: true,
     })
   })
 

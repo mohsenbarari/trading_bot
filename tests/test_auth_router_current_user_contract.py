@@ -49,12 +49,17 @@ class AuthRouterCurrentUserContractTests(unittest.IsolatedAsyncioTestCase):
             messenger_blocked_at=datetime(2026, 5, 21, 8, 0, tzinfo=timezone.utc),
         )
 
-        with patch("api.routers.auth.is_user_accountant", new=AsyncMock(return_value=True)) as accountant_mock:
+        with patch("api.routers.auth.is_user_accountant", new=AsyncMock(return_value=True)) as accountant_mock, patch(
+            "api.routers.auth.is_user_customer",
+            new=AsyncMock(return_value=False),
+        ) as customer_mock:
             result = await read_users_me(current_user=user, db=object())
 
         accountant_mock.assert_awaited_once_with(unittest.mock.ANY, 7)
+        customer_mock.assert_awaited_once_with(unittest.mock.ANY, 7)
         self.assertEqual(result.id, 7)
         self.assertTrue(result.is_accountant)
+        self.assertFalse(result.is_customer)
         self.assertEqual(result.account_name, "ali")
         self.assertEqual(result.global_lock_grace_expires_at, user.messenger_grace_expires_at)
         self.assertEqual(result.global_web_locked_at, user.messenger_blocked_at)
@@ -69,7 +74,10 @@ class AuthRouterCurrentUserContractTests(unittest.IsolatedAsyncioTestCase):
         ) as resolve_mock, patch(
             "api.routers.auth.is_user_accountant",
             new=AsyncMock(return_value=False),
-        ) as accountant_mock:
+        ) as accountant_mock, patch(
+            "api.routers.auth.is_user_customer",
+            new=AsyncMock(return_value=True),
+        ) as customer_mock:
             result = await update_my_avatar(
                 payload=SimpleNamespace(avatar_file_id="avatar-1"),
                 current_user=user,
@@ -82,10 +90,12 @@ class AuthRouterCurrentUserContractTests(unittest.IsolatedAsyncioTestCase):
             avatar_file_id="avatar-1",
         )
         accountant_mock.assert_awaited_once_with(db, 7)
+        customer_mock.assert_awaited_once_with(db, 7)
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(user)
         self.assertEqual(user.avatar_file_id, "avatar-1")
         self.assertFalse(result.is_accountant)
+        self.assertTrue(result.is_customer)
         self.assertEqual(result.avatar_file_id, "avatar-1")
 
 
