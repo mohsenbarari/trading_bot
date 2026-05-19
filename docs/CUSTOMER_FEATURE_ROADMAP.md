@@ -13,7 +13,7 @@
   - [x] هر رفتار عادی کاربر برای مشتری مجاز است مگر آن‌جا که محدودیت صریح customer آن را منع کند.
 - [x] contract اجرای معامله‌ی customer روشن شده است: customer هیچ trade مستقیم نهایی با طرف بیرونی ندارد و chain معامله حتماً از owner او عبور می‌کند.
 - [x] contract visibility بازار روشن شده است: role ادمینی به‌تنهایی raw visibility اضافه نمی‌کند و market visibility صرفاً relation-based است.
-- [x] challenge fair-price فعلاً عمداً deferred شده است تا بعد از تغییرات planned در شیوه اضافه‌کردن customer دوباره بسته شود.
+- [x] challenge fair-price برای offer source بسته شده است: `Tier 1` دقیقاً مانند user عادی رفتار می‌کند و `Tier 2` چون offer source نیست branch مستقلی در fair-price ندارد.
 - [x] seamهای مهمی که می‌توان از آن‌ها reuse کرد در پروژه وجود دارند: `accountant_relation_service.py`, `chat_service.py`, `chat_room_service.py`, `session_service.py`, `user_deletion_service.py`, `users_public`, و الگوی `actor_user_id`.
 - [x] در فرانت، پروفایل عمومی و سطح مدیریت ادمین دیگر دو surface جدا و disconnected نیستند؛ `PublicProfile.vue` اکنون می‌تواند `UserProfile.vue` را در modal ادمینی باز کند و این contract باید در طراحی customer نیز حفظ شود.
 
@@ -33,7 +33,7 @@
 - [x] owner مرجع policy، visibility، cap، و customer management است.
 - [x] customer تا جایی که restriction صریحی نقض نشود باید همان capabilityهای user عادی را inherit کند.
 - [x] محدودیت‌های customer شامل market/trade visibility و allowed communication graph هستند، نه اینکه کل lifecycle user از نو تعریف شود.
-- [x] پروفایل عمومی customer و ورود ادمین به تنظیمات همان customer باید روی contract فعلی `PublicProfile.vue` ↔ `UserProfile.vue` سوار شود، نه با ایجاد یک panel موازی جدید.
+- [x] پروفایل عمومی customer و ورود `SUPER_ADMIN` به تنظیمات همان customer باید روی contract فعلی `PublicProfile.vue` ↔ `UserProfile.vue` سوار شود، نه با ایجاد یک panel موازی جدید.
 
 ## 2. Phase 1 - Data Foundation
 
@@ -474,24 +474,27 @@ customer management و customer visibility روی contract فعلی PublicProfil
 
 وضعیت contract فعلی که باید reuse شود:
 - [x] `PublicProfile.vue` برای owner action cardهای owner-only دارد.
-- [x] `PublicProfile.vue` اکنون برای ادمین می‌تواند `UserProfile.vue` را در modal باز کند.
+- [x] `PublicProfile.vue` اکنون برای نقش‌های ادمینی می‌تواند `UserProfile.vue` را در modal باز کند، اما customer visibility باید از اینجا به بعد `SUPER_ADMIN`-only شود.
 - [x] `AdminView.vue` نیز همان `UserProfile.vue` را به‌عنوان surface مدیریت user استفاده می‌کند.
 
 نتیجه اجرایی برای customer:
 - [ ] customer section owner-only در `PublicProfile.vue` اضافه می‌شود.
-- [ ] admin هم باید در همان profile surface customer visibility را ببیند، ولی actionهای owner-only را نه.
-- [ ] اگر admin از public profile وارد modal تنظیمات کاربر شد، همان data contract باید customer-related fields را هم در `UserProfile.vue` نشان دهد.
+- [ ] فقط `SUPER_ADMIN` باید در همان profile surface customer visibility را ببیند، ولی actionهای owner-only را نه.
+- [ ] `MIDDLE_MANAGER` نباید customer public profile و customer list در public profile owner را ببیند.
+- [ ] اگر `SUPER_ADMIN` از public profile وارد modal تنظیمات کاربر شد، همان data contract باید customer-related fields را هم در `UserProfile.vue` نشان دهد.
 - [ ] بنابراین customer settings duplication بین `PublicProfile.vue` و `AdminView.vue` ممنوع است؛ منبع مدیریت باید همان `UserProfile.vue` بماند.
+- [ ] برای customer surface نباید از helper عمومی `isAdminRoleValue()` استفاده شود؛ gate این بخش باید صریحاً `SUPER_ADMIN` را از `MIDDLE_MANAGER` جدا کند.
+- [ ] `users_public` و searchهای وابسته به آن باید customer visibility را server-side و relation-aware enforce کنند تا هم public profile نشت نکند و هم featureهای chat/search با rule جدید سازگار بمانند.
 
 خروجی‌های لازم:
 - [ ] owner customer manager modal / section
-- [ ] admin-visible customer summary in public profile
+- [ ] super-admin-visible customer summary in public profile
 - [ ] `UserProfile.vue` support for `max_customers` and customer-aware admin controls
 - [ ] route/state sync بین public profile و admin user settings برای customer surfaces
 
 validation phase:
 - [ ] owner profile customer CRUD UI سبز شود.
-- [ ] admin public-profile → user-settings handoff سبز شود.
+- [ ] super-admin public-profile → user-settings handoff سبز شود.
 - [ ] public profile visibility matrix for customer/accountant/admin/user عادی سبز شود.
 
 ## 9. Phase 8 - Sync, Deletion, and Lifecycle Convergence
