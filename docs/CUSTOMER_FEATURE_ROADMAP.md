@@ -288,6 +288,9 @@ validation phase:
 
 - [ ] customer نباید trade مستقیم customer ↔ outsider داشته باشد.
 - [ ] هر execution باید از owner mediation عبور کند.
+- [ ] full matrix در checklist section 9.0 مرجع نهایی actor-category coverage است؛ این بخش همان matrix را به requirementهای اجرایی تبدیل می‌کند.
+- [ ] offer source فقط `Owner` یا `Tier 1` است؛ `Tier 2` source invalid است و باید در create-offer guard رد شود.
+- [ ] buy/sell mirrorها با همان chain actorها derive می‌شوند؛ فقط جهت buyer/seller در هر leg و price projection متناظر با offer type تغییر می‌کند.
 - [ ] Tier 1 canonical cases (قیمت یکسان در همه legs):
   - [ ] customer seller vs customer buyer (ownerهای متفاوت): chain سه‌مرحله‌ای.
   - [ ] customer buyer vs owner outsider: chain دو‌مرحله‌ای.
@@ -301,10 +304,23 @@ validation phase:
 - [ ] notificationها، historyها، و UI summaryها باید با همین chainها هم‌راستا باشند.
 - [ ] Tier 2 canonical cases:
   - [ ] owner-offer + own Tier2 responder: direct one-leg trade at `viewer_effective_price`.
-  - [ ] outsider buy-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ buyer owner @ raw_price`).
-  - [ ] outsider sell-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ source seller actor @ raw_price`).
-  - [ ] same-owner Tier1 sell-offer + Tier2 responder: two-leg chain (`Tier2 customer ↔ own owner @ viewer_effective_price`, `own owner ↔ Tier1 source seller @ raw_price`).
-  - [ ] core rule: in Tier 2 execution only the responder side is mediated; the outer/raw leg always terminates on the original source actor of the offer.
+  - [ ] owner/non-customer buy-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ source buyer @ raw_price`).
+  - [ ] owner/non-customer sell-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ source seller @ raw_price`).
+  - [ ] Tier1 sell-offer + same-owner Tier2 responder: two-leg chain (`Tier2 customer ↔ shared owner @ viewer_effective_price`, `shared owner ↔ Tier1 source seller @ raw_price`).
+  - [ ] Tier1 offer + other-owner Tier2 responder: three-leg chain (`Tier1 source ↔ source owner @ raw_price`, `source owner ↔ responder owner @ raw_price`, `responder owner ↔ Tier2 responder @ viewer_effective_price`) with buyer/seller directions derived from offer type.
+  - [ ] core rule: `Tier 2` responder leg always uses `viewer_effective_price`; all inter-owner/source legs preserve `raw_price`; source-side mediation depends on whether the source actor is `Owner`/non-customer or `Tier 1`.
+- [ ] Final matrix examples:
+  - [ ] Owner source vs other owner: `مجید ←buyer / رامین ←seller @ 50000`.
+  - [ ] Owner source vs own Tier1: `رامین ←buyer / سینا ←seller @ 100000`.
+  - [ ] Owner source vs other Tier1: `پیمان ←buyer / مجید ←seller @ 200000`; `مجید ←buyer / رامین ←seller @ 200000`.
+  - [ ] Owner buy raw=`50000` vs own Tier2: `49750` rounds down to `49700`; `رامین ←buyer / علی ←seller @ 49700`.
+  - [ ] Owner sell raw=`100000` vs other Tier2: `محمد ←buyer / مجید ←seller @ 100700`; `مجید ←buyer / رامین ←seller @ 100000`.
+  - [ ] Tier1 source vs own owner: `رامین ←buyer / سینا ←seller @ 200000`.
+  - [ ] Tier1 source vs other owner: `سینا ←buyer / رامین ←seller @ 50000`; `رامین ←buyer / مجید ←seller @ 50000`.
+  - [ ] Tier1 source vs same-owner Tier1: `سهراب ←buyer / رامین ←seller @ 100000`; `رامین ←buyer / سینا ←seller @ 100000`.
+  - [ ] Tier1 source vs other-owner Tier1: `سینا ←buyer / رامین ←seller @ 200000`; `رامین ←buyer / مجید ←seller @ 200000`; `مجید ←buyer / پیمان ←seller @ 200000`.
+  - [ ] Tier1 sell raw=`50000` vs same-owner Tier2: `50250` rounds up to `50300`; `علی ←buyer / رامین ←seller @ 50300`; `رامین ←buyer / سینا ←seller @ 50000`.
+  - [ ] Tier1 buy raw=`100000` vs other-owner Tier2: `سینا ←buyer / رامین ←seller @ 100000`; `رامین ←buyer / مجید ←seller @ 100000`; `مجید ←buyer / محمد ←seller @ 99300`.
 - [ ] notificationها، historyها، و UI summaryها باید این chain را منعکس کنند، نه اینکه یک trade مستقیم customer ↔ customer بسازند.
 
 ### 5.15. سناریوی customer trading restriction
@@ -371,8 +387,8 @@ history باید بسته به viewer یکی یا هر دو را نشان دهد
 - [ ] اگر `Tier 2` روی آفر buy یا sell بیرونی request بزند، history باید دو leg را جدا نگه دارد.
 - [ ] customer فقط leg خودش با owner خودش را می‌بیند.
 - [ ] owner customer هر دو leg را با customer context مناسب می‌بیند.
-- [ ] counterparty بیرونی فقط leg بیرونی owner ↔ source actor را می‌بیند و customer identity برای او sanitize می‌شود.
-- [ ] اگر source actor یک `Tier 1` seller باشد، leg بیرونی به همان `Tier 1` ختم می‌شود نه به owner او.
+- [ ] counterparty بیرونی فقط leg مجاز مربوط به خودش را می‌بیند و customer identityهای پشت ownerها برای او sanitize می‌شود.
+- [ ] اگر source actor یک `Tier 1` باشد و responder بیرون از همان owner relation باشد، history باید source-owner leg را نیز حفظ کند؛ leg بین‌مالکی به source owner ختم می‌شود و source owner leg جداگانه به خود `Tier 1` ختم می‌شود.
 
 ### 7.4. سناریوی counterpart در تاریخچه با owner
 
@@ -527,7 +543,7 @@ release gate:
 
 این‌ها blocker محصولی نیستند، ولی در طراحی فنی باید early explicit شوند:
 
-- [ ] در سناریوهای یک‌طرف-customer و same-owner-customer-to-customer، تعداد دقیق legs و shape نهایی trade chain چگونه normalize می‌شود؟
+- [x] تعداد دقیق legs و shape نهایی trade chain برای owner/Tier1 source در برابر owner/Tier1/Tier2 responder در ماتریس ۱۱ حالته section 5.14 بسته شد.
 - [ ] fallback naming برای history وقتی customer relation بعداً deleted/revoked می‌شود آیا از soft-deleted relation lookup می‌آید یا از snapshot صریح هنگام trade؟
 - [ ] fair-price customer-aware عمداً deferred است و بعد از تغییر flow اضافه‌کردن customer دوباره بسته خواهد شد.
 
