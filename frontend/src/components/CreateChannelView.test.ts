@@ -825,7 +825,7 @@ describe('CreateChannelView.vue', () => {
     if (!pushedBackHandler) {
       throw new Error('Expected pushed back handler')
     }
-    pushedBackHandler()
+    (pushedBackHandler as () => void)()
     expect(pushBackStateMock.mock.calls.length).toBeGreaterThanOrEqual(2)
 
     wrapper.unmount()

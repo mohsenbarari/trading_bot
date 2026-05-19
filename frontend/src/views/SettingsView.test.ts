@@ -232,7 +232,7 @@ describe('SettingsView.vue', () => {
     if (!rejectClear) {
       throw new Error('Expected clear-cache rejection handler')
     }
-    rejectClear(new Error('clear-cache-failed'))
+    ;(rejectClear as (e: Error) => void)(new Error('clear-cache-failed'))
     await flushPromises()
 
     expect(wrapper.find('.storage-feedback').text()).toContain('پاک‌سازی حافظه ناموفق بود.')

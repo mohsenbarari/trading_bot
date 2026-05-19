@@ -684,7 +684,7 @@ describe('chatUploadBackground', () => {
 
     const abortingXhr = new MockXHR()
     const abortingXhrAbortSpy = vi.spyOn(abortingXhr, 'abort')
-    hooks.state.xhrControllers.set(-932, abortingXhr)
+    hooks.state.xhrControllers.set(-932, abortingXhr as unknown as XMLHttpRequest)
     const pausePromise = hooks.pauseUploadForServiceWorker({ ...baseUpload, id: -932 })
     expect(abortingXhrAbortSpy).toHaveBeenCalled()
     hooks.state.serviceWorkerHandoffResolvers.get(-932)?.()
@@ -1173,7 +1173,7 @@ describe('chatUploadBackground', () => {
         return request
       },
     })
-    expect(await hooks.putRecord(throwingDb as unknown as IDBDatabase, { id: -990 })).toBe(false)
+    expect(await hooks.putRecord(throwingDb as unknown as IDBDatabase, { id: -990 } as any)).toBe(false)
     await expect(hooks.idbDelete(-990)).resolves.toBeUndefined()
     await expect(hooks.idbGet(-990)).resolves.toBeNull()
     await expect(hooks.idbGetAll()).resolves.toEqual([])
@@ -3416,7 +3416,7 @@ describe('chatUploadBackground', () => {
       if (!messageHandler) {
         throw new Error('Expected service worker message handler')
       }
-      messageHandler({ data: { type: 'chat-upload:sent' } })
+      ;(messageHandler as (e: any) => void)({ data: { type: 'chat-upload:sent' } })
     expect(hooks.state.pendingUploads.has(-999)).toBe(false)
 
     records.set(-913, {
@@ -3675,7 +3675,7 @@ describe('chatUploadBackground', () => {
     })
 
     const parseFailUpload = makeLegacyUpload(-941)
-    parseFailUpload.sendRetryCount = 999
+    ;(parseFailUpload as any).sendRetryCount = 999
     hooks.state.pendingUploads.set(parseFailUpload.id, parseFailUpload)
     await hooks.sendOneLegacy(parseFailUpload)
     expect(parseFailUpload.phase).toBe('failed')

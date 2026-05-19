@@ -439,7 +439,7 @@ describe('ChatConversationList.vue', () => {
     if (!registeredBackHandler) {
       throw new Error('Expected registered back handler')
     }
-    registeredBackHandler()
+    (registeredBackHandler as () => void)()
     await flushPromises()
     const freshWrapper = mount(ChatConversationList, {
       props: {
