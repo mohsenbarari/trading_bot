@@ -700,4 +700,155 @@ describe('PublicProfile.vue', () => {
     await accountantHeader!.trigger('click')
     expect(accountantAccordion!.classes()).toContain('open')
   })
+
+  it('shows customer context when the public profile belongs to a customer', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 91,
+      account_name: 'customer91',
+      avatar_file_id: null,
+      mobile_number: '09127777777',
+      address: 'شیراز',
+      created_at_jalali: '۱۴۰۵/۰۲/۰۲',
+      trades_count: 5,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+      customer_owner_user_id: 20,
+      customer_owner_account_name: 'owner20',
+      customer_management_name: 'مشتری ویژه',
+      customer_tier: 'tier2',
+      customer_relations: [],
+    }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 91, account_name: 'customer91' },
+        viewerUserId: 20,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('نمای مشتری')
+    expect(wrapper.text()).toContain('owner20')
+    expect(wrapper.text()).toContain('مشتری ویژه')
+    expect(wrapper.text()).toContain('سطح 2')
+  })
+
+  it('shows owner customer list for super-admin viewers', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر ارشد' }))
+
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 20,
+      account_name: 'owner20',
+      avatar_file_id: null,
+      mobile_number: '09124444444',
+      address: 'مشهد',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۲',
+      trades_count: 12,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+      customer_owner_user_id: null,
+      customer_owner_account_name: null,
+      customer_management_name: null,
+      customer_tier: null,
+      customer_relations: [
+        {
+          customer_user_id: 91,
+          customer_account_name: 'customer91',
+          management_name: 'مشتری ویژه',
+          customer_tier: 'tier1',
+        },
+      ],
+    }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 20, account_name: 'owner20' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('مشتریان این مالک')
+    expect(wrapper.text()).toContain('مشتری ویژه')
+    expect(wrapper.text()).toContain('customer91')
+    expect(wrapper.text()).toContain('سطح 1')
+  })
+
+  it('does not show owner customer list for middle-manager viewers', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
+
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 20,
+      account_name: 'owner20',
+      avatar_file_id: null,
+      mobile_number: '09124444444',
+      address: 'مشهد',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۲',
+      trades_count: 12,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+      customer_owner_user_id: null,
+      customer_owner_account_name: null,
+      customer_management_name: null,
+      customer_tier: null,
+      customer_relations: [
+        {
+          customer_user_id: 91,
+          customer_account_name: 'customer91',
+          management_name: 'مشتری ویژه',
+          customer_tier: 'tier1',
+        },
+      ],
+    }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 20, account_name: 'owner20' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('مشتریان این مالک')
+    expect(wrapper.text()).not.toContain('مشتری ویژه')
+  })
 })

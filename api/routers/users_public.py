@@ -7,7 +7,9 @@ from typing import List, Optional
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from core.db import get_db
 from core.services.accountant_relation_service import get_active_accountant_relation_for_accountant, list_active_accountants_for_owner
-from models.user import User
+from core.services.customer_relation_service import get_active_customer_relation_for_customer, list_active_customers_for_owner
+from models.customer_relation import CustomerRelation
+from models.user import User, UserRole
 from api.deps import get_current_user
 
 import schemas
@@ -25,6 +27,11 @@ def _serialize_public_user(
     highlight_accountant_user_id: int | None = None,
     highlight_accountant_relation_display_name: str | None = None,
     accountant_relations: list[schemas.PublicAccountantRelationSummary] | None = None,
+    customer_owner_user_id: int | None = None,
+    customer_owner_account_name: str | None = None,
+    customer_management_name: str | None = None,
+    customer_tier=None,
+    customer_relations: list[schemas.PublicCustomerRelationSummary] | None = None,
 ) -> schemas.UserPublicRead:
     public_user = schemas.UserPublicRead.model_validate(user, from_attributes=True)
     return public_user.model_copy(update={
@@ -32,6 +39,11 @@ def _serialize_public_user(
         "highlight_accountant_user_id": highlight_accountant_user_id,
         "highlight_accountant_relation_display_name": highlight_accountant_relation_display_name,
         "accountant_relations": accountant_relations or [],
+        "customer_owner_user_id": customer_owner_user_id,
+        "customer_owner_account_name": customer_owner_account_name,
+        "customer_management_name": customer_management_name,
+        "customer_tier": customer_tier,
+        "customer_relations": customer_relations or [],
     })
 
 
@@ -49,6 +61,46 @@ def _serialize_public_accountant_relation(
     )
 
 
+def _serialize_public_customer_relation(
+    relation: CustomerRelation,
+) -> schemas.PublicCustomerRelationSummary | None:
+    customer_user = getattr(relation, "customer_user", None)
+    if customer_user is None or customer_user.is_deleted:
+        return None
+    return schemas.PublicCustomerRelationSummary(
+        customer_user_id=customer_user.id,
+        customer_account_name=customer_user.account_name,
+        management_name=relation.management_name,
+        customer_tier=relation.customer_tier,
+    )
+
+
+def _is_super_admin(user: User) -> bool:
+    return getattr(user, "role", None) == UserRole.SUPER_ADMIN
+
+
+def _can_view_owner_customer_list(current_user: User, owner_user_id: int) -> bool:
+    return current_user.id == owner_user_id or _is_super_admin(current_user)
+
+
+def _can_view_customer_profile(
+    current_user: User,
+    relation: CustomerRelation,
+    *,
+    viewer_accountant_relation: AccountantRelation | None,
+) -> bool:
+    if current_user.id == relation.customer_user_id:
+        return True
+    if current_user.id == relation.owner_user_id:
+        return True
+    if _is_super_admin(current_user):
+        return True
+    return (
+        viewer_accountant_relation is not None
+        and getattr(viewer_accountant_relation, "owner_user_id", None) == relation.owner_user_id
+    )
+
+
 async def _load_public_accountant_relation_summaries(
     db: AsyncSession,
     owner_user_id: int,
@@ -58,15 +110,26 @@ async def _load_public_accountant_relation_summaries(
     return [relation for relation in serialized if relation is not None]
 
 
+async def _load_public_customer_relation_summaries(
+    db: AsyncSession,
+    owner_user_id: int,
+) -> list[schemas.PublicCustomerRelationSummary]:
+    relations = await list_active_customers_for_owner(db, owner_user_id)
+    serialized = [_serialize_public_customer_relation(relation) for relation in relations]
+    return [relation for relation in serialized if relation is not None]
+
+
 async def _resolve_public_search_rows(
     db: AsyncSession,
     rows: list[User],
     *,
-    current_user_id: int,
+    current_user: User,
 ) -> list[schemas.UserPublicRead]:
     user_ids = [user.id for user in rows if getattr(user, "id", None) is not None]
     if not user_ids:
         return []
+
+    viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
 
     relation_stmt = (
         select(AccountantRelation)
@@ -84,13 +147,29 @@ async def _resolve_public_search_rows(
         if relation.accountant_user_id is not None
     }
 
+    customer_relation_stmt = (
+        select(CustomerRelation)
+        .options(joinedload(CustomerRelation.owner_user))
+        .where(
+            CustomerRelation.customer_user_id.in_(user_ids),
+            CustomerRelation.status == "active",
+            CustomerRelation.deleted_at.is_(None),
+        )
+    )
+    customer_relations = list((await db.execute(customer_relation_stmt)).scalars().all())
+    relation_by_customer_id = {
+        relation.customer_user_id: relation
+        for relation in customer_relations
+        if relation.customer_user_id is not None
+    }
+
     serialized_rows: list[schemas.UserPublicRead] = []
     seen_user_ids: set[int] = set()
     for user in rows:
         relation = relation_by_accountant_id.get(user.id)
         if relation and relation.owner_user and not relation.owner_user.is_deleted:
             owner_user = relation.owner_user
-            if owner_user.id == current_user_id or owner_user.id in seen_user_ids:
+            if owner_user.id == current_user.id or owner_user.id in seen_user_ids:
                 continue
             serialized_rows.append(
                 _serialize_public_user(
@@ -103,7 +182,29 @@ async def _resolve_public_search_rows(
             seen_user_ids.add(owner_user.id)
             continue
 
-        if user.id == current_user_id or user.id in seen_user_ids:
+        customer_relation = relation_by_customer_id.get(user.id)
+        if customer_relation:
+            if not _can_view_customer_profile(
+                current_user,
+                customer_relation,
+                viewer_accountant_relation=viewer_accountant_relation,
+            ):
+                continue
+
+            owner_user = customer_relation.owner_user
+            serialized_rows.append(
+                _serialize_public_user(
+                    user,
+                    customer_owner_user_id=owner_user.id if owner_user and not owner_user.is_deleted else None,
+                    customer_owner_account_name=owner_user.account_name if owner_user and not owner_user.is_deleted else None,
+                    customer_management_name=customer_relation.management_name,
+                    customer_tier=customer_relation.customer_tier,
+                )
+            )
+            seen_user_ids.add(user.id)
+            continue
+
+        if user.id == current_user.id or user.id in seen_user_ids:
             continue
         serialized_rows.append(_serialize_public_user(user))
         seen_user_ids.add(user.id)
@@ -134,24 +235,57 @@ async def search_public_users(
     query = query.order_by(User.id.desc()).limit(limit)
     result = await db.execute(query)
     users = result.scalars().all()
-    return await _resolve_public_search_rows(db, users, current_user_id=current_user.id)
+    return await _resolve_public_search_rows(db, users, current_user=current_user)
 
 @router.get("/{user_id}", response_model=schemas.UserPublicRead)
-async def read_public_user(user_id: int, db: AsyncSession = Depends(get_db)):
+async def read_public_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """دریافت اطلاعات عمومی یک کاربر (قابل دسترسی برای همه کاربران لاگین شده)"""
+    viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
     relation = await get_active_accountant_relation_for_accountant(db, user_id)
     if relation and relation.owner_user and not relation.owner_user.is_deleted:
         accountant_relations = await _load_public_accountant_relation_summaries(db, relation.owner_user.id)
+        customer_relations = []
+        if _can_view_owner_customer_list(current_user, relation.owner_user.id):
+            customer_relations = await _load_public_customer_relation_summaries(db, relation.owner_user.id)
         return _serialize_public_user(
             relation.owner_user,
             resolved_from_accountant_id=user_id,
             highlight_accountant_user_id=user_id,
             highlight_accountant_relation_display_name=relation.relation_display_name,
             accountant_relations=accountant_relations,
+            customer_relations=customer_relations,
+        )
+
+    customer_relation = await get_active_customer_relation_for_customer(db, user_id)
+    if customer_relation:
+        customer_user = customer_relation.customer_user
+        if customer_user is None or customer_user.is_deleted:
+            raise HTTPException(status_code=404, detail="User not found")
+        if not _can_view_customer_profile(
+            current_user,
+            customer_relation,
+            viewer_accountant_relation=viewer_accountant_relation,
+        ):
+            raise HTTPException(status_code=404, detail="User not found")
+
+        owner_user = customer_relation.owner_user
+        return _serialize_public_user(
+            customer_user,
+            customer_owner_user_id=owner_user.id if owner_user and not owner_user.is_deleted else None,
+            customer_owner_account_name=owner_user.account_name if owner_user and not owner_user.is_deleted else None,
+            customer_management_name=customer_relation.management_name,
+            customer_tier=customer_relation.customer_tier,
         )
 
     user = await db.get(User, user_id)
     if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
     accountant_relations = await _load_public_accountant_relation_summaries(db, user.id)
-    return _serialize_public_user(user, accountant_relations=accountant_relations)
+    customer_relations = []
+    if _can_view_owner_customer_list(current_user, user.id):
+        customer_relations = await _load_public_customer_relation_summaries(db, user.id)
+    return _serialize_public_user(user, accountant_relations=accountant_relations, customer_relations=customer_relations)
