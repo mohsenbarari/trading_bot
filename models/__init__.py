@@ -4,6 +4,7 @@
 """
 from .user import User
 from .accountant_relation import AccountantRelation, AccountantRelationStatus
+from .customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from .invitation import Invitation
 from .session import (
     UserSession,
@@ -43,6 +44,9 @@ __all__ = [
     "User",
     "AccountantRelation",
     "AccountantRelationStatus",
+    "CustomerRelation",
+    "CustomerRelationStatus",
+    "CustomerTier",
     "Invitation",
     "UserSession",
     "Platform",

@@ -456,6 +456,7 @@ def setup_user_events():
                 "channel_messages_count": target.channel_messages_count,
                 "max_sessions": target.max_sessions,
                 "max_accountants": getattr(target, "max_accountants", 3),
+                    "max_customers": getattr(target, "max_customers", 5),
                 "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
                 "created_at": target.created_at.isoformat() if target.created_at else None,
             }
@@ -502,6 +503,7 @@ def setup_user_events():
                 "channel_messages_count": target.channel_messages_count,
                 "max_sessions": target.max_sessions,
                 "max_accountants": getattr(target, "max_accountants", 3),
+                "max_customers": getattr(target, "max_customers", 5),
                 "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
                 "updated_at": target.updated_at.isoformat() if target.updated_at else None,
             }
@@ -564,6 +566,68 @@ def setup_accountant_relation_events():
             logger.error(f"Error in accountant_relation after_delete event: {e}")
 
     logger.info("✅ AccountantRelation event listeners registered")
+
+
+def setup_customer_relation_events():
+    """Setup event listeners for CustomerRelation model."""
+    from models.customer_relation import CustomerRelation
+
+    def customer_relation_payload(target):
+        status = target.status.value if hasattr(target.status, "value") else target.status
+        customer_tier = target.customer_tier.value if hasattr(target.customer_tier, "value") else target.customer_tier
+        commission_rate = target.commission_rate
+        if commission_rate is not None:
+            commission_rate = str(commission_rate)
+        return {
+            "id": target.id,
+            "owner_user_id": target.owner_user_id,
+            "customer_user_id": target.customer_user_id,
+            "created_by_user_id": target.created_by_user_id,
+            "invitation_token": target.invitation_token,
+            "management_name": target.management_name,
+            "customer_tier": customer_tier,
+            "commission_rate": commission_rate,
+            "min_trade_quantity": target.min_trade_quantity,
+            "max_trade_quantity": target.max_trade_quantity,
+            "max_daily_trades": target.max_daily_trades,
+            "max_daily_commodity_volume": target.max_daily_commodity_volume,
+            "trading_restricted_until": target.trading_restricted_until.isoformat() if target.trading_restricted_until else None,
+            "status": status,
+            "expires_at": target.expires_at.isoformat() if target.expires_at else None,
+            "activated_at": target.activated_at.isoformat() if target.activated_at else None,
+            "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
+            "created_at": target.created_at.isoformat() if target.created_at else None,
+            "updated_at": target.updated_at.isoformat() if target.updated_at else None,
+        }
+
+    @event.listens_for(CustomerRelation, 'after_insert')
+    def on_customer_relation_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "customer_relations", target.id, "INSERT", customer_relation_payload(target))
+        except Exception as e:
+            logger.error(f"Error in customer_relation after_insert event: {e}")
+
+    @event.listens_for(CustomerRelation, 'after_update')
+    def on_customer_relation_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "customer_relations", target.id, "UPDATE", customer_relation_payload(target))
+        except Exception as e:
+            logger.error(f"Error in customer_relation after_update event: {e}")
+
+    @event.listens_for(CustomerRelation, 'after_delete')
+    def on_customer_relation_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "customer_relations", target.id, "DELETE", {"id": target.id})
+        except Exception as e:
+            logger.error(f"Error in customer_relation after_delete event: {e}")
+
+    logger.info("✅ CustomerRelation event listeners registered")
 
 
 def setup_commodity_events():
@@ -833,6 +897,7 @@ def setup_all_events():
     """Setup all event listeners"""
     setup_user_events()
     setup_accountant_relation_events()
+    setup_customer_relation_events()
     setup_chat_events()
     setup_chat_member_events()
     setup_invitation_events()
