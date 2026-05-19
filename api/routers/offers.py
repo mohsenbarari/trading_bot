@@ -20,6 +20,7 @@ from core.config import settings
 from core.trading_settings import get_trading_settings
 from core.utils import check_user_limits, increment_user_counter, to_jalali_str
 from core.services.trade_service import get_available_trade_amounts
+from core.services.customer_relation_service import build_customer_offer_read_model
 from core.services.user_account_status_service import is_user_market_blocked
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
@@ -79,12 +80,18 @@ class OfferResponse(BaseModel):
     quantity: int
     remaining_quantity: int
     price: int
+    raw_price: int
+    market_published_price: int
+    viewer_effective_price: int
     is_wholesale: bool
     lot_sizes: Optional[List[int]]
     original_lot_sizes: Optional[List[int]]
     notes: Optional[str]
     status: str
     channel_message_id: Optional[int]
+    customer_badge_visible: bool = False
+    customer_management_name: Optional[str] = None
+    customer_tier: Optional[str] = None
     created_at: str
     expires_at_ts: Optional[int] = None
     
@@ -114,10 +121,19 @@ def offer_to_response(
     *,
     viewer_user_id: Optional[int] = None,
     include_owner_identity: bool = False,
+    offer_owner_relation: object | None = None,
+    viewer_customer_relation: object | None = None,
 ) -> OfferResponse:
     """تبدیل مدل Offer به پاسخ API"""
     remaining = offer.remaining_quantity or offer.quantity
     is_own_offer = viewer_user_id is not None and offer.user_id == viewer_user_id
+    offer_read_model = build_customer_offer_read_model(
+        raw_price=offer.price,
+        offer_type=offer.offer_type,
+        viewer_user_id=viewer_user_id,
+        offer_owner_relation=offer_owner_relation,
+        viewer_customer_relation=viewer_customer_relation,
+    )
     
     # محاسبه زمان انقضا
     expires_at_ts = None
@@ -144,13 +160,19 @@ def offer_to_response(
         commodity_name=offer.commodity.name if offer.commodity else "نامشخص",
         quantity=offer.quantity,
         remaining_quantity=remaining,
-        price=offer.price,
+        price=offer_read_model.market_published_price,
+        raw_price=offer_read_model.raw_price,
+        market_published_price=offer_read_model.market_published_price,
+        viewer_effective_price=offer_read_model.viewer_effective_price,
         is_wholesale=offer.is_wholesale,
         lot_sizes=offer.lot_sizes,
         original_lot_sizes=offer.original_lot_sizes,
         notes=offer.notes,
         status=offer.status.value,
         channel_message_id=offer.channel_message_id,
+        customer_badge_visible=offer_read_model.customer_badge_visible,
+        customer_management_name=offer_read_model.customer_management_name,
+        customer_tier=offer_read_model.customer_tier,
         created_at=to_jalali_str(offer.created_at) or "",
         expires_at_ts=expires_at_ts
     )

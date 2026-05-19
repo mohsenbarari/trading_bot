@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 
@@ -24,6 +25,16 @@ CAPACITY_TRACKED_CUSTOMER_RELATION_STATUSES = (
 CUSTOMER_INVITATION_PREFIX = "CUST-"
 CUSTOMER_PENDING_LIFETIME = timedelta(days=2)
 PRICE_ROUNDING_UNIT = Decimal("100")
+
+
+@dataclass(frozen=True)
+class CustomerOfferReadModel:
+    raw_price: int
+    market_published_price: int
+    viewer_effective_price: int
+    customer_badge_visible: bool = False
+    customer_management_name: str | None = None
+    customer_tier: str | None = None
 
 
 def _utcnow_naive():
@@ -284,6 +295,48 @@ def apply_customer_commission(
     delta = normalized_price * normalized_rate / Decimal("100")
     adjusted_price = normalized_price - delta if normalized_offer_type == OfferType.BUY.value else normalized_price + delta
     return round_customer_price(adjusted_price, normalized_offer_type)
+
+
+def build_customer_offer_read_model(
+    *,
+    raw_price: Decimal | int | str,
+    offer_type: OfferType | str,
+    viewer_user_id: int | None = None,
+    offer_owner_relation: CustomerRelation | object | None = None,
+    viewer_customer_relation: CustomerRelation | object | None = None,
+) -> CustomerOfferReadModel:
+    normalized_raw_price = int(_normalize_decimal(raw_price, name="raw_price"))
+    if normalized_raw_price <= 0:
+        raise ValueError("raw_price must be positive")
+
+    normalized_offer_type = _normalize_offer_type(offer_type)
+
+    owner_relation_status = getattr(getattr(offer_owner_relation, "status", None), "value", getattr(offer_owner_relation, "status", None))
+    owner_relation_tier = getattr(getattr(offer_owner_relation, "customer_tier", None), "value", getattr(offer_owner_relation, "customer_tier", None))
+    owner_user_id = getattr(offer_owner_relation, "owner_user_id", None)
+    customer_badge_visible = (
+        offer_owner_relation is not None
+        and owner_relation_status == CustomerRelationStatus.ACTIVE.value
+        and viewer_user_id is not None
+        and owner_user_id == viewer_user_id
+    )
+
+    viewer_relation_status = getattr(getattr(viewer_customer_relation, "status", None), "value", getattr(viewer_customer_relation, "status", None))
+    viewer_relation_tier = getattr(getattr(viewer_customer_relation, "customer_tier", None), "value", getattr(viewer_customer_relation, "customer_tier", None))
+    viewer_rate = getattr(viewer_customer_relation, "commission_rate", None)
+    if viewer_relation_status == CustomerRelationStatus.ACTIVE.value and viewer_relation_tier == "tier2":
+        viewer_effective_price = apply_customer_commission(normalized_raw_price, viewer_rate, normalized_offer_type)
+    else:
+        viewer_effective_price = normalized_raw_price
+
+    return CustomerOfferReadModel(
+        raw_price=normalized_raw_price,
+        market_published_price=normalized_raw_price,
+        viewer_effective_price=viewer_effective_price,
+        customer_badge_visible=customer_badge_visible,
+        customer_management_name=getattr(offer_owner_relation, "management_name", None) if customer_badge_visible else None,
+        customer_tier=owner_relation_tier if customer_badge_visible else None,
+    )
 
 
 def validate_customer_trade_limits(

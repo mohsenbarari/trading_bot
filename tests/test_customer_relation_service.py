@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from core.services.customer_relation_service import (
     apply_customer_commission,
     build_allowed_customer_chat_targets,
+    build_customer_offer_read_model,
     CUSTOMER_INVITATION_PREFIX,
     get_active_customer_relation_for_customer,
     get_active_customer_relation_for_user,
@@ -210,6 +211,92 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             apply_customer_commission(50000, "bad", OfferType.BUY)
         with self.assertRaises(ValueError):
             round_customer_price("50000", "invalid")
+
+    def test_build_customer_offer_read_model_keeps_tier1_prices_and_owner_only_badge(self):
+        owner_relation = SimpleNamespace(
+            owner_user_id=7,
+            management_name="مشتری ویژه",
+            customer_tier="tier1",
+            status=CustomerRelationStatus.ACTIVE,
+        )
+
+        public_view = build_customer_offer_read_model(
+            raw_price=52000,
+            offer_type=OfferType.SELL,
+            viewer_user_id=19,
+            offer_owner_relation=owner_relation,
+        )
+        self.assertEqual(public_view.raw_price, 52000)
+        self.assertEqual(public_view.market_published_price, 52000)
+        self.assertEqual(public_view.viewer_effective_price, 52000)
+        self.assertFalse(public_view.customer_badge_visible)
+        self.assertIsNone(public_view.customer_management_name)
+        self.assertIsNone(public_view.customer_tier)
+
+        owner_view = build_customer_offer_read_model(
+            raw_price=52000,
+            offer_type=OfferType.SELL,
+            viewer_user_id=7,
+            offer_owner_relation=owner_relation,
+        )
+        self.assertEqual(owner_view.raw_price, 52000)
+        self.assertEqual(owner_view.market_published_price, 52000)
+        self.assertEqual(owner_view.viewer_effective_price, 52000)
+        self.assertTrue(owner_view.customer_badge_visible)
+        self.assertEqual(owner_view.customer_management_name, "مشتری ویژه")
+        self.assertEqual(owner_view.customer_tier, "tier1")
+
+    def test_build_customer_offer_read_model_projects_tier2_viewer_effective_price(self):
+        viewer_relation = SimpleNamespace(
+            customer_tier="tier2",
+            commission_rate="0.5",
+            status=CustomerRelationStatus.ACTIVE,
+        )
+
+        buy_view = build_customer_offer_read_model(
+            raw_price=192800,
+            offer_type=OfferType.BUY,
+            viewer_user_id=9,
+            viewer_customer_relation=viewer_relation,
+        )
+        self.assertEqual(buy_view.raw_price, 192800)
+        self.assertEqual(buy_view.market_published_price, 192800)
+        self.assertEqual(buy_view.viewer_effective_price, 191800)
+
+        sell_view = build_customer_offer_read_model(
+            raw_price=53500,
+            offer_type=OfferType.SELL,
+            viewer_user_id=9,
+            viewer_customer_relation=viewer_relation,
+        )
+        self.assertEqual(sell_view.viewer_effective_price, 53800)
+
+    def test_build_customer_offer_read_model_ignores_inactive_or_non_tier2_viewer_relations(self):
+        inactive_view = build_customer_offer_read_model(
+            raw_price=50000,
+            offer_type=OfferType.BUY,
+            viewer_customer_relation=SimpleNamespace(
+                customer_tier="tier2",
+                commission_rate="0.8",
+                status=CustomerRelationStatus.PENDING,
+            ),
+        )
+        self.assertEqual(inactive_view.viewer_effective_price, 50000)
+
+        tier1_view = build_customer_offer_read_model(
+            raw_price=50000,
+            offer_type=OfferType.SELL,
+            viewer_customer_relation=SimpleNamespace(
+                customer_tier="tier1",
+                commission_rate="0.8",
+                status=CustomerRelationStatus.ACTIVE,
+            ),
+        )
+        self.assertEqual(tier1_view.viewer_effective_price, 50000)
+
+    def test_build_customer_offer_read_model_rejects_invalid_raw_price(self):
+        with self.assertRaises(ValueError):
+            build_customer_offer_read_model(raw_price=0, offer_type=OfferType.BUY)
 
     def test_validate_customer_trade_limits_accepts_valid_relation(self):
         relation = SimpleNamespace(

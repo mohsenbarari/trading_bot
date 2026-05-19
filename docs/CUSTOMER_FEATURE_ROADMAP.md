@@ -182,9 +182,9 @@ validation phase:
 
 ### 5.2. لایه‌های قیمت
 
-- [ ] `raw_price`: همان قیمتی که customer یا owner واقعاً ثبت کرده است.
-- [ ] `market_published_price`: قیمت منتشرشده در market.
-- [ ] `viewer_effective_price`: قیمت نهایی نمایش برای viewer.
+- [x] `raw_price`: همان قیمتی که customer یا owner واقعاً ثبت کرده است.
+- [x] `market_published_price`: قیمت منتشرشده در market.
+- [x] `viewer_effective_price`: قیمت نهایی نمایش برای viewer.
 
 این تفکیک مهم است چون:
 - [ ] برای `Tier 1`: `raw_price == market_published_price == viewer_effective_price` برای همه viewerها (به‌جز owner tag context).
