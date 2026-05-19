@@ -247,7 +247,9 @@ describe('useChatMessages', () => {
     await nextTick()
 
     expect(messages.value?.map((message) => message.id)).toEqual([10])
-    expect(messages.value[0]).not.toBe(messages.value[0].reply_to_message)
+    const cachedMessage = messages.value?.[0]
+    expect(cachedMessage).toBeDefined()
+    expect(cachedMessage).not.toBe(cachedMessage?.reply_to_message)
     expect(isLoadingMessages.value).toBe(false)
 
       const cb = resolveMessages as ((msgs: any) => void) | null
@@ -307,7 +309,7 @@ describe('useChatMessages', () => {
 
     selectedUserId.value = 101
     await subject.loadMessages(101)
-    expect(messages.value.map((message) => message.id)).toEqual([500])
+    expect(messages.value?.map((message) => message.id)).toEqual([500])
   })
 
   it('loads older messages with dedupe and stops pagination when the server returns no more rows', async () => {

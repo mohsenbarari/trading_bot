@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { PendingUpload } from './chatUploadBackground'
+
 type XhrScenario = (xhr: MockXHR) => void
 
 function installIndexedDb(initialRecords: Array<Record<string, any>>) {
@@ -680,10 +682,11 @@ describe('chatUploadBackground', () => {
     await hooks.pauseUploadForServiceWorker({ ...baseUpload, id: -931 })
     expect(hooks.state.serviceWorkerOwnedUploads.has(-931)).toBe(true)
 
-    const abortingXhr = { abort: vi.fn() }
+    const abortingXhr = new MockXHR()
+    const abortingXhrAbortSpy = vi.spyOn(abortingXhr, 'abort')
     hooks.state.xhrControllers.set(-932, abortingXhr)
     const pausePromise = hooks.pauseUploadForServiceWorker({ ...baseUpload, id: -932 })
-    expect(abortingXhr.abort).toHaveBeenCalled()
+    expect(abortingXhrAbortSpy).toHaveBeenCalled()
     hooks.state.serviceWorkerHandoffResolvers.get(-932)?.()
     await pausePromise
     expect(hooks.state.serviceWorkerOwnedUploads.has(-932)).toBe(true)
@@ -705,7 +708,7 @@ describe('chatUploadBackground', () => {
     service.subscribeToUploads((event) => events.push(event))
     await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
 
-    const makeLegacyUpload = (id: number) => ({
+    const makeLegacyUpload = (id: number): PendingUpload => ({
       id,
       userId: -77,
       roomKind: 'channel' as const,
@@ -1116,7 +1119,10 @@ describe('chatUploadBackground', () => {
     })
     const upgradedDb = await hooks.openDB()
     expect(createObjectStore).toHaveBeenCalledWith('pending', { keyPath: 'id' })
-    upgradedDb.onversionchange?.(new Event('versionchange'))
+      if (!upgradedDb.onversionchange) {
+        throw new Error('Expected IndexedDB versionchange handler')
+      }
+      upgradedDb.onversionchange(new Event('versionchange') as IDBVersionChangeEvent)
 
     service = await importFreshModule()
     hooks = service.__chatUploadBackgroundTestHooks
@@ -1167,7 +1173,7 @@ describe('chatUploadBackground', () => {
         return request
       },
     })
-    expect(await hooks.putRecord(throwingDb as any, { id: -990 })).toBe(false)
+    expect(await hooks.putRecord(throwingDb as unknown as IDBDatabase, { id: -990 })).toBe(false)
     await expect(hooks.idbDelete(-990)).resolves.toBeUndefined()
     await expect(hooks.idbGet(-990)).resolves.toBeNull()
     await expect(hooks.idbGetAll()).resolves.toEqual([])
@@ -3407,7 +3413,10 @@ describe('chatUploadBackground', () => {
     await pausePromise
     expect(hooks.state.serviceWorkerOwnedUploads.has(-912)).toBe(true)
 
-    messageHandler?.({ data: { type: 'chat-upload:sent' } })
+      if (!messageHandler) {
+        throw new Error('Expected service worker message handler')
+      }
+      messageHandler({ data: { type: 'chat-upload:sent' } })
     expect(hooks.state.pendingUploads.has(-999)).toBe(false)
 
     records.set(-913, {
@@ -3437,7 +3446,7 @@ describe('chatUploadBackground', () => {
     const hooks = service.__chatUploadBackgroundTestHooks
     await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
 
-    const albumUpload = {
+    const albumUpload: PendingUpload = {
       id: -921,
       userId: 77,
       roomKind: 'group' as const,
@@ -3644,13 +3653,14 @@ describe('chatUploadBackground', () => {
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url.endsWith('/api/chat/rooms/77/send')) {
-        return {
-          ok: false,
-          status: 500,
-          json: async () => {
+        const brokenJsonResponse = new Response(null, { status: 500 })
+        Object.defineProperty(brokenJsonResponse, 'json', {
+          configurable: true,
+          value: async () => {
             throw new Error('broken json')
           },
-        } as Response
+        })
+        return brokenJsonResponse
       }
       if (url.endsWith('/api/chat/rooms/78/send')) {
         hooks.state.abortFlags.add(-942)
