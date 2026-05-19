@@ -5,6 +5,9 @@
 ## Snapshot وضعیت شروع roadmap
 
 - [x] challengeهای محصولی اصلی customer بسته شده‌اند.
+- [x] سطح‌بندی customer روی دو tier بسته شده است:
+  - [x] `Tier 1`: آفرساز، بازار هم‌قیمت با عموم، کمیسیون توافقی خارج پلتفرم.
+  - [x] `Tier 2`: non-offer-creator، market consumer/executor، کمیسیون سیستمی داخل پلتفرم.
 - [x] دو اصل تفسیری نهایی روشن شده‌اند:
   - [x] مشتری یک کاربر عادی اما محدود است.
   - [x] هر رفتار عادی کاربر برای مشتری مجاز است مگر آن‌جا که محدودیت صریح customer آن را منع کند.
@@ -39,6 +42,7 @@
 
 خروجی‌های لازم:
 - [ ] مدل relation جدید برای owner ← customer اضافه شود.
+- [ ] سطح customer به‌صورت صریح در مدل داده اضافه شود (`customer_tier`).
 - [ ] migration جدول relation و cap per-owner اضافه شود.
 - [ ] indexها و uniquenessها برای management name و active membership تعریف شود.
 - [ ] fieldهای policy per-customer روی relation تعریف شوند.
@@ -50,6 +54,7 @@
 - [ ] `created_by_user_id`
 - [ ] `invitation_token`
 - [ ] `management_name`
+- [ ] `customer_tier`
 - [ ] `commission_rate`
 - [ ] `min_trade_quantity`
 - [ ] `max_trade_quantity`
@@ -68,6 +73,7 @@
 - [ ] customer data باید حول relation شکل بگیرد، نه با پر کردن ده‌ها فیلد customer-specific در `users`.
 - [ ] چون customer یک user عادی است، identity اصلی او در `users` باقی می‌ماند.
 - [ ] policyهای owner-specific روی relation قرار می‌گیرند چون اگر روزی customer lifecycle عوض شود، باید از identity user مستقل بمانند.
+- [ ] `commission_rate` برای `Tier 1` nullable/unused است و فقط برای `Tier 2` authoritative خواهد بود.
 
 validation phase:
 - [ ] migration head سبز شود.
@@ -152,72 +158,71 @@ validation phase:
 ## 6. Phase 5 - منطق قیمت‌گذاری، سناریو محور و exhaustive
 
 هدف:
-مشخص‌کردن اینکه قیمت خام، قیمت تعدیل‌شده، نمایش owner-facing، و محاسبه fair-price چطور با حضور customer هم‌زمان درست بمانند.
+مشخص‌کردن اینکه pricing behavior برای Tier 1 و Tier 2 بدون تداخل و با projection قابل‌ردیابی اجرا شود.
+
+### 5.0. رفتار tier-aware
+
+- [ ] `Tier 1`: آفر با raw price منتشر می‌شود و همه viewerها همان raw published price را می‌بینند.
+- [ ] `Tier 1`: owner همان customer روی آفر، تگ «مشتری + management name» می‌بیند.
+- [ ] `Tier 2`: حق ثبت آفر ندارد و فقط request روی آفرهای دیگر می‌زند.
+- [ ] `Tier 2`: pricing projection بر اساس commission policy سیستمی باقی می‌ماند.
 
 ### 5.1. اصل بنیادی
 
 - [ ] قیمت ذخیره‌شده در DB برای آفر customer باید «قیمت خام actor» بماند.
-- [ ] کمیسیون یک policy نمایشی/معاملاتی owner روی customer است، نه اینکه raw market data را overwrite کند.
-- [ ] در نتیجه، adjusted price باید در response/runtime محاسبه شود نه اینکه جایگزین raw price در persistence شود.
-- [ ] زنجیره‌ی execution customer باید بتواند هم‌زمان سه لایه قیمت را حمل کند: raw price مبدا، market published price، و customer-viewer price.
+- [ ] کمیسیون سیستمی فقط به `Tier 2` تعلق دارد.
+- [ ] برای `Tier 1` هیچ adjusted price در pipeline پلتفرم تولید نمی‌شود.
+- [ ] زنجیره execution باید با tier طرفین سازگار باشد.
 
-### 5.2. سه قیمت هم‌زمان که باید همیشه از هم تفکیک شوند
+### 5.2. لایه‌های قیمت
 
 - [ ] `raw_price`: همان قیمتی که customer یا owner واقعاً ثبت کرده است.
-- [ ] `market_published_price`: همان قیمتی که آفر بعد از اعمال policy customerِ ثبت‌کننده برای عموم market منتشر می‌شود.
-- [ ] `viewer_effective_price`: همان قیمتی که viewer نهایی در UI market می‌بیند؛ برای customer viewer این قیمت می‌تواند یک projection دوم بر اساس policy خود او باشد.
+- [ ] `market_published_price`: قیمت منتشرشده در market.
+- [ ] `viewer_effective_price`: قیمت نهایی نمایش برای viewer.
 
 این تفکیک مهم است چون:
-- [ ] customer باید raw_price خودش را ببیند.
-- [ ] owner همان customer باید raw_price را ببیند.
-- [ ] هر viewer غیر-owner، از جمله middle admin و super admin، باید فقط market projection را ببیند مگر آن‌که خودش owner همان customer relation باشد.
-- [ ] customer viewer برای آفرهای دیگر market باید `viewer_effective_price` مخصوص خودش را ببیند، نه صرفاً market published price عمومی را.
+- [ ] برای `Tier 1`: `raw_price == market_published_price == viewer_effective_price` برای همه viewerها (به‌جز owner tag context).
+- [ ] برای `Tier 2`: projectionهای کمیسیونی فعال هستند و می‌توانند بین این سه لایه اختلاف بسازند.
 
-### 5.3. سناریوی پایه فروش customer
+### 5.3. سناریوی Tier 1 - آفر فروش
 
 اگر customer یک آفر فروش ثبت کند:
 - [ ] raw_price همان عددی است که customer وارد کرده است.
 - [ ] برای خود customer: همان raw_price نمایش داده می‌شود.
 - [ ] برای owner همان customer: raw_price نمایش داده می‌شود + badge مشتری.
-- [ ] برای هر viewer غیر-owner: ابتدا `market_published_price = raw_price + commission(source customer)` و سپس rounding rule اعمال می‌شود.
-- [ ] اگر viewer خودش customer باشد، بعد از آن policy viewer-customer خودش روی market published price اعمال می‌شود تا `viewer_effective_price` شکل بگیرد.
+- [ ] برای همه viewerها همان raw_price منتشر و نمایش داده می‌شود.
+- [ ] فقط owner همان customer context tag می‌بیند.
 
 مثال:
 - [ ] customer قیمت فروش خام `199600` ثبت می‌کند.
-- [ ] commission = `0.5%`.
-- [ ] `market_published_price = 199600 × 1.005 = 200598`.
-- [ ] nearest-100 = `200600`.
-- [ ] customer و owner او عدد `199600` را می‌بینند.
-- [ ] سایر viewerهای غیر-customer عدد `200600` را می‌بینند.
-- [ ] اگر viewer یک customer دیگر باشد، price projection دومِ viewer policy روی `200600` اعمال می‌شود.
+- [ ] raw = `52000`.
+- [ ] آفر با `52000` برای همه منتشر می‌شود.
+- [ ] owner همان customer (رامین) تگ مشتری + نام سینا را می‌بیند.
 
-### 5.4. سناریوی پایه خرید customer
+### 5.4. سناریوی Tier 1 - آفر خرید
 
 اگر customer یک آفر خرید ثبت کند:
 - [ ] raw_price همان عدد واردشده است.
 - [ ] برای customer: raw_price.
 - [ ] برای owner همان customer: raw_price + badge مشتری.
-- [ ] برای سایر viewerهای غیر-owner: `market_published_price = raw_price - commission(source customer)` و سپس rounding rule.
-- [ ] برای customer viewerِ دیگر: یک projection دوم بر اساس کمیسیون customer viewer روی market published price اعمال می‌شود.
+- [ ] برای همه viewerها همان raw_price منتشر و نمایش داده می‌شود.
+- [ ] فقط owner همان customer context tag می‌بیند.
 
 مثال:
-- [ ] customer قیمت خرید خام `191500` ثبت می‌کند.
-- [ ] commission source customer = `0.5%`.
-- [ ] `market_published_price = 191500 × 0.995 = 190542.5`.
-- [ ] nearest-100 = `190600`.
-- [ ] اگر viewer یک user عادی یا admin unrelated باشد، `190600` را می‌بیند.
-- [ ] اگر viewer یک customer دیگر با commission `0.5%` باشد، `viewer_effective_price = 190600 × 0.995 = 189647` و nearest-100 = `189700` می‌شود.
+- [ ] raw = `98000`.
+- [ ] آفر با `98000` برای همه منتشر می‌شود.
+- [ ] owner همان customer (مجید) تگ مشتری + نام پیمان را می‌بیند.
 
-### 5.5. سناریوی midpoint در فروش
+### 5.5. midpoint / rounding
 
-اگر adjusted price دقیقاً در midpoint بین دو مضرب 100 قرار بگیرد:
-- [ ] در آفر فروش به بالا round می‌شود.
+- [ ] این بخش فقط برای `Tier 2` کاربرد دارد.
+- [ ] `Tier 1` چون projection کمیسیونی ندارد، midpoint rule در انتشار آفر استفاده نمی‌شود.
 
 مثال:
 - [ ] adjusted = `200550`.
 - [ ] چون midpoint در فروش است، خروجی `200600` می‌شود.
 
-### 5.6. سناریوی midpoint در خرید
+### 5.6. Tier 2 midpoint در خرید
 
 - [ ] در آفر خرید midpoint باید به پایین round شود.
 
@@ -225,14 +230,15 @@ validation phase:
 - [ ] adjusted = `200550`.
 - [ ] چون خرید است، خروجی `200500` می‌شود.
 
-### 5.7. سناریوی non-midpoint نزدیک پایین
+### 5.7. Tier 2 non-midpoint نزدیک پایین
 
 - [ ] adjusted = `200525` midpoint نیست، به نزدیک‌ترین مضرب 100 می‌رود.
 - [ ] خروجی `200500` می‌شود.
 
 ### 5.8. وقتی owner خودش market را می‌بیند
 
-- [ ] owner باید raw view ببیند، نه adjusted view.
+- [ ] owner برای آفرهای `Tier 1` customer خودش raw view کامل می‌بیند.
+- [ ] owner برای آفرهای `Tier 2` طبق policy همان tier می‌بیند.
 - [ ] دلیل: owner policy maker است و باید بداند customer چه قیمت خامی ثبت کرده.
 - [ ] owner نباید برای customerهای ownerهای دیگر identity اضافه ببیند.
 - [ ] owner فقط customerهای خودش را با badge مشتری می‌بیند.
@@ -246,9 +252,8 @@ validation phase:
 
 ### 5.10. وقتی customer خودش market را می‌بیند
 
-- [ ] فقط آفر خودش باید raw باشد.
-- [ ] customer market جداگانه‌ای نمی‌بیند.
-- [ ] آفرهای بقیه market برای او با `viewer_effective_price` نمایش داده می‌شوند؛ یعنی market published price هر آفر، دوباره با policy viewer-customer خودش project می‌شود.
+- [ ] در `Tier 1` فقط آفر خودش raw نیست؛ کل market با همان raw published price عمومی دیده می‌شود.
+- [ ] در `Tier 2` projection کمیسیونی viewer-facing فعال است.
 - [ ] customer نباید commission rate خودش را از UI استخراج کند.
 - [ ] بنابراین حتی اگر raw/effective difference برای آفر خودش قابل مقایسه باشد، نباید label یا helper مستقیمی نرخ را افشا کند.
 
@@ -261,6 +266,8 @@ validation phase:
 ### 5.12. سناریوی owner editing customer commission
 
 وقتی owner commission را از `0.5` به `0.8` تغییر می‌دهد:
+- [ ] این سناریو برای `Tier 2` است.
+- [ ] `Tier 1` commission setting سیستمی ندارد.
 - [ ] هیچ raw_price قبلی در DB تغییر نمی‌کند.
 - [ ] tradeهای قبلاً ثبت‌شده باید با commission historical خودشان ثابت بمانند و rewrite نشوند.
 - [ ] هر trade جدیدی که بعد از این تغییر ایجاد می‌شود باید با commission جدید محاسبه شود.
@@ -280,17 +287,13 @@ validation phase:
 
 - [ ] customer نباید trade مستقیم customer ↔ outsider داشته باشد.
 - [ ] هر execution باید از owner mediation عبور کند.
-- [ ] اگر فقط یک سمت customer باشد، زنجیره execution باید owner همان customer را به‌عنوان واسطه وارد trade rows کند.
-- [ ] اگر هر دو سمت customer و ownerهایشان متفاوت باشند، execution باید به trade chain سه‌مرحله‌ای بشکند.
-- [ ] مثال canonical:
-  - [ ] source offer: customer1 ownerA, BUY, qty=20, raw=`191500`
-  - [ ] source commission ownerA for this customer: `0.5%`
-  - [ ] public market published price for everyone except ownerA and the source customer itself: `190600`
-  - [ ] viewer customer1 ownerB with commission `0.5%` sees `189700`
-  - [ ] persisted trade rows for one completed business action:
-    - [ ] trade1: `customer1 ownerB → ownerB @ 189700`
-    - [ ] trade2: `ownerB → ownerA @ 190600`
-    - [ ] trade3: `ownerA → customer1 ownerA @ 191500`
+- [ ] Tier 1 canonical cases (قیمت یکسان در همه legs):
+  - [ ] customer seller vs customer buyer (ownerهای متفاوت): chain سه‌مرحله‌ای.
+  - [ ] customer buyer vs owner outsider: chain دو‌مرحله‌ای.
+  - [ ] owner offer vs customer outsider: chain دو‌مرحله‌ای.
+  - [ ] owner offer vs own-customer: trade مستقیم یک‌مرحله‌ای.
+- [ ] notificationها، historyها، و UI summaryها باید با همین chainها هم‌راستا باشند.
+- [ ] chain نهایی اجرای معامله برای `Tier 2` باید با سناریوهای مستقل محصولی قفل شود.
 - [ ] notificationها، historyها، و UI summaryها باید این chain را منعکس کنند، نه اینکه یک trade مستقیم customer ↔ customer بسازند.
 
 ### 5.15. سناریوی customer trading restriction
@@ -345,6 +348,7 @@ history باید بسته به viewer یکی یا هر دو را نشان دهد
 - [ ] source customer باید leg `ownerA ↔ customerA` را ببیند.
 - [ ] responder customer باید leg `customerB ↔ ownerB` را ببیند.
 - [ ] mutual history بین ownerA و ownerB باید بر leg واسطه‌ای بین دو owner تکیه کند، نه بر customer endpointها.
+- [ ] این chain برای `Tier 1` قطعی است و با قیمت یکسان در همه legs ثبت می‌شود.
 
 ### 7.4. سناریوی counterpart در تاریخچه با owner
 
@@ -501,5 +505,6 @@ release gate:
 - [ ] در سناریوهای یک‌طرف-customer و same-owner-customer-to-customer، تعداد دقیق legs و shape نهایی trade chain چگونه normalize می‌شود؟
 - [ ] fallback naming برای history وقتی customer relation بعداً deleted/revoked می‌شود آیا از soft-deleted relation lookup می‌آید یا از snapshot صریح هنگام trade؟
 - [ ] fair-price customer-aware عمداً deferred است و بعد از تغییر flow اضافه‌کردن customer دوباره بسته خواهد شد.
+- [ ] سناریوهای قطعی `Tier 2` برای pricing و execution chain (با اعداد واقعی) باید تکمیل شود تا Phase 5/6 کامل بسته شود.
 
 این موارد challenge جدید محصولی نیستند؛ فقط detailهای implementation-level هستند و باید در phaseهای 4 تا 8 به‌صورت صریح بسته شوند.
