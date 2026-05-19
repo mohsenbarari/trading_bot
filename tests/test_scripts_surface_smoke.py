@@ -55,7 +55,7 @@ class ScriptsSurfaceSmokeTests(unittest.TestCase):
         self.assertGreaterEqual(payload['summary']['python_unittest_files'], 200)
         self.assertGreaterEqual(payload['summary']['frontend_unit_files'], 10)
         self.assertGreaterEqual(payload['summary']['frontend_e2e_files'], 7)
-        self.assertEqual(payload['summary']['manual_non_regression_tools'], 4)
+        self.assertEqual(payload['summary']['manual_non_regression_tools'], 5)
 
 
 if __name__ == '__main__':

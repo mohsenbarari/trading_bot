@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 MANUAL_NON_REGRESSION_TOOLS = (
     'tests/api_load_test.py',
+    'tests/customer_live_auth_smoke.py',
     'tests/load_test.py',
     'tests/live_simulation.py',
     'tests/debug_trade.py',

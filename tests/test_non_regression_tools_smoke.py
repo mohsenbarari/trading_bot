@@ -9,6 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PYTHON_BIN = sys.executable
 TOOL_PATHS = [
     Path('tests/api_load_test.py'),
+    Path('tests/customer_live_auth_smoke.py'),
     Path('tests/load_test.py'),
     Path('tests/live_simulation.py'),
     Path('tests/debug_trade.py'),
