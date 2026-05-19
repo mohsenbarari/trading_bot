@@ -69,6 +69,7 @@
 - [x] سایر کاربران عادی نباید بتوانند پروفایل عمومی مشتری را ببینند.
 - [x] لیست مشتریان owner نباید در پروفایل عمومی owner برای کاربران عادی دیگر نمایش داده شود.
 - [x] در سطح public profile و customer list داخل public profile owner، تنها `SUPER_ADMIN` همان visibility owner را نسبت به customer دارد.
+- [x] در public profile، history برای `SUPER_ADMIN` نباید به‌شکل mutual history با خود سوپرادمین تفسیر شود؛ باید history واقعی همان user هدف را نشان دهد.
 
 ## 5. پیام‌رسان، گروه، و کانال
 
@@ -208,6 +209,10 @@ Tier1-source cases:
 - [x] اگر user3 تاریخچه معاملات با owner1 را ببیند، برای همان معامله نباید آن تگ مشتری را ببیند.
 - [x] اگر owner1 در حال مرور تاریخچه معاملات با مشتری1 باشد، در هر معامله باید نام سمت دیگر معامله همراه با یک تگ ریز context نمایش داده شود.
 - [x] حسابداران owner فقط مجاز به دیدن مشتریان و تاریخچه معاملات مشتریان هستند.
+- [x] وقتی `SUPER_ADMIN` پروفایل عمومی هر user را باز می‌کند، باید history همان user را از perspective خودِ target user ببیند، نه از perspective سوپرادمین.
+- [x] جزئیات حداقلی history برای `SUPER_ADMIN` در public profile باید شامل این‌ها باشد: شماره معامله، زمان، buy/sell badge از perspective user هدف، کالا، مقدار، قیمت، و counterpart principal name.
+- [x] اگر آن trade customer-aware باشد و viewer مجاز `SUPER_ADMIN` باشد، context relation نیز باید روی همان row دیده شود؛ برای owner-target به‌صورت `مشتری: management_name` و برای customer-target به‌صورت `مالک: owner` و `سطح: Tier`.
+- [x] تا قبل از اضافه‌شدن chain/group identifier، `SUPER_ADMIN` در public profile باید فقط rowهایی را ببیند که همان user هدف مستقیماً یکی از طرفین آن row است؛ grouping چند-leg بعداً روی seam history انجام می‌شود.
 
 ## 10. بلاک، محدودیت، و سرریز محدودیت‌ها
 
