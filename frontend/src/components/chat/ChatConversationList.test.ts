@@ -373,4 +373,87 @@ describe('ChatConversationList.vue', () => {
 
     expect(wrapper.get('.conversation-menu-empty').text()).toContain('برای این گفتگو عملیاتی در دسترس نیست')
   })
+
+  it('sorts pinned and recent conversations, shows typing text, and offers group leave plus pin-down actions', async () => {
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [
+          makeConversation({ id: 8, other_user_id: 18, other_user_name: 'Older Direct', last_message_at: '2026-05-12T08:00:00' }),
+          makeConversation({ id: 7, other_user_id: 17, other_user_name: 'Pinned Older', is_pinned: true, pinned_at: '2026-05-12T10:00:00', pin_order: null }),
+          makeConversation({ id: 9, other_user_id: 19, other_user_name: 'Pinned Newer', is_pinned: true, pinned_at: '2026-05-12T10:05:00', pin_order: null }),
+          makeConversation({ id: 6, chat_id: 26, other_user_id: -26, other_user_name: 'Group Room', room_kind: 'group', is_pinned: false }),
+          makeConversation({ id: 10, other_user_id: 20, other_user_name: 'Typing Direct', last_message_at: '2026-05-12T09:00:00' }),
+        ],
+        selectedUserId: null,
+        typingUsers: { 20: true },
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { teleport: true, transition: false },
+      },
+    })
+
+    expect(wrapper.text()).toContain('در حال نوشتن...')
+
+    const pinnedRow = wrapper.findAll('.conversation-item').find((row) => row.text().includes('Pinned Newer'))
+    expect(pinnedRow).toBeTruthy()
+    await pinnedRow!.trigger('contextmenu', { clientX: 44, clientY: 66 })
+    await flushPromises()
+    expect(wrapper.get('.conversation-menu-panel').text()).toContain('جابجایی به پایین')
+
+    const groupRow = wrapper.findAll('.conversation-item').find((row) => row.text().includes('Group Room'))
+    expect(groupRow).toBeTruthy()
+    await groupRow!.trigger('contextmenu', { clientX: 55, clientY: 77 })
+    await flushPromises()
+    expect(wrapper.get('.conversation-menu-panel').text()).toContain('ترک گروه')
+  })
+
+  it('runs the registered back-state closer and clears pending long-press timers on unmount', async () => {
+    vi.useFakeTimers()
+    let registeredBackHandler: null | (() => void) = null
+    pushBackStateMock.mockImplementationOnce((handler: () => void) => {
+      registeredBackHandler = handler
+    })
+    const clearTimeoutSpy = vi.spyOn(window, 'clearTimeout')
+
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [makeConversation()],
+        selectedUserId: null,
+        typingUsers: {},
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { teleport: true, transition: false },
+      },
+    })
+
+    await wrapper.get('.conversation-item').trigger('contextmenu', { clientX: 20, clientY: 30 })
+    await flushPromises()
+    expect(typeof registeredBackHandler).toBe('function')
+
+    registeredBackHandler?.()
+    await flushPromises()
+    const freshWrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [makeConversation()],
+        selectedUserId: null,
+        typingUsers: {},
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { teleport: true, transition: false },
+      },
+    })
+
+    const item = freshWrapper.get('.conversation-item')
+    item.element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 12, clientY: 12 }))
+    freshWrapper.unmount()
+    expect(clearTimeoutSpy).toHaveBeenCalled()
+  })
 })

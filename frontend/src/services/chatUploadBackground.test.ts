@@ -3107,4 +3107,819 @@ describe('chatUploadBackground', () => {
     })
     expect(service.getPendingForUser(77)).toEqual([])
   })
+
+  it('falls back from blob persistence to bytes when IndexedDB rejects document blobs', async () => {
+    const storedRecords: Array<Record<string, any>> = []
+    let putCount = 0
+    const db = {
+      objectStoreNames: { contains: () => true },
+      transaction: () => {
+        const tx: {
+          objectStore: (_store: string) => { put: (value: Record<string, any>) => void }
+          oncomplete: null | (() => void)
+          onerror: null | (() => void)
+          onabort: null | (() => void)
+        } = {
+          objectStore: () => ({
+            put(value: Record<string, any>) {
+              storedRecords.push({ ...value })
+              putCount += 1
+              Promise.resolve().then(() => {
+                if (putCount === 1) {
+                  tx.onerror?.()
+                } else {
+                  tx.oncomplete?.()
+                }
+              })
+            },
+          }),
+          oncomplete: null,
+          onerror: null,
+          onabort: null,
+        }
+        return tx
+      },
+      close: vi.fn(),
+      onversionchange: null,
+    }
+    vi.stubGlobal('indexedDB', {
+      open: () => {
+        const request: {
+          result: typeof db
+          error: null
+          onupgradeneeded: null | ((event: { target: { result: typeof db } }) => void)
+          onsuccess: null | (() => void)
+          onerror: null | (() => void)
+        } = {
+          result: db,
+          error: null,
+          onupgradeneeded: null,
+          onsuccess: null,
+          onerror: null,
+        }
+        Promise.resolve().then(() => request.onsuccess?.())
+        return request
+      },
+    })
+
+    class ThrowingFileReader {
+      result = null
+      error = null
+      onload: null | (() => void) = null
+      onerror: null | (() => void) = null
+      readAsDataURL() {
+        throw new Error('reader boom')
+      }
+    }
+    vi.stubGlobal('FileReader', ThrowingFileReader as any)
+
+    const service = await importFreshModule()
+    const hooks = service.__chatUploadBackgroundTestHooks
+    await expect(hooks.blobToDataUrl(new Blob(['doc'], { type: 'text/plain' }))).rejects.toThrow('reader boom')
+
+    const fileBytes = new Uint8Array([100, 111, 99]).buffer
+    const fallbackFile = {
+      size: 3,
+      type: 'application/pdf',
+      arrayBuffer: vi.fn().mockResolvedValue(fileBytes),
+    }
+    const upload = {
+      id: -901,
+      userId: 77,
+      roomKind: 'direct' as const,
+      senderId: 15,
+      msgType: 'document' as const,
+      file: fallbackFile as any,
+      fileName: 'report.pdf',
+      mimeType: 'application/pdf',
+      thumbnail: '',
+      width: 0,
+      height: 0,
+      albumId: null,
+      albumIndex: 0,
+      albumSize: 1,
+      phase: 'queued' as const,
+      progress: 0,
+      uploadedBytes: 0,
+      totalBytes: 3,
+      createdAt: '2026-05-14T02:00:00Z',
+    }
+
+    await hooks.idbPut(upload)
+
+    expect(storedRecords).toHaveLength(2)
+    expect(storedRecords[0]?.fileDataUrl).toBeUndefined()
+  expect(storedRecords[0]?.file).toBe(fallbackFile)
+    expect(storedRecords[1]?.file).toBeUndefined()
+    expect(storedRecords[1]?.fileBytes).toBeInstanceOf(ArrayBuffer)
+  expect(fallbackFile.arrayBuffer).toHaveBeenCalledOnce()
+  })
+
+  it('swallows document byte fallback failures and IndexedDB open failures during persistence', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const storedRecords: Array<Record<string, any>> = []
+    let putCount = 0
+    const db = {
+      objectStoreNames: { contains: () => true },
+      transaction: () => {
+        const tx: {
+          objectStore: (_store: string) => { put: (value: Record<string, any>) => void }
+          oncomplete: null | (() => void)
+          onerror: null | (() => void)
+          onabort: null | (() => void)
+        } = {
+          objectStore: () => ({
+            put(value: Record<string, any>) {
+              storedRecords.push({ ...value })
+              putCount += 1
+              Promise.resolve().then(() => {
+                if (putCount === 1) {
+                  tx.onerror?.()
+                } else {
+                  tx.oncomplete?.()
+                }
+              })
+            },
+          }),
+          oncomplete: null,
+          onerror: null,
+          onabort: null,
+        }
+        return tx
+      },
+      close: vi.fn(),
+      onversionchange: null,
+    }
+    vi.stubGlobal('indexedDB', {
+      open: () => {
+        const request: {
+          result: typeof db
+          error: null
+          onupgradeneeded: null | ((event: { target: { result: typeof db } }) => void)
+          onsuccess: null | (() => void)
+          onerror: null | (() => void)
+        } = {
+          result: db,
+          error: null,
+          onupgradeneeded: null,
+          onsuccess: null,
+          onerror: null,
+        }
+        Promise.resolve().then(() => request.onsuccess?.())
+        return request
+      },
+    })
+
+    class ImmediateFileReader {
+      result = 'data:application/pdf;base64,ZG9j'
+      error = null
+      onload: null | (() => void) = null
+      onerror: null | (() => void) = null
+      readAsDataURL() {
+        this.onload?.()
+      }
+    }
+    vi.stubGlobal('FileReader', ImmediateFileReader as any)
+
+    let service = await importFreshModule()
+    let hooks = service.__chatUploadBackgroundTestHooks
+    const failingFile = {
+      size: 3,
+      type: 'application/pdf',
+      arrayBuffer: vi.fn().mockRejectedValue(new Error('arrayBuffer failed')),
+    }
+    await hooks.idbPut({
+      id: -902,
+      userId: 77,
+      roomKind: 'direct',
+      senderId: 15,
+      msgType: 'document',
+      file: failingFile as any,
+      fileName: 'broken.pdf',
+      mimeType: 'application/pdf',
+      thumbnail: '',
+      width: 0,
+      height: 0,
+      albumId: null,
+      albumIndex: 0,
+      albumSize: 1,
+      phase: 'queued',
+      progress: 0,
+      uploadedBytes: 0,
+      totalBytes: 3,
+      createdAt: '2026-05-14T02:05:00Z',
+    } as any)
+
+    expect(storedRecords).toHaveLength(1)
+  expect(storedRecords[0]?.file).toBe(failingFile)
+
+    vi.stubGlobal('indexedDB', {
+      open: () => {
+        throw new Error('open failed')
+      },
+    })
+    service = await importFreshModule()
+    hooks = service.__chatUploadBackgroundTestHooks
+    await hooks.idbPut({
+      id: -903,
+      userId: 77,
+      roomKind: 'direct',
+      senderId: 15,
+      msgType: 'image',
+      file: new Blob(['img'], { type: 'image/png' }),
+      fileName: 'open-fail.png',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 10,
+      height: 10,
+      albumId: null,
+      albumIndex: 0,
+      albumSize: 1,
+      phase: 'queued',
+      progress: 0,
+      uploadedBytes: 0,
+      totalBytes: 3,
+      createdAt: '2026-05-14T02:06:00Z',
+    } as any)
+
+    expect(warnSpy).toHaveBeenCalledWith('[uploadService] idbPut open failed:', expect.any(Error))
+    warnSpy.mockRestore()
+  })
+
+  it('handles service-worker handoff failures, malformed bridge payloads, and reclaim URL creation failures', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { records } = installIndexedDb([])
+    let messageHandler: ((event: { data: any }) => void) | null = null
+    const controller = { postMessage: vi.fn(() => { throw new Error('post failed') }) }
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 Chrome/124.0.0.0 Safari/537.36',
+    })
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      writable: true,
+      value: {
+        controller,
+        addEventListener: vi.fn((type: string, handler: (event: { data: any }) => void) => {
+          if (type === 'message') {
+            messageHandler = handler
+          }
+        }),
+      },
+    })
+
+    const service = await importFreshModule()
+    const hooks = service.__chatUploadBackgroundTestHooks
+    await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+
+    await expect(hooks.postUploadsToServiceWorker([-911])).resolves.toBe(false)
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[uploadService] failed to hand off uploads to service worker:',
+      expect.any(Error),
+    )
+
+    controller.postMessage = vi.fn()
+    const throwingUpload = {
+      id: -912,
+      userId: 77,
+      roomKind: 'direct' as const,
+      senderId: 15,
+      msgType: 'image' as const,
+      file: new Blob(['payload'], { type: 'image/png' }),
+      fileName: 'sw-pause.png',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 10,
+      height: 10,
+      albumId: null,
+      albumIndex: 0,
+      albumSize: 1,
+      phase: 'uploading' as const,
+      progress: 10,
+      uploadedBytes: 1,
+      totalBytes: 10,
+      createdAt: '2026-05-14T02:10:00Z',
+    }
+    hooks.state.xhrControllers.set(-912, { abort() { throw new Error('xhr abort failed') } } as any)
+    hooks.state.sendControllers.set(-912, { abort() { throw new Error('send abort failed') } } as any)
+    const pausePromise = hooks.pauseUploadForServiceWorker(throwingUpload)
+    hooks.state.serviceWorkerHandoffResolvers.get(-912)?.()
+    await pausePromise
+    expect(hooks.state.serviceWorkerOwnedUploads.has(-912)).toBe(true)
+
+    messageHandler?.({ data: { type: 'chat-upload:sent' } })
+    expect(hooks.state.pendingUploads.has(-999)).toBe(false)
+
+    records.set(-913, {
+      ...throwingUpload,
+      id: -913,
+      phase: 'queued',
+      localBlobUrl: undefined,
+      file: new Blob(['restored'], { type: 'image/png' }),
+    })
+    hooks.state.serviceWorkerOwnedUploads.add(-913)
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => {
+        throw new Error('url failed')
+      }),
+    })
+    await hooks.reclaimUploadsFromServiceWorker()
+    expect(hooks.state.pendingUploads.get(-913)?.localBlobUrl).toBeUndefined()
+
+    warnSpy.mockRestore()
+  })
+
+  it('reuses existing resumable album batches, resets terminal sessions, and tolerates cancel cleanup failures', async () => {
+    installIndexedDb([])
+    const service = await importFreshModule()
+    const hooks = service.__chatUploadBackgroundTestHooks
+    await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+
+    const albumUpload = {
+      id: -921,
+      userId: 77,
+      roomKind: 'group' as const,
+      senderId: 15,
+      msgType: 'image' as const,
+      file: new Blob(['album'], { type: 'image/png' }),
+      fileName: 'album.png',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 10,
+      height: 10,
+      albumId: 'existing-album',
+      albumIndex: 0,
+      albumSize: 2,
+      phase: 'queued' as const,
+      progress: 0,
+      uploadedBytes: 0,
+      totalBytes: 5,
+      createdAt: '2026-05-14T02:15:00Z',
+    }
+    hooks.ensureAlbumBatch('existing-album', 77, 2, 'group', 'existing-batch')
+    await hooks.ensureResumableUploadBatch(albumUpload)
+    expect(albumUpload.batchId).toBe('existing-batch')
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/api/chat/upload-sessions/terminal-session') && init?.method !== 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: 'failed',
+            total_bytes: 5,
+            next_offset: 0,
+            received_bytes: 0,
+          }),
+        } as Response
+      }
+      if (url.endsWith('/api/chat/upload-batches') && init?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ batch_id: 'new-batch' }),
+        } as Response
+      }
+      if (url.endsWith('/api/chat/upload-sessions') && init?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            session_id: 'new-session',
+            resume_token: 'new-resume',
+            next_offset: 2,
+            chunk_size: 5 * 1024 * 1024,
+            expires_at: '2026-05-14T03:00:00Z',
+            status: 'uploading',
+          }),
+        } as Response
+      }
+      if (url.endsWith('/api/chat/upload-batches/batch-cancel/cancel') && init?.method === 'POST') {
+        throw new Error('cancel failed')
+      }
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    const upload = {
+      id: -922,
+      userId: 77,
+      roomKind: 'direct' as const,
+      senderId: 15,
+      msgType: 'image' as const,
+      file: new Blob(['reset'], { type: 'image/png' }),
+      fileName: 'reset.png',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 12,
+      height: 12,
+      albumId: null,
+      albumIndex: 0,
+      albumSize: 1,
+      phase: 'uploading' as const,
+      progress: 40,
+      uploadedBytes: 2,
+      totalBytes: 5,
+      createdAt: '2026-05-14T02:16:00Z',
+      batchId: 'old-batch',
+      sessionId: 'terminal-session',
+      resumeToken: 'old-resume',
+      nextOffset: 2,
+    }
+
+    await hooks.ensureResumableUploadSession(upload)
+    expect(upload.batchId).toBe('new-batch')
+    expect(upload.sessionId).toBe('new-session')
+    expect(upload.resumeToken).toBe('new-resume')
+
+    await expect(hooks.finalizeResumableUploadSession({ ...upload, sessionId: undefined })).rejects.toThrow('Missing upload session id')
+    await expect(hooks.cancelServerUploadState({ ...upload, batchId: 'batch-cancel', sessionId: undefined })).resolves.toBeUndefined()
+  })
+
+  it('marks single resumable commits failed on empty payloads and send timeouts', async () => {
+    installIndexedDb([])
+    const service = await importFreshModule()
+    const hooks = service.__chatUploadBackgroundTestHooks
+    const events: any[] = []
+    service.subscribeToUploads((event) => events.push(event))
+    await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+
+    const makeUpload = (id: number, batchId: string) => ({
+      id,
+      userId: 77,
+      roomKind: 'direct' as const,
+      senderId: 15,
+      msgType: 'image' as const,
+      file: new Blob(['payload'], { type: 'image/png' }),
+      fileName: `single-${Math.abs(id)}.png`,
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 10,
+      height: 10,
+      albumId: null,
+      albumIndex: 0,
+      albumSize: 1,
+      phase: 'uploaded' as const,
+      progress: 100,
+      uploadedBytes: 7,
+      totalBytes: 7,
+      batchId,
+      fileId: `file-${Math.abs(id)}`,
+      createdAt: '2026-05-14T02:20:00Z',
+    })
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/api/chat/upload-batches/empty-commit/commit') && init?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ messages: [] }),
+        } as Response
+      }
+      if (url.endsWith('/api/chat/upload-batches/timeout-commit/commit') && init?.method === 'POST') {
+        return await new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted by timeout signal')))
+        })
+      }
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    const emptyUpload = makeUpload(-931, 'empty-commit')
+    hooks.state.pendingUploads.set(emptyUpload.id, emptyUpload)
+    await hooks.commitSingleUploadBatch(emptyUpload)
+    expect(emptyUpload.phase).toBe('failed')
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error',
+      optimisticId: -931,
+      errorMessage: 'پیام نهایی از سرور دریافت نشد',
+    }))
+
+    const timeoutUpload = { ...makeUpload(-932, 'timeout-commit'), sendRetryCount: 999 }
+    hooks.state.pendingUploads.set(timeoutUpload.id, timeoutUpload)
+    const timeoutPromise = hooks.commitSingleUploadBatch(timeoutUpload)
+    await vi.runAllTimersAsync()
+    await timeoutPromise
+    expect(timeoutUpload.phase).toBe('failed')
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error',
+      optimisticId: -932,
+      errorMessage: 'Network Error (send timeout)',
+    }))
+  })
+
+  it('covers legacy send parse-failure, cancel, and timeout cleanup branches', async () => {
+    installIndexedDb([])
+    const service = await importFreshModule()
+    const hooks = service.__chatUploadBackgroundTestHooks
+    const events: any[] = []
+    service.subscribeToUploads((event) => events.push(event))
+    await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+
+    const makeLegacyUpload = (id: number) => ({
+      id,
+      userId: -77,
+      roomKind: 'channel' as const,
+      senderId: 15,
+      msgType: 'image' as const,
+      file: new Blob(['payload'], { type: 'image/png' }),
+      fileName: `legacy-${Math.abs(id)}.png`,
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 120,
+      height: 80,
+      albumId: null,
+      albumIndex: 0,
+      albumSize: 1,
+      phase: 'uploaded' as const,
+      progress: 100,
+      uploadedBytes: 7,
+      totalBytes: 7,
+      fileId: `legacy-file-${Math.abs(id)}`,
+      createdAt: '2026-05-14T02:25:00Z',
+    })
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/api/chat/rooms/77/send')) {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => {
+            throw new Error('broken json')
+          },
+        } as Response
+      }
+      if (url.endsWith('/api/chat/rooms/78/send')) {
+        hooks.state.abortFlags.add(-942)
+        throw new Error('network down')
+      }
+      if (url.endsWith('/api/chat/rooms/79/send')) {
+        return await new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('legacy timeout abort')))
+        })
+      }
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    const parseFailUpload = makeLegacyUpload(-941)
+    parseFailUpload.sendRetryCount = 999
+    hooks.state.pendingUploads.set(parseFailUpload.id, parseFailUpload)
+    await hooks.sendOneLegacy(parseFailUpload)
+    expect(parseFailUpload.phase).toBe('failed')
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error',
+      optimisticId: -941,
+      errorMessage: 'خطای ارسال (500)',
+    }))
+
+    const cancelledUpload = {
+      ...makeLegacyUpload(-942),
+      userId: -78,
+      albumId: 'legacy-cancel-album',
+    }
+    hooks.state.pendingUploads.set(cancelledUpload.id, cancelledUpload)
+    hooks.state.albumBatches.set('legacy-cancel-album', {
+      albumId: 'legacy-cancel-album',
+      userId: -78,
+      roomKind: 'channel',
+      expectedCount: 1,
+      optimisticIds: new Set([cancelledUpload.id]),
+      commitRetryCount: 0,
+      flushing: false,
+    })
+    await hooks.sendOneLegacy(cancelledUpload)
+    expect(events).toContainEqual(expect.objectContaining({ type: 'cancelled', optimisticId: -942 }))
+    expect(hooks.state.pendingUploads.has(-942)).toBe(false)
+
+    const timeoutUpload = { ...makeLegacyUpload(-943), userId: -79, sendRetryCount: 999 }
+    hooks.state.pendingUploads.set(timeoutUpload.id, timeoutUpload)
+    const timeoutPromise = hooks.sendOneLegacy(timeoutUpload)
+    await vi.runAllTimersAsync()
+    await timeoutPromise
+    expect(timeoutUpload.phase).toBe('failed')
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error',
+      optimisticId: -943,
+      errorMessage: 'Network Error (send timeout)',
+    }))
+  })
+
+  it('resumes session-backed foreground uploads with preserved progress and flushes uploaded albums', async () => {
+    installIndexedDb([])
+    const service = await importFreshModule()
+    const hooks = service.__chatUploadBackgroundTestHooks
+    const events: any[] = []
+    service.subscribeToUploads((event) => events.push(event))
+    await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/activity')) {
+        return { ok: true, status: 204, json: async () => ({}) } as Response
+      }
+      if (url.endsWith('/api/chat/upload-sessions/foreground-session') && init?.method !== 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: 'ready',
+            total_bytes: 10,
+            next_offset: 10,
+            received_bytes: 10,
+            final_chat_file_id: 'foreground-file',
+            preview_metadata: {
+              thumbnail: 'foreground-thumb',
+              width: 100,
+              height: 80,
+            },
+          }),
+        } as Response
+      }
+      if (url.endsWith('/api/chat/upload-batches/foreground-batch/commit') && init?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            messages: [
+              {
+                id: 9931,
+                sender_id: 15,
+                receiver_id: 77,
+                content: JSON.stringify({ file_id: 'foreground-file' }),
+                message_type: 'image',
+                is_read: false,
+                created_at: '2026-05-14T02:31:00Z',
+              },
+            ],
+          }),
+        } as Response
+      }
+      if (url.endsWith('/api/chat/upload-batches/foreground-album-batch/commit') && init?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            messages: [
+              {
+                id: 9932,
+                sender_id: 15,
+                receiver_id: 55,
+                content: JSON.stringify({ file_id: 'album-file', album_index: 0 }),
+                message_type: 'image',
+                is_read: false,
+                created_at: '2026-05-14T02:31:30Z',
+              },
+            ],
+          }),
+        } as Response
+      }
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    const uploading = {
+      id: -951,
+      userId: 77,
+      roomKind: 'direct' as const,
+      senderId: 15,
+      msgType: 'image' as const,
+      file: new Blob(['1234567890'], { type: 'image/png' }),
+      fileName: 'foreground.png',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 0,
+      height: 0,
+      albumId: null,
+      albumIndex: 0,
+      albumSize: 1,
+      phase: 'uploading' as const,
+      progress: 10,
+      uploadedBytes: 1,
+      totalBytes: 10,
+      batchId: 'foreground-batch',
+      sessionId: 'foreground-session',
+      resumeToken: 'foreground-token',
+      nextOffset: 4,
+      createdAt: '2026-05-14T02:30:00Z',
+    }
+    const uploadedAlbum = {
+      id: -952,
+      userId: -55,
+      roomKind: 'group' as const,
+      senderId: 15,
+      msgType: 'image' as const,
+      file: new Blob(['album'], { type: 'image/png' }),
+      fileName: 'foreground-album.png',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 20,
+      height: 20,
+      albumId: 'foreground-album',
+      albumIndex: 0,
+      albumSize: 1,
+      phase: 'uploaded' as const,
+      progress: 100,
+      uploadedBytes: 5,
+      totalBytes: 5,
+      batchId: 'foreground-album-batch',
+      fileId: 'album-file',
+      createdAt: '2026-05-14T02:30:30Z',
+    }
+    hooks.state.pendingUploads.set(uploading.id, uploading)
+    hooks.state.pendingUploads.set(uploadedAlbum.id, uploadedAlbum)
+    hooks.ensureAlbumBatch('foreground-album', -55, 1, 'group', 'foreground-album-batch').optimisticIds.add(uploadedAlbum.id)
+
+    await hooks.resumePendingUploadsAfterForegroundWake()
+    expect(uploading.totalBytes).toBe(uploading.file.size)
+    expect(uploading.uploadedBytes).toBe(4)
+    expect(uploading.progress).toBe(40)
+    await Promise.resolve()
+    await vi.runAllTimersAsync()
+
+    expect(events).toContainEqual(expect.objectContaining({ type: 'sent', optimisticId: -952 }))
+  })
+
+  it('reuses the existing init promise on repeat init calls and tolerates resume failures', async () => {
+    const service = await importFreshModule()
+
+    const firstInit = service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+    const secondInit = service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+    expect(secondInit).toBe(firstInit)
+    await firstInit
+    await secondInit
+  })
+
+  it('resumes uploaded albums during init even when preview URL recreation fails', async () => {
+    installIndexedDb([
+      {
+        id: -961,
+        userId: -55,
+        roomKind: 'group',
+        senderId: 15,
+        msgType: 'image',
+        fileName: 'init-album.png',
+        mimeType: 'image/png',
+        thumbnail: '',
+        width: 50,
+        height: 40,
+        albumId: 'init-album',
+        albumIndex: 0,
+        albumSize: 1,
+        phase: 'uploaded',
+        progress: 100,
+        uploadedBytes: 5,
+        totalBytes: 5,
+        batchId: 'init-album-batch',
+        fileId: 'init-album-file',
+        createdAt: '2026-05-14T02:40:00Z',
+        file: new Blob(['album'], { type: 'image/png' }),
+      },
+    ])
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => {
+        throw new Error('createObjectURL failed')
+      }),
+    })
+
+    const service = await importFreshModule()
+    const events: any[] = []
+    service.subscribeToUploads((event) => events.push(event))
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/activity')) {
+        return { ok: true, status: 204, json: async () => ({}) } as Response
+      }
+      if (url.endsWith('/api/chat/upload-batches/init-album-batch/commit') && init?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            messages: [
+              {
+                id: 9961,
+                sender_id: 15,
+                receiver_id: 55,
+                content: JSON.stringify({ file_id: 'init-album-file', album_index: 0 }),
+                message_type: 'image',
+                is_read: false,
+                created_at: '2026-05-14T02:41:00Z',
+              },
+            ],
+          }),
+        } as Response
+      }
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+    await service.waitForChatUploadBackgroundReady()
+    await vi.runAllTimersAsync()
+
+    expect(events.map((event) => event.type)).toEqual(['added', 'sent'])
+    expect(service.getPendingForUser(-55)).toEqual([])
+  })
 })

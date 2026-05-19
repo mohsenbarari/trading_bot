@@ -23,6 +23,9 @@ describe('messageReactions', () => {
 
     window.localStorage.setItem('chat_recent_message_reactions', '{not-json')
     expect(getRecentMessageReactions()).toEqual([])
+
+    window.localStorage.setItem('chat_recent_message_reactions', JSON.stringify({ emoji: '🔥' }))
+    expect(getRecentMessageReactions()).toEqual([])
   })
 
   it('records supported reactions once and ignores unsupported entries', () => {

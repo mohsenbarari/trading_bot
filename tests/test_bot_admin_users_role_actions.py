@@ -3,6 +3,8 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from aiogram.exceptions import TelegramBadRequest
+
 from bot.handlers.admin_users import handle_set_user_role, handle_user_edit_role
 from core.enums import UserRole
 
@@ -31,6 +33,36 @@ class FakeSession:
 
 
 class BotAdminUsersRoleActionsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_role_handlers_ignore_non_super_admin_and_swallow_edit_failures(self):
+        callback = SimpleNamespace(
+            data="user_edit_role_9",
+            message=SimpleNamespace(edit_text=AsyncMock()),
+            answer=AsyncMock(),
+        )
+        await handle_user_edit_role(callback, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER))
+        callback.message.edit_text.assert_not_awaited()
+        callback.answer.assert_not_awaited()
+
+        target_user = SimpleNamespace(
+            id=9,
+            role=UserRole.STANDARD,
+            trading_restricted_until=None,
+            max_daily_trades=None,
+            max_active_commodities=None,
+            max_daily_requests=None,
+        )
+        failing_callback = SimpleNamespace(
+            data="set_user_role_9_STANDARD",
+            message=SimpleNamespace(edit_text=AsyncMock(side_effect=TelegramBadRequest(method='editMessageText', message='unchanged'))),
+            answer=AsyncMock(),
+        )
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(target_user)), patch(
+            "bot.handlers.admin_users.get_user_profile_text", new=AsyncMock(return_value="PROFILE")
+        ), patch("bot.handlers.admin_users.get_user_profile_return_keyboard", return_value="KB"):
+            await handle_set_user_role(failing_callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+
+        failing_callback.answer.assert_awaited_once_with("✅ نقش کاربر تغییر کرد.")
+
     async def test_handle_user_edit_role_shows_prompt(self):
         callback = SimpleNamespace(
             data="user_edit_role_9",

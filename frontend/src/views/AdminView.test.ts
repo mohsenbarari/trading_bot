@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { nextTick, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AdminView from './AdminView.vue'
 
@@ -34,7 +35,7 @@ vi.mock('../composables/useBackButton', () => ({
 
 describe('AdminView.vue', () => {
   beforeEach(() => {
-    adminViewMocks.route.query = {}
+    adminViewMocks.route.query = reactive({}) as Record<string, string>
     adminViewMocks.routerPushMock.mockReset()
     adminViewMocks.routerReplaceMock.mockReset()
     adminViewMocks.pushBackStateMock.mockReset()
@@ -248,5 +249,46 @@ describe('AdminView.vue', () => {
     wrapper.unmount()
 
     expect(adminViewMocks.clearBackStackMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('reacts to route query changes after mount and executes stored back callbacks', async () => {
+    adminViewMocks.apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 92, account_name: 'route-reactive-user' }),
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    adminViewMocks.route.query.section = 'settings'
+    adminViewMocks.route.query.user_id = '92'
+    await nextTick()
+    await flushPromises()
+    expect(adminViewMocks.apiFetchMock).not.toHaveBeenCalled()
+
+    adminViewMocks.route.query.section = 'user_profile'
+    await nextTick()
+    await flushPromises()
+    expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/92')
+    expect(wrapper.get('.user-profile-stub').text()).toBe('route-reactive-user')
+
+    const vm = wrapper.vm as any
+    vm.handleNavigate('settings')
+    await flushPromises()
+    const settingsBack = adminViewMocks.pushBackStateMock.mock.lastCall?.[0]
+    expect(typeof settingsBack).toBe('function')
+    settingsBack()
+    await flushPromises()
+    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+
+    await wrapper.findAll('.admin-action-btn.secondary')[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.get('.user-manager-open-profile').trigger('click')
+    await flushPromises()
+    const profileBack = adminViewMocks.pushBackStateMock.mock.lastCall?.[0]
+    expect(typeof profileBack).toBe('function')
+    profileBack()
+    await flushPromises()
+    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
   })
 })

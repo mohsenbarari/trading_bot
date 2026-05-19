@@ -242,6 +242,37 @@ describe('TradingView.vue', () => {
     wrapper.unmount()
   })
 
+  it('surfaces loader errors for each tab and logs commodity/settings fetch failures', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    tradingViewMocks.apiFetchJsonMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/offers/' && (!options?.method || options.method === 'GET')) throw new Error('offers failed')
+      if (path === '/api/offers/my?since_hours=2') throw new Error('my offers failed')
+      if (path === '/api/trades/my') throw new Error('my trades failed')
+      if (path === '/api/commodities/') throw new Error('commodities failed')
+      if (path === '/api/trading-settings/') throw new Error('settings failed')
+      return null
+    })
+
+    const wrapper = await mountTradingView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('خطا در دریافت لیست لفظ‌ها')
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load commodities', expect.any(Error))
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load settings', expect.any(Error))
+
+    const tabs = wrapper.findAll('.tabs button')
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('خطا در دریافت لفظ‌های من')
+
+    await tabs[2]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('خطا در دریافت صورت معاملات')
+
+    consoleErrorSpy.mockRestore()
+    wrapper.unmount()
+  })
+
   it('keeps offer creation text-only and does not render wizard actions', async () => {
     const wrapper = await mountTradingView()
     await flushPromises()
@@ -417,6 +448,28 @@ describe('TradingView.vue', () => {
     repeatedWrapper.unmount()
   })
 
+  it('shows empty states for initial my-offers and my-trades tabs', async () => {
+    tradingViewMocks.apiFetchJsonMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/offers/' && (!options?.method || options.method === 'GET')) return offersFixture
+      if (path === '/api/offers/my?since_hours=2') return []
+      if (path === '/api/trades/my') return []
+      if (path === '/api/commodities/') return commoditiesFixture
+      if (path === '/api/trading-settings/') return tradingSettingsFixture
+      return null
+    })
+
+    const myOffersWrapper = await mountTradingView({ initialTab: 'my_offers' })
+    await flushPromises()
+    expect(myOffersWrapper.text()).toContain('شما هیچ لفظی در ۲ ساعت اخیر نداشته‌اید.')
+    myOffersWrapper.unmount()
+
+    const myTradesWrapper = await mountTradingView({ initialTab: 'my_trades' })
+    await flushPromises()
+    expect(tradingViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/trades/my', {})
+    expect(myTradesWrapper.text()).toContain('هنوز هیچ معامله‌ای انجام نداده‌اید.')
+    myTradesWrapper.unmount()
+  })
+
   it('shows a lot suggestion and can retry with the suggested amount', async () => {
     tradingViewMocks.apiFetchMock
       .mockResolvedValueOnce({
@@ -464,6 +517,26 @@ describe('TradingView.vue', () => {
     }))
     expect(wrapper.find('.trade-lot-suggestion-alert-stub').exists()).toBe(false)
 
+    wrapper.unmount()
+  })
+
+  it('falls back when trade error payloads cannot be parsed', async () => {
+    tradingViewMocks.apiFetchMock.mockResolvedValueOnce({
+      ok: false,
+      json: async () => {
+        throw new Error('bad json')
+      },
+    })
+
+    const wrapper = await mountTradingView()
+    await flushPromises()
+
+    await wrapper.find('.trade-btn.full-width').trigger('click')
+    await flushPromises()
+    await wrapper.find('.confirm-trade-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('خطا در انجام معامله')
     wrapper.unmount()
   })
 
@@ -611,6 +684,7 @@ describe('TradingView.vue', () => {
       lot_sizes: [5, 15],
       remaining_quantity: 20,
       quantity: 20,
+      expires_at_ts: Math.floor(Date.now() / 1000) + 2,
     }]
     tradingViewMocks.apiFetchJsonMock.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/api/offers/' && (!options?.method || options.method === 'GET')) return offersState
@@ -632,9 +706,14 @@ describe('TradingView.vue', () => {
     })
 
     const wrapper = await mountTradingView()
+  const handlers = new Map<string, (payload: unknown) => void>(tradingViewMocks.wsOnMock.mock.calls as [string, (payload: unknown) => void][]) 
     await flushPromises()
     await wrapper.findAll('.trade-btn')[0]!.trigger('click')
     await wrapper.find('.confirm-trade-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.trade-lot-summary').text()).toBe('15 + 5')
+
+    handlers.get('offer:updated')?.({ id: 101 })
     await flushPromises()
     expect(wrapper.find('.trade-lot-summary').text()).toBe('15 + 5')
 
@@ -645,10 +724,51 @@ describe('TradingView.vue', () => {
       quantity: 20,
       lot_sizes: [4, 6],
     }]
-    const handlers = new Map<string, (payload: unknown) => void>(tradingViewMocks.wsOnMock.mock.calls as [string, (payload: unknown) => void][]) 
     handlers.get('offer:updated')?.({ id: 101 })
     await flushPromises()
     expect(wrapper.find('.trade-lot-summary').text()).toBe('10 + 6 + 4')
+
+    offersState = [{
+      ...offersState[0]!,
+      remaining_quantity: 0,
+      quantity: 20,
+      lot_sizes: [5, 15],
+    }]
+    handlers.get('offer:updated')?.({ id: 101 })
+    await flushPromises()
+    expect(wrapper.find('.trade-lot-suggestion-alert-stub').exists()).toBe(false)
+
+    tradingViewMocks.apiFetchMock.mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({
+        error_code: 'TRADE_LOT_UNAVAILABLE',
+        offer_id: 101,
+        offer_type: 'sell',
+        commodity_name: 'سکه',
+        price: 123456,
+        remaining_quantity: 20,
+        available_lots: [5, 15],
+      }),
+    })
+    offersState = [{
+      ...offersFixture[0],
+      is_wholesale: false,
+      lot_sizes: [5, 15],
+      remaining_quantity: 20,
+      quantity: 20,
+      expires_at_ts: Math.floor(Date.now() / 1000) + 1,
+    }]
+    handlers.get('offer:updated')?.({ id: 101 })
+    await flushPromises()
+    await wrapper.findAll('.trade-btn')[0]!.trigger('click')
+    await wrapper.find('.confirm-trade-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.trade-lot-suggestion-alert-stub').exists()).toBe(true)
+
+    vi.advanceTimersByTime(2000)
+    await flushPromises()
+    expect(wrapper.find('.trade-lot-suggestion-alert-stub').exists()).toBe(false)
+    expect(wrapper.findAll('.offer-card')).toHaveLength(0)
 
     offersState = []
     handlers.get('offer:updated')?.({ id: 101 })

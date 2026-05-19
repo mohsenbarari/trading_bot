@@ -69,6 +69,10 @@ class BotStartRespondTokenGuardTests(unittest.IsolatedAsyncioTestCase):
             await handle_start_with_token(message, SimpleNamespace(args="respond_5"), state=SimpleNamespace(), user=user)
         self.assertIn("لفظ خودتان", message.answer.await_args.args[0])
 
+        message = make_message()
+        await handle_start_with_token(message, SimpleNamespace(args="respond_bad"), state=SimpleNamespace(), user=user)
+        self.assertIn("خطا در پردازش درخواست", message.answer.await_args.args[0])
+
 
 if __name__ == "__main__":
     unittest.main()

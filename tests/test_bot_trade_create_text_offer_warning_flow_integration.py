@@ -73,6 +73,39 @@ class FakeState:
 
 
 class BotTradeCreateTextOfferWarningFlowIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fake_session_helpers_cover_existing_ids_and_empty_get(self):
+        session = FakeSession()
+        already_identified = SimpleNamespace(id=703)
+        session.add(already_identified)
+        self.assertEqual(already_identified.id, 703)
+        self.assertIsNone(await session.commit())
+        self.assertIsNone(await session.refresh(already_identified))
+        offered = SimpleNamespace(id=None)
+        session.add(offered)
+        self.assertEqual(offered.id, 181)
+        self.assertIs(await session.get(type("Offer", (), {}), 1), already_identified)
+        self.assertEqual((await session.get(type("User", (), {}), 6)).id, 6)
+        self.assertIsNone(await session.get(type("Other", (), {}), 1))
+
+        context = FakeSessionContext(session)
+        self.assertIs(await context.__aenter__(), session)
+        self.assertFalse(await context.__aexit__(None, None, None))
+
+        create_session = FakeSession()
+        created_offer = SimpleNamespace(id=None)
+        create_session.add(created_offer)
+
+        async def update_get(model, key):
+            if create_session.added and model.__name__ == "Offer":
+                return create_session.added[0]
+            if model.__name__ == "User":
+                return SimpleNamespace(id=key)
+            return None
+
+        self.assertIs(await update_get(type("Offer", (), {}), 1), created_offer)
+        self.assertEqual((await update_get(type("User", (), {}), 8)).id, 8)
+        self.assertIsNone(await update_get(type("Other", (), {}), 1))
+
     def make_warning_payload(self):
         return {
             "error_code": "OFFER_PRICE_WARNING",
@@ -124,6 +157,7 @@ class BotTradeCreateTextOfferWarningFlowIntegrationTests(unittest.IsolatedAsynci
             return None
 
         update_session.get = update_get
+        self.assertIsNone(await update_session.get(type("Other", (), {}), 5))
 
         with patch("bot.utils.offer_parser.parse_offer_text", new=AsyncMock(return_value=(parsed_offer, None))), patch(
             "core.trading_settings.get_trading_settings",

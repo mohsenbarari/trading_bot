@@ -105,4 +105,26 @@ describe('ProfileView.vue', () => {
     })
     expect(routerPushMock).toHaveBeenNthCalledWith(3, '/')
   })
+
+  it('keeps the loading fallback and logs when loading the current profile fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    apiFetchMock.mockRejectedValue(new Error('profile fetch failed'))
+
+    const wrapper = mount(ProfileView, {
+      global: {
+        stubs: {
+          PublicProfile: {
+            template: '<div class="public-profile-stub" />',
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.public-profile-stub').exists()).toBe(false)
+    expect(wrapper.find('.loading-container').exists()).toBe(true)
+    expect(errorSpy).toHaveBeenCalledWith(expect.any(Error))
+
+    errorSpy.mockRestore()
+  })
 })

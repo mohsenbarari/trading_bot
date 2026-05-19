@@ -62,4 +62,39 @@ describe('useUserProfileTiming', () => {
 
     wrapper.unmount()
   })
+
+  it('formats day-long restrictions and clears invalid or empty timing state safely', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-08T08:00:00.000Z'))
+
+    const wrapper = mount(TimingHarness, {
+      props: {
+        user: {
+          trading_restricted_until: '2026-05-10T10:02:00.000Z',
+        },
+      },
+    })
+
+    await nextTick()
+    expect((wrapper.vm as any).countdownRestriction).toBe('2 روز 2 ساعت 2 دقیقه')
+    expect((wrapper.vm as any).countdownLimitation).toBe('')
+
+    await wrapper.setProps({
+      user: {
+        trading_restricted_until: 'invalid-date',
+        limitations_expire_at: 'invalid-date',
+      },
+    })
+    await nextTick()
+    expect((wrapper.vm as any).countdownRestriction).toBe('')
+    expect((wrapper.vm as any).countdownLimitation).toBe('')
+
+    await wrapper.setProps({ user: null })
+    await nextTick()
+    expect((wrapper.vm as any).countdownRestriction).toBe('')
+    expect((wrapper.vm as any).countdownLimitation).toBe('')
+    expect((wrapper.vm as any).toEnglishDigits('')).toBe('')
+
+    wrapper.unmount()
+  })
 })

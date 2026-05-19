@@ -30,6 +30,14 @@ class FakeDB:
 
 
 class SyncRouterReceiveSettingsCacheTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fake_db_helper_paths(self):
+        db = FakeDB()
+        async with db.begin_nested() as nested:
+            self.assertIsNone(nested)
+
+        with self.assertRaisesRegex(AssertionError, "rollback should not be called"):
+            await db.rollback()
+
     async def test_receive_sync_data_refreshes_trading_settings_cache(self):
         db = FakeDB()
         items = [{"table": "trading_settings", "operation": "INSERT", "id": 1, "data": {"key": "x", "value": "1"}}]

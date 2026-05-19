@@ -41,6 +41,68 @@ class FakeSession:
 
 
 class BotAdminUsersEntryNavigationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_entry_handlers_ignore_non_admins_and_protect_admin_targets(self):
+        message = SimpleNamespace(
+            answer=AsyncMock(),
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=1),
+        )
+        state = SimpleNamespace(update_data=AsyncMock(), clear=AsyncMock(), get_data=AsyncMock(return_value={}))
+
+        await handle_users_menu(message, user=None, state=state)
+        message.answer.assert_not_called()
+
+        with patch("bot.handlers.admin_users.delete_user_message", new=AsyncMock()) as delete_mock, patch(
+            "bot.handlers.admin_users.show_users_list", new=AsyncMock()
+        ) as show_mock:
+            await handle_users_list_command(message, user=SimpleNamespace(role=UserRole.STANDARD), state=state)
+        delete_mock.assert_not_awaited()
+        show_mock.assert_not_awaited()
+
+        callback = SimpleNamespace(
+            data="users_page_2",
+            bot=SimpleNamespace(),
+            message=SimpleNamespace(chat=SimpleNamespace(id=2), message_id=88),
+            answer=AsyncMock(),
+        )
+        with patch("bot.handlers.admin_users.show_users_list", new=AsyncMock()) as show_mock:
+            await handle_users_pagination(callback, user=SimpleNamespace(role=UserRole.STANDARD), state=state)
+        show_mock.assert_not_awaited()
+        callback.answer.assert_not_awaited()
+
+        target_user = SimpleNamespace(
+            id=9,
+            role=UserRole.SUPER_ADMIN,
+            trading_restricted_until=None,
+            max_daily_trades=None,
+            max_active_commodities=None,
+            max_daily_requests=None,
+        )
+        protected_callback = SimpleNamespace(
+            data="user_profile_9",
+            message=SimpleNamespace(reply_markup=None, edit_text=AsyncMock(), chat=SimpleNamespace(id=5)),
+            answer=AsyncMock(),
+        )
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(target_user)):
+            await handle_view_user_profile(
+                protected_callback,
+                user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER),
+                state=SimpleNamespace(),
+            )
+        protected_callback.answer.assert_awaited_once_with("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+        protected_callback.message.edit_text.assert_not_awaited()
+
+        denied_callback = SimpleNamespace(
+            data="user_profile_9",
+            message=SimpleNamespace(reply_markup=None, edit_text=AsyncMock(), chat=SimpleNamespace(id=5)),
+            answer=AsyncMock(),
+        )
+        await handle_view_user_profile(denied_callback, user=None, state=SimpleNamespace())
+        denied_callback.answer.assert_not_awaited()
+
+        await handle_back_to_admin(message, user=None, state=state)
+        self.assertEqual(message.answer.await_count, 0)
+
     async def test_menu_list_and_pagination_handlers_delegate_correctly(self):
         message = SimpleNamespace(
             answer=AsyncMock(return_value=SimpleNamespace(message_id=41)),
@@ -104,6 +166,20 @@ class BotAdminUsersEntryNavigationTests(unittest.IsolatedAsyncioTestCase):
         keyboard_mock.assert_called_once_with(user_id=9, back_to_page=4, is_restricted=True, has_limitations=True)
         message.edit_text.assert_awaited_once_with("PROFILE", reply_markup="KB", parse_mode="Markdown")
         callback.answer.assert_awaited_once()
+
+        broken_reply_markup = SimpleNamespace(inline_keyboard=object())
+        broken_message = SimpleNamespace(reply_markup=broken_reply_markup, edit_text=AsyncMock(), chat=SimpleNamespace(id=6))
+        broken_callback = SimpleNamespace(
+            data="user_profile_9",
+            message=broken_message,
+            answer=AsyncMock(),
+        )
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(target_user)), patch(
+            "bot.handlers.admin_users.get_user_profile_text", new=AsyncMock(return_value="PROFILE")
+        ), patch("bot.handlers.admin_users.get_user_profile_return_keyboard", return_value="KB") as keyboard_mock:
+            await handle_view_user_profile(broken_callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=SimpleNamespace())
+        keyboard_mock.assert_called_once_with(user_id=9, back_to_page=1, is_restricted=True, has_limitations=True)
+        broken_callback.answer.assert_awaited_once()
 
     async def test_handle_back_to_admin_clears_state_and_schedules_anchor_cleanup(self):
         message = SimpleNamespace(

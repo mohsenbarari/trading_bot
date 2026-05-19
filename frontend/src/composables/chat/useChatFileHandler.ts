@@ -100,14 +100,6 @@ async function readCachedEntry(fileId: string): Promise<CachedFileEntry | null> 
     }
 }
 
-function navHasShareFiles(): boolean {
-    const navAny = navigator as Navigator & {
-        canShare?: (data: ShareData) => boolean
-        share?: (data: ShareData) => Promise<void>
-    }
-    return typeof navAny.share === 'function' && typeof navAny.canShare === 'function'
-}
-
 // Strict whitelist: only mime types Chrome/Safari actually render inline via
 // blob: URL without diverting to the OS download manager. Text formats
 // (text/plain, json, csv, xml, html...) are INTENTIONALLY EXCLUDED — Chrome
@@ -213,12 +205,6 @@ function shareBlobSync(entry: CachedFileEntry, fallbackName: string): Promise<bo
         })
 }
 
-async function shareBlob(entry: CachedFileEntry, fallbackName: string): Promise<boolean> {
-    const result = shareBlobSync(entry, fallbackName)
-    if (result === false) return false
-    return result
-}
-
 function openBlobInTab(blob: Blob, fileName: string): boolean {
     // Use a programmatic anchor click WITHOUT the `download` attribute and
     // WITHOUT `rel=noopener` — both have been observed to make Chrome treat
@@ -262,7 +248,7 @@ function triggerAnchorDownload(blob: Blob, fileName: string) {
     }, 4000)
 }
 
-async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode: 'open' | 'share' | 'download' = 'open'): Promise<void> {
+async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode: 'open' | 'download' = 'open'): Promise<void> {
     const displayName = entry.fileName || fileName || 'file'
     const mimeType = entry.mimeType || entry.blob.type || ''
     diagLog('present mode=' + mode, 'name=' + displayName, 'mime=' + mimeType, 'inline=' + isInlineViewable(mimeType, displayName))
@@ -270,25 +256,6 @@ async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode:
     if (mode === 'download') {
         // Explicit save-to-disk action.
         triggerAnchorDownload(entry.blob, displayName)
-        return
-    }
-
-    if (mode === 'share') {
-        // Share button: invoke navigator.share SYNCHRONOUSLY (preserve user
-        // activation) so the OS share sheet appears with the cached file.
-        // We deliberately do NOT fall back to anchor download here — per
-        // product spec the share action must only ever open the share sheet,
-        // never trigger an unexpected device download. If the platform's
-        // share API rejects, we silently log and bail.
-        const result = shareBlobSync(entry, displayName)
-        if (result === false) {
-            console.info('[chat-file] share unavailable on this device — bailing without fallback')
-            return
-        }
-        const shared = await result
-        if (!shared) {
-            console.info('[chat-file] share() rejected — bailing without fallback')
-        }
         return
     }
 

@@ -57,6 +57,30 @@ class BotTradeHistoryGeneratePdfTests(unittest.IsolatedAsyncioTestCase):
                 self.args = args
                 self.kwargs = kwargs
 
+        dummy_doc = DummyDoc("/tmp/demo.pdf")
+        dummy_doc.build([])
+        self.assertTrue(os.path.exists(dummy_doc.filename))
+        os.remove(dummy_doc.filename)
+
+        dummy_table = DummyTable([[1]], colWidths=[42])
+        dummy_table.setStyle([("LINEBELOW", 0, 0, -1, -1)])
+        self.assertEqual(dummy_table.colWidths, [42])
+        self.assertTrue(dummy_table.style)
+
+        dummy_paragraph = DummyParagraph("text", "style")
+        self.assertEqual(dummy_paragraph.text, "text")
+        self.assertEqual(dummy_paragraph.style, "style")
+
+        dummy_spacer = DummySpacer(1, 2)
+        self.assertEqual(dummy_spacer.args, (1, 2))
+
+        dummy_style = DummyStyle("name", fontName="Vazir")
+        self.assertEqual(dummy_style.args, ("name",))
+        self.assertEqual(dummy_style.kwargs["fontName"], "Vazir")
+
+        dummy_font = DummyTTFont("Vazir", "fonts/Vazir.ttf")
+        self.assertEqual(dummy_font.args, ("Vazir", "fonts/Vazir.ttf"))
+
         reportlab_mod = ModuleType("reportlab")
         lib_mod = ModuleType("reportlab.lib")
         colors_mod = ModuleType("reportlab.lib.colors")

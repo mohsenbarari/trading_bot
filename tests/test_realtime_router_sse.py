@@ -65,6 +65,34 @@ class RealtimeRouterSseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.headers["Cache-Control"], "no-cache")
         self.assertEqual(response.headers["X-Accel-Buffering"], "no")
 
+    async def test_event_generator_tolerates_invalid_json_and_emits_heartbeat(self):
+        pubsub = FakePubSub([
+            {"type": "message", "channel": b"events:offer:updated", "data": b"not-json"},
+        ])
+
+        class FakeLoop:
+            def __init__(self):
+                self.values = iter([0, 20])
+
+            def time(self):
+                return next(self.values)
+
+        async def fake_sleep(_delay):
+            raise asyncio.CancelledError()
+
+        with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(pubsub)), patch(
+            "api.routers.realtime.asyncio.get_event_loop", return_value=FakeLoop()
+        ), patch("api.routers.realtime.asyncio.sleep", side_effect=fake_sleep):
+            generator = event_generator(user_id=5)
+            first = await generator.__anext__()
+            second = await generator.__anext__()
+            with self.assertRaises(asyncio.CancelledError):
+                await generator.__anext__()
+
+        self.assertIn("event: offer:updated", first)
+        self.assertIn("data: not-json", first)
+        self.assertEqual(second, "event: heartbeat\ndata: {}\n\n")
+
 
 if __name__ == "__main__":
     unittest.main()

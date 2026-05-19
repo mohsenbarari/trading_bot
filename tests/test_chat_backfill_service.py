@@ -61,6 +61,46 @@ class ChatBackfillHelperTests(unittest.TestCase):
 
 
 class BackfillDirectChatsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_helper_queries_load_existing_chat_members_and_unlinked_counts(self):
+        existing_chat_result = Mock()
+        existing_chat_result.scalar_one_or_none.return_value = 44
+        member_a = SimpleNamespace(user_id=10)
+        member_b = SimpleNamespace(user_id=10)
+        member_c = SimpleNamespace(user_id=20)
+        members_result = Mock()
+        members_result.scalars.return_value.all.return_value = [member_a, member_b, member_c]
+        message_count_result = Mock()
+        message_count_result.scalar_one.return_value = 5
+        statements = []
+
+        async def execute(stmt):
+            statements.append(str(stmt))
+            return [existing_chat_result, members_result, message_count_result][len(statements) - 1]
+
+        db = SimpleNamespace(execute=AsyncMock(side_effect=execute))
+
+        self.assertEqual(await chat_backfill_service._find_existing_direct_chat_id(db, 10, 20), 44)
+        members = await chat_backfill_service._load_existing_members(db, 44, 10, 20)
+        self.assertEqual(members, {10: member_a, 20: member_c})
+        self.assertEqual(await chat_backfill_service._count_unlinked_messages(db, 10, 20), 5)
+        self.assertEqual(len(statements), 3)
+
+    async def test_backfill_applies_optional_conversation_filter_and_limit(self):
+        captured = []
+
+        async def execute(stmt):
+            captured.append(stmt)
+            return scalars_result([])
+
+        db = SimpleNamespace(execute=AsyncMock(side_effect=execute))
+
+        stats = await chat_backfill_service.backfill_direct_chats(db, conversation_id=12, limit=4)
+
+        self.assertEqual(stats.as_dict(), chat_backfill_service.DirectChatBackfillStats().as_dict())
+        self.assertEqual(len(captured), 1)
+        self.assertIn("conversations.id", str(captured[0]))
+        self.assertIsNotNone(getattr(captured[0], "_limit_clause", None))
+
     async def test_backfill_returns_empty_stats_when_no_conversations_match(self):
         db = SimpleNamespace(execute=AsyncMock(return_value=scalars_result([])))
 

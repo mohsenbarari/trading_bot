@@ -114,6 +114,29 @@ describe('imagePreprocessClient', () => {
     expect(module.canUseImagePreprocessWorker()).toBe(false)
   })
 
+  it('covers additional cpu and memory fallback thresholds', async () => {
+    installWorkerSupport({ cpu: 6, memory: 0 })
+    const module = await loadModule()
+
+    expect(module.getRecommendedImagePreprocessParallelism()).toBe(2)
+
+    Object.defineProperty(navigator, 'hardwareConcurrency', {
+      configurable: true,
+      value: 4,
+    })
+    expect(module.getRecommendedImagePreprocessParallelism()).toBe(2)
+
+    Object.defineProperty(navigator, 'hardwareConcurrency', {
+      configurable: true,
+      value: 1,
+    })
+    Object.defineProperty(navigator, 'deviceMemory', {
+      configurable: true,
+      value: undefined,
+    })
+    expect(module.getRecommendedImagePreprocessParallelism()).toBe(1)
+  })
+
   it('processes a queued job and resolves only the matching worker response', async () => {
     installWorkerSupport({ cpu: 1, memory: 1 })
     const module = await loadModule()
@@ -188,6 +211,9 @@ describe('imagePreprocessClient', () => {
     const firstPromise = module.processImageInWorker(createImageFile('first.jpg'))
     const secondPromise = module.processImageInWorker(createImageFile('second.jpg'))
     const firstWorker = MockWorker.instances[0]!
+    firstWorker.terminate.mockImplementation(() => {
+      throw new Error('terminate failed')
+    })
     const firstRejection = expect(firstPromise).rejects.toThrow('timed out')
 
     expect(firstWorker.postMessage).toHaveBeenCalledTimes(1)
@@ -212,6 +238,47 @@ describe('imagePreprocessClient', () => {
     })
 
     await expect(secondPromise).resolves.toMatchObject({ width: 800, height: 600 })
+  })
+
+  it('rejects already-aborted signals, aborted queued jobs, and worker-declared failures', async () => {
+    installWorkerSupport({ cpu: 1, memory: 1 })
+    const module = await loadModule()
+
+    const alreadyAbortedController = new AbortController()
+    alreadyAbortedController.abort()
+    await expect(module.processImageInWorker(createImageFile('already-aborted.jpg'), alreadyAbortedController.signal)).rejects.toThrow(
+      'UploadCancelled'
+    )
+
+    const firstPromise = module.processImageInWorker(createImageFile('first.jpg'))
+    const queuedAbortController = new AbortController()
+    const secondPromise = module.processImageInWorker(createImageFile('queued-aborted.jpg'), queuedAbortController.signal)
+    queuedAbortController.abort()
+
+    const firstWorker = MockWorker.instances[0]!
+    const firstPayload = firstWorker.postMessage.mock.calls[0]?.[0]
+    firstWorker.emitMessage({
+      id: firstPayload.id,
+      ok: true,
+      blob: new Blob(['processed'], { type: 'image/jpeg' }),
+      width: 320,
+      height: 240,
+      thumbnailDataUrl: 'data:image/jpeg;base64,done',
+    })
+
+    await expect(firstPromise).resolves.toMatchObject({ width: 320, height: 240 })
+    await expect(secondPromise).rejects.toThrow('UploadCancelled')
+    expect(firstWorker.postMessage).toHaveBeenCalledTimes(1)
+
+    const failurePromise = module.processImageInWorker(createImageFile('worker-failure.jpg'))
+    const failurePayload = firstWorker.postMessage.mock.calls[1]?.[0]
+    firstWorker.emitMessage({
+      id: failurePayload.id,
+      ok: false,
+      error: 'worker said no',
+    })
+
+    await expect(failurePromise).rejects.toThrow('worker said no')
   })
 
   it('rejects unsupported environments and worker crashes', async () => {

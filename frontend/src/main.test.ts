@@ -202,4 +202,35 @@ describe('main.ts', () => {
 
     expect(mainMocks.registerSW).toHaveBeenCalledTimes(1)
   })
+
+  it('covers offline-ready logging, setup failures, Telegram init warnings, and storage-cleanup failures', async () => {
+    setReadyState('complete')
+    setTelegram(true)
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    mainMocks.telegram.ready.mockImplementationOnce(() => {
+      throw new Error('telegram init failed')
+    })
+    mainMocks.registerSW.mockImplementationOnce((options: any) => {
+      options.onOfflineReady()
+      throw new Error('sw setup failed')
+    })
+    vi.spyOn(window.sessionStorage.__proto__, 'removeItem').mockImplementationOnce(() => {
+      throw new Error('blocked storage')
+    })
+
+    await importFreshMain()
+    getTimeoutByDelay(1500)?.fn()
+
+    expect(warnSpy).toHaveBeenCalledWith('Telegram WebApp not initialized', expect.any(Error))
+    expect(logSpy).toHaveBeenCalledWith('App ready to work offline')
+    expect(errorSpy).toHaveBeenCalledWith('SW setup error:', expect.any(Error))
+
+    logSpy.mockRestore()
+    warnSpy.mockRestore()
+    errorSpy.mockRestore()
+  })
 })

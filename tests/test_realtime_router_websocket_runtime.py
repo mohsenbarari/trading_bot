@@ -36,6 +36,16 @@ class FakeWebSocket:
         self.sent_text.append(payload)
 
 
+class FailingHeartbeatWebSocket(FakeWebSocket):
+    async def send_json(self, payload):
+        raise RuntimeError("heartbeat failed")
+
+
+class ExplodingReceiveWebSocket(FakeWebSocket):
+    async def receive_text(self):
+        raise RuntimeError("socket exploded")
+
+
 class FakeSession:
     def __init__(self, user, active_session):
         self.user = user
@@ -128,6 +138,64 @@ class RealtimeRouterWebSocketRuntimeTests(unittest.IsolatedAsyncioTestCase):
             await websocket_endpoint(websocket, token="jwt")
 
         self.assertEqual(websocket.sent_json, [{"type": "heartbeat"}])
+        self.assertTrue(task.cancelled)
+
+    async def test_websocket_endpoint_breaks_when_heartbeat_send_fails(self):
+        websocket = FailingHeartbeatWebSocket()
+        task = FakeTask()
+        session_id = str(uuid.uuid4())
+
+        async def fake_wait_for(awaitable, timeout):
+            if hasattr(awaitable, "close"):
+                awaitable.close()
+            raise asyncio.TimeoutError()
+
+        def fake_create_task(coro):
+            if hasattr(coro, "close"):
+                coro.close()
+            return task
+
+        with patch("api.routers.realtime.verify_ws_token", return_value=(5, session_id)), patch(
+            "api.routers.realtime.is_session_blacklisted", new=AsyncMock(return_value=False)
+        ), patch(
+            "api.routers.realtime.AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(user=SimpleNamespace(id=5, is_deleted=False), active_session=SimpleNamespace(is_active=True, user_id=5))),
+        ), patch("api.routers.realtime.manager.connect", new=AsyncMock()), patch(
+            "api.routers.realtime.manager.disconnect"
+        ) as disconnect_mock, patch("api.routers.realtime.asyncio.create_task", side_effect=fake_create_task), patch(
+            "api.routers.realtime.asyncio.wait_for", side_effect=fake_wait_for
+        ):
+            await websocket_endpoint(websocket, token="jwt")
+
+        disconnect_mock.assert_called_once_with(websocket)
+        self.assertTrue(task.cancelled)
+
+    async def test_websocket_endpoint_logs_outer_runtime_errors(self):
+        websocket = ExplodingReceiveWebSocket()
+        task = FakeTask()
+        session_id = str(uuid.uuid4())
+
+        async def fake_wait_for(awaitable, timeout):
+            return await awaitable
+
+        def fake_create_task(coro):
+            if hasattr(coro, "close"):
+                coro.close()
+            return task
+
+        with patch("api.routers.realtime.verify_ws_token", return_value=(5, session_id)), patch(
+            "api.routers.realtime.is_session_blacklisted", new=AsyncMock(return_value=False)
+        ), patch(
+            "api.routers.realtime.AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(user=SimpleNamespace(id=5, is_deleted=False), active_session=SimpleNamespace(is_active=True, user_id=5))),
+        ), patch("api.routers.realtime.manager.connect", new=AsyncMock()), patch(
+            "api.routers.realtime.manager.disconnect"
+        ), patch("api.routers.realtime.asyncio.create_task", side_effect=fake_create_task), patch(
+            "api.routers.realtime.asyncio.wait_for", side_effect=fake_wait_for
+        ), patch("api.routers.realtime.logging.warning") as warning_mock:
+            await websocket_endpoint(websocket, token="jwt")
+
+        warning_mock.assert_called_once()
         self.assertTrue(task.cancelled)
 
 

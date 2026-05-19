@@ -59,6 +59,21 @@ class BotTradeHistoryQueryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result_user, target_user)
         self.assertEqual(result_trades, trades)
 
+    async def test_get_trade_history_self_history_skips_target_lookup(self):
+        trades = [SimpleNamespace(created_at=datetime(2026, 1, 1, 12, 0, 0))]
+
+        class SelfHistorySession(FakeSession):
+            async def execute(self, stmt):
+                self.calls += 1
+                return FakeExecuteResult(trades=self.trades)
+
+        session = SelfHistorySession(None, trades)
+        with patch("bot.handlers.trade_history.AsyncSessionLocal", return_value=FakeSessionContext(session)):
+            result_user, result_trades = await get_trade_history(1, 0, months=1)
+
+        self.assertIsNone(result_user)
+        self.assertEqual(result_trades, trades)
+
 
 if __name__ == "__main__":
     unittest.main()

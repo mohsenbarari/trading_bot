@@ -133,6 +133,45 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.states, [LinkState.waiting_for_address])
         self.assertIn("تکمیل ثبت‌نام", message.answer.await_args.args[0])
 
+    async def test_handle_contact_and_address_completion_cover_permission_and_error_paths(self):
+        user = SimpleNamespace(telegram_id=None, username=None, full_name="acc", account_name="acc", has_bot_access=False, address="تهران خیابان آزادی پلاک ۱۰")
+        db = FakeDB(user)
+        state = FakeState()
+        message = make_message()
+
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.finalize_account_link", new=AsyncMock(side_effect=PermissionError("ACCOUNTANT_BOT_ACCESS_FORBIDDEN"))
+        ):
+            await handle_contact(message, state)
+        self.assertEqual(state.cleared, 1)
+        self.assertIn("حسابدارها به ربات تلگرام دسترسی ندارند", message.answer.await_args.args[0])
+
+        user = SimpleNamespace(
+            id=99,
+            telegram_id=None,
+            username=None,
+            full_name="acc",
+            account_name="acc",
+            has_bot_access=False,
+            address="System Default",
+        )
+        db = FakeDB(user)
+        state = FakeState()
+        await state.update_data(link_user_id=99)
+        message = SimpleNamespace(
+            bot=SimpleNamespace(),
+            text="تهران خیابان آزادی پلاک ۱۰",
+            from_user=SimpleNamespace(id=10, username="u", full_name="Linked User"),
+            answer=AsyncMock(),
+        )
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.finalize_account_link", new=AsyncMock(side_effect=RuntimeError("boom"))
+        ):
+            await handle_address_completion(message, state)
+        self.assertEqual(db.rollbacks, 1)
+        self.assertEqual(state.cleared, 1)
+        self.assertIn("خطا در تکمیل ثبت‌نام", message.answer.await_args.args[0])
+
     async def test_handle_address_completion_links_user_and_saves_address(self):
         user = SimpleNamespace(
             id=99,

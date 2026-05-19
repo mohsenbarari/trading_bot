@@ -66,6 +66,21 @@ class CommoditiesRouterCreateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.refresh_calls[0][1], ["aliases"])
         invalidate_mock.assert_awaited_once()
 
+    async def test_create_commodity_ignores_cache_invalidation_failures(self):
+        db = FakeDB([FakeExecuteResult(None)])
+        with patch(
+            "bot.utils.redis_helpers.invalidate_commodity_cache",
+            new=AsyncMock(side_effect=RuntimeError("cache down")),
+        ):
+            result = await create_commodity(
+                commodity_data=schemas.CommodityCreate(name="Silver"),
+                aliases=["silver"],
+                db=db,
+                source="bot",
+            )
+
+        self.assertEqual(result.name, "Silver")
+
 
 if __name__ == "__main__":
     unittest.main()

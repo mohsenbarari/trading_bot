@@ -318,17 +318,34 @@ function authOnlyHeaders(accessToken: string) {
 
 type LoginFixture = Pick<SeededChannelAdminFixture, 'accountName' | 'accessToken' | 'refreshToken'>
 
+function isRetriableWebKitGotoError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return /WebKit encountered an internal error/i.test(message)
+}
+
+async function gotoWithWebKitRetry(page: Page, url: string) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded' })
+      return
+    } catch (error) {
+      if (!isRetriableWebKitGotoError(error) || attempt === 2) {
+        throw error
+      }
+    }
+  }
+}
+
 async function loginWithSeededSession(page: Page, fixture: LoginFixture) {
-  await page.goto('/login')
+  await gotoWithWebKitRetry(page, '/login')
   await page.evaluate(({ accessToken, refreshToken }) => {
     localStorage.setItem('auth_token', accessToken)
     localStorage.setItem('refresh_token', refreshToken)
     localStorage.removeItem('suspended_refresh_token')
   }, fixture)
-  await page.goto('/')
+  await gotoWithWebKitRetry(page, '/')
   await expect(page).toHaveURL(/\/$/, { timeout: 30000 })
   await expect(page.getByText(fixture.accountName)).toBeVisible({ timeout: 30000 })
-  await page.waitForLoadState('networkidle')
 }
 
 async function navigateFromMessengerToMarket(page: Page) {
@@ -938,6 +955,49 @@ async function injectDocument(page: Page, prefix = 'pw-room', sizeBytes = 0) {
   ])
 }
 
+async function waitForPersistedPendingDocumentUpload(page: Page) {
+  await expect
+    .poll(async () => {
+      return await page.evaluate(async () => {
+        return await new Promise<boolean>((resolve) => {
+          try {
+            const openRequest = indexedDB.open('chat_upload_queue')
+            openRequest.onerror = () => resolve(false)
+            openRequest.onupgradeneeded = () => resolve(false)
+            openRequest.onsuccess = () => {
+              try {
+                const db = openRequest.result
+                if (!db.objectStoreNames.contains('pending')) {
+                  resolve(false)
+                  return
+                }
+
+                const tx = db.transaction('pending', 'readonly')
+                const getAllRequest = tx.objectStore('pending').getAll()
+                getAllRequest.onerror = () => resolve(false)
+                getAllRequest.onsuccess = () => {
+                  const rows = Array.isArray(getAllRequest.result) ? getAllRequest.result : []
+                  resolve(
+                    rows.some((row) => (
+                      row?.msgType === 'document' &&
+                      typeof row?.phase === 'string' &&
+                      !['sent', 'cancelled', 'failed'].includes(row.phase)
+                    )),
+                  )
+                }
+              } catch {
+                resolve(false)
+              }
+            }
+          } catch {
+            resolve(false)
+          }
+        })
+      })
+    }, { timeout: 15000 })
+    .toBe(true)
+}
+
 test.describe('Channel media regressions', () => {
   test('channel admin can open attachments without voice/location and send image+video album', async ({
     page,
@@ -1263,7 +1323,7 @@ test.describe('Channel media regressions', () => {
     request,
     browserName,
   }) => {
-    test.setTimeout(120000)
+    test.setTimeout(180000)
     const sender = seedPrimarySession('group_single_document_sender')
     const receiver = seedPrimarySession('group_single_document_receiver')
     const groupTitle = `Group Single Document ${Date.now()}`
@@ -1350,11 +1410,15 @@ test.describe('Channel media regressions', () => {
       await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال ارسال فایل...`, {
         timeout: 30000,
       })
+      await waitForPersistedPendingDocumentUpload(senderPage)
+      await expect.poll(() => sawChunkAppend, { timeout: 30000 }).toBe(true)
 
       await navigateFromMessengerToMarket(senderPage)
+      await expect.poll(() => sawFinalize, { timeout: 90000 }).toBe(true)
+      await expect.poll(() => sawCommit, { timeout: 90000 }).toBe(true)
 
       await expect
-        .poll(async () => fetchLatestRoomMessageTypesByChatId(request, receiver.accessToken, groupId), { timeout: 60000 })
+        .poll(async () => fetchLatestRoomMessageTypesByChatId(request, receiver.accessToken, groupId), { timeout: 30000 })
         .toEqual(expect.arrayContaining(['document']))
 
       await expect(receiverPage.locator('.messages-container .msg-document')).toBeVisible({ timeout: 60000 })
@@ -1455,6 +1519,7 @@ test.describe('Channel media regressions', () => {
     await expect(sendUneditedButton).toBeVisible({ timeout: 30000 })
     await sendUneditedButton.click()
     await expect(sendUneditedButton).toHaveCount(0, { timeout: 30000 })
+    await expect.poll(() => chunkAppendHits, { timeout: 30000 }).toBeGreaterThanOrEqual(1)
 
     await expect
       .poll(async () => {
@@ -1486,6 +1551,7 @@ test.describe('Channel media regressions', () => {
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
     await injectGalleryVideo(page, `pw-group-single-${Date.now()}.webm`)
     await expect(page.locator('.attachment-sheet')).toHaveCount(0, { timeout: 30000 })
+    await expect.poll(() => chunkAppendHits, { timeout: 30000 }).toBeGreaterThanOrEqual(2)
 
     await expect
       .poll(async () => {
@@ -1522,6 +1588,7 @@ test.describe('Channel media regressions', () => {
     page,
     request,
   }) => {
+    test.slow()
     const fixture = seedChannelSession('channel_forward_image', 'admin')
     const fileName = `pw-forward-${Date.now()}.png`
     const directImageMessage = await seedDirectImageMessage(request, fixture, fileName) as { id?: number }

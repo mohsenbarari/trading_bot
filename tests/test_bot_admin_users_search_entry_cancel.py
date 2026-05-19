@@ -8,6 +8,27 @@ from core.enums import UserRole
 
 
 class BotAdminUsersSearchEntryCancelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_search_entry_and_cancel_ignore_non_admins(self):
+        message = SimpleNamespace(
+            answer=AsyncMock(),
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=6),
+        )
+        state = SimpleNamespace(set_state=AsyncMock())
+
+        await start_search_user(message, state=state, user=None)
+        message.answer.assert_not_called()
+        state.set_state.assert_not_awaited()
+
+        query = SimpleNamespace(
+            message=SimpleNamespace(answer=AsyncMock(), chat=SimpleNamespace(id=9)),
+            bot=SimpleNamespace(),
+            answer=AsyncMock(),
+        )
+        await handle_user_search_cancel(query, state=SimpleNamespace(), user=None)
+        query.message.answer.assert_not_called()
+        query.answer.assert_not_awaited()
+
     async def test_start_search_user_sets_state_and_updates_anchor(self):
         message = SimpleNamespace(
             answer=AsyncMock(return_value=SimpleNamespace(message_id=81)),

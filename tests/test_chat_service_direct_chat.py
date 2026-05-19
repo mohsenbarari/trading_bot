@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType
 from core.services.chat_service import (
+    get_existing_direct_chat,
     get_or_create_direct_chat,
     hide_direct_conversation,
     set_direct_chat_mark_unread_state,
@@ -34,6 +35,18 @@ class FakeDB:
 
 
 class GetOrCreateDirectChatTests(unittest.IsolatedAsyncioTestCase):
+    async def test_get_existing_direct_chat_returns_none_or_loaded_chat(self):
+        db = FakeDB(get_result=SimpleNamespace(id=44))
+
+        with patch("core.services.chat_service._find_existing_direct_chat_id", new=AsyncMock(return_value=None)):
+            self.assertIsNone(await get_existing_direct_chat(db, 10, 20))
+
+        with patch("core.services.chat_service._find_existing_direct_chat_id", new=AsyncMock(return_value=44)):
+            chat = await get_existing_direct_chat(db, 10, 20)
+
+        self.assertEqual(chat.id, 44)
+        db.get.assert_awaited_with(Chat, 44)
+
     async def test_creates_chat_and_members_with_expected_statuses(self):
         deleted_at = datetime(2026, 5, 7, 12, 0, tzinfo=timezone.utc)
         user1 = SimpleNamespace(id=10, is_deleted=False, deleted_at=None)

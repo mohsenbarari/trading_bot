@@ -44,6 +44,12 @@ class CoverageBucket:
             return 0.0
         return round((self.covered / self.total) * 100, 1)
 
+    @property
+    def exact_pct(self) -> float:
+        if self.total <= 0:
+            return 0.0
+        return (self.covered / self.total) * 100
+
     def as_dict(self) -> dict[str, float | int]:
         return {
             'covered': self.covered,
@@ -58,6 +64,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--frontend-summary', default='frontend/coverage/coverage-summary.json')
     parser.add_argument('--markdown-out', default='tmp/repo-coverage-summary.md')
     parser.add_argument('--json-out', default='tmp/repo-coverage-summary.json')
+    parser.add_argument('--min-weighted-pct', type=float, default=None)
+    parser.add_argument('--min-backend-pct', type=float, default=None)
+    parser.add_argument('--min-frontend-pct', type=float, default=None)
+    parser.add_argument('--weighted-threshold-exclusive', action='store_true')
+    parser.add_argument('--backend-threshold-exclusive', action='store_true')
+    parser.add_argument('--frontend-threshold-exclusive', action='store_true')
     return parser.parse_args()
 
 
@@ -178,6 +190,26 @@ def render_table(title: str, sections: dict[str, CoverageBucket]) -> list[str]:
     return lines
 
 
+def evaluate_threshold(
+    label: str,
+    bucket: CoverageBucket,
+    threshold: float | None,
+    *,
+    exclusive: bool,
+    notes: list[str],
+) -> bool:
+    if threshold is None:
+        return False
+
+    comparator = '>' if exclusive else '>='
+    passes = bucket.exact_pct > threshold if exclusive else bucket.exact_pct >= threshold
+    verdict = 'passed' if passes else 'failed'
+    notes.append(
+        f'{label} threshold {verdict}: {bucket.exact_pct:.6f}% {comparator} {threshold:.6f}%.'
+    )
+    return not passes
+
+
 def main() -> int:
     args = parse_args()
     notes: list[str] = []
@@ -191,6 +223,30 @@ def main() -> int:
         covered=backend_overall.covered + frontend_overall.covered,
         total=backend_overall.total + frontend_overall.total,
     )
+
+    threshold_failures = [
+        evaluate_threshold(
+            'Repository weighted coverage',
+            repo_overall,
+            args.min_weighted_pct,
+            exclusive=args.weighted_threshold_exclusive,
+            notes=notes,
+        ),
+        evaluate_threshold(
+            'Backend coverage',
+            backend_overall,
+            args.min_backend_pct,
+            exclusive=args.backend_threshold_exclusive,
+            notes=notes,
+        ),
+        evaluate_threshold(
+            'Frontend coverage',
+            frontend_overall,
+            args.min_frontend_pct,
+            exclusive=args.frontend_threshold_exclusive,
+            notes=notes,
+        ),
+    ]
 
     markdown_lines = [
         '# Repository Coverage Summary',
@@ -232,6 +288,14 @@ def main() -> int:
         'inputs': {
             'backend_json': str(backend_path.relative_to(REPO_ROOT)),
             'frontend_summary_json': str(frontend_path.relative_to(REPO_ROOT)),
+            'thresholds': {
+                'min_weighted_pct': args.min_weighted_pct,
+                'min_backend_pct': args.min_backend_pct,
+                'min_frontend_pct': args.min_frontend_pct,
+                'weighted_threshold_exclusive': args.weighted_threshold_exclusive,
+                'backend_threshold_exclusive': args.backend_threshold_exclusive,
+                'frontend_threshold_exclusive': args.frontend_threshold_exclusive,
+            },
         },
     }
 
@@ -244,7 +308,7 @@ def main() -> int:
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
 
     print('\n'.join(markdown_lines))
-    return 0
+    return 1 if any(threshold_failures) else 0
 
 
 if __name__ == '__main__':

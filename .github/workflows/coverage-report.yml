@@ -102,7 +102,9 @@ jobs:
             --backend-json tmp/backend-coverage.json \
             --frontend-summary frontend/coverage/coverage-summary.json \
             --markdown-out tmp/repo-coverage-summary.md \
-            --json-out tmp/repo-coverage-summary.json
+            --json-out tmp/repo-coverage-summary.json \
+            --min-weighted-pct 97 \
+            --weighted-threshold-exclusive
           cat tmp/repo-coverage-summary.md >> "$GITHUB_STEP_SUMMARY"
           {
             echo

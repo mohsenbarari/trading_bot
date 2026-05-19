@@ -48,4 +48,31 @@ describe('notification type helpers', () => {
     expect(getNotificationDisplayKind({ category: 'user', level: 'error' })).toBe('error')
     expect(getNotificationDisplayKind({ category: 'user' })).toBe('info')
   })
+
+  it('preserves explicit payload text and supports user titles plus chat-kind toasts', () => {
+    const normalized = normalizeAppNotificationPayload({
+      id: 'room-alert',
+      title: 'عنوان سفارشی',
+      body: 'fallback body',
+      content: 'rich body',
+      message: '   ',
+      category: 'USER',
+      level: 'UNKNOWN',
+    })
+
+    expect(normalized.id).toBe('room-alert')
+    expect(normalized.title).toBe('عنوان سفارشی')
+    expect(normalized.body).toBe('rich body')
+    expect(normalized.content).toBe('rich body')
+    expect(normalized.message).toBe('rich body')
+    expect(buildNotificationTitle('user')).toBe('اعلان کاربری')
+
+    const chatToast = createToastNotification({ title: 'chat', body: 'toast', kind: 'chat' })
+    expect(chatToast.kind).toBe('chat')
+  })
+
+  it('falls back for unknown title categories and non-string notification ids', () => {
+    expect(typeof normalizeNotificationId(null)).toBe('number')
+    expect(buildNotificationTitle('unknown' as any)).toBe('اعلان جدید')
+  })
 })

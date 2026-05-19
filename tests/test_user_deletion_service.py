@@ -3,7 +3,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from models.accountant_relation import AccountantRelationStatus
-from core.services.user_deletion_service import delete_user_account
+from core.services.user_deletion_service import (
+    _close_linked_accountant_relations,
+    _close_owned_accountant_relations,
+    _delete_user_account_in_transaction,
+    delete_user_account,
+    remove_user_from_telegram_channel,
+)
 
 
 def scalar_result(rows):
@@ -12,7 +18,81 @@ def scalar_result(rows):
     return result
 
 
+class _HttpClientContext:
+    def __init__(self):
+        self.post = AsyncMock()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
 class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
+    async def test_remove_user_from_telegram_channel_respects_config_and_posts_ban_unban(self):
+        with patch("core.services.user_deletion_service.settings", SimpleNamespace(channel_id=None, bot_token="bot-token")), patch(
+            "core.services.user_deletion_service.httpx.AsyncClient"
+        ) as client_factory:
+            await remove_user_from_telegram_channel(123)
+        client_factory.assert_not_called()
+
+        client = _HttpClientContext()
+        with patch("core.services.user_deletion_service.settings", SimpleNamespace(channel_id=-100123, bot_token="bot-token")), patch(
+            "core.services.user_deletion_service.httpx.AsyncClient",
+            return_value=client,
+        ):
+            await remove_user_from_telegram_channel(123)
+
+        self.assertEqual(client.post.await_count, 2)
+        self.assertIn("banChatMember", client.post.await_args_list[0].args[0])
+        self.assertIn("unbanChatMember", client.post.await_args_list[1].args[0])
+
+    async def test_accountant_relation_helpers_cover_pending_active_and_skip_paths(self):
+        user = SimpleNamespace(id=31, is_deleted=False)
+        active_relation = SimpleNamespace(
+            status=AccountantRelationStatus.ACTIVE,
+            accountant_user=None,
+            invitation_token="active-token",
+            deleted_at=None,
+        )
+        expired_relation = SimpleNamespace(
+            status=AccountantRelationStatus.EXPIRED,
+            accountant_user=None,
+            invitation_token="expired-token",
+            deleted_at=None,
+        )
+        owned_db = SimpleNamespace(execute=AsyncMock(return_value=scalar_result([active_relation, expired_relation])))
+
+        with patch("core.services.user_deletion_service._invalidate_accountant_invitation", AsyncMock()) as invalidate_mock, patch(
+            "core.services.user_deletion_service._delete_user_account_in_transaction", AsyncMock()
+        ) as delete_in_tx_mock:
+            await _close_owned_accountant_relations(owned_db, user, processed_user_ids=set(), effects=[])
+
+        delete_in_tx_mock.assert_not_awaited()
+        invalidate_mock.assert_not_awaited()
+        self.assertEqual(active_relation.status, AccountantRelationStatus.DELETED)
+        self.assertIsNotNone(active_relation.deleted_at)
+        self.assertIsNotNone(expired_relation.deleted_at)
+
+        pending_relation = SimpleNamespace(
+            status=AccountantRelationStatus.PENDING,
+            invitation_token="pending-token",
+            deleted_at=None,
+        )
+        linked_db = SimpleNamespace(execute=AsyncMock(return_value=scalar_result([pending_relation])))
+        with patch("core.services.user_deletion_service._invalidate_accountant_invitation", AsyncMock()) as invalidate_mock:
+            await _close_linked_accountant_relations(linked_db, user)
+
+        invalidate_mock.assert_awaited_once()
+        self.assertEqual(pending_relation.status, AccountantRelationStatus.REVOKED)
+        self.assertIsNotNone(pending_relation.deleted_at)
+
+        skip_db = SimpleNamespace(execute=AsyncMock(), delete=AsyncMock())
+        await _delete_user_account_in_transaction(skip_db, SimpleNamespace(id=31, is_deleted=False), processed_user_ids={31}, effects=[])
+        await _delete_user_account_in_transaction(skip_db, SimpleNamespace(id=32, is_deleted=True), processed_user_ids=set(), effects=[])
+        skip_db.execute.assert_not_awaited()
+
     async def test_linked_user_deletion_revokes_sessions_and_telegram_side_effects(self):
         user = SimpleNamespace(
             id=17,
@@ -279,6 +359,17 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         publish_session_revocation.assert_any_await(owner.id, owner_revoked_sessions)
         self.assertEqual(result.user_id, owner.id)
         self.assertEqual(result.revoked_session_count, 1)
+
+    async def test_delete_user_account_raises_when_primary_effect_is_missing(self):
+        user = SimpleNamespace(id=77, is_deleted=False)
+        db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+
+        with patch("core.services.user_deletion_service._delete_user_account_in_transaction", AsyncMock()):
+            with self.assertRaisesRegex(RuntimeError, "Primary deleted user effect"):
+                await delete_user_account(db, user)
+
+        db.commit.assert_awaited_once()
+        db.rollback.assert_not_awaited()
 
 if __name__ == "__main__":
     unittest.main()

@@ -86,6 +86,11 @@ class ChatServicePinHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(message, direct_message)
         self.assertIs(chat, direct_chat)
 
+        foreign_direct_db = SimpleNamespace(get=AsyncMock(side_effect=[direct_message, direct_chat]))
+        with self.assertRaises(HTTPException) as foreign_direct_error:
+            await chat_service.get_pinnable_message(foreign_direct_db, message_id=5, actor_id=99)
+        self.assertEqual(foreign_direct_error.exception.status_code, 403)
+
         room_message = SimpleNamespace(id=6, is_deleted=False, chat_id=60, sender_id=20, receiver_id=20)
         room_chat = SimpleNamespace(id=60, type=ChatType.GROUP, is_deleted=False)
         no_member_db = SimpleNamespace(

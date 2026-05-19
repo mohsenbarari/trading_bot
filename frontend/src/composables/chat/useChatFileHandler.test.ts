@@ -457,4 +457,55 @@ describe('useChatFileHandler.ts', () => {
     expect(URL.revokeObjectURL).toHaveBeenCalled()
     vi.useRealTimers()
   })
+
+  it('promotes IndexedDB cache hits into memory, reuses cached opens, patches missing mime types for share, and tolerates seed/multi-share file failures', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+    const anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const shareMock = navigator.share as ReturnType<typeof vi.fn>
+    const originalFile = File
+
+    cachedEntries.set('idb-open', {
+      blob: new Blob(['cached'], { type: 'application/pdf' }),
+      fileName: 'cached.pdf',
+      mimeType: 'application/pdf',
+      size: 6,
+      cachedAt: Date.now(),
+    })
+
+    await fileHandler.handleFileClick('idb-open', '/api/chat/files/idb-open', 'cached.pdf')
+    expect(fileHandler.isFileCached('idb-open')).toBe(true)
+    expect(anchorClickSpy).toHaveBeenCalledTimes(1)
+
+    shareMock.mockResolvedValueOnce(undefined)
+    cachedEntries.set('share-mime', {
+      blob: new Blob(['raw'], { type: '' }),
+      fileName: 'raw.bin',
+      mimeType: '',
+      size: 3,
+      cachedAt: Date.now(),
+    })
+    expect(await fileHandler.shareFile('share-mime', 'raw.bin', 'application/octet-stream')).toBe(true)
+    const sharePayload = shareMock.mock.calls.at(-1)?.[0] as ShareData
+    expect(sharePayload.files?.[0]?.type).toBe('application/octet-stream')
+
+    localforageInstance.setItem.mockRejectedValueOnce(new Error('seed quota'))
+    await fileHandler.seedFileCache('seed-fail', new Blob(['seed'], { type: 'application/pdf' }), 'seed.pdf', 'application/pdf')
+    expect(console.warn).toHaveBeenCalledWith('[useChatFileHandler] seed cache write failed', expect.any(Error))
+
+    await fileHandler.seedFileCache('multi-fail', new Blob(['m'], { type: 'application/pdf' }), 'm.pdf', 'application/pdf')
+    Object.defineProperty(globalThis, 'File', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => {
+        throw new Error('multi file failed')
+      }),
+    })
+    expect(await fileHandler.shareMultipleFiles(['multi-fail'])).toBe(false)
+    expect(console.warn).toHaveBeenCalledWith('[useChatFileHandler] multi-share File() failed', expect.any(Error))
+    Object.defineProperty(globalThis, 'File', {
+      configurable: true,
+      writable: true,
+      value: originalFile,
+    })
+  })
 })

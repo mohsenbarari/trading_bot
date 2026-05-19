@@ -36,6 +36,49 @@ class FakeSession:
 
 
 class BotAdminUsersUnblockUnlimitTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unblock_and_unlimit_ignore_unauthorized_and_protected_targets(self):
+        callback = SimpleNamespace(data="user_unblock_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        await handle_user_unblock(callback, user=None)
+        callback.answer.assert_not_awaited()
+
+        protected_user = SimpleNamespace(
+            id=9,
+            role=UserRole.SUPER_ADMIN,
+            account_status=UserAccountStatus.ACTIVE,
+            telegram_id=123,
+            trading_restricted_until=None,
+            max_daily_trades=None,
+            max_active_commodities=None,
+            max_daily_requests=None,
+        )
+        callback = SimpleNamespace(data="user_unblock_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(protected_user)):
+            await handle_user_unblock(callback, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER))
+        callback.answer.assert_awaited_once_with("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+
+        callback = SimpleNamespace(data="user_unlimit_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        await handle_user_unlimit(callback, user=None)
+        callback.answer.assert_not_awaited()
+
+        protected_limit_user = SimpleNamespace(
+            id=9,
+            role=UserRole.SUPER_ADMIN,
+            account_status=UserAccountStatus.ACTIVE,
+            telegram_id=123,
+            trading_restricted_until=None,
+            max_daily_trades=1,
+            max_active_commodities=None,
+            max_daily_requests=None,
+            limitations_expire_at=None,
+            trades_count=0,
+            commodities_traded_count=0,
+            channel_messages_count=0,
+        )
+        callback = SimpleNamespace(data="user_unlimit_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(protected_limit_user)):
+            await handle_user_unlimit(callback, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER))
+        callback.answer.assert_awaited_once_with("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+
     async def test_handle_user_unblock_handles_success_and_missing_user(self):
         target_user = SimpleNamespace(
             id=9,

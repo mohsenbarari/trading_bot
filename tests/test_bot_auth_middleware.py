@@ -176,6 +176,34 @@ class BotAuthMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("غیرفعال", message.answer.await_args.args[0])
         handler.assert_not_awaited()
 
+    async def test_middleware_shows_alert_for_locked_callback_queries(self):
+        blocked_user = MagicMock(
+            has_bot_access=True,
+            account_status=UserAccountStatus.INACTIVE,
+            messenger_blocked_at=object(),
+            messenger_grace_expires_at=None,
+        )
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=_ExecuteResult(blocked_user))
+        middleware = auth_middleware.AuthMiddleware(session_pool=MagicMock(return_value=_AsyncSessionContext(session)))
+        handler = AsyncMock()
+
+        original_callback = auth_middleware.CallbackQuery
+        original_is_locked = auth_middleware.is_user_global_web_locked
+        try:
+            auth_middleware.CallbackQuery = FakeCallbackQuery
+            auth_middleware.is_user_global_web_locked = MagicMock(return_value=True)
+            callback = FakeCallbackQuery(18)
+            await middleware(handler, callback, {})
+        finally:
+            auth_middleware.CallbackQuery = original_callback
+            auth_middleware.is_user_global_web_locked = original_is_locked
+
+        callback.answer.assert_awaited_once()
+        self.assertTrue(callback.answer.await_args.kwargs['show_alert'])
+        self.assertIn('غیرفعال', callback.answer.await_args.args[0])
+        handler.assert_not_awaited()
+
 
 if __name__ == '__main__':
     unittest.main()

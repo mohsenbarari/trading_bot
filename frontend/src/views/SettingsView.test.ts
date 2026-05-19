@@ -251,6 +251,13 @@ describe('SettingsView.vue', () => {
             mobile_number: '09121111111',
             is_blocked: true,
           },
+          {
+            id: 88,
+            full_name: 'Blocked User',
+            account_name: 'blocked-user',
+            mobile_number: '09120000000',
+            is_blocked: true,
+          },
         ])
       }
       if (path === '/api/blocks/search?q=xy&limit=5') return responseOf(searchResultsFixture)
@@ -321,5 +328,51 @@ describe('SettingsView.vue', () => {
 
     expect(settingsViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/sessions/session-current', { method: 'DELETE' })
     expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalled()
+  })
+
+  it('logs session loading failures on mount without breaking the page shell', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/sessions/active') throw new Error('sessions-load-failed')
+      return responseOf({})
+    })
+
+    const wrapper = await mountSettingsView()
+    await flushPromises()
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.any(Error))
+    expect(wrapper.find('.settings-page').exists()).toBe(true)
+    errorSpy.mockRestore()
+  })
+
+  it('logs terminate/logout failures but still forces local logout for the current session', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/sessions/active') return responseOf(sessionsFixture)
+      if (path === '/api/sessions/logout-all' && options?.method === 'POST') throw new Error('logout-all-failed')
+      if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') throw new Error('terminate-failed')
+      if (path === '/api/sessions/session-current' && options?.method === 'DELETE') throw new Error('logout-current-failed')
+      return responseOf({})
+    })
+
+    const wrapper = await mountSettingsView()
+    await flushPromises()
+
+    const accordions = wrapper.findAll('.ds-accordion-header')
+    await accordions[0]!.trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.logout-all-btn').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.session-delete-btn').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.logout-btn').trigger('click')
+    await flushPromises()
+
+    expect(errorSpy).toHaveBeenCalledTimes(3)
+    expect(settingsViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
+    errorSpy.mockRestore()
   })
 })

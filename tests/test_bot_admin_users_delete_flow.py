@@ -29,6 +29,32 @@ class FakeSession:
 
 
 class BotAdminUsersDeleteFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_delete_handlers_ignore_unauthorized_and_reject_protected_targets(self):
+        callback = SimpleNamespace(
+            data="user_ask_delete_9",
+            message=SimpleNamespace(edit_text=AsyncMock()),
+            answer=AsyncMock(),
+        )
+        await handle_user_delete_request(callback, user=None)
+        callback.answer.assert_not_awaited()
+
+        protected_user = SimpleNamespace(id=9, role=UserRole.SUPER_ADMIN)
+        callback = SimpleNamespace(
+            data="user_ask_delete_9",
+            message=SimpleNamespace(edit_text=AsyncMock()),
+            answer=AsyncMock(),
+        )
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(protected_user)):
+            await handle_user_delete_request(callback, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER))
+        callback.answer.assert_awaited_once_with("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+
+        denied_confirm = SimpleNamespace(
+            data="user_delete_confirm_9",
+            answer=AsyncMock(),
+        )
+        await handle_user_delete_confirm(denied_confirm, user=None, state=SimpleNamespace())
+        denied_confirm.answer.assert_not_awaited()
+
     async def test_handle_user_delete_request_shows_confirmation(self):
         callback = SimpleNamespace(
             data="user_ask_delete_9",
@@ -42,6 +68,11 @@ class BotAdminUsersDeleteFlowTests(unittest.IsolatedAsyncioTestCase):
         keyboard_mock.assert_called_once_with(9)
         self.assertIn("آیا از حذف این کاربر", callback.message.edit_text.await_args.args[0])
         callback.answer.assert_awaited_once()
+
+        callback = SimpleNamespace(data="user_ask_delete_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(None)):
+            await handle_user_delete_request(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+        callback.answer.assert_awaited_once_with("❌ کاربر یافت نشد.", show_alert=True)
 
     async def test_handle_user_delete_confirm_covers_success_error_and_missing_user(self):
         actor = SimpleNamespace(role=UserRole.SUPER_ADMIN)
@@ -68,6 +99,12 @@ class BotAdminUsersDeleteFlowTests(unittest.IsolatedAsyncioTestCase):
             await handle_user_delete_confirm(callback, user=actor, state=state)
         self.assertIn("boom", callback.answer.await_args.args[0])
         self.assertTrue(callback.answer.await_args.kwargs["show_alert"])
+
+        protected_target = SimpleNamespace(id=9, is_deleted=False, role=UserRole.SUPER_ADMIN)
+        denied_callback = SimpleNamespace(data="user_delete_confirm_9", answer=AsyncMock())
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(protected_target)):
+            await handle_user_delete_confirm(denied_callback, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER), state=state)
+        denied_callback.answer.assert_awaited_once_with("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
 
         callback = SimpleNamespace(
             data="user_delete_confirm_9",

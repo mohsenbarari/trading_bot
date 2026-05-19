@@ -41,6 +41,15 @@ class BotAdminMobileTests(unittest.IsolatedAsyncioTestCase):
 
         state = FakeState({"last_prompt_message_id": 50, "inviter_role": UserRole.MIDDLE_MANAGER.value})
         message = make_message("۰۹۱۲۳۴۵۶۷۸۹")
+        message.bot.delete_message = AsyncMock(side_effect=RuntimeError("boom"))
+        with patch("bot.handlers.admin.normalize_persian_numerals", return_value="09123456789"), patch(
+            "bot.handlers.admin.get_role_selection_keyboard", return_value="KB"
+        ):
+            await process_invitation_mobile(message, state)
+        self.assertEqual(state.updated[0], {"mobile_number": "09123456789"})
+
+        state = FakeState({"last_prompt_message_id": 50, "inviter_role": UserRole.MIDDLE_MANAGER.value})
+        message = make_message("۰۹۱۲۳۴۵۶۷۸۹")
         with patch("bot.handlers.admin.normalize_persian_numerals", return_value="09123456789"), patch(
             "bot.handlers.admin.get_role_selection_keyboard", return_value="KB"
         ) as role_keyboard_mock:

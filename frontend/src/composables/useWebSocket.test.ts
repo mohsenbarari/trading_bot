@@ -87,6 +87,7 @@ describe('useWebSocket', () => {
 
   it('connects, dispatches events, sends heartbeats, reconnects on close, and disconnects cleanly', async () => {
     localStorage.setItem('auth_token', 'token-123')
+    const parseErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const { useWebSocket } = await importFreshModule()
     const ws = useWebSocket()
     const reconnectListener = vi.fn()
@@ -117,6 +118,9 @@ describe('useWebSocket', () => {
     MockWebSocket.instances[0]?.emitMessage('{"type":"other:event","data":{"ok":true}}')
     expect(wildcardListener).toHaveBeenCalledWith({ type: 'other:event', data: { ok: true } })
 
+    MockWebSocket.instances[0]?.emitMessage('{invalid-json')
+    expect(parseErrorSpy).toHaveBeenCalledWith('Error parsing WS message:', expect.any(Error))
+
     vi.advanceTimersByTime(25000)
     expect(MockWebSocket.instances[0]?.send).toHaveBeenCalledWith('ping')
 
@@ -126,8 +130,14 @@ describe('useWebSocket', () => {
     vi.advanceTimersByTime(3000)
     expect(MockWebSocket.instances).toHaveLength(2)
 
+    MockWebSocket.instances[1]!.emitOpen()
+    expect(reconnectListener).toHaveBeenCalledTimes(2)
+    vi.advanceTimersByTime(3000)
+    expect(MockWebSocket.instances).toHaveLength(2)
+
     ws.disconnect()
     expect(MockWebSocket.instances[1]?.close).toHaveBeenCalled()
+    parseErrorSpy.mockRestore()
   })
 
   it('uses the direct backend URL in dev mode and closes the socket after websocket errors', async () => {

@@ -39,6 +39,16 @@ class CoreUserAccountStatusLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, 3)
         session.commit.assert_awaited_once()
 
+    async def test_finalize_due_user_messenger_blocks_reuses_global_lock_finalizer(self):
+        with patch(
+            "core.user_account_status_loop.finalize_due_user_global_locks",
+            new=AsyncMock(return_value=7),
+        ) as finalize_mock:
+            result = await user_account_status_loop.finalize_due_user_messenger_blocks()
+
+        self.assertEqual(result, 7)
+        finalize_mock.assert_awaited_once_with()
+
     async def test_user_account_status_loop_logs_errors_and_keeps_looping(self):
         async def cancel_sleep(_delay):
             raise asyncio.CancelledError()

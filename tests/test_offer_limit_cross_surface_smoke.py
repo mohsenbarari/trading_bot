@@ -175,6 +175,46 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         trading_settings._fallback_cache = None
         trading_settings._fallback_timestamp = 0
 
+    async def test_helper_sessions_cover_guard_and_fallback_paths(self):
+        api_db = ApiSuccessDB()
+        with self.assertRaisesRegex(AssertionError, "Unexpected get"):
+            await api_db.get(None, 1)
+        with self.assertRaisesRegex(AssertionError, "Unexpected execute"):
+            await api_db.execute(None)
+        with self.assertRaisesRegex(AssertionError, "should not be used"):
+            await api_db.scalar(None)
+
+        existing_item = SimpleNamespace(id=800, created_at=datetime(2026, 1, 2, 10, 0, 0))
+        refreshed = await api_db._refresh(existing_item)
+        self.assertIs(refreshed, existing_item)
+        self.assertEqual(existing_item.id, 800)
+
+        guard_db = ApiGuardDB({"value": 7})
+        self.assertIsNone(await guard_db.get(None, 1))
+
+        scalar_session = ScalarSession()
+        with self.assertRaisesRegex(AssertionError, "Unexpected scalar"):
+            await scalar_session.scalar(None)
+
+        shared_count = {"value": 1}
+        create_session = BotCreateSession(shared_count)
+        await create_session.commit()
+        self.assertEqual(shared_count["value"], 1)
+
+        existing_offer = SimpleNamespace(id=55)
+        create_session.add(existing_offer)
+        self.assertEqual(existing_offer.id, 55)
+        await create_session.commit()
+        self.assertEqual(shared_count["value"], 2)
+        await create_session.commit()
+        self.assertEqual(shared_count["value"], 2)
+
+        update_session = BotUpdateSession(create_session)
+        self.assertIs(await update_session.get(type("Offer", (), {}), 1), existing_offer)
+        user_obj = await update_session.get(type("User", (), {}), 9)
+        self.assertEqual(user_obj.id, 9)
+        self.assertIsNone(await update_session.get(type("Other", (), {}), 9))
+
     async def test_web_fifteenth_offer_blocks_bot_sixteenth_with_live_limit_message(self):
         shared_count = {"value": 14}
         live_settings = trading_settings.TradingSettings(max_active_offers=15, offer_expiry_minutes=30)

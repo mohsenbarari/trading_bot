@@ -30,6 +30,10 @@ class BotPanelAdminSettingsEntryTests(unittest.IsolatedAsyncioTestCase):
         await handle_admin_settings_button(message, state, user=None)
         message.answer.assert_not_awaited()
 
+        denied_callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
+        await handle_settings_edit_click(denied_callback, FakeState(), user=None)
+        denied_callback.answer.assert_awaited_once_with("دسترسی ندارید")
+
         with patch("bot.handlers.panel.get_settings_text", new=AsyncMock(return_value="TEXT")), patch(
             "bot.handlers.panel.get_settings_keyboard", return_value="KB"
         ):

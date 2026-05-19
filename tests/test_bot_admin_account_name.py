@@ -40,6 +40,13 @@ class BotAdminAccountNameTests(unittest.IsolatedAsyncioTestCase):
 
         state = FakeState({"last_prompt_message_id": 50})
         message = make_message("ali_user")
+        message.bot.delete_message = AsyncMock(side_effect=RuntimeError("boom"))
+        with patch("bot.handlers.admin.normalize_account_name", return_value="normalized"):
+            await process_invitation_account_name(message, state)
+        self.assertEqual(state.updated[0], {"account_name": "normalized"})
+
+        state = FakeState({"last_prompt_message_id": 50})
+        message = make_message("ali_user")
         with patch("bot.handlers.admin.normalize_account_name", return_value="normalized"):
             await process_invitation_account_name(message, state)
 

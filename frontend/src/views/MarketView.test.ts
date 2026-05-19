@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -29,13 +29,39 @@ vi.mock('../composables/useOffers', () => ({
 
 vi.mock('../composables/useTradingSort', () => ({
   useTradingSort: (offers: { value: any[] }) => ({
-    filterType: ref<'all' | 'buy' | 'sell'>('all'),
-    sortCommodity: ref(''),
-    sortDirection: ref<'none' | 'asc' | 'desc'>('none'),
-    showSortPanel: ref(false),
-    filteredOffers: computed(() => offers.value),
-    toggleSort: marketViewMocks.toggleSortMock,
-    clearSort: marketViewMocks.clearSortMock,
+    ...(function () {
+      const filterType = ref<'all' | 'buy' | 'sell'>('all')
+      const sortCommodity = ref('')
+      const sortDirection = ref<'none' | 'asc' | 'desc'>('none')
+      const showSortPanel = ref(false)
+
+      return {
+        filterType,
+        sortCommodity,
+        sortDirection,
+        showSortPanel,
+        filteredOffers: computed(() => offers.value),
+        toggleSort: (commodityName: string) => {
+          marketViewMocks.toggleSortMock(commodityName)
+          if (sortCommodity.value !== commodityName) {
+            sortCommodity.value = commodityName
+            sortDirection.value = 'asc'
+            return
+          }
+          if (sortDirection.value === 'asc') {
+            sortDirection.value = 'desc'
+            return
+          }
+          sortCommodity.value = ''
+          sortDirection.value = 'none'
+        },
+        clearSort: () => {
+          marketViewMocks.clearSortMock()
+          sortCommodity.value = ''
+          sortDirection.value = 'none'
+        },
+      }
+    })(),
   }),
 }))
 
@@ -281,6 +307,108 @@ describe('MarketView.vue', () => {
     expect(wrapper.find('.create-btn.buy').exists()).toBe(false)
     expect(wrapper.find('.create-btn.sell').exists()).toBe(false)
     expect(wrapper.find('.wizard-overlay').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('shows the default placeholder plus fetch-error logging when market dependencies fail', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/commodities/') throw new Error('commodities failed')
+      if (path === '/api/trading-settings/') throw new Error('settings failed')
+      if (path === '/api/auth/me') throw new Error('me failed')
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect((wrapper.find('.text-offer-input').element as HTMLInputElement).placeholder).toBe('مثال: خرید سکه 30 عدد 125000')
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load commodities', expect.any(Error))
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load settings', expect.any(Error))
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load current user', expect.any(Error))
+
+    consoleErrorSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('renders sort loading and toggles the sort icon/clear button states', async () => {
+    let resolveCommodities: ((value: unknown) => void) | null = null
+    marketViewMocks.apiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/commodities/') {
+        return new Promise((resolve) => {
+          resolveCommodities = resolve
+        }) as Promise<any>
+      }
+      if (path === '/api/trading-settings/') return Promise.resolve(responseOf(settingsFixture))
+      if (path === '/api/auth/me') return Promise.resolve(responseOf({ id: 77 }))
+      return Promise.resolve(responseOf(null))
+    })
+
+    const wrapper = await mountMarketView()
+    await nextTick()
+
+    await wrapper.find('.sort-toggle-btn').trigger('click')
+    expect(wrapper.find('.panel-loading').exists()).toBe(true)
+
+    resolveCommodities?.(responseOf(commoditiesFixture))
+    await flushPromises()
+
+    await wrapper.findAll('.commodity-btn')[0]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.html()).toContain('lucide-arrow-up')
+    expect(wrapper.find('.clear-sort-btn').exists()).toBe(true)
+
+    await wrapper.findAll('.commodity-btn')[0]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.html()).toContain('lucide-arrow-down')
+
+    wrapper.unmount()
+  })
+
+  it('surfaces parse/publish failures and clears preview state on cancel', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    marketViewMocks.apiFetchJsonMock.mockResolvedValueOnce({ success: false, error: 'متن نامعتبر است' })
+    await wrapper.find('.text-offer-input').setValue('متن نامعتبر')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.parse-error').text()).toBe('متن نامعتبر است')
+
+    marketViewMocks.apiFetchJsonMock.mockRejectedValueOnce(new Error('parser exploded'))
+    await wrapper.find('.text-offer-input').setValue('explode')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.parse-error').text()).toBe('parser exploded')
+
+    marketViewMocks.apiFetchJsonMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        trade_type: 'sell',
+        commodity_id: 1,
+        commodity_name: 'سکه',
+        quantity: 2,
+        price: 120000,
+        is_wholesale: false,
+        lot_sizes: [1, 1],
+        notes: null,
+      },
+    })
+    marketViewMocks.apiFetchMock.mockResolvedValueOnce(errorResponse(422, { detail: 'قیمت نامعتبر است' }))
+
+    await wrapper.find('.text-offer-input').setValue('فروش سکه 2 عدد 120000')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.offer-preview-error').text()).toBe('قیمت نامعتبر است')
+
+    await wrapper.find('.offer-preview-cancel').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
 
     wrapper.unmount()
   })

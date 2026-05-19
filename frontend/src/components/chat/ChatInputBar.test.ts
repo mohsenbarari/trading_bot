@@ -812,6 +812,28 @@ describe('ChatInputBar.vue', () => {
     expect(visualViewportMock.removeEventListener).toHaveBeenCalledWith('scroll', expect.any(Function))
   })
 
+  it('falls back to window.innerHeight when visualViewport is unavailable', async () => {
+    vi.stubGlobal('CSS', {
+      supports: vi.fn(() => false),
+    })
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: undefined,
+    })
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: 640,
+    })
+
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      stickerPickerOpen: true,
+    })
+
+    expect(wrapper.findComponent({ name: 'EmojiStickerPicker' }).props('panelHeight')).toBe(269)
+  })
+
   it('handles throwing CSS support probes and env-probe entries without content', async () => {
     vi.stubGlobal('CSS', {
       supports: vi.fn(() => {
@@ -836,6 +858,86 @@ describe('ChatInputBar.vue', () => {
     ], {} as ResizeObserver)
     await nextTick()
     expect(wrapper.findComponent({ name: 'EmojiStickerPicker' }).props('panelHeight')).toBe('max(0px, calc(180px - env(keyboard-inset-height, 0px)))')
+  })
+
+  it('covers selection clamp, active selection reads, env keyboard sizing, and direct picker open', async () => {
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      modelValue: 'abc',
+    })
+    const hooks = getInputBarTestHooks(wrapper)
+    const textarea = wrapper.get('textarea').element as HTMLTextAreaElement
+
+    hooks.state.messageInputRef.value = null
+    hooks.state.composerSelectionStart.value = 9
+    hooks.state.composerSelectionEnd.value = 11
+    hooks.captureSelection()
+    expect(hooks.state.composerSelectionStart.value).toBe(3)
+    expect(hooks.state.composerSelectionEnd.value).toBe(3)
+
+    hooks.state.messageInputRef.value = textarea
+    textarea.focus()
+    textarea.setSelectionRange(1, 2)
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => textarea,
+    })
+    expect(hooks.getComposerSelection()).toEqual({ start: 1, end: 2 })
+
+    hooks.state.keyboardInsetEnvSupported.value = true
+    hooks.state.envKeyboardInset.value = 144
+    hooks.state.envKeyboardInsetMax.value = 188
+    expect(hooks.getMeasuredKeyboardInset()).toBe(188)
+
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => document.body,
+    })
+    hooks.state.keyboardHeight.value = 0
+    hooks.state.lastKnownKeyboardHeight.value = 0
+    await wrapper.get('.emoji-btn').trigger('click')
+    expect(wrapper.emitted('update:stickerPickerOpen')).toContainEqual([true])
+  })
+
+  it('covers keyboard-open picker transition timers and viewport metric branches', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      modelValue: 'keyboard flow',
+      stickerPickerOpen: false,
+    })
+    const hooks = getInputBarTestHooks(wrapper)
+    const textarea = wrapper.get('textarea').element as HTMLTextAreaElement
+    const clearTimeoutSpy = vi.spyOn(window, 'clearTimeout')
+
+    hooks.state.viewportBaseHeight.value = 0
+    hooks.state.lockedComposerInsetHeight.value = 33
+    hooks.state.pendingKeyboardReturn.value = false
+    visualViewportMock.height = 640
+    hooks.updateKeyboardMetrics()
+    expect(hooks.state.viewportBaseHeight.value).toBeGreaterThan(0)
+    expect(hooks.state.lockedComposerInsetHeight.value).toBe(0)
+
+    hooks.state.keyboardHeight.value = 180
+    textarea.focus()
+    textarea.setSelectionRange(2, 4)
+    hooks.prepareStickerToggle()
+    expect(hooks.state.lockedComposerInsetHeight.value).toBe(180)
+
+    await wrapper.get('.emoji-btn').trigger('mousedown')
+    await wrapper.get('.emoji-btn').trigger('click')
+    expect(hooks.state.pendingPickerOpenAfterKeyboardClose.value).toBe(true)
+    expect(hooks.state.disablePickerTransition.value).toBe(true)
+
+    visualViewportMock.height = 900
+    hooks.state.viewportBaseHeight.value = 900
+    await vi.advanceTimersByTimeAsync(320)
+    await nextTick()
+
+    expect(clearTimeoutSpy).toHaveBeenCalled()
+    expect(wrapper.emitted('update:stickerPickerOpen')).toContainEqual([true])
   })
 
   it('summarizes remaining media types and keeps empty send/voice guards inert', async () => {

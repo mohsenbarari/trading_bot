@@ -36,7 +36,66 @@ class FakeSession:
 
 
 class BotAdminUsersLimitFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_limit_confirm_and_cancel_cover_missing_and_protected_targets(self):
+        callback = SimpleNamespace(answer=AsyncMock())
+        state = SimpleNamespace(get_data=AsyncMock(return_value={
+            "limit_target_user_id": 9,
+            "limit_expire_at": datetime(2026, 1, 1, 12, 0, 0),
+            "limit_max_trades": 1,
+            "limit_max_commodities": None,
+            "limit_max_requests": None,
+        }))
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(None)):
+            await handle_limit_confirm(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=state)
+        callback.answer.assert_awaited_once_with("❌ کاربر یافت نشد.", show_alert=True)
+
+        protected_user = SimpleNamespace(
+            id=9,
+            role=UserRole.SUPER_ADMIN,
+            max_daily_trades=None,
+            max_active_commodities=None,
+            max_daily_requests=None,
+            limitations_expire_at=None,
+            trades_count=0,
+            commodities_traded_count=0,
+            channel_messages_count=0,
+            trading_restricted_until=None,
+            telegram_id=123,
+        )
+        callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(protected_user)):
+            await handle_limit_confirm(callback, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER), state=state)
+        callback.answer.assert_awaited_once_with("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+
+        cancel_callback = SimpleNamespace(data="limit_cancel_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        with patch("bot.handlers.admin_users.clear_state_retain_anchors", new=AsyncMock()), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(None)
+        ):
+            await handle_limit_cancel(cancel_callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=SimpleNamespace())
+        cancel_callback.answer.assert_awaited_once_with("عملیات لغو شد.")
+
+        cancel_callback = SimpleNamespace(data="limit_cancel_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        with patch("bot.handlers.admin_users.clear_state_retain_anchors", new=AsyncMock()), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(SimpleNamespace(
+                id=9,
+                role=UserRole.SUPER_ADMIN,
+                trading_restricted_until=None,
+                max_daily_trades=None,
+                max_active_commodities=None,
+                max_daily_requests=None,
+                can_block_users=True,
+                max_blocked_users=5,
+            ))
+        ):
+            await handle_limit_cancel(cancel_callback, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER), state=SimpleNamespace())
+        cancel_callback.answer.assert_awaited_once_with("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+
     async def test_process_limit_value_handles_invalid_and_valid_inputs(self):
+        state = SimpleNamespace(clear=AsyncMock())
+        message = SimpleNamespace(text="5")
+        await process_limit_value(message, state=state, user=None)
+        state.clear.assert_awaited_once()
+
         message = SimpleNamespace(
             text="bad",
             answer=AsyncMock(return_value=SimpleNamespace(message_id=41)),
@@ -48,6 +107,19 @@ class BotAdminUsersLimitFlowTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.admin_users.asyncio.create_task", side_effect=consume_task
         ), patch("bot.handlers.admin_users.safe_delete_message", new=AsyncMock()):
             await process_limit_value(message, state=state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+        self.assertIn("عدد صحیح معتبر", message.answer.await_args.args[0])
+
+        negative_msg = SimpleNamespace(message_id=43)
+        message = SimpleNamespace(
+            text="-1",
+            answer=AsyncMock(return_value=negative_msg),
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=1),
+        )
+        with patch("bot.handlers.admin_users.delete_user_message", new=AsyncMock()), patch(
+            "bot.handlers.admin_users.asyncio.create_task", side_effect=consume_task
+        ), patch("bot.handlers.admin_users.safe_delete_message", new=AsyncMock()):
+            await process_limit_value(message, state=SimpleNamespace(get_data=AsyncMock(return_value={"limit_target_user_id": 9})), user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
         self.assertIn("عدد صحیح معتبر", message.answer.await_args.args[0])
 
         for editing, expected_kwargs in [
@@ -78,6 +150,10 @@ class BotAdminUsersLimitFlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_limit_confirm_and_cancel_cover_key_branches(self):
         callback = SimpleNamespace(answer=AsyncMock())
+        await handle_limit_confirm(callback, user=None, state=SimpleNamespace())
+        callback.answer.assert_not_awaited()
+
+        callback = SimpleNamespace(answer=AsyncMock())
         state = SimpleNamespace(get_data=AsyncMock(return_value={
             "limit_target_user_id": 9,
             "limit_expire_at": datetime(2026, 1, 1, 12, 0, 0),
@@ -107,7 +183,7 @@ class BotAdminUsersLimitFlowTests(unittest.IsolatedAsyncioTestCase):
             "limit_expire_at": datetime(2026, 1, 1, 12, 0, 0),
             "limit_max_trades": 1,
             "limit_max_commodities": 2,
-            "limit_max_requests": None,
+            "limit_max_requests": 3,
         }))
         with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=session), patch(
             "bot.handlers.admin_users.create_user_notification", new=AsyncMock()
@@ -122,10 +198,15 @@ class BotAdminUsersLimitFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(target_user.trades_count, 0)
         self.assertEqual(notify_mock.await_args.kwargs["level"], NotificationLevel.WARNING)
         self.assertEqual(notify_mock.await_args.kwargs["category"], NotificationCategory.SYSTEM)
+        self.assertIn("مجموع ارسال لفظ در کانال: 3", notify_mock.await_args.args[2])
         telegram_mock.assert_awaited_once()
         clear_mock.assert_awaited_once_with(state)
         keyboard_mock.assert_called_once_with(user_id=9, is_restricted=True, has_limitations=True)
         callback.answer.assert_awaited_once_with("✅ محدودیت‌ها اعمال شد.", show_alert=True)
+
+        cancel_callback = SimpleNamespace(data="limit_cancel_9", answer=AsyncMock())
+        await handle_limit_cancel(cancel_callback, user=None, state=SimpleNamespace())
+        cancel_callback.answer.assert_not_awaited()
 
         target_user = SimpleNamespace(
             id=9,

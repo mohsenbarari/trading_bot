@@ -40,6 +40,14 @@ class FakeDB:
 
 
 class SyncRouterReceiveErrorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fake_db_helper_paths(self):
+        db = FakeDB()
+        await db.rollback()
+        self.assertEqual(db.rollbacks, 1)
+
+        async with db.begin_nested() as nested:
+            self.assertIsNone(nested)
+
     async def test_receive_sync_data_returns_partial_when_items_fail(self):
         db = FakeDB()
         items = [{"table": "users", "operation": "INSERT", "id": 1, "data": {"full_name": "User"}}]

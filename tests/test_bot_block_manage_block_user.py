@@ -20,6 +20,10 @@ def make_callback():
 class BotBlockManageBlockUserTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_block_user_answers_and_refreshes_menu_on_success(self):
         callback = make_callback()
+        await handle_block_user(callback, SimpleNamespace(user_id=7), user=None)
+        callback.answer.assert_awaited_once_with()
+
+        callback = make_callback()
         with patch("bot.handlers.block_manage.AsyncSessionLocal", side_effect=[FakeSessionContext(), FakeSessionContext()]), patch(
             "bot.handlers.block_manage.block_user", new=AsyncMock(return_value=(False, "no"))
         ):

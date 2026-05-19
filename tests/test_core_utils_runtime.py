@@ -1,4 +1,6 @@
 import asyncio
+import importlib
+import typing
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import unittest
@@ -53,20 +55,33 @@ class CoreUtilsRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         iran_now = utils.get_iran_time()
         self.assertIn('Tehran', str(iran_now.tzinfo))
+        self.assertIsNone(utils.to_iran_time(None))
 
         naive_utc = datetime(2025, 1, 2, 12, 0)
         iran_dt = utils.to_iran_time(naive_utc)
         self.assertIsNotNone(iran_dt.tzinfo)
+        self.assertEqual(utils.format_iran_datetime(naive_utc), iran_dt.strftime('%Y-%m-%d %H:%M'))
         self.assertEqual(utils.format_iran_datetime(naive_utc, include_time=False), iran_dt.strftime('%Y-%m-%d'))
         self.assertEqual(utils.format_iran_datetime(None), '---')
 
         jalali = utils.to_jalali_str(naive_utc)
         self.assertIsInstance(jalali, str)
+        self.assertIsNone(utils.to_jalali_str(None))
         parsed = utils.parse_jalali_str(jalali)
         self.assertIsNotNone(parsed)
         self.assertEqual(parsed.utcoffset(), timedelta(0))
         self.assertIsNone(utils.parse_jalali_str(''))
         self.assertIsNone(utils.parse_jalali_str('broken'))
+
+    async def test_utils_reload_with_type_checking_enabled_executes_type_only_import(self):
+        original = typing.TYPE_CHECKING
+        try:
+            typing.TYPE_CHECKING = True
+            reloaded = importlib.reload(utils)
+            self.assertIn('User', reloaded.__dict__)
+        finally:
+            typing.TYPE_CHECKING = original
+            importlib.reload(utils)
 
     async def test_normalization_helpers(self):
         self.assertEqual(utils.normalize_persian_numerals('۱۲٣abc'), '123abc')
@@ -90,6 +105,25 @@ class CoreUtilsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(utils, 'logger') as logger:
             await utils.send_deletable_message(bot, 1, 'hello')
         logger.warning.assert_called_once()
+
+    async def test_send_deletable_message_delete_task_swallows_delete_errors(self):
+        bot = AsyncMock()
+        sent_message = AsyncMock()
+        sent_message.delete = AsyncMock(side_effect=TelegramBadRequest(method='deleteMessage', message='denied'))
+        bot.send_message = AsyncMock(return_value=sent_message)
+        created = {}
+
+        def capture_task(coro):
+            created['coro'] = coro
+            return None
+
+        with patch('core.utils.asyncio.create_task', side_effect=capture_task), patch(
+            'core.utils.asyncio.sleep', new=AsyncMock()
+        ):
+            await utils.send_deletable_message(bot, 1, 'hello')
+            await created['coro']
+
+        sent_message.delete.assert_awaited_once()
 
     async def test_send_telegram_notification_paths(self):
         with patch('core.utils.os.getenv', return_value=None), patch.object(utils, 'logger') as logger:
@@ -206,6 +240,17 @@ class CoreUtilsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         allowed, message = utils.check_user_limits(channel_limited, 'channel_message')
         self.assertFalse(allowed)
         self.assertIn('حداکثر تعداد ارسال لفظ', message)
+
+        active_but_unrestricted = SimpleNamespace(
+            limitations_expire_at=datetime.utcnow() + timedelta(days=1),
+            max_daily_trades=None,
+            trades_count=0,
+            max_active_commodities=None,
+            commodities_traded_count=0,
+            max_daily_requests=None,
+            channel_messages_count=0,
+        )
+        self.assertEqual(utils.check_user_limits(active_but_unrestricted, 'other'), (True, None))
 
     async def test_increment_and_reset_user_counter(self):
         session = AsyncMock()

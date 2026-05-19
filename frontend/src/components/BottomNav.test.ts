@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { nextTick, reactive } from 'vue'
 
 const apiFetchMock = vi.fn()
-const routeState = { name: 'home' }
+const routeState = reactive({ name: 'home' })
 
 vi.mock('vue-router', () => ({
   useRoute: () => routeState,
@@ -44,6 +45,55 @@ describe('BottomNav.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('مدیریت')
+    wrapper.unmount()
+  })
+
+  it('primes the current user, toggles the FAB menu, collapses on route changes, and renders disabled plus capped unread states', async () => {
+    localStorage.setItem('auth_token', 'jwt-token')
+    routeState.name = 'market'
+    apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 2, role: 'عادی', account_name: 'normal-user' }),
+    })
+
+    const currentUserModule = await import('../utils/currentUser')
+    currentUserModule.clearCurrentUserSummary()
+
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const wrapper = mount(BottomNav, {
+      global: {
+        stubs: {
+          'router-link': {
+            props: ['to'],
+            template: '<a :href="typeof to === \'string\' ? to : to.path"><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/auth/me')
+
+    await wrapper.get('.fab-btn').trigger('click')
+    expect(wrapper.find('.fab-nav').exists()).toBe(true)
+
+    ;(wrapper.vm as any).navItems[0].disabled = true
+    const storeModule = await import('../stores/notifications')
+    const notificationStore = storeModule.useNotificationStore()
+    notificationStore.setChatUnreadCount(120)
+    await nextTick()
+    await flushPromises()
+
+    expect(wrapper.find('.fab-unread-badge').text()).toBe('9+')
+
+    routeState.name = 'home'
+    await nextTick()
+    await flushPromises()
+
+    expect(wrapper.find('.fab-nav').exists()).toBe(false)
+    expect(wrapper.find('.soon-dot').exists()).toBe(true)
+    expect(wrapper.find('.nav-unread-badge').text()).toBe('99+')
+
     wrapper.unmount()
   })
 })

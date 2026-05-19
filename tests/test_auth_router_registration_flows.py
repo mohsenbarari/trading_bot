@@ -140,6 +140,16 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         send_sms_mock.assert_called_once_with("09120000000", "12345")
         self.assertEqual(result, {"detail": "کد تایید ارسال شد", "expires_in": 120})
 
+        redis = FakeRedis()
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth.random.randint",
+            return_value=12345,
+        ), patch("api.routers.auth.send_otp_sms", return_value=False):
+            with self.assertRaises(HTTPException) as exc_info:
+                await register_otp_request(req, db=FakeDB([FakeExecuteResult(invitation)]))
+        self.assertEqual(exc_info.exception.status_code, 500)
+        self.assertEqual(exc_info.exception.detail, "خطا در ارسال پیامک")
+
     async def test_register_otp_request_rejects_invalid_accountant_relation_tokens(self):
         req = RegisterOTPRequest(token="ACCT-token")
         invitation = SimpleNamespace(
@@ -343,6 +353,30 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(relation.status, "active")
         self.assertIsNotNone(relation.activated_at)
         self.assertEqual(result["access_token"], "access-acc")
+
+    async def test_register_complete_rejects_missing_accountant_relation(self):
+        invitation = SimpleNamespace(
+            token="ACCT-token",
+            account_name="accountant1",
+            mobile_number="09120000000",
+            role="watch",
+            is_used=False,
+            expires_at=datetime.utcnow() + timedelta(minutes=5),
+        )
+        redis = FakeRedis({"reg_verified:ACCT-token": "1"})
+
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth.get_pending_accountant_relation_by_invitation_token",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await register_complete(
+                    RegisterComplete(token="ACCT-token", address="Tehran"),
+                    raw_request=make_request(),
+                    db=FakeDB([FakeExecuteResult(invitation)]),
+                )
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "دعوت‌نامه حسابدار نامعتبر یا منقضی شده است")
 
 
 if __name__ == "__main__":

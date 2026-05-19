@@ -15,6 +15,51 @@ from core.enums import UserRole
 
 
 class BotAdminUsersLimitStartTests(unittest.IsolatedAsyncioTestCase):
+    async def test_limit_start_and_set_handlers_cover_guard_branches(self):
+        callback = SimpleNamespace(data="user_limit_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        await handle_user_limit_start(callback, user=None, state=SimpleNamespace())
+        callback.answer.assert_not_awaited()
+
+        protected_user = SimpleNamespace(id=9, role=UserRole.SUPER_ADMIN)
+        callback = SimpleNamespace(data="user_limit_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(protected_user)):
+            await handle_user_limit_start(callback, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER), state=SimpleNamespace())
+        callback.answer.assert_awaited_once_with("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+
+        callback = SimpleNamespace(data="user_limit_dur_9_15", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(None)):
+            await handle_user_limit_start(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=SimpleNamespace(update_data=AsyncMock()))
+        callback.answer.assert_awaited_once_with("❌ کاربر یافت نشد.", show_alert=True)
+
+        callback = SimpleNamespace(data="user_limit_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(None)):
+            await handle_user_limit_start(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=SimpleNamespace())
+        callback.answer.assert_awaited_once_with("❌ کاربر یافت نشد.", show_alert=True)
+
+        for handler, callback_data in [
+            (handle_set_trades, "limit_set_trades_9"),
+            (handle_set_commodities, "limit_set_commodities_9"),
+            (handle_set_requests, "limit_set_requests_9"),
+        ]:
+            callback = SimpleNamespace(data=callback_data, message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+            await handler(callback, user=None, state=SimpleNamespace(update_data=AsyncMock(), set_state=AsyncMock()))
+            callback.answer.assert_not_awaited()
+
+        for handler, callback_data in [
+            (handle_set_trades, "limit_set_trades_9"),
+            (handle_set_commodities, "limit_set_commodities_9"),
+            (handle_set_requests, "limit_set_requests_9"),
+        ]:
+            missing_callback = SimpleNamespace(data=callback_data, message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+            with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(None)):
+                await handler(missing_callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=SimpleNamespace(update_data=AsyncMock(), set_state=AsyncMock()))
+            missing_callback.answer.assert_awaited_once_with("❌ کاربر یافت نشد.", show_alert=True)
+
+            protected_callback = SimpleNamespace(data=callback_data, message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+            with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(SimpleNamespace(id=9, role=UserRole.SUPER_ADMIN))):
+                await handler(protected_callback, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER), state=SimpleNamespace(update_data=AsyncMock(), set_state=AsyncMock()))
+            protected_callback.answer.assert_awaited_once_with("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+
     async def test_get_limit_panel_text_and_limit_start_paths(self):
         text = get_limit_panel_text(1, None, 3)
         self.assertIn("1", text)
@@ -52,6 +97,21 @@ class BotAdminUsersLimitStartTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.update_data.await_args.kwargs["limit_target_user_id"], 9)
         keyboard_mock.assert_called_once_with(9)
         callback.message.edit_text.assert_awaited_once_with(get_limit_panel_text(None, None, None), reply_markup="KB", parse_mode="Markdown")
+
+        state = SimpleNamespace(update_data=AsyncMock())
+        callback = SimpleNamespace(
+            data="user_limit_dur_9_0",
+            message=SimpleNamespace(edit_text=AsyncMock()),
+            answer=AsyncMock(),
+        )
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(target_user)), patch(
+            "bot.handlers.admin_users.datetime"
+        ) as datetime_mock, patch(
+            "bot.keyboards.get_limit_settings_keyboard", return_value="KB"
+        ):
+            datetime_mock.utcnow.return_value = datetime(2026, 1, 1, 12, 0, 0)
+            await handle_user_limit_start(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=state)
+        self.assertEqual(state.update_data.await_args.kwargs["limit_expire_at"], datetime(2026, 1, 1, 12, 0, 0).replace() + __import__('datetime').timedelta(days=36500))
 
     async def test_limit_set_prompts_mark_editing_state(self):
         for handler, callback_data, expected_editing in [

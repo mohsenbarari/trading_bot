@@ -195,4 +195,38 @@ describe('imagePreprocess.worker', () => {
       error: 'No OffscreenCanvas 2D context',
     })
   })
+
+  it('posts an error response when createImageBitmap support is unavailable', async () => {
+    Object.defineProperty(globalThis, 'createImageBitmap', {
+      configurable: true,
+      value: undefined,
+    })
+    Object.defineProperty(globalThis, 'OffscreenCanvas', {
+      configurable: true,
+      value: MockOffscreenCanvas,
+    })
+    const postMessageSpy = vi.spyOn(globalThis, 'postMessage').mockImplementation(() => undefined)
+
+    await loadWorkerModule()
+    const handler = (globalThis as typeof globalThis & {
+      onmessage?: (event: MessageEvent<any>) => Promise<void>
+    }).onmessage
+
+    await handler?.({
+      data: {
+        id: 'job-4',
+        file: new Blob(['raw'], { type: 'image/jpeg' }),
+        maxWidthOrHeight: 1920,
+        quality: 0.85,
+        thumbnailMaxWidthOrHeight: 64,
+        thumbnailQuality: 0.58,
+      },
+    } as MessageEvent<any>)
+
+    expect(postMessageSpy.mock.calls[0]![0]).toMatchObject({
+      id: 'job-4',
+      ok: false,
+      error: 'createImageBitmap is unavailable in worker',
+    })
+  })
 })

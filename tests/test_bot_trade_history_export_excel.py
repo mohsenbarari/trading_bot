@@ -21,6 +21,22 @@ def make_callback():
 
 
 class BotTradeHistoryExportExcelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_export_excel_returns_early_without_user_and_uses_self_display_name(self):
+        callback = make_callback()
+        await export_excel(callback, SimpleNamespace(target_user_id=5), FakeState(), user=None, bot=SimpleNamespace())
+        callback.answer.assert_not_awaited()
+
+        callback = make_callback()
+        bot = SimpleNamespace(send_document=AsyncMock())
+        trades = [SimpleNamespace(id=1)]
+        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, trades))), patch(
+            "bot.handlers.trade_history.generate_excel", new=AsyncMock(return_value="/tmp/out.xlsx")
+        ), patch("bot.handlers.trade_history.FSInputFile", return_value="FILE") as file_mock, patch(
+            "bot.handlers.trade_history.os.remove"
+        ):
+            await export_excel(callback, SimpleNamespace(target_user_id=2), FakeState(), user=SimpleNamespace(id=2), bot=bot)
+        self.assertIn("trade_history_پروفایل من.xlsx", file_mock.call_args.kwargs["filename"])
+
     async def test_export_excel_warns_when_no_trades_exist(self):
         callback = make_callback()
         with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(SimpleNamespace(account_name="t"), []))):

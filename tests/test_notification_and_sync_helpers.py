@@ -101,6 +101,37 @@ class SyncPushHelperTests(unittest.TestCase):
 
         executor.submit.assert_not_called()
 
+    def test_sync_push_helper_branches_cover_invalid_cooldowns_and_submit_failure(self):
+        with patch("core.config.settings.sync_direct_push_cooldown_seconds", "bad"):
+            self.assertEqual(sync_push._get_cooldown_seconds(), 90.0)
+
+        with patch("core.config.settings.sync_direct_push_cooldown_seconds", 0.0):
+            sync_push._mark_target_cooldown("https://peer.example", "disabled")
+        self.assertFalse(sync_push._target_is_in_cooldown("https://peer.example"))
+
+        sync_push._target_cooldowns["https://peer.example"] = 100.0
+        with patch("core.sync_push.time.monotonic", return_value=200.0):
+            self.assertFalse(sync_push._target_is_in_cooldown("https://peer.example"))
+        self.assertNotIn("https://peer.example", sync_push._target_cooldowns)
+
+        with patch("core.server_routing.default_peer_server_url", return_value="https://peer.example"), \
+             patch("core.config.settings.sync_api_key", "secret"), \
+             patch.object(sync_push, "_executor") as executor, \
+             patch.object(sync_push, "logger") as logger:
+            executor.submit.side_effect = RuntimeError("submit down")
+            sync_push.push_sync_direct({"id": 1})
+
+        logger.warning.assert_called_once()
+
+    def test_teardown_tolerates_close_failure(self):
+        class ClosingClient:
+            is_closed = False
+
+            def close(self):
+                raise RuntimeError("close failed")
+
+        sync_push._http_client = ClosingClient()
+
     def test_do_push_sends_signed_payload_to_sync_receive(self):
         recorded = {}
 

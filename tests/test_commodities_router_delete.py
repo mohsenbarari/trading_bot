@@ -87,6 +87,17 @@ class CommoditiesRouterDeleteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.commits, 1)
         invalidate_mock.assert_awaited_once()
 
+    async def test_delete_commodity_ignores_cache_invalidation_failures(self):
+        commodity = SimpleNamespace(id=1, aliases=[])
+        db = FakeDB([FakeExecuteResult(value=commodity), FakeExecuteResult(values=[])])
+        with patch(
+            "bot.utils.redis_helpers.invalidate_commodity_cache",
+            new=AsyncMock(side_effect=RuntimeError("cache down")),
+        ):
+            result = await delete_commodity(1, db=db, source="bot")
+
+        self.assertIsNone(result)
+
 
 if __name__ == "__main__":
     unittest.main()
