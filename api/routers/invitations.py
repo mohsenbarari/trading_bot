@@ -12,6 +12,10 @@ from core.services.accountant_relation_service import (
     get_pending_accountant_relation_by_invitation_token,
     is_accountant_invitation_token,
 )
+from core.services.customer_relation_service import (
+    get_pending_customer_relation_by_invitation_token,
+    is_customer_invitation_token,
+)
 from models.invitation import Invitation
 from models.user import User, UserRole
 from core.config import settings
@@ -163,6 +167,10 @@ async def lookup_invitation(
         relation = await get_pending_accountant_relation_by_invitation_token(db, inv.token)
         if not relation:
             raise HTTPException(status_code=400, detail="Invitation expired")
+    elif is_customer_invitation_token(inv.token):
+        relation = await get_pending_customer_relation_by_invitation_token(db, inv.token)
+        if not relation:
+            raise HTTPException(status_code=400, detail="Invitation expired")
         
     if inv.expires_at < datetime.utcnow():
         raise HTTPException(status_code=400, detail="Invitation expired")
@@ -188,6 +196,10 @@ async def validate_invitation(
 
     if is_accountant_invitation_token(token):
         relation = await get_pending_accountant_relation_by_invitation_token(db, token)
+        if not relation:
+            raise HTTPException(status_code=400, detail="Invitation expired")
+    elif is_customer_invitation_token(token):
+        relation = await get_pending_customer_relation_by_invitation_token(db, token)
         if not relation:
             raise HTTPException(status_code=400, detail="Invitation expired")
         

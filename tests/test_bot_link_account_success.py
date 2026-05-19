@@ -146,6 +146,15 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.cleared, 1)
         self.assertIn("حسابدارها به ربات تلگرام دسترسی ندارند", message.answer.await_args.args[0])
 
+        state = FakeState()
+        message = make_message()
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.finalize_account_link", new=AsyncMock(side_effect=PermissionError("CUSTOMER_BOT_ACCESS_FORBIDDEN"))
+        ):
+            await handle_contact(message, state)
+        self.assertEqual(state.cleared, 1)
+        self.assertIn("مشتری‌ها در این فاز به ربات تلگرام دسترسی ندارند", message.answer.await_args.args[0])
+
         user = SimpleNamespace(
             id=99,
             telegram_id=None,

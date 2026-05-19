@@ -153,6 +153,48 @@ class BotStartInvitationEntryTests(unittest.IsolatedAsyncioTestCase):
             await handle_start_with_token(message, command, state=FakeState(), user=None)
         self.assertIn("نامعتبر یا منقضی", message.answer.await_args.args[0])
 
+    async def test_handle_start_with_token_redirects_customer_invitation_to_web_only_flow(self):
+        invitation = SimpleNamespace(token="CUST-token", mobile_number="09120000000", is_used=False)
+        message = SimpleNamespace(
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=16),
+            answer=AsyncMock(return_value=SimpleNamespace(message_id=77)),
+        )
+        state = FakeState()
+        command = SimpleNamespace(args="CUST-token")
+
+        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
+            "bot.handlers.start.AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(invitation)),
+        ), patch(
+            "bot.handlers.start.get_pending_customer_relation_by_invitation_token",
+            new=AsyncMock(return_value=SimpleNamespace(id=1)),
+        ), patch(
+            "bot.handlers.start.settings",
+            SimpleNamespace(frontend_url="https://app.example"),
+        ):
+            await handle_start_with_token(message, command, state, user=None)
+
+        self.assertEqual(state.updated, [])
+        self.assertEqual(state.states, [])
+        self.assertIn("مشتری", message.answer.await_args.args[0])
+        self.assertIn("فقط از طریق وب‌اپ", message.answer.await_args.args[0])
+
+        message = SimpleNamespace(
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=17),
+            answer=AsyncMock(return_value=SimpleNamespace(message_id=77)),
+        )
+        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
+            "bot.handlers.start.AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(invitation)),
+        ), patch(
+            "bot.handlers.start.get_pending_customer_relation_by_invitation_token",
+            new=AsyncMock(return_value=None),
+        ):
+            await handle_start_with_token(message, command, state=FakeState(), user=None)
+        self.assertIn("نامعتبر یا منقضی", message.answer.await_args.args[0])
+
 
 if __name__ == "__main__":
     unittest.main()
