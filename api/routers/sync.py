@@ -17,16 +17,17 @@ logger = logging.getLogger(__name__)
 TABLE_ORDER = {
     "users": 0,
     "accountant_relations": 1,
-    "chats": 2,
-    "chat_members": 3,
-    "invitations": 4,
-    "notifications": 5,
-    "user_blocks": 6,
-    "commodities": 7,
-    "commodity_aliases": 8,
-    "trading_settings": 9,
-    "offers": 10,
-    "trades": 11,
+    "customer_relations": 2,
+    "chats": 3,
+    "chat_members": 4,
+    "invitations": 5,
+    "notifications": 6,
+    "user_blocks": 7,
+    "commodities": 8,
+    "commodity_aliases": 9,
+    "trading_settings": 10,
+    "offers": 11,
+    "trades": 12,
 }
 
 async def verify_signature(request: Request):
@@ -76,6 +77,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from core.enums import ChatType
 from models.accountant_relation import AccountantRelation
+from models.customer_relation import CustomerRelation
 from models.user import User
 from models.invitation import Invitation
 from models.notification import Notification
@@ -104,6 +106,7 @@ NATURAL_KEYS = {
 SEQUENCE_MAP = {
     "users": ("users_id_seq", "users"),
     "accountant_relations": ("accountant_relations_id_seq", "accountant_relations"),
+    "customer_relations": ("customer_relations_id_seq", "customer_relations"),
     "chats": ("chats_id_seq", "chats"),
     "chat_members": ("chat_members_id_seq", "chat_members"),
     "offers": ("offers_id_seq", "offers"),
@@ -119,6 +122,7 @@ def get_model_class(table_name: str):
     mapping = {
         "users": User,
         "accountant_relations": AccountantRelation,
+        "customer_relations": CustomerRelation,
         "chats": Chat,
         "chat_members": ChatMember,
         "invitations": Invitation,

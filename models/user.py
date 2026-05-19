@@ -64,6 +64,7 @@ class User(Base):
     # Session management
     max_sessions = Column(Integer, default=1, nullable=False)
     max_accountants = Column(Integer, default=3, nullable=False)
+    max_customers = Column(Integer, default=5, nullable=False)
     home_server = Column(String(16), nullable=False, default="foreign")
 
     can_block_users = Column(Boolean, default=True)

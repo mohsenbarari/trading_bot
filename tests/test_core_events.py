@@ -200,6 +200,27 @@ class CoreEventsTests(unittest.TestCase):
             created_at=now,
         )
         notification = SimpleNamespace(id=5, user_id=1, message='hi', is_read=False, created_at=None, level='INFO', category='SYSTEM')
+        customer_relation = SimpleNamespace(
+            id=9,
+            owner_user_id=3,
+            customer_user_id=5,
+            created_by_user_id=3,
+            invitation_token='cust-invite-token',
+            management_name='مشتری ویژه',
+            customer_tier=SimpleNamespace(value='tier2'),
+            commission_rate='0.50',
+            min_trade_quantity=1,
+            max_trade_quantity=10,
+            max_daily_trades=3,
+            max_daily_commodity_volume=50,
+            trading_restricted_until=now,
+            status=SimpleNamespace(value='active'),
+            expires_at=now,
+            activated_at=now,
+            deleted_at=None,
+            created_at=now,
+            updated_at=now,
+        )
 
         return {
             ('Chat', 'after_insert'): chat,
@@ -218,6 +239,9 @@ class CoreEventsTests(unittest.TestCase):
             ('AccountantRelation', 'after_insert'): accountant_relation,
             ('AccountantRelation', 'after_update'): accountant_relation,
             ('AccountantRelation', 'after_delete'): accountant_relation,
+            ('CustomerRelation', 'after_insert'): customer_relation,
+            ('CustomerRelation', 'after_update'): customer_relation,
+            ('CustomerRelation', 'after_delete'): customer_relation,
             ('Commodity', 'after_insert'): commodity,
             ('Commodity', 'after_update'): commodity,
             ('Commodity', 'after_delete'): commodity,
@@ -385,6 +409,7 @@ class CoreEventsTests(unittest.TestCase):
                 commodities_traded_count=2,
                 channel_messages_count=3,
                 max_sessions=1,
+                max_customers=5,
                 last_seen_at=now,
                 created_at=now,
                 updated_at=now,
@@ -398,6 +423,7 @@ class CoreEventsTests(unittest.TestCase):
         for payload in user_payloads:
             self.assertEqual(payload['global_lock_grace_expires_at'], payload['messenger_grace_expires_at'])
             self.assertEqual(payload['global_web_locked_at'], payload['messenger_blocked_at'])
+            self.assertEqual(payload['max_customers'], 5)
         publish_event_sync.assert_any_call('offer:created', unittest.mock.ANY)
         publish_event_sync.assert_any_call('offer:updated', unittest.mock.ANY)
         publish_event_sync.assert_any_call('offer:expired', {'id': 1})
@@ -419,6 +445,7 @@ class CoreEventsTests(unittest.TestCase):
             events, 'logger'
         ) as logger:
             events.setup_accountant_relation_events()
+            events.setup_customer_relation_events()
             events.setup_chat_events()
             events.setup_chat_member_events()
             events.setup_commodity_events()
@@ -535,8 +562,34 @@ class CoreEventsTests(unittest.TestCase):
             registry[('AccountantRelation', 'after_update')](None, connection, accountant_relation)
             registry[('AccountantRelation', 'after_delete')](None, connection, accountant_relation)
 
-        self.assertGreaterEqual(log_change.call_count, 25)
+            customer_relation = SimpleNamespace(
+                id=9,
+                owner_user_id=3,
+                customer_user_id=5,
+                created_by_user_id=3,
+                invitation_token='cust-invite-token',
+                management_name='مشتری ویژه',
+                customer_tier=SimpleNamespace(value='tier2'),
+                commission_rate='0.50',
+                min_trade_quantity=1,
+                max_trade_quantity=10,
+                max_daily_trades=3,
+                max_daily_commodity_volume=50,
+                trading_restricted_until=now,
+                status=SimpleNamespace(value='active'),
+                expires_at=now,
+                activated_at=now,
+                deleted_at=None,
+                created_at=now,
+                updated_at=now,
+            )
+            registry[('CustomerRelation', 'after_insert')](None, connection, customer_relation)
+            registry[('CustomerRelation', 'after_update')](None, connection, customer_relation)
+            registry[('CustomerRelation', 'after_delete')](None, connection, customer_relation)
+
+        self.assertGreaterEqual(log_change.call_count, 28)
         logger.info.assert_any_call('✅ AccountantRelation event listeners registered')
+        logger.info.assert_any_call('✅ CustomerRelation event listeners registered')
         logger.info.assert_any_call('✅ Chat event listeners registered')
         logger.info.assert_any_call('✅ ChatMember event listeners registered')
         logger.info.assert_any_call('✅ Commodity event listeners registered')
@@ -549,6 +602,8 @@ class CoreEventsTests(unittest.TestCase):
         with patch('core.events.setup_user_events') as setup_user_events, patch(
             'core.events.setup_accountant_relation_events'
         ) as setup_accountant_relation_events, patch(
+            'core.events.setup_customer_relation_events'
+        ) as setup_customer_relation_events, patch(
             'core.events.setup_chat_events'
         ) as setup_chat_events, patch(
             'core.events.setup_chat_member_events'
@@ -567,6 +622,7 @@ class CoreEventsTests(unittest.TestCase):
 
         setup_user_events.assert_called_once()
         setup_accountant_relation_events.assert_called_once()
+        setup_customer_relation_events.assert_called_once()
         setup_chat_events.assert_called_once()
         setup_chat_member_events.assert_called_once()
         setup_invitation_events.assert_called_once()
@@ -588,6 +644,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_trade_events()
             events.setup_user_events()
             events.setup_accountant_relation_events()
+            events.setup_customer_relation_events()
             events.setup_chat_events()
             events.setup_chat_member_events()
             events.setup_commodity_events()
