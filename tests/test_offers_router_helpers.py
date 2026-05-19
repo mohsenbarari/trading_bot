@@ -107,6 +107,11 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.user_account_name, "owner")
         self.assertTrue(response.is_own_offer)
         self.assertEqual(response.remaining_quantity, 12)
+        self.assertEqual(response.price, 123456)
+        self.assertEqual(response.raw_price, 123456)
+        self.assertEqual(response.market_published_price, 123456)
+        self.assertEqual(response.viewer_effective_price, 123456)
+        self.assertFalse(response.customer_badge_visible)
         self.assertEqual(response.expires_at_ts, int(offer.created_at.timestamp() + 15 * 60))
 
         hidden_response = offers_module.offer_to_response(
@@ -118,6 +123,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(hidden_response.user_id)
         self.assertEqual(hidden_response.user_account_name, "")
         self.assertFalse(hidden_response.is_own_offer)
+        self.assertEqual(hidden_response.viewer_effective_price, 123456)
 
         expired_offer = make_offer_model(status=OfferStatus.EXPIRED)
         expired_response = offers_module.offer_to_response(
@@ -136,6 +142,32 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertIsNone(broken_response.expires_at_ts)
         logger.error.assert_called_once()
+
+        owner_relation = SimpleNamespace(
+            owner_user_id=7,
+            management_name="مشتری ویژه",
+            customer_tier="tier1",
+            status="active",
+        )
+        tier2_viewer_relation = SimpleNamespace(
+            customer_tier="tier2",
+            commission_rate="0.5",
+            status="active",
+        )
+        projected_response = offers_module.offer_to_response(
+            make_offer_model(price=53500, offer_type=OfferType.SELL),
+            SimpleNamespace(offer_expiry_minutes=15),
+            viewer_user_id=7,
+            offer_owner_relation=owner_relation,
+            viewer_customer_relation=tier2_viewer_relation,
+        )
+        self.assertEqual(projected_response.price, 53500)
+        self.assertEqual(projected_response.raw_price, 53500)
+        self.assertEqual(projected_response.market_published_price, 53500)
+        self.assertEqual(projected_response.viewer_effective_price, 53800)
+        self.assertTrue(projected_response.customer_badge_visible)
+        self.assertEqual(projected_response.customer_management_name, "مشتری ویژه")
+        self.assertEqual(projected_response.customer_tier, "tier1")
 
     async def test_send_offer_to_channel_builds_buttons_and_handles_failures(self):
         wholesale_offer = make_offer_model(price=75000)
