@@ -394,7 +394,7 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(channel_result, channel_serialized)
 
     async def test_room_mute_channel_avatar_toggle_pin_and_commit_fallback_paths(self):
-        current_user = SimpleNamespace(id=5)
+        current_user = SimpleNamespace(id=5, account_name='owner')
         direct_room = SimpleNamespace(id=70, type=ChatType.DIRECT)
         with patch('api.routers.chat.get_room_or_404', new=AsyncMock(return_value=direct_room)):
             with self.assertRaises(HTTPException) as exc_info:
@@ -503,9 +503,11 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         serialized_messages = [make_message_read(101, message_type='document')]
         fallback_message = make_message_read(102, message_type='document')
         published = []
+        published_sender_names = []
 
         async def capture_publish_direct_message_event(*, message, serializer, **_kwargs):
             published.append(serializer(message))
+            published_sender_names.append(_kwargs.get('sender_name'))
 
         with patch('api.routers.chat.get_upload_batch_for_current_user', new=AsyncMock(return_value=batch)), patch(
             'api.routers.chat.commit_upload_batch',
@@ -531,6 +533,7 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
 
         fallback_mock.assert_called_once_with(commit_result.messages[1])
         self.assertEqual([message.id for message in published], [101, 102])
+        self.assertEqual(published_sender_names, ['owner', 'owner'])
         self.assertEqual(result.batch_id, 'batch-1')
 
     async def test_upload_runtime_and_pinned_state_helpers_cover_remaining_chat_router_branches(self):
@@ -605,6 +608,9 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch('api.routers.chat.is_user_accountant', new=AsyncMock(return_value=False)), patch(
+            'api.routers.chat.is_user_customer',
+            new=AsyncMock(return_value=False),
+        ), patch(
             'api.routers.chat.resolve_owned_avatar_file_id',
             new=AsyncMock(return_value='avatar-1'),
         ) as resolve_create_mock, patch(

@@ -157,7 +157,7 @@ validation phase:
 - [x] direct chat allow/deny matrix سبز شود.
 - [x] matrix باید owner/accountant/same-owner customer/`SUPER_ADMIN`/`MIDDLE_MANAGER` را صریح پوشش دهد.
 - [x] group creation/member mutation deny matrix سبز شود.
-- [ ] notification/realtime behavior در chatهای مجاز intact بماند.
+- [x] notification/realtime behavior در chatهای مجاز intact بماند.
 
 ## 6. Phase 5 - منطق قیمت‌گذاری، سناریو محور و exhaustive
 
