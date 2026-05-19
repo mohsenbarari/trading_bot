@@ -21,6 +21,8 @@ from core.services.single_session_recovery_service import (
     cancel_recovery_request,
     create_recovery_request,
     expire_recovery_request,
+    get_recovery_admin_target,
+    list_recovery_admin_targets,
     get_active_recovery_request_for_login_request,
     get_latest_recovery_request_for_login_request,
     get_recovery_requester_display_name,
@@ -130,6 +132,18 @@ class SingleSessionRecoveryServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(await get_active_recovery_request_for_login_request(db, request_id), active)
         self.assertIs(await get_latest_recovery_request_for_login_request(db, request_id), latest)
+
+        active_string = SimpleNamespace(id=uuid.uuid4(), status=SingleSessionRecoveryStatus.PENDING_ADMIN_REVIEW.value)
+        latest_string = SimpleNamespace(id=uuid.uuid4(), status=SingleSessionRecoveryStatus.CANCELLED.value)
+        db.execute = AsyncMock(
+            side_effect=[
+                scalar_one_or_none_result(active_string),
+                scalar_one_or_none_result(latest_string),
+            ]
+        )
+
+        self.assertIs(await get_active_recovery_request_for_login_request(db, request_id), active_string)
+        self.assertIs(await get_latest_recovery_request_for_login_request(db, request_id), latest_string)
 
     def test_identity_request_and_submission_refresh_windows(self):
         now = datetime(2026, 5, 16, 12, 0, 0)
@@ -265,6 +279,16 @@ class SingleSessionRecoveryServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_show_inline_recovery_prompt(submitted, admin_target, now=now))
         self.assertFalse(should_show_inline_recovery_prompt(submitted, SimpleNamespace(current_action_message_id=None), now=now))
         self.assertFalse(should_show_inline_recovery_prompt(expired, admin_target, now=now))
+        self.assertFalse(
+            should_show_inline_recovery_prompt(
+                SimpleNamespace(
+                    status=SingleSessionRecoveryStatus.APPROVED,
+                    inline_action_expires_at=now + timedelta(seconds=10),
+                ),
+                admin_target,
+                now=now,
+            )
+        )
 
         pending_payload = build_recovery_message_action_payload(
             recovery_request=pending,
@@ -327,6 +351,15 @@ class SingleSessionRecoveryServiceTests(unittest.IsolatedAsyncioTestCase):
         rows = await list_pending_admin_recovery_targets(db, admin_user_id=10, now=now)
         self.assertEqual(rows, [(visible_target, visible_request, requester)])
 
+        db.execute = AsyncMock(return_value=FakeExecuteResult([visible_target]))
+        self.assertEqual(await list_recovery_admin_targets(db, visible_request.id), [visible_target])
+
+        db.execute = AsyncMock(return_value=FakeExecuteResult([visible_target]))
+        self.assertIs(
+            await get_recovery_admin_target(db, recovery_id=visible_request.id, admin_user_id=10),
+            visible_target,
+        )
+
     async def test_action_map_helper_normalizes_message_ids_and_skips_missing_target_message(self):
         now = datetime(2026, 5, 16, 12, 0, 0)
         recovery = SimpleNamespace(
@@ -355,3 +388,20 @@ class SingleSessionRecoveryServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(list(action_map), [101])
         self.assertEqual(action_map[101]["prompt_type"], "initial_request")
+
+    async def test_create_recovery_request_skips_optional_flush_when_unavailable(self):
+        login_request = SimpleNamespace(
+            id=uuid.uuid4(),
+            user_id=12,
+            requester_device_name="Galaxy S24",
+            requester_ip="1.2.3.4",
+        )
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=scalar_one_or_none_result(None)),
+            add=Mock(),
+        )
+
+        recovery = await create_recovery_request(db, login_request)
+
+        self.assertEqual(recovery.session_login_request_id, login_request.id)
+        db.add.assert_called_once_with(recovery)

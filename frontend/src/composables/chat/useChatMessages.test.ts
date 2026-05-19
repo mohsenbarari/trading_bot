@@ -212,6 +212,8 @@ describe('useChatMessages', () => {
             content: 'cached',
             message_type: 'text',
             created_at: '2026-05-14T13:00:00Z',
+            reactions: [{ emoji: '🔥', user_id: 12 }],
+            reply_to_message: { id: 5, sender_id: 7, content: 'reply', message_type: 'text' },
           },
         ]
       }
@@ -245,6 +247,7 @@ describe('useChatMessages', () => {
     await nextTick()
 
     expect(messages.value?.map((message) => message.id)).toEqual([10])
+    expect(messages.value[0]).not.toBe(messages.value[0].reply_to_message)
     expect(isLoadingMessages.value).toBe(false)
 
       const cb = resolveMessages as ((msgs: any) => void) | null
@@ -256,6 +259,8 @@ describe('useChatMessages', () => {
         content: 'cached',
         message_type: 'text',
         created_at: '2026-05-14T13:00:00Z',
+        reactions: [{ emoji: '🔥', user_id: 12 }],
+        reply_to_message: { id: 5, sender_id: 7, content: 'reply', message_type: 'text' },
       },
       {
         id: 11,
@@ -270,6 +275,39 @@ describe('useChatMessages', () => {
     await pendingLoad
     await flushPromises()
       expect(messages.value?.map((message) => message.id)).toEqual([10, 11])
+  })
+
+  it('evicts the oldest cached snapshot after enough chat switches and ignores empty snapshots', async () => {
+    createSubject()
+
+    for (let offset = 0; offset < 13; offset += 1) {
+      const userId = 100 + offset
+      messages.value = offset === 0
+        ? [{ id: -offset - 1, sender_id: 7, receiver_id: userId, content: 'pending only', message_type: 'text' }]
+        : [{ id: offset + 1, sender_id: userId, receiver_id: 7, content: `msg-${offset}`, message_type: 'text' }]
+      selectedUserId.value = userId
+      await nextTick()
+    }
+
+    selectedUserId.value = 999
+    await nextTick()
+
+    messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/chat/messages/100?limit=48')) return []
+      if (url.startsWith('/api/chat/messages/101?limit=48')) {
+        return [{ id: 500, sender_id: 101, receiver_id: 7, content: 'fresh snapshot miss', message_type: 'text' }]
+      }
+      if (url === '/api/chat/read/100' || url === '/api/chat/read/101') return {}
+      throw new Error(`unexpected url ${url}`)
+    })
+
+    selectedUserId.value = 100
+    await subject.loadMessages(100)
+    expect(messages.value).toEqual([])
+
+    selectedUserId.value = 101
+    await subject.loadMessages(101)
+    expect(messages.value.map((message) => message.id)).toEqual([500])
   })
 
   it('loads older messages with dedupe and stops pagination when the server returns no more rows', async () => {
@@ -293,6 +331,15 @@ describe('useChatMessages', () => {
     messageMocks.apiFetchJson.mockResolvedValueOnce([])
     const secondAppend = await subject.loadOlderMessages(12)
     expect(secondAppend).toBe(0)
+    expect(subject.hasOlderMessages.value).toBe(false)
+  })
+
+  it('treats non-array older-message payloads as exhausted pagination', async () => {
+    createSubject()
+    messages.value = [{ id: 10, sender_id: 12, receiver_id: 7, content: 'current', message_type: 'text' }]
+
+    messageMocks.apiFetchJson.mockResolvedValueOnce({ rows: [] })
+    await expect(subject.loadOlderMessages(12)).resolves.toBe(0)
     expect(subject.hasOlderMessages.value).toBe(false)
   })
 
@@ -335,6 +382,43 @@ describe('useChatMessages', () => {
     const failed = await subject.sendMediaMessage('video', 'file-2')
     expect(failed).toBeNull()
     expect(alertSpy).toHaveBeenCalledWith('media failed')
+  })
+
+  it('adds new conversations for direct media sends and appends when the optimistic placeholder is missing', async () => {
+    createSubject()
+    conversations.value = []
+    selectedUserName.value = ''
+    messages.value = []
+
+    messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
+      if (url === '/api/chat/send') {
+        return {
+          id: 77,
+          sender_id: 7,
+          receiver_id: 15,
+          content: 'doc-file',
+          message_type: 'voice',
+          created_at: '2026-05-14T14:05:00Z',
+        }
+      }
+      if (url === '/api/chat/conversations') {
+        return conversations.value
+      }
+      throw new Error(`unexpected url ${url}`)
+    })
+
+    selectedUserId.value = 15
+    const sent = await subject.sendMediaMessage('voice', 'doc-file', undefined, -404)
+
+    expect(sent?.id).toBe(77)
+    expect(messages.value.map((message) => message.id)).toEqual([77])
+    expect(conversations.value[0]).toMatchObject({
+      other_user_id: 15,
+      other_user_name: 'گفتگوی جدید',
+      last_message_type: 'voice',
+      last_message_content: 'پیام صوتی',
+    })
+    expect(scrollToBottomMock).toHaveBeenCalled()
   })
 
   it('edits existing messages and sends optimistic text messages with reply metadata', async () => {
@@ -520,9 +604,15 @@ describe('useChatMessages', () => {
     expect(messageMocks.apiFetchJson).not.toHaveBeenCalled()
 
     selectedUserId.value = 12
+    conversations.value = [{ other_user_id: 12, unread_count: 4 }]
     messageMocks.apiFetchJson.mockRejectedValueOnce(new Error('read failed'))
     await subject.markAsRead()
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to mark as read', expect.any(Error))
+
+    messageMocks.apiFetchJson.mockResolvedValueOnce({})
+    await subject.markAsRead()
+    expect(conversations.value[0].unread_count).toBe(0)
+    expect(messageMocks.markChatAsRead).toHaveBeenCalledWith(12)
 
     messages.value = [{ id: 7, content: 'old', message_type: 'text' }]
     editingMessage.value = { id: 7, content: 'old', message_type: 'text' }
@@ -548,6 +638,23 @@ describe('useChatMessages', () => {
     subject.sendSticker('🙂')
     await flushPromises()
     expect(messages.value.some((message) => message.id === 50)).toBe(true)
+  })
+
+  it('handles reply focus helpers and mobile reply cancellation', async () => {
+    createSubject()
+    isMobile.value = true
+    swipedMessageId.value = 321
+    const replyMessage = { id: 222, sender_id: 12, content: 'reply me', message_type: 'text' } as any
+
+    subject.handleReply(replyMessage)
+    await nextTick()
+
+    expect(replyingToMessage.value).toEqual(replyMessage)
+    expect(focusMessageInputMock).toHaveBeenCalled()
+
+    subject.cancelReply()
+    expect(replyingToMessage.value).toBeNull()
+    expect(swipedMessageId.value).toBeNull()
   })
 
   it('formats target-user status for minutes, today, yesterday, old dates, missing data, and failures', async () => {

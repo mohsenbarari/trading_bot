@@ -33,6 +33,24 @@ class BotTradeHistoryFormatTests(unittest.TestCase):
         self.assertIn("🟢 خرید کالای 1", text)
         self.assertIn("... و 1 معامله دیگر", text)
 
+    def test_format_trade_history_self_view_uses_counterparty_and_sell_label(self):
+        trade = SimpleNamespace(
+            responder_user_id=99,
+            trade_type=TradeType.BUY,
+            commodity=SimpleNamespace(name="سکه"),
+            quantity=2,
+            price=1234,
+            created_at=datetime(2026, 1, 2, 12, 0, 0),
+            responder_user=SimpleNamespace(account_name="buyer"),
+            offer_user=SimpleNamespace(account_name="seller"),
+        )
+
+        text = format_trade_history([trade], None, current_user_id=2)
+
+        self.assertIn("📊 تاریخچه معاملات کل شما", text)
+        self.assertIn("🔴 فروش سکه", text)
+        self.assertIn("طرف معامله: buyer", text)
+
 
 if __name__ == "__main__":
     unittest.main()

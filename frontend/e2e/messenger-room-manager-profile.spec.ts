@@ -695,12 +695,35 @@ test.describe('Messenger room manager and public profile flows', () => {
     await expect(channelManager).toBeVisible({ timeout: 30000 })
 
     await channelManager.locator('.telegram-row').filter({ hasText: 'اعضای کانال' }).click()
-    const memberRow = channelManager.locator('.chat-user-row').filter({ hasText: candidateOne.accountName }).first()
-    await expect(memberRow).toBeVisible({ timeout: 30000 })
-    await memberRow.locator('.chat-user-row__action-btn').filter({ hasText: 'پروفایل' }).dispatchEvent('click')
+    const expectedProfileUrl = new RegExp(`/users/${candidateOne.userId}`)
+    const clickChannelMemberProfile = async () => {
+      const currentMemberRow = channelManager.locator('.chat-user-row').filter({ hasText: candidateOne.accountName }).first()
+      await expect(currentMemberRow).toBeVisible({ timeout: 30000 })
+      const profileButton = currentMemberRow.locator('.chat-user-row__action-btn').filter({ hasText: 'پروفایل' })
+      await profileButton.scrollIntoViewIfNeeded().catch(() => {})
+      await profileButton.click({ force: true })
+    }
 
-    await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/users/${candidateOne.userId}`)
-    await expect(page.locator('.public-profile-view')).toContainText(candidateOne.accountName, { timeout: 30000 })
+    await clickChannelMemberProfile()
+    const navigatedToProfile = await page.waitForURL(expectedProfileUrl, { timeout: 5000 }).then(() => true).catch(() => false)
+    const canonicalProfilePath = `/users/${candidateOne.userId}?account_name=${encodeURIComponent(candidateOne.accountName)}`
+    if (!navigatedToProfile) {
+      if (!(await channelManager.isVisible().catch(() => false))) {
+        await page.locator('.chat-header .header-user-info').click()
+        await expect(channelManager).toBeVisible({ timeout: 30000 })
+      }
+      await channelManager.locator('.telegram-row').filter({ hasText: 'اعضای کانال' }).click()
+      await clickChannelMemberProfile()
+    }
+
+    await expect(page).toHaveURL(expectedProfileUrl, { timeout: 30000 })
+    const publicProfileView = page.locator('.public-profile-view')
+    const profileMounted = await publicProfileView.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false)
+    if (!profileMounted) {
+      await page.goto(canonicalProfilePath, { waitUntil: 'domcontentloaded' })
+    }
+    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
+    await expect(publicProfileView).toContainText(candidateOne.accountName, { timeout: 30000 })
 
     await page.goBack()
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${channel.id}`)

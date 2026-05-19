@@ -1,4 +1,5 @@
 import unittest
+import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -78,6 +79,30 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         session.commit.assert_awaited_once()
         self.assertEqual(len(created), 3)
         self.assertIn("user_account_status_loop", created)
+
+    async def test_lifespan_rolls_back_mandatory_rollout_failures(self):
+        session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+
+        with patch.object(main.settings, "server_mode", "foreign"), patch("main.init_db", new=AsyncMock()), patch(
+            "main.init_redis", new=AsyncMock()
+        ), patch("main.close_redis", new=AsyncMock()), patch("main.setup_event_listeners"), patch(
+            "main.AsyncSessionLocal", return_value=_AsyncSessionContext(session)
+        ), patch(
+            "main.ensure_mandatory_channel_rollout", new=AsyncMock(side_effect=RuntimeError("rollout failed"))
+        ), patch("main.asyncio.create_task"):
+            with self.assertRaises(RuntimeError):
+                async with main.lifespan(main.app):
+                    pass
+
+        session.rollback.assert_awaited_once()
+        session.commit.assert_not_awaited()
+
+    async def test_main_module_logs_when_frontend_build_directory_is_missing(self):
+        with patch("pathlib.Path.exists", return_value=False), patch("logging.getLogger") as get_logger:
+            importlib.reload(main)
+
+        get_logger.return_value.warning.assert_called_with("⚠️ Frontend build directory not found. Run 'npm run build' first.")
+        importlib.reload(main)
 
 
 if __name__ == "__main__":

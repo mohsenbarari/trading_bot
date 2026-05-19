@@ -52,6 +52,19 @@ class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(packs[0].id, "emotions")
         self.assertIn("happy", packs[0].stickers)
 
+    async def test_fake_helpers_cover_context_and_db_add_paths(self):
+        fake_file = FakeAsyncFile()
+        async with fake_file as active_file:
+            self.assertIs(active_file, fake_file)
+            await active_file.write(b"data")
+
+        self.assertFalse(await fake_file.__aexit__(None, None, None))
+
+        db = FakeDB()
+        marker = object()
+        db.add(marker)
+        self.assertEqual(db.added, [marker])
+
     async def test_get_chat_file_validates_token_and_file_existence(self):
         db = FakeDB()
 

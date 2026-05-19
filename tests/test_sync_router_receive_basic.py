@@ -33,6 +33,14 @@ class FakeDB:
 
 
 class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fake_db_helper_paths(self):
+        db = FakeDB()
+        await db.rollback()
+        self.assertEqual(db.rollbacks, 1)
+
+        async with db.begin_nested() as nested:
+            self.assertIsNone(nested)
+
     async def test_receive_sync_data_relays_notifications_and_refreshes_unread_counts(self):
         db = FakeDB()
         items = [

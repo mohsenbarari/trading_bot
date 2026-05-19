@@ -659,4 +659,276 @@ describe('CreateChannelView.vue', () => {
     vi.useRealTimers()
   })
 
+  it('keeps the active channel open when unfollow returns through the close-button path and debounces add-member candidate searches', async () => {
+    vi.useFakeTimers()
+    const activeChannel = {
+      id: 15,
+      type: 'channel' as const,
+      title: 'Channel Fifteen',
+      description: 'Debounced channel',
+      avatar_file_id: null,
+      created_by_id: 1,
+      is_system: false,
+      is_mandatory: false,
+      member_count: 1,
+      created_at: '2026-05-12T12:00:00',
+    }
+
+    apiFetchJsonMock.mockImplementation(async (url: string) => {
+      if (url === '/api/chat/channels') return [activeChannel]
+      if (url === '/api/chat/channels/15/members') return []
+      if (url.includes('/api/chat/channels/invite-candidates?')) {
+        return { items: [], total: 0, active_total: 0 }
+      }
+      throw new Error(`Unhandled apiFetchJson call: ${url}`)
+    })
+
+    apiFetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/chat/channels/15/unfollow') {
+        return makeResponse({ chat_id: 15, user_id: 1, role: null, removed: true, member_count: 0, left: true })
+      }
+      throw new Error(`Unhandled apiFetch call: ${url}`)
+    })
+
+    const CreateChannelView = (await import('./CreateChannelView.vue')).default
+    const wrapper = mount(CreateChannelView, {
+      props: {
+        apiBaseUrl: '',
+        jwtToken: 'token',
+        currentUserId: 1,
+        showCloseButton: true,
+        initialChannelId: 15,
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          transition: false,
+        },
+      },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as Record<string, any>
+    vm.page = 'add-members'
+    vm.candidateQuery = 'member'
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(220)
+    await flushPromises()
+    expect(apiFetchJsonMock).toHaveBeenCalledWith(expect.stringContaining('/api/chat/channels/invite-candidates?'))
+    expect(apiFetchJsonMock).toHaveBeenCalledWith(expect.stringContaining('q=member'))
+
+    await vm.unfollowCurrentChannel()
+    await flushPromises()
+
+    expect(wrapper.emitted('refresh-conversations')).toHaveLength(1)
+    expect(wrapper.emitted('left')?.[0]).toEqual([15])
+    expect(vm.activeChannel?.id).toBe(15)
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('covers helper fallbacks, avatar picker guards, profile route fallback guards, and close-button back-state handling', async () => {
+    vi.useFakeTimers()
+    apiFetchJsonMock.mockResolvedValue([])
+
+    const CreateChannelView = (await import('./CreateChannelView.vue')).default
+    const wrapper = mount(CreateChannelView, {
+      props: {
+        apiBaseUrl: '',
+        jwtToken: 'token',
+        currentUserId: 1,
+        showCloseButton: true,
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { transition: false },
+      },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as Record<string, any>
+    const sameRoleA = {
+      user_id: 5,
+      account_name: 'beta',
+      full_name: 'Beta',
+      mobile_number: '09120000005',
+      avatar_file_id: null,
+      role: 'member' as const,
+      joined_at: '2026-05-12T10:00:00',
+      is_channel_creator: false,
+    }
+    const sameRoleB = { ...sameRoleA, user_id: 6, account_name: 'alpha', full_name: 'Alpha' }
+    expect([sameRoleA, sameRoleB].sort(vm.compareMemberOrder).map((item: typeof sameRoleA) => item.account_name)).toEqual(['alpha', 'beta'])
+
+    vm.page = 'overview'
+    vm.activeChannel = null
+    await flushPromises()
+    expect(vm.pageSubtitle).toBe('یک کانال را برای مدیریت انتخاب کنید.')
+    expect(vm.currentChannelExitSubtitle).toBe('از این کانال خارج شوید')
+
+    const avatarClickSpy = vi.fn()
+    vm.avatarInput = { click: avatarClickSpy }
+    vm.avatarBusy = true
+    vm.triggerAvatarPicker()
+    expect(avatarClickSpy).not.toHaveBeenCalled()
+    vm.avatarBusy = false
+    vm.triggerAvatarPicker()
+    expect(avatarClickSpy).toHaveBeenCalledTimes(1)
+
+    currentRouteState.value.fullPath = '/chat?user_id=-7'
+    routerResolveMock.mockReturnValueOnce({ href: '/users/4?account_name=member4' })
+    routerPushMock.mockImplementationOnce(async () => {
+      currentRouteState.value.fullPath = '/users/4?account_name=member4'
+    })
+    vm.openMemberProfile({ user_id: 4, account_name: 'member4' })
+    await vi.advanceTimersByTimeAsync(220)
+
+    currentRouteState.value.fullPath = '/chat?user_id=-7'
+    routerResolveMock.mockReturnValueOnce({ href: '' })
+    routerPushMock.mockImplementationOnce(async () => {
+      currentRouteState.value.fullPath = '/chat?user_id=-7'
+    })
+    vm.openMemberProfile({ user_id: 5, account_name: 'member5' })
+    await vi.advanceTimersByTimeAsync(220)
+
+    vm.managerBackStateActive = true
+    vm.requestClose()
+    expect(popBackStateMock).toHaveBeenCalled()
+    expect(wrapper.emitted('close')).toHaveLength(1)
+
+    let pushedBackHandler: (() => void) | null = null
+    pushBackStateMock.mockImplementationOnce((handler: () => void) => {
+      pushedBackHandler = handler
+    })
+    vm.pageHistory = ['home']
+    vm.page = 'overview'
+    vm.activeChannel = {
+      id: 12,
+      type: 'channel',
+      title: 'Fallback Channel',
+      description: 'Desc',
+      avatar_file_id: null,
+      created_by_id: 1,
+      is_system: false,
+      is_mandatory: false,
+      member_count: 1,
+      created_at: '2026-05-12T10:00:00',
+    }
+    vm.pushManagerBackState()
+    expect(typeof pushedBackHandler).toBe('function')
+    pushedBackHandler?.()
+    expect(pushBackStateMock.mock.calls.length).toBeGreaterThanOrEqual(2)
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('covers active-channel avatar updates, empty guard reasons, load failure, and select-all invite payloads', async () => {
+    vi.useFakeTimers()
+    const activeChannel = {
+      id: 21,
+      type: 'channel' as const,
+      title: 'Channel Twenty One',
+      description: 'Members',
+      avatar_file_id: null,
+      created_by_id: 1,
+      is_system: false,
+      is_mandatory: false,
+      member_count: 2,
+      created_at: '2026-05-12T12:00:00',
+    }
+    const members = [
+      {
+        user_id: 1,
+        account_name: 'owner1',
+        full_name: 'Owner One',
+        mobile_number: '09120000001',
+        avatar_file_id: null,
+        role: 'admin' as const,
+        joined_at: '2026-05-12T12:00:00',
+        is_channel_creator: true,
+      },
+      {
+        user_id: 2,
+        account_name: 'admin2',
+        full_name: 'Admin Two',
+        mobile_number: '09120000002',
+        avatar_file_id: null,
+        role: 'admin' as const,
+        joined_at: '2026-05-12T12:01:00',
+        is_channel_creator: false,
+      },
+    ]
+    apiFetchJsonMock.mockImplementation(async (url: string) => {
+      if (url === '/api/chat/channels') return [activeChannel]
+      if (url === '/api/chat/channels/21/members') return members
+      throw new Error('channels unavailable')
+    })
+    apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/chat/channels/21/members/bulk') {
+        const body = JSON.parse(String(options?.body || '{}'))
+        expect(body).toEqual({ select_all_active_users: true })
+        return makeResponse({
+          chat_id: 21,
+          processed_user_ids: [],
+          added_count: 0,
+          reactivated_count: 0,
+          already_member_count: 2,
+          member_count: 2,
+          select_all_active_users: true,
+        })
+      }
+      throw new Error(`Unhandled apiFetch call: ${url}`)
+    })
+    uploadAvatarImageMock.mockResolvedValue({ file_id: 'avatar-21' })
+
+    const CreateChannelView = (await import('./CreateChannelView.vue')).default
+    const wrapper = mount(CreateChannelView, {
+      props: {
+        apiBaseUrl: '',
+        jwtToken: 'token',
+        currentUserId: 1,
+        showCloseButton: true,
+        initialChannelId: 21,
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { transition: false },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as Record<string, any>
+    vm.members = members
+    expect(vm.getMemberGuardReason(members[1])).toBe('')
+
+    const fileInput = wrapper.get('input[type="file"]')
+    Object.defineProperty(fileInput.element, 'files', {
+      configurable: true,
+      value: [new File(['avatar'], 'channel.png', { type: 'image/png' })],
+    })
+    await fileInput.trigger('change')
+    await flushPromises()
+    expect(vm.activeChannel.avatar_file_id).toBe('avatar-21')
+
+    vm.selectAllActiveUsers = true
+    await vm.submitMembers()
+    await flushPromises()
+
+    apiFetchJsonMock.mockReset()
+    apiFetchJsonMock.mockRejectedValueOnce(new Error('channels unavailable'))
+    await vm.loadExistingChannels()
+    expect(vm.errorMessage).toBe('channels unavailable')
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
 })

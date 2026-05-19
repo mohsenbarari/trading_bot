@@ -3489,6 +3489,596 @@ describe('ChatView.vue', () => {
     wrapper.unmount()
   })
 
+  it('covers album-save selection and media download helper fallbacks', async () => {
+    const mediaMessage = buildImageMessage({
+      id: 81,
+      sender_id: 55,
+      receiver_id: 7,
+      content: JSON.stringify({ file_id: 'img-save', album_id: 'album-save', album_index: 0 }),
+      local_blob_url: 'blob:cached-image',
+    })
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    })
+    await flushPromises()
+
+    const hooks = getChatViewTestHooks(wrapper)
+    hooks.state.contextMenu.value = {
+      visible: true,
+      message: mediaMessage,
+      messageIds: [81, 82, 81],
+      x: 0,
+      y: 0,
+    }
+
+    hooks.handleSaveAlbum()
+    expect(hooks.state.selectionModePurpose.value).toBe('album-download')
+    expect(hooks.state.selectedMessages.value).toEqual([81, 82])
+    expect(hooks.state.contextMenu.value.visible).toBe(false)
+
+    hooks.state.contextMenu.value = {
+      visible: true,
+      message: null,
+      messageIds: [81],
+      x: 0,
+      y: 0,
+    }
+    hooks.handleSaveAlbum()
+    expect(hooks.state.contextMenu.value.visible).toBe(false)
+
+    const createdAnchors: HTMLAnchorElement[] = []
+    const originalCreateElement = document.createElement.bind(document)
+    const createElementSpy = vi.spyOn(document, 'createElement').mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+      const element = originalCreateElement(tagName as keyof HTMLElementTagNameMap, options as ElementCreationOptions | undefined)
+      if (tagName === 'a') {
+        createdAnchors.push(element as HTMLAnchorElement)
+        vi.spyOn(element as HTMLAnchorElement, 'click').mockImplementation(() => {})
+      }
+      return element
+    }) as typeof document.createElement)
+
+    await hooks.saveMessageMediaToDevice(mediaMessage, 1, 2)
+    expect(createdAnchors).toHaveLength(1)
+    expect(createdAnchors[0]?.download).toBe('02_img-save.jpg')
+    expect(createdAnchors[0]?.href).toBe('blob:cached-image')
+
+    createElementSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('falls back to direct media downloads when album media fetches fail', async () => {
+    const mediaMessage = buildImageMessage({
+      id: 91,
+      sender_id: 55,
+      receiver_id: 7,
+      content: JSON.stringify({ file_id: 'img-fallback' }),
+      local_blob_url: undefined,
+    })
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    })
+    await flushPromises()
+
+    const hooks = getChatViewTestHooks(wrapper)
+    const fetchMock = vi.fn(async () => new Response('missing', { status: 500 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const createdAnchors: HTMLAnchorElement[] = []
+    const originalCreateElement = document.createElement.bind(document)
+    const createElementSpy = vi.spyOn(document, 'createElement').mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+      const element = originalCreateElement(tagName as keyof HTMLElementTagNameMap, options as ElementCreationOptions | undefined)
+      if (tagName === 'a') {
+        createdAnchors.push(element as HTMLAnchorElement)
+        vi.spyOn(element as HTMLAnchorElement, 'click').mockImplementation(() => {})
+      }
+      return element
+    }) as typeof document.createElement)
+
+    await hooks.saveMessageMediaToDevice(mediaMessage)
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/chat/files/img-fallback?token=jwt-token')
+    expect(errorSpy).toHaveBeenCalledWith('Album media download failed, falling back to direct URL:', expect.any(Error))
+    expect(createdAnchors).toHaveLength(1)
+    expect(createdAnchors[0]?.download).toBe('img-fallback.jpg')
+    expect(createdAnchors[0]?.href).toContain('/api/chat/files/img-fallback?token=jwt-token')
+
+    createElementSpy.mockRestore()
+    errorSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('covers media cache seeding helpers and mime/file-name inference branches', async () => {
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    })
+    await flushPromises()
+
+    const hooks = getChatViewTestHooks(wrapper)
+    const imageMessage = buildImageMessage({
+      id: 101,
+      sender_id: 55,
+      receiver_id: 7,
+      content: JSON.stringify({ file_id: 'img-seed' }),
+      local_blob_url: 'blob:local-image',
+    })
+    const documentMessage = buildMessage({
+      id: 102,
+      sender_id: 55,
+      receiver_id: 7,
+      message_type: 'document',
+      content: JSON.stringify({
+        file_id: 'doc-seed',
+        file_name: 'report.pdf',
+        mime_type: 'application/pdf',
+      }),
+      local_blob_url: 'blob:local-doc',
+    })
+
+    expect(hooks.inferMediaMime(buildMessage({ message_type: 'text', content: 'plain text' }))).toBe('application/octet-stream')
+    expect(hooks.inferMediaMime(documentMessage)).toBe('application/pdf')
+    expect(hooks.inferMediaMime(buildMessage({ message_type: 'document', content: '{invalid' }))).toBe('application/octet-stream')
+
+    expect(hooks.inferMediaFileName(imageMessage, 'img-seed', 1)).toBe('02_img-seed.jpg')
+    expect(hooks.inferMediaFileName(buildMessage({ message_type: 'voice', content: JSON.stringify({ file_id: 'voice-1' }) }), 'voice-1', 0)).toBe('01_voice-1.webm')
+    expect(hooks.inferMediaFileName(documentMessage, 'doc-seed', 0)).toBe('report.pdf')
+
+    chatViewMocks.seedFileCacheMock.mockClear()
+    let fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === 'blob:local-image') {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        })
+      }
+      return new Response('missing', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(hooks.ensureMessageBlobInFileCache(imageMessage)).resolves.toBe('img-seed')
+    expect(chatViewMocks.seedFileCacheMock).toHaveBeenCalledWith(
+      'img-seed',
+      expect.anything(),
+      '01_img-seed.jpg',
+      'image/png',
+    )
+
+    chatViewMocks.seedFileCacheMock.mockClear()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === 'blob:local-doc') {
+        throw new Error('local blob failed')
+      }
+      if (url === '/api/chat/files/doc-seed?token=jwt-token') {
+        return new Response(new Uint8Array([4, 5, 6]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/pdf' },
+        })
+      }
+      return new Response('missing', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(hooks.ensureMessageBlobInFileCache(documentMessage)).resolves.toBe('doc-seed')
+    expect(fetchMock).toHaveBeenNthCalledWith(1, 'blob:local-doc')
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/chat/files/doc-seed?token=jwt-token')
+    expect(chatViewMocks.seedFileCacheMock).toHaveBeenCalledWith(
+      'doc-seed',
+      expect.anything(),
+      'report.pdf',
+      'application/pdf',
+    )
+    expect(warnSpy).toHaveBeenCalledWith('[chat-share] seed from local blob failed', expect.any(Error))
+
+    fetchMock = vi.fn(async () => new Response('missing', { status: 404 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(hooks.ensureMessageBlobInFileCache(buildImageMessage({ content: JSON.stringify({ file_id: 'img-missing' }) }))).resolves.toBeNull()
+    await expect(hooks.ensureMessageBlobInFileCache(buildImageMessage({ content: '{}' }))).resolves.toBeNull()
+
+    warnSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('covers room-manager routing helpers and missing named-room cleanup', async () => {
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 88,
+        other_user_id: -88,
+        other_user_name: 'گروه فعال',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'group',
+        chat_id: 88,
+      },
+      {
+        id: 23,
+        other_user_id: -23,
+        other_user_name: 'کانال فعال',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'channel',
+        chat_id: 23,
+      },
+    ]
+
+    const wrapper = await mountChatView({
+      targetUserId: -88,
+      targetUserName: 'گروه فعال',
+    })
+    await flushPromises()
+
+    const hooks = getChatViewTestHooks(wrapper)
+
+    hooks.openSelectedRoomManager()
+    expect(hooks.state.showGroupManagerModal.value).toBe(true)
+
+    hooks.state.selectedUserId.value = -23
+    hooks.state.selectedUserName.value = 'کانال فعال'
+    chatViewMocks.loadConversationsMock.mockClear()
+    chatViewMocks.loadMessagesMock.mockClear()
+    await hooks.handleChannelManagerOpenChannel({ chatId: 23, title: 'کانال فعال' })
+    await flushPromises()
+    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(-23)
+    expect(hooks.state.selectedUserId.value).toBe(-23)
+
+    hooks.openSelectedRoomManager()
+    expect(hooks.state.showChannelManagerModal.value).toBe(true)
+
+    chatViewMocks.conversationsSeed = []
+    chatViewMocks.loadConversationsMock.mockClear()
+    chatViewMocks.loadMessagesMock.mockClear()
+    hooks.state.showAttachmentMenu.value = true
+    hooks.state.showStickerPicker.value = true
+    await hooks.handleChannelManagerOpenChannel({ chatId: 77, title: 'کانال تازه' })
+    await flushPromises()
+    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(-77)
+    expect(hooks.state.selectedUserId.value).toBe(-77)
+    expect(hooks.state.selectedUserName.value).toBe('کانال تازه')
+    expect(hooks.state.showAttachmentMenu.value).toBe(false)
+    expect(hooks.state.showStickerPicker.value).toBe(false)
+
+    hooks.state.selectedUserId.value = -99
+    hooks.state.selectedUserName.value = 'گفتگوی حذف‌شده'
+    hooks.state.showAttachmentMenu.value = true
+    hooks.state.showStickerPicker.value = true
+    hooks.clearMissingNamedRoomSelection()
+    expect(hooks.state.selectedUserId.value).toBeNull()
+    expect(hooks.state.selectedUserName.value).toBe('')
+    expect(hooks.state.showAttachmentMenu.value).toBe(false)
+    expect(hooks.state.showStickerPicker.value).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('covers direct and named-room conversation actions across success and error branches', async () => {
+    const directConversation = {
+      id: 55,
+      other_user_id: 55,
+      other_user_name: 'گفتگوی مستقیم',
+      last_message_content: null,
+      last_message_type: null,
+      last_message_at: null,
+      unread_count: 0,
+      room_kind: 'direct',
+      is_pinned: false,
+      is_muted: false,
+      pinned_at: null,
+      pin_order: null,
+    }
+    const groupConversation = {
+      id: 88,
+      other_user_id: -88,
+      other_user_name: 'گروه فعال',
+      last_message_content: null,
+      last_message_type: null,
+      last_message_at: null,
+      unread_count: 0,
+      room_kind: 'group',
+      chat_id: 88,
+    }
+    const channelConversation = {
+      id: 23,
+      other_user_id: -23,
+      other_user_name: 'کانال فعال',
+      last_message_content: null,
+      last_message_type: null,
+      last_message_at: null,
+      unread_count: 0,
+      room_kind: 'channel',
+      chat_id: 23,
+      is_muted: false,
+    }
+
+    chatViewMocks.conversationsSeed = [directConversation, groupConversation, channelConversation]
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'گفتگوی مستقیم',
+    })
+    await flushPromises()
+
+    const hooks = getChatViewTestHooks(wrapper)
+    chatViewMocks.apiFetchMock.mockClear()
+    chatViewMocks.loadConversationsMock.mockClear()
+
+    await hooks.handleConversationAction({ action: 'pin', conv: directConversation })
+    await flushPromises()
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/direct/55/pin', expect.objectContaining({ method: 'POST' }))
+
+    chatViewMocks.apiFetchMock.mockClear()
+    await hooks.handleConversationAction({ action: 'move-pin-up', conv: directConversation })
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/direct/55/pin-order', expect.objectContaining({ method: 'POST' }))
+
+    chatViewMocks.apiFetchMock.mockClear()
+    chatViewMocks.setConversationMutedMock.mockClear()
+    await hooks.handleConversationAction({ action: 'mute', conv: channelConversation })
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/rooms/23/mute', expect.objectContaining({ method: 'POST' }))
+    expect(chatViewMocks.setConversationMutedMock).toHaveBeenCalledWith(-23, true)
+
+    chatViewMocks.apiFetchMock.mockClear()
+    await hooks.handleConversationAction({ action: 'mark-unread', conv: groupConversation })
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/rooms/88/mark-unread', expect.objectContaining({ method: 'POST' }))
+
+    hooks.state.selectedUserId.value = 55
+    hooks.state.selectedUserName.value = 'گفتگوی مستقیم'
+    chatViewMocks.apiFetchMock.mockClear()
+    await hooks.handleConversationAction({ action: 'delete', conv: directConversation })
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/direct/55', { method: 'DELETE' })
+    expect(hooks.state.selectedUserId.value).toBeNull()
+
+    hooks.state.selectedUserId.value = -88
+    hooks.state.selectedUserName.value = 'گروه فعال'
+    chatViewMocks.apiFetchMock.mockClear()
+    await hooks.handleConversationAction({ action: 'leave', conv: groupConversation })
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/groups/88/leave', { method: 'POST' })
+    expect(hooks.state.selectedUserId.value).toBeNull()
+
+    hooks.state.selectedUserId.value = -23
+    hooks.state.selectedUserName.value = 'کانال فعال'
+    chatViewMocks.apiFetchMock.mockClear()
+    await hooks.handleConversationAction({ action: 'unfollow', conv: channelConversation })
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/channels/23/unfollow', { method: 'POST' })
+    expect(hooks.state.selectedUserId.value).toBeNull()
+
+    chatViewMocks.apiFetchMock.mockRejectedValueOnce(new Error('action failed'))
+    chatViewMocks.loadConversationsMock.mockClear()
+    await hooks.handleConversationAction({ action: 'pin', conv: directConversation })
+    await flushPromises()
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('action failed')
+
+    wrapper.unmount()
+  })
+
+  it('covers search-result navigation helpers across global-search and in-chat flows', async () => {
+    vi.useFakeTimers()
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 55,
+        other_user_id: 55,
+        other_user_name: 'هدف جستجو',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'direct',
+      },
+    ]
+
+    const wrapper = await mountChatView()
+    await flushPromises()
+
+    const hooks = getChatViewTestHooks(wrapper)
+    const globalResult = { id: 501, sender_id: 55, receiver_id: 7 }
+    const loadedResult = { id: 502, sender_id: 55, receiver_id: 7 }
+    const unloadedResult = { id: 503, sender_id: 55, receiver_id: 7 }
+
+    hooks.state.searchResults.value = [loadedResult]
+    hooks.state.currentSearchIndex.value = 0
+    hooks.state.showInChatSearchList.value = true
+    chatViewMocks.scrollToMessageMock.mockClear()
+    hooks.handleToggleInChatList()
+    expect(hooks.state.showInChatSearchList.value).toBe(false)
+    await vi.advanceTimersByTimeAsync(150)
+    expect(chatViewMocks.scrollToMessageMock).toHaveBeenCalledWith(502)
+
+    chatViewMocks.loadMessagesMock.mockClear()
+    chatViewMocks.scrollToMessageMock.mockClear()
+    hooks.state.isSearchActive.value = true
+    hooks.state.showInChatSearchList.value = true
+    hooks.state.searchResults.value = [globalResult]
+    hooks.state.currentSearchIndex.value = 0
+    hooks.state.selectedUserId.value = null
+    hooks.state.selectedUserName.value = ''
+    await hooks.handleSearchResultClick(globalResult)
+    await flushPromises()
+    expect(hooks.state.isSearchActive.value).toBe(false)
+    expect(hooks.state.showInChatSearchList.value).toBe(false)
+    expect(hooks.state.searchResults.value).toEqual([])
+    expect(hooks.state.currentSearchIndex.value).toBe(0)
+    expect(hooks.state.selectedUserId.value).toBe(55)
+    expect(hooks.state.selectedUserName.value).toBe('هدف جستجو')
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55, false, 501)
+
+    chatViewMocks.loadMessagesMock.mockClear()
+    chatViewMocks.scrollToMessageMock.mockClear()
+    hooks.state.selectedUserId.value = 55
+    hooks.state.selectedUserName.value = 'هدف جستجو'
+    hooks.state.messages.value = [buildCurrentUserMessage(502, 'بارگذاری شده')]
+    hooks.state.searchResults.value = [globalResult, loadedResult]
+    hooks.state.currentSearchIndex.value = 0
+    hooks.state.showInChatSearchList.value = true
+    await hooks.handleSearchResultClick(loadedResult)
+    expect(hooks.state.currentSearchIndex.value).toBe(1)
+    expect(hooks.state.showInChatSearchList.value).toBe(false)
+    expect(chatViewMocks.loadMessagesMock).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(150)
+    expect(chatViewMocks.scrollToMessageMock).toHaveBeenCalledWith(502)
+
+    chatViewMocks.loadMessagesMock.mockClear()
+    chatViewMocks.scrollToMessageMock.mockClear()
+    hooks.state.messages.value = []
+    hooks.state.searchResults.value = [unloadedResult]
+    hooks.state.currentSearchIndex.value = 0
+    hooks.state.showInChatSearchList.value = true
+    await hooks.handleSearchResultClick(unloadedResult)
+    await flushPromises()
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55, false, 503)
+    await vi.advanceTimersByTimeAsync(250)
+    expect(chatViewMocks.scrollToMessageMock).toHaveBeenCalledWith(503)
+
+    vi.useRealTimers()
+    wrapper.unmount()
+  })
+
+  it('covers route/new-chat helpers and group-channel lifecycle handlers', async () => {
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 23,
+        other_user_id: -23,
+        other_user_name: 'کانال رفرش‌شده',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'channel',
+        chat_id: 23,
+      },
+    ]
+
+    const wrapper = await mountChatView({ currentUserRole: 'مدیر ارشد' })
+    await flushPromises()
+
+    const hooks = getChatViewTestHooks(wrapper)
+
+    chatViewMocks.loadMessagesMock.mockClear()
+    hooks.openConversationFromRoute(0, 'ignored')
+    expect(chatViewMocks.loadMessagesMock).not.toHaveBeenCalled()
+
+    hooks.openConversationFromRoute(-88, 'اتاق منفی')
+    expect(hooks.state.selectedUserId.value).toBe(-88)
+    expect(hooks.state.selectedUserName.value).toBe('اتاق منفی')
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(-88)
+
+    chatViewMocks.loadMessagesMock.mockClear()
+    hooks.state.showNewChatModal.value = true
+    hooks.handleNewChatSearch(66, 'گفتگوی تازه')
+    expect(hooks.state.showNewChatModal.value).toBe(false)
+    expect(hooks.state.selectedUserId.value).toBe(66)
+    expect(hooks.state.selectedUserName.value).toBe('گفتگوی تازه')
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(66)
+
+    hooks.openNewConversation()
+    expect(hooks.state.showNewChatModal.value).toBe(true)
+
+    hooks.openGroupCreation()
+    expect(hooks.state.showNewChatModal.value).toBe(false)
+    expect(hooks.state.showGroupManagerModal.value).toBe(true)
+    expect(hooks.state.groupManagerChatId.value).toBeNull()
+
+    hooks.state.showNewChatModal.value = true
+    hooks.openChannelCreation()
+    expect(hooks.state.showNewChatModal.value).toBe(false)
+    expect(hooks.state.showChannelManagerModal.value).toBe(true)
+    expect(hooks.state.channelManagerChatId.value).toBeNull()
+
+    chatViewMocks.loadConversationsMock.mockClear()
+    hooks.state.selectedUserId.value = -23
+    hooks.state.selectedUserName.value = 'قدیمی'
+    hooks.handleChannelManagerConversationRefresh()
+    await flushPromises()
+    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(hooks.state.selectedUserName.value).toBe('کانال رفرش‌شده')
+
+    chatViewMocks.loadConversationsMock.mockClear()
+    hooks.closeChannelManager()
+    await flushPromises()
+    expect(hooks.state.showChannelManagerModal.value).toBe(false)
+    expect(hooks.state.channelManagerChatId.value).toBeNull()
+    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+
+    chatViewMocks.loadConversationsMock.mockClear()
+    chatViewMocks.loadMessagesMock.mockClear()
+    hooks.state.showGroupManagerModal.value = true
+    hooks.state.groupManagerChatId.value = 99
+    await hooks.handleGroupCreated({ id: 99, title: 'گروه جدید' })
+    await flushPromises()
+    expect(hooks.state.showGroupManagerModal.value).toBe(false)
+    expect(hooks.state.groupManagerChatId.value).toBeNull()
+    expect(hooks.state.selectedUserId.value).toBe(-99)
+    expect(hooks.state.selectedUserName.value).toBe('گروه جدید')
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(-99)
+
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 23,
+        other_user_id: -23,
+        other_user_name: 'کانال رفرش‌شده',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'channel',
+        chat_id: 23,
+      },
+      {
+        id: 99,
+        other_user_id: -99,
+        other_user_name: 'گروه جدید',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'group',
+        chat_id: 99,
+      },
+    ]
+
+    chatViewMocks.loadConversationsMock.mockClear()
+    hooks.state.selectedUserId.value = -99
+    hooks.state.selectedUserName.value = 'گروه قدیمی'
+    await hooks.handleGroupUpdated({ id: 99, title: 'گروه به‌روز' })
+    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(hooks.state.selectedUserName.value).toBe('گروه به‌روز')
+
+    chatViewMocks.loadConversationsMock.mockClear()
+    hooks.state.selectedUserId.value = -99
+    hooks.state.selectedUserName.value = 'گروه به‌روز'
+    hooks.state.showAttachmentMenu.value = true
+    hooks.state.showStickerPicker.value = true
+    await hooks.handleGroupLeft(99)
+    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(hooks.state.selectedUserId.value).toBeNull()
+    expect(hooks.state.selectedUserName.value).toBe('')
+    expect(hooks.state.showAttachmentMenu.value).toBe(false)
+    expect(hooks.state.showStickerPicker.value).toBe(false)
+
+    chatViewMocks.loadConversationsMock.mockClear()
+    hooks.state.selectedUserId.value = -23
+    hooks.state.selectedUserName.value = 'کانال رفرش‌شده'
+    hooks.state.showAttachmentMenu.value = true
+    hooks.state.showStickerPicker.value = true
+    await hooks.handleChannelLeft(23)
+    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(hooks.state.selectedUserId.value).toBeNull()
+    expect(hooks.state.selectedUserName.value).toBe('')
+    expect(hooks.state.showAttachmentMenu.value).toBe(false)
+    expect(hooks.state.showStickerPicker.value).toBe(false)
+
+    wrapper.unmount()
+  })
+
   it('downloads an album from the context menu through the selection bar', async () => {
     vi.useFakeTimers()
     const albumMessages = [

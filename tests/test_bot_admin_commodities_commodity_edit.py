@@ -65,6 +65,25 @@ class BotAdminCommoditiesCommodityEditTests(unittest.IsolatedAsyncioTestCase):
         status_msg.edit_text.assert_awaited_once_with("✅ نام کالا تغییر یافت.", parse_mode="Markdown")
         show_list_mock.assert_awaited_once_with(message.bot, 1, unittest.mock.ANY, state)
 
+        status_msg = SimpleNamespace(message_id=31, edit_text=AsyncMock())
+        message = SimpleNamespace(
+            text="بهار",
+            answer=AsyncMock(return_value=status_msg),
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=1),
+        )
+        state = SimpleNamespace(get_data=AsyncMock(return_value={"commodity_id": 7}))
+        with patch("bot.handlers.admin_commodities.delete_user_message", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.update_anchor", new=AsyncMock()
+        ), patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.httpx.AsyncClient", return_value=FakeClient(FakeResponse(error=RuntimeError("bad")))
+        ), patch("bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.show_commodity_list", new=AsyncMock()
+        ):
+            await handle_commodity_edit_name(message, state, user=SimpleNamespace(id=1))
+
+        self.assertIn("bad", status_msg.edit_text.await_args.args[0])
+
 
 if __name__ == "__main__":
     unittest.main()

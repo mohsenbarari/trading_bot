@@ -51,12 +51,29 @@ class BotPanelSettingsResetTests(unittest.IsolatedAsyncioTestCase):
             await handle_settings_reset_confirm(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
         self.assertIn("بازنشانی شد", callback.answer.await_args.args[0])
 
+        denied_confirm = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
+        await handle_settings_reset_confirm(denied_confirm, user=None)
+        denied_confirm.answer.assert_awaited_once_with()
+
+        failed_confirm = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
+        with patch("core.trading_settings.TradingSettings", FakeTradingSettings), patch(
+            "core.trading_settings.save_trading_settings_async", new=AsyncMock(return_value=False)
+        ), patch("bot.handlers.panel.get_settings_text", new=AsyncMock(return_value="TEXT")), patch(
+            "bot.handlers.panel.get_settings_keyboard", return_value="KB"
+        ):
+            await handle_settings_reset_confirm(failed_confirm, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+        self.assertIn("خطا در بازنشانی", failed_confirm.answer.await_args.args[0])
+
         callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
         with patch("bot.handlers.panel.get_settings_text", new=AsyncMock(return_value="TEXT")), patch(
             "bot.handlers.panel.get_settings_keyboard", return_value="KB"
         ):
             await handle_settings_reset_cancel(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
         callback.answer.assert_awaited_once_with("لغو شد")
+
+        denied_cancel = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
+        await handle_settings_reset_cancel(denied_cancel, user=None)
+        denied_cancel.answer.assert_awaited_once_with()
 
 
 if __name__ == "__main__":

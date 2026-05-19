@@ -54,6 +54,26 @@ class BotTradeHistoryBackToProfileTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("پروفایل عمومی", callback.message.edit_text.await_args.args[0])
         callback.answer.assert_awaited_once()
 
+    async def test_back_to_profile_handles_self_target_and_missing_target(self):
+        callback = make_callback()
+        user = SimpleNamespace(id=2, account_name="self", full_name="Self User", telegram_id=99, role=SimpleNamespace(value="role"))
+        with patch("core.config.settings.bot_username", "botname"), patch(
+            "bot.keyboards.get_user_panel_keyboard", return_value="KB"
+        ):
+            await back_to_profile(callback, SimpleNamespace(target_user_id=2), state=SimpleNamespace(), user=user)
+        self.assertIn("پروفایل شما", callback.message.edit_text.await_args.args[0])
+        callback.message.edit_text.assert_awaited_once_with(
+            callback.message.edit_text.await_args.args[0],
+            parse_mode="Markdown",
+            reply_markup="KB",
+        )
+
+        callback = make_callback()
+        with patch("bot.handlers.trade_history.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(None))):
+            await back_to_profile(callback, SimpleNamespace(target_user_id=5), state=SimpleNamespace(), user=SimpleNamespace(id=2))
+        callback.message.edit_text.assert_not_awaited()
+        callback.answer.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()

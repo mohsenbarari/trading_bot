@@ -10,11 +10,19 @@ from core.enums import UserRole
 
 
 class FakeResponse:
+    def __init__(self, error=None):
+        self.error = error
+
     def raise_for_status(self):
+        if self.error:
+            raise self.error
         return None
 
 
 class FakeClient:
+    def __init__(self, error=None):
+        self.error = error
+
     async def __aenter__(self):
         return self
 
@@ -22,7 +30,7 @@ class FakeClient:
         return False
 
     async def post(self, url, json=None, headers=None):
-        return FakeResponse()
+        return FakeResponse(self.error)
 
 
 class BotAdminCommoditiesAliasAddTests(unittest.IsolatedAsyncioTestCase):
@@ -57,6 +65,47 @@ class BotAdminCommoditiesAliasAddTests(unittest.IsolatedAsyncioTestCase):
         clear_mock.assert_awaited_once_with(state)
         status_msg.edit_text.assert_awaited_once()
         show_aliases_mock.assert_awaited_once_with(message.bot, 1, unittest.mock.ANY, state, 7)
+
+        status_msg = SimpleNamespace(message_id=13, edit_text=AsyncMock())
+        message = SimpleNamespace(
+            text="بهار",
+            answer=AsyncMock(return_value=status_msg),
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=1),
+        )
+        state = SimpleNamespace(get_data=AsyncMock(return_value={"commodity_id": 7}))
+        http_error = httpx.HTTPStatusError(
+            "bad",
+            request=SimpleNamespace(),
+            response=SimpleNamespace(text="plain", json=lambda: {"detail": "exists"}),
+        )
+        with patch("bot.handlers.admin_commodities.delete_user_message", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.update_anchor", new=AsyncMock()
+        ), patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.httpx.AsyncClient", return_value=FakeClient(http_error)
+        ), patch("bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.show_aliases_list", new=AsyncMock()
+        ):
+            await handle_alias_add_name(message, state, user=SimpleNamespace(id=1))
+        self.assertIn("exists", status_msg.edit_text.await_args.args[0])
+
+        status_msg = SimpleNamespace(message_id=14, edit_text=AsyncMock())
+        message = SimpleNamespace(
+            text="بهار",
+            answer=AsyncMock(return_value=status_msg),
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=1),
+        )
+        state = SimpleNamespace(get_data=AsyncMock(return_value={"commodity_id": 7}))
+        with patch("bot.handlers.admin_commodities.delete_user_message", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.update_anchor", new=AsyncMock()
+        ), patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.httpx.AsyncClient", side_effect=RuntimeError("boom")
+        ), patch("bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.show_aliases_list", new=AsyncMock()
+        ):
+            await handle_alias_add_name(message, state, user=SimpleNamespace(id=1))
+        self.assertIn("boom", status_msg.edit_text.await_args.args[0])
 
 
 if __name__ == "__main__":

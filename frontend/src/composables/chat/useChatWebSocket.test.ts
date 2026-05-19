@@ -182,6 +182,30 @@ describe('useChatWebSocket', () => {
     expect(exposed.activityTextByConversation.value[12]).toBeUndefined()
   })
 
+  it('covers fallback activity labels, repeated typing updates, and invalid activity payloads', () => {
+    const clearTimeoutSpy = vi.spyOn(window, 'clearTimeout')
+    mountHarness()
+
+    emit('chat:activity', {
+      room_kind: 'group',
+      chat_id: 8,
+      sender_id: 44,
+      sender_name: '   ',
+      activity: 'uploading_file',
+      active: true,
+    })
+    expect(exposed.activityTextByConversation.value[-8]).toBe('کاربر در حال ارسال فایل...')
+
+    emit('chat:typing', { sender_id: 12, sender_name: 'Ali' })
+    emit('chat:typing', { sender_id: 12, sender_name: 'Ali' })
+    expect(clearTimeoutSpy).toHaveBeenCalled()
+
+    emit('chat:activity', { sender_id: 'bad-id', activity: 'typing' })
+    expect(exposed.isTyping.value).toBe(true)
+
+    clearTimeoutSpy.mockRestore()
+  })
+
   it('appends incoming open-chat messages, updates previews, and debounces missing conversation reloads', async () => {
     conversations.value = [{ other_user_id: 12, unread_count: 0, last_message_at: null, last_message_type: null, last_message_content: null }]
     mountHarness()
@@ -210,6 +234,23 @@ describe('useChatWebSocket', () => {
     vi.advanceTimersByTime(400)
     await Promise.resolve()
     expect(loadConversationsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('increments unread counts for inactive conversations and handles deleted previews', async () => {
+    conversations.value = [{ other_user_id: 45, unread_count: 1, last_message_at: null, last_message_type: null, last_message_content: null }]
+    mountHarness()
+
+    emit('chat:message', {
+      id: 702,
+      sender_id: 45,
+      created_at: '2026-05-14T14:02:00Z',
+      message_type: 'text',
+      content: 'gone',
+      is_deleted: true,
+    })
+
+    expect(conversations.value[0].unread_count).toBe(2)
+    expect(conversations.value[0].last_message_content).toBe('پیام حذف شد')
   })
 
   it('falls back to loadMessages for incomplete payloads and patches direct read receipts in place', async () => {
@@ -255,5 +296,34 @@ describe('useChatWebSocket', () => {
     expect(messages.value[0].reactions).toEqual([
       { emoji: '🔥', user_id: 5 },
     ])
+  })
+
+  it('covers typing failures and ignores invalid or unknown reaction events', async () => {
+    const typingErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    apiFetchMock.mockRejectedValueOnce(new Error('typing failed'))
+    mountHarness()
+
+    await exposed.sendTypingSignal()
+    expect(typingErrorSpy).toHaveBeenCalledWith('Typing signal failed', expect.any(Error))
+
+    messages.value = [{ id: 91, reactions: [{ emoji: '🙂', user_id: 2 }] }]
+    emit('chat:reaction', { foo: 'bar' })
+    emit('chat:reaction', { id: 404, reactions: [{ emoji: '🔥', user_id: 1 }] })
+    expect(messages.value[0].reactions).toEqual([{ emoji: '🙂', user_id: 2 }])
+
+    typingErrorSpy.mockRestore()
+  })
+
+  it('clears active typing timeouts during unmount teardown', () => {
+    const clearTimeoutSpy = vi.spyOn(window, 'clearTimeout')
+    mountHarness()
+
+    emit('chat:typing', { sender_id: 12, sender_name: 'Ali' })
+
+    wrapper?.unmount()
+    wrapper = null
+
+    expect(clearTimeoutSpy).toHaveBeenCalled()
+    clearTimeoutSpy.mockRestore()
   })
 })

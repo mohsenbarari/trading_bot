@@ -169,4 +169,28 @@ describe('DashboardView.vue', () => {
     expect(dashboardViewMocks.apiFetchMock).toHaveBeenNthCalledWith(3, '/api/sessions/session-b', { method: 'DELETE' })
     expect(dashboardViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
   })
+
+  it('renders the midday and evening greetings for later hours', async () => {
+    const payload = {
+      id: 21,
+      full_name: 'کاربر زمان‌بندی',
+      account_name: 'timed21',
+      account_status: 'active',
+      global_lock_grace_expires_at: null,
+      global_web_locked_at: null,
+      trading_restricted_until: null,
+    }
+
+    vi.setSystemTime(new Date(2026, 4, 14, 13, 0, 0))
+    dashboardViewMocks.apiFetchMock.mockResolvedValueOnce(makeJsonResponse(payload))
+    const middayWrapper = await mountView()
+    expect(middayWrapper.text()).toContain('ظهر بخیر')
+    middayWrapper.unmount()
+
+    vi.setSystemTime(new Date(2026, 4, 14, 18, 0, 0))
+    dashboardViewMocks.apiFetchMock.mockResolvedValueOnce(makeJsonResponse(payload))
+    const eveningWrapper = await mountView()
+    expect(eveningWrapper.text()).toContain('عصر بخیر')
+    eveningWrapper.unmount()
+  })
 })

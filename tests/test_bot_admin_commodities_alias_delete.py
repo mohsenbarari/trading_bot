@@ -52,6 +52,12 @@ class BotAdminCommoditiesAliasDeleteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(query.message.edit_text.await_args.kwargs["reply_markup"], "KB")
         self.assertIn("ربع", query.message.edit_text.await_args.args[0])
 
+        query = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock(), reply_markup=SimpleNamespace(inline_keyboard=None)), data="alias_delete_7_9")
+        state = SimpleNamespace(set_state=AsyncMock(), update_data=AsyncMock())
+        with patch("bot.handlers.admin_commodities.get_alias_delete_confirm_keyboard", return_value="KB"):
+            await handle_alias_delete_start(query, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=state)
+        self.assertIn("---", query.message.edit_text.await_args.args[0])
+
     async def test_handle_alias_delete_yes_handles_success_and_error(self):
         status_msg = SimpleNamespace(message_id=22, edit_text=AsyncMock())
         query = SimpleNamespace(
@@ -85,6 +91,20 @@ class BotAdminCommoditiesAliasDeleteTests(unittest.IsolatedAsyncioTestCase):
         ), patch("bot.handlers.admin_commodities.show_aliases_list", new=AsyncMock()):
             await handle_alias_delete_yes(query, user=SimpleNamespace(id=1), state=state)
         self.assertIn("bad", status_msg.edit_text.await_args.args[0])
+
+        status_msg = SimpleNamespace(message_id=23, edit_text=AsyncMock())
+        query = SimpleNamespace(
+            message=SimpleNamespace(edit_text=AsyncMock(return_value=status_msg), chat=SimpleNamespace(id=1)),
+            bot=SimpleNamespace(),
+        )
+        state = SimpleNamespace(get_data=AsyncMock(return_value={"alias_to_delete_id": 9, "commodity_id": 7}))
+        with patch("bot.handlers.admin_commodities.update_anchor", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()
+        ), patch("bot.handlers.admin_commodities.httpx.AsyncClient", side_effect=RuntimeError("explode")), patch(
+            "bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()
+        ), patch("bot.handlers.admin_commodities.show_aliases_list", new=AsyncMock()):
+            await handle_alias_delete_yes(query, user=SimpleNamespace(id=1), state=state)
+        self.assertIn("explode", status_msg.edit_text.await_args.args[0])
 
 
 if __name__ == "__main__":

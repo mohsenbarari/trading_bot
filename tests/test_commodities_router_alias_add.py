@@ -67,6 +67,16 @@ class CommoditiesRouterAliasAddTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.alias, "gold")
         invalidate_mock.assert_awaited_once()
 
+    async def test_add_alias_to_commodity_ignores_cache_invalidation_failures(self):
+        db = FakeDB([FakeExecuteResult(None)])
+        with patch(
+            "bot.utils.redis_helpers.invalidate_commodity_cache",
+            new=AsyncMock(side_effect=RuntimeError("cache down")),
+        ):
+            result = await add_alias_to_commodity(1, alias=schemas.CommodityAliasCreate(alias="silver"), db=db, source="bot")
+
+        self.assertEqual(result.alias, "silver")
+
 
 if __name__ == "__main__":
     unittest.main()

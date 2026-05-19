@@ -126,6 +126,37 @@ class ChatServiceThreadingSyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(direct_chat.last_message_id, 303)
         self.assertEqual(conversation.unread_count_user2, 1)
 
+    async def test_sync_direct_message_threading_unhides_hidden_members(self):
+        created_at = datetime(2026, 5, 8, 0, 5, tzinfo=timezone.utc)
+        sender = SimpleNamespace(id=10)
+        receiver = SimpleNamespace(id=20)
+        message = SimpleNamespace(id=304, chat_id=None, created_at=created_at)
+        conversation = SimpleNamespace(
+            last_message_id=None,
+            last_message_at=None,
+            unread_count_user1=0,
+            unread_count_user2=0,
+        )
+        direct_chat = SimpleNamespace(id=100, last_message_id=None, last_message_at=None)
+        sender_member = SimpleNamespace(last_read_message_id=None, last_read_at=None, is_hidden=False, hidden_at=None, updated_at=None)
+        hidden_member = SimpleNamespace(is_hidden=True, hidden_at=created_at, updated_at=None)
+
+        with patch(
+            "core.services.chat_service.get_or_create_direct_conversation",
+            new=AsyncMock(return_value=conversation),
+        ), patch(
+            "core.services.chat_service.get_or_create_direct_chat",
+            new=AsyncMock(return_value=direct_chat),
+        ), patch(
+            "core.services.chat_service._load_direct_chat_members",
+            new=AsyncMock(return_value={10: sender_member, 20: hidden_member}),
+        ):
+            await sync_direct_message_threading(object(), sender=sender, receiver=receiver, message=message)
+
+        self.assertFalse(hidden_member.is_hidden)
+        self.assertIsNone(hidden_member.hidden_at)
+        self.assertEqual(hidden_member.updated_at, created_at)
+
 
 if __name__ == "__main__":
     unittest.main()

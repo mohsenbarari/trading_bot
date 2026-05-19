@@ -64,6 +64,24 @@ class BotTradeManageSuccessTests(unittest.IsolatedAsyncioTestCase):
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
         callback.answer.assert_awaited_with("✅ لفظ شما منقضی شد")
 
+    async def test_handle_expire_offer_logs_channel_markup_failures_and_keeps_success_flow(self):
+        offer = SimpleNamespace(user_id=4, status=OfferStatus.ACTIVE, channel_message_id=77)
+        final_session = FakeSession(offer)
+        factory = FakeSessionFactory(FakeSession(), final_session)
+        callback = make_callback()
+        bot = SimpleNamespace(edit_message_reply_markup=AsyncMock(side_effect=RuntimeError('edit failed')))
+        settings_obj = SimpleNamespace(channel_id=-100, offer_expire_rate_per_minute=5, offer_expire_daily_limit_after_threshold=99)
+
+        with patch("bot.handlers.trade_manage.get_trading_settings", return_value=settings_obj), patch(
+            "bot.handlers.trade_manage.track_expire_rate", new=AsyncMock(return_value=1)
+        ), patch("bot.handlers.trade_manage.track_daily_expire", new=AsyncMock(return_value={"count": 0})), patch(
+            "bot.handlers.trade_manage.AsyncSessionLocal", new=factory
+        ), patch("bot.handlers.trade_manage.settings", settings_obj), patch("bot.handlers.trade_manage.logger") as logger:
+            await handle_expire_offer(callback, SimpleNamespace(offer_id=5), user=SimpleNamespace(id=4), bot=bot)
+
+        logger.debug.assert_called_once()
+        callback.answer.assert_awaited_with("✅ لفظ شما منقضی شد")
+
 
 if __name__ == "__main__":
     unittest.main()

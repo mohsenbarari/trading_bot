@@ -81,4 +81,24 @@ describe('emojiStickerCatalog', () => {
     expect(catalog.buildFrequentEmojiCategory(null, 2).emojis).toHaveLength(2)
     expect(() => catalog.recordEmojiStickerUsage(null, '😂')).not.toThrow()
   })
+
+  it('falls back from invalid JSON usage state and sorts equal-count entries by recency before fallback fill', async () => {
+    localStorage.setItem('chat_emoji_sticker_usage_v1:11', '{broken-json')
+    let catalog = await import('./emojiStickerCatalog')
+
+    expect(catalog.buildFrequentEmojiCategory(11, 4).emojis).toHaveLength(4)
+
+    localStorage.setItem('chat_emoji_sticker_usage_v1:11', JSON.stringify({
+      '😂': { count: 1, lastUsedAt: 10 },
+      '❤️': { count: 1, lastUsedAt: 20 },
+    }))
+
+    vi.resetModules()
+    catalog = await import('./emojiStickerCatalog')
+    const frequent = catalog.buildFrequentEmojiCategory(11, 45)
+
+    expect(frequent.emojis[0]?.emoji).toBe('❤️')
+    expect(frequent.emojis[1]?.emoji).toBe('😂')
+    expect(frequent.emojis.length).toBe(45)
+  })
 })

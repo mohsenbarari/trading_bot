@@ -57,6 +57,20 @@ class BotAdminCommoditiesDeleteCancelTests(unittest.IsolatedAsyncioTestCase):
         status_msg.edit_text.assert_awaited_once_with("✅ کالا حذف شد.")
         show_list_mock.assert_awaited_once_with(query.bot, 1, unittest.mock.ANY, state)
 
+        status_msg = SimpleNamespace(message_id=61, edit_text=AsyncMock())
+        query = SimpleNamespace(
+            message=SimpleNamespace(edit_text=AsyncMock(return_value=status_msg), chat=SimpleNamespace(id=1)),
+            bot=SimpleNamespace(),
+        )
+        state = SimpleNamespace(get_data=AsyncMock(return_value={"commodity_to_delete_id": 7}))
+        with patch("bot.handlers.admin_commodities.update_anchor", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()
+        ), patch("bot.handlers.admin_commodities.httpx.AsyncClient", return_value=FakeClient(FakeResponse(error=RuntimeError("delete failed")))), patch(
+            "bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()
+        ), patch("bot.handlers.admin_commodities.show_commodity_list", new=AsyncMock()):
+            await handle_delete_yes(query, user=SimpleNamespace(id=1), state=state)
+        self.assertIn("delete failed", status_msg.edit_text.await_args.args[0])
+
         query = SimpleNamespace(bot=SimpleNamespace(), message=SimpleNamespace(chat=SimpleNamespace(id=1)))
         state = SimpleNamespace(get_data=AsyncMock(return_value={"commodity_id": 7}))
         with patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()) as clear_mock, patch(

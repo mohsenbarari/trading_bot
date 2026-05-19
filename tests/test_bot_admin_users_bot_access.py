@@ -3,6 +3,8 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from aiogram.exceptions import TelegramBadRequest
+
 from bot.handlers.admin_users import handle_user_toggle_account_status
 from core.enums import UserAccountStatus, UserRole
 
@@ -31,6 +33,59 @@ class FakeSession:
 
 
 class BotAdminUsersAccountStatusTests(unittest.IsolatedAsyncioTestCase):
+    async def test_handle_user_toggle_account_status_rejects_protected_targets_and_swallows_edit_failures(self):
+        callback = SimpleNamespace(data="user_toggle_account_status_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        await handle_user_toggle_account_status(callback, user=None)
+        callback.answer.assert_not_awaited()
+
+        protected_user = SimpleNamespace(
+            id=9,
+            role=UserRole.SUPER_ADMIN,
+            telegram_id=123,
+            account_status=UserAccountStatus.ACTIVE,
+            trading_restricted_until=None,
+            max_daily_trades=None,
+            max_active_commodities=None,
+            max_daily_requests=None,
+        )
+        denied_callback = SimpleNamespace(
+            data="user_toggle_account_status_9",
+            message=SimpleNamespace(edit_text=AsyncMock()),
+            answer=AsyncMock(),
+        )
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(protected_user)):
+            await handle_user_toggle_account_status(denied_callback, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER))
+        denied_callback.answer.assert_awaited_once_with("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+
+        target_user = SimpleNamespace(
+            id=10,
+            role=UserRole.STANDARD,
+            telegram_id=321,
+            account_status=UserAccountStatus.ACTIVE,
+            trading_restricted_until=None,
+            max_daily_trades=None,
+            max_active_commodities=None,
+            max_daily_requests=None,
+        )
+        session = FakeSession(target_user)
+        callback = SimpleNamespace(
+            data="user_toggle_account_status_10",
+            message=SimpleNamespace(edit_text=AsyncMock(side_effect=TelegramBadRequest(method='editMessageText', message='unchanged'))),
+            answer=AsyncMock(),
+        )
+
+        async def transition_side_effect(_session, user_obj, target_status):
+            user_obj.account_status = target_status
+
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=session), patch(
+            "bot.handlers.admin_users.transition_user_account_status", new=AsyncMock(side_effect=transition_side_effect)
+        ), patch("bot.handlers.admin_users.get_user_profile_text", new=AsyncMock(return_value="PROFILE")), patch(
+            "bot.handlers.admin_users.get_user_settings_keyboard", return_value="KB"
+        ):
+            await handle_user_toggle_account_status(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+
+        callback.answer.assert_awaited_once_with("✅ وضعیت حساب غیرفعال شد.", show_alert=True)
+
     async def test_handle_user_toggle_account_status_handles_both_directions_and_missing_user(self):
         for initial_status, expected_status in [
             (UserAccountStatus.ACTIVE, "غیرفعال"),

@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from bot.handlers.trade_history import show_trade_history
+from bot.handlers.trade_history import change_history_months, show_mutual_trade_history, show_my_trade_history, show_trade_history
 
 
 class FakeState:
@@ -13,11 +13,42 @@ class FakeState:
         self.updated.append(kwargs)
 
 
-def make_callback():
-    return SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
+def make_callback(side_effect=None):
+    return SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock(side_effect=side_effect)))
+
+
+class FakeBadRequest(Exception):
+    pass
 
 
 class BotTradeHistoryShowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_show_my_trade_history_and_change_history_months_paths(self):
+        message = SimpleNamespace(answer=AsyncMock())
+        state = FakeState()
+        await show_my_trade_history(message, state, user=None)
+        message.answer.assert_not_awaited()
+
+        message = SimpleNamespace(answer=AsyncMock())
+        state = FakeState()
+        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, [SimpleNamespace(id=1)]))), patch(
+            "bot.handlers.trade_history.format_trade_history", return_value="TEXT"
+        ), patch("bot.handlers.trade_history.get_trade_history_keyboard", return_value="KB"):
+            await show_my_trade_history(message, state, user=SimpleNamespace(id=2))
+        self.assertEqual(state.updated, [{"history_months": 3}])
+        message.answer.assert_awaited_once_with("TEXT", reply_markup="KB")
+
+        callback = make_callback()
+        await change_history_months(callback, SimpleNamespace(months=1, target_user_id=2), FakeState(), user=None)
+        callback.answer.assert_not_awaited()
+
+        callback = make_callback()
+        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(SimpleNamespace(account_name="t"), [1]))), patch(
+            "bot.handlers.trade_history.format_trade_history", return_value="TEXT"
+        ), patch("bot.handlers.trade_history.get_trade_history_keyboard", return_value="KB"):
+            await change_history_months(callback, SimpleNamespace(months=1, target_user_id=2), FakeState(), user=SimpleNamespace(id=2))
+        callback.message.edit_text.assert_awaited_once_with("TEXT", reply_markup="KB")
+        callback.answer.assert_awaited_once()
+
     async def test_show_trade_history_requires_user_and_handles_missing_target(self):
         callback = make_callback()
         await show_trade_history(callback, SimpleNamespace(target_user_id=5), FakeState(), user=None)
@@ -44,6 +75,45 @@ class BotTradeHistoryShowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.updated, [{"history_months": 3, "history_target_id": 5}])
         callback.message.edit_text.assert_awaited_once_with("TEXT", reply_markup="KB")
         callback.answer.assert_awaited()
+
+        callback = make_callback()
+        state = FakeState()
+        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, [1]))), patch(
+            "bot.handlers.trade_history.format_trade_history", return_value="SELF"
+        ), patch("bot.handlers.trade_history.get_trade_history_keyboard", return_value="KB"):
+            await show_trade_history(callback, SimpleNamespace(target_user_id=0), state, user=SimpleNamespace(id=2))
+        callback.message.edit_text.assert_awaited_once_with("SELF", reply_markup="KB")
+
+    async def test_change_history_months_ignores_bad_request_and_mutual_history_covers_self_missing_and_no_user(self):
+        callback = make_callback(side_effect=FakeBadRequest())
+        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(SimpleNamespace(account_name="t"), [1]))), patch(
+            "bot.handlers.trade_history.format_trade_history", return_value="TEXT"
+        ), patch("bot.handlers.trade_history.get_trade_history_keyboard", return_value="KB"), patch(
+            "bot.handlers.trade_history.TelegramBadRequest", FakeBadRequest
+        ):
+            await change_history_months(callback, SimpleNamespace(months=2, target_user_id=2), FakeState(), user=SimpleNamespace(id=2))
+        callback.answer.assert_awaited_once()
+
+        callback = make_callback()
+        state = FakeState()
+        await show_mutual_trade_history(callback, SimpleNamespace(target_user_id=5), state, user=None)
+        callback.answer.assert_not_awaited()
+        self.assertEqual(state.updated, [])
+
+        callback = make_callback()
+        state = FakeState()
+        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, []))):
+            await show_mutual_trade_history(callback, SimpleNamespace(target_user_id=5), state, user=SimpleNamespace(id=2))
+        self.assertEqual(state.updated, [{"history_months": 3}])
+        callback.answer.assert_awaited_once_with("کاربر یافت نشد", show_alert=True)
+
+        callback = make_callback()
+        state = FakeState()
+        with patch("bot.handlers.trade_history.get_trade_history", new=AsyncMock(return_value=(None, [1]))), patch(
+            "bot.handlers.trade_history.format_trade_history", return_value="SELF"
+        ), patch("bot.handlers.trade_history.get_trade_history_keyboard", return_value="KB"):
+            await show_mutual_trade_history(callback, SimpleNamespace(target_user_id=2), state, user=SimpleNamespace(id=2))
+        callback.message.edit_text.assert_awaited_once_with("SELF", reply_markup="KB")
 
 
 if __name__ == "__main__":

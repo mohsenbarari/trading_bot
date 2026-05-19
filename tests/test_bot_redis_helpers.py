@@ -1,3 +1,4 @@
+import builtins
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -152,6 +153,60 @@ class BotRedisHelpersTests(unittest.IsolatedAsyncioTestCase):
         with patch('bot.utils.redis_helpers.get_redis_client', AsyncMock(return_value=broken_redis)):
             await redis_helpers.mark_deleted_telegram_user(77)
             self.assertTrue(await redis_helpers.is_deleted_telegram_user(77))
+
+    async def test_get_redis_client_returns_none_when_imports_fail(self):
+        original_import = builtins.__import__
+
+        def broken_import(name, *args, **kwargs):
+            if name in {'redis.asyncio', 'core.redis'}:
+                raise ImportError('missing dependency')
+            return original_import(name, *args, **kwargs)
+
+        with patch('bot.utils.redis_helpers.logger.warning') as warning_mock, patch('builtins.__import__', side_effect=broken_import):
+            client = await redis_helpers.get_redis_client()
+
+        self.assertIsNone(client)
+        warning_mock.assert_called_once()
+
+    async def test_check_double_click_fallback_cleans_expired_confirmation_keys(self):
+        redis_helpers._memory_fallback['confirmations'].update({
+            'stale': 1.0,
+            'confirm:5:4:3': 99.0,
+        })
+
+        with patch('bot.utils.redis_helpers.get_redis_client', AsyncMock(return_value=None)), patch(
+            'bot.utils.redis_helpers.time.time', return_value=105.0
+        ):
+            self.assertFalse(await redis_helpers.check_double_click(9, 8, 7, timeout=3.0))
+
+        self.assertNotIn('stale', redis_helpers._memory_fallback['confirmations'])
+
+    async def test_cache_helpers_cover_empty_get_and_redis_write_invalidation_failures(self):
+        empty_redis = AsyncMock()
+        empty_redis.get = AsyncMock(return_value=None)
+        with patch('bot.utils.redis_helpers.get_redis_client', AsyncMock(return_value=empty_redis)):
+            self.assertIsNone(await redis_helpers.get_cached_commodities())
+
+        broken_set_redis = AsyncMock()
+        broken_set_redis.setex = AsyncMock(side_effect=RuntimeError('set failed'))
+        with patch('bot.utils.redis_helpers.get_redis_client', AsyncMock(return_value=broken_set_redis)), patch(
+            'bot.utils.redis_helpers.time.time', return_value=200.0
+        ), patch('bot.utils.redis_helpers.logger.warning') as warning_mock:
+            await redis_helpers.set_cached_commodities([{'id': 7}], ttl=20)
+
+        self.assertEqual(redis_helpers._memory_fallback['cache']['cache:commodities:all']['data'], [{'id': 7}])
+        warning_mock.assert_called()
+
+        broken_delete_redis = AsyncMock()
+        broken_delete_redis.delete = AsyncMock(side_effect=RuntimeError('delete failed'))
+        redis_helpers._memory_fallback['cache']['cache:commodities:all'] = {'data': [{'id': 8}], 'expires': 500.0}
+        with patch('bot.utils.redis_helpers.get_redis_client', AsyncMock(return_value=broken_delete_redis)), patch(
+            'bot.utils.redis_helpers.logger.debug'
+        ) as debug_mock:
+            await redis_helpers.invalidate_commodity_cache()
+
+        self.assertNotIn('cache:commodities:all', redis_helpers._memory_fallback['cache'])
+        debug_mock.assert_called_once()
 
 
 if __name__ == '__main__':

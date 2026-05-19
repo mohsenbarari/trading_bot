@@ -159,6 +159,19 @@ class BotStartRegistrationAddressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(session.added), 0)
         self.assertIn("ثبت‌نام حسابدار از مسیر ربات مجاز نیست", message.answer.await_args.args[0])
 
+        session = FakeSession(invitation)
+        state = FakeState("ACCT-token")
+        message = make_message()
+        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
+            "bot.handlers.start.AsyncSessionLocal",
+            return_value=FakeSessionContext(session),
+        ), patch(
+            "bot.handlers.start.get_pending_accountant_relation_by_invitation_token",
+            new=AsyncMock(return_value=None),
+        ):
+            await handle_address(message, state)
+        self.assertIn("دیگر معتبر نیست", message.answer.await_args.args[0])
+
 
 if __name__ == "__main__":
     unittest.main()

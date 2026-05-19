@@ -54,6 +54,26 @@ class BotAdminUsersProfileTextTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("آزاد (منقضی شده)", text)
         self.assertIn("⛔ غیرفعال", text)
 
+    async def test_get_user_profile_text_marks_permanent_restriction_and_unknown_join_date(self):
+        now = datetime(2026, 1, 1, 12, 0, 0)
+        user = SimpleNamespace(
+            account_name="perm",
+            mobile_number="0935",
+            role=UserRole.STANDARD,
+            account_status=UserAccountStatus.ACTIVE,
+            created_at=None,
+            trading_restricted_until=datetime(2201, 1, 1, 0, 0, 0),
+            max_daily_trades=None,
+            max_active_commodities=None,
+            max_daily_requests=None,
+            limitations_expire_at=None,
+        )
+        with patch("bot.handlers.admin_users.datetime") as datetime_mock:
+            datetime_mock.utcnow.return_value = now
+            text = await get_user_profile_text(user)
+        self.assertIn("مسدود دائم", text)
+        self.assertIn("نامشخص", text)
+
 
 if __name__ == "__main__":
     unittest.main()

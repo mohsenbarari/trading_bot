@@ -265,4 +265,44 @@ describe('useNotificationRuntime', () => {
 
     wrapper.unmount()
   })
+
+  it('uses group labels, sticker and fallback bodies, and skips bootstrap work without an auth token', async () => {
+    localStorage.removeItem('auth_token')
+    const wrapper = mountRuntime()
+
+    expect(notificationRuntimeMocks.connect).not.toHaveBeenCalled()
+    expect(notificationRuntimeMocks.store.fetchInitialCounts).not.toHaveBeenCalled()
+    expect(notificationRuntimeMocks.ensureSessionValidation).not.toHaveBeenCalled()
+
+    setDocumentHidden(true)
+    emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {
+      room_kind: 'group',
+      chat_id: 17,
+      message_type: 'sticker',
+      content: '',
+    })
+    await flushPromises()
+    expect(notificationRuntimeMocks.store.addToast).toHaveBeenLastCalledWith({
+      title: 'گروه',
+      body: 'استیکر',
+      route: '/chat?user_id=-17&user_name=%DA%AF%D8%B1%D9%88%D9%87',
+      kind: 'chat',
+    })
+
+    emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {
+      sender_id: 66,
+      sender_name: '',
+      message_type: 'document',
+      content: '',
+    })
+    await flushPromises()
+    expect(notificationRuntimeMocks.store.addToast).toHaveBeenLastCalledWith({
+      title: 'پیام جدید',
+      body: 'فایل جدید',
+      route: '/chat?user_id=66&user_name=%D9%BE%DB%8C%D8%A7%D9%85%20%D8%AC%D8%AF%DB%8C%D8%AF',
+      kind: 'chat',
+    })
+
+    wrapper.unmount()
+  })
 })

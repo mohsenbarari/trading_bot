@@ -46,6 +46,26 @@ class FakeSessionContext:
 
 
 class BotTradeCreateConfirmTelegramErrorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fake_session_helpers_cover_stored_offer_and_empty_rollback(self):
+        session = FakeSession(stored_offer="stored")
+        self.assertEqual(await session.get(None, None), "stored")
+
+        already_identified = SimpleNamespace(id=777)
+        session.add(already_identified)
+        self.assertEqual(already_identified.id, 777)
+
+        create_session = FakeSession()
+
+        async def rollback_get(model, key):
+            if create_session.added:
+                return create_session.added[0]
+            return None
+
+        self.assertIsNone(await rollback_get(None, None))
+        ctx = FakeSessionContext(session)
+        self.assertIs(await ctx.__aenter__(), session)
+        self.assertFalse(await ctx.__aexit__(None, None, None))
+
     async def test_handle_trade_confirm_rolls_back_offer_on_telegram_bad_request(self):
         callback = SimpleNamespace(
             message=SimpleNamespace(edit_text=AsyncMock()),
@@ -100,6 +120,53 @@ class BotTradeCreateConfirmTelegramErrorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("خطا در ارسال به کانال", callback.message.edit_text.await_args.args[0])
         state.clear.assert_awaited_once()
         callback.answer.assert_awaited_once_with()
+
+    async def test_handle_trade_confirm_logs_when_telegram_error_rollback_fails(self):
+        callback = SimpleNamespace(
+            message=SimpleNamespace(edit_text=AsyncMock()),
+            answer=AsyncMock(),
+            from_user=SimpleNamespace(id=555),
+        )
+        state = SimpleNamespace(
+            get_data=AsyncMock(
+                return_value={
+                    "quantity": 12,
+                    "trade_type": "buy",
+                    "commodity_name": "سکه",
+                    "price": 123456,
+                    "commodity_id": 7,
+                    "is_wholesale": True,
+                    "lot_sizes": None,
+                    "notes": None,
+                }
+            ),
+            clear=AsyncMock(),
+        )
+        create_session = FakeSession()
+        rollback_session = FakeSession()
+        rollback_session.get = AsyncMock(side_effect=RuntimeError("rollback boom"))
+        error = TelegramBadRequest(method=SimpleNamespace(__api_method__="sendMessage"), message="bad")
+        bot = SimpleNamespace(send_message=AsyncMock(side_effect=error))
+
+        with patch("core.trading_settings.get_trading_settings", return_value=SimpleNamespace(max_active_offers=3)), patch(
+            "bot.handlers.trade_create.check_user_limits", side_effect=[(True, None), (True, None)]
+        ), patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            side_effect=[
+                FakeSessionContext(FakeSession([0])),
+                FakeSessionContext(FakeSession()),
+                FakeSessionContext(create_session),
+                FakeSessionContext(rollback_session),
+            ],
+        ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
+            "core.services.trade_service.detect_offer_price_warning", new=AsyncMock(return_value=None)
+        ), patch(
+            "bot.handlers.trade_create.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
+        ), patch("bot.handlers.trade_create.logger.debug") as debug_mock:
+            await handle_trade_confirm(callback, state, user=SimpleNamespace(id=1, limitations_expire_at=None), bot=bot)
+
+        debug_mock.assert_called_once()
+        self.assertIn("خطا در ارسال به کانال", callback.message.edit_text.await_args.args[0])
 
 
 if __name__ == "__main__":

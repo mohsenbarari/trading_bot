@@ -6,11 +6,15 @@ from pydantic import ValidationError
 from core.enums import NotificationCategory, NotificationLevel, UserRole
 from core.utils import to_jalali_str
 from schemas import (
+    AccountantRelationCreate,
+    AccountantRelationUpdate,
     InvitationCreate,
+    InvitationRead,
     NotificationRead,
     OTPRequest,
     OTPVerify,
     TokenPair,
+    UserAvatarUpdate,
     UserPublicRead,
     UserRead,
 )
@@ -108,6 +112,54 @@ class SchemaSmokeTests(unittest.TestCase):
         self.assertEqual(notification.level, NotificationLevel.INFO)
         self.assertEqual(notification.category, NotificationCategory.SYSTEM)
         self.assertEqual(notification.created_at_jalali, to_jalali_str(created_at))
+
+    def test_avatar_and_accountant_schema_validators_and_invitation_jalali(self):
+        created_at = datetime(2026, 5, 6, 10, 0, 0)
+
+        self.assertIsNone(UserAvatarUpdate(avatar_file_id=None).avatar_file_id)
+        self.assertIsNone(UserAvatarUpdate(avatar_file_id='   ').avatar_file_id)
+        self.assertEqual(UserAvatarUpdate(avatar_file_id=' avatar-1 ').avatar_file_id, 'avatar-1')
+
+        relation = AccountantRelationCreate(
+            account_name=' owner ',
+            relation_display_name=' Display Name ',
+            mobile_number='۰۹۱۲۳۴۵۶۷۸۹',
+            duty_description=' duty ',
+        )
+        self.assertEqual(relation.account_name, 'owner')
+        self.assertEqual(relation.relation_display_name, 'Display Name')
+        self.assertEqual(relation.mobile_number, '09123456789')
+        self.assertEqual(relation.duty_description, 'duty')
+
+        relation_without_duty = AccountantRelationCreate(
+            account_name='owner',
+            relation_display_name='Display Name',
+            mobile_number='09123456789',
+            duty_description=None,
+        )
+        self.assertIsNone(relation_without_duty.duty_description)
+
+        with self.assertRaises(ValidationError):
+            AccountantRelationCreate(
+                account_name=None,
+                relation_display_name='Display Name',
+                mobile_number='09123456789',
+            )
+
+        self.assertEqual(AccountantRelationUpdate(duty_description=' duty ').duty_description, 'duty')
+        self.assertIsNone(AccountantRelationUpdate(duty_description='   ').duty_description)
+        self.assertIsNone(AccountantRelationUpdate(duty_description=None).duty_description)
+
+        invitation = InvitationRead(
+            id=44,
+            account_name='demo-user',
+            mobile_number='09123456789',
+            role=UserRole.STANDARD,
+            token='token-1',
+            expires_at=created_at,
+            created_by_id=99,
+        )
+        self.assertEqual(invitation.expires_at_jalali, to_jalali_str(created_at))
 
 
 if __name__ == '__main__':

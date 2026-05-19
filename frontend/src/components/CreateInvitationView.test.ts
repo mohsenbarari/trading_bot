@@ -259,4 +259,77 @@ describe('CreateInvitationView.vue', () => {
     expect(roleOptions).toEqual(['تماشا', 'عادی'])
     expect((wrapper.get('#role').element as HTMLSelectElement).value).toBe('عادی')
   })
+
+  it('shows a fallback copy error for the Telegram link when execCommand returns false', async () => {
+    installClipboard(undefined)
+    installExecCommand(false)
+    createInvitationMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
+        short_link: '',
+      }),
+    )
+
+    const wrapper = await mountView()
+    await fillInviteForm(wrapper)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    await wrapper.get('.copy-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.copy-btn').text()).toBe('خطا')
+
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(wrapper.get('.copy-btn').text()).toBe('کپی')
+  })
+
+  it('surfaces Telegram clipboard write failures without using the fallback textarea path', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('clipboard denied'))
+    installClipboard(writeText)
+    createInvitationMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
+        short_link: '',
+      }),
+    )
+
+    const wrapper = await mountView()
+    await fillInviteForm(wrapper)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    await wrapper.get('.copy-btn').trigger('click')
+    await flushPromises()
+
+    expect(writeText).toHaveBeenCalledWith('https://t.me/mbmtrading1_bot?start=invite-token')
+    expect(wrapper.get('.copy-btn').text()).toBe('خطا')
+
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(wrapper.get('.copy-btn').text()).toBe('کپی')
+  })
+
+  it('shows a fallback copy error for the web link when execCommand throws', async () => {
+    installClipboard(undefined)
+    installExecCommand(new Error('copy failed'))
+    createInvitationMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        link: 'https://t.me/mbmtrading1_bot?start=invite-token',
+        short_link: 'https://coin.gold-trade.ir/invite/route-token',
+      }),
+    )
+
+    const wrapper = await mountView()
+    await fillInviteForm(wrapper)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    await wrapper.get('.copy-btn.web').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.copy-btn.web').text()).toBe('خطا')
+
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(wrapper.get('.copy-btn.web').text()).toBe('کپی')
+  })
 })

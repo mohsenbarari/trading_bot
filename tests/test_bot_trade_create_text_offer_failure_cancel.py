@@ -43,6 +43,31 @@ class FakeSessionContext:
 
 
 class BotTradeCreateTextOfferFailureCancelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fake_session_helpers_cover_existing_ids_and_empty_rollback(self):
+        session = FakeSession()
+        already_identified = SimpleNamespace(id=702)
+        session.add(already_identified)
+        self.assertEqual(already_identified.id, 702)
+        self.assertIsNone(await session.commit())
+        self.assertIsNone(await session.refresh(already_identified))
+        self.assertIsNone(await session.get(type("Other", (), {}), 4))
+
+        context = FakeSessionContext(session)
+        self.assertIs(await context.__aenter__(), session)
+        self.assertFalse(await context.__aexit__(None, None, None))
+
+        create_session = FakeSession()
+        created_offer = SimpleNamespace(id=None)
+        create_session.add(created_offer)
+
+        async def rollback_get(model, key):
+            if create_session.added and model.__name__ == "Offer":
+                return create_session.added[0]
+            return None
+
+        self.assertIs(await rollback_get(type("Offer", (), {}), 1), created_offer)
+        self.assertIsNone(await rollback_get(type("Other", (), {}), 1))
+
     async def test_handle_text_offer_confirm_handles_channel_unset_and_runtime_error_and_cancel(self):
         data = {
             "quantity": 12,
@@ -79,6 +104,7 @@ class BotTradeCreateTextOfferFailureCancelTests(unittest.IsolatedAsyncioTestCase
             return None
 
         rollback_session.get = rollback_get
+        self.assertIsNone(await rollback_session.get(type("Other", (), {}), 2))
         callback = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock(), from_user=SimpleNamespace(id=555))
         state = SimpleNamespace(get_data=AsyncMock(return_value=data), clear=AsyncMock())
         with patch("core.trading_settings.get_trading_settings", return_value=SimpleNamespace(max_active_offers=3)), patch(

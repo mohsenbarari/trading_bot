@@ -10,10 +10,13 @@ from core.enums import UserRole
 
 
 class FakeResponse:
-    def __init__(self, payload=None):
+    def __init__(self, payload=None, error=None):
         self._payload = payload
+        self.error = error
 
     def raise_for_status(self):
+        if self.error:
+            raise self.error
         return None
 
     def json(self):
@@ -103,6 +106,54 @@ class BotAdminCommoditiesAddCreateTests(unittest.IsolatedAsyncioTestCase):
         state.set_state.assert_awaited_once_with(CommodityManagement.awaiting_add_aliases)
         anchor_mock.assert_awaited_once_with(state, 42, message.bot, 1)
 
+        state = SimpleNamespace(update_data=AsyncMock(), set_state=AsyncMock())
+        prompt_msg = SimpleNamespace(message_id=43)
+        message = SimpleNamespace(
+            text="سکه",
+            answer=AsyncMock(return_value=prompt_msg),
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=1),
+        )
+        with patch("bot.handlers.admin_commodities.delete_user_message", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.httpx.AsyncClient", return_value=FakeGetClient({"a": {"name": "نیم"}})
+        ), patch("bot.handlers.admin_commodities.get_commodity_fsm_cancel_keyboard", return_value="KB"), patch(
+            "bot.handlers.admin_commodities.update_anchor", new=AsyncMock()
+        ):
+            await handle_add_name(message, state, user=SimpleNamespace(id=1))
+        state.update_data.assert_awaited_once_with(name="سکه")
+
+        state = SimpleNamespace(update_data=AsyncMock(), set_state=AsyncMock())
+        prompt_msg = SimpleNamespace(message_id=44)
+        message = SimpleNamespace(
+            text="سکه",
+            answer=AsyncMock(return_value=prompt_msg),
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=1),
+        )
+        with patch("bot.handlers.admin_commodities.delete_user_message", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.httpx.AsyncClient", return_value=FakeGetClient("unexpected")
+        ), patch("bot.handlers.admin_commodities.get_commodity_fsm_cancel_keyboard", return_value="KB"), patch(
+            "bot.handlers.admin_commodities.update_anchor", new=AsyncMock()
+        ):
+            await handle_add_name(message, state, user=SimpleNamespace(id=1))
+        state.update_data.assert_awaited_once_with(name="سکه")
+
+        state = SimpleNamespace(update_data=AsyncMock(), set_state=AsyncMock())
+        prompt_msg = SimpleNamespace(message_id=45)
+        message = SimpleNamespace(
+            text="سکه",
+            answer=AsyncMock(return_value=prompt_msg),
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=1),
+        )
+        with patch("bot.handlers.admin_commodities.delete_user_message", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.httpx.AsyncClient", side_effect=RuntimeError("lookup failed")
+        ), patch("bot.handlers.admin_commodities.get_commodity_fsm_cancel_keyboard", return_value="KB"), patch(
+            "bot.handlers.admin_commodities.update_anchor", new=AsyncMock()
+        ):
+            await handle_add_name(message, state, user=SimpleNamespace(id=1))
+        state.update_data.assert_awaited_once_with(name="سکه")
+
     async def test_handle_add_aliases_and_create_handles_success_and_http_error(self):
         status_msg = SimpleNamespace(message_id=51, edit_text=AsyncMock())
         message = SimpleNamespace(
@@ -145,6 +196,24 @@ class BotAdminCommoditiesAddCreateTests(unittest.IsolatedAsyncioTestCase):
         ), patch("bot.handlers.admin_commodities.get_error_detail", return_value="oops"):
             await handle_add_aliases_and_create(message, state, user=SimpleNamespace(id=1))
         self.assertIn("oops", status_msg.edit_text.await_args.args[0])
+
+        status_msg = SimpleNamespace(message_id=53, edit_text=AsyncMock())
+        message = SimpleNamespace(
+            text="ندارد",
+            answer=AsyncMock(return_value=status_msg),
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=1),
+        )
+        state = SimpleNamespace(get_data=AsyncMock(return_value={"name": "سکه"}))
+        with patch("bot.handlers.admin_commodities.delete_user_message", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.update_anchor", new=AsyncMock()
+        ), patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.httpx.AsyncClient", side_effect=RuntimeError("broken transport")
+        ), patch("bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.show_commodity_list", new=AsyncMock()
+        ):
+            await handle_add_aliases_and_create(message, state, user=SimpleNamespace(id=1))
+        self.assertIn("broken transport", status_msg.edit_text.await_args.args[0])
 
 
 if __name__ == "__main__":

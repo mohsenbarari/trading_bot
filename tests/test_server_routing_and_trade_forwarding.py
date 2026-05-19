@@ -117,6 +117,7 @@ class TradeForwardingSignatureTests(unittest.TestCase):
             fresh_signature = trade_forwarding.sign_internal_payload(body.decode(), 200)
 
             self.assertFalse(trade_forwarding.verify_internal_signature(body, None, fresh_signature, "secret"))
+            self.assertFalse(trade_forwarding.verify_internal_signature(body, "not-a-number", fresh_signature, "secret"))
             self.assertFalse(trade_forwarding.verify_internal_signature(body, "100", fresh_signature, "secret"))
             self.assertFalse(trade_forwarding.verify_internal_signature(body, "200", fresh_signature, "wrong"))
 

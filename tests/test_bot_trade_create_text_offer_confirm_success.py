@@ -44,25 +44,49 @@ class FakeSessionContext:
 
 
 class BotTradeCreateTextOfferConfirmSuccessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fake_session_helpers_cover_existing_ids_and_empty_update_get(self):
+        session = FakeSession()
+        already_identified = SimpleNamespace(id=700)
+        session.add(already_identified)
+        self.assertEqual(already_identified.id, 700)
+        self.assertIsNone(await session.commit())
+        self.assertIsNone(await session.refresh(already_identified))
+
+        offered = SimpleNamespace(id=None)
+        session.add(offered)
+        self.assertEqual(offered.id, 77)
+        self.assertIs(await session.get(type("Offer", (), {}), 1), already_identified)
+        self.assertEqual((await session.get(type("User", (), {}), 9)).id, 9)
+        self.assertIsNone(await session.get(type("Other", (), {}), 3))
+
+        context = FakeSessionContext(session)
+        self.assertIs(await context.__aenter__(), session)
+        self.assertFalse(await context.__aexit__(None, None, None))
+
+        create_session = FakeSession()
+        created_offer = SimpleNamespace(id=None)
+        create_session.add(created_offer)
+
+        async def update_get(model, key):
+            if create_session.added and model.__name__ == "Offer":
+                return create_session.added[0]
+            if model.__name__ == "User":
+                return SimpleNamespace(id=key)
+            return None
+
+        self.assertIs(await update_get(type("Offer", (), {}), 1), created_offer)
+        self.assertEqual((await update_get(type("User", (), {}), 2)).id, 2)
+        self.assertIsNone(await update_get(type("Other", (), {}), 1))
+
     async def test_handle_text_offer_confirm_publishes_offer_and_updates_channel_message(self):
+        offer_data = dict(quantity=12, trade_type="buy", commodity_id=7, commodity_name="سکه", price=123456, is_wholesale=True, lot_sizes=None, notes="فقط نقدی")
         callback = SimpleNamespace(
             message=SimpleNamespace(edit_text=AsyncMock()),
             answer=AsyncMock(),
             from_user=SimpleNamespace(id=555),
         )
         state = SimpleNamespace(
-            get_data=AsyncMock(
-                return_value={
-                    "quantity": 12,
-                    "trade_type": "buy",
-                    "commodity_id": 7,
-                    "commodity_name": "سکه",
-                    "price": 123456,
-                    "is_wholesale": True,
-                    "lot_sizes": None,
-                    "notes": "فقط نقدی",
-                }
-            ),
+            get_data=AsyncMock(return_value=offer_data),
             clear=AsyncMock(),
         )
         create_session = FakeSession()
@@ -77,6 +101,7 @@ class BotTradeCreateTextOfferConfirmSuccessTests(unittest.IsolatedAsyncioTestCas
             return None
 
         update_session.get = update_get
+        self.assertIsNone(await update_session.get(type("Other", (), {}), 4))
 
         with patch("core.trading_settings.get_trading_settings", return_value=SimpleNamespace(max_active_offers=3)), patch(
             "core.utils.check_user_limits", side_effect=[(True, None), (True, None)]

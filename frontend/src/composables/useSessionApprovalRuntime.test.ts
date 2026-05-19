@@ -282,4 +282,93 @@ describe('useSessionApprovalRuntime', () => {
     })
     expect(runtime.showModal.value).toBe(false)
   })
+
+  it('skips prompt work without auth and immediately closes expired recovery prompts', async () => {
+    localStorage.clear()
+
+    const { runtime } = mountRuntime()
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    expect(sessionRuntimeMocks.apiFetch).not.toHaveBeenCalled()
+
+    emitWsEvent(WS_NOTIFICATION_EVENTS.sessionRecoveryUpdate, createRecoveryPrompt())
+    await flushPromises()
+    expect(runtime.showModal.value).toBe(false)
+
+    localStorage.setItem('auth_token', 'token-2')
+    emitWsEvent(WS_NOTIFICATION_EVENTS.sessionRecoveryUpdate, createRecoveryPrompt({
+      inline_action_expires_at: new Date(Date.now() - 1_000).toISOString(),
+    }))
+    await flushPromises()
+
+    expect(runtime.showModal.value).toBe(false)
+    expect(runtime.pendingRecovery.value).toBeNull()
+    expect(runtime.countdown.value).toBe(0)
+
+    await runtime.openRecoveryThread()
+    expect(routerPushMock).not.toHaveBeenCalled()
+  })
+
+  it('dismisses recovery prompts on hidden updates and logs request/recovery action failures', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    sessionRuntimeMocks.apiFetch.mockRejectedValue(new Error('request failed'))
+
+    const { runtime } = mountRuntime()
+
+    runtime.pendingRecovery.value = createRecoveryPrompt({ recovery_id: 'recovery-close' })
+    runtime.showModal.value = true
+    emitWsEvent(WS_NOTIFICATION_EVENTS.sessionRecoveryUpdate, createRecoveryPrompt({
+      recovery_id: 'recovery-close',
+      visible: false,
+    }))
+    await flushPromises()
+    expect(runtime.showModal.value).toBe(false)
+
+    runtime.pendingRequest.value = createRequest({ request_id: 'req-approve' })
+    runtime.showModal.value = true
+    await runtime.approve()
+
+    runtime.pendingRequest.value = createRequest({ request_id: 'req-reject' })
+    runtime.showModal.value = true
+    await runtime.reject()
+
+    runtime.pendingRecovery.value = createRecoveryPrompt({ recovery_id: 'recovery-approve' })
+    runtime.showModal.value = true
+    await runtime.approveRecovery()
+
+    runtime.pendingRecovery.value = createRecoveryPrompt({ recovery_id: 'recovery-reject' })
+    runtime.showModal.value = true
+    await runtime.rejectRecovery()
+
+    runtime.pendingRecovery.value = createRecoveryPrompt({ recovery_id: 'recovery-identity' })
+    runtime.showModal.value = true
+    await runtime.requestRecoveryIdentity()
+
+    expect(errorSpy).toHaveBeenCalledWith('Approve error:', expect.any(Error))
+    expect(errorSpy).toHaveBeenCalledWith('Reject error:', expect.any(Error))
+    expect(errorSpy).toHaveBeenCalledWith('Recovery approve error:', expect.any(Error))
+    expect(errorSpy).toHaveBeenCalledWith('Recovery reject error:', expect.any(Error))
+    expect(errorSpy).toHaveBeenCalledWith('Recovery request-identity error:', expect.any(Error))
+
+    errorSpy.mockRestore()
+  })
+
+  it('falls back to realtime display when pending fetches or active-session checks fail', async () => {
+    sessionRuntimeMocks.apiFetch
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockRejectedValueOnce(new Error('pending fetch failed'))
+      .mockRejectedValueOnce(new Error('active fetch failed'))
+
+    const { runtime } = mountRuntime()
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    emitWsEvent(WS_NOTIFICATION_EVENTS.sessionLoginRequest, createRequest({ request_id: 'req-fallback' }))
+    await flushPromises()
+
+    expect(runtime.showModal.value).toBe(true)
+    expect(runtime.pendingRequest.value?.request_id).toBe('req-fallback')
+  })
 })

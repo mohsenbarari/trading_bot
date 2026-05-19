@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from core.services.chat_service import (
     commit_direct_read_state,
     ensure_direct_message_chat_link,
+    publish_direct_activity_event,
     publish_direct_message_event,
     publish_direct_read_event,
     publish_direct_reaction_event,
@@ -137,6 +138,21 @@ class ChatServiceWrapperTests(unittest.IsolatedAsyncioTestCase):
         await publish_direct_typing_event(receiver_id=10, sender_id=10, publisher=publisher)
 
         publisher.assert_not_awaited()
+
+    async def test_publish_direct_activity_event_includes_sender_name_when_provided(self):
+        publisher = AsyncMock()
+
+        await publish_direct_activity_event(
+            receiver_id=20,
+            sender_id=10,
+            activity="typing",
+            active=True,
+            publisher=publisher,
+            sender_name="user-10",
+        )
+
+        publisher.assert_awaited_once()
+        self.assertEqual(publisher.await_args.args[2]["sender_name"], "user-10")
 
 
 if __name__ == "__main__":

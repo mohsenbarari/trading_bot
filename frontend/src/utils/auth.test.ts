@@ -97,6 +97,18 @@ describe('auth utils', () => {
     expect(localStorage.getItem('auth_token')).toBe('shared-auth')
   })
 
+  it('treats JWT decode exceptions as unauthenticated', async () => {
+    localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 3600))
+    const atobSpy = vi.spyOn(window, 'atob').mockImplementation(() => {
+      throw new Error('decode failed')
+    })
+
+    const { isAuthenticated } = await import(authModulePath)
+
+    await expect(isAuthenticated()).resolves.toBe(false)
+    atobSpy.mockRestore()
+  })
+
   it('isAuthenticated returns true for a still-valid access token', async () => {
     const futureExp = Math.floor(Date.now() / 1000) + 3600
     localStorage.setItem('auth_token', makeJwt(futureExp))
@@ -137,6 +149,22 @@ describe('auth utils', () => {
     localStorage.setItem('auth_token', 'auth')
     localStorage.setItem('refresh_token', 'refresh')
     forceLogout()
+    expect(localStorage.getItem('auth_token')).toBeNull()
+    expect(localStorage.getItem('refresh_token')).toBeNull()
+    expect(localStorage.getItem('suspended_refresh_token')).toBeNull()
+    expect(location.href).toBe('/login')
+  })
+
+  it('logout delegates to forceLogout', async () => {
+    localStorage.setItem('auth_token', 'auth')
+    localStorage.setItem('refresh_token', 'refresh')
+    localStorage.setItem('suspended_refresh_token', 'suspended')
+    const location = mockLocation()
+
+    const { logout } = await import(authModulePath)
+
+    logout()
+
     expect(localStorage.getItem('auth_token')).toBeNull()
     expect(localStorage.getItem('refresh_token')).toBeNull()
     expect(localStorage.getItem('suspended_refresh_token')).toBeNull()
@@ -240,6 +268,12 @@ describe('auth utils', () => {
     fetchMock.mockRejectedValueOnce(new Error('profile unavailable'))
     await authGuard({ path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any, {} as any, next)
     expect(next).toHaveBeenLastCalledWith('/dashboard')
+
+    next.mockClear()
+    localStorage.removeItem('current_user_summary')
+    fetchMock.mockRejectedValueOnce(new Error('market profile unavailable'))
+    await authGuard({ path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any, {} as any, next)
+    expect(next).toHaveBeenLastCalledWith()
   })
 
   it('apiFetch refreshes on 401 and retries the original request with the new token', async () => {
@@ -297,6 +331,27 @@ describe('auth utils', () => {
     expect(localStorage.getItem('auth_token')).toBeNull()
   })
 
+  it('apiFetch returns plain 403 responses when the error payload cannot be parsed', async () => {
+    localStorage.setItem('auth_token', 'auth-token')
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ detail: 'forbidden' }),
+      clone() {
+        return {
+          json: async () => {
+            throw new Error('broken clone json')
+          },
+        }
+      },
+    })
+
+    const { apiFetch } = await import(authModulePath)
+    const response = await apiFetch('/api/private')
+
+    expect(response.status).toBe(403)
+  })
+
   it('setupExpiryTimer refreshes soon-expiring tokens and suspends explicit auth failures', async () => {
     vi.useFakeTimers()
     const location = mockLocation()
@@ -335,6 +390,53 @@ describe('auth utils', () => {
     warnSpy.mockRestore()
   })
 
+  it('apiFetch suspends the session when refresh returns auth_error after a 401', async () => {
+    localStorage.setItem('auth_token', 'expired-auth')
+    localStorage.setItem('refresh_token', 'refresh-token')
+    const location = mockLocation()
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({}, 401, false))
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+
+    const { apiFetch } = await import(authModulePath)
+
+    await expect(apiFetch('/api/private')).rejects.toThrow('نشست شما منقضی شده است. لطفا مجددا وارد شوید')
+    expect(localStorage.getItem('auth_token')).toBeNull()
+    expect(localStorage.getItem('refresh_token')).toBeNull()
+    expect(localStorage.getItem('suspended_refresh_token')).toBe('refresh-token')
+    expect(location.href).toBe('/login')
+  })
+
+  it('apiFetch retries after refresh returns a network_error and also retries direct 5xx responses', async () => {
+    vi.useFakeTimers()
+    localStorage.setItem('auth_token', 'expired-auth')
+    localStorage.setItem('refresh_token', 'refresh-token')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({}, 401, false))
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce(makeJsonResponse({ retried: true }))
+
+    const { apiFetch, isAppConnecting } = await import(authModulePath)
+    const refreshedRetryPromise = apiFetch('/api/refresh-retry')
+
+    await vi.advanceTimersByTimeAsync(1500)
+    const refreshedRetryResponse = await refreshedRetryPromise
+    expect(refreshedRetryResponse.ok).toBe(true)
+
+    fetchMock.mockReset()
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ detail: 'bad gateway' }, 502, false))
+      .mockResolvedValueOnce(makeJsonResponse({ recovered: true }))
+
+    const directRetryPromise = apiFetch('/api/direct-5xx')
+    await vi.advanceTimersByTimeAsync(1500)
+    const directRetryResponse = await directRetryPromise
+    expect(directRetryResponse.ok).toBe(true)
+    expect(isAppConnecting.value).toBe(false)
+    warnSpy.mockRestore()
+  })
+
   it('apiFetchJson returns null for 204 and surfaces response details on failures', async () => {
     fetchMock
       .mockResolvedValueOnce(makeJsonResponse(null, 204))
@@ -344,5 +446,13 @@ describe('auth utils', () => {
 
     await expect(apiFetchJson('/api/no-content')).resolves.toBeNull()
     await expect(apiFetchJson('/api/fail')).rejects.toThrow('validation failed')
+  })
+
+  it('apiFetchJson returns parsed JSON for successful non-204 responses', async () => {
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ ok: true, value: 7 }))
+
+    const { apiFetchJson } = await import(authModulePath)
+
+    await expect(apiFetchJson('/api/json')).resolves.toEqual({ ok: true, value: 7 })
   })
 })

@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +47,66 @@ def resolve_docker_compose_command() -> list[str] | None:
 
 
 class DeploySurfaceSmokeTests(unittest.TestCase):
+    def test_run_checked_applies_default_and_extra_environment(self):
+        with patch(__name__ + '.subprocess.run') as run_mock:
+            run_mock.return_value = subprocess.CompletedProcess(args=['echo'], returncode=0, stdout='ok', stderr='')
+            result = run_checked(['echo'], extra_env={'CUSTOM_FLAG': '1'})
+
+        self.assertEqual(result.returncode, 0)
+        env = run_mock.call_args.kwargs['env']
+        self.assertEqual(env['CUSTOM_FLAG'], '1')
+        self.assertEqual(env['POSTGRES_USER'], DEFAULT_SUBPROCESS_ENV['POSTGRES_USER'])
+
+    def test_resolve_docker_compose_command_helper_paths(self):
+        with patch(__name__ + '.shutil.which', side_effect=['/usr/bin/docker', '/usr/bin/docker-compose']), patch(
+            __name__ + '.run_checked',
+            side_effect=[
+                subprocess.CompletedProcess(args=['docker', 'compose', 'version'], returncode=1, stdout='', stderr=''),
+                subprocess.CompletedProcess(args=['docker-compose', 'version'], returncode=0, stdout='ok', stderr=''),
+            ],
+        ):
+            self.assertEqual(resolve_docker_compose_command(), ['docker-compose'])
+
+        with patch(__name__ + '.shutil.which', return_value=None):
+            self.assertIsNone(resolve_docker_compose_command())
+
+    def test_skip_branches_for_missing_host_tools(self):
+        with patch(__name__ + '.shutil.which', return_value=None):
+            with self.assertRaises(unittest.SkipTest):
+                self.test_makefile_parses_with_noop_status_target()
+
+        with patch(__name__ + '.resolve_docker_compose_command', return_value=None):
+            with self.assertRaises(unittest.SkipTest):
+                self.test_compose_files_render_valid_config()
+
+        with patch(__name__ + '.shutil.which', side_effect=lambda tool: None if tool in {'docker', 'nginx'} else '/usr/bin/make'):
+            with self.assertRaises(unittest.SkipTest):
+                self.test_dockerfiles_pass_docker_build_check()
+            with self.assertRaises(unittest.SkipTest):
+                self.test_nginx_config_passes_syntax_validation()
+
+    def test_docker_build_check_uses_buildx_and_skip_when_check_mode_missing(self):
+        with patch(__name__ + '.shutil.which', return_value='/usr/bin/docker'), patch(
+            __name__ + '.run_checked',
+            side_effect=[
+                subprocess.CompletedProcess(args=['docker', 'build', '--help'], returncode=0, stdout='plain help', stderr=''),
+                subprocess.CompletedProcess(args=['docker', 'buildx', 'build', '--help'], returncode=0, stdout='supports --check', stderr=''),
+                subprocess.CompletedProcess(args=['docker', 'buildx', 'build', '--check'], returncode=0, stdout='', stderr=''),
+                subprocess.CompletedProcess(args=['docker', 'buildx', 'build', '--check'], returncode=0, stdout='', stderr=''),
+            ],
+        ):
+            self.test_dockerfiles_pass_docker_build_check()
+
+        with patch(__name__ + '.shutil.which', return_value='/usr/bin/docker'), patch(
+            __name__ + '.run_checked',
+            side_effect=[
+                subprocess.CompletedProcess(args=['docker', 'build', '--help'], returncode=0, stdout='plain help', stderr=''),
+                subprocess.CompletedProcess(args=['docker', 'buildx', 'build', '--help'], returncode=0, stdout='plain help', stderr=''),
+            ],
+        ):
+            with self.assertRaises(unittest.SkipTest):
+                self.test_dockerfiles_pass_docker_build_check()
+
     def test_deploy_script_has_valid_bash_syntax(self):
         result = run_checked(['bash', '-n', 'deploy.sh'])
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)

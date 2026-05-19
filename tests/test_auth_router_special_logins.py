@@ -136,6 +136,25 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["user_id"], 77)
         self.assertEqual(result["role"], UserRole.SUPER_ADMIN)
 
+    async def test_dev_login_accepts_private_networks_and_reuses_existing_user(self):
+        request = make_request(headers={"x-platform": "web"}, host="192.168.1.8")
+        existing_user = SimpleNamespace(id=7, role=UserRole.SUPER_ADMIN, home_server="iran")
+        db = FakeDB([FakeExecuteResult(existing_user)])
+
+        with patch("api.routers.auth.create_refresh_token", return_value="refresh-token"), patch(
+            "api.routers.auth.ensure_mandatory_channel_membership", new=AsyncMock()
+        ) as mandatory_mock, patch("api.routers.auth.hash_token", return_value="hashed-refresh"), patch(
+            "api.routers.auth.uuid.uuid4", return_value="session-uuid"
+        ), patch("api.routers.auth.utc_now", return_value=datetime(2026, 1, 1, tzinfo=timezone.utc)), patch(
+            "api.routers.auth._login_home_server", return_value="foreign"
+        ), patch("api.routers.auth.create_access_token", return_value="access-token"):
+            result = await dev_login(request, db=db)
+
+        self.assertEqual(existing_user.home_server, "foreign")
+        mandatory_mock.assert_awaited_once_with(db, user=existing_user)
+        self.assertEqual(db.commit.await_count, 1)
+        self.assertEqual(result["user_id"], 7)
+
     async def test_webapp_login_requires_bot_token_and_invalid_payload_returns_auth_failed(self):
         request = make_request(headers={"user-agent": "Telegram"}, host="10.0.0.8")
 
@@ -211,6 +230,18 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+        with patch.object(auth.settings, "bot_token", "bot-token"), patch(
+            "api.routers.auth.create_refresh_token",
+            return_value="refresh-token",
+        ), patch(
+            "api.routers.auth.handle_login_session",
+            new=AsyncMock(return_value={"action": "blocked", "reason": "too many requests"}),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await webapp_login(WebAppLogin(init_data=init_data), raw_request=request, db=FakeDB([FakeExecuteResult(user)]))
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "Authentication failed")
+
     async def test_webapp_login_returns_blocked_for_inactive_accounts(self):
         request = make_request(headers={"user-agent": "Telegram"}, host="10.0.0.8")
         init_data = build_webapp_init_data("bot-token", {"id": 123})
@@ -228,6 +259,23 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "User is blocked")
+
+    async def test_webapp_login_rejects_expired_payloads_and_generic_parse_failures(self):
+        request = make_request(headers={"user-agent": "Telegram"}, host="10.0.0.8")
+        expired_data = build_webapp_init_data("bot-token", {"id": 123}, auth_date=1)
+
+        with patch.object(auth.settings, "bot_token", "bot-token"):
+            with self.assertRaises(HTTPException) as exc_info:
+                await webapp_login(WebAppLogin(init_data=expired_data), raw_request=request, db=FakeDB())
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "Authentication failed")
+
+        init_data = build_webapp_init_data("bot-token", {"id": 123})
+        with patch.object(auth.settings, "bot_token", "bot-token"), patch("api.routers.auth.json.loads", side_effect=RuntimeError("bad user json")):
+            with self.assertRaises(HTTPException) as exc_info:
+                await webapp_login(WebAppLogin(init_data=init_data), raw_request=request, db=FakeDB())
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "Authentication failed")
 
 
 if __name__ == "__main__":

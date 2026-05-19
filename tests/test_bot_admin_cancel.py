@@ -31,6 +31,18 @@ class BotAdminCancelTests(unittest.IsolatedAsyncioTestCase):
         return_panel.assert_awaited_once()
         callback.answer.assert_awaited_once_with("لغو شد")
 
+    async def test_cancel_invitation_creation_ignores_delete_failure(self):
+        callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(delete=AsyncMock(side_effect=RuntimeError("boom")), answer=AsyncMock()))
+        state = FakeState({"last_prompt_message_id": 10})
+
+        with patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()) as return_panel:
+            await cancel_invitation_creation(callback, state, bot=SimpleNamespace())
+
+        self.assertEqual(state.cleared, 1)
+        callback.message.answer.assert_awaited_once_with("عملیات لغو شد.")
+        return_panel.assert_awaited_once()
+        callback.answer.assert_awaited_once_with("لغو شد")
+
 
 if __name__ == "__main__":
     unittest.main()

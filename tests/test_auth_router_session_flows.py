@@ -50,6 +50,12 @@ class AuthRouterSessionFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 401)
         self.assertEqual(exc_info.exception.detail, "توکن نامعتبر است")
 
+        with patch("jose.jwt.decode", return_value={"type": "refresh"}):
+            with self.assertRaises(HTTPException) as exc_info:
+                await refresh_access_token(req, db=FakeDB())
+        self.assertEqual(exc_info.exception.status_code, 401)
+        self.assertEqual(exc_info.exception.detail, "توکن نامعتبر است")
+
     async def test_refresh_access_token_handles_missing_deleted_or_expired_session(self):
         req = RefreshTokenRequest(refresh_token="good")
         payload = {"type": "refresh", "sub": 5}
@@ -69,6 +75,12 @@ class AuthRouterSessionFlowTests(unittest.IsolatedAsyncioTestCase):
                 await refresh_access_token(req, db=FakeDB([FakeExecuteResult(deleted_user)]))
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "حساب کاربری غیرفعال شده است")
+
+        with patch("jose.jwt.decode", return_value=payload):
+            with self.assertRaises(HTTPException) as exc_info:
+                await refresh_access_token(req, db=FakeDB([FakeExecuteResult(None)]))
+        self.assertEqual(exc_info.exception.status_code, 404)
+        self.assertEqual(exc_info.exception.detail, "کاربر یافت نشد")
 
         session = SimpleNamespace(
             id="sess-1",

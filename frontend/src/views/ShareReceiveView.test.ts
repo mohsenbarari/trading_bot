@@ -150,6 +150,15 @@ describe('ShareReceiveView.vue', () => {
     expect(shareReceiveViewMocks.apiFetchJsonMock).not.toHaveBeenCalled()
   })
 
+  it('shows an expired-payload error when the shared payload is missing from storage', async () => {
+    shareReceiveViewMocks.readSharedPayloadMock.mockResolvedValue(null)
+
+    const wrapper = await mountView()
+
+    expect(wrapper.text()).toContain('محتوای اشتراک‌گذاری یافت نشد یا منقضی شده است.')
+    expect(shareReceiveViewMocks.apiFetchJsonMock).not.toHaveBeenCalled()
+  })
+
   it('loads conversations into the full-screen picker and deletes the payload on close', async () => {
     shareReceiveViewMocks.readSharedPayloadMock.mockResolvedValue(
       makeSharedPayload({
@@ -175,6 +184,34 @@ describe('ShareReceiveView.vue', () => {
     expect(shareReceiveViewMocks.deleteSharedPayloadMock).toHaveBeenCalledWith('share-key-1')
     expect(shareReceiveViewMocks.routerBackMock).toHaveBeenCalledTimes(1)
     expect(shareReceiveViewMocks.routerReplaceMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to messenger-home replace when history is shallow and conversation loading fails', async () => {
+    shareReceiveViewMocks.readSharedPayloadMock.mockResolvedValue(
+      makeSharedPayload({
+        files: [makeSharedFile()],
+      }),
+    )
+    shareReceiveViewMocks.apiFetchJsonMock.mockRejectedValue(new Error('conversation-load-failed'))
+
+    const wrapper = await mountView()
+    const modal = wrapper.getComponent({ name: 'ChatForwardModal' })
+
+      Object.defineProperty(window, 'history', {
+        configurable: true,
+        value: {
+          ...window.history,
+          length: 1,
+        },
+      })
+
+    expect(modal.props('sortedConversations')).toEqual([])
+
+    modal.vm.$emit('close')
+    await settle()
+
+    expect(shareReceiveViewMocks.deleteSharedPayloadMock).toHaveBeenCalledWith('share-key-1')
+    expect(shareReceiveViewMocks.routerReplaceMock).toHaveBeenCalledWith('/')
   })
 
   it('uploads files once, reuses their file ids, and redirects to a single room target', async () => {

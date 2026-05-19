@@ -24,6 +24,10 @@ class FakeSessionContext:
 class BotBlockManageListSearchEntryTests(unittest.IsolatedAsyncioTestCase):
     async def test_show_blocked_list_handles_empty_and_renders_list(self):
         callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace())
+        await show_blocked_list(callback, user=None)
+        callback.answer.assert_awaited_once_with()
+
+        callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace())
         with patch("bot.handlers.block_manage.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
             "bot.handlers.block_manage.get_blocked_users", new=AsyncMock(return_value=[])
         ):
@@ -38,6 +42,11 @@ class BotBlockManageListSearchEntryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("کاربران مسدود شده", safe_edit.await_args.args[1])
 
     async def test_start_search_moves_to_search_state(self):
+        callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace())
+        state = FakeState()
+        await start_search(callback, state, user=None)
+        callback.answer.assert_awaited_once_with()
+
         callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace())
         state = FakeState()
         with patch("bot.handlers.block_manage.safe_edit_text", new=AsyncMock()) as safe_edit:

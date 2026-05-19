@@ -175,6 +175,15 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         sleep_mock.assert_not_awaited()
         self.assertEqual(fake_redis.rpush_calls, [])
 
+    async def test_main_logs_and_retries_unexpected_loop_errors(self):
+        fake_redis, send_mock, sleep_mock = await self._run_main_once(
+            blpop_results=[RuntimeError("loop exploded"), asyncio.CancelledError()]
+        )
+
+        self.assertEqual(len(fake_redis.blpop_calls), 2)
+        send_mock.assert_not_awaited()
+        sleep_mock.assert_awaited_once_with(5)
+
 
 if __name__ == "__main__":
     unittest.main()

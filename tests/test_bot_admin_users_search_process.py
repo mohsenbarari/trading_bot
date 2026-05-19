@@ -101,6 +101,34 @@ class BotAdminUsersSearchProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(anchor_mock.await_count, 2)
         self.assertEqual(message.answer.await_args_list[-1].args[0], "PROFILE")
 
+    async def test_process_search_query_treats_unmanageable_target_as_not_found(self):
+        protected_user = SimpleNamespace(
+            id=10,
+            role=UserRole.SUPER_ADMIN,
+            trading_restricted_until=None,
+            max_daily_trades=None,
+            max_active_commodities=None,
+            max_daily_requests=None,
+        )
+        searching = SimpleNamespace(message_id=15)
+        missing = SimpleNamespace(message_id=16)
+        message = SimpleNamespace(
+            text="chief",
+            answer=AsyncMock(side_effect=[searching, missing]),
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=4),
+        )
+
+        with patch("bot.handlers.admin_users.delete_user_message", new=AsyncMock()), patch(
+            "bot.handlers.admin_users.clear_state_retain_anchors", new=AsyncMock()
+        ), patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(protected_user)), patch(
+            "bot.handlers.admin_users.get_users_management_keyboard", return_value="KB"
+        ), patch("bot.handlers.admin_users.update_anchor", new=AsyncMock()) as anchor_mock:
+            await process_search_query(message, state=SimpleNamespace(), user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER))
+
+        self.assertEqual(anchor_mock.await_count, 2)
+        self.assertIn("یافت نشد", message.answer.await_args_list[-1].args[0])
+
 
 if __name__ == "__main__":
     unittest.main()

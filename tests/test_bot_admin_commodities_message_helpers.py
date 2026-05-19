@@ -36,6 +36,9 @@ class BotAdminCommoditiesMessageHelperTests(unittest.IsolatedAsyncioTestCase):
         await delete_user_message(message)
         message.delete.assert_awaited_once_with()
 
+        message = SimpleNamespace(delete=AsyncMock(side_effect=RuntimeError("boom")))
+        await delete_user_message(message)
+
 
 if __name__ == "__main__":
     unittest.main()

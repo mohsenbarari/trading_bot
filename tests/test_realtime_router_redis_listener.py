@@ -14,6 +14,11 @@ class FakeWebSocket:
         self.sent.append(payload)
 
 
+class FailingWebSocket(FakeWebSocket):
+    async def send_json(self, payload):
+        raise RuntimeError("send failed")
+
+
 class FakePubSub:
     def __init__(self, messages):
         self.messages = list(messages)
@@ -67,6 +72,41 @@ class RealtimeRouterRedisListenerTests(unittest.IsolatedAsyncioTestCase):
                 {"type": "offer:created", "data": {"safe": 2}},
             ],
         )
+
+    async def test_listen_redis_events_handles_send_failures_timeout_loop_errors_and_critical_errors(self):
+        failing_pubsub = FakePubSub([
+            {"type": "message", "channel": b"events:offer:created", "data": b'{"safe": 1}'},
+        ])
+        with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(failing_pubsub)), patch(
+            "api.routers.realtime.asyncio.sleep", new=asyncio.sleep
+        ), patch("api.routers.realtime.logging.error") as error_mock:
+            await listen_redis_events(FailingWebSocket(), user_id=None)
+        self.assertNotIn("notifications:None", failing_pubsub.subscribed)
+        self.assertTrue(error_mock.called)
+
+        timeout_pubsub = FakePubSub([asyncio.TimeoutError()])
+        with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(timeout_pubsub)), patch(
+            "api.routers.realtime.asyncio.sleep", new=asyncio.sleep
+        ):
+            await listen_redis_events(FakeWebSocket(), user_id=None)
+
+        loop_error_pubsub = FakePubSub([RuntimeError("loop failed")])
+        sleep_calls = []
+
+        async def fake_sleep(delay):
+            sleep_calls.append(delay)
+
+        with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(loop_error_pubsub)), patch(
+            "api.routers.realtime.asyncio.sleep", side_effect=fake_sleep
+        ), patch("api.routers.realtime.logging.error"):
+            await listen_redis_events(FakeWebSocket(), user_id=None)
+        self.assertIn(1, sleep_calls)
+
+        with patch("api.routers.realtime.redis.Redis", side_effect=RuntimeError("redis down")), patch(
+            "api.routers.realtime.logging.error"
+        ) as error_mock:
+            await listen_redis_events(FakeWebSocket(), user_id=None)
+        error_mock.assert_called()
 
 
 if __name__ == "__main__":

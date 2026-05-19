@@ -20,6 +20,10 @@ def make_callback():
 class BotBlockManageUnblockUserTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_unblock_user_refreshes_list_or_menu(self):
         callback = make_callback()
+        await handle_unblock_user(callback, SimpleNamespace(user_id=7), user=None)
+        callback.answer.assert_awaited_once_with()
+
+        callback = make_callback()
         with patch("bot.handlers.block_manage.AsyncSessionLocal", side_effect=[FakeSessionContext(), FakeSessionContext()]), patch(
             "bot.handlers.block_manage.unblock_user", new=AsyncMock(return_value=(True, "ok"))
         ), patch("bot.handlers.block_manage.get_blocked_users", new=AsyncMock(return_value=[{"id": 1, "account_name": "u1"}])), patch(

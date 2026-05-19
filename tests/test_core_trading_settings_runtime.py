@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tempfile
 from pathlib import Path
@@ -54,12 +55,12 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_load_from_db_async_parses_json_and_plain_values(self):
         session = AsyncMock()
-        session.execute = AsyncMock(return_value=_ExecuteResult([('a', '1'), ('b', json.dumps({'x': 2}))]))
+        session.execute = AsyncMock(return_value=_ExecuteResult([('a', '1'), ('b', json.dumps({'x': 2})), ('c', '{'), ('d', None)]))
 
         with patch('core.db.AsyncSessionLocal', return_value=_AsyncSessionContext(session)):
             data = await trading_settings._load_from_db_async()
 
-        self.assertEqual(data, {'a': 1, 'b': {'x': 2}})
+        self.assertEqual(data, {'a': 1, 'b': {'x': 2}, 'c': '{', 'd': None})
 
         with patch('core.db.AsyncSessionLocal', side_effect=RuntimeError('db down')), patch.object(
             trading_settings, 'logger'
@@ -190,6 +191,30 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
             trading_settings.refresh_settings_cache()
         self.assertEqual(trading_settings._fallback_cache.offer_min_quantity, 12)
         self.assertEqual(trading_settings._fallback_timestamp, 50)
+
+    async def test_sync_loader_bridge_and_shared_cache_failure_fallbacks(self):
+        async def async_loader():
+            return trading_settings.TradingSettings(offer_min_quantity=17)
+
+        loaded = await asyncio.to_thread(trading_settings._run_async_settings_loader_sync, async_loader)
+        self.assertEqual(loaded.offer_min_quantity, 17)
+
+        with patch(
+            'core.trading_settings._run_async_settings_loader_sync',
+            side_effect=RuntimeError('redis bridge failed'),
+        ), patch('core.trading_settings.load_trading_settings', return_value=trading_settings.TradingSettings(offer_min_quantity=13)), patch(
+            'core.trading_settings.time.time', return_value=30
+        ), patch.object(trading_settings, 'logger') as logger:
+            loaded = trading_settings.get_trading_settings()
+
+        self.assertEqual(loaded.offer_min_quantity, 13)
+        logger.debug.assert_called_once()
+
+        with patch('core.trading_settings._run_async_settings_loader_sync', side_effect=RuntimeError('db bridge failed')), patch(
+            'core.trading_settings._load_from_json', return_value={}
+        ), patch.object(trading_settings, 'logger'):
+            loaded = trading_settings.load_trading_settings()
+        self.assertIsInstance(loaded, trading_settings.TradingSettings)
 
     async def test_sync_getter_prefers_shared_redis_cache_over_stale_fallback(self):
         stale = trading_settings.TradingSettings(max_active_offers=4)

@@ -51,6 +51,12 @@ class BotAdminCommoditiesAliasEditTests(unittest.IsolatedAsyncioTestCase):
         state.update_data.assert_awaited_once_with(alias_id=9, alias_name="ربع", commodity_id=7)
         self.assertEqual(query.message.edit_text.await_args.kwargs["reply_markup"], "KB")
 
+        query = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock(), reply_markup=SimpleNamespace(inline_keyboard=None)), data="alias_edit_7_9")
+        state = SimpleNamespace(set_state=AsyncMock(), update_data=AsyncMock())
+        with patch("bot.handlers.admin_commodities.get_commodity_fsm_cancel_keyboard", return_value="KB"):
+            await handle_alias_edit_start(query, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=state)
+        state.update_data.assert_awaited_once_with(alias_id=9, alias_name="---", commodity_id=7)
+
     async def test_handle_alias_edit_name_handles_success_and_error(self):
         status_msg = SimpleNamespace(message_id=15, edit_text=AsyncMock())
         message = SimpleNamespace(

@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from bot.handlers.start import handle_start_with_token
+from bot.handlers.start import build_accountant_register_link_line, build_webapp_link_line, handle_start_with_token
 
 
 class FakeExecuteResult:
@@ -33,6 +33,40 @@ class FakeSessionContext:
 
 
 class BotStartProfileTokenSuccessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_start_link_helpers_and_logged_in_profile_token_show_keyboard(self):
+        from bot.handlers import start as module
+
+        with patch.object(module, "settings", SimpleNamespace(frontend_url="")):
+            self.assertIsNone(build_webapp_link_line())
+            self.assertIsNone(build_accountant_register_link_line("tok"))
+
+        with patch.object(module, "settings", SimpleNamespace(frontend_url="https://app.example")):
+            self.assertIn("https://app.example", build_webapp_link_line())
+            self.assertIn("register?token=tok", build_accountant_register_link_line("tok"))
+
+        target_user = SimpleNamespace(
+            id=9,
+            is_deleted=False,
+            account_name="target",
+            mobile_number="09120000000",
+            address="تهران",
+        )
+        message = SimpleNamespace(
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=30),
+            delete=AsyncMock(),
+            answer=AsyncMock(return_value=SimpleNamespace(message_id=91)),
+        )
+        user = SimpleNamespace(id=5)
+
+        with patch("bot.handlers.start.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(target_user))), patch(
+            "bot.handlers.start.delete_previous_anchor", new=AsyncMock()
+        ), patch("bot.handlers.start.set_anchor") as set_anchor:
+            await handle_start_with_token(message, SimpleNamespace(args="profile_9"), state=SimpleNamespace(), user=user)
+
+        self.assertIsNotNone(message.answer.await_args.kwargs["reply_markup"])
+        set_anchor.assert_called_once_with(30, 91)
+
     async def test_handle_start_with_profile_token_shows_public_profile(self):
         target_user = SimpleNamespace(
             id=9,

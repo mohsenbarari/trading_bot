@@ -42,6 +42,34 @@ class FakeSessionContext:
 
 
 class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fake_session_helpers_cover_existing_ids_and_update_get_fallbacks(self):
+        session = FakeSession()
+        already_identified = SimpleNamespace(id=701)
+        session.add(already_identified)
+        self.assertEqual(already_identified.id, 701)
+        self.assertIsNone(await session.commit())
+        self.assertIsNone(await session.refresh(already_identified))
+        self.assertIsNone(await session.get(type("Other", (), {}), 8))
+
+        context = FakeSessionContext(session)
+        self.assertIs(await context.__aenter__(), session)
+        self.assertFalse(await context.__aexit__(None, None, None))
+
+        create_session = FakeSession()
+        created_offer = SimpleNamespace(id=None)
+        create_session.add(created_offer)
+
+        async def update_get(model, key):
+            if create_session.added and model.__name__ == "Offer":
+                return create_session.added[0]
+            if model.__name__ == "User" and key == 1:
+                return SimpleNamespace(id=key)
+            return None
+
+        self.assertIs(await update_get(type("Offer", (), {}), 1), created_offer)
+        self.assertEqual((await update_get(type("User", (), {}), 1)).id, 1)
+        self.assertIsNone(await update_get(type("Other", (), {}), 9))
+
     async def test_handle_trade_confirm_publishes_wholesale_offer_and_updates_channel_message(self):
         callback = SimpleNamespace(
             message=SimpleNamespace(edit_text=AsyncMock()),
@@ -65,19 +93,10 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
             clear=AsyncMock(),
         )
         user = SimpleNamespace(id=1, limitations_expire_at=None)
-        created_offer = None
         db_user = SimpleNamespace(id=1)
         create_session = FakeSession()
         update_session = FakeSession(get_map={(None, 0): None})
         bot = SimpleNamespace(send_message=AsyncMock(side_effect=[SimpleNamespace(message_id=777), SimpleNamespace(message_id=778)]))
-
-        def get_map_for_update():
-            nonlocal created_offer
-            if create_session.added:
-                created_offer = create_session.added[0]
-            return {
-                (type(created_offer), 99): created_offer,
-            }
 
         async def update_get(model, key):
             if create_session.added and model.__name__ == "Offer":
@@ -87,6 +106,7 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
             return None
 
         update_session.get = update_get
+        self.assertIsNone(await update_session.get(type("Other", (), {}), 7))
 
         with patch("core.trading_settings.get_trading_settings", return_value=SimpleNamespace(max_active_offers=3)), patch(
             "bot.handlers.trade_create.check_user_limits", side_effect=[(True, None), (True, None)]

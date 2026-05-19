@@ -31,6 +31,22 @@ class FakeSession:
 
 
 class BotAdminUsersBlockActionsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_handle_user_block_actions_rejects_protected_targets_and_ignores_non_admins(self):
+        callback = SimpleNamespace(data="user_block_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        await handle_user_block_actions(callback, user=None)
+        callback.answer.assert_not_awaited()
+
+        protected_user = SimpleNamespace(id=9, role=UserRole.SUPER_ADMIN, account_status=UserAccountStatus.ACTIVE)
+        callback = SimpleNamespace(data="user_block_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(protected_user)):
+            await handle_user_block_actions(callback, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER))
+        callback.answer.assert_awaited_once_with("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+
+        callback = SimpleNamespace(data="user_block_apply_9_15", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(protected_user)):
+            await handle_user_block_actions(callback, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER))
+        callback.answer.assert_awaited_once_with("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+
     async def test_handle_user_block_actions_shows_duration_menu(self):
         callback = SimpleNamespace(data="user_block_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
         with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(SimpleNamespace(id=9, role=UserRole.STANDARD, account_status=UserAccountStatus.ACTIVE))), patch(
@@ -80,6 +96,11 @@ class BotAdminUsersBlockActionsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_user_block_actions_handles_missing_user(self):
         callback = SimpleNamespace(data="user_block_apply_9_15", answer=AsyncMock())
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(None)):
+            await handle_user_block_actions(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+        callback.answer.assert_awaited_once_with("❌ کاربر یافت نشد.", show_alert=True)
+
+        callback = SimpleNamespace(data="user_block_9", message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
         with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(None)):
             await handle_user_block_actions(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
         callback.answer.assert_awaited_once_with("❌ کاربر یافت نشد.", show_alert=True)

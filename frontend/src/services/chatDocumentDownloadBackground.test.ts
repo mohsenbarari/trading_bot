@@ -146,6 +146,42 @@ function installIndexedDb(recordsInput: IndexedDbRecord[], options?: {
   }
 }
 
+function installThrowingTransactionDb() {
+  const db = {
+    objectStoreNames: {
+      contains: vi.fn(() => true),
+    },
+    createObjectStore: vi.fn(),
+    transaction: vi.fn(() => {
+      throw new Error('tx failed')
+    }),
+    close: vi.fn(),
+    onversionchange: null as null | (() => void),
+  }
+
+  const openMock = vi.fn(() => {
+    const request = {
+      result: db,
+      error: null,
+      onupgradeneeded: null as null | ((event: Event) => void),
+      onsuccess: null as null | (() => void),
+      onerror: null as null | (() => void),
+    }
+
+    queueMicrotask(() => {
+      request.onsuccess?.()
+    })
+
+    return request
+  })
+
+  vi.stubGlobal('indexedDB', {
+    open: openMock,
+  })
+
+  return { db, openMock }
+}
+
 describe('chatDocumentDownloadBackground', () => {
   const originalCreateObjectURL = URL.createObjectURL
   const originalRevokeObjectURL = URL.revokeObjectURL
@@ -440,5 +476,55 @@ describe('chatDocumentDownloadBackground', () => {
 
     indexedDb.triggerVersionChange()
     expect(indexedDb.db.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('survives indexeddb open failures while still completing downloads', async () => {
+    installIndexedDb([], { failOpen: true })
+
+    const service = await importFreshModule()
+    const events: any[] = []
+    service.subscribeToDocumentDownloads((event) => events.push(event))
+    await service.initChatDocumentDownloadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+
+    fetchMock.mockResolvedValueOnce(new AbortAwareResponse({
+      headers: { 'content-type': 'application/pdf' },
+      body: null,
+      blob: new Blob(['pdf'], { type: 'application/pdf' }),
+    }) as any)
+
+    await service.startDocumentDownload({
+      messageId: 90,
+      userId: 7,
+      fileId: 'file-90',
+      fileName: 'open-failed.pdf',
+    })
+    await vi.runAllTimersAsync()
+
+    expect(events.map((event) => event.type)).toContain('completed')
+  })
+
+  it('handles IndexedDB transaction failures and non-ok HTTP responses gracefully', async () => {
+    installThrowingTransactionDb()
+
+    const service = await importFreshModule()
+    const events: any[] = []
+    service.subscribeToDocumentDownloads((event) => events.push(event))
+    await service.initChatDocumentDownloadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+
+    fetchMock.mockResolvedValueOnce(new AbortAwareResponse({
+      ok: false,
+      status: 404,
+    }) as any)
+
+    await service.startDocumentDownload({
+      messageId: 91,
+      userId: 7,
+      fileId: 'file-91',
+      fileName: 'tx-failed.pdf',
+    })
+    await vi.runAllTimersAsync()
+
+    expect(fetchMock).toHaveBeenCalledWith('https://coin.test/api/chat/files/file-91?token=jwt', expect.any(Object))
+    expect(service.getPendingDocumentDownloadsForUser(7)).toEqual([])
   })
 })

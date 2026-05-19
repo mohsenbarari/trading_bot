@@ -75,6 +75,73 @@ class BotTradeHistoryGenerateExcelTests(unittest.IsolatedAsyncioTestCase):
             if os.path.exists(filename):
                 os.remove(filename)
 
+    async def test_generate_excel_self_history_records_counterparty_for_both_trade_sides(self):
+        class DummyCell:
+            def __init__(self, value=None):
+                self.value = value
+                self.fill = None
+                self.font = None
+                self.alignment = None
+
+        class DummySheet:
+            def __init__(self):
+                self.title = ""
+                self.sheet_view = SimpleNamespace(rightToLeft=False)
+                self._cells = {}
+
+            def cell(self, row, column, value=None):
+                key = (row, column)
+                cell = self._cells.setdefault(key, DummyCell())
+                if value is not None:
+                    cell.value = value
+                return cell
+
+        class DummyWorkbook:
+            last_instance = None
+
+            def __init__(self):
+                self.active = DummySheet()
+                DummyWorkbook.last_instance = self
+
+            def save(self, filename):
+                with open(filename, "wb") as handle:
+                    handle.write(b"xlsx")
+
+        class DummyStyle:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+        openpyxl_mod = ModuleType("openpyxl")
+        openpyxl_mod.Workbook = DummyWorkbook
+        styles_mod = ModuleType("openpyxl.styles")
+        styles_mod.Font = DummyStyle
+        styles_mod.Alignment = DummyStyle
+        styles_mod.PatternFill = DummyStyle
+
+        buy_trade = make_trade()
+        buy_trade.offer_user = SimpleNamespace(account_name="offer-owner")
+        buy_trade.responder_user = SimpleNamespace(account_name="responder")
+
+        sell_trade = make_trade()
+        sell_trade.responder_user_id = 99
+        sell_trade.trade_type = TradeType.BUY
+        sell_trade.offer_user = SimpleNamespace(account_name="offer-owner")
+        sell_trade.responder_user = SimpleNamespace(account_name="other-side")
+
+        with patch.dict(sys.modules, {"openpyxl": openpyxl_mod, "openpyxl.styles": styles_mod}):
+            filename = await generate_excel([buy_trade, sell_trade], None, SimpleNamespace(id=2))
+
+        try:
+            sheet = DummyWorkbook.last_instance.active
+            self.assertEqual(sheet.cell(1, 5).value, "طرف معامله")
+            self.assertEqual(sheet.cell(2, 5).value, "offer-owner")
+            self.assertEqual(sheet.cell(3, 4).value, "فروش")
+            self.assertEqual(sheet.cell(3, 5).value, "other-side")
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -41,6 +41,11 @@ class BotMessageManagerTests(unittest.IsolatedAsyncioTestCase):
             message_manager.schedule_delete(bot, 1, 2, message_manager.DeleteDelay.DEFAULT)
             create_task.assert_called_once()
 
+        with patch('bot.message_manager.asyncio.create_task') as create_task:
+            create_task.side_effect = lambda coro: coro.close()
+            message_manager.schedule_delete(bot, 1, 3, 15)
+        create_task.assert_called_once()
+
         message = SimpleNamespace(bot=bot, chat=SimpleNamespace(id=99), message_id=77)
         with patch('bot.message_manager.schedule_delete') as schedule_delete:
             message_manager.schedule_message_delete(message)
@@ -73,6 +78,11 @@ class BotMessageManagerTests(unittest.IsolatedAsyncioTestCase):
         bot.delete_message = AsyncMock(side_effect=RuntimeError('boom'))
         await message_manager.delete_previous_anchor(bot, 8)
         self.assertIsNone(message_manager.get_anchor(8))
+
+        message_manager.set_anchor(10, 100)
+        bot.delete_message = AsyncMock(side_effect=TelegramBadRequest(method='deleteMessage', message='gone'))
+        await message_manager.delete_previous_anchor(bot, 10)
+        self.assertIsNone(message_manager.get_anchor(10))
 
         with patch('bot.message_manager.schedule_message_delete') as schedule_message_delete, patch(
             'bot.message_manager.delete_previous_anchor', AsyncMock()

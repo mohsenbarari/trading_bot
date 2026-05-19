@@ -272,4 +272,40 @@ describe('notification store', () => {
     expect(store.appNotifications.map((notification) => notification.id)).toEqual([10])
     expect(store.isLoadingHistory).toBe(false)
   })
+
+  it('covers mark-all-read and non-ok delete flows without losing optimistic state permanently', async () => {
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+    store.addAppNotification({ id: 1, message: 'first', category: 'system', is_read: false })
+
+    apiFetchMock.mockRejectedValueOnce(new Error('mark failed'))
+    await store.markAllAsRead()
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to mark all as read:', expect.any(Error))
+    expect(store.appNotifications.find((notification) => notification.id === 1)?.is_read).toBe(false)
+
+    apiFetchMock.mockResolvedValueOnce(makeResponse({}, false))
+    await store.clearAllNotifications()
+    expect(store.appNotifications.map((notification) => notification.id)).toEqual([1])
+
+    apiFetchMock.mockResolvedValueOnce(makeResponse({}, false))
+    await store.deleteNotification(1)
+    expect(store.appNotifications.map((notification) => notification.id)).toEqual([1])
+  })
+
+  it('restores deleted notifications after unrelated concurrent updates when no original neighbors remain', async () => {
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+    store.addAppNotification({ id: 3, message: 'third', category: 'system' })
+    store.addAppNotification({ id: 2, message: 'second', category: 'system' })
+    store.addAppNotification({ id: 1, message: 'first', category: 'system' })
+
+    apiFetchMock.mockRejectedValueOnce(new Error('delete failed'))
+    const deletePromise = store.deleteNotification(2)
+    store.appNotifications = [
+      store.addAppNotification({ id: 99, message: 'unrelated', category: 'user' }),
+    ]
+    await deletePromise
+
+    expect(store.appNotifications.map((notification) => notification.id)).toEqual([99, 2])
+  })
 })

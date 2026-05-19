@@ -52,6 +52,15 @@ class BotAdminRoleTests(unittest.IsolatedAsyncioTestCase):
         await process_invitation_role(callback, state, user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER), bot=SimpleNamespace())
         self.assertIn("مجاز نیست", callback.answer.await_args.args[0])
 
+        callback = make_callback(data="set_role_STANDARD")
+        callback.message.edit_text = AsyncMock(side_effect=RuntimeError("boom"))
+        callback.message.delete = AsyncMock(side_effect=RuntimeError("boom"))
+        state = FakeState({"last_prompt_message_id": 10})
+        with patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()) as return_panel:
+            await process_invitation_role(callback, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), bot=SimpleNamespace())
+        callback.message.answer.assert_awaited_once()
+        return_panel.assert_awaited_once()
+
     async def test_process_invitation_role_handles_missing_data_success_and_existing_active_link(self):
         bot = SimpleNamespace(get_me=AsyncMock(return_value=SimpleNamespace(username="botname")))
         callback = make_callback(data="set_role_STANDARD")
@@ -76,6 +85,31 @@ class BotAdminRoleTests(unittest.IsolatedAsyncioTestCase):
         ), patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()):
             await process_invitation_role(callback, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), bot=bot)
         self.assertIn("لینک قبلی هنوز فعال است", callback.message.answer.await_args.args[0])
+
+        callback = make_callback(data="set_role_STANDARD")
+        state = FakeState({"account_name": "acc", "mobile_number": "09123456789"})
+        broken_bot = SimpleNamespace(get_me=AsyncMock(side_effect=RuntimeError("boom")))
+        with patch("bot.handlers.admin.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
+            "bot.handlers.admin.create_invitation", new=AsyncMock(side_effect=HTTPException(status_code=400, detail="EXISTING_ACTIVE_LINK::acc::tok"))
+        ), patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()):
+            await process_invitation_role(callback, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), bot=broken_bot)
+        self.assertIn("خطای سیستمی", callback.message.answer.await_args.args[0])
+
+        callback = make_callback(data="set_role_STANDARD")
+        state = FakeState({"account_name": "acc", "mobile_number": "09123456789"})
+        with patch("bot.handlers.admin.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
+            "bot.handlers.admin.create_invitation", new=AsyncMock(side_effect=HTTPException(status_code=400, detail="bad detail"))
+        ), patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()):
+            await process_invitation_role(callback, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), bot=bot)
+        self.assertIn("خطا در ایجاد دعوت‌نامه", callback.message.answer.await_args.args[0])
+
+        callback = make_callback(data="set_role_STANDARD")
+        state = FakeState({"account_name": "acc", "mobile_number": "09123456789"})
+        with patch("bot.handlers.admin.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
+            "bot.handlers.admin.create_invitation", new=AsyncMock(side_effect=RuntimeError("boom"))
+        ), patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()):
+            await process_invitation_role(callback, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), bot=bot)
+        self.assertIn("خطای سیستمی", callback.message.answer.await_args.args[0])
 
 
 if __name__ == "__main__":

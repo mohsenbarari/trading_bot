@@ -57,6 +57,22 @@ class CommoditiesRouterUpdateNameTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.commits, 1)
         invalidate_mock.assert_awaited_once()
 
+    async def test_update_commodity_name_ignores_cache_invalidation_failures(self):
+        commodity = SimpleNamespace(id=1, name="Old", aliases=[])
+        db = FakeDB([FakeExecuteResult(commodity), FakeExecuteResult(None)])
+        with patch(
+            "bot.utils.redis_helpers.invalidate_commodity_cache",
+            new=AsyncMock(side_effect=RuntimeError("cache down")),
+        ):
+            result = await update_commodity_name(
+                1,
+                commodity_update=schemas.CommodityCreate(name="Fresh"),
+                db=db,
+                source="bot",
+            )
+
+        self.assertEqual(result.name, "Fresh")
+
 
 if __name__ == "__main__":
     unittest.main()

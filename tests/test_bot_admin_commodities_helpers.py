@@ -40,6 +40,9 @@ class BotAdminCommoditiesHelperTests(unittest.TestCase):
         error = httpx.HTTPStatusError("bad", request=SimpleNamespace(), response=FakeResponse({"detail": ["a", "b"]}))
         self.assertEqual(get_error_detail(error), '["a", "b"]')
 
+        error = httpx.HTTPStatusError("bad", request=SimpleNamespace(), response=FakeResponse({"detail": None}, text="fallback"))
+        self.assertEqual(get_error_detail(error), "fallback")
+
         error = httpx.HTTPStatusError("bad", request=SimpleNamespace(), response=FakeResponse(json_error=True, text="plain"))
         self.assertEqual(get_error_detail(error), "plain")
 

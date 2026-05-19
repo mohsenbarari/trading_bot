@@ -155,4 +155,23 @@ describe('useChatScroll', () => {
     expect(subject.isViewingReply.value).toBe(false)
     expect(target.classList.contains('highlight-message')).toBe(false)
   })
+
+  it('marks unread messages as read when the scroll handler reaches the bottom', () => {
+    const unreadNewMessagesCount = ref(1)
+    const subject = useChatScroll({
+      messagesContainer: ref(container),
+      messages: ref([]),
+      currentUserId: 7,
+      unreadNewMessagesCount,
+      markAsRead: markAsReadMock,
+      isUserAtBottom: ref(false),
+      showScrollButton: ref(true),
+    })
+
+    container.scrollTop = 710
+    subject.handleScroll()
+
+    expect(markAsReadMock).toHaveBeenCalledTimes(1)
+    expect(unreadNewMessagesCount.value).toBe(0)
+  })
 })

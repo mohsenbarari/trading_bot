@@ -8,6 +8,8 @@ from fastapi import HTTPException
 from api.routers.invitations import (
     InvitationCreate,
     create_invitation,
+    generate_short_code,
+    generate_token,
     lookup_invitation,
     validate_invitation,
 )
@@ -39,6 +41,15 @@ class FakeDB:
 
 
 class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
+    def test_generate_token_and_short_code_shapes(self):
+        token = generate_token()
+        short_code = generate_short_code()
+
+        self.assertTrue(token.startswith("INV-"))
+        self.assertEqual(len(token), 36)
+        self.assertEqual(len(short_code), 8)
+        self.assertTrue(short_code.isalnum())
+
     async def test_create_invitation_rejects_invalid_mobile_and_existing_user(self):
         admin = SimpleNamespace(id=1)
 
@@ -194,6 +205,15 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await validate_invitation("ACCT-OK", db=FakeDB([FakeExecuteResult(accountant_invitation)]))
         self.assertTrue(result["valid"])
+
+        with patch(
+            "api.routers.invitations.get_pending_accountant_relation_by_invitation_token",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await validate_invitation("ACCT-OK", db=FakeDB([FakeExecuteResult(accountant_invitation)]))
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "Invitation expired")
 
     async def test_validate_invitation_handles_error_states_and_success(self):
         with self.assertRaises(HTTPException) as exc_info:
