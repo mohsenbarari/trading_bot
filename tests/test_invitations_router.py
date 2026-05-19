@@ -215,6 +215,40 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "Invitation expired")
 
+    async def test_lookup_and_validate_invitation_respect_customer_pending_relation(self):
+        customer_invitation = SimpleNamespace(
+            is_used=False,
+            expires_at=datetime.utcnow() + timedelta(minutes=5),
+            token="CUST-OK",
+            account_name="cust1",
+            mobile_number="09120000000",
+            role=UserRole.STANDARD,
+        )
+
+        with patch(
+            "api.routers.invitations.get_pending_customer_relation_by_invitation_token",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await lookup_invitation("SHORT", db=FakeDB([FakeExecuteResult(customer_invitation)]))
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        with patch(
+            "api.routers.invitations.get_pending_customer_relation_by_invitation_token",
+            new=AsyncMock(return_value=SimpleNamespace(id=1)),
+        ):
+            result = await validate_invitation("CUST-OK", db=FakeDB([FakeExecuteResult(customer_invitation)]))
+        self.assertTrue(result["valid"])
+
+        with patch(
+            "api.routers.invitations.get_pending_customer_relation_by_invitation_token",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await validate_invitation("CUST-OK", db=FakeDB([FakeExecuteResult(customer_invitation)]))
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "Invitation expired")
+
     async def test_validate_invitation_handles_error_states_and_success(self):
         with self.assertRaises(HTTPException) as exc_info:
             await validate_invitation("INV", db=FakeDB([FakeExecuteResult(None)]))

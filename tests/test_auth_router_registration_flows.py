@@ -167,6 +167,24 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
                 await register_otp_request(req, db=FakeDB([FakeExecuteResult(invitation)]))
         self.assertEqual(exc_info.exception.status_code, 400)
 
+    async def test_register_otp_request_rejects_invalid_customer_relation_tokens(self):
+        req = RegisterOTPRequest(token="CUST-token")
+        invitation = SimpleNamespace(
+            is_used=False,
+            expires_at=datetime.utcnow() + timedelta(minutes=5),
+            mobile_number="09120000000",
+        )
+        redis = FakeRedis()
+
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth.get_pending_customer_relation_by_invitation_token",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await register_otp_request(req, db=FakeDB([FakeExecuteResult(invitation)]))
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "دعوت‌نامه مشتری نامعتبر یا منقضی شده است")
+
     async def test_register_otp_verify_rejects_invalid_code_and_persists_verified_flag(self):
         req = RegisterOTPVerify(token="abc", code="12345")
         redis = FakeRedis()
@@ -377,6 +395,81 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "دعوت‌نامه حسابدار نامعتبر یا منقضی شده است")
+
+    async def test_register_complete_binds_pending_customer_relation_and_disables_bot_access(self):
+        invitation = SimpleNamespace(
+            token="CUST-token",
+            account_name="customer1",
+            mobile_number="09120000000",
+            role="standard",
+            is_used=False,
+            expires_at=datetime.utcnow() + timedelta(minutes=5),
+        )
+        relation = SimpleNamespace(
+            customer_user_id=None,
+            status="pending",
+            activated_at=None,
+            deleted_at=None,
+        )
+        redis = FakeRedis({"reg_verified:CUST-token": "1"})
+        db = FakeDB([FakeExecuteResult(invitation)])
+        session = SimpleNamespace(id="session-cust")
+
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth.get_pending_customer_relation_by_invitation_token",
+            new=AsyncMock(return_value=relation),
+        ), patch(
+            "api.routers.auth._login_home_server",
+            return_value="foreign",
+        ), patch(
+            "api.routers.auth.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.auth.create_refresh_token",
+            return_value="refresh-cust",
+        ), patch(
+            "api.routers.auth.handle_login_session",
+            new=AsyncMock(return_value={"session": session}),
+        ), patch(
+            "api.routers.auth.create_access_token",
+            return_value="access-cust",
+        ):
+            result = await register_complete(
+                RegisterComplete(token="CUST-token", address="Tehran, Vanak"),
+                raw_request=make_request(),
+                db=db,
+            )
+
+        new_user = db.added[0]
+        self.assertFalse(new_user.has_bot_access)
+        self.assertEqual(relation.customer_user_id, 77)
+        self.assertEqual(relation.status, "active")
+        self.assertIsNotNone(relation.activated_at)
+        self.assertEqual(result["access_token"], "access-cust")
+
+    async def test_register_complete_rejects_missing_customer_relation(self):
+        invitation = SimpleNamespace(
+            token="CUST-token",
+            account_name="customer1",
+            mobile_number="09120000000",
+            role="standard",
+            is_used=False,
+            expires_at=datetime.utcnow() + timedelta(minutes=5),
+        )
+        redis = FakeRedis({"reg_verified:CUST-token": "1"})
+
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth.get_pending_customer_relation_by_invitation_token",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await register_complete(
+                    RegisterComplete(token="CUST-token", address="Tehran"),
+                    raw_request=make_request(),
+                    db=FakeDB([FakeExecuteResult(invitation)]),
+                )
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "دعوت‌نامه مشتری نامعتبر یا منقضی شده است")
 
 
 if __name__ == "__main__":

@@ -111,6 +111,23 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("حسابدارها به ربات تلگرام دسترسی ندارند", message.answer.await_args.args[0])
         self.assertEqual(state.cleared, 1)
 
+    async def test_handle_contact_blocks_customer_bot_linking(self):
+        customer_user = SimpleNamespace(id=6, telegram_id=None, account_name="cust", full_name="cust", address="تهران خیابان آزادی پلاک ۱۰")
+        message = make_message()
+        state = FakeState()
+
+        with patch("bot.handlers.link_account.get_db", new=db_factory(customer_user)), patch(
+            "bot.handlers.link_account.is_user_accountant",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "bot.handlers.link_account.is_user_customer",
+            new=AsyncMock(return_value=True),
+        ):
+            await handle_contact(message, state)
+
+        self.assertIn("مشتری‌ها در این فاز به ربات تلگرام دسترسی ندارند", message.answer.await_args.args[0])
+        self.assertEqual(state.cleared, 1)
+
     async def test_handle_address_completion_guard_branches(self):
         message = SimpleNamespace(text="short", answer=AsyncMock())
         state = FakeState()
@@ -141,6 +158,19 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
             await handle_address_completion(message, state)
         self.assertEqual(state.cleared, 1)
         self.assertIn("حسابدارها به ربات تلگرام دسترسی ندارند", message.answer.await_args.args[0])
+
+        customer_user = SimpleNamespace(id=9, telegram_id=None, account_name="cust", full_name="cust", address="System Default")
+        state = FakeState()
+        await state.update_data(link_user_id=9)
+        message = SimpleNamespace(text="تهران خیابان آزادی پلاک ۱۰", answer=AsyncMock(), from_user=SimpleNamespace(id=10))
+        with patch("bot.handlers.link_account.get_db", new=db_factory(customer_user)), patch(
+            "bot.handlers.link_account.is_user_accountant", new=AsyncMock(return_value=False)
+        ), patch(
+            "bot.handlers.link_account.is_user_customer", new=AsyncMock(return_value=True)
+        ):
+            await handle_address_completion(message, state)
+        self.assertEqual(state.cleared, 1)
+        self.assertIn("مشتری‌ها در این فاز به ربات تلگرام دسترسی ندارند", message.answer.await_args.args[0])
 
         linked_elsewhere = SimpleNamespace(id=9, telegram_id=77, account_name="acc", full_name="acc", address="System Default")
         state = FakeState()

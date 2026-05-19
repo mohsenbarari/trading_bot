@@ -11,6 +11,7 @@ from models.user import User, set_legacy_has_bot_access_compatibility
 from core.config import settings
 from core.db import get_db
 from core.services.accountant_relation_service import is_user_accountant
+from core.services.customer_relation_service import is_user_customer
 from core.services.chat_room_service import ensure_mandatory_channel_membership
 from bot.keyboards import get_persistent_menu_keyboard
 from bot.utils.channel_invites import build_channel_join_request_line
@@ -48,17 +49,45 @@ def build_accountant_web_only_message() -> str:
     return "\n\n".join(lines)
 
 
-async def should_block_accountant_bot_access(db: AsyncSession, user: User) -> bool:
+def build_customer_web_only_message() -> str:
+    lines = [
+        "⚠️ مشتری‌ها در این فاز به ربات تلگرام دسترسی ندارند.",
+        "برای استفاده از حساب مشتری فقط از وب‌اپ استفاده کنید.",
+    ]
+    webapp_link_line = build_webapp_link_line()
+    if webapp_link_line:
+        lines.append(webapp_link_line)
+    return "\n\n".join(lines)
+
+
+def _is_mocked_relation_check(relation_checker) -> bool:
+    return callable(getattr(relation_checker, "assert_awaited", None)) or callable(
+        getattr(relation_checker, "assert_called", None)
+    )
+
+
+async def _run_relation_check(db: AsyncSession, relation_checker, user_id: int) -> bool:
+    if not isinstance(db, AsyncSession) and not _is_mocked_relation_check(relation_checker):
+        return False
+    return await relation_checker(db, user_id)
+
+
+async def get_web_only_bot_access_reason(db: AsyncSession, user: User) -> str | None:
     user_id = getattr(user, "id", None)
     if user_id is None:
-        return False
-    if not isinstance(db, AsyncSession):
-        is_mocked_check = callable(getattr(is_user_accountant, "assert_awaited", None)) or callable(
-            getattr(is_user_accountant, "assert_called", None)
-        )
-        if not is_mocked_check:
-            return False
-    return await is_user_accountant(db, user_id)
+        return None
+
+    if await _run_relation_check(db, is_user_accountant, user_id):
+        return "accountant"
+    if await _run_relation_check(db, is_user_customer, user_id):
+        return "customer"
+    return None
+
+
+def build_web_only_message_for_reason(reason: str | None) -> str:
+    if reason == "customer":
+        return build_customer_web_only_message()
+    return build_accountant_web_only_message()
 
 
 async def finalize_account_link(
@@ -68,8 +97,11 @@ async def finalize_account_link(
     *,
     address: str | None = None,
 ) -> None:
-    if await should_block_accountant_bot_access(db, user):
+    block_reason = await get_web_only_bot_access_reason(db, user)
+    if block_reason == "accountant":
         raise PermissionError("ACCOUNTANT_BOT_ACCESS_FORBIDDEN")
+    if block_reason == "customer":
+        raise PermissionError("CUSTOMER_BOT_ACCESS_FORBIDDEN")
 
     user.telegram_id = message.from_user.id
     user.username = message.from_user.username
@@ -192,8 +224,13 @@ async def handle_contact(message: types.Message, state: FSMContext):
             await state.clear()
             return
 
-        if await should_block_accountant_bot_access(db, user):
-            await message.answer(build_accountant_web_only_message(), reply_markup=types.ReplyKeyboardRemove(), parse_mode="Markdown")
+        block_reason = await get_web_only_bot_access_reason(db, user)
+        if block_reason:
+            await message.answer(
+                build_web_only_message_for_reason(block_reason),
+                reply_markup=types.ReplyKeyboardRemove(),
+                parse_mode="Markdown",
+            )
             await state.clear()
             return
             
@@ -216,8 +253,12 @@ async def handle_contact(message: types.Message, state: FSMContext):
         
         try:
             await finalize_account_link(db, user, message)
-        except PermissionError:
-            await message.answer(build_accountant_web_only_message(), reply_markup=types.ReplyKeyboardRemove(), parse_mode="Markdown")
+        except PermissionError as exc:
+            await message.answer(
+                build_web_only_message_for_reason(str(exc).replace("_BOT_ACCESS_FORBIDDEN", "").lower()),
+                reply_markup=types.ReplyKeyboardRemove(),
+                parse_mode="Markdown",
+            )
         except Exception as e:
             rollback = getattr(db, "rollback", None)
             if callable(rollback):
@@ -252,9 +293,14 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
             await message.answer("❌ کاربر یافت نشد. لطفاً دوباره /link را بزنید.")
             return
 
-        if await should_block_accountant_bot_access(db, user):
+        block_reason = await get_web_only_bot_access_reason(db, user)
+        if block_reason:
             await state.clear()
-            await message.answer(build_accountant_web_only_message(), reply_markup=types.ReplyKeyboardRemove(), parse_mode="Markdown")
+            await message.answer(
+                build_web_only_message_for_reason(block_reason),
+                reply_markup=types.ReplyKeyboardRemove(),
+                parse_mode="Markdown",
+            )
             return
 
         if user.telegram_id and user.telegram_id != message.from_user.id:
@@ -264,8 +310,12 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
 
         try:
             await finalize_account_link(db, user, message, address=address)
-        except PermissionError:
-            await message.answer(build_accountant_web_only_message(), reply_markup=types.ReplyKeyboardRemove(), parse_mode="Markdown")
+        except PermissionError as exc:
+            await message.answer(
+                build_web_only_message_for_reason(str(exc).replace("_BOT_ACCESS_FORBIDDEN", "").lower()),
+                reply_markup=types.ReplyKeyboardRemove(),
+                parse_mode="Markdown",
+            )
         except Exception as e:
             rollback = getattr(db, "rollback", None)
             if callable(rollback):

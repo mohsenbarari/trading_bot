@@ -17,6 +17,10 @@ from core.services.accountant_relation_service import (
     get_pending_accountant_relation_by_invitation_token,
     is_accountant_invitation_token,
 )
+from core.services.customer_relation_service import (
+    get_pending_customer_relation_by_invitation_token,
+    is_customer_invitation_token,
+)
 from core.services.chat_room_service import ensure_mandatory_channel_membership
 from models.invitation import Invitation
 from models.user import User, set_legacy_has_bot_access_compatibility
@@ -47,6 +51,13 @@ def build_accountant_register_link_line(token: str) -> str | None:
     if not frontend_url:
         return None
     return f"🌐 [تکمیل ثبت‌نام حسابدار در وب اپ]({frontend_url}/register?token={token})"
+
+
+def build_customer_register_link_line(token: str) -> str | None:
+    frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
+    if not frontend_url:
+        return None
+    return f"🌐 [تکمیل ثبت‌نام مشتری در وب اپ]({frontend_url}/register?token={token})"
 
 
 @router.message(CommandStart(deep_link=True))
@@ -205,6 +216,26 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
                 parse_mode="Markdown",
             )
             return
+
+        if is_customer_invitation_token(token):
+            relation = await get_pending_customer_relation_by_invitation_token(session, token)
+            if not relation:
+                await message.answer("لینک دعوت شما نامعتبر یا منقضی شده است.", reply_markup=types.ReplyKeyboardRemove())
+                return
+
+            customer_lines = [
+                "✅ دعوت‌نامه مشتری معتبر است.",
+                "ثبت‌نام مشتری فقط از طریق وب‌اپ انجام می‌شود و این حساب به ربات تلگرام دسترسی نخواهد داشت.",
+            ]
+            register_line = build_customer_register_link_line(token)
+            if register_line:
+                customer_lines.append(register_line)
+            await message.answer(
+                "\n\n".join(customer_lines),
+                reply_markup=types.ReplyKeyboardRemove(),
+                parse_mode="Markdown",
+            )
+            return
             
         await state.update_data(token=token, mobile_number=invitation.mobile_number)
         await state.set_state(Registration.awaiting_contact)
@@ -318,6 +349,26 @@ async def handle_address(message: types.Message, state: FSMContext):
                 accountant_lines.append(register_line)
             await message.answer(
                 "\n\n".join(accountant_lines),
+                reply_markup=types.ReplyKeyboardRemove(),
+                parse_mode="Markdown",
+            )
+            return
+
+        if is_customer_invitation_token(token):
+            relation = await get_pending_customer_relation_by_invitation_token(session, token)
+            if not relation:
+                await message.answer("خطا! لینک دعوت شما دیگر معتبر نیست.", reply_markup=types.ReplyKeyboardRemove())
+                return
+
+            customer_lines = [
+                "⚠️ ثبت‌نام مشتری از مسیر ربات مجاز نیست.",
+                "برای تکمیل ثبت‌نام مشتری از وب‌اپ استفاده کنید.",
+            ]
+            register_line = build_customer_register_link_line(token)
+            if register_line:
+                customer_lines.append(register_line)
+            await message.answer(
+                "\n\n".join(customer_lines),
                 reply_markup=types.ReplyKeyboardRemove(),
                 parse_mode="Markdown",
             )

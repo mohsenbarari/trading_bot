@@ -6,6 +6,7 @@ from bot.handlers.link_account import (
     INCOMPLETE_ADDRESS_SENTINELS,
     LinkState,
     build_accountant_web_only_message,
+    build_customer_web_only_message,
     build_webapp_link_line,
     cmd_link,
     user_requires_address_completion,
@@ -42,6 +43,7 @@ class BotLinkAccountCmdTests(unittest.IsolatedAsyncioTestCase):
         with unittest.mock.patch.object(module, "settings", SimpleNamespace(frontend_url="https://app.example")):
             self.assertIn("https://app.example", build_webapp_link_line())
             self.assertIn("وباپ".replace("\u000c", "‌"), build_accountant_web_only_message())
+            self.assertIn("وباپ".replace("\u000c", "‌"), build_customer_web_only_message())
 
         message = SimpleNamespace(answer=AsyncMock())
         state = FakeState()

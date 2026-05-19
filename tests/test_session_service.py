@@ -188,6 +188,37 @@ class HandleLoginSessionTests(unittest.IsolatedAsyncioTestCase):
         )
         db.commit.assert_awaited_once()
 
+    async def test_web_only_users_keep_regular_session_policy(self):
+        db = SimpleNamespace(commit=AsyncMock())
+        user = SimpleNamespace(id=120, role=UserRole.STANDARD, max_sessions=3, has_bot_access=False)
+        created_session = SimpleNamespace(id=uuid.uuid4())
+        active_sessions = [SimpleNamespace(id=uuid.uuid4(), is_primary=True)]
+
+        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=active_sessions)), \
+             patch("core.services.session_service.create_session", AsyncMock(return_value=created_session)) as create_session:
+            result = await session_service.handle_login_session(
+                db,
+                user,
+                "refresh-web-only",
+                device_name="Web Browser",
+                device_ip="127.0.0.2",
+                platform=Platform.WEB,
+                home_server="foreign",
+            )
+
+        self.assertEqual(result, {"action": "session_created", "session": created_session})
+        create_session.assert_awaited_once_with(
+            db,
+            user.id,
+            "refresh-web-only",
+            "Web Browser",
+            "127.0.0.2",
+            Platform.WEB,
+            is_primary=False,
+            home_server="foreign",
+        )
+        db.commit.assert_awaited_once()
+
     async def test_accountant_users_stay_limited_to_one_active_session(self):
         db = SimpleNamespace(execute=AsyncMock(return_value=scalar_one_or_none_result(None)), commit=AsyncMock(), add=Mock())
         user = SimpleNamespace(id=12, role=UserRole.STANDARD, max_sessions=3)

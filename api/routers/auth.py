@@ -12,6 +12,7 @@ import time
 from core.db import get_db
 from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
 from models.accountant_relation import AccountantRelationStatus
+from models.customer_relation import CustomerRelationStatus
 from models.invitation import Invitation
 from core.security import (
     create_access_token,
@@ -47,6 +48,10 @@ from core.services.accountant_relation_service import (
     get_pending_accountant_relation_by_invitation_token,
     is_accountant_invitation_token,
     is_user_accountant,
+)
+from core.services.customer_relation_service import (
+    get_pending_customer_relation_by_invitation_token,
+    is_customer_invitation_token,
 )
 
 
@@ -180,7 +185,10 @@ async def register_otp_request(
         relation = await get_pending_accountant_relation_by_invitation_token(db, req.token)
         if not relation:
             raise HTTPException(status_code=400, detail="دعوت‌نامه حسابدار نامعتبر یا منقضی شده است")
-
+    elif is_customer_invitation_token(req.token):
+        relation = await get_pending_customer_relation_by_invitation_token(db, req.token)
+        if not relation:
+            raise HTTPException(status_code=400, detail="دعوت‌نامه مشتری نامعتبر یا منقضی شده است")
     mobile = inv.mobile_number
     
     # Rate limiting
@@ -242,10 +250,15 @@ async def register_complete(
         raise HTTPException(status_code=400, detail="دعوت‌نامه نامعتبر است")
 
     accountant_relation = None
+    customer_relation = None
     if is_accountant_invitation_token(req.token):
         accountant_relation = await get_pending_accountant_relation_by_invitation_token(db, req.token)
         if not accountant_relation:
             raise HTTPException(status_code=400, detail="دعوت‌نامه حسابدار نامعتبر یا منقضی شده است")
+    elif is_customer_invitation_token(req.token):
+        customer_relation = await get_pending_customer_relation_by_invitation_token(db, req.token)
+        if not customer_relation:
+            raise HTTPException(status_code=400, detail="دعوت‌نامه مشتری نامعتبر یا منقضی شده است")
         
     # 3. Create User
     new_user = User(
@@ -258,7 +271,10 @@ async def register_complete(
         home_server=_login_home_server(raw_request),
         max_sessions=1,
     )
-    set_legacy_has_bot_access_compatibility(new_user, enabled=accountant_relation is None)
+    set_legacy_has_bot_access_compatibility(
+        new_user,
+        enabled=accountant_relation is None and customer_relation is None,
+    )
     
     db.add(new_user)
     
@@ -269,11 +285,18 @@ async def register_complete(
         accountant_relation.status = AccountantRelationStatus.ACTIVE
         accountant_relation.activated_at = utc_now()
         accountant_relation.deleted_at = None
+    if customer_relation:
+        customer_relation.customer_user_id = new_user.id
+        customer_relation.status = CustomerRelationStatus.ACTIVE
+        customer_relation.activated_at = utc_now()
+        customer_relation.deleted_at = None
     
     try:
         await db.flush()
         if accountant_relation:
             accountant_relation.accountant_user_id = new_user.id
+        if customer_relation:
+            customer_relation.customer_user_id = new_user.id
         await ensure_mandatory_channel_membership(db, user=new_user)
         await db.commit()
         await db.refresh(new_user)
@@ -345,6 +368,11 @@ async def refresh_access_token(
         if not user_id:
             raise HTTPException(status_code=401, detail="توکن نامعتبر است")
         
+        customer_relation = None
+        if is_customer_invitation_token(req.token):
+            customer_relation = await get_pending_customer_relation_by_invitation_token(db, req.token)
+            if not customer_relation:
+                raise HTTPException(status_code=400, detail="دعوت‌نامه مشتری نامعتبر یا منقضی شده است")
         stmt = select(User).where(User.id == int(user_id))
         user = (await db.execute(stmt)).scalar_one_or_none()
         
@@ -367,6 +395,11 @@ async def refresh_access_token(
         if session.expires_at and session.expires_at < utc_now():
             raise HTTPException(status_code=401, detail="SESSION_EXPIRED_REQUIRE_OTP")
         
+        if customer_relation:
+            customer_relation.customer_user_id = new_user.id
+            customer_relation.status = CustomerRelationStatus.ACTIVE
+            customer_relation.activated_at = utc_now()
+            customer_relation.deleted_at = None
         # Update last_active_at
         session.last_active_at = utc_now()
         

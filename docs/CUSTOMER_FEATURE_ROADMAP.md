@@ -118,19 +118,19 @@ validation phase:
 وارد کردن customer به lifecycle ثبت‌نام و session بدون شکستن منطق user عادی.
 
 خروجی‌های لازم:
-- [ ] invitation flow customer-aware شود.
-- [ ] registration بر اساس token customer relation را activate کند.
-- [ ] session policy customer فقط در محدوده restrictionهای صریح محدود شود، نه با branch کاملاً مجزا.
+- [x] invitation flow customer-aware شود.
+- [x] registration بر اساس token customer relation را activate کند.
+- [x] session policy customer فقط در محدوده restrictionهای صریح محدود شود، نه با branch کاملاً مجزا.
 
 رفتار مطلوب:
-- [ ] customer از دید login/OTP/refresh/session یک user عادی است مگر requirement صریح customer-specific آن را محدود کند.
-- [ ] اگر policy فعلی session برای userهای عادی مجاز است و هیچ محدودیت customer آن را منع نکرده، customer هم همان behavior را بگیرد.
-- [ ] bot/web split همچنان باید با challenge document سازگار بماند؛ customer در این فاز web-only است و bot path نباید onboarding موازی بسازد.
+- [x] customer از دید login/OTP/refresh/session یک user عادی است مگر requirement صریح customer-specific آن را محدود کند.
+- [x] اگر policy فعلی session برای userهای عادی مجاز است و هیچ محدودیت customer آن را منع نکرده، customer هم همان behavior را بگیرد.
+- [x] bot/web split همچنان باید با challenge document سازگار بماند؛ customer در این فاز web-only است و bot path نباید onboarding موازی بسازد.
 
 validation phase:
-- [ ] customer invitation register flow سبز شود.
-- [ ] invalid/expired/reused token tests سبز شوند.
-- [ ] customer session regression با user عادی مقایسه شود تا محدودیت ناخواسته اضافه نشده باشد.
+- [x] customer invitation register flow سبز شود.
+- [x] invalid/expired/reused token tests سبز شوند.
+- [x] customer session regression با user عادی مقایسه شود تا محدودیت ناخواسته اضافه نشده باشد.
 
 ## 5. Phase 4 - Communication Graph and Messenger Restrictions
 
