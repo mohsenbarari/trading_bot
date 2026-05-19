@@ -213,6 +213,7 @@ Tier1-source cases:
 - [x] جزئیات حداقلی history برای `SUPER_ADMIN` در public profile باید شامل این‌ها باشد: شماره معامله، زمان، buy/sell badge از perspective user هدف، کالا، مقدار، قیمت، و counterpart principal name.
 - [x] اگر آن trade customer-aware باشد و viewer مجاز `SUPER_ADMIN` باشد، context relation نیز باید روی همان row دیده شود؛ برای owner-target به‌صورت `مشتری: management_name` و برای customer-target به‌صورت `مالک: owner` و `سطح: Tier`.
 - [x] تا قبل از اضافه‌شدن chain/group identifier، `SUPER_ADMIN` در public profile باید فقط rowهایی را ببیند که همان user هدف مستقیماً یکی از طرفین آن row است؛ grouping چند-leg بعداً روی seam history انجام می‌شود.
+- [x] `MIDDLE_MANAGER` در public profile هیچ customer-aware history visibility ویژه‌ای ندارد و فقط اگر خودش طرف مستقیم معامله با آن user باشد، همان mutual history عادی را می‌بیند.
 
 ## 10. بلاک، محدودیت، و سرریز محدودیت‌ها
 
