@@ -5,7 +5,7 @@ API Router for Trade Management - MiniApp Integration
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Mapping
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Request
@@ -22,6 +22,7 @@ from core.utils import (
     check_user_limits, increment_user_counter, to_jalali_str,
     create_user_notification, send_telegram_notification
 )
+from core.services.accountant_chat_contract import AccountantChatIdentity, load_accountant_chat_identity_map
 from core.services.accountant_relation_service import build_trade_notification_audience_user_ids
 from core.services.trade_service import (
     build_lot_unavailable_suggestion_payload,
@@ -89,7 +90,50 @@ class TradeResponse(BaseModel):
 
 # --- Helper Functions ---
 
-def trade_to_response(trade: Trade) -> TradeResponse:
+def _coerce_trade_user_id(value: object) -> int | None:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return None
+    return normalized if normalized > 0 else None
+
+
+def _resolve_trade_participant_name(
+    user: object | None,
+    user_id: object,
+    identity_map: Mapping[int, AccountantChatIdentity] | None,
+) -> str | None:
+    normalized_user_id = _coerce_trade_user_id(user_id)
+    if normalized_user_id is not None and identity_map:
+        identity = identity_map.get(normalized_user_id)
+        if identity is not None:
+            return identity.display_name
+    return getattr(user, "account_name", None)
+
+
+async def _load_trade_identity_map(
+    db: AsyncSession,
+    trades: list[Trade],
+) -> dict[int, AccountantChatIdentity]:
+    participant_ids = sorted(
+        {
+            normalized_user_id
+            for trade in trades
+            for raw_user_id in (getattr(trade, "offer_user_id", None), getattr(trade, "responder_user_id", None))
+            for normalized_user_id in [_coerce_trade_user_id(raw_user_id)]
+            if normalized_user_id is not None
+        }
+    )
+    if not participant_ids:
+        return {}
+    return await load_accountant_chat_identity_map(db, participant_ids)
+
+
+def trade_to_response(
+    trade: Trade,
+    *,
+    identity_map: Mapping[int, AccountantChatIdentity] | None = None,
+) -> TradeResponse:
     """تبدیل مدل Trade به پاسخ API"""
     return TradeResponse(
         id=trade.id,
@@ -102,9 +146,9 @@ def trade_to_response(trade: Trade) -> TradeResponse:
         price=trade.price,
         status=trade.status.value,
         offer_user_id=trade.offer_user_id,
-        offer_user_name=trade.offer_user.account_name if trade.offer_user else None,
+        offer_user_name=_resolve_trade_participant_name(trade.offer_user, trade.offer_user_id, identity_map),
         responder_user_id=trade.responder_user_id,
-        responder_user_name=trade.responder_user.account_name if trade.responder_user else None,
+        responder_user_name=_resolve_trade_participant_name(trade.responder_user, trade.responder_user_id, identity_map),
         created_at=to_jalali_str(trade.created_at) or ""
     )
 
@@ -737,8 +781,9 @@ async def get_my_trades(
     
     result = await db.execute(query)
     trades = result.scalars().all()
-    
-    return [trade_to_response(t) for t in trades]
+
+    identity_map = await _load_trade_identity_map(db, list(trades))
+    return [trade_to_response(t, identity_map=identity_map) for t in trades]
 
 
 @router.get("/{trade_id}", response_model=TradeResponse)
@@ -767,8 +812,9 @@ async def get_trade(
     # فقط طرفین معامله می‌توانند جزئیات را ببینند
     if trade.offer_user_id != owner_user.id and trade.responder_user_id != owner_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما به این معامله دسترسی ندارید.")
-    
-    return trade_to_response(trade)
+
+    identity_map = await _load_trade_identity_map(db, [trade])
+    return trade_to_response(trade, identity_map=identity_map)
 
 
 @router.get("/with/{other_user_id}", response_model=List[TradeResponse])
@@ -803,5 +849,6 @@ async def get_trades_with_user(
     
     result = await db.execute(query)
     trades = result.scalars().all()
-    
-    return [trade_to_response(t) for t in trades]
+
+    identity_map = await _load_trade_identity_map(db, list(trades))
+    return [trade_to_response(t, identity_map=identity_map) for t in trades]
