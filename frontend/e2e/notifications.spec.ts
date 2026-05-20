@@ -18,6 +18,17 @@ interface RelationAwareNotificationFixture {
   relationDisplayName: string
 }
 
+interface RelationAwareTradeNotificationFixture {
+  viewer: SeededSessionFixture
+  ownerUserId: number
+  ownerAccountName: string
+  accountantUserId: number
+  accountantAccountName: string
+  relationDisplayName: string
+  offerId: number
+  offerQuantity: number
+}
+
 interface RelationAwareRoomActivityFixture {
   owner: SeededSessionFixture
   accountant: SeededSessionFixture
@@ -421,6 +432,143 @@ asyncio.run(main())
 `)
 }
 
+function seedRelationAwareTradeNotificationFixture(label: string): RelationAwareTradeNotificationFixture {
+  return runPythonInApp<RelationAwareTradeNotificationFixture>(`
+import asyncio
+import json
+import uuid
+from datetime import datetime, timedelta
+
+from core.db import AsyncSessionLocal
+from core.enums import UserRole
+from core.security import create_access_token, create_refresh_token
+from core.services.session_service import hash_token
+from models.accountant_relation import AccountantRelation, AccountantRelationStatus
+from models.commodity import Commodity
+from models.offer import Offer, OfferStatus, OfferType
+from models.session import Platform, UserSession
+from models.user import User
+
+label = ${JSON.stringify(label)}
+
+def build_session_payload(user, device_name):
+  refresh_token = create_refresh_token(subject=user.id)
+  session = UserSession(
+    user_id=user.id,
+    device_name=device_name,
+    device_ip='127.0.0.1',
+    platform=Platform.WEB,
+    refresh_token_hash=hash_token(refresh_token),
+    is_primary=True,
+    is_active=True,
+    expires_at=None,
+  )
+  return refresh_token, session
+
+def random_mobile():
+  mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+  return f"09{mobile_seed:09d}"
+
+async def main():
+  suffix = uuid.uuid4().hex[:10]
+  relation_display_name = f"دفتر {suffix[:6]}"
+
+  async with AsyncSessionLocal() as db:
+    viewer = User(
+      account_name=f"pw_{label}_viewer_{suffix}",
+      mobile_number=random_mobile(),
+      full_name='Playwright Trade Viewer',
+      address='Playwright Trade Viewer',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    owner = User(
+      account_name=f"pw_{label}_owner_{suffix}",
+      mobile_number=random_mobile(),
+      full_name='Playwright Trade Owner',
+      address='Playwright Trade Owner',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+      max_accountants=3,
+    )
+    accountant = User(
+      account_name=f"pw_{label}_acct_{suffix}",
+      mobile_number=random_mobile(),
+      full_name='Playwright Trade Accountant',
+      address='Playwright Trade Accountant',
+      role=UserRole.STANDARD,
+      has_bot_access=False,
+      max_sessions=1,
+    )
+    commodity = Commodity(name=f"PW Notification Trade Commodity {suffix[:6]}")
+    db.add_all([viewer, owner, accountant, commodity])
+    await db.flush()
+
+    db.add(AccountantRelation(
+      owner_user_id=owner.id,
+      accountant_user_id=accountant.id,
+      created_by_user_id=owner.id,
+      invitation_token=f"pw_trade_inv_{uuid.uuid4().hex}",
+      global_account_name=accountant.account_name,
+      relation_display_name=relation_display_name,
+      duty_description='Playwright trade notification relation',
+      mobile_number=accountant.mobile_number,
+      status=AccountantRelationStatus.ACTIVE,
+      expires_at=datetime.utcnow() + timedelta(days=30),
+      activated_at=datetime.utcnow(),
+    ))
+
+    offer = Offer(
+      user_id=accountant.id,
+      actor_user_id=accountant.id,
+      home_server='foreign',
+      offer_type=OfferType.SELL,
+      commodity_id=commodity.id,
+      quantity=2,
+      remaining_quantity=2,
+      price=654321,
+      is_wholesale=True,
+      lot_sizes=None,
+      original_lot_sizes=None,
+      status=OfferStatus.ACTIVE,
+      notes='Playwright trade notification offer',
+    )
+    db.add(offer)
+
+    viewer_refresh_token, viewer_session = build_session_payload(viewer, 'Playwright Trade Notification Viewer Device')
+    db.add(viewer_session)
+    await db.flush()
+
+    viewer_access_token = create_access_token(
+      subject=viewer.id,
+      expires_delta=timedelta(minutes=60),
+      session_id=str(viewer_session.id),
+    )
+
+    await db.commit()
+
+  print(json.dumps({
+    'viewer': {
+      'userId': viewer.id,
+      'accountName': viewer.account_name,
+      'accessToken': viewer_access_token,
+      'refreshToken': viewer_refresh_token,
+    },
+    'ownerUserId': owner.id,
+    'ownerAccountName': owner.account_name,
+    'accountantUserId': accountant.id,
+    'accountantAccountName': accountant.account_name,
+    'relationDisplayName': relation_display_name,
+    'offerId': offer.id,
+    'offerQuantity': 2,
+  }))
+
+asyncio.run(main())
+`)
+}
+
 function createPendingLoginRequest(userId: number, deviceName: string): PendingLoginRequestFixture {
   return runPythonInApp<PendingLoginRequestFixture>(`
 import asyncio
@@ -529,6 +677,24 @@ async function sendRoomActivitySignal(
   })
 
   expect(response.status()).toBe(204)
+}
+
+async function executeTrade(
+  request: APIRequestContext,
+  viewer: SeededSessionFixture,
+  offerId: number,
+  quantity: number,
+) {
+  const response = await request.post(`${BACKEND_BASE_URL}/api/trades/`, {
+    headers: authHeaders(viewer.accessToken),
+    data: {
+      offer_id: offerId,
+      quantity,
+    },
+  })
+
+  expect(response.status()).toBe(201)
+  return response.json()
 }
 
 test.describe('Notification regressions', () => {
@@ -708,5 +874,36 @@ test.describe('Notification regressions', () => {
     await expect(headerStatus).toContainText(fixture.relationDisplayName, { timeout: 30000 })
     await expect(headerStatus).toContainText('در حال ارسال فایل', { timeout: 30000 })
     await expect(headerStatus).not.toContainText(fixture.accountant.accountName)
+  })
+
+  test('trade notifications opened from the notification center keep the owner-resolved route and highlight', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedRelationAwareTradeNotificationFixture('trade_notification_center')
+
+    await loginWithSeededSession(page, fixture.viewer)
+    await page.waitForTimeout(1200)
+
+    await executeTrade(request, fixture.viewer, fixture.offerId, fixture.offerQuantity)
+
+    const toast = page.locator('.toast-card-floating').filter({ hasText: fixture.relationDisplayName })
+    await expect(toast).toBeVisible({ timeout: 30000 })
+    await expect(toast).not.toContainText(fixture.accountantAccountName)
+
+    await page.getByRole('button', { name: 'اعلان‌ها' }).click()
+    await expect(page).toHaveURL(/\/notifications$/)
+
+    const notificationRow = page.locator('.notif-item').filter({ hasText: fixture.relationDisplayName }).first()
+    await expect(notificationRow).toBeVisible({ timeout: 30000 })
+    await expect(notificationRow).not.toContainText(fixture.accountantAccountName)
+
+    await notificationRow.click()
+
+    await expect(page).toHaveURL(new RegExp(`/users/${fixture.ownerUserId}`))
+    await expect(page).toHaveURL(new RegExp(`highlight_accountant_user_id=${fixture.accountantUserId}`))
+    await expect(page.getByText('نمایش پروفایل مالک اصلی')).toBeVisible()
+    await expect(page.locator('.accountant-resolution-banner')).toContainText(fixture.relationDisplayName)
+    await expect(page.locator('.profile-hero-copy h3')).toHaveText(fixture.ownerAccountName)
   })
 })
