@@ -630,16 +630,38 @@ async def _execute_trade_authoritatively(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="نمی‌توانید روی لفظ خودتان معامله کنید.")
 
     responder_customer_relation = await get_active_customer_relation_for_customer(db, owner_user.id)
-    uses_owner_customer_trade_path = (
-        responder_customer_relation is not None
-        and responder_customer_relation.owner_user_id == offer.user_id
+    responder_customer_tier = getattr(
+        getattr(responder_customer_relation, "customer_tier", None),
+        "value",
+        getattr(responder_customer_relation, "customer_tier", None),
     )
+    is_tier2_customer_responder = (
+        responder_customer_relation is not None
+        and responder_customer_tier == CustomerTier.TIER_2.value
+    )
+    responder_owner_user_id = _coerce_trade_user_id(
+        getattr(responder_customer_relation, "owner_user_id", None)
+    )
+    uses_owner_customer_trade_path = (
+        responder_owner_user_id is not None
+        and responder_owner_user_id == offer.user_id
+    )
+    uses_outsider_owner_customer_trade_chain = (
+        is_tier2_customer_responder
+        and responder_owner_user_id is not None
+        and responder_owner_user_id != offer.user_id
+    )
+    responder_mediator_owner: User | None = None
+    if uses_outsider_owner_customer_trade_chain:
+        responder_mediator_owner = await db.get(User, responder_owner_user_id)
+        if responder_mediator_owner is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="امکان انجام این معامله وجود ندارد.",
+            )
+
     executed_trade_price = offer.price
-    if (
-        uses_owner_customer_trade_path
-        and getattr(getattr(responder_customer_relation, "customer_tier", None), "value", getattr(responder_customer_relation, "customer_tier", None))
-        == CustomerTier.TIER_2.value
-    ):
+    if is_tier2_customer_responder:
         executed_trade_price = apply_customer_commission(
             offer.price,
             getattr(responder_customer_relation, "commission_rate", None),
@@ -709,28 +731,69 @@ async def _execute_trade_authoritatively(
     
     # گرفتن شماره معامله جدید
     max_trade_number = await db.scalar(select(func.max(Trade.trade_number)))
-    new_trade_number = (max_trade_number or 9999) + 1
+    next_trade_number = (max_trade_number or 9999) + 1
     
     # نوع معامله از دید پاسخ‌دهنده
     responder_trade_type = TradeType.BUY if offer.offer_type == OfferType.SELL else TradeType.SELL
     
-    # ایجاد معامله
-    new_trade = Trade(
-        trade_number=new_trade_number,
-        offer_id=offer.id,
-        offer_user_id=offer.user_id,
-        offer_user_mobile=offer.user.mobile_number if offer.user else None,
-        responder_user_id=owner_user.id,
-        responder_user_mobile=owner_user.mobile_number,
-        actor_user_id=actor_user.id,
-        commodity_id=offer.commodity_id,
-        trade_type=responder_trade_type,
-        quantity=trade_quantity,
-        price=executed_trade_price,
-        status=TradeStatus.COMPLETED,
-        idempotency_key=trade_data.idempotency_key,
-    )
-    db.add(new_trade)
+    source_leg_trade: Trade | None = None
+    response_trade_record: Trade
+    response_trade_number: int
+
+    if uses_outsider_owner_customer_trade_chain and responder_mediator_owner is not None:
+        source_leg_trade = Trade(
+            trade_number=next_trade_number,
+            offer_id=offer.id,
+            offer_user_id=offer.user_id,
+            offer_user_mobile=offer.user.mobile_number if offer.user else None,
+            responder_user_id=responder_mediator_owner.id,
+            responder_user_mobile=responder_mediator_owner.mobile_number,
+            actor_user_id=actor_user.id,
+            commodity_id=offer.commodity_id,
+            trade_type=responder_trade_type,
+            quantity=trade_quantity,
+            price=offer.price,
+            status=TradeStatus.COMPLETED,
+            idempotency_key=None,
+        )
+        db.add(source_leg_trade)
+        next_trade_number += 1
+
+        response_trade_record = Trade(
+            trade_number=next_trade_number,
+            offer_id=None,
+            offer_user_id=responder_mediator_owner.id,
+            offer_user_mobile=responder_mediator_owner.mobile_number,
+            responder_user_id=owner_user.id,
+            responder_user_mobile=owner_user.mobile_number,
+            actor_user_id=actor_user.id,
+            commodity_id=offer.commodity_id,
+            trade_type=responder_trade_type,
+            quantity=trade_quantity,
+            price=executed_trade_price,
+            status=TradeStatus.COMPLETED,
+            idempotency_key=trade_data.idempotency_key,
+        )
+        db.add(response_trade_record)
+    else:
+        response_trade_record = Trade(
+            trade_number=next_trade_number,
+            offer_id=offer.id,
+            offer_user_id=offer.user_id,
+            offer_user_mobile=offer.user.mobile_number if offer.user else None,
+            responder_user_id=owner_user.id,
+            responder_user_mobile=owner_user.mobile_number,
+            actor_user_id=actor_user.id,
+            commodity_id=offer.commodity_id,
+            trade_type=responder_trade_type,
+            quantity=trade_quantity,
+            price=executed_trade_price,
+            status=TradeStatus.COMPLETED,
+            idempotency_key=trade_data.idempotency_key,
+        )
+        db.add(response_trade_record)
+
+    response_trade_number = response_trade_record.trade_number
     
     # آپدیت لفظ
     offer.remaining_quantity -= trade_quantity
@@ -773,27 +836,33 @@ async def _execute_trade_authoritatively(
             selectinload(Trade.responder_user),
             selectinload(Trade.commodity)
         )
-        .where(Trade.id == new_trade.id)
+        .where(Trade.id == response_trade_record.id)
     )
-    created_trade = new_trade
-    new_trade = result.scalar_one()
+    created_trade = response_trade_record
+    response_trade = result.scalar_one()
+    response_offer_user = getattr(response_trade, "offer_user", None)
+    if response_offer_user is None:
+        response_offer_user = responder_mediator_owner if uses_outsider_owner_customer_trade_chain else offer.user
+    response_responder_user = getattr(response_trade, "responder_user", None) or owner_user
     participant_identity_map = await _load_trade_identity_map_for_user_ids(
         db,
         [
-            getattr(new_trade, "offer_user_id", None) or created_trade.offer_user_id,
-            getattr(new_trade, "responder_user_id", None) or created_trade.responder_user_id,
+            getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
+            getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
+            getattr(source_leg_trade, "offer_user_id", None),
+            getattr(source_leg_trade, "responder_user_id", None),
         ],
     )
     offer_user_payload = _build_trade_participant_payload(
         "offer_user",
-        user=offer.user,
-        user_id=getattr(new_trade, "offer_user_id", None) or created_trade.offer_user_id,
+        user=response_offer_user,
+        user_id=getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
         identity_map=participant_identity_map,
     )
     responder_user_payload = _build_trade_participant_payload(
         "responder_user",
-        user=owner_user,
-        user_id=getattr(new_trade, "responder_user_id", None) or created_trade.responder_user_id,
+        user=response_responder_user,
+        user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
         identity_map=participant_identity_map,
     )
     offer_user_display_name = offer_user_payload.get("offer_user_name") or "نامشخص"
@@ -824,81 +893,189 @@ async def _execute_trade_authoritatively(
         respond_type_fa = "فروش"
         offer_emoji = "🟢"
         offer_type_fa = "خرید"
-    
-    # پیام برای پاسخ‌دهنده
-    responder_msg = (
-        f"{respond_emoji} <b>{respond_type_fa}</b>\n\n"
-        f"💰 فی: {executed_trade_price:,}\n"
-        f"📦 تعداد: {trade_quantity}\n"
-        f"🏷️ کالا: {offer.commodity.name}\n"
-        f"👤 طرف معامله: {offer_user_display_name}\n"
-        f"🔢 شماره معامله: {new_trade_number}\n"
-        f"🕐 زمان معامله: {trade_datetime}"
-    )
-    
-    # پیام برای لفظ‌دهنده
-    offer_owner_msg = (
-        f"{offer_emoji} <b>{offer_type_fa}</b>\n\n"
-        f"💰 فی: {executed_trade_price:,}\n"
-        f"📦 تعداد: {trade_quantity}\n"
-        f"🏷️ کالا: {offer.commodity.name}\n"
-        f"👤 طرف معامله: {responder_user_display_name}\n"
-        f"🔢 شماره معامله: {new_trade_number}\n"
-        f"🕐 زمان معامله: {trade_datetime}"
-    )
-    
-    # ارسال پیام‌های تلگرام (در background)
-    background_tasks.add_task(send_telegram_message_sync, owner_user.telegram_id, responder_msg)
-    if offer.user:
-        background_tasks.add_task(send_telegram_message_sync, offer.user.telegram_id, offer_owner_msg)
-    
-    # ارسال نوتیفیکیشن اپ
-    notif_msg_responder = (
-        f"{respond_emoji} {respond_type_fa}\n"
-        f"💰 فی: {executed_trade_price:,} | 📦 تعداد: {trade_quantity}\n"
-        f"🏷️ کالا: {offer.commodity.name}\n"
-        f"👤 طرف معامله: {offer_user_display_name}\n"
-        f"🔢 شماره: {new_trade_number}"
-    )
-    
-    notif_msg_owner = (
-        f"{offer_emoji} {offer_type_fa}\n"
-        f"💰 فی: {executed_trade_price:,} | 📦 تعداد: {trade_quantity}\n"
-        f"🏷️ کالا: {offer.commodity.name}\n"
-        f"👤 طرف معامله: {responder_user_display_name}\n"
-        f"🔢 شماره: {new_trade_number}"
-    )
-    
-    try:
-        responder_audience = await build_trade_notification_audience_user_ids(db, [owner_user.id])
-        offer_owner_audience = await build_trade_notification_audience_user_ids(db, [offer.user_id])
-        responder_notification_payload = _build_trade_notification_extra_payload(
-            "offer_user",
-            offer_user_payload,
-            trade_number=new_trade_number,
+
+    def _build_trade_message_bundle(
+        *,
+        trade_price: int,
+        trade_number: int,
+        offer_user_name: str,
+        responder_user_name: str,
+    ) -> tuple[str, str, str, str]:
+        responder_msg = (
+            f"{respond_emoji} <b>{respond_type_fa}</b>\n\n"
+            f"💰 فی: {trade_price:,}\n"
+            f"📦 تعداد: {trade_quantity}\n"
+            f"🏷️ کالا: {offer.commodity.name}\n"
+            f"👤 طرف معامله: {offer_user_name}\n"
+            f"🔢 شماره معامله: {trade_number}\n"
+            f"🕐 زمان معامله: {trade_datetime}"
         )
-        offer_owner_notification_payload = _build_trade_notification_extra_payload(
+        offer_owner_msg = (
+            f"{offer_emoji} <b>{offer_type_fa}</b>\n\n"
+            f"💰 فی: {trade_price:,}\n"
+            f"📦 تعداد: {trade_quantity}\n"
+            f"🏷️ کالا: {offer.commodity.name}\n"
+            f"👤 طرف معامله: {responder_user_name}\n"
+            f"🔢 شماره معامله: {trade_number}\n"
+            f"🕐 زمان معامله: {trade_datetime}"
+        )
+        notif_msg_responder = (
+            f"{respond_emoji} {respond_type_fa}\n"
+            f"💰 فی: {trade_price:,} | 📦 تعداد: {trade_quantity}\n"
+            f"🏷️ کالا: {offer.commodity.name}\n"
+            f"👤 طرف معامله: {offer_user_name}\n"
+            f"🔢 شماره: {trade_number}"
+        )
+        notif_msg_owner = (
+            f"{offer_emoji} {offer_type_fa}\n"
+            f"💰 فی: {trade_price:,} | 📦 تعداد: {trade_quantity}\n"
+            f"🏷️ کالا: {offer.commodity.name}\n"
+            f"👤 طرف معامله: {responder_user_name}\n"
+            f"🔢 شماره: {trade_number}"
+        )
+        return responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner
+    if uses_outsider_owner_customer_trade_chain and responder_mediator_owner is not None and source_leg_trade is not None:
+        source_leg_offer_payload = _build_trade_participant_payload(
+            "offer_user",
+            user=offer.user,
+            user_id=source_leg_trade.offer_user_id,
+            identity_map=participant_identity_map,
+        )
+        source_leg_responder_payload = _build_trade_participant_payload(
             "responder_user",
-            responder_user_payload,
-            trade_number=new_trade_number,
+            user=responder_mediator_owner,
+            user_id=source_leg_trade.responder_user_id,
+            identity_map=participant_identity_map,
+        )
+        source_leg_offer_name = source_leg_offer_payload.get("offer_user_name") or "نامشخص"
+        source_leg_responder_name = source_leg_responder_payload.get("responder_user_name") or "نامشخص"
+
+        customer_responder_msg, customer_offer_owner_msg, customer_notif_responder, customer_notif_owner = _build_trade_message_bundle(
+            trade_price=executed_trade_price,
+            trade_number=response_trade_number,
+            offer_user_name=offer_user_display_name,
+            responder_user_name=responder_user_display_name,
+        )
+        source_responder_msg, source_offer_owner_msg, source_notif_responder, source_notif_owner = _build_trade_message_bundle(
+            trade_price=offer.price,
+            trade_number=source_leg_trade.trade_number,
+            offer_user_name=source_leg_offer_name,
+            responder_user_name=source_leg_responder_name,
         )
 
-        for audience_user_id in responder_audience:
-            await create_user_notification(
-                db, audience_user_id, notif_msg_responder,
-                level=NotificationLevel.SUCCESS,
-                category=NotificationCategory.TRADE,
-                extra_payload=responder_notification_payload,
+        background_tasks.add_task(send_telegram_message_sync, owner_user.telegram_id, customer_responder_msg)
+        if responder_mediator_owner.telegram_id:
+            background_tasks.add_task(send_telegram_message_sync, responder_mediator_owner.telegram_id, customer_offer_owner_msg)
+            background_tasks.add_task(send_telegram_message_sync, responder_mediator_owner.telegram_id, source_responder_msg)
+        if offer.user:
+            background_tasks.add_task(send_telegram_message_sync, offer.user.telegram_id, source_offer_owner_msg)
+
+        try:
+            customer_responder_audience = await build_trade_notification_audience_user_ids(db, [owner_user.id])
+            mediator_owner_audience = await build_trade_notification_audience_user_ids(db, [responder_mediator_owner.id])
+            source_owner_audience = await build_trade_notification_audience_user_ids(db, [offer.user_id])
+
+            customer_responder_payload = _build_trade_notification_extra_payload(
+                "offer_user",
+                offer_user_payload,
+                trade_number=response_trade_number,
             )
-        for audience_user_id in offer_owner_audience:
-            await create_user_notification(
-                db, audience_user_id, notif_msg_owner,
-                level=NotificationLevel.SUCCESS,
-                category=NotificationCategory.TRADE,
-                extra_payload=offer_owner_notification_payload,
+            customer_offer_owner_payload = _build_trade_notification_extra_payload(
+                "responder_user",
+                responder_user_payload,
+                trade_number=response_trade_number,
             )
-    except:
-        pass
+            source_responder_payload = _build_trade_notification_extra_payload(
+                "offer_user",
+                source_leg_offer_payload,
+                trade_number=source_leg_trade.trade_number,
+            )
+            source_offer_owner_payload = _build_trade_notification_extra_payload(
+                "responder_user",
+                source_leg_responder_payload,
+                trade_number=source_leg_trade.trade_number,
+            )
+
+            for audience_user_id in customer_responder_audience:
+                await create_user_notification(
+                    db,
+                    audience_user_id,
+                    customer_notif_responder,
+                    level=NotificationLevel.SUCCESS,
+                    category=NotificationCategory.TRADE,
+                    extra_payload=customer_responder_payload,
+                )
+            for audience_user_id in mediator_owner_audience:
+                await create_user_notification(
+                    db,
+                    audience_user_id,
+                    customer_notif_owner,
+                    level=NotificationLevel.SUCCESS,
+                    category=NotificationCategory.TRADE,
+                    extra_payload=customer_offer_owner_payload,
+                )
+            for audience_user_id in mediator_owner_audience:
+                await create_user_notification(
+                    db,
+                    audience_user_id,
+                    source_notif_responder,
+                    level=NotificationLevel.SUCCESS,
+                    category=NotificationCategory.TRADE,
+                    extra_payload=source_responder_payload,
+                )
+            for audience_user_id in source_owner_audience:
+                await create_user_notification(
+                    db,
+                    audience_user_id,
+                    source_notif_owner,
+                    level=NotificationLevel.SUCCESS,
+                    category=NotificationCategory.TRADE,
+                    extra_payload=source_offer_owner_payload,
+                )
+        except:
+            pass
+    else:
+        responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner = _build_trade_message_bundle(
+            trade_price=executed_trade_price,
+            trade_number=response_trade_number,
+            offer_user_name=offer_user_display_name,
+            responder_user_name=responder_user_display_name,
+        )
+
+        background_tasks.add_task(send_telegram_message_sync, owner_user.telegram_id, responder_msg)
+        if offer.user:
+            background_tasks.add_task(send_telegram_message_sync, offer.user.telegram_id, offer_owner_msg)
+
+        try:
+            responder_audience = await build_trade_notification_audience_user_ids(db, [owner_user.id])
+            offer_owner_audience = await build_trade_notification_audience_user_ids(db, [offer.user_id])
+            responder_notification_payload = _build_trade_notification_extra_payload(
+                "offer_user",
+                offer_user_payload,
+                trade_number=response_trade_number,
+            )
+            offer_owner_notification_payload = _build_trade_notification_extra_payload(
+                "responder_user",
+                responder_user_payload,
+                trade_number=response_trade_number,
+            )
+
+            for audience_user_id in responder_audience:
+                await create_user_notification(
+                    db, audience_user_id, notif_msg_responder,
+                    level=NotificationLevel.SUCCESS,
+                    category=NotificationCategory.TRADE,
+                    extra_payload=responder_notification_payload,
+                )
+            for audience_user_id in offer_owner_audience:
+                await create_user_notification(
+                    db, audience_user_id, notif_msg_owner,
+                    level=NotificationLevel.SUCCESS,
+                    category=NotificationCategory.TRADE,
+                    extra_payload=offer_owner_notification_payload,
+                )
+        except:
+            pass
     
     # افزایش شمارنده معامله
     # فقط پاسخ‌دهنده (کسی که روی لفظ دیگران معامله می‌کند) شمارنده‌اش افزایش می‌یابد
@@ -910,23 +1087,44 @@ async def _execute_trade_authoritatively(
     await publish_event(
         "trade:created",
         _build_trade_created_event_payload(
-            trade_id=getattr(new_trade, "id", None) or created_trade.id,
-            trade_number=new_trade_number,
-            offer_id=offer.id,
+            trade_id=getattr(response_trade, "id", None) or created_trade.id,
+            trade_number=response_trade_number,
+            offer_id=getattr(response_trade, "offer_id", None),
             commodity_id=offer.commodity_id,
             quantity=trade_quantity,
             price=executed_trade_price,
             commodity_name=offer.commodity.name if offer.commodity else None,
             trade_type=responder_trade_type.value,
-            status=getattr(getattr(new_trade, "status", None), "value", None) or TradeStatus.COMPLETED.value,
-            created_at=to_jalali_str(getattr(new_trade, "created_at", None)) or "",
-            offer_user=offer.user,
+            status=getattr(getattr(response_trade, "status", None), "value", None) or TradeStatus.COMPLETED.value,
+            created_at=to_jalali_str(getattr(response_trade, "created_at", None)) or "",
+            offer_user=response_offer_user,
             offer_user_id=created_trade.offer_user_id,
-            responder_user=owner_user,
+            responder_user=response_responder_user,
             responder_user_id=created_trade.responder_user_id,
             identity_map=participant_identity_map,
         ),
     )
+    if uses_outsider_owner_customer_trade_chain and responder_mediator_owner is not None and source_leg_trade is not None:
+        await publish_event(
+            "trade:created",
+            _build_trade_created_event_payload(
+                trade_id=getattr(source_leg_trade, "id", None),
+                trade_number=source_leg_trade.trade_number,
+                offer_id=offer.id,
+                commodity_id=offer.commodity_id,
+                quantity=trade_quantity,
+                price=offer.price,
+                commodity_name=offer.commodity.name if offer.commodity else None,
+                trade_type=responder_trade_type.value,
+                status=getattr(getattr(source_leg_trade, "status", None), "value", None) or TradeStatus.COMPLETED.value,
+                created_at=to_jalali_str(getattr(source_leg_trade, "created_at", None)) or "",
+                offer_user=offer.user,
+                offer_user_id=source_leg_trade.offer_user_id,
+                responder_user=responder_mediator_owner,
+                responder_user_id=source_leg_trade.responder_user_id,
+                identity_map=participant_identity_map,
+            ),
+        )
     await publish_event("offer:updated", {
         "id": offer.id,
         "remaining_quantity": offer.remaining_quantity,
@@ -934,7 +1132,7 @@ async def _execute_trade_authoritatively(
         "status": offer.status.value
     })
     
-    return trade_to_response(new_trade, identity_map=participant_identity_map)
+    return trade_to_response(response_trade, identity_map=participant_identity_map)
 
 
 @router.post("/", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)
