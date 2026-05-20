@@ -233,6 +233,25 @@ def _build_upload_session_event_payload(
     return payload
 
 
+async def _resolve_direct_activity_sender_name(
+    db: AsyncSession,
+    *,
+    current_user: User,
+) -> str | None:
+    if not hasattr(db, "execute"):
+        return getattr(current_user, "account_name", None)
+
+    sender_id = getattr(current_user, "id", None)
+    if sender_id is None:
+        return getattr(current_user, "account_name", None)
+
+    identity = (await load_accountant_chat_identity_map(db, [sender_id])).get(sender_id)
+    if identity is not None:
+        return identity.display_name
+
+    return getattr(current_user, "account_name", None)
+
+
 async def _increment_upload_session_observability_counters(
     *,
     event_name: str,
@@ -335,7 +354,7 @@ async def _publish_upload_session_runtime_event(
         await publish_direct_activity_event(
             receiver_id=target_id,
             sender_id=current_user.id,
-            sender_name=getattr(current_user, "account_name", None),
+            sender_name=await _resolve_direct_activity_sender_name(db, current_user=current_user),
             activity="uploading_file",
             active=has_active_uploads,
             publisher=publish_user_event,
@@ -677,12 +696,13 @@ async def send_typing_signal(
 async def send_direct_activity_signal(
     data: DirectChatActivitySignal,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """ارسال سیگنال activity برای گفتگو مستقیم."""
     await publish_direct_activity_event(
         receiver_id=data.receiver_id,
         sender_id=current_user.id,
-        sender_name=current_user.account_name,
+        sender_name=await _resolve_direct_activity_sender_name(db, current_user=current_user),
         activity=data.activity,
         active=data.active,
         publisher=publish_user_event,
