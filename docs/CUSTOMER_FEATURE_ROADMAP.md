@@ -77,11 +77,11 @@
 
 validation phase:
 - [x] migration head سبز شود.
-- [ ] uniqueness management name در محدوده owner تست شود.
-- [ ] relation activation / deletion / duplicate-active tests سبز شود.
+- [x] uniqueness management name در محدوده owner تست شود.
+- [x] relation activation / deletion / duplicate-active tests سبز شود.
 
 rollback surface:
-- [ ] با disable کردن consumerها و endpointها، schema additive قابل نگه‌داری است.
+- [x] با disable کردن consumerها و endpointها، schema additive قابل نگه‌داری است.
 
 ## 3. Phase 2 - Shared Backend Seams
 
@@ -91,7 +91,7 @@ rollback surface:
 خروجی‌های لازم:
 - [x] service جدید `customer_relation_service.py` ساخته شود.
 - [x] helperهای capacity, active-relation lookup, owner resolution, allowed-communication graph ساخته شود.
-- [ ] helperهای shared commission calculation و reverse presentation ساخته شود.
+- [x] helperهای shared commission calculation و reverse presentation ساخته شود.
 
 حداقل helperهای لازم:
 - [x] `get_active_customer_relation_for_user(...)`
