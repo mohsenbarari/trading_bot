@@ -68,6 +68,18 @@ describe('notification store', () => {
     expect(store.appNotifications.map((notification) => notification.id)).toEqual([99, 1])
   })
 
+  it('preserves route metadata from a realtime notification when matching history arrives later', async () => {
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+
+    store.addAppNotification({ id: 55, message: 'trade', category: 'trade', route: '/users/19' })
+    apiFetchMock.mockResolvedValueOnce(makeResponse([{ id: 55, message: 'trade', category: 'trade', is_read: false }]))
+
+    await store.fetchHistory()
+
+    expect(store.appNotifications[0]).toMatchObject({ id: 55, route: '/users/19' })
+  })
+
   it('clearAllNotifications restores prior notifications while keeping concurrent realtime items on failure', async () => {
     const { useNotificationStore } = await import('./notifications')
     const store = useNotificationStore()

@@ -37,6 +37,7 @@ export const useNotificationStore = defineStore('notifications', () => {
         fallbackTimestamp = Date.now(),
         existingNotification?: NormalizedAppNotification
     ): NormalizedAppNotification => ({
+        ...(existingNotification || {}),
         ...normalizeAppNotificationPayload(notification),
         client_received_at:
             existingNotification?.client_received_at

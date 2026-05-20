@@ -58,10 +58,13 @@ interface Offer {
 interface Trade {
   id: number
   trade_number: number
+  offer_id?: number | null
   trade_type: string
+  commodity_id?: number | null
   commodity_name: string
   quantity: number
   price: number
+  status?: string | null
   offer_user_id: number | null
   offer_user_name: string | null
   offer_user_profile_user_id?: number | null
@@ -77,6 +80,75 @@ interface Trade {
   responder_user_highlight_accountant_user_id?: number | null
   responder_user_highlight_accountant_relation_display_name?: string | null
   created_at: string
+}
+
+function normalizeTradeRealtimePayload(payload: unknown): Trade | null {
+  if (!payload || typeof payload !== 'object') {
+    return null
+  }
+
+  const rawTrade = payload as Partial<Trade>
+  const tradeId = Number(rawTrade.id)
+  const tradeNumber = Number(rawTrade.trade_number)
+  const quantity = Number(rawTrade.quantity)
+  const price = Number(rawTrade.price)
+  const offerUserId = rawTrade.offer_user_id == null ? null : Number(rawTrade.offer_user_id)
+  const responderUserId = rawTrade.responder_user_id == null ? null : Number(rawTrade.responder_user_id)
+
+  if (!Number.isFinite(tradeId) || !Number.isFinite(tradeNumber) || !Number.isFinite(quantity) || !Number.isFinite(price)) {
+    return null
+  }
+
+  if (typeof rawTrade.trade_type !== 'string' || typeof rawTrade.commodity_name !== 'string' || !rawTrade.commodity_name.trim()) {
+    return null
+  }
+
+  return {
+    id: tradeId,
+    trade_number: tradeNumber,
+    offer_id: rawTrade.offer_id ?? null,
+    trade_type: rawTrade.trade_type,
+    commodity_id: rawTrade.commodity_id ?? null,
+    commodity_name: rawTrade.commodity_name,
+    quantity,
+    price,
+    status: rawTrade.status ?? null,
+    offer_user_id: Number.isFinite(offerUserId as number) ? offerUserId : null,
+    offer_user_name: rawTrade.offer_user_name ?? null,
+    offer_user_profile_user_id: rawTrade.offer_user_profile_user_id ?? null,
+    offer_user_profile_account_name: rawTrade.offer_user_profile_account_name ?? null,
+    offer_user_resolved_from_accountant_id: rawTrade.offer_user_resolved_from_accountant_id ?? null,
+    offer_user_highlight_accountant_user_id: rawTrade.offer_user_highlight_accountant_user_id ?? null,
+    offer_user_highlight_accountant_relation_display_name: rawTrade.offer_user_highlight_accountant_relation_display_name ?? null,
+    responder_user_id: Number.isFinite(responderUserId as number) ? responderUserId : null,
+    responder_user_name: rawTrade.responder_user_name ?? null,
+    responder_user_profile_user_id: rawTrade.responder_user_profile_user_id ?? null,
+    responder_user_profile_account_name: rawTrade.responder_user_profile_account_name ?? null,
+    responder_user_resolved_from_accountant_id: rawTrade.responder_user_resolved_from_accountant_id ?? null,
+    responder_user_highlight_accountant_user_id: rawTrade.responder_user_highlight_accountant_user_id ?? null,
+    responder_user_highlight_accountant_relation_display_name: rawTrade.responder_user_highlight_accountant_relation_display_name ?? null,
+    created_at: typeof rawTrade.created_at === 'string' && rawTrade.created_at.trim() ? rawTrade.created_at : 'همین الان',
+  }
+}
+
+function upsertTradeFromRealtime(payload: unknown): boolean {
+  const trade = normalizeTradeRealtimePayload(payload)
+  if (!trade) {
+    return false
+  }
+
+  const currentUserId = Number(props.user?.id)
+  if (!Number.isFinite(currentUserId)) {
+    return false
+  }
+
+  const isParticipant = Number(trade.offer_user_id) === currentUserId || Number(trade.responder_user_id) === currentUserId
+  if (!isParticipant) {
+    return true
+  }
+
+  myTrades.value = [trade, ...myTrades.value.filter((currentTrade) => currentTrade.id !== trade.id)]
+  return true
 }
 
 interface TradingSettings {
@@ -622,9 +694,9 @@ function handleOfferUpdatedWS(_data: any) {
   else if (activeTab.value === 'my_offers') loadMyOffers(true)
 }
 
-function handleTradeCreatedWS(_data: any) {
+function handleTradeCreatedWS(data: any) {
   if (activeTab.value === 'offers') loadOffers(true)
-  else if (activeTab.value === 'my_trades') loadMyTrades(true)
+  else if (activeTab.value === 'my_trades' && !upsertTradeFromRealtime(data)) loadMyTrades(true)
 }
 
 function setupWebSocket() {

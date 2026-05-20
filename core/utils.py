@@ -281,7 +281,8 @@ async def create_user_notification(
     user_id: int,
     message: str,
     level: NotificationLevel = NotificationLevel.INFO,
-    category: NotificationCategory = NotificationCategory.SYSTEM
+    category: NotificationCategory = NotificationCategory.SYSTEM,
+    extra_payload: dict | None = None,
 ) -> Notification:
     """
     ایجاد نوتیفیکیشن برای کاربر و افزایش شمارنده.
@@ -316,6 +317,8 @@ async def create_user_notification(
         "level": new_notif.level.value,
         "category": new_notif.category.value
     }
+    if extra_payload:
+        payload.update(extra_payload)
     
     try:
         async with redis.Redis(connection_pool=pool) as redis_client:

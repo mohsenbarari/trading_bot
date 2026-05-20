@@ -116,6 +116,61 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(relation_aware_response.responder_user_highlight_accountant_user_id, 22)
         self.assertEqual(relation_aware_response.responder_user_highlight_accountant_relation_display_name, "حسابدار خرید")
 
+        event_payload = trades._build_trade_created_event_payload(
+            trade_id=91,
+            trade_number=10002,
+            offer_id=10,
+            commodity_id=5,
+            quantity=7,
+            price=75000,
+            commodity_name='Gold',
+            trade_type='buy',
+            status='completed',
+            created_at='1403/10/12',
+            offer_user=trade.offer_user,
+            offer_user_id=trade.offer_user_id,
+            responder_user=trade.responder_user,
+            responder_user_id=trade.responder_user_id,
+            identity_map={
+                11: SimpleNamespace(
+                    display_name='حسابدار فروش',
+                    profile_user_id=71,
+                    profile_account_name='owner-71',
+                    resolved_from_accountant_id=11,
+                    highlight_accountant_user_id=11,
+                    highlight_accountant_relation_display_name='حسابدار فروش',
+                ),
+                22: SimpleNamespace(
+                    display_name='حسابدار خرید',
+                    profile_user_id=82,
+                    profile_account_name='owner-82',
+                    resolved_from_accountant_id=22,
+                    highlight_accountant_user_id=22,
+                    highlight_accountant_relation_display_name='حسابدار خرید',
+                ),
+            },
+        )
+        self.assertEqual(event_payload['id'], 91)
+        self.assertEqual(event_payload['commodity_id'], 5)
+        self.assertEqual(event_payload['status'], 'completed')
+        self.assertEqual(event_payload['created_at'], '1403/10/12')
+        self.assertEqual(event_payload['offer_user_profile_user_id'], 71)
+
+        profile_route = trades._build_trade_profile_route_from_payload('offer_user', event_payload)
+        self.assertEqual(
+            profile_route,
+            '/users/71?account_name=owner-71&highlight_accountant_user_id=11&highlight_accountant_relation_display_name=%D8%AD%D8%B3%D8%A7%D8%A8%D8%AF%D8%A7%D8%B1+%D9%81%D8%B1%D9%88%D8%B4',
+        )
+
+        notification_payload = trades._build_trade_notification_extra_payload(
+            'offer_user',
+            event_payload,
+            trade_number=10002,
+        )
+        self.assertEqual(notification_payload['route'], profile_route)
+        self.assertEqual(notification_payload['counterparty_profile_user_id'], 71)
+        self.assertEqual(notification_payload['highlight_accountant_user_id'], 11)
+
         with patch("api.routers.trades.os.getenv", return_value=None):
             self.assertFalse(await trades.send_telegram_message(1, "hello"))
 

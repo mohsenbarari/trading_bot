@@ -104,18 +104,21 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
 
         const title = normalizedNotification.title || 'اعلان جدید'
         const body = normalizedNotification.body || ''
+        const targetRoute = typeof normalizedNotification.route === 'string' && normalizedNotification.route.trim()
+            ? normalizedNotification.route
+            : '/notifications'
 
         notificationStore.addToast({
             title,
             body,
-            route: '/notifications',
+            route: targetRoute,
             kind: 'app',
             level: normalizedNotification.level,
             category: normalizedNotification.category,
         })
 
         if (document.hidden) {
-            showBrowserNotification(title, body, { route: '/notifications' })
+            showBrowserNotification(title, body, { route: targetRoute })
         }
     }
 

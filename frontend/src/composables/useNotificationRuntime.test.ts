@@ -199,6 +199,38 @@ describe('useNotificationRuntime', () => {
     wrapper.unmount()
   })
 
+  it('routes trade app notifications through payload routes when provided', async () => {
+    notificationRuntimeMocks.store.addAppNotification.mockReturnValueOnce({
+      title: 'معامله جدید',
+      body: 'طرف معامله: دفتر مالک',
+      level: 'success',
+      category: 'trade',
+      route: '/users/19?account_name=owner-19',
+    })
+
+    const wrapper = mountRuntime()
+    setDocumentHidden(true)
+
+    emitWsEvent(WS_NOTIFICATION_EVENTS.appMessage, { id: 'trade-1', message: 'trade payload' })
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.store.addToast).toHaveBeenLastCalledWith({
+      title: 'معامله جدید',
+      body: 'طرف معامله: دفتر مالک',
+      route: '/users/19?account_name=owner-19',
+      kind: 'app',
+      level: 'success',
+      category: 'trade',
+    })
+    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenLastCalledWith(
+      'معامله جدید',
+      'طرف معامله: دفتر مالک',
+      { route: '/users/19?account_name=owner-19' },
+    )
+
+    wrapper.unmount()
+  })
+
   it('handles chat notifications for open, direct, muted, and channel conversations correctly', async () => {
     const wrapper = mountRuntime()
 

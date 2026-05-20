@@ -266,6 +266,53 @@ describe('TradingView.vue', () => {
     wrapper.unmount()
   })
 
+  it('upserts rich trade:created payloads without reloading and preserves relation-aware profile targets', async () => {
+    const wrapper = await mountTradingView({ initialTab: 'my_trades' })
+    await flushPromises()
+
+    const handlers = new Map<string, (payload: unknown) => void>(tradingViewMocks.wsOnMock.mock.calls as [string, (payload: unknown) => void][])
+    tradingViewMocks.apiFetchJsonMock.mockClear()
+
+    handlers.get('trade:created')?.({
+      id: 999,
+      trade_number: 19999,
+      offer_id: 101,
+      commodity_id: 1,
+      trade_type: 'buy',
+      commodity_name: 'سکه',
+      quantity: 8,
+      price: 222000,
+      status: 'completed',
+      offer_user_id: 90,
+      offer_user_name: 'حسابدار فروش جدید',
+      offer_user_profile_user_id: 77,
+      offer_user_profile_account_name: 'owner-77',
+      offer_user_highlight_accountant_user_id: 90,
+      offer_user_highlight_accountant_relation_display_name: 'حسابدار فروش جدید',
+      responder_user_id: 7,
+      responder_user_name: 'my-user',
+      created_at: 'همین الان',
+    })
+    await flushPromises()
+
+    expect(tradingViewMocks.apiFetchJsonMock).not.toHaveBeenCalledWith('/api/trades/my', {})
+    expect(wrapper.text()).toContain('19999')
+    expect(wrapper.text()).toContain('حسابدار فروش جدید')
+
+    await wrapper.get('.trade-card .profile-link').trigger('click')
+    expect(wrapper.emitted('navigate')?.at(-1)).toEqual([
+      'public_profile',
+      {
+        id: 77,
+        account_name: 'owner-77',
+        highlight_accountant_user_id: 90,
+        highlight_accountant_relation_display_name: 'حسابدار فروش جدید',
+      },
+    ])
+
+    wrapper.unmount()
+  })
+
   it('renders customer context and viewer-specific display pricing on active offers', async () => {
     tradingViewMocks.apiFetchJsonMock.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/api/offers/' && (!options?.method || options.method === 'GET')) {

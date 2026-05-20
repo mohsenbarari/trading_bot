@@ -61,4 +61,29 @@ describe('NotificationsView.vue', () => {
     expect(deleteSpy).toHaveBeenCalledWith(11)
     expect(wrapper.text()).toContain('اعلان')
   })
+
+  it('opens a notification route when the item carries one', async () => {
+    const store = useNotificationStore()
+    store.appNotifications = [
+      {
+        id: 12,
+        title: 'معامله',
+        body: 'بدنه',
+        content: 'بدنه',
+        message: 'بدنه',
+        level: 'success',
+        category: 'trade',
+        is_read: false,
+        route: '/users/19?account_name=owner-19',
+      },
+    ] as any
+
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+
+    await wrapper.get('.notif-item').trigger('click')
+    expect(routerPushMock).toHaveBeenCalledWith('/users/19?account_name=owner-19')
+  })
 })
