@@ -236,12 +236,12 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB()
 
         with patch(
-            "api.routers.chat.load_accountant_chat_identity_map",
-            new=AsyncMock(return_value={5: SimpleNamespace(display_name="دفتر مالک")}),
-        ) as identity_mock, patch("api.routers.chat.publish_direct_typing_event", new=AsyncMock()) as typing_mock:
+            "api.routers.chat.resolve_direct_sender_display_name",
+            new=AsyncMock(return_value="دفتر مالک"),
+        ) as sender_name_mock, patch("api.routers.chat.publish_direct_typing_event", new=AsyncMock()) as typing_mock:
             result = await send_typing_signal(data=typing_data, current_user=current_user, db=db)
 
-        identity_mock.assert_awaited_once_with(db, [5])
+        sender_name_mock.assert_awaited_once_with(db, user=current_user)
         typing_mock.assert_awaited_once_with(
             receiver_id=9,
             sender_id=5,
@@ -273,12 +273,12 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB()
 
         with patch(
-            "api.routers.chat.load_accountant_chat_identity_map",
-            new=AsyncMock(return_value={5: SimpleNamespace(display_name="دفتر مالک")}),
-        ) as identity_mock, patch("api.routers.chat.publish_direct_activity_event", new=AsyncMock()) as activity_mock:
+            "api.routers.chat.resolve_direct_sender_display_name",
+            new=AsyncMock(return_value="دفتر مالک"),
+        ) as sender_name_mock, patch("api.routers.chat.publish_direct_activity_event", new=AsyncMock()) as activity_mock:
             result = await send_direct_activity_signal(data=activity_data, current_user=current_user, db=db)
 
-        identity_mock.assert_awaited_once_with(db, [5])
+        sender_name_mock.assert_awaited_once_with(db, user=current_user)
         activity_mock.assert_awaited_once_with(
             receiver_id=9,
             sender_id=5,

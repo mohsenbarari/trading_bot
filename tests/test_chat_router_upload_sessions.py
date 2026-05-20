@@ -377,9 +377,9 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat._has_active_upload_sessions_for_room",
             new=AsyncMock(return_value=True),
         ), patch(
-            "api.routers.chat.load_accountant_chat_identity_map",
-            new=AsyncMock(return_value={5: SimpleNamespace(display_name="دفتر مالک")}),
-        ) as identity_mock, patch(
+            "api.routers.chat.resolve_direct_sender_display_name",
+            new=AsyncMock(return_value="دفتر مالک"),
+        ) as sender_name_mock, patch(
             "api.routers.chat.publish_direct_activity_event",
             new=AsyncMock(),
         ) as direct_activity_mock:
@@ -390,7 +390,7 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
                 event_name="progress",
             )
 
-        identity_mock.assert_awaited_once_with(db, [5])
+        sender_name_mock.assert_awaited_once_with(db, user=current_user)
         publish_user_mock.assert_awaited_once()
         published_payload = publish_user_mock.await_args.args[2]
         self.assertEqual(published_payload["retry_count"], 2)

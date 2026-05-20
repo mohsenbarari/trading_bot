@@ -78,6 +78,25 @@ async def load_accountant_chat_identity_map(
     return identity_map
 
 
+async def resolve_direct_sender_display_name(
+    db: AsyncSession | object,
+    *,
+    user: object,
+) -> str | None:
+    if not hasattr(db, "execute"):
+        return getattr(user, "account_name", None)
+
+    sender_id = _coerce_positive_int(getattr(user, "id", None))
+    if sender_id is None:
+        return getattr(user, "account_name", None)
+
+    identity = (await load_accountant_chat_identity_map(db, [sender_id])).get(sender_id)
+    if identity is not None:
+        return identity.display_name
+
+    return getattr(user, "account_name", None)
+
+
 def _coerce_positive_int(value: Any) -> int | None:
     try:
         normalized = int(value)
