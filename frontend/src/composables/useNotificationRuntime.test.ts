@@ -305,4 +305,31 @@ describe('useNotificationRuntime', () => {
 
     wrapper.unmount()
   })
+
+  it('preserves relation-aware direct sender labels in chat toasts and browser routes', async () => {
+    const wrapper = mountRuntime()
+
+    setRoute('/dashboard')
+    setDocumentHidden(true)
+    emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {
+      sender_id: 58,
+      sender_name: 'دفتر مالک',
+      message_type: 'text',
+      content: 'پیام تست',
+    })
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.store.incrementChatUnread).toHaveBeenCalledWith(58)
+    expect(notificationRuntimeMocks.store.addToast).toHaveBeenLastCalledWith({
+      title: 'دفتر مالک',
+      body: 'پیام تست',
+      route: '/chat?user_id=58&user_name=%D8%AF%D9%81%D8%AA%D8%B1%20%D9%85%D8%A7%D9%84%DA%A9',
+      kind: 'chat',
+    })
+    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenLastCalledWith('دفتر مالک', 'پیام تست', {
+      route: '/chat?user_id=58&user_name=%D8%AF%D9%81%D8%AA%D8%B1%20%D9%85%D8%A7%D9%84%DA%A9',
+    })
+
+    wrapper.unmount()
+  })
 })
