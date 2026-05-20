@@ -754,20 +754,37 @@ async def _execute_trade_authoritatively(
         and source_customer_tier == CustomerTier.TIER_1.value
         and offer.user_id != responder_owner_user_id
     )
+    uses_cross_owner_customer_trade_chain = (
+        is_tier2_customer_responder
+        and responder_owner_user_id is not None
+        and source_customer_owner_user_id is not None
+        and source_customer_owner_user_id != responder_owner_user_id
+        and source_customer_tier == CustomerTier.TIER_1.value
+    )
     uses_outsider_owner_customer_trade_chain = (
         is_tier2_customer_responder
         and responder_owner_user_id is not None
         and responder_owner_user_id != offer.user_id
         and not uses_same_owner_customer_trade_chain
+        and not uses_cross_owner_customer_trade_chain
     )
     uses_customer_trade_chain = (
         uses_same_owner_customer_trade_chain
+        or uses_cross_owner_customer_trade_chain
         or uses_outsider_owner_customer_trade_chain
     )
+    source_mediator_owner: User | None = None
     responder_mediator_owner: User | None = None
     if uses_customer_trade_chain:
         responder_mediator_owner = await db.get(User, responder_owner_user_id)
         if responder_mediator_owner is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="امکان انجام این معامله وجود ندارد.",
+            )
+    if uses_cross_owner_customer_trade_chain:
+        source_mediator_owner = await db.get(User, source_customer_owner_user_id)
+        if source_mediator_owner is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="امکان انجام این معامله وجود ندارد.",
@@ -858,17 +875,19 @@ async def _execute_trade_authoritatively(
     responder_trade_type = TradeType.BUY if offer.offer_type == OfferType.SELL else TradeType.SELL
     
     source_leg_trade: Trade | None = None
+    bridge_leg_trade: Trade | None = None
     response_trade_record: Trade
     response_trade_number: int
 
     if uses_customer_trade_chain and responder_mediator_owner is not None:
+        source_leg_responder_user = source_mediator_owner or responder_mediator_owner
         source_leg_trade = Trade(
             trade_number=next_trade_number,
             offer_id=offer.id,
             offer_user_id=offer.user_id,
             offer_user_mobile=offer.user.mobile_number if offer.user else None,
-            responder_user_id=responder_mediator_owner.id,
-            responder_user_mobile=responder_mediator_owner.mobile_number,
+            responder_user_id=source_leg_responder_user.id,
+            responder_user_mobile=source_leg_responder_user.mobile_number,
             actor_user_id=actor_user.id,
             commodity_id=offer.commodity_id,
             trade_type=responder_trade_type,
@@ -879,6 +898,25 @@ async def _execute_trade_authoritatively(
         )
         db.add(source_leg_trade)
         next_trade_number += 1
+
+        if uses_cross_owner_customer_trade_chain and source_mediator_owner is not None:
+            bridge_leg_trade = Trade(
+                trade_number=next_trade_number,
+                offer_id=None,
+                offer_user_id=source_mediator_owner.id,
+                offer_user_mobile=source_mediator_owner.mobile_number,
+                responder_user_id=responder_mediator_owner.id,
+                responder_user_mobile=responder_mediator_owner.mobile_number,
+                actor_user_id=actor_user.id,
+                commodity_id=offer.commodity_id,
+                trade_type=responder_trade_type,
+                quantity=trade_quantity,
+                price=offer.price,
+                status=TradeStatus.COMPLETED,
+                idempotency_key=None,
+            )
+            db.add(bridge_leg_trade)
+            next_trade_number += 1
 
         response_trade_record = Trade(
             trade_number=next_trade_number,
@@ -972,6 +1010,8 @@ async def _execute_trade_authoritatively(
             getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
             getattr(source_leg_trade, "offer_user_id", None),
             getattr(source_leg_trade, "responder_user_id", None),
+            getattr(bridge_leg_trade, "offer_user_id", None),
+            getattr(bridge_leg_trade, "responder_user_id", None),
         ],
     )
     participant_customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
@@ -981,6 +1021,8 @@ async def _execute_trade_authoritatively(
             getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
             getattr(source_leg_trade, "offer_user_id", None),
             getattr(source_leg_trade, "responder_user_id", None),
+            getattr(bridge_leg_trade, "offer_user_id", None),
+            getattr(bridge_leg_trade, "responder_user_id", None),
         ],
     )
     offer_user_payload = _build_trade_participant_payload(
@@ -1070,7 +1112,25 @@ async def _execute_trade_authoritatively(
             f"{trade_path_line}"
         )
         return responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner
+
+    async def _create_trade_notifications_for_leg(
+        *,
+        audience_user_ids: list[int],
+        message: str,
+        extra_payload: dict[str, object | None],
+    ) -> None:
+        for audience_user_id in audience_user_ids:
+            await create_user_notification(
+                db,
+                audience_user_id,
+                message,
+                level=NotificationLevel.SUCCESS,
+                category=NotificationCategory.TRADE,
+                extra_payload=extra_payload,
+            )
+
     if uses_customer_trade_chain and responder_mediator_owner is not None and source_leg_trade is not None:
+        source_leg_responder_user = source_mediator_owner or responder_mediator_owner
         source_leg_offer_payload = _build_trade_participant_payload(
             "offer_user",
             user=offer.user,
@@ -1079,7 +1139,7 @@ async def _execute_trade_authoritatively(
         )
         source_leg_responder_payload = _build_trade_participant_payload(
             "responder_user",
-            user=responder_mediator_owner,
+            user=source_leg_responder_user,
             user_id=source_leg_trade.responder_user_id,
             identity_map=participant_identity_map,
         )
@@ -1095,6 +1155,31 @@ async def _execute_trade_authoritatively(
             responder_user_id=source_leg_trade.responder_user_id,
             customer_relation_map=participant_customer_relation_map,
         )
+        bridge_leg_offer_payload: dict[str, object | None] | None = None
+        bridge_leg_responder_payload: dict[str, object | None] | None = None
+        bridge_leg_offer_name: str | None = None
+        bridge_leg_responder_name: str | None = None
+        bridge_leg_path_payload: dict[str, str | None] | None = None
+        if bridge_leg_trade is not None and source_mediator_owner is not None:
+            bridge_leg_offer_payload = _build_trade_participant_payload(
+                "offer_user",
+                user=source_mediator_owner,
+                user_id=bridge_leg_trade.offer_user_id,
+                identity_map=participant_identity_map,
+            )
+            bridge_leg_responder_payload = _build_trade_participant_payload(
+                "responder_user",
+                user=responder_mediator_owner,
+                user_id=bridge_leg_trade.responder_user_id,
+                identity_map=participant_identity_map,
+            )
+            bridge_leg_offer_name = bridge_leg_offer_payload.get("offer_user_name") or "نامشخص"
+            bridge_leg_responder_name = bridge_leg_responder_payload.get("responder_user_name") or "نامشخص"
+            bridge_leg_path_payload = _build_trade_path_payload(
+                offer_user_id=bridge_leg_trade.offer_user_id,
+                responder_user_id=bridge_leg_trade.responder_user_id,
+                customer_relation_map=participant_customer_relation_map,
+            )
 
         customer_responder_msg, customer_offer_owner_msg, customer_notif_responder, customer_notif_owner = _build_trade_message_bundle(
             trade_price=executed_trade_price,
@@ -1110,18 +1195,37 @@ async def _execute_trade_authoritatively(
             responder_user_name=source_leg_responder_name,
             trade_path_summary=source_leg_path_payload.get("trade_path_summary"),
         )
+        if bridge_leg_trade is not None and bridge_leg_offer_payload is not None and bridge_leg_responder_payload is not None:
+            bridge_responder_msg, bridge_offer_owner_msg, bridge_notif_responder, bridge_notif_owner = _build_trade_message_bundle(
+                trade_price=offer.price,
+                trade_number=bridge_leg_trade.trade_number,
+                offer_user_name=bridge_leg_offer_name or "نامشخص",
+                responder_user_name=bridge_leg_responder_name or "نامشخص",
+                trade_path_summary=bridge_leg_path_payload.get("trade_path_summary") if bridge_leg_path_payload else None,
+            )
+        else:
+            bridge_responder_msg = bridge_offer_owner_msg = bridge_notif_responder = bridge_notif_owner = None
 
         background_tasks.add_task(send_telegram_message_sync, owner_user.telegram_id, customer_responder_msg)
         if responder_mediator_owner.telegram_id:
             background_tasks.add_task(send_telegram_message_sync, responder_mediator_owner.telegram_id, customer_offer_owner_msg)
-            background_tasks.add_task(send_telegram_message_sync, responder_mediator_owner.telegram_id, source_responder_msg)
+            if bridge_responder_msg:
+                background_tasks.add_task(send_telegram_message_sync, responder_mediator_owner.telegram_id, bridge_responder_msg)
+        if source_leg_responder_user.telegram_id:
+            background_tasks.add_task(send_telegram_message_sync, source_leg_responder_user.telegram_id, source_responder_msg)
+        if bridge_offer_owner_msg and source_mediator_owner is not None and source_mediator_owner.telegram_id:
+            background_tasks.add_task(send_telegram_message_sync, source_mediator_owner.telegram_id, bridge_offer_owner_msg)
         if offer.user:
             background_tasks.add_task(send_telegram_message_sync, offer.user.telegram_id, source_offer_owner_msg)
 
         try:
             customer_responder_audience = await build_trade_notification_audience_user_ids(db, [owner_user.id])
-            mediator_owner_audience = await build_trade_notification_audience_user_ids(db, [responder_mediator_owner.id])
-            source_owner_audience = await build_trade_notification_audience_user_ids(db, [offer.user_id])
+            responder_owner_audience = await build_trade_notification_audience_user_ids(db, [responder_mediator_owner.id])
+            source_leg_responder_audience = await build_trade_notification_audience_user_ids(db, [source_leg_responder_user.id])
+            source_actor_audience = await build_trade_notification_audience_user_ids(db, [offer.user_id])
+            bridge_offer_owner_audience = None
+            if bridge_offer_owner_msg and source_mediator_owner is not None:
+                bridge_offer_owner_audience = await build_trade_notification_audience_user_ids(db, [source_mediator_owner.id])
 
             customer_responder_payload = _build_trade_notification_extra_payload(
                 "offer_user",
@@ -1143,43 +1247,52 @@ async def _execute_trade_authoritatively(
                 source_leg_responder_payload,
                 trade_number=source_leg_trade.trade_number,
             )
+            if bridge_leg_trade is not None and bridge_leg_offer_payload is not None and bridge_leg_responder_payload is not None:
+                bridge_responder_payload = _build_trade_notification_extra_payload(
+                    "offer_user",
+                    bridge_leg_offer_payload,
+                    trade_number=bridge_leg_trade.trade_number,
+                )
+                bridge_offer_owner_payload = _build_trade_notification_extra_payload(
+                    "responder_user",
+                    bridge_leg_responder_payload,
+                    trade_number=bridge_leg_trade.trade_number,
+                )
+            else:
+                bridge_responder_payload = bridge_offer_owner_payload = None
 
-            for audience_user_id in customer_responder_audience:
-                await create_user_notification(
-                    db,
-                    audience_user_id,
-                    customer_notif_responder,
-                    level=NotificationLevel.SUCCESS,
-                    category=NotificationCategory.TRADE,
-                    extra_payload=customer_responder_payload,
+            await _create_trade_notifications_for_leg(
+                audience_user_ids=customer_responder_audience,
+                message=customer_notif_responder,
+                extra_payload=customer_responder_payload,
+            )
+            await _create_trade_notifications_for_leg(
+                audience_user_ids=responder_owner_audience,
+                message=customer_notif_owner,
+                extra_payload=customer_offer_owner_payload,
+            )
+            if bridge_notif_responder and bridge_responder_payload:
+                await _create_trade_notifications_for_leg(
+                    audience_user_ids=responder_owner_audience,
+                    message=bridge_notif_responder,
+                    extra_payload=bridge_responder_payload,
                 )
-            for audience_user_id in mediator_owner_audience:
-                await create_user_notification(
-                    db,
-                    audience_user_id,
-                    customer_notif_owner,
-                    level=NotificationLevel.SUCCESS,
-                    category=NotificationCategory.TRADE,
-                    extra_payload=customer_offer_owner_payload,
+            await _create_trade_notifications_for_leg(
+                audience_user_ids=source_leg_responder_audience,
+                message=source_notif_responder,
+                extra_payload=source_responder_payload,
+            )
+            if bridge_notif_owner and bridge_offer_owner_payload and bridge_offer_owner_audience is not None:
+                await _create_trade_notifications_for_leg(
+                    audience_user_ids=bridge_offer_owner_audience,
+                    message=bridge_notif_owner,
+                    extra_payload=bridge_offer_owner_payload,
                 )
-            for audience_user_id in mediator_owner_audience:
-                await create_user_notification(
-                    db,
-                    audience_user_id,
-                    source_notif_responder,
-                    level=NotificationLevel.SUCCESS,
-                    category=NotificationCategory.TRADE,
-                    extra_payload=source_responder_payload,
-                )
-            for audience_user_id in source_owner_audience:
-                await create_user_notification(
-                    db,
-                    audience_user_id,
-                    source_notif_owner,
-                    level=NotificationLevel.SUCCESS,
-                    category=NotificationCategory.TRADE,
-                    extra_payload=source_offer_owner_payload,
-                )
+            await _create_trade_notifications_for_leg(
+                audience_user_ids=source_actor_audience,
+                message=source_notif_owner,
+                extra_payload=source_offer_owner_payload,
+            )
         except:
             pass
     else:
@@ -1280,6 +1393,28 @@ async def _execute_trade_authoritatively(
                 customer_relation_map=participant_customer_relation_map,
             ),
         )
+        if bridge_leg_trade is not None and source_mediator_owner is not None:
+            await publish_event(
+                "trade:created",
+                _build_trade_created_event_payload(
+                    trade_id=getattr(bridge_leg_trade, "id", None),
+                    trade_number=bridge_leg_trade.trade_number,
+                    offer_id=None,
+                    commodity_id=offer.commodity_id,
+                    quantity=trade_quantity,
+                    price=offer.price,
+                    commodity_name=offer.commodity.name if offer.commodity else None,
+                    trade_type=responder_trade_type.value,
+                    status=getattr(getattr(bridge_leg_trade, "status", None), "value", None) or TradeStatus.COMPLETED.value,
+                    created_at=to_jalali_str(getattr(bridge_leg_trade, "created_at", None)) or "",
+                    offer_user=source_mediator_owner,
+                    offer_user_id=bridge_leg_trade.offer_user_id,
+                    responder_user=responder_mediator_owner,
+                    responder_user_id=bridge_leg_trade.responder_user_id,
+                    identity_map=participant_identity_map,
+                    customer_relation_map=participant_customer_relation_map,
+                ),
+            )
     await publish_event("offer:updated", {
         "id": offer.id,
         "remaining_quantity": offer.remaining_quantity,
