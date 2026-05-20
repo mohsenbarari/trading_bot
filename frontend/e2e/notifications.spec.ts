@@ -18,6 +18,14 @@ interface RelationAwareNotificationFixture {
   relationDisplayName: string
 }
 
+interface RelationAwareRoomActivityFixture {
+  owner: SeededSessionFixture
+  accountant: SeededSessionFixture
+  relationDisplayName: string
+  groupChatId: number
+  groupTitle: string
+}
+
 interface PendingLoginRequestFixture {
   requestId: string
   deviceName: string
@@ -225,6 +233,151 @@ asyncio.run(main())
 `)
 }
 
+function seedRelationAwareRoomActivityFixture(label: string): RelationAwareRoomActivityFixture {
+  return runPythonInApp<RelationAwareRoomActivityFixture>(`
+import asyncio
+import json
+import uuid
+from datetime import datetime, timedelta
+
+from core.db import AsyncSessionLocal
+from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType, UserRole
+from core.security import create_access_token, create_refresh_token
+from core.services.session_service import hash_token
+from models.accountant_relation import AccountantRelation, AccountantRelationStatus
+from models.chat import Chat
+from models.chat_member import ChatMember
+from models.session import Platform, UserSession
+from models.user import User
+
+label = ${JSON.stringify(label)}
+
+def build_session_payload(user, device_name):
+  refresh_token = create_refresh_token(subject=user.id)
+  session = UserSession(
+    user_id=user.id,
+    device_name=device_name,
+    device_ip='127.0.0.1',
+    platform=Platform.WEB,
+    refresh_token_hash=hash_token(refresh_token),
+    is_primary=True,
+    is_active=True,
+    expires_at=None,
+  )
+  return refresh_token, session
+
+async def main():
+  suffix = uuid.uuid4().hex[:10]
+  relation_display_name = f"دفتر {suffix[:6]}"
+  owner_mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+  accountant_mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+
+  async with AsyncSessionLocal() as db:
+    owner = User(
+      account_name=f"pw_{label}_owner_{suffix}",
+      mobile_number=f"09{owner_mobile_seed:09d}",
+      full_name='Playwright Room Owner',
+      address='Playwright Room Owner',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+      max_accountants=3,
+    )
+    accountant = User(
+      account_name=f"pw_{label}_acct_{suffix}",
+      mobile_number=f"09{accountant_mobile_seed:09d}",
+      full_name='Playwright Room Accountant',
+      address='Playwright Room Accountant',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    db.add(owner)
+    db.add(accountant)
+    await db.flush()
+
+    relation = AccountantRelation(
+      owner_user_id=owner.id,
+      accountant_user_id=accountant.id,
+      created_by_user_id=owner.id,
+      invitation_token=f"pw_room_inv_{uuid.uuid4().hex}",
+      global_account_name=accountant.account_name,
+      relation_display_name=relation_display_name,
+      duty_description='Playwright Room Activity Relation',
+      mobile_number=accountant.mobile_number,
+      status=AccountantRelationStatus.ACTIVE,
+      expires_at=datetime.utcnow() + timedelta(days=30),
+      activated_at=datetime.utcnow(),
+    )
+    db.add(relation)
+
+    chat = Chat(
+      type=ChatType.GROUP,
+      title=f"Playwright Relation Group {suffix[:6]}",
+      description='Playwright relation-aware room activity',
+      created_by_id=owner.id,
+    )
+    db.add(chat)
+    await db.flush()
+
+    db.add_all([
+      ChatMember(
+        chat_id=chat.id,
+        user_id=owner.id,
+        role=ChatMemberRole.ADMIN,
+        membership_status=ChatMembershipStatus.ACTIVE,
+        joined_at=datetime.utcnow(),
+      ),
+      ChatMember(
+        chat_id=chat.id,
+        user_id=accountant.id,
+        role=ChatMemberRole.MEMBER,
+        membership_status=ChatMembershipStatus.ACTIVE,
+        joined_at=datetime.utcnow(),
+      ),
+    ])
+
+    owner_refresh_token, owner_session = build_session_payload(owner, 'Playwright Relation Room Owner Device')
+    accountant_refresh_token, accountant_session = build_session_payload(accountant, 'Playwright Relation Room Accountant Device')
+    db.add(owner_session)
+    db.add(accountant_session)
+    await db.flush()
+
+    owner_access_token = create_access_token(
+      subject=owner.id,
+      expires_delta=timedelta(minutes=60),
+      session_id=str(owner_session.id),
+    )
+    accountant_access_token = create_access_token(
+      subject=accountant.id,
+      expires_delta=timedelta(minutes=60),
+      session_id=str(accountant_session.id),
+    )
+
+    await db.commit()
+
+  print(json.dumps({
+    'owner': {
+      'userId': owner.id,
+      'accountName': owner.account_name,
+      'accessToken': owner_access_token,
+      'refreshToken': owner_refresh_token,
+    },
+    'accountant': {
+      'userId': accountant.id,
+      'accountName': accountant.account_name,
+      'accessToken': accountant_access_token,
+      'refreshToken': accountant_refresh_token,
+    },
+    'relationDisplayName': relation_display_name,
+    'groupChatId': chat.id,
+    'groupTitle': chat.title,
+  }))
+
+asyncio.run(main())
+`)
+}
+
 function createPendingLoginRequest(userId: number, deviceName: string): PendingLoginRequestFixture {
   return runPythonInApp<PendingLoginRequestFixture>(`
 import asyncio
@@ -315,6 +468,24 @@ async function sendTextChatMessage(
 
   expect(response.ok()).toBeTruthy()
   return response.json()
+}
+
+async function sendRoomActivitySignal(
+  request: APIRequestContext,
+  actor: SeededSessionFixture,
+  roomChatId: number,
+  activity: 'typing' | 'uploading_file',
+  active = true,
+) {
+  const response = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${roomChatId}/activity`, {
+    headers: authHeaders(actor.accessToken),
+    data: {
+      activity,
+      active,
+    },
+  })
+
+  expect(response.status()).toBe(204)
 }
 
 test.describe('Notification regressions', () => {
@@ -448,5 +619,21 @@ test.describe('Notification regressions', () => {
       })
 
     await expect(page.getByText(content)).toBeVisible()
+  })
+
+  test('group room activity status shows relation-aware accountant label in chat header', async ({ page, request }) => {
+    const fixture = seedRelationAwareRoomActivityFixture('room_relation_activity')
+
+    await loginWithSeededSession(page, fixture.owner)
+    await page.goto(`/chat?user_id=-${fixture.groupChatId}&user_name=${encodeURIComponent(fixture.groupTitle)}`)
+    await expect(page.locator('.chat-header .header-name')).toContainText(fixture.groupTitle, { timeout: 30000 })
+    await page.waitForTimeout(1200)
+
+    await sendRoomActivitySignal(request, fixture.accountant, fixture.groupChatId, 'typing', true)
+
+    const headerStatus = page.locator('.chat-header .header-status')
+    await expect(headerStatus).toContainText(fixture.relationDisplayName, { timeout: 30000 })
+    await expect(headerStatus).toContainText('در حال نوشتن', { timeout: 30000 })
+    await expect(headerStatus).not.toContainText(fixture.accountant.accountName)
   })
 })
