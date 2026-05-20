@@ -58,7 +58,6 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
             message=message,
             serializer=unittest.mock.ANY,
             publisher=unittest.mock.ANY,
-            sender_name="alpha",
         )
         serialize_mock.assert_awaited_once_with(db, message, viewer_user_id=5)
         self.assertIs(result, serialized)

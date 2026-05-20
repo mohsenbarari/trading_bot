@@ -1648,7 +1648,6 @@ async def send_message(
         message=message,
         serializer=_build_direct_message_accountant_serializer(identity_map),
         publisher=publish_user_event,
-        sender_name=getattr(current_user, "account_name", None),
     )
 
     return response_message
@@ -2114,7 +2113,6 @@ async def commit_upload_batch_endpoint(
                 message=message,
                 serializer=_serializer,
                 publisher=publish_user_event,
-                sender_name=getattr(current_user, "account_name", None),
             )
     else:
         member_user_ids = await list_active_room_member_user_ids(db, chat_id=commit_result.target.target_id)

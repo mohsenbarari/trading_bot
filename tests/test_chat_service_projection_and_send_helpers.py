@@ -244,7 +244,10 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await chat_service.prepare_direct_message_send(
-                    SimpleNamespace(get=AsyncMock(return_value=receiver)),
+                    SimpleNamespace(
+                        get=AsyncMock(return_value=receiver),
+                        execute=AsyncMock(return_value=scalar_one_or_none_result(None)),
+                    ),
                     sender=sender,
                     receiver_id=6,
                     content="hello",
@@ -304,6 +307,12 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(payload["sender_name"], "demo")
         self.assertTrue(payload["created_at"].startswith("2025-01-01T12:00:00"))
+
+        serializer_named_payload = chat_service.build_direct_message_event_payload(
+            message,
+            serializer=lambda item: {"created_at": item.created_at, "sender_name": "relation-aware"},
+        )
+        self.assertEqual(serializer_named_payload["sender_name"], "relation-aware")
 
         reloaded = SimpleNamespace(id=9)
         db = SimpleNamespace(execute=AsyncMock(return_value=first_result(reloaded)))
