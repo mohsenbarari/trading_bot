@@ -132,6 +132,7 @@ from core.services.accountant_chat_contract import (
     collect_message_identity_user_ids,
     load_accountant_chat_identity_map,
     resolve_direct_sender_display_name,
+    resolve_relation_aware_sender_display_name,
 )
 from core.services.single_session_recovery_service import (
     build_recovery_action_map_for_admin_messages,
@@ -350,7 +351,7 @@ async def _publish_upload_session_runtime_event(
     await publish_room_activity_event(
         chat=chat,
         sender_id=current_user.id,
-        sender_name=getattr(current_user, "account_name", None),
+        sender_name=await resolve_relation_aware_sender_display_name(db, user=current_user),
         member_user_ids=await list_active_room_member_user_ids(db, chat_id=chat.id),
         activity="uploading_file",
         active=has_active_uploads,
@@ -712,7 +713,7 @@ async def send_room_activity_signal(
     await publish_room_activity_event(
         chat=chat,
         sender_id=current_user.id,
-        sender_name=current_user.account_name,
+        sender_name=await resolve_relation_aware_sender_display_name(db, user=current_user),
         member_user_ids=await list_active_room_member_user_ids(db, chat_id=chat.id),
         activity=data.activity,
         active=data.active,
