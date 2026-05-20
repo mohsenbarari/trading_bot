@@ -26,6 +26,7 @@ describe('currentUser utils', () => {
       global_web_locked_at: '2026-05-21T12:00:00Z',
       is_accountant: true,
       is_customer: true,
+      customer_tier: 'tier2',
     })
 
     expect(result).toMatchObject({
@@ -38,6 +39,7 @@ describe('currentUser utils', () => {
       global_web_locked_at: '2026-05-21T12:00:00Z',
       is_accountant: true,
       is_customer: true,
+      customer_tier: 'tier2',
     })
     expect(readCachedCurrentUserSummary()).toMatchObject({
       account_status: 'inactive',
@@ -45,6 +47,7 @@ describe('currentUser utils', () => {
       global_web_locked_at: '2026-05-21T12:00:00Z',
       is_accountant: true,
       is_customer: true,
+      customer_tier: 'tier2',
     })
   })
 
@@ -61,6 +64,7 @@ describe('currentUser utils', () => {
         global_web_locked_at: null,
         is_accountant: false,
         is_customer: true,
+        customer_tier: 'tier1',
       }),
     })
 
@@ -76,6 +80,7 @@ describe('currentUser utils', () => {
       global_web_locked_at: null,
       is_accountant: false,
       is_customer: true,
+      customer_tier: 'tier1',
     })
   })
 

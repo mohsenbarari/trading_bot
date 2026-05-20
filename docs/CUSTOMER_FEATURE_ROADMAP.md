@@ -168,9 +168,10 @@ validation phase:
 
 - [x] `Tier 1`: آفر با raw price منتشر می‌شود و همه viewerها همان raw published price را می‌بینند.
 - [x] `Tier 1`: owner همان customer روی آفر، تگ «مشتری + management name» می‌بیند.
-- [ ] `Tier 2`: حق ثبت آفر ندارد و فقط request روی آفرهای دیگر می‌زند.
+- [x] `Tier 2`: حق ثبت آفر ندارد و فقط request روی آفرهای دیگر می‌زند.
 - [x] `Tier 2`: pricing projection بر اساس commission policy سیستمی باقی می‌ماند.
 - [x] `Tier 2`: projection قیمت viewer-specific است؛ دو `Tier 2` با نرخ‌های متفاوت می‌توانند یک آفر واحد را با دو price متفاوت ببینند.
+- [x] contract جاری `/api/auth/me` و `MarketView.vue` باید این محدودیت را به‌صورت additive به UI برسانند، اما authority نهایی همچنان backend create-offer guard می‌ماند.
 
 ### 5.1. اصل بنیادی
 
@@ -296,7 +297,7 @@ validation phase:
 - [ ] customer نباید trade مستقیم customer ↔ outsider داشته باشد.
 - [ ] هر execution باید از owner mediation عبور کند.
 - [ ] full matrix در checklist section 9.0 مرجع نهایی actor-category coverage است؛ این بخش همان matrix را به requirementهای اجرایی تبدیل می‌کند.
-- [ ] offer source فقط `Owner` یا `Tier 1` است؛ `Tier 2` source invalid است و باید در create-offer guard رد شود.
+- [x] offer source فقط `Owner` یا `Tier 1` است؛ `Tier 2` source invalid است و باید در create-offer guard رد شود.
 - [ ] buy/sell mirrorها با همان chain actorها derive می‌شوند؛ فقط جهت buyer/seller در هر leg و price projection متناظر با offer type تغییر می‌کند.
 - [ ] Tier 1 canonical cases (قیمت یکسان در همه legs):
   - [ ] customer seller vs customer buyer (ownerهای متفاوت): chain سه‌مرحله‌ای.

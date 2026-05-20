@@ -93,6 +93,7 @@ class UserRead(UserBase):
     )
     is_accountant: bool = False
     is_customer: bool = False
+    customer_tier: CustomerTier | None = None
     is_deleted: bool = False
     avatar_file_id: str | None = None
     created_at: datetime

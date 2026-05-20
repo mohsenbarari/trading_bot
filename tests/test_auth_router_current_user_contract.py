@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from api.routers.auth import read_users_me, update_my_avatar
+from models.customer_relation import CustomerTier
 from models.user import UserRole
 
 
@@ -50,16 +51,17 @@ class AuthRouterCurrentUserContractTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("api.routers.auth.is_user_accountant", new=AsyncMock(return_value=True)) as accountant_mock, patch(
-            "api.routers.auth.is_user_customer",
-            new=AsyncMock(return_value=False),
-        ) as customer_mock:
+            "api.routers.auth.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ) as customer_relation_mock:
             result = await read_users_me(current_user=user, db=object())
 
         accountant_mock.assert_awaited_once_with(unittest.mock.ANY, 7)
-        customer_mock.assert_awaited_once_with(unittest.mock.ANY, 7)
+        customer_relation_mock.assert_awaited_once_with(unittest.mock.ANY, 7)
         self.assertEqual(result.id, 7)
         self.assertTrue(result.is_accountant)
         self.assertFalse(result.is_customer)
+        self.assertIsNone(result.customer_tier)
         self.assertEqual(result.account_name, "ali")
         self.assertEqual(result.global_lock_grace_expires_at, user.messenger_grace_expires_at)
         self.assertEqual(result.global_web_locked_at, user.messenger_blocked_at)
@@ -75,9 +77,9 @@ class AuthRouterCurrentUserContractTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.auth.is_user_accountant",
             new=AsyncMock(return_value=False),
         ) as accountant_mock, patch(
-            "api.routers.auth.is_user_customer",
-            new=AsyncMock(return_value=True),
-        ) as customer_mock:
+            "api.routers.auth.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=SimpleNamespace(customer_tier=CustomerTier.TIER_2)),
+        ) as customer_relation_mock:
             result = await update_my_avatar(
                 payload=SimpleNamespace(avatar_file_id="avatar-1"),
                 current_user=user,
@@ -90,12 +92,13 @@ class AuthRouterCurrentUserContractTests(unittest.IsolatedAsyncioTestCase):
             avatar_file_id="avatar-1",
         )
         accountant_mock.assert_awaited_once_with(db, 7)
-        customer_mock.assert_awaited_once_with(db, 7)
+        customer_relation_mock.assert_awaited_once_with(db, 7)
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(user)
         self.assertEqual(user.avatar_file_id, "avatar-1")
         self.assertFalse(result.is_accountant)
         self.assertTrue(result.is_customer)
+        self.assertEqual(result.customer_tier, CustomerTier.TIER_2)
         self.assertEqual(result.avatar_file_id, "avatar-1")
 
 

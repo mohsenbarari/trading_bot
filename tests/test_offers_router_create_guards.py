@@ -8,18 +8,25 @@ from fastapi import HTTPException
 
 from api.routers.offers import OfferCreate, create_offer
 from core.enums import UserAccountStatus, UserRole
+from models.customer_relation import CustomerTier
 
 
 class FakeDB:
-    def __init__(self, *, scalar_result=None, get_result=None):
+    def __init__(self, *, scalar_result=None, get_result=None, execute_scalar_result=None):
         self.scalar_result = scalar_result
         self.get_result = get_result
+        self.execute_scalar_result = execute_scalar_result
 
     async def scalar(self, _stmt):
         return self.scalar_result
 
     async def get(self, _model, _id):
         return self.get_result
+
+    async def execute(self, _stmt):
+        return SimpleNamespace(
+            scalar_one_or_none=lambda: self.execute_scalar_result,
+        )
 
 
 def make_offer(**overrides):
@@ -77,6 +84,26 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "حساب شما غیرفعال است و دسترسی شما به بازار بسته شده است.")
+
+    async def test_create_offer_rejects_tier2_customers(self):
+        current_user = make_user()
+        tier2_relation = SimpleNamespace(customer_tier=CustomerTier.TIER_2)
+
+        with patch(
+            "api.routers.offers.check_user_limits",
+            side_effect=[(True, None), (True, None)],
+        ), patch(
+            "api.routers.offers.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=tier2_relation),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_offer(make_offer(), db=FakeDB(), context=make_context(current_user))
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(
+            exc_info.exception.detail,
+            "مشتری سطح 2 مجاز به ثبت لفظ نیست و فقط می‌تواند روی لفظ‌های دیگر درخواست بزند.",
+        )
 
     async def test_create_offer_rejects_user_limit_failures(self):
         current_user = make_user()

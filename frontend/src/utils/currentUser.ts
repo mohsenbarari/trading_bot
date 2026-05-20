@@ -11,6 +11,7 @@ export interface CurrentUserSummary {
   global_web_locked_at?: string | null
   is_accountant?: boolean
   is_customer?: boolean
+  customer_tier?: 'tier1' | 'tier2' | null
 }
 
 const CURRENT_USER_STORAGE_KEY = 'current_user_summary'
@@ -37,6 +38,7 @@ function normalizeCurrentUserSummary(raw: unknown): CurrentUserSummary | null {
       typeof user.global_web_locked_at === 'string' ? user.global_web_locked_at : null,
     is_accountant: user.is_accountant === true,
     is_customer: user.is_customer === true,
+    customer_tier: user.customer_tier === 'tier1' || user.customer_tier === 'tier2' ? user.customer_tier : null,
   }
 }
 

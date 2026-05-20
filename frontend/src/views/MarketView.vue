@@ -44,8 +44,11 @@ interface OfferPriceWarning {
   difference_percent: number
 }
 
+type CustomerTierValue = 'tier1' | 'tier2' | null
+
 const { offers, isLoading, fetchOffers, startPolling, stopPolling } = useOffers()
 const currentUserId = ref<number | undefined>(undefined)
+const currentUserCustomerTier = ref<CustomerTierValue>(null)
 
 const {
   filterType,
@@ -75,6 +78,7 @@ const successMessage = ref('')
 const pendingOfferPreview = ref<ParsedOfferPreview | null>(null)
 const previewError = ref('')
 const previewWarning = ref<OfferPriceWarning | null>(null)
+const isTier2Customer = computed(() => currentUserCustomerTier.value === 'tier2')
 
 // Computed
 const randomPlaceholder = computed(() => {
@@ -127,6 +131,10 @@ function cancelOfferPreview() {
 
 async function confirmOfferPreview() {
   if (!pendingOfferPreview.value) return
+  if (isTier2Customer.value) {
+    previewError.value = 'مشتری سطح 2 مجاز به ثبت لفظ نیست و فقط می‌تواند روی لفظ‌های دیگر درخواست بزند.'
+    return
+  }
   isSubmitting.value = true
   previewError.value = ''
 
@@ -161,6 +169,10 @@ async function confirmOfferPreview() {
 }
 
 function parseAndSubmitTextOffer() {
+  if (isTier2Customer.value) {
+    parseError.value = 'مشتری سطح 2 مجاز به ثبت لفظ نیست و فقط می‌تواند روی لفظ‌های دیگر درخواست بزند.'
+    return
+  }
   if (!offerText.value.trim()) return
   isSubmitting.value = true
   parseError.value = ''
@@ -189,11 +201,22 @@ async function fetchCurrentUser() {
         if (res.ok) {
             const data = await res.json()
             currentUserId.value = data.id
+      currentUserCustomerTier.value = data.customer_tier === 'tier1' || data.customer_tier === 'tier2'
+        ? data.customer_tier
+        : null
         }
     } catch (e) {
         console.error('Failed to load current user', e)
     }
 }
+
+watch(isTier2Customer, (blocked) => {
+  if (!blocked) return
+  offerText.value = ''
+  pendingOfferPreview.value = null
+  previewWarning.value = null
+  previewError.value = ''
+})
 
 onMounted(() => {
     fetchOffers()
@@ -300,27 +323,35 @@ onUnmounted(() => {
     />
 
     <!-- Bottom Action Bar -->
-    <div class="market-action-bar">
+    <div class="market-action-bar" :class="{ 'market-action-bar--notice': isTier2Customer }">
         <div class="action-bar-inner">
-            <!-- Text Input Row -->
-            <div class="input-wrapper">
-                <input 
-                    v-model="offerText"
-                    type="text" 
-                    :placeholder="randomPlaceholder"
-                    class="text-offer-input"
-                    @keydown.enter="parseAndSubmitTextOffer"
-                >
-                <button 
-                    @click="parseAndSubmitTextOffer"
-                    :disabled="!offerText.trim() || isSubmitting"
-                    class="send-btn"
-                >
-                    <Loader2 v-if="isSubmitting" class="animate-spin" :size="20" />
-                    <Send v-else :size="20" />
-                </button>
-            </div>
-            <div v-if="parseError" class="parse-error">{{ parseError }}</div>
+        <template v-if="isTier2Customer">
+          <div class="tier2-offer-note">
+            <div class="tier2-offer-note-title">ثبت لفظ برای مشتری سطح 2 غیرفعال است</div>
+            <div class="tier2-offer-note-text">شما فقط می‌توانید روی لفظ‌های دیگر درخواست بزنید.</div>
+          </div>
+        </template>
+        <template v-else>
+          <!-- Text Input Row -->
+          <div class="input-wrapper">
+            <input 
+              v-model="offerText"
+              type="text" 
+              :placeholder="randomPlaceholder"
+              class="text-offer-input"
+              @keydown.enter="parseAndSubmitTextOffer"
+            >
+            <button 
+              @click="parseAndSubmitTextOffer"
+              :disabled="!offerText.trim() || isSubmitting"
+              class="send-btn"
+            >
+              <Loader2 v-if="isSubmitting" class="animate-spin" :size="20" />
+              <Send v-else :size="20" />
+            </button>
+          </div>
+          <div v-if="parseError" class="parse-error">{{ parseError }}</div>
+        </template>
         </div>
     </div>
   </div>
@@ -504,6 +535,34 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.market-action-bar--notice {
+  background: rgba(255, 248, 235, 0.97);
+  border-top-color: rgba(217, 119, 6, 0.18);
+}
+
+.tier2-offer-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--ds-radius-lg);
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.98), rgba(255, 237, 213, 0.96));
+  border: 1px solid rgba(217, 119, 6, 0.2);
+  color: var(--ds-warning-700, #9a3412);
+  box-shadow: 0 10px 24px rgba(217, 119, 6, 0.08);
+}
+
+.tier2-offer-note-title {
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.tier2-offer-note-text {
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--ds-warning-600, #b45309);
 }
 
 .input-wrapper {
