@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
@@ -51,19 +51,27 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_get_my_trades_serializes_matching_rows(self):
-        trades = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
+        trades = [
+            SimpleNamespace(id=1, offer_user_id=5, responder_user_id=11),
+            SimpleNamespace(id=2, offer_user_id=12, responder_user_id=5),
+        ]
         db = FakeDB([FakeExecuteResult(values=trades)])
         context = self.make_context(owner_id=5, actor_id=11)
 
         with patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ) as identity_mock, patch(
             "api.routers.trades.trade_to_response",
             side_effect=[{"id": 1}, {"id": 2}],
         ) as response_mock:
             result = await get_my_trades(skip=0, limit=50, db=db, context=context)
 
         self.assertEqual(result, [{"id": 1}, {"id": 2}])
+        identity_mock.assert_awaited_once()
         self.assertEqual(response_mock.call_count, 2)
         self.assertEqual(response_mock.call_args_list[0].args[0], trades[0])
+        self.assertEqual(response_mock.call_args_list[0].kwargs["identity_map"], {})
 
     async def test_get_trade_enforces_not_found_and_access_control(self):
         context = self.make_context(owner_id=5, actor_id=12)
@@ -87,14 +95,18 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         context = self.make_context(owner_id=5, actor_id=12)
         trade = SimpleNamespace(id=7, offer_user_id=5, responder_user_id=10)
 
-        with patch("api.routers.trades.trade_to_response", return_value={"id": 7}) as response_mock:
+        with patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ) as identity_mock, patch("api.routers.trades.trade_to_response", return_value={"id": 7}) as response_mock:
             result = await get_trade(
                 trade_id=7,
                 db=FakeDB([FakeExecuteResult(single=trade)]),
                 context=context,
             )
 
-        response_mock.assert_called_once_with(trade)
+        identity_mock.assert_awaited_once()
+        response_mock.assert_called_once_with(trade, identity_map={})
         self.assertEqual(result, {"id": 7})
 
     async def test_get_trades_with_user_short_circuits_self_and_serializes_history(self):
@@ -104,8 +116,11 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
             [],
         )
 
-        trades = [SimpleNamespace(id=11)]
-        with patch("api.routers.trades.trade_to_response", return_value={"id": 11}) as response_mock:
+        trades = [SimpleNamespace(id=11, offer_user_id=5, responder_user_id=7)]
+        with patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ) as identity_mock, patch("api.routers.trades.trade_to_response", return_value={"id": 11}) as response_mock:
             result = await get_trades_with_user(
                 other_user_id=7,
                 skip=0,
@@ -114,21 +129,26 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
                 context=context,
             )
 
-        response_mock.assert_called_once_with(trades[0])
+        identity_mock.assert_awaited_once()
+        response_mock.assert_called_once_with(trades[0], identity_map={})
         self.assertEqual(result, [{"id": 11}])
 
     async def test_get_trade_allows_effective_owner_when_actor_differs(self):
         context = self.make_context(owner_id=51, actor_id=52)
         trade = SimpleNamespace(id=17, offer_user_id=9, responder_user_id=51)
 
-        with patch("api.routers.trades.trade_to_response", return_value={"id": 17}) as response_mock:
+        with patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ) as identity_mock, patch("api.routers.trades.trade_to_response", return_value={"id": 17}) as response_mock:
             result = await get_trade(
                 trade_id=17,
                 db=FakeDB([FakeExecuteResult(single=trade)]),
                 context=context,
             )
 
-        response_mock.assert_called_once_with(trade)
+        identity_mock.assert_awaited_once()
+        response_mock.assert_called_once_with(trade, identity_map={})
         self.assertEqual(result, {"id": 17})
 
 

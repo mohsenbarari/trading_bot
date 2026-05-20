@@ -82,6 +82,16 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.responder_user_name, "buyer")
         self.assertEqual(response.created_at, "1403/10/12")
 
+        relation_aware_response = trades.trade_to_response(
+            trade,
+            identity_map={
+                11: SimpleNamespace(display_name="حسابدار فروش"),
+                22: SimpleNamespace(display_name="حسابدار خرید"),
+            },
+        )
+        self.assertEqual(relation_aware_response.offer_user_name, "حسابدار فروش")
+        self.assertEqual(relation_aware_response.responder_user_name, "حسابدار خرید")
+
         with patch("api.routers.trades.os.getenv", return_value=None):
             self.assertFalse(await trades.send_telegram_message(1, "hello"))
 
