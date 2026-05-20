@@ -312,8 +312,8 @@ validation phase:
 - [ ] notificationها، historyها، و UI summaryها باید با همین chainها هم‌راستا باشند.
 - [ ] Tier 2 canonical cases:
   - [x] owner-offer + own Tier2 responder: direct one-leg trade at `viewer_effective_price`.
-  - [ ] owner/non-customer buy-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ source buyer @ raw_price`).
-  - [ ] owner/non-customer sell-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ source seller @ raw_price`).
+  - [x] owner/non-customer buy-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ source buyer @ raw_price`).
+  - [x] owner/non-customer sell-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ source seller @ raw_price`).
   - [ ] Tier1 sell-offer + same-owner Tier2 responder: two-leg chain (`Tier2 customer ↔ shared owner @ viewer_effective_price`, `shared owner ↔ Tier1 source seller @ raw_price`).
   - [ ] Tier1 offer + other-owner Tier2 responder: three-leg chain (`Tier1 source ↔ source owner @ raw_price`, `source owner ↔ responder owner @ raw_price`, `responder owner ↔ Tier2 responder @ viewer_effective_price`) with buyer/seller directions derived from offer type.
   - [ ] core rule: `Tier 2` responder leg always uses `viewer_effective_price`; all inter-owner/source legs preserve `raw_price`; source-side mediation depends on whether the source actor is `Owner`/non-customer or `Tier 1`.
@@ -322,7 +322,8 @@ validation phase:
   - [ ] Owner source vs own Tier1: `رامین ←buyer / سینا ←seller @ 100000`.
   - [ ] Owner source vs other Tier1: `پیمان ←buyer / مجید ←seller @ 200000`; `مجید ←buyer / رامین ←seller @ 200000`.
   - [x] Owner buy raw=`50000` vs own Tier2: `49750` rounds down to `49700`; `رامین ←buyer / علی ←seller @ 49700`.
-  - [ ] Owner sell raw=`100000` vs other Tier2: `محمد ←buyer / مجید ←seller @ 100700`; `مجید ←buyer / رامین ←seller @ 100000`.
+  - [x] Owner sell raw=`100000` vs other Tier2: `محمد ←buyer / مجید ←seller @ 100700`; `مجید ←buyer / رامین ←seller @ 100000`.
+  - [x] Owner buy raw=`50000` vs other Tier2: `مجید ←buyer / رامین ←seller @ 50000`; `محمد ←buyer / مجید ←seller @ 49700`.
   - [ ] Tier1 source vs own owner: `رامین ←buyer / سینا ←seller @ 200000`.
   - [ ] Tier1 source vs other owner: `سینا ←buyer / رامین ←seller @ 50000`; `رامین ←buyer / مجید ←seller @ 50000`.
   - [ ] Tier1 source vs same-owner Tier1: `سهراب ←buyer / رامین ←seller @ 100000`; `رامین ←buyer / سینا ←seller @ 100000`.
