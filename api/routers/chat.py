@@ -681,12 +681,14 @@ async def get_messages(
 @router.post("/typing", status_code=status.HTTP_204_NO_CONTENT)
 async def send_typing_signal(
     data: TypingSignal,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """ارسال سیگنال تایپ کردن به گیرنده"""
     await publish_direct_typing_event(
         receiver_id=data.receiver_id,
         sender_id=current_user.id,
+        sender_name=await _resolve_direct_activity_sender_name(db, current_user=current_user),
         publisher=publish_user_event,
     )
     return None

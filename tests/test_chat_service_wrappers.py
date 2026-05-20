@@ -108,7 +108,12 @@ class ChatServiceWrapperTests(unittest.IsolatedAsyncioTestCase):
         publisher = AsyncMock()
         message = SimpleNamespace(sender_id=10, receiver_id=20)
 
-        await publish_direct_typing_event(receiver_id=20, sender_id=10, publisher=publisher)
+        await publish_direct_typing_event(
+            receiver_id=20,
+            sender_id=10,
+            publisher=publisher,
+            sender_name="user-10",
+        )
         await publish_direct_message_event(
             receiver_id=20,
             message=SimpleNamespace(id=9),
@@ -129,6 +134,7 @@ class ChatServiceWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(publisher.await_args_list[2].args[1], "chat:reaction")
         self.assertEqual(publisher.await_args_list[3].args[1], "chat:reaction")
         self.assertEqual(publisher.await_args_list[4].args[1], "chat:read")
+        self.assertEqual(publisher.await_args_list[0].args[2]["sender_name"], "user-10")
         self.assertEqual(publisher.await_args_list[1].args[2]["sender_name"], "user-10")
         self.assertEqual(publisher.await_args_list[4].args[2], {"reader_id": 10})
 

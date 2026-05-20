@@ -1188,6 +1188,7 @@ async def publish_direct_typing_event(
     receiver_id: int,
     sender_id: int,
     publisher: DirectEventPublisher,
+    sender_name: str | None = None,
 ) -> None:
     """Publish one direct-chat typing signal if the sender is not targeting themselves."""
     await publish_direct_activity_event(
@@ -1196,6 +1197,7 @@ async def publish_direct_typing_event(
         activity="typing",
         active=True,
         publisher=publisher,
+        sender_name=sender_name,
     )
 
 
