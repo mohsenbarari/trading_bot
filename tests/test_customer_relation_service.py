@@ -9,6 +9,7 @@ from core.services.customer_relation_service import (
     apply_customer_commission,
     build_allowed_customer_chat_targets,
     build_customer_offer_read_model,
+    CAPACITY_TRACKED_CUSTOMER_RELATION_STATUSES,
     CUSTOMER_INVITATION_PREFIX,
     get_active_customer_relation_for_customer,
     get_active_customer_relation_for_user,
@@ -77,6 +78,26 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             CustomerRelation.__table__.c.customer_tier.type.enums,
             ["tier1", "tier2"],
+        )
+
+    def test_customer_relation_partial_unique_indexes_protect_live_management_names_and_customers(self):
+        indexes = {index.name: index for index in CustomerRelation.__table__.indexes}
+
+        management_index = indexes["ux_customer_relations_owner_management_active"]
+        self.assertTrue(management_index.unique)
+        self.assertEqual([column.name for column in management_index.columns], ["owner_user_id", "management_name"])
+        self.assertIn("deleted_at IS NULL", str(management_index.dialect_options["postgresql"]["where"]))
+
+        active_customer_index = indexes["ux_customer_relations_customer_active"]
+        self.assertTrue(active_customer_index.unique)
+        self.assertEqual([column.name for column in active_customer_index.columns], ["customer_user_id"])
+        self.assertIn("customer_user_id IS NOT NULL", str(active_customer_index.dialect_options["postgresql"]["where"]))
+        self.assertIn("deleted_at IS NULL", str(active_customer_index.dialect_options["postgresql"]["where"]))
+
+    def test_capacity_tracked_statuses_only_include_pending_and_active(self):
+        self.assertEqual(
+            CAPACITY_TRACKED_CUSTOMER_RELATION_STATUSES,
+            (CustomerRelationStatus.PENDING, CustomerRelationStatus.ACTIVE),
         )
 
     def test_get_effective_max_customers_clamps_invalid_values(self):
@@ -298,6 +319,19 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_build_customer_offer_read_model_rejects_invalid_raw_price(self):
         with self.assertRaises(ValueError):
             build_customer_offer_read_model(raw_price=0, offer_type=OfferType.BUY)
+
+    def test_build_customer_offer_read_model_is_additive_noop_without_customer_context(self):
+        read_model = build_customer_offer_read_model(
+            raw_price=65000,
+            offer_type=OfferType.SELL,
+        )
+
+        self.assertEqual(read_model.raw_price, 65000)
+        self.assertEqual(read_model.market_published_price, 65000)
+        self.assertEqual(read_model.viewer_effective_price, 65000)
+        self.assertFalse(read_model.customer_badge_visible)
+        self.assertIsNone(read_model.customer_management_name)
+        self.assertIsNone(read_model.customer_tier)
 
     async def test_load_offer_customer_read_context_reuses_viewer_relation_from_offer_owner_map(self):
         relation_one = SimpleNamespace(customer_user_id=9, owner_user_id=7, status=CustomerRelationStatus.ACTIVE)
