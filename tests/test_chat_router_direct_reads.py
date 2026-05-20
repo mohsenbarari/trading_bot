@@ -242,6 +242,28 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(result)
 
+    async def test_send_direct_activity_signal_uses_relation_aware_sender_name_when_available(self):
+        current_user = SimpleNamespace(id=5, account_name="ali-user")
+        activity_data = SimpleNamespace(receiver_id=9, activity="typing", active=True)
+        db = FakeDB()
+
+        with patch(
+            "api.routers.chat.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={5: SimpleNamespace(display_name="دفتر مالک")}),
+        ) as identity_mock, patch("api.routers.chat.publish_direct_activity_event", new=AsyncMock()) as activity_mock:
+            result = await send_direct_activity_signal(data=activity_data, current_user=current_user, db=db)
+
+        identity_mock.assert_awaited_once_with(db, [5])
+        activity_mock.assert_awaited_once_with(
+            receiver_id=9,
+            sender_id=5,
+            sender_name="دفتر مالک",
+            activity="typing",
+            active=True,
+            publisher=unittest.mock.ANY,
+        )
+        self.assertIsNone(result)
+
     async def test_poll_messages_shapes_unread_summary(self):
         current_user = SimpleNamespace(id=5)
         rows = [

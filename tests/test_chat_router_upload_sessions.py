@@ -351,7 +351,7 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_publish_upload_session_runtime_event_updates_direct_activity(self):
         current_user = SimpleNamespace(id=5, account_name="sender")
-        db = object()
+        db = SimpleNamespace(execute=AsyncMock())
         session = SimpleNamespace(
             id="sess-direct",
             batch_id="batch-direct",
@@ -377,6 +377,9 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat._has_active_upload_sessions_for_room",
             new=AsyncMock(return_value=True),
         ), patch(
+            "api.routers.chat.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={5: SimpleNamespace(display_name="دفتر مالک")}),
+        ) as identity_mock, patch(
             "api.routers.chat.publish_direct_activity_event",
             new=AsyncMock(),
         ) as direct_activity_mock:
@@ -387,6 +390,7 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
                 event_name="progress",
             )
 
+        identity_mock.assert_awaited_once_with(db, [5])
         publish_user_mock.assert_awaited_once()
         published_payload = publish_user_mock.await_args.args[2]
         self.assertEqual(published_payload["retry_count"], 2)
@@ -395,13 +399,13 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
         direct_activity_mock.assert_awaited_once_with(
             receiver_id=9,
             sender_id=5,
-            sender_name="sender",
+            sender_name="دفتر مالک",
             activity="uploading_file",
             active=True,
             publisher=publish_user_mock,
         )
 
-    async def test_publish_upload_session_runtime_event_updates_group_activity(self):
+    async def test_publish_upload_session_runtime_event_skips_identity_lookup_for_group_activity(self):
         current_user = SimpleNamespace(id=5, account_name="sender")
         chat = SimpleNamespace(id=70, is_deleted=False)
         session = SimpleNamespace(
@@ -429,6 +433,9 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat._has_active_upload_sessions_for_room",
             new=AsyncMock(return_value=False),
         ), patch(
+            "api.routers.chat.load_accountant_chat_identity_map",
+            new=AsyncMock(),
+        ) as identity_mock, patch(
             "api.routers.chat.list_active_room_member_user_ids",
             new=AsyncMock(return_value=[5, 6]),
         ), patch(
@@ -443,6 +450,7 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
                 event_name="ready",
             )
 
+        identity_mock.assert_not_awaited()
         publish_user_mock.assert_awaited_once()
         counter_mock.assert_awaited_once_with(event_name="ready", room_kind="group", media_type="video")
         room_activity_mock.assert_awaited_once_with(
