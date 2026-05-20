@@ -219,6 +219,9 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat.get_active_group_member_or_403",
             new=AsyncMock(),
         ) as group_member_mock, patch(
+            "api.routers.chat.resolve_relation_aware_sender_display_name",
+            new=AsyncMock(return_value="دفتر مالک"),
+        ) as sender_name_mock, patch(
             "api.routers.chat.list_active_room_member_user_ids",
             new=AsyncMock(return_value=[5, 6]),
         ) as users_mock, patch(
@@ -228,11 +231,12 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
             result = await send_room_activity_signal(chat_id=70, data=activity_data, current_user=current_user, db=db)
 
         group_member_mock.assert_awaited_once_with(db, chat=group_chat, user_id=5)
+        sender_name_mock.assert_awaited_once_with(db, user=current_user)
         users_mock.assert_awaited_once_with(db, chat_id=70)
         publish_mock.assert_awaited_once_with(
             chat=group_chat,
             sender_id=5,
-            sender_name="room-user",
+            sender_name="دفتر مالک",
             member_user_ids=[5, 6],
             activity="typing",
             active=True,
@@ -244,6 +248,9 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat.get_active_channel_member_or_403",
             new=AsyncMock(),
         ) as channel_member_mock, patch(
+            "api.routers.chat.resolve_relation_aware_sender_display_name",
+            new=AsyncMock(return_value="دفتر مالک"),
+        ) as channel_sender_name_mock, patch(
             "api.routers.chat.list_active_room_member_user_ids",
             new=AsyncMock(return_value=[5, 7]),
         ) as channel_users_mock, patch(
@@ -253,11 +260,12 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
             result = await send_room_activity_signal(chat_id=71, data=activity_data, current_user=current_user, db=db)
 
         channel_member_mock.assert_awaited_once_with(db, chat=channel_chat, user_id=5)
+        channel_sender_name_mock.assert_awaited_once_with(db, user=current_user)
         channel_users_mock.assert_awaited_once_with(db, chat_id=71)
         channel_publish_mock.assert_awaited_once_with(
             chat=channel_chat,
             sender_id=5,
-            sender_name="room-user",
+            sender_name="دفتر مالک",
             member_user_ids=[5, 7],
             activity="typing",
             active=True,

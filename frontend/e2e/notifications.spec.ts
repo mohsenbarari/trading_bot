@@ -12,6 +12,12 @@ interface SeededSessionFixture {
   refreshToken: string
 }
 
+interface RelationAwareNotificationFixture {
+  owner: SeededSessionFixture
+  accountant: SeededSessionFixture
+  relationDisplayName: string
+}
+
 interface PendingLoginRequestFixture {
   requestId: string
   deviceName: string
@@ -104,6 +110,121 @@ asyncio.run(main())
 `)
 }
 
+function seedRelationAwareNotificationPair(label: string): RelationAwareNotificationFixture {
+  return runPythonInApp<RelationAwareNotificationFixture>(`
+import asyncio
+import json
+import uuid
+from datetime import datetime, timedelta
+
+from core.db import AsyncSessionLocal
+from core.enums import UserRole
+from core.security import create_access_token, create_refresh_token
+from core.services.session_service import hash_token
+from models.accountant_relation import AccountantRelation, AccountantRelationStatus
+from models.session import Platform, UserSession
+from models.user import User
+
+label = ${JSON.stringify(label)}
+
+def build_session_payload(user, device_name):
+  refresh_token = create_refresh_token(subject=user.id)
+  session = UserSession(
+    user_id=user.id,
+    device_name=device_name,
+    device_ip='127.0.0.1',
+    platform=Platform.WEB,
+    refresh_token_hash=hash_token(refresh_token),
+    is_primary=True,
+    is_active=True,
+    expires_at=None,
+  )
+  return refresh_token, session
+
+async def main():
+  suffix = uuid.uuid4().hex[:10]
+  relation_display_name = f"دفتر {suffix[:6]}"
+  owner_mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+  accountant_mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+
+  async with AsyncSessionLocal() as db:
+    owner = User(
+      account_name=f"pw_{label}_owner_{suffix}",
+      mobile_number=f"09{owner_mobile_seed:09d}",
+      full_name='Playwright Owner',
+      address='Playwright Notification Owner',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+      max_accountants=3,
+    )
+    accountant = User(
+      account_name=f"pw_{label}_acct_{suffix}",
+      mobile_number=f"09{accountant_mobile_seed:09d}",
+      full_name='Playwright Accountant',
+      address='Playwright Notification Accountant',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    db.add(owner)
+    db.add(accountant)
+    await db.flush()
+
+    relation = AccountantRelation(
+      owner_user_id=owner.id,
+      accountant_user_id=accountant.id,
+      created_by_user_id=owner.id,
+      invitation_token=f"pw_inv_{uuid.uuid4().hex}",
+      global_account_name=accountant.account_name,
+      relation_display_name=relation_display_name,
+      duty_description='Playwright Notification Relation',
+      mobile_number=accountant.mobile_number,
+      status=AccountantRelationStatus.ACTIVE,
+      expires_at=datetime.utcnow() + timedelta(days=30),
+      activated_at=datetime.utcnow(),
+    )
+    db.add(relation)
+
+    owner_refresh_token, owner_session = build_session_payload(owner, 'Playwright Relation Owner Device')
+    accountant_refresh_token, accountant_session = build_session_payload(accountant, 'Playwright Relation Accountant Device')
+    db.add(owner_session)
+    db.add(accountant_session)
+    await db.flush()
+
+    owner_access_token = create_access_token(
+      subject=owner.id,
+      expires_delta=timedelta(minutes=60),
+      session_id=str(owner_session.id),
+    )
+    accountant_access_token = create_access_token(
+      subject=accountant.id,
+      expires_delta=timedelta(minutes=60),
+      session_id=str(accountant_session.id),
+    )
+
+    await db.commit()
+
+  print(json.dumps({
+    'owner': {
+      'userId': owner.id,
+      'accountName': owner.account_name,
+      'accessToken': owner_access_token,
+      'refreshToken': owner_refresh_token,
+    },
+    'accountant': {
+      'userId': accountant.id,
+      'accountName': accountant.account_name,
+      'accessToken': accountant_access_token,
+      'refreshToken': accountant_refresh_token,
+    },
+    'relationDisplayName': relation_display_name,
+  }))
+
+asyncio.run(main())
+`)
+}
+
 function createPendingLoginRequest(userId: number, deviceName: string): PendingLoginRequestFixture {
   return runPythonInApp<PendingLoginRequestFixture>(`
 import asyncio
@@ -173,7 +294,8 @@ async function loginWithSeededSession(page: Page, fixture: SeededSessionFixture)
     localStorage.removeItem('suspended_refresh_token')
   }, fixture)
   await page.goto('/')
-  await expect(page.getByText(fixture.accountName)).toBeVisible()
+  await expect(page).not.toHaveURL(/\/login$/)
+  await expect(page.getByRole('button', { name: 'اعلان‌ها' })).toBeVisible()
 }
 
 async function sendTextChatMessage(
@@ -289,5 +411,42 @@ test.describe('Notification regressions', () => {
         return body.unread_chats_count ?? -1
       })
       .toBe(0)
+  })
+
+  test('relation-aware direct chat notifications keep the accountant display label in toast and route', async ({
+    page,
+    request,
+  }) => {
+    const fixture = seedRelationAwareNotificationPair('chat_relation_label')
+    const warmupContent = `PLAYWRIGHT RELATION WARMUP ${Date.now()}`
+    const content = `PLAYWRIGHT RELATION CHAT ${Date.now()}`
+
+    await loginWithSeededSession(page, fixture.owner)
+    await sendTextChatMessage(request, fixture.owner, fixture.accountant.userId, warmupContent)
+    await page.waitForTimeout(1200)
+
+    await sendTextChatMessage(request, fixture.accountant, fixture.owner.userId, content)
+
+    const toast = page.locator('.toast-card-floating').filter({ hasText: content })
+    await expect(toast).toBeVisible()
+    await expect(toast).toContainText(fixture.relationDisplayName)
+    await expect(toast).not.toContainText(fixture.accountant.accountName)
+
+    await toast.click()
+
+    await expect
+      .poll(() => page.evaluate(() => {
+        const url = new URL(window.location.href)
+        return {
+          userId: url.searchParams.get('user_id'),
+          userName: url.searchParams.get('user_name'),
+        }
+      }))
+      .toEqual({
+        userId: String(fixture.accountant.userId),
+        userName: fixture.relationDisplayName,
+      })
+
+    await expect(page.getByText(content)).toBeVisible()
   })
 })

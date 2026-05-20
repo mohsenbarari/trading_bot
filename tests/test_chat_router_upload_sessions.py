@@ -405,7 +405,7 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             publisher=publish_user_mock,
         )
 
-    async def test_publish_upload_session_runtime_event_skips_identity_lookup_for_group_activity(self):
+    async def test_publish_upload_session_runtime_event_uses_relation_aware_sender_name_for_group_activity(self):
         current_user = SimpleNamespace(id=5, account_name="sender")
         chat = SimpleNamespace(id=70, is_deleted=False)
         session = SimpleNamespace(
@@ -433,9 +433,9 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat._has_active_upload_sessions_for_room",
             new=AsyncMock(return_value=False),
         ), patch(
-            "api.routers.chat.load_accountant_chat_identity_map",
-            new=AsyncMock(),
-        ) as identity_mock, patch(
+            "api.routers.chat.resolve_relation_aware_sender_display_name",
+            new=AsyncMock(return_value="دفتر مالک"),
+        ) as sender_name_mock, patch(
             "api.routers.chat.list_active_room_member_user_ids",
             new=AsyncMock(return_value=[5, 6]),
         ), patch(
@@ -450,13 +450,13 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
                 event_name="ready",
             )
 
-        identity_mock.assert_not_awaited()
+        sender_name_mock.assert_awaited_once_with(db, user=current_user)
         publish_user_mock.assert_awaited_once()
         counter_mock.assert_awaited_once_with(event_name="ready", room_kind="group", media_type="video")
         room_activity_mock.assert_awaited_once_with(
             chat=chat,
             sender_id=5,
-            sender_name="sender",
+            sender_name="دفتر مالک",
             member_user_ids=[5, 6],
             activity="uploading_file",
             active=False,

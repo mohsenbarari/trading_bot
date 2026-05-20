@@ -83,6 +83,14 @@ async def resolve_direct_sender_display_name(
     *,
     user: object,
 ) -> str | None:
+    return await resolve_relation_aware_sender_display_name(db, user=user)
+
+
+async def resolve_relation_aware_sender_display_name(
+    db: AsyncSession | object,
+    *,
+    user: object,
+) -> str | None:
     if not hasattr(db, "execute"):
         return getattr(user, "account_name", None)
 
