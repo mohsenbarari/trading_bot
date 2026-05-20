@@ -313,6 +313,7 @@ deploy order:
 release gate:
 - [x] backend focused suites سبز شوند.
 - [x] frontend unit + Playwright suites سبز شوند.
+- [x] trade notification-center route و trade history owner-resolution با Playwright regressionهای سبک (`frontend/e2e/notifications.spec.ts` و `frontend/e2e/trade-history-accountant.spec.ts`) قفل شده‌اند.
 - [x] sync smoke سبز شود.
 - [x] manual sanity روی owner/accountant happy path بعد از deploy سبز شد.
 
@@ -338,6 +339,7 @@ rollback strategy:
 - [x] accountant actionها تحت owner principal ثبت می‌شوند و `actor_user_id` audit از دست نمی‌رود.
 - [x] profile/messenger/trade history همه owner-resolved و relation-aware هستند.
 - [x] trade/create/execute notifications به owner و active accountants درست fanout می‌شوند.
+- [x] trade notification runtime و notification-center click path هر دو owner-resolved profile route را حفظ می‌کنند.
 - [x] unlink و owner delete orphan ایجاد نمی‌کنند.
 - [x] sync/resync accountant data را بین سرورها converge می‌کند.
 - [x] test gate و deploy/rollback path برای release آماده‌اند.

@@ -21,6 +21,17 @@ interface TradeHistoryFixture {
   relationDisplayName: string
 }
 
+interface TradeRealtimeFixture {
+  viewer: SessionUser
+  counterpartyOwnerId: number
+  counterpartyOwnerAccountName: string
+  counterpartyAccountantId: number
+  counterpartyAccountantAccountName: string
+  relationDisplayName: string
+  offerId: number
+  offerQuantity: number
+}
+
 function resolveAppContainerName() {
   const stdout = execFileSync('docker', ['ps', '--format', '{{.Names}}'], {
     encoding: 'utf8',
@@ -197,6 +208,139 @@ asyncio.run(main())
 `)
 }
 
+function seedTradeRealtimeFixture(label: string): TradeRealtimeFixture {
+  return runPythonInApp<TradeRealtimeFixture>(`
+import asyncio
+import json
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from core.db import AsyncSessionLocal
+from core.enums import UserRole
+from core.security import create_access_token, create_refresh_token
+from core.services.session_service import hash_token
+from models.accountant_relation import AccountantRelation, AccountantRelationStatus
+from models.commodity import Commodity
+from models.offer import Offer, OfferStatus, OfferType
+from models.session import Platform, UserSession
+from models.user import User
+
+label = ${JSON.stringify(label)}
+
+def random_mobile():
+  mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+  return f"09{mobile_seed:09d}"
+
+async def main():
+  suffix = uuid.uuid4().hex[:10]
+  relation_display_name = 'حسابدار فروش'
+
+  async with AsyncSessionLocal() as db:
+    viewer = User(
+      account_name=f"pw_trade_rt_viewer_{label}_{suffix}",
+      mobile_number=random_mobile(),
+      full_name='Playwright Trade Realtime Viewer',
+      address='Playwright Trade Realtime Viewer',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    counterparty_owner = User(
+      account_name=f"pw_trade_rt_owner_{label}_{suffix}",
+      mobile_number=random_mobile(),
+      full_name='Playwright Trade Realtime Owner',
+      address='Playwright Trade Realtime Owner',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    counterparty_accountant = User(
+      account_name=f"pw_trade_rt_acct_{label}_{suffix}",
+      mobile_number=random_mobile(),
+      full_name=relation_display_name,
+      address='Playwright Trade Realtime Accountant',
+      role=UserRole.STANDARD,
+      has_bot_access=False,
+      max_sessions=1,
+    )
+    commodity = Commodity(name=f"PW Trade Realtime Commodity {suffix[:6]}")
+
+    db.add_all([viewer, counterparty_owner, counterparty_accountant, commodity])
+    await db.flush()
+
+    relation = AccountantRelation(
+      owner_user_id=counterparty_owner.id,
+      accountant_user_id=counterparty_accountant.id,
+      created_by_user_id=counterparty_owner.id,
+      invitation_token=uuid.uuid4().hex,
+      global_account_name=counterparty_accountant.account_name,
+      relation_display_name=relation_display_name,
+      mobile_number=counterparty_accountant.mobile_number,
+      status=AccountantRelationStatus.ACTIVE,
+      expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+      activated_at=datetime.now(timezone.utc),
+    )
+    db.add(relation)
+
+    offer = Offer(
+      user_id=counterparty_accountant.id,
+      actor_user_id=counterparty_accountant.id,
+      home_server='foreign',
+      offer_type=OfferType.SELL,
+      commodity_id=commodity.id,
+      quantity=3,
+      remaining_quantity=3,
+      price=543210,
+      is_wholesale=True,
+      lot_sizes=None,
+      original_lot_sizes=None,
+      status=OfferStatus.ACTIVE,
+      notes='Playwright trade realtime offer',
+    )
+    db.add(offer)
+
+    refresh_token = create_refresh_token(subject=viewer.id)
+    session = UserSession(
+      user_id=viewer.id,
+      device_name='Playwright Trade Realtime Device',
+      device_ip='127.0.0.1',
+      platform=Platform.WEB,
+      refresh_token_hash=hash_token(refresh_token),
+      is_primary=True,
+      is_active=True,
+      expires_at=None,
+    )
+    db.add(session)
+    await db.flush()
+
+    access_token = create_access_token(
+      subject=viewer.id,
+      expires_delta=timedelta(minutes=60),
+      session_id=str(session.id),
+    )
+
+    await db.commit()
+
+  print(json.dumps({
+    'viewer': {
+      'userId': viewer.id,
+      'accountName': viewer.account_name,
+      'accessToken': access_token,
+      'refreshToken': refresh_token,
+    },
+    'counterpartyOwnerId': counterparty_owner.id,
+    'counterpartyOwnerAccountName': counterparty_owner.account_name,
+    'counterpartyAccountantId': counterparty_accountant.id,
+    'counterpartyAccountantAccountName': counterparty_accountant.account_name,
+    'relationDisplayName': relation_display_name,
+    'offerId': offer.id,
+    'offerQuantity': 3,
+  }))
+
+asyncio.run(main())
+`)
+}
+
 async function waitForBackendReady(request: APIRequestContext) {
   await expect
     .poll(async () => {
@@ -219,6 +363,22 @@ async function loginWithSeededSession(page: Page, session: SessionUser) {
   }, session)
 }
 
+async function executeTrade(request: APIRequestContext, accessToken: string, offerId: number, quantity: number) {
+  const response = await request.post(`${BACKEND_BASE_URL}/api/trades/`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    data: {
+      offer_id: offerId,
+      quantity,
+    },
+  })
+
+  expect(response.status()).toBe(201)
+  return response.json()
+}
+
 test.describe('Trade history accountant context', () => {
   test('own public profile history resolves accountant counterpart rows to the owner profile', async ({ page, request }) => {
     await waitForBackendReady(request)
@@ -235,6 +395,66 @@ test.describe('Trade history accountant context', () => {
 
     const counterpartyLink = page.locator('.profile-link-btn').filter({ hasText: fixture.relationDisplayName }).first()
     await expect(counterpartyLink).toBeVisible()
+    await expect(profileView).not.toContainText(fixture.counterpartyAccountantAccountName)
+
+    await counterpartyLink.click()
+
+    await expect(page).toHaveURL(new RegExp(`/users/${fixture.counterpartyOwnerId}`))
+    await expect(page).toHaveURL(new RegExp(`highlight_accountant_user_id=${fixture.counterpartyAccountantId}`))
+    await expect(profileView).toContainText('نمایش پروفایل مالک اصلی')
+    await expect(profileView).toContainText(fixture.relationDisplayName)
+    await expect(profileView).toContainText(fixture.counterpartyOwnerAccountName)
+  })
+
+  test('trade-created realtime keeps relation-aware toast, history rows, and owner profile targets stable', async ({ page, request }) => {
+    await waitForBackendReady(request)
+    const fixture = seedTradeRealtimeFixture('trade_created_realtime')
+
+    await loginWithSeededSession(page, fixture.viewer)
+    await page.goto(`/users/${fixture.viewer.userId}?account_name=${encodeURIComponent(fixture.viewer.accountName)}`)
+    await page.waitForTimeout(1200)
+
+    await executeTrade(request, fixture.viewer.accessToken, fixture.offerId, fixture.offerQuantity)
+
+    const toast = page.locator('.toast-card-floating').filter({ hasText: fixture.relationDisplayName })
+    await expect(toast).toBeVisible({ timeout: 30000 })
+    await expect(toast).not.toContainText(fixture.counterpartyAccountantAccountName)
+
+    await expect
+      .poll(async () => {
+        const response = await request.get(`${BACKEND_BASE_URL}/api/trades/my`, {
+          headers: {
+            Authorization: `Bearer ${fixture.viewer.accessToken}`,
+          },
+        })
+        expect(response.ok()).toBeTruthy()
+        const body = await response.json()
+        const trade = Array.isArray(body)
+          ? body.find((item: any) => Number(item?.offer_id) === fixture.offerId)
+          : null
+        if (!trade) {
+          return null
+        }
+        return {
+          offer_user_name: trade.offer_user_name,
+          offer_user_profile_user_id: Number(trade.offer_user_profile_user_id),
+          offer_user_highlight_accountant_user_id: Number(trade.offer_user_highlight_accountant_user_id),
+          offer_user_highlight_accountant_relation_display_name: trade.offer_user_highlight_accountant_relation_display_name,
+        }
+      }, { timeout: 30000 })
+      .toEqual({
+        offer_user_name: fixture.relationDisplayName,
+        offer_user_profile_user_id: fixture.counterpartyOwnerId,
+        offer_user_highlight_accountant_user_id: fixture.counterpartyAccountantId,
+        offer_user_highlight_accountant_relation_display_name: fixture.relationDisplayName,
+      })
+
+    const profileView = page.locator('.public-profile-view')
+    const historyHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات من' }).first()
+    await historyHeader.click()
+
+    const counterpartyLink = page.locator('.profile-link-btn').filter({ hasText: fixture.relationDisplayName }).first()
+    await expect(counterpartyLink).toBeVisible({ timeout: 30000 })
     await expect(profileView).not.toContainText(fixture.counterpartyAccountantAccountName)
 
     await counterpartyLink.click()
