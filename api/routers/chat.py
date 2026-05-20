@@ -131,6 +131,7 @@ from core.services.accountant_chat_contract import (
     apply_accountant_identity_to_message_payload,
     collect_message_identity_user_ids,
     load_accountant_chat_identity_map,
+    resolve_direct_sender_display_name,
 )
 from core.services.single_session_recovery_service import (
     build_recovery_action_map_for_admin_messages,
@@ -231,25 +232,6 @@ def _build_upload_session_event_payload(
     if batch_status is not None:
         payload["batch_status"] = _enum_value(batch_status)
     return payload
-
-
-async def _resolve_direct_activity_sender_name(
-    db: AsyncSession,
-    *,
-    current_user: User,
-) -> str | None:
-    if not hasattr(db, "execute"):
-        return getattr(current_user, "account_name", None)
-
-    sender_id = getattr(current_user, "id", None)
-    if sender_id is None:
-        return getattr(current_user, "account_name", None)
-
-    identity = (await load_accountant_chat_identity_map(db, [sender_id])).get(sender_id)
-    if identity is not None:
-        return identity.display_name
-
-    return getattr(current_user, "account_name", None)
 
 
 async def _increment_upload_session_observability_counters(
@@ -354,7 +336,7 @@ async def _publish_upload_session_runtime_event(
         await publish_direct_activity_event(
             receiver_id=target_id,
             sender_id=current_user.id,
-            sender_name=await _resolve_direct_activity_sender_name(db, current_user=current_user),
+            sender_name=await resolve_direct_sender_display_name(db, user=current_user),
             activity="uploading_file",
             active=has_active_uploads,
             publisher=publish_user_event,
@@ -688,7 +670,7 @@ async def send_typing_signal(
     await publish_direct_typing_event(
         receiver_id=data.receiver_id,
         sender_id=current_user.id,
-        sender_name=await _resolve_direct_activity_sender_name(db, current_user=current_user),
+        sender_name=await resolve_direct_sender_display_name(db, user=current_user),
         publisher=publish_user_event,
     )
     return None
@@ -704,7 +686,7 @@ async def send_direct_activity_signal(
     await publish_direct_activity_event(
         receiver_id=data.receiver_id,
         sender_id=current_user.id,
-        sender_name=await _resolve_direct_activity_sender_name(db, current_user=current_user),
+        sender_name=await resolve_direct_sender_display_name(db, user=current_user),
         activity=data.activity,
         active=data.active,
         publisher=publish_user_event,

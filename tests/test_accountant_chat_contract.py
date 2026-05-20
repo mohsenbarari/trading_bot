@@ -8,6 +8,7 @@ from core.services.accountant_chat_contract import (
     build_relation_aware_display_name,
     collect_message_identity_user_ids,
     load_accountant_chat_identity_map,
+    resolve_direct_sender_display_name,
 )
 from models.accountant_relation import AccountantRelationStatus
 
@@ -84,6 +85,34 @@ class AccountantChatContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(identity_map[101].resolved_from_accountant_id, 101)
         self.assertEqual(identity_map[101].highlight_accountant_user_id, 101)
         self.assertEqual(identity_map[101].highlight_accountant_relation_display_name, "دفتر مالک")
+
+    async def test_resolve_direct_sender_display_name_uses_identity_map_and_falls_back(self):
+        owner = SimpleNamespace(id=201, account_name="owner-201", avatar_file_id="avatar-201", is_deleted=False)
+        relation = SimpleNamespace(
+            accountant_user_id=101,
+            relation_display_name="دفتر مالک",
+            owner_user=owner,
+            status=AccountantRelationStatus.ACTIVE,
+            deleted_at=None,
+        )
+        db = FakeDB(values=[relation])
+
+        resolved = await resolve_direct_sender_display_name(
+            db,
+            user=SimpleNamespace(id=101, account_name="raw-accountant"),
+        )
+        fallback = await resolve_direct_sender_display_name(
+            FakeDB(values=[]),
+            user=SimpleNamespace(id=9, account_name="raw-user"),
+        )
+        no_db_fallback = await resolve_direct_sender_display_name(
+            object(),
+            user=SimpleNamespace(id=7, account_name="raw-no-db"),
+        )
+
+        self.assertEqual(resolved, "دفتر مالک")
+        self.assertEqual(fallback, "raw-user")
+        self.assertEqual(no_db_fallback, "raw-no-db")
 
     def test_apply_accountant_identity_to_direct_conversation_row_sets_profile_fields(self):
         identity = AccountantChatIdentity(
