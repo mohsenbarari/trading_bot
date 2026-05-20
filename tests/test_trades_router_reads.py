@@ -3,9 +3,20 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
+from sqlalchemy.dialects import postgresql
 
 from api.deps import EffectiveOwnerActor
 from api.routers.trades import get_my_trades, get_trade, get_trades_with_user
+from models.user import UserRole
+
+
+def compile_sql(statement):
+    return str(
+        statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
 
 
 class FakeScalarRows:
@@ -31,8 +42,10 @@ class FakeExecuteResult:
 class FakeDB:
     def __init__(self, execute_results=None):
         self.execute_results = list(execute_results or [])
+        self.statements = []
 
     async def execute(self, _stmt):
+        self.statements.append(_stmt)
         if not self.execute_results:
             raise AssertionError("Unexpected execute() call")
         return self.execute_results.pop(0)
@@ -40,9 +53,9 @@ class FakeDB:
 
 class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
-    def make_context(owner_id=5, actor_id=None):
-        owner_user = SimpleNamespace(id=owner_id)
-        actor_user = SimpleNamespace(id=actor_id if actor_id is not None else owner_id)
+    def make_context(owner_id=5, actor_id=None, owner_role=None, actor_role=None):
+        owner_user = SimpleNamespace(id=owner_id, role=owner_role)
+        actor_user = SimpleNamespace(id=actor_id if actor_id is not None else owner_id, role=actor_role or owner_role)
         return EffectiveOwnerActor(
             owner_user=owner_user,
             actor_user=actor_user,
@@ -87,12 +100,16 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.detail, "معامله یافت نشد.")
 
         foreign_trade = SimpleNamespace(offer_user_id=9, responder_user_id=10)
-        with self.assertRaises(HTTPException) as exc_info:
-            await get_trade(
-                trade_id=7,
-                db=FakeDB([FakeExecuteResult(single=foreign_trade)]),
-                context=context,
-            )
+        with patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_trade(
+                    trade_id=7,
+                    db=FakeDB([FakeExecuteResult(single=foreign_trade)]),
+                    context=context,
+                )
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "شما به این معامله دسترسی ندارید.")
 
@@ -126,6 +143,9 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         trades = [SimpleNamespace(id=11, offer_user_id=5, responder_user_id=7)]
         with patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ), patch(
             "api.routers.trades.load_accountant_chat_identity_map",
             new=AsyncMock(return_value={}),
         ) as identity_mock, patch(
@@ -164,6 +184,156 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         identity_mock.assert_awaited_once()
         response_mock.assert_called_once_with(trade, identity_map={}, customer_relation_map={})
         self.assertEqual(result, {"id": 17})
+
+    async def test_get_trades_with_user_switches_to_target_customer_history_for_owner_viewer(self):
+        context = self.make_context(owner_id=7, actor_id=17)
+        trades = [SimpleNamespace(id=21, offer_user_id=50, responder_user_id=99)]
+        db = FakeDB([FakeExecuteResult(values=trades)])
+
+        async def relation_lookup(_db, user_id):
+            if user_id == 50:
+                return SimpleNamespace(owner_user_id=7)
+            return None
+
+        with patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=relation_lookup),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.trade_to_response", return_value={"id": 21}) as response_mock:
+            result = await get_trades_with_user(other_user_id=50, skip=0, limit=20, db=db, context=context)
+
+        self.assertEqual(result, [{"id": 21}])
+        response_mock.assert_called_once_with(trades[0], identity_map={}, customer_relation_map={})
+        sql = compile_sql(db.statements[0])
+        self.assertIn("trades.offer_user_id = 50", sql)
+        self.assertIn("trades.responder_user_id = 50", sql)
+        self.assertNotIn("trades.offer_user_id = 7 AND trades.responder_user_id = 50", sql)
+
+    async def test_get_trades_with_user_switches_to_target_customer_history_for_super_admin(self):
+        context = self.make_context(owner_id=900, owner_role=UserRole.SUPER_ADMIN)
+        trades = [SimpleNamespace(id=22, offer_user_id=50, responder_user_id=101)]
+        db = FakeDB([FakeExecuteResult(values=trades)])
+
+        async def relation_lookup(_db, user_id):
+            if user_id == 50:
+                return SimpleNamespace(owner_user_id=7)
+            return None
+
+        with patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=relation_lookup),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.trade_to_response", return_value={"id": 22}):
+            result = await get_trades_with_user(other_user_id=50, skip=0, limit=20, db=db, context=context)
+
+        self.assertEqual(result, [{"id": 22}])
+        sql = compile_sql(db.statements[0])
+        self.assertIn("trades.offer_user_id = 50", sql)
+        self.assertIn("trades.responder_user_id = 50", sql)
+
+    async def test_get_trades_with_user_keeps_mutual_history_for_unauthorized_customer_view(self):
+        context = self.make_context(owner_id=8, actor_id=18)
+        trades = [SimpleNamespace(id=23, offer_user_id=8, responder_user_id=50)]
+        db = FakeDB([FakeExecuteResult(values=trades)])
+
+        async def relation_lookup(_db, user_id):
+            if user_id == 50:
+                return SimpleNamespace(owner_user_id=7)
+            return None
+
+        with patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=relation_lookup),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.trade_to_response", return_value={"id": 23}):
+            result = await get_trades_with_user(other_user_id=50, skip=0, limit=20, db=db, context=context)
+
+        self.assertEqual(result, [{"id": 23}])
+        sql = compile_sql(db.statements[0])
+        self.assertIn("trades.offer_user_id = 8 AND trades.responder_user_id = 50", sql)
+        self.assertIn("trades.offer_user_id = 50 AND trades.responder_user_id = 8", sql)
+
+    async def test_get_trade_allows_owned_customer_history_row_for_owner_viewer(self):
+        context = self.make_context(owner_id=7, actor_id=17)
+        trade = SimpleNamespace(id=27, offer_user_id=50, responder_user_id=99)
+
+        async def relation_lookup(_db, user_id):
+            if user_id == 50:
+                return SimpleNamespace(owner_user_id=7)
+            return None
+
+        with patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=relation_lookup),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ) as identity_mock, patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.trade_to_response", return_value={"id": 27}) as response_mock:
+            result = await get_trade(trade_id=27, db=FakeDB([FakeExecuteResult(single=trade)]), context=context)
+
+        identity_mock.assert_awaited_once()
+        response_mock.assert_called_once_with(trade, identity_map={}, customer_relation_map={})
+        self.assertEqual(result, {"id": 27})
+
+    async def test_get_trade_allows_customer_history_row_for_super_admin(self):
+        context = self.make_context(owner_id=901, owner_role=UserRole.SUPER_ADMIN)
+        trade = SimpleNamespace(id=28, offer_user_id=50, responder_user_id=99)
+
+        async def relation_lookup(_db, user_id):
+            if user_id == 50:
+                return SimpleNamespace(owner_user_id=7)
+            return None
+
+        with patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=relation_lookup),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.trade_to_response", return_value={"id": 28}):
+            result = await get_trade(trade_id=28, db=FakeDB([FakeExecuteResult(single=trade)]), context=context)
+
+        self.assertEqual(result, {"id": 28})
+
+    async def test_get_trade_denies_unrelated_viewer_even_for_customer_history_row(self):
+        context = self.make_context(owner_id=8, actor_id=18)
+        trade = SimpleNamespace(id=29, offer_user_id=50, responder_user_id=99)
+
+        async def relation_lookup(_db, user_id):
+            if user_id == 50:
+                return SimpleNamespace(owner_user_id=7)
+            return None
+
+        with patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=relation_lookup),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_trade(trade_id=29, db=FakeDB([FakeExecuteResult(single=trade)]), context=context)
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "شما به این معامله دسترسی ندارید.")
 
 
 if __name__ == "__main__":
