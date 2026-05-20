@@ -90,6 +90,12 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
         )
         customer_relation_patcher.start()
         self.addCleanup(customer_relation_patcher.stop)
+        trade_relation_map_patcher = patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value={}),
+        )
+        trade_relation_map_patcher.start()
+        self.addCleanup(trade_relation_map_patcher.stop)
 
     async def test_execute_trade_authoritatively_rejects_watch_restricted_and_limit_failures(self):
         trade_data = TradeCreate(offer_id=7, quantity=4)
@@ -262,7 +268,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
             )
 
         db.refresh.assert_awaited_once_with(offer, ["user", "commodity"])
-        response_mock.assert_called_once_with(existing_trade, identity_map={})
+        response_mock.assert_called_once_with(existing_trade, identity_map={}, customer_relation_map={})
         self.assertEqual(result, {"id": 88})
 
 

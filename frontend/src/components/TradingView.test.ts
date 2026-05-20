@@ -104,6 +104,8 @@ const myTradesFixture = [
     commodity_name: 'سکه',
     quantity: 5,
     price: 120000,
+    trade_path_kind: 'owner_customer_tier2',
+    trade_path_summary: 'مالک ↔ مشتری سطح ۲',
     offer_user_id: 9,
     offer_user_name: 'حسابدار فروش',
     offer_user_profile_user_id: 77,
@@ -243,6 +245,7 @@ describe('TradingView.vue', () => {
     expect(tradingViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/trades/my', {})
     expect(wrapper.text()).toContain('10001')
     expect(wrapper.text()).toContain('120,000')
+    expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۲')
 
     wrapper.unmount()
   })
@@ -283,6 +286,8 @@ describe('TradingView.vue', () => {
       quantity: 8,
       price: 222000,
       status: 'completed',
+      trade_path_kind: 'owner_customer_tier1',
+      trade_path_summary: 'مالک ↔ مشتری سطح ۱',
       offer_user_id: 90,
       offer_user_name: 'حسابدار فروش جدید',
       offer_user_profile_user_id: 77,
@@ -298,6 +303,7 @@ describe('TradingView.vue', () => {
     expect(tradingViewMocks.apiFetchJsonMock).not.toHaveBeenCalledWith('/api/trades/my', {})
     expect(wrapper.text()).toContain('19999')
     expect(wrapper.text()).toContain('حسابدار فروش جدید')
+    expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۱')
 
     await wrapper.get('.trade-card .profile-link').trigger('click')
     expect(wrapper.emitted('navigate')?.at(-1)).toEqual([

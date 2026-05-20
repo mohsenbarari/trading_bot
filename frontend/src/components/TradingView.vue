@@ -79,6 +79,8 @@ interface Trade {
   responder_user_resolved_from_accountant_id?: number | null
   responder_user_highlight_accountant_user_id?: number | null
   responder_user_highlight_accountant_relation_display_name?: string | null
+  trade_path_kind?: string | null
+  trade_path_summary?: string | null
   created_at: string
 }
 
@@ -127,6 +129,8 @@ function normalizeTradeRealtimePayload(payload: unknown): Trade | null {
     responder_user_resolved_from_accountant_id: rawTrade.responder_user_resolved_from_accountant_id ?? null,
     responder_user_highlight_accountant_user_id: rawTrade.responder_user_highlight_accountant_user_id ?? null,
     responder_user_highlight_accountant_relation_display_name: rawTrade.responder_user_highlight_accountant_relation_display_name ?? null,
+    trade_path_kind: typeof rawTrade.trade_path_kind === 'string' ? rawTrade.trade_path_kind : null,
+    trade_path_summary: typeof rawTrade.trade_path_summary === 'string' ? rawTrade.trade_path_summary : null,
     created_at: typeof rawTrade.created_at === 'string' && rawTrade.created_at.trim() ? rawTrade.created_at : 'همین الان',
   }
 }
@@ -991,6 +995,10 @@ watch(activeTab, (val) => {
               >
                 {{ getTradeCounterpartyLabel(trade) }}
               </span>
+            </div>
+            <div v-if="trade.trade_path_summary" class="trade-info-row">
+              <span class="info-label">🧭 مسیر:</span>
+              <span class="info-value">{{ trade.trade_path_summary }}</span>
             </div>
             <div class="trade-info-row">
               <span class="info-label">🔢 شماره معامله:</span>

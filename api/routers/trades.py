@@ -36,7 +36,7 @@ from core.services.trade_service import (
 )
 from core.services.user_account_status_service import is_user_trade_blocked
 from models.user import User
-from models.customer_relation import CustomerTier
+from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.offer import Offer, OfferType, OfferStatus
 from models.trade import Trade, TradeType, TradeStatus
 from models.commodity import Commodity
@@ -98,6 +98,8 @@ class TradeResponse(BaseModel):
     responder_user_resolved_from_accountant_id: Optional[int] = None
     responder_user_highlight_accountant_user_id: Optional[int] = None
     responder_user_highlight_accountant_relation_display_name: Optional[str] = None
+    trade_path_kind: Optional[str] = None
+    trade_path_summary: Optional[str] = None
     created_at: str
     
     class Config:
@@ -142,6 +144,83 @@ async def _load_trade_identity_map_for_user_ids(
     if not participant_ids:
         return {}
     return await load_accountant_chat_identity_map(db, participant_ids)
+
+
+def _normalize_customer_tier_value(value: object | None) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "value"):
+        value = getattr(value, "value")
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return normalized or None
+
+
+async def _load_trade_customer_relation_map_for_user_ids(
+    db: AsyncSession,
+    user_ids: list[object] | tuple[object, ...],
+) -> dict[int, CustomerRelation]:
+    participant_ids = sorted(
+        {
+            normalized_user_id
+            for raw_user_id in user_ids
+            for normalized_user_id in [_coerce_trade_user_id(raw_user_id)]
+            if normalized_user_id is not None
+        }
+    )
+    if not participant_ids:
+        return {}
+
+    result = await db.execute(
+        select(CustomerRelation).where(
+            CustomerRelation.customer_user_id.in_(participant_ids),
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+            CustomerRelation.deleted_at.is_(None),
+        )
+    )
+    relations = result.scalars().all()
+    return {
+        relation.customer_user_id: relation
+        for relation in relations
+        if _coerce_trade_user_id(getattr(relation, "customer_user_id", None)) is not None
+    }
+
+
+def _build_trade_path_payload(
+    *,
+    offer_user_id: object,
+    responder_user_id: object,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+) -> dict[str, str | None]:
+    payload: dict[str, str | None] = {
+        "trade_path_kind": None,
+        "trade_path_summary": None,
+    }
+    if not customer_relation_map:
+        return payload
+
+    normalized_offer_user_id = _coerce_trade_user_id(offer_user_id)
+    normalized_responder_user_id = _coerce_trade_user_id(responder_user_id)
+    if normalized_offer_user_id is None or normalized_responder_user_id is None:
+        return payload
+
+    relation = customer_relation_map.get(normalized_offer_user_id)
+    if relation is None or _coerce_trade_user_id(getattr(relation, "owner_user_id", None)) != normalized_responder_user_id:
+        relation = customer_relation_map.get(normalized_responder_user_id)
+        if relation is None or _coerce_trade_user_id(getattr(relation, "owner_user_id", None)) != normalized_offer_user_id:
+            return payload
+
+    customer_tier = _normalize_customer_tier_value(getattr(relation, "customer_tier", None))
+    if customer_tier == CustomerTier.TIER_2.value:
+        payload["trade_path_kind"] = "owner_customer_tier2"
+        payload["trade_path_summary"] = "مالک ↔ مشتری سطح ۲"
+        return payload
+    if customer_tier == CustomerTier.TIER_1.value:
+        payload["trade_path_kind"] = "owner_customer_tier1"
+        payload["trade_path_summary"] = "مالک ↔ مشتری سطح ۱"
+        return payload
+    return payload
 
 
 def _build_trade_participant_payload(
@@ -224,6 +303,7 @@ def _build_trade_created_event_payload(
     responder_user: object | None,
     responder_user_id: object,
     identity_map: Mapping[int, AccountantChatIdentity] | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None = None,
 ) -> dict[str, object | None]:
     payload: dict[str, object | None] = {
         "id": trade_id,
@@ -251,6 +331,13 @@ def _build_trade_created_event_payload(
             user=responder_user,
             user_id=responder_user_id,
             identity_map=identity_map,
+        )
+    )
+    payload.update(
+        _build_trade_path_payload(
+            offer_user_id=offer_user_id,
+            responder_user_id=responder_user_id,
+            customer_relation_map=customer_relation_map,
         )
     )
     return payload
@@ -313,6 +400,7 @@ def trade_to_response(
     trade: Trade,
     *,
     identity_map: Mapping[int, AccountantChatIdentity] | None = None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None = None,
 ) -> TradeResponse:
     """تبدیل مدل Trade به پاسخ API"""
     offer_user_payload = _build_trade_participant_payload(
@@ -327,6 +415,11 @@ def trade_to_response(
         user_id=trade.responder_user_id,
         identity_map=identity_map,
     )
+    trade_path_payload = _build_trade_path_payload(
+        offer_user_id=trade.offer_user_id,
+        responder_user_id=trade.responder_user_id,
+        customer_relation_map=customer_relation_map,
+    )
     return TradeResponse(
         id=trade.id,
         trade_number=trade.trade_number,
@@ -339,6 +432,7 @@ def trade_to_response(
         status=trade.status.value,
         **offer_user_payload,
         **responder_user_payload,
+        **trade_path_payload,
         created_at=to_jalali_str(trade.created_at) or ""
     )
 
@@ -642,17 +736,36 @@ async def _execute_trade_authoritatively(
     responder_owner_user_id = _coerce_trade_user_id(
         getattr(responder_customer_relation, "owner_user_id", None)
     )
+    source_customer_relation = await get_active_customer_relation_for_customer(db, offer.user_id)
+    source_customer_tier = _normalize_customer_tier_value(
+        getattr(source_customer_relation, "customer_tier", None)
+    )
+    source_customer_owner_user_id = _coerce_trade_user_id(
+        getattr(source_customer_relation, "owner_user_id", None)
+    )
     uses_owner_customer_trade_path = (
         responder_owner_user_id is not None
         and responder_owner_user_id == offer.user_id
+    )
+    uses_same_owner_customer_trade_chain = (
+        is_tier2_customer_responder
+        and responder_owner_user_id is not None
+        and source_customer_owner_user_id == responder_owner_user_id
+        and source_customer_tier == CustomerTier.TIER_1.value
+        and offer.user_id != responder_owner_user_id
     )
     uses_outsider_owner_customer_trade_chain = (
         is_tier2_customer_responder
         and responder_owner_user_id is not None
         and responder_owner_user_id != offer.user_id
+        and not uses_same_owner_customer_trade_chain
+    )
+    uses_customer_trade_chain = (
+        uses_same_owner_customer_trade_chain
+        or uses_outsider_owner_customer_trade_chain
     )
     responder_mediator_owner: User | None = None
-    if uses_outsider_owner_customer_trade_chain:
+    if uses_customer_trade_chain:
         responder_mediator_owner = await db.get(User, responder_owner_user_id)
         if responder_mediator_owner is None:
             raise HTTPException(
@@ -727,7 +840,15 @@ async def _execute_trade_authoritatively(
                 db,
                 [existing_trade_obj.offer_user_id, existing_trade_obj.responder_user_id],
             )
-            return trade_to_response(existing_trade_obj, identity_map=existing_identity_map)
+            existing_customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
+                db,
+                [existing_trade_obj.offer_user_id, existing_trade_obj.responder_user_id],
+            )
+            return trade_to_response(
+                existing_trade_obj,
+                identity_map=existing_identity_map,
+                customer_relation_map=existing_customer_relation_map,
+            )
     
     # گرفتن شماره معامله جدید
     max_trade_number = await db.scalar(select(func.max(Trade.trade_number)))
@@ -740,7 +861,7 @@ async def _execute_trade_authoritatively(
     response_trade_record: Trade
     response_trade_number: int
 
-    if uses_outsider_owner_customer_trade_chain and responder_mediator_owner is not None:
+    if uses_customer_trade_chain and responder_mediator_owner is not None:
         source_leg_trade = Trade(
             trade_number=next_trade_number,
             offer_id=offer.id,
@@ -842,9 +963,18 @@ async def _execute_trade_authoritatively(
     response_trade = result.scalar_one()
     response_offer_user = getattr(response_trade, "offer_user", None)
     if response_offer_user is None:
-        response_offer_user = responder_mediator_owner if uses_outsider_owner_customer_trade_chain else offer.user
+        response_offer_user = responder_mediator_owner if uses_customer_trade_chain else offer.user
     response_responder_user = getattr(response_trade, "responder_user", None) or owner_user
     participant_identity_map = await _load_trade_identity_map_for_user_ids(
+        db,
+        [
+            getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
+            getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
+            getattr(source_leg_trade, "offer_user_id", None),
+            getattr(source_leg_trade, "responder_user_id", None),
+        ],
+    )
+    participant_customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
         db,
         [
             getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
@@ -900,7 +1030,9 @@ async def _execute_trade_authoritatively(
         trade_number: int,
         offer_user_name: str,
         responder_user_name: str,
+        trade_path_summary: str | None = None,
     ) -> tuple[str, str, str, str]:
+        trade_path_line = f"\n🧭 مسیر: {trade_path_summary}" if trade_path_summary else ""
         responder_msg = (
             f"{respond_emoji} <b>{respond_type_fa}</b>\n\n"
             f"💰 فی: {trade_price:,}\n"
@@ -909,6 +1041,7 @@ async def _execute_trade_authoritatively(
             f"👤 طرف معامله: {offer_user_name}\n"
             f"🔢 شماره معامله: {trade_number}\n"
             f"🕐 زمان معامله: {trade_datetime}"
+            f"{trade_path_line}"
         )
         offer_owner_msg = (
             f"{offer_emoji} <b>{offer_type_fa}</b>\n\n"
@@ -918,6 +1051,7 @@ async def _execute_trade_authoritatively(
             f"👤 طرف معامله: {responder_user_name}\n"
             f"🔢 شماره معامله: {trade_number}\n"
             f"🕐 زمان معامله: {trade_datetime}"
+            f"{trade_path_line}"
         )
         notif_msg_responder = (
             f"{respond_emoji} {respond_type_fa}\n"
@@ -925,6 +1059,7 @@ async def _execute_trade_authoritatively(
             f"🏷️ کالا: {offer.commodity.name}\n"
             f"👤 طرف معامله: {offer_user_name}\n"
             f"🔢 شماره: {trade_number}"
+            f"{trade_path_line}"
         )
         notif_msg_owner = (
             f"{offer_emoji} {offer_type_fa}\n"
@@ -932,9 +1067,10 @@ async def _execute_trade_authoritatively(
             f"🏷️ کالا: {offer.commodity.name}\n"
             f"👤 طرف معامله: {responder_user_name}\n"
             f"🔢 شماره: {trade_number}"
+            f"{trade_path_line}"
         )
         return responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner
-    if uses_outsider_owner_customer_trade_chain and responder_mediator_owner is not None and source_leg_trade is not None:
+    if uses_customer_trade_chain and responder_mediator_owner is not None and source_leg_trade is not None:
         source_leg_offer_payload = _build_trade_participant_payload(
             "offer_user",
             user=offer.user,
@@ -949,18 +1085,30 @@ async def _execute_trade_authoritatively(
         )
         source_leg_offer_name = source_leg_offer_payload.get("offer_user_name") or "نامشخص"
         source_leg_responder_name = source_leg_responder_payload.get("responder_user_name") or "نامشخص"
+        customer_leg_path_payload = _build_trade_path_payload(
+            offer_user_id=getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
+            responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
+            customer_relation_map=participant_customer_relation_map,
+        )
+        source_leg_path_payload = _build_trade_path_payload(
+            offer_user_id=source_leg_trade.offer_user_id,
+            responder_user_id=source_leg_trade.responder_user_id,
+            customer_relation_map=participant_customer_relation_map,
+        )
 
         customer_responder_msg, customer_offer_owner_msg, customer_notif_responder, customer_notif_owner = _build_trade_message_bundle(
             trade_price=executed_trade_price,
             trade_number=response_trade_number,
             offer_user_name=offer_user_display_name,
             responder_user_name=responder_user_display_name,
+            trade_path_summary=customer_leg_path_payload.get("trade_path_summary"),
         )
         source_responder_msg, source_offer_owner_msg, source_notif_responder, source_notif_owner = _build_trade_message_bundle(
             trade_price=offer.price,
             trade_number=source_leg_trade.trade_number,
             offer_user_name=source_leg_offer_name,
             responder_user_name=source_leg_responder_name,
+            trade_path_summary=source_leg_path_payload.get("trade_path_summary"),
         )
 
         background_tasks.add_task(send_telegram_message_sync, owner_user.telegram_id, customer_responder_msg)
@@ -1040,6 +1188,11 @@ async def _execute_trade_authoritatively(
             trade_number=response_trade_number,
             offer_user_name=offer_user_display_name,
             responder_user_name=responder_user_display_name,
+            trade_path_summary=_build_trade_path_payload(
+                offer_user_id=getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
+                responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
+                customer_relation_map=participant_customer_relation_map,
+            ).get("trade_path_summary"),
         )
 
         background_tasks.add_task(send_telegram_message_sync, owner_user.telegram_id, responder_msg)
@@ -1102,9 +1255,10 @@ async def _execute_trade_authoritatively(
             responder_user=response_responder_user,
             responder_user_id=created_trade.responder_user_id,
             identity_map=participant_identity_map,
+            customer_relation_map=participant_customer_relation_map,
         ),
     )
-    if uses_outsider_owner_customer_trade_chain and responder_mediator_owner is not None and source_leg_trade is not None:
+    if uses_customer_trade_chain and responder_mediator_owner is not None and source_leg_trade is not None:
         await publish_event(
             "trade:created",
             _build_trade_created_event_payload(
@@ -1123,6 +1277,7 @@ async def _execute_trade_authoritatively(
                 responder_user=responder_mediator_owner,
                 responder_user_id=source_leg_trade.responder_user_id,
                 identity_map=participant_identity_map,
+                customer_relation_map=participant_customer_relation_map,
             ),
         )
     await publish_event("offer:updated", {
@@ -1132,7 +1287,11 @@ async def _execute_trade_authoritatively(
         "status": offer.status.value
     })
     
-    return trade_to_response(response_trade, identity_map=participant_identity_map)
+    return trade_to_response(
+        response_trade,
+        identity_map=participant_identity_map,
+        customer_relation_map=participant_customer_relation_map,
+    )
 
 
 @router.post("/", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)
@@ -1234,7 +1393,22 @@ async def get_my_trades(
     trades = result.scalars().all()
 
     identity_map = await _load_trade_identity_map(db, list(trades))
-    return [trade_to_response(t, identity_map=identity_map) for t in trades]
+    customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
+        db,
+        [
+            raw_user_id
+            for trade in trades
+            for raw_user_id in (getattr(trade, "offer_user_id", None), getattr(trade, "responder_user_id", None))
+        ],
+    )
+    return [
+        trade_to_response(
+            t,
+            identity_map=identity_map,
+            customer_relation_map=customer_relation_map,
+        )
+        for t in trades
+    ]
 
 
 @router.get("/{trade_id}", response_model=TradeResponse)
@@ -1265,7 +1439,15 @@ async def get_trade(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما به این معامله دسترسی ندارید.")
 
     identity_map = await _load_trade_identity_map(db, [trade])
-    return trade_to_response(trade, identity_map=identity_map)
+    customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
+        db,
+        [trade.offer_user_id, trade.responder_user_id],
+    )
+    return trade_to_response(
+        trade,
+        identity_map=identity_map,
+        customer_relation_map=customer_relation_map,
+    )
 
 
 @router.get("/with/{other_user_id}", response_model=List[TradeResponse])
@@ -1302,4 +1484,19 @@ async def get_trades_with_user(
     trades = result.scalars().all()
 
     identity_map = await _load_trade_identity_map(db, list(trades))
-    return [trade_to_response(t, identity_map=identity_map) for t in trades]
+    customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
+        db,
+        [
+            raw_user_id
+            for trade in trades
+            for raw_user_id in (getattr(trade, "offer_user_id", None), getattr(trade, "responder_user_id", None))
+        ],
+    )
+    return [
+        trade_to_response(
+            t,
+            identity_map=identity_map,
+            customer_relation_map=customer_relation_map,
+        )
+        for t in trades
+    ]
