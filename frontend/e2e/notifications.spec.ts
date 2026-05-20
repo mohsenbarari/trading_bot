@@ -635,5 +635,12 @@ test.describe('Notification regressions', () => {
     await expect(headerStatus).toContainText(fixture.relationDisplayName, { timeout: 30000 })
     await expect(headerStatus).toContainText('در حال نوشتن', { timeout: 30000 })
     await expect(headerStatus).not.toContainText(fixture.accountant.accountName)
+
+    await sendRoomActivitySignal(request, fixture.accountant, fixture.groupChatId, 'typing', false)
+    await sendRoomActivitySignal(request, fixture.accountant, fixture.groupChatId, 'uploading_file', true)
+
+    await expect(headerStatus).toContainText(fixture.relationDisplayName, { timeout: 30000 })
+    await expect(headerStatus).toContainText('در حال ارسال فایل', { timeout: 30000 })
+    await expect(headerStatus).not.toContainText(fixture.accountant.accountName)
   })
 })
