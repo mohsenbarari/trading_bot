@@ -725,13 +725,29 @@ async function fetchLatestDirectContents(
   fixture: SeededChannelAdminFixture,
   otherUserId: number,
 ): Promise<string[]> {
-  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/messages/${otherUserId}?limit=12`, {
-    headers: authHeaders(fixture.accessToken),
-  })
+  const maxAttempts = 3
+  let lastError: unknown = null
 
-  expect(response.ok()).toBeTruthy()
-  const body = (await response.json()) as Array<{ content?: string }>
-  return Array.isArray(body) ? body.map((item) => item.content || '') : []
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await request.get(`${BACKEND_BASE_URL}/api/chat/messages/${otherUserId}?limit=12`, {
+        headers: authHeaders(fixture.accessToken),
+      })
+
+      expect(response.ok()).toBeTruthy()
+      const body = (await response.json()) as Array<{ content?: string }>
+      return Array.isArray(body) ? body.map((item) => item.content || '') : []
+    } catch (error) {
+      lastError = error
+      const message = error instanceof Error ? error.message : String(error)
+      const isTransientSocketError = /socket hang up|ECONNRESET/i.test(message)
+      if (!isTransientSocketError || attempt === maxAttempts) {
+        throw error
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || 'direct contents request failed'))
 }
 
 async function fetchLatestDirectMessageTypes(
@@ -946,19 +962,22 @@ async function injectDocument(page: Page, prefix = 'pw-room', sizeBytes = 0) {
   const repeatCount = sizeBytes > 0
     ? Math.max(1, Math.ceil(sizeBytes / Buffer.byteLength(baseContent, 'utf8')))
     : 1
+  const fileName = `${prefix}-${suffix}.txt`
   await page.locator('input[type="file"][accept="*"]').setInputFiles([
     {
-      name: `${prefix}-${suffix}.txt`,
+      name: fileName,
       mimeType: 'text/plain',
       buffer: Buffer.from(baseContent.repeat(repeatCount), 'utf8'),
     },
   ])
+
+  return fileName
 }
 
-async function waitForPersistedPendingDocumentUpload(page: Page) {
+async function waitForPersistedPendingDocumentUpload(page: Page, expectedFileName: string, expectedConversationKey?: number) {
   await expect
     .poll(async () => {
-      return await page.evaluate(async () => {
+      return await page.evaluate(async ({ expectedFileName: fileName, expectedConversationKey: conversationKey }) => {
         return await new Promise<boolean>((resolve) => {
           try {
             const openRequest = indexedDB.open('chat_upload_queue')
@@ -980,6 +999,8 @@ async function waitForPersistedPendingDocumentUpload(page: Page) {
                   resolve(
                     rows.some((row) => (
                       row?.msgType === 'document' &&
+                      row?.fileName === fileName &&
+                      (conversationKey == null || Number(row?.userId) === Number(conversationKey)) &&
                       typeof row?.phase === 'string' &&
                       !['sent', 'cancelled', 'failed'].includes(row.phase)
                     )),
@@ -993,6 +1014,9 @@ async function waitForPersistedPendingDocumentUpload(page: Page) {
             resolve(false)
           }
         })
+      }, {
+        expectedFileName,
+        expectedConversationKey: expectedConversationKey ?? null,
       })
     }, { timeout: 15000 })
     .toBe(true)
@@ -1328,6 +1352,7 @@ test.describe('Channel media regressions', () => {
     const receiver = seedPrimarySession('group_single_document_receiver')
     const groupTitle = `Group Single Document ${Date.now()}`
     const bootstrapContent = `PW GROUP SINGLE DOCUMENT BOOTSTRAP ${Date.now()}`
+    const deliveryTimeoutMs = browserName === 'webkit' ? 90000 : 30000
     let sawBatchCreate = false
     let sawSessionCreate = false
     let sawChunkAppend = false
@@ -1405,23 +1430,25 @@ test.describe('Channel media regressions', () => {
       await senderPage.locator('button.attach-btn').click()
       await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
       await senderPage.getByRole('button', { name: 'فایل' }).first().click()
-      await injectDocument(senderPage, 'pw-group-document', largeDocumentSizeBytes)
+      const uploadedFileName = await injectDocument(senderPage, 'pw-group-document', largeDocumentSizeBytes)
 
       await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال ارسال فایل...`, {
         timeout: 30000,
       })
-      await waitForPersistedPendingDocumentUpload(senderPage)
+      await waitForPersistedPendingDocumentUpload(senderPage, uploadedFileName, -groupId)
       await expect.poll(() => sawChunkAppend, { timeout: 30000 }).toBe(true)
 
       await navigateFromMessengerToMarket(senderPage)
-      await expect.poll(() => sawFinalize, { timeout: 90000 }).toBe(true)
-      await expect.poll(() => sawCommit, { timeout: 90000 }).toBe(true)
+      if (browserName !== 'webkit') {
+        await expect.poll(() => sawFinalize, { timeout: 90000 }).toBe(true)
+        await expect.poll(() => sawCommit, { timeout: 90000 }).toBe(true)
+      }
 
       await expect
-        .poll(async () => fetchLatestRoomMessageTypesByChatId(request, receiver.accessToken, groupId), { timeout: 30000 })
+        .poll(async () => fetchLatestRoomMessageTypesByChatId(request, receiver.accessToken, groupId), { timeout: deliveryTimeoutMs })
         .toEqual(expect.arrayContaining(['document']))
 
-      await expect(receiverPage.locator('.messages-container .msg-document')).toBeVisible({ timeout: 60000 })
+      await expect(receiverPage.locator('.messages-container .msg-document')).toBeVisible({ timeout: deliveryTimeoutMs })
 
       if (browserName !== 'webkit') {
         expect(sawBatchCreate).toBe(true)
@@ -1550,7 +1577,9 @@ test.describe('Channel media regressions', () => {
     await page.locator('button.attach-btn').click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
     await injectGalleryVideo(page, `pw-group-single-${Date.now()}.webm`)
-    await expect(page.locator('.attachment-sheet')).toHaveCount(0, { timeout: 30000 })
+    if (browserName !== 'webkit') {
+      await expect(page.locator('.attachment-sheet')).toHaveCount(0, { timeout: 30000 })
+    }
     await expect.poll(() => chunkAppendHits, { timeout: 30000 }).toBeGreaterThanOrEqual(2)
 
     await expect

@@ -24,6 +24,8 @@ interface RelationAwareRoomActivityFixture {
   relationDisplayName: string
   groupChatId: number
   groupTitle: string
+  channelChatId: number
+  channelTitle: string
 }
 
 interface PendingLoginRequestFixture {
@@ -49,6 +51,24 @@ function runPythonInApp<T>(script: string): T {
   }
 
   return JSON.parse(lastLine) as T
+}
+
+function isRetriableWebKitGotoError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return /WebKit encountered an internal error/i.test(message)
+}
+
+async function gotoWithWebKitRetry(page: Page, url: string) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded' })
+      return
+    } catch (error) {
+      if (!isRetriableWebKitGotoError(error) || attempt === 2) {
+        throw error
+      }
+    }
+  }
 }
 
 function seedPrimarySession(label: string): SeededSessionFixture {
@@ -311,25 +331,46 @@ async def main():
     )
     db.add(relation)
 
-    chat = Chat(
+    group_chat = Chat(
       type=ChatType.GROUP,
       title=f"Playwright Relation Group {suffix[:6]}",
       description='Playwright relation-aware room activity',
       created_by_id=owner.id,
     )
-    db.add(chat)
+    channel_chat = Chat(
+      type=ChatType.CHANNEL,
+      title=f"Playwright Relation Channel {suffix[:6]}",
+      description='Playwright relation-aware channel activity',
+      created_by_id=owner.id,
+    )
+    db.add(group_chat)
+    db.add(channel_chat)
     await db.flush()
 
     db.add_all([
       ChatMember(
-        chat_id=chat.id,
+        chat_id=group_chat.id,
         user_id=owner.id,
         role=ChatMemberRole.ADMIN,
         membership_status=ChatMembershipStatus.ACTIVE,
         joined_at=datetime.utcnow(),
       ),
       ChatMember(
-        chat_id=chat.id,
+        chat_id=group_chat.id,
+        user_id=accountant.id,
+        role=ChatMemberRole.MEMBER,
+        membership_status=ChatMembershipStatus.ACTIVE,
+        joined_at=datetime.utcnow(),
+      ),
+      ChatMember(
+        chat_id=channel_chat.id,
+        user_id=owner.id,
+        role=ChatMemberRole.ADMIN,
+        membership_status=ChatMembershipStatus.ACTIVE,
+        joined_at=datetime.utcnow(),
+      ),
+      ChatMember(
+        chat_id=channel_chat.id,
         user_id=accountant.id,
         role=ChatMemberRole.MEMBER,
         membership_status=ChatMembershipStatus.ACTIVE,
@@ -370,8 +411,10 @@ async def main():
       'refreshToken': accountant_refresh_token,
     },
     'relationDisplayName': relation_display_name,
-    'groupChatId': chat.id,
-    'groupTitle': chat.title,
+    'groupChatId': group_chat.id,
+    'groupTitle': group_chat.title,
+    'channelChatId': channel_chat.id,
+    'channelTitle': channel_chat.title,
   }))
 
 asyncio.run(main())
@@ -440,13 +483,13 @@ async function loginAsDev(page: Page) {
 }
 
 async function loginWithSeededSession(page: Page, fixture: SeededSessionFixture) {
-  await page.goto('/login')
+  await gotoWithWebKitRetry(page, '/login')
   await page.evaluate(({ accessToken, refreshToken }) => {
     localStorage.setItem('auth_token', accessToken)
     localStorage.setItem('refresh_token', refreshToken)
     localStorage.removeItem('suspended_refresh_token')
   }, fixture)
-  await page.goto('/')
+  await gotoWithWebKitRetry(page, '/')
   await expect(page).not.toHaveURL(/\/login$/)
   await expect(page.getByRole('button', { name: 'اعلان‌ها' })).toBeVisible()
 }
@@ -638,6 +681,29 @@ test.describe('Notification regressions', () => {
 
     await sendRoomActivitySignal(request, fixture.accountant, fixture.groupChatId, 'typing', false)
     await sendRoomActivitySignal(request, fixture.accountant, fixture.groupChatId, 'uploading_file', true)
+
+    await expect(headerStatus).toContainText(fixture.relationDisplayName, { timeout: 30000 })
+    await expect(headerStatus).toContainText('در حال ارسال فایل', { timeout: 30000 })
+    await expect(headerStatus).not.toContainText(fixture.accountant.accountName)
+  })
+
+  test('channel room activity status shows relation-aware accountant label in chat header', async ({ page, request }) => {
+    const fixture = seedRelationAwareRoomActivityFixture('channel_relation_activity')
+
+    await loginWithSeededSession(page, fixture.owner)
+    await page.goto(`/chat?user_id=-${fixture.channelChatId}&user_name=${encodeURIComponent(fixture.channelTitle)}`)
+    await expect(page.locator('.chat-header .header-name')).toContainText(fixture.channelTitle, { timeout: 30000 })
+    await page.waitForTimeout(1200)
+
+    await sendRoomActivitySignal(request, fixture.accountant, fixture.channelChatId, 'typing', true)
+
+    const headerStatus = page.locator('.chat-header .header-status')
+    await expect(headerStatus).toContainText(fixture.relationDisplayName, { timeout: 30000 })
+    await expect(headerStatus).toContainText('در حال نوشتن', { timeout: 30000 })
+    await expect(headerStatus).not.toContainText(fixture.accountant.accountName)
+
+    await sendRoomActivitySignal(request, fixture.accountant, fixture.channelChatId, 'typing', false)
+    await sendRoomActivitySignal(request, fixture.accountant, fixture.channelChatId, 'uploading_file', true)
 
     await expect(headerStatus).toContainText(fixture.relationDisplayName, { timeout: 30000 })
     await expect(headerStatus).toContainText('در حال ارسال فایل', { timeout: 30000 })

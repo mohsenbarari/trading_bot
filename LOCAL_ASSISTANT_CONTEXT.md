@@ -230,6 +230,7 @@ Behavioral rules:
 - frontend downloads/uploads are designed around real progress reporting, cancellation, weak-device resilience, and background continuation
 - albums are explicit batch constructs driven by `album_id` and `album_index`, not by grouping adjacent images
 - messenger state orchestration lives in `ChatView.vue`; UI and gestures are delegated to subcomponents and composables
+- realtime `sender_name` for direct messages and room activity should preserve relation-aware accountant labels from the shared contract instead of being recomputed from raw `account_name` in router call sites
 
 Source of truth:
 - `api/routers/chat.py`
@@ -253,6 +254,10 @@ Reference notes:
 - `/memories/repo/chat-media-pipeline.md`
 - `/memories/repo/chat-upload-gotchas.md`
 - `/memories/repo/chat-album-grouping.md`
+
+Relation-aware sender label source of truth:
+- `core/services/accountant_chat_contract.py` owns `resolve_relation_aware_sender_display_name()` for direct and room activity labels
+- `resolve_direct_sender_display_name()` is only a backward-compatible alias for older direct-only call sites and tests
 
 ### User Blocks, Restrictions, And Admin Limits
 Blocking and admin restrictions are different concepts.
