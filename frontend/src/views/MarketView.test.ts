@@ -156,7 +156,7 @@ describe('MarketView.vue', () => {
     marketViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
-      if (path === '/api/auth/me') return responseOf({ id: 77 })
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
       if (path === '/api/offers/') return responseOf({ success: true, id: 1001 })
       return responseOf(null)
     })
@@ -257,7 +257,7 @@ describe('MarketView.vue', () => {
     marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
-      if (path === '/api/auth/me') return responseOf({ id: 77 })
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
       if (path === '/api/offers/' && options?.method === 'POST') {
         const body = JSON.parse(String(options.body))
         if (!body.warning_acknowledged) {
@@ -311,6 +311,26 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
+  it('replaces the create-offer bar with a read-only note for tier2 customers', async () => {
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: 'tier2' })
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect(wrapper.find('.text-offer-input').exists()).toBe(false)
+    expect(wrapper.find('.send-btn').exists()).toBe(false)
+    expect(wrapper.find('.tier2-offer-note').exists()).toBe(true)
+    expect(wrapper.text()).toContain('ثبت لفظ برای مشتری سطح 2 غیرفعال است')
+    expect(wrapper.text()).toContain('شما فقط می‌توانید روی لفظ‌های دیگر درخواست بزنید.')
+
+    wrapper.unmount()
+  })
+
   it('shows the default placeholder plus fetch-error logging when market dependencies fail', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     marketViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
@@ -341,7 +361,7 @@ describe('MarketView.vue', () => {
         }) as Promise<any>
       }
       if (path === '/api/trading-settings/') return Promise.resolve(responseOf(settingsFixture))
-      if (path === '/api/auth/me') return Promise.resolve(responseOf({ id: 77 }))
+      if (path === '/api/auth/me') return Promise.resolve(responseOf({ id: 77, customer_tier: null }))
       return Promise.resolve(responseOf(null))
     })
 

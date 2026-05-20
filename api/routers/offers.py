@@ -20,9 +20,14 @@ from core.config import settings
 from core.trading_settings import get_trading_settings
 from core.utils import check_user_limits, increment_user_counter, to_jalali_str
 from core.services.trade_service import get_available_trade_amounts
-from core.services.customer_relation_service import build_customer_offer_read_model, load_offer_customer_read_context
+from core.services.customer_relation_service import (
+    build_customer_offer_read_model,
+    get_active_customer_relation_for_customer,
+    load_offer_customer_read_context,
+)
 from core.services.user_account_status_service import is_user_market_blocked
 from models.user import User
+from models.customer_relation import CustomerTier
 from models.offer import Offer, OfferType, OfferStatus
 from models.commodity import Commodity
 from api.deps import EffectiveOwnerActor, get_current_user, get_current_user_optional, get_effective_owner_actor_context
@@ -323,6 +328,13 @@ async def create_offer(
     allowed, error_msg = check_user_limits(owner_user, 'trade', offer_data.quantity)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
+
+    actor_customer_relation = await get_active_customer_relation_for_customer(db, actor_user.id)
+    if actor_customer_relation and actor_customer_relation.customer_tier == CustomerTier.TIER_2:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="مشتری سطح 2 مجاز به ثبت لفظ نیست و فقط می‌تواند روی لفظ‌های دیگر درخواست بزند.",
+        )
     
     # بررسی تعداد لفظ‌های فعال (با کش Redis)
     ts = get_trading_settings()

@@ -12,7 +12,7 @@ import time
 from core.db import get_db
 from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
 from models.accountant_relation import AccountantRelationStatus
-from models.customer_relation import CustomerRelationStatus
+from models.customer_relation import CustomerRelationStatus, CustomerTier
 from models.invitation import Invitation
 from core.security import (
     create_access_token,
@@ -50,6 +50,7 @@ from core.services.accountant_relation_service import (
     is_user_accountant,
 )
 from core.services.customer_relation_service import (
+    get_active_customer_relation_for_customer,
     get_pending_customer_relation_by_invitation_token,
     is_customer_invitation_token,
     is_user_customer,
@@ -130,9 +131,19 @@ class RefreshTokenRequest(BaseModel):
 
 # --- Endpoints ---
 
-def _serialize_current_user_response(current_user: User, *, is_accountant: bool, is_customer: bool) -> schemas.UserRead:
+def _serialize_current_user_response(
+    current_user: User,
+    *,
+    is_accountant: bool,
+    is_customer: bool,
+    customer_tier: CustomerTier | None = None,
+) -> schemas.UserRead:
     return schemas.UserRead.model_validate(current_user).model_copy(
-        update={"is_accountant": is_accountant, "is_customer": is_customer}
+        update={
+            "is_accountant": is_accountant,
+            "is_customer": is_customer,
+            "customer_tier": customer_tier,
+        }
     )
 
 @router.get("/me", response_model=schemas.UserRead)
@@ -141,10 +152,12 @@ async def read_users_me(
     db: AsyncSession = Depends(get_db),
 ):
     """دریافت اطلاعات کاربر جاری"""
+    customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
     return _serialize_current_user_response(
         current_user,
         is_accountant=await is_user_accountant(db, current_user.id),
-        is_customer=await is_user_customer(db, current_user.id),
+        is_customer=customer_relation is not None,
+        customer_tier=customer_relation.customer_tier if customer_relation else None,
     )
 
 
@@ -161,10 +174,12 @@ async def update_my_avatar(
     )
     await db.commit()
     await db.refresh(current_user)
+    customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
     return _serialize_current_user_response(
         current_user,
         is_accountant=await is_user_accountant(db, current_user.id),
-        is_customer=await is_user_customer(db, current_user.id),
+        is_customer=customer_relation is not None,
+        customer_tier=customer_relation.customer_tier if customer_relation else None,
     )
 
 
