@@ -1075,6 +1075,721 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             {None, "مالک ↔ مشتری سطح ۱", "مالک ↔ مشتری سطح ۲"},
         )
 
+    async def test_execute_trade_authoritatively_creates_two_legs_for_owner_source_and_other_owner_tier1_responder(self):
+        responder_customer = make_user(id=72, account_name="tier1_customer_other_owner", telegram_id=None)
+        responder_owner = make_user(id=82, account_name="responder_owner_tier1", telegram_id=882)
+        source_owner = make_user(id=83, account_name="source_owner_direct", telegram_id=883)
+        offer = make_offer(
+            user_id=source_owner.id,
+            price=100000,
+            quantity=4,
+            remaining_quantity=4,
+            offer_type=OfferType.SELL,
+            user=source_owner,
+        )
+        reloaded_trade = SimpleNamespace(
+            id=99,
+            trade_number=10012,
+            offer_id=None,
+            trade_type=TradeType.BUY,
+            commodity_id=offer.commodity_id,
+            commodity=offer.commodity,
+            quantity=4,
+            price=100000,
+            status=TradeStatus.COMPLETED,
+            offer_user_id=responder_owner.id,
+            offer_user=responder_owner,
+            responder_user_id=responder_customer.id,
+            responder_user=responder_customer,
+            created_at=None,
+        )
+        db = FakeDB(
+            get_results=[offer, responder_owner],
+            execute_results=[
+                FakeExecuteResult(single=responder_customer),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=10009,
+        )
+
+        async def customer_relation_lookup(_db, user_id):
+            if user_id == responder_customer.id:
+                return SimpleNamespace(
+                    owner_user_id=responder_owner.id,
+                    customer_tier=CustomerTier.TIER_1,
+                    commission_rate=None,
+                )
+            return None
+
+        participant_relation_map = {
+            responder_customer.id: SimpleNamespace(
+                owner_user_id=responder_owner.id,
+                customer_tier=CustomerTier.TIER_1,
+            ),
+        }
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=customer_relation_lookup),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value=participant_relation_map),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[responder_customer.id], [responder_owner.id], [source_owner.id]]),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.update_channel_buttons", new=AsyncMock(return_value=True)), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(),
+        ) as notif_mock, patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "api.routers.trades.trade_to_response",
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+                "id": trade.id,
+                "trade_number": trade.trade_number,
+                "offer_id": trade.offer_id,
+                "price": trade.price,
+            },
+        ):
+            result = await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=4),
+                BackgroundTasks(),
+                db=db,
+                context=make_context(responder_customer),
+            )
+
+        self.assertEqual(len(db.added), 2)
+        owner_leg, customer_leg = db.added
+        self.assertEqual(owner_leg.offer_user_id, source_owner.id)
+        self.assertEqual(owner_leg.responder_user_id, responder_owner.id)
+        self.assertEqual(owner_leg.offer_id, offer.id)
+        self.assertEqual(owner_leg.price, 100000)
+        self.assertEqual(owner_leg.trade_type, TradeType.BUY)
+        self.assertEqual(customer_leg.offer_user_id, responder_owner.id)
+        self.assertEqual(customer_leg.responder_user_id, responder_customer.id)
+        self.assertIsNone(customer_leg.offer_id)
+        self.assertEqual(customer_leg.price, 100000)
+        self.assertEqual(customer_leg.trade_type, TradeType.BUY)
+        self.assertEqual(result, {"id": 99, "trade_number": 10012, "offer_id": None, "price": 100000})
+
+        notification_messages = [call.args[2] for call in notif_mock.await_args_list]
+        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
+
+        trade_payloads = [call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created"]
+        self.assertEqual(len(trade_payloads), 2)
+        self.assertEqual(
+            {payload.get("trade_path_summary") for payload in trade_payloads},
+            {None, "مالک ↔ مشتری سطح ۱"},
+        )
+
+    async def test_execute_trade_authoritatively_creates_two_legs_for_tier1_source_and_other_owner_responder(self):
+        responder_owner = make_user(id=92, account_name="responder_owner_direct", telegram_id=992)
+        source_customer = make_user(id=53, account_name="tier1_source_other_owner_direct", telegram_id=None)
+        source_owner = make_user(id=93, account_name="source_owner_bridge", telegram_id=993)
+        offer = make_offer(
+            user_id=source_customer.id,
+            price=50000,
+            quantity=4,
+            remaining_quantity=4,
+            offer_type=OfferType.SELL,
+            user=SimpleNamespace(
+                account_name=source_customer.account_name,
+                mobile_number="09129999991",
+                telegram_id=953,
+            ),
+        )
+        reloaded_trade = SimpleNamespace(
+            id=100,
+            trade_number=10013,
+            offer_id=None,
+            trade_type=TradeType.BUY,
+            commodity_id=offer.commodity_id,
+            commodity=offer.commodity,
+            quantity=4,
+            price=50000,
+            status=TradeStatus.COMPLETED,
+            offer_user_id=source_owner.id,
+            offer_user=source_owner,
+            responder_user_id=responder_owner.id,
+            responder_user=responder_owner,
+            created_at=None,
+        )
+        db = FakeDB(
+            get_results=[offer, source_owner],
+            execute_results=[
+                FakeExecuteResult(single=responder_owner),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=10010,
+        )
+
+        async def customer_relation_lookup(_db, user_id):
+            if user_id == source_customer.id:
+                return SimpleNamespace(
+                    owner_user_id=source_owner.id,
+                    customer_tier=CustomerTier.TIER_1,
+                    commission_rate=None,
+                )
+            return None
+
+        participant_relation_map = {
+            source_customer.id: SimpleNamespace(
+                owner_user_id=source_owner.id,
+                customer_tier=CustomerTier.TIER_1,
+            ),
+        }
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=customer_relation_lookup),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value=participant_relation_map),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[responder_owner.id], [source_owner.id], [source_owner.id], [source_customer.id]]),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.update_channel_buttons", new=AsyncMock(return_value=True)), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(),
+        ) as notif_mock, patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "api.routers.trades.trade_to_response",
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+                "id": trade.id,
+                "trade_number": trade.trade_number,
+                "offer_id": trade.offer_id,
+                "price": trade.price,
+            },
+        ):
+            result = await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=4),
+                BackgroundTasks(),
+                db=db,
+                context=make_context(responder_owner),
+            )
+
+        self.assertEqual(len(db.added), 2)
+        source_leg, owner_leg = db.added
+        self.assertEqual(source_leg.offer_user_id, source_customer.id)
+        self.assertEqual(source_leg.responder_user_id, source_owner.id)
+        self.assertEqual(source_leg.offer_id, offer.id)
+        self.assertEqual(source_leg.price, 50000)
+        self.assertEqual(source_leg.trade_type, TradeType.BUY)
+        self.assertEqual(owner_leg.offer_user_id, source_owner.id)
+        self.assertEqual(owner_leg.responder_user_id, responder_owner.id)
+        self.assertIsNone(owner_leg.offer_id)
+        self.assertEqual(owner_leg.price, 50000)
+        self.assertEqual(owner_leg.trade_type, TradeType.BUY)
+        self.assertEqual(result, {"id": 100, "trade_number": 10013, "offer_id": None, "price": 50000})
+
+        notification_messages = [call.args[2] for call in notif_mock.await_args_list]
+        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
+
+        trade_payloads = [call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created"]
+        self.assertEqual(len(trade_payloads), 2)
+        self.assertEqual(
+            {payload.get("trade_path_summary") for payload in trade_payloads},
+            {None, "مالک ↔ مشتری سطح ۱"},
+        )
+
+    async def test_execute_trade_authoritatively_creates_two_legs_for_tier1_source_and_same_owner_tier1_responder(self):
+        responder_customer = make_user(id=73, account_name="tier1_same_owner_responder", telegram_id=None)
+        source_customer = make_user(id=74, account_name="tier1_same_owner_source", telegram_id=None)
+        shared_owner = make_user(id=94, account_name="shared_owner_tier1", telegram_id=994)
+        offer = make_offer(
+            user_id=source_customer.id,
+            price=100000,
+            quantity=4,
+            remaining_quantity=4,
+            offer_type=OfferType.SELL,
+            user=SimpleNamespace(
+                account_name=source_customer.account_name,
+                mobile_number="09129999992",
+                telegram_id=954,
+            ),
+        )
+        reloaded_trade = SimpleNamespace(
+            id=101,
+            trade_number=10014,
+            offer_id=None,
+            trade_type=TradeType.BUY,
+            commodity_id=offer.commodity_id,
+            commodity=offer.commodity,
+            quantity=4,
+            price=100000,
+            status=TradeStatus.COMPLETED,
+            offer_user_id=shared_owner.id,
+            offer_user=shared_owner,
+            responder_user_id=responder_customer.id,
+            responder_user=responder_customer,
+            created_at=None,
+        )
+        db = FakeDB(
+            get_results=[offer, shared_owner],
+            execute_results=[
+                FakeExecuteResult(single=responder_customer),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=10011,
+        )
+
+        async def customer_relation_lookup(_db, user_id):
+            if user_id == responder_customer.id:
+                return SimpleNamespace(
+                    owner_user_id=shared_owner.id,
+                    customer_tier=CustomerTier.TIER_1,
+                    commission_rate=None,
+                )
+            if user_id == source_customer.id:
+                return SimpleNamespace(
+                    owner_user_id=shared_owner.id,
+                    customer_tier=CustomerTier.TIER_1,
+                    commission_rate=None,
+                )
+            return None
+
+        participant_relation_map = {
+            responder_customer.id: SimpleNamespace(
+                owner_user_id=shared_owner.id,
+                customer_tier=CustomerTier.TIER_1,
+            ),
+            source_customer.id: SimpleNamespace(
+                owner_user_id=shared_owner.id,
+                customer_tier=CustomerTier.TIER_1,
+            ),
+        }
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=customer_relation_lookup),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value=participant_relation_map),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[responder_customer.id], [shared_owner.id], [source_customer.id]]),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.update_channel_buttons", new=AsyncMock(return_value=True)), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(),
+        ) as notif_mock, patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "api.routers.trades.trade_to_response",
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+                "id": trade.id,
+                "trade_number": trade.trade_number,
+                "offer_id": trade.offer_id,
+                "price": trade.price,
+            },
+        ):
+            result = await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=4),
+                BackgroundTasks(),
+                db=db,
+                context=make_context(responder_customer),
+            )
+
+        self.assertEqual(len(db.added), 2)
+        source_leg, customer_leg = db.added
+        self.assertEqual(source_leg.offer_user_id, source_customer.id)
+        self.assertEqual(source_leg.responder_user_id, shared_owner.id)
+        self.assertEqual(source_leg.offer_id, offer.id)
+        self.assertEqual(source_leg.price, 100000)
+        self.assertEqual(source_leg.trade_type, TradeType.BUY)
+        self.assertEqual(customer_leg.offer_user_id, shared_owner.id)
+        self.assertEqual(customer_leg.responder_user_id, responder_customer.id)
+        self.assertIsNone(customer_leg.offer_id)
+        self.assertEqual(customer_leg.price, 100000)
+        self.assertEqual(customer_leg.trade_type, TradeType.BUY)
+        self.assertEqual(result, {"id": 101, "trade_number": 10014, "offer_id": None, "price": 100000})
+
+        notification_messages = [call.args[2] for call in notif_mock.await_args_list]
+        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
+
+        trade_payloads = [call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created"]
+        self.assertEqual(len(trade_payloads), 2)
+        self.assertEqual({payload.get("trade_path_summary") for payload in trade_payloads}, {"مالک ↔ مشتری سطح ۱"})
+
+    async def test_execute_trade_authoritatively_creates_three_legs_for_tier1_source_and_other_owner_tier1_responder(self):
+        responder_customer = make_user(id=75, account_name="tier1_other_owner_responder", telegram_id=None)
+        source_customer = make_user(id=76, account_name="tier1_other_owner_source", telegram_id=None)
+        responder_owner = make_user(id=95, account_name="responder_owner_tier1_chain", telegram_id=995)
+        source_owner = make_user(id=96, account_name="source_owner_tier1_chain", telegram_id=996)
+        offer = make_offer(
+            user_id=source_customer.id,
+            price=200000,
+            quantity=4,
+            remaining_quantity=4,
+            offer_type=OfferType.SELL,
+            user=SimpleNamespace(
+                account_name=source_customer.account_name,
+                mobile_number="09129999993",
+                telegram_id=955,
+            ),
+        )
+        reloaded_trade = SimpleNamespace(
+            id=102,
+            trade_number=10015,
+            offer_id=None,
+            trade_type=TradeType.BUY,
+            commodity_id=offer.commodity_id,
+            commodity=offer.commodity,
+            quantity=4,
+            price=200000,
+            status=TradeStatus.COMPLETED,
+            offer_user_id=responder_owner.id,
+            offer_user=responder_owner,
+            responder_user_id=responder_customer.id,
+            responder_user=responder_customer,
+            created_at=None,
+        )
+        db = FakeDB(
+            get_results=[offer, source_owner, responder_owner],
+            execute_results=[
+                FakeExecuteResult(single=responder_customer),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=10012,
+        )
+
+        async def customer_relation_lookup(_db, user_id):
+            if user_id == responder_customer.id:
+                return SimpleNamespace(
+                    owner_user_id=responder_owner.id,
+                    customer_tier=CustomerTier.TIER_1,
+                    commission_rate=None,
+                )
+            if user_id == source_customer.id:
+                return SimpleNamespace(
+                    owner_user_id=source_owner.id,
+                    customer_tier=CustomerTier.TIER_1,
+                    commission_rate=None,
+                )
+            return None
+
+        participant_relation_map = {
+            responder_customer.id: SimpleNamespace(
+                owner_user_id=responder_owner.id,
+                customer_tier=CustomerTier.TIER_1,
+            ),
+            source_customer.id: SimpleNamespace(
+                owner_user_id=source_owner.id,
+                customer_tier=CustomerTier.TIER_1,
+            ),
+        }
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=customer_relation_lookup),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value=participant_relation_map),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[responder_customer.id], [responder_owner.id], [source_owner.id], [source_customer.id], [source_owner.id]]),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.update_channel_buttons", new=AsyncMock(return_value=True)), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(),
+        ) as notif_mock, patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "api.routers.trades.trade_to_response",
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+                "id": trade.id,
+                "trade_number": trade.trade_number,
+                "offer_id": trade.offer_id,
+                "price": trade.price,
+            },
+        ):
+            result = await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=4),
+                BackgroundTasks(),
+                db=db,
+                context=make_context(responder_customer),
+            )
+
+        self.assertEqual(len(db.added), 3)
+        source_leg, bridge_leg, customer_leg = db.added
+        self.assertEqual(source_leg.offer_user_id, source_customer.id)
+        self.assertEqual(source_leg.responder_user_id, source_owner.id)
+        self.assertEqual(source_leg.offer_id, offer.id)
+        self.assertEqual(source_leg.price, 200000)
+        self.assertEqual(source_leg.trade_type, TradeType.BUY)
+        self.assertEqual(bridge_leg.offer_user_id, source_owner.id)
+        self.assertEqual(bridge_leg.responder_user_id, responder_owner.id)
+        self.assertIsNone(bridge_leg.offer_id)
+        self.assertEqual(bridge_leg.price, 200000)
+        self.assertEqual(bridge_leg.trade_type, TradeType.BUY)
+        self.assertEqual(customer_leg.offer_user_id, responder_owner.id)
+        self.assertEqual(customer_leg.responder_user_id, responder_customer.id)
+        self.assertIsNone(customer_leg.offer_id)
+        self.assertEqual(customer_leg.price, 200000)
+        self.assertEqual(customer_leg.trade_type, TradeType.BUY)
+        self.assertEqual(result, {"id": 102, "trade_number": 10015, "offer_id": None, "price": 200000})
+
+        notification_messages = [call.args[2] for call in notif_mock.await_args_list]
+        self.assertTrue(any("🧭 مسیر: مالک ↔ مشتری سطح ۱" in message for message in notification_messages))
+
+        trade_payloads = [call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created"]
+        self.assertEqual(len(trade_payloads), 3)
+        self.assertEqual(
+            {payload.get("trade_path_summary") for payload in trade_payloads},
+            {None, "مالک ↔ مشتری سطح ۱"},
+        )
+
+    async def test_execute_trade_authoritatively_keeps_owner_to_own_tier1_as_single_direct_leg(self):
+        responder_customer = make_user(id=77, account_name="tier1_own_customer", telegram_id=None)
+        source_owner = make_user(id=97, account_name="owner_source_tier1", telegram_id=997)
+        offer = make_offer(
+            user_id=source_owner.id,
+            price=188000,
+            quantity=4,
+            remaining_quantity=4,
+            offer_type=OfferType.SELL,
+            user=source_owner,
+        )
+        reloaded_trade = SimpleNamespace(
+            id=103,
+            trade_number=10016,
+            offer_id=offer.id,
+            trade_type=TradeType.BUY,
+            commodity_id=offer.commodity_id,
+            commodity=offer.commodity,
+            quantity=4,
+            price=188000,
+            status=TradeStatus.COMPLETED,
+            offer_user_id=source_owner.id,
+            offer_user=source_owner,
+            responder_user_id=responder_customer.id,
+            responder_user=responder_customer,
+            created_at=None,
+        )
+        db = FakeDB(
+            get_results=[offer],
+            execute_results=[
+                FakeExecuteResult(single=responder_customer),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=10013,
+        )
+
+        async def customer_relation_lookup(_db, user_id):
+            if user_id == responder_customer.id:
+                return SimpleNamespace(
+                    owner_user_id=source_owner.id,
+                    customer_tier=CustomerTier.TIER_1,
+                    commission_rate=None,
+                )
+            return None
+
+        participant_relation_map = {
+            responder_customer.id: SimpleNamespace(
+                owner_user_id=source_owner.id,
+                customer_tier=CustomerTier.TIER_1,
+            ),
+        }
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=customer_relation_lookup),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value=participant_relation_map),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[responder_customer.id], [source_owner.id]]),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.update_channel_buttons", new=AsyncMock(return_value=True)), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "api.routers.trades.trade_to_response",
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+                "id": trade.id,
+                "trade_number": trade.trade_number,
+                "offer_id": trade.offer_id,
+                "price": trade.price,
+            },
+        ):
+            result = await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=4),
+                BackgroundTasks(),
+                db=db,
+                context=make_context(responder_customer),
+            )
+
+        self.assertEqual(len(db.added), 1)
+        direct_trade = db.added[0]
+        self.assertEqual(direct_trade.offer_user_id, source_owner.id)
+        self.assertEqual(direct_trade.responder_user_id, responder_customer.id)
+        self.assertEqual(direct_trade.offer_id, offer.id)
+        self.assertEqual(direct_trade.price, 188000)
+        self.assertEqual(direct_trade.trade_type, TradeType.BUY)
+        self.assertEqual(result, {"id": 103, "trade_number": 10016, "offer_id": offer.id, "price": 188000})
+
+        trade_payload = next(call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created")
+        self.assertEqual(trade_payload.get("trade_path_summary"), "مالک ↔ مشتری سطح ۱")
+
+    async def test_execute_trade_authoritatively_keeps_tier1_to_own_owner_as_single_direct_leg(self):
+        responder_owner = make_user(id=98, account_name="owner_responder_tier1", telegram_id=998)
+        source_customer = make_user(id=78, account_name="tier1_source_own_owner", telegram_id=None)
+        offer = make_offer(
+            user_id=source_customer.id,
+            price=200000,
+            quantity=4,
+            remaining_quantity=4,
+            offer_type=OfferType.SELL,
+            user=SimpleNamespace(
+                account_name=source_customer.account_name,
+                mobile_number="09129999994",
+                telegram_id=956,
+            ),
+        )
+        reloaded_trade = SimpleNamespace(
+            id=104,
+            trade_number=10017,
+            offer_id=offer.id,
+            trade_type=TradeType.BUY,
+            commodity_id=offer.commodity_id,
+            commodity=offer.commodity,
+            quantity=4,
+            price=200000,
+            status=TradeStatus.COMPLETED,
+            offer_user_id=source_customer.id,
+            offer_user=source_customer,
+            responder_user_id=responder_owner.id,
+            responder_user=responder_owner,
+            created_at=None,
+        )
+        db = FakeDB(
+            get_results=[offer, responder_owner],
+            execute_results=[
+                FakeExecuteResult(single=responder_owner),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=10014,
+        )
+
+        async def customer_relation_lookup(_db, user_id):
+            if user_id == source_customer.id:
+                return SimpleNamespace(
+                    owner_user_id=responder_owner.id,
+                    customer_tier=CustomerTier.TIER_1,
+                    commission_rate=None,
+                )
+            return None
+
+        participant_relation_map = {
+            source_customer.id: SimpleNamespace(
+                owner_user_id=responder_owner.id,
+                customer_tier=CustomerTier.TIER_1,
+            ),
+        }
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=customer_relation_lookup),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value=participant_relation_map),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[responder_owner.id], [source_customer.id]]),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.update_channel_buttons", new=AsyncMock(return_value=True)), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "api.routers.trades.trade_to_response",
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+                "id": trade.id,
+                "trade_number": trade.trade_number,
+                "offer_id": trade.offer_id,
+                "price": trade.price,
+            },
+        ):
+            result = await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=4),
+                BackgroundTasks(),
+                db=db,
+                context=make_context(responder_owner),
+            )
+
+        self.assertEqual(len(db.added), 1)
+        direct_trade = db.added[0]
+        self.assertEqual(direct_trade.offer_user_id, source_customer.id)
+        self.assertEqual(direct_trade.responder_user_id, responder_owner.id)
+        self.assertEqual(direct_trade.offer_id, offer.id)
+        self.assertEqual(direct_trade.price, 200000)
+        self.assertEqual(direct_trade.trade_type, TradeType.BUY)
+        self.assertEqual(result, {"id": 104, "trade_number": 10017, "offer_id": offer.id, "price": 200000})
+
+        trade_payload = next(call.args[1] for call in publish_mock.await_args_list if call.args[0] == "trade:created")
+        self.assertEqual(trade_payload.get("trade_path_summary"), "مالک ↔ مشتری سطح ۱")
+
     async def test_execute_trade_authoritatively_fans_out_notifications_to_both_owner_sides(self):
         owner_user = make_user(id=5, account_name="owner_principal", telegram_id=555)
         actor_user = make_user(id=44, account_name="delegate_actor", telegram_id=444)

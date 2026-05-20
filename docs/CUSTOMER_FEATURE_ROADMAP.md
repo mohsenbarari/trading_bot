@@ -298,18 +298,18 @@ validation phase:
 - [ ] هر execution باید از owner mediation عبور کند.
 - [ ] full matrix در checklist section 9.0 مرجع نهایی actor-category coverage است؛ این بخش همان matrix را به requirementهای اجرایی تبدیل می‌کند.
 - [x] offer source فقط `Owner` یا `Tier 1` است؛ `Tier 2` source invalid است و باید در create-offer guard رد شود.
-- [ ] buy/sell mirrorها با همان chain actorها derive می‌شوند؛ فقط جهت buyer/seller در هر leg و price projection متناظر با offer type تغییر می‌کند.
-- [ ] Tier 1 canonical cases (قیمت یکسان در همه legs):
-  - [ ] customer seller vs customer buyer (ownerهای متفاوت): chain سه‌مرحله‌ای.
-  - [ ] customer buyer vs owner outsider: chain دو‌مرحله‌ای.
-  - [ ] owner offer vs customer outsider: chain دو‌مرحله‌ای.
-  - [ ] owner offer vs own-customer: trade مستقیم یک‌مرحله‌ای.
-- [ ] Tier 1 canonical examples:
-  - [ ] `سینا sell 52000` + `پیمان request` => `پیمان ↔ مجید @52000`، `مجید ↔ رامین @52000`، `رامین ↔ سینا @52000`.
-  - [ ] `پیمان buy 98000` + `رامین request` => `مجید ↔ رامین @98000`، `پیمان ↔ مجید @98000`.
-  - [ ] `مجید buy 189600` + `سینا request` => `رامین ↔ سینا @189600`، `مجید ↔ رامین @189600`.
-  - [ ] `رامین sell 188000` + `سینا request` => direct `سینا ↔ رامین @188000`.
-- [ ] notificationها، historyها، و UI summaryها باید با همین chainها هم‌راستا باشند.
+- [x] buy/sell mirrorها با همان chain actorها derive می‌شوند؛ فقط جهت buyer/seller در هر leg و price projection متناظر با offer type تغییر می‌کند.
+- [x] Tier 1 canonical cases (قیمت یکسان در همه legs):
+  - [x] customer seller vs customer buyer (ownerهای متفاوت): chain سه‌مرحله‌ای.
+  - [x] customer buyer vs owner outsider: chain دو‌مرحله‌ای.
+  - [x] owner offer vs customer outsider: chain دو‌مرحله‌ای.
+  - [x] owner offer vs own-customer: trade مستقیم یک‌مرحله‌ای.
+- [x] Tier 1 canonical examples:
+  - [x] `سینا sell 52000` + `پیمان request` => `پیمان ↔ مجید @52000`، `مجید ↔ رامین @52000`، `رامین ↔ سینا @52000`.
+  - [x] `پیمان buy 98000` + `رامین request` => `مجید ↔ رامین @98000`، `پیمان ↔ مجید @98000`.
+  - [x] `مجید buy 189600` + `سینا request` => `رامین ↔ سینا @189600`، `مجید ↔ رامین @189600`.
+  - [x] `رامین sell 188000` + `سینا request` => direct `سینا ↔ رامین @188000`.
+- [x] notificationها، historyها، و UI summaryها در سطح row/leg حالا با همین chainها هم‌راستا هستند؛ full business-chain grouping همچنان deferred است.
 - [ ] Tier 2 canonical cases:
   - [x] owner-offer + own Tier2 responder: direct one-leg trade at `viewer_effective_price`.
   - [x] owner/non-customer buy-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ source buyer @ raw_price`).
@@ -317,17 +317,17 @@ validation phase:
   - [x] Tier1 sell-offer + same-owner Tier2 responder: two-leg chain (`Tier2 customer ↔ shared owner @ viewer_effective_price`, `shared owner ↔ Tier1 source seller @ raw_price`).
   - [x] Tier1 offer + other-owner Tier2 responder: three-leg chain (`Tier1 source ↔ source owner @ raw_price`, `source owner ↔ responder owner @ raw_price`, `responder owner ↔ Tier2 responder @ viewer_effective_price`) with buyer/seller directions derived from offer type.
   - [x] core rule: `Tier 2` responder leg always uses `viewer_effective_price`; all inter-owner/source legs preserve `raw_price`; source-side mediation depends on whether the source actor is `Owner`/non-customer or `Tier 1`.
-- [ ] Final matrix examples:
-  - [ ] Owner source vs other owner: `مجید ←buyer / رامین ←seller @ 50000`.
-  - [ ] Owner source vs own Tier1: `رامین ←buyer / سینا ←seller @ 100000`.
-  - [ ] Owner source vs other Tier1: `پیمان ←buyer / مجید ←seller @ 200000`; `مجید ←buyer / رامین ←seller @ 200000`.
+- [x] Final matrix examples:
+  - [x] Owner source vs other owner: `مجید ←buyer / رامین ←seller @ 50000`.
+  - [x] Owner source vs own Tier1: `رامین ←buyer / سینا ←seller @ 100000`.
+  - [x] Owner source vs other Tier1: `پیمان ←buyer / مجید ←seller @ 200000`; `مجید ←buyer / رامین ←seller @ 200000`.
   - [x] Owner buy raw=`50000` vs own Tier2: `49750` rounds down to `49700`; `رامین ←buyer / علی ←seller @ 49700`.
   - [x] Owner sell raw=`100000` vs other Tier2: `محمد ←buyer / مجید ←seller @ 100700`; `مجید ←buyer / رامین ←seller @ 100000`.
   - [x] Owner buy raw=`50000` vs other Tier2: `مجید ←buyer / رامین ←seller @ 50000`; `محمد ←buyer / مجید ←seller @ 49700`.
-  - [ ] Tier1 source vs own owner: `رامین ←buyer / سینا ←seller @ 200000`.
-  - [ ] Tier1 source vs other owner: `سینا ←buyer / رامین ←seller @ 50000`; `رامین ←buyer / مجید ←seller @ 50000`.
-  - [ ] Tier1 source vs same-owner Tier1: `سهراب ←buyer / رامین ←seller @ 100000`; `رامین ←buyer / سینا ←seller @ 100000`.
-  - [ ] Tier1 source vs other-owner Tier1: `سینا ←buyer / رامین ←seller @ 200000`; `رامین ←buyer / مجید ←seller @ 200000`; `مجید ←buyer / پیمان ←seller @ 200000`.
+  - [x] Tier1 source vs own owner: `رامین ←buyer / سینا ←seller @ 200000`.
+  - [x] Tier1 source vs other owner: `سینا ←buyer / رامین ←seller @ 50000`; `رامین ←buyer / مجید ←seller @ 50000`.
+  - [x] Tier1 source vs same-owner Tier1: `سهراب ←buyer / رامین ←seller @ 100000`; `رامین ←buyer / سینا ←seller @ 100000`.
+  - [x] Tier1 source vs other-owner Tier1: `سینا ←buyer / رامین ←seller @ 200000`; `رامین ←buyer / مجید ←seller @ 200000`; `مجید ←buyer / پیمان ←seller @ 200000`.
   - [x] Tier1 sell raw=`50000` vs same-owner Tier2: `50250` rounds up to `50300`; `علی ←buyer / رامین ←seller @ 50300`; `رامین ←buyer / سینا ←seller @ 50000`.
   - [x] Tier1 buy raw=`100000` vs other-owner Tier2: `سینا ←buyer / رامین ←seller @ 100000`; `رامین ←buyer / مجید ←seller @ 100000`; `مجید ←buyer / محمد ←seller @ 99300`.
 - [x] owner-customer legها در notification/history/UI summary حالا additive `trade_path_summary` دارند تا customer-facing/source legها به‌شکل fake customer ↔ customer دیده نشوند.
@@ -342,10 +342,10 @@ validation phase:
 
 ### 5.16. validation phase برای قیمت‌گذاری
 
-- [ ] pure math tests برای buy/sell, midpoint, non-midpoint, floor_100/ceil_100.
-- [ ] serializer tests برای owner/admin/customer/public viewer matrix.
-- [ ] market e2e برای raw vs adjusted rendering.
-- [ ] regression برای warning/exclusion path بدون reintroduce کردن challenge fair-price.
+- [x] pure math tests برای buy/sell, midpoint, non-midpoint, floor_100/ceil_100.
+- [x] serializer tests برای owner/admin/customer/public viewer matrix.
+- [x] market e2e برای raw vs adjusted rendering.
+- [x] regression برای warning/exclusion path بدون reintroduce کردن challenge fair-price.
 
 ## 7. Phase 6 - تاریخچه معامله، سناریو محور و exhaustive
 
@@ -414,19 +414,21 @@ history باید بسته به viewer یکی یا هر دو را نشان دهد
 
 اگر owner1 وارد پروفایل عمومی customer1 شود و تاریخچه را ببیند:
 - [ ] اینجا viewer دارد رابطه مستقیم owner ↔ customer را می‌بیند.
+- [x] backend read seam دیگر در این حالت روی mutual-history محدود نمی‌ماند و برای owner/accountant مجاز، rowهای خود customer را برمی‌گرداند.
 - [ ] هر trade باید طرف دیگر معامله را همراه context نمایش دهد.
 - [ ] مثلاً اگر customer1 با user3 معامله‌ای انجام داده، owner1 در لیست customer1 باید ببیند counterpart چه کسی بوده است.
 - [ ] در این view، customer context دیگر زائد است چون خود صفحه متعلق به customer1 است.
 
 ### 7.6. سناریوی accountant در تاریخچه customer
 
-- [ ] accountant owner باید بتواند customerها و history آن‌ها را ببیند.
+- [x] accountant owner باید بتواند customerها و history آن‌ها را ببیند.
 - [ ] اما نباید owner-only management control ببیند.
 - [ ] نمایش history برای accountant باید شبیه owner باشد، با همان customer contextهای لازم.
 
 ### 7.7. سناریوی admin در تاریخچه
 
 - [ ] `SUPER_ADMIN` باید history واقعی user هدف را در public profile ببیند، نه mutual history با خودش.
+- [x] برای public profile مشتری، `SUPER_ADMIN` حالا target-customer row history را می‌بیند، نه mutual-history با خودش.
 - [ ] اگر owner در یک view badge/customer context می‌بیند، `SUPER_ADMIN` هم باید همان context را ببیند.
 - [ ] `MIDDLE_MANAGER` در public profile فقط mutual history عادی خودش با آن user را می‌بیند و هیچ customer-aware context اضافه‌ای ندارد.
 - [ ] این دقیقاً باید با sync اخیر public profile و admin user modal سازگار بماند؛ یعنی جایی که `SUPER_ADMIN` از public profile وارد تنظیمات user می‌شود، همان entity/context را ببیند.

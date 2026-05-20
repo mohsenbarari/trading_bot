@@ -22,6 +22,14 @@ interface SeededCommoditySessionFixture extends SeededSessionFixture {
   commodityName: string
 }
 
+interface CustomerPricingMarketFixture {
+  owner: SeededSessionFixture
+  tier2Customer: SeededSessionFixture
+  outsider: SeededSessionFixture
+  commodityName: string
+  sourceManagementName: string
+}
+
 interface Commodity {
   id: number
   name: string
@@ -248,6 +256,162 @@ asyncio.run(main())
 `)
 }
 
+function seedCustomerPricingMarketFixture(label: string): CustomerPricingMarketFixture {
+  return runPythonInApp<CustomerPricingMarketFixture>(`
+import asyncio
+import json
+import uuid
+from datetime import timedelta
+from decimal import Decimal
+
+from core.db import AsyncSessionLocal
+from core.enums import UserRole
+from core.security import create_access_token, create_refresh_token
+from core.services.session_service import hash_token
+from models.commodity import Commodity
+from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
+from models.offer import Offer, OfferStatus, OfferType
+from models.session import Platform, UserSession
+from models.user import User
+
+label = ${JSON.stringify(label)}
+
+def build_mobile() -> str:
+  return f"09{int(uuid.uuid4().hex[:9], 16) % 1000000000:09d}"
+
+async def create_session_bundle(db, user, device_name):
+  refresh_token = create_refresh_token(subject=user.id)
+  session = UserSession(
+    user_id=user.id,
+    device_name=device_name,
+    device_ip='127.0.0.1',
+    platform=Platform.WEB,
+    refresh_token_hash=hash_token(refresh_token),
+    is_primary=True,
+    is_active=True,
+    expires_at=None,
+  )
+  db.add(session)
+  await db.flush()
+  access_token = create_access_token(
+    subject=user.id,
+    expires_delta=timedelta(minutes=60),
+    session_id=str(session.id),
+  )
+  return {
+    'userId': user.id,
+    'accountName': user.account_name,
+    'accessToken': access_token,
+    'refreshToken': refresh_token,
+  }
+
+async def main():
+  suffix = uuid.uuid4().hex[:10]
+  commodity_name = f"کالای قیمت مشتری {int(uuid.uuid4().hex[:8], 16) % 10000}"
+  source_management_name = f"مشتری سطح ۱ {suffix[:4]}"
+
+  async with AsyncSessionLocal() as db:
+    commodity = Commodity(name=commodity_name)
+    owner = User(
+      account_name=f"pw_customer_owner_{label}_{suffix}",
+      mobile_number=build_mobile(),
+      full_name='Playwright Customer Owner',
+      address='Playwright Customer Owner',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    source_customer = User(
+      account_name=f"pw_customer_source_{label}_{suffix}",
+      mobile_number=build_mobile(),
+      full_name='Playwright Tier1 Source',
+      address='Playwright Tier1 Source',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    tier2_customer = User(
+      account_name=f"pw_customer_tier2_{label}_{suffix}",
+      mobile_number=build_mobile(),
+      full_name='Playwright Tier2 Viewer',
+      address='Playwright Tier2 Viewer',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    outsider = User(
+      account_name=f"pw_customer_outsider_{label}_{suffix}",
+      mobile_number=build_mobile(),
+      full_name='Playwright Outsider Viewer',
+      address='Playwright Outsider Viewer',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    db.add_all([commodity, owner, source_customer, tier2_customer, outsider])
+    await db.flush()
+
+    db.add_all([
+      CustomerRelation(
+        owner_user_id=owner.id,
+        customer_user_id=source_customer.id,
+        created_by_user_id=owner.id,
+        invitation_token=f"CUST-{uuid.uuid4().hex}",
+        management_name=source_management_name,
+        customer_tier=CustomerTier.TIER_1,
+        commission_rate=None,
+        status=CustomerRelationStatus.ACTIVE,
+        activated_at=None,
+        deleted_at=None,
+      ),
+      CustomerRelation(
+        owner_user_id=owner.id,
+        customer_user_id=tier2_customer.id,
+        created_by_user_id=owner.id,
+        invitation_token=f"CUST-{uuid.uuid4().hex}",
+        management_name=f"مشتری سطح ۲ {suffix[:4]}",
+        customer_tier=CustomerTier.TIER_2,
+        commission_rate=Decimal('0.5'),
+        status=CustomerRelationStatus.ACTIVE,
+        activated_at=None,
+        deleted_at=None,
+      ),
+    ])
+
+    db.add(Offer(
+      user_id=source_customer.id,
+      actor_user_id=source_customer.id,
+      offer_type=OfferType.BUY,
+      commodity_id=commodity.id,
+      quantity=10,
+      remaining_quantity=10,
+      price=50000,
+      is_wholesale=True,
+      lot_sizes=None,
+      original_lot_sizes=None,
+      notes=f"pw-customer-market-{label}",
+      status=OfferStatus.ACTIVE,
+      exclude_from_competitive_price=False,
+    ))
+
+    owner_bundle = await create_session_bundle(db, owner, 'Playwright Customer Owner Device')
+    tier2_bundle = await create_session_bundle(db, tier2_customer, 'Playwright Tier2 Viewer Device')
+    outsider_bundle = await create_session_bundle(db, outsider, 'Playwright Outsider Viewer Device')
+
+    await db.commit()
+
+  print(json.dumps({
+    'owner': owner_bundle,
+    'tier2Customer': tier2_bundle,
+    'outsider': outsider_bundle,
+    'commodityName': commodity_name,
+    'sourceManagementName': source_management_name,
+  }))
+
+asyncio.run(main())
+`)
+}
+
 function fetchPersistedOfferByNotes(note: string): PersistedOfferRecord | null {
   return runPythonInApp<PersistedOfferRecord | null>(`
 import asyncio
@@ -407,6 +571,36 @@ test.describe('Market offer creation regressions', () => {
         && Number(offer.price) === price,
       ),
     ).toBeTruthy()
+  })
+
+  test('market cards keep raw owner/public pricing but show adjusted Tier2 pricing', async ({ page }) => {
+    const fixture = seedCustomerPricingMarketFixture('pricing_matrix')
+
+    await setSeededSession(page, fixture.owner)
+    await page.goto('/market')
+
+    const ownerCard = page.locator('.offer-card-wrap', { hasText: fixture.commodityName }).first()
+    await expect(ownerCard).toBeVisible()
+    await expect(ownerCard.locator('.price')).toHaveText('50,000')
+    await expect(ownerCard.locator('.customer-context-badge')).toHaveText('مشتری')
+    await expect(ownerCard.locator('.customer-context-name')).toHaveText(fixture.sourceManagementName)
+    await expect(ownerCard.locator('.customer-context-tier')).toHaveText('سطح 1')
+
+    await setSeededSession(page, fixture.tier2Customer)
+    await page.goto('/market')
+
+    const tier2Card = page.locator('.offer-card-wrap', { hasText: fixture.commodityName }).first()
+    await expect(tier2Card).toBeVisible()
+    await expect(tier2Card.locator('.price')).toHaveText('49,700')
+    await expect(tier2Card.locator('.customer-context-row')).toHaveCount(0)
+
+    await setSeededSession(page, fixture.outsider)
+    await page.goto('/market')
+
+    const outsiderCard = page.locator('.offer-card-wrap', { hasText: fixture.commodityName }).first()
+    await expect(outsiderCard).toBeVisible()
+    await expect(outsiderCard.locator('.price')).toHaveText('50,000')
+    await expect(outsiderCard.locator('.customer-context-row')).toHaveCount(0)
   })
 
   test('sell outlier warning requires a second confirmation and persists exclusion flags', async ({ page, request }) => {

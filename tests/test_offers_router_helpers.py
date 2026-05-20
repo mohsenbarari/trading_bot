@@ -169,6 +169,83 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(projected_response.customer_management_name, "مشتری ویژه")
         self.assertEqual(projected_response.customer_tier, "tier1")
 
+    async def test_offer_to_response_covers_public_owner_admin_and_tier2_pricing_matrix(self):
+        owner_relation = SimpleNamespace(
+            owner_user_id=7,
+            management_name="مشتری ویژه",
+            customer_tier="tier1",
+            status="active",
+        )
+        tier2_viewer_relation = SimpleNamespace(
+            customer_tier="tier2",
+            commission_rate="0.5",
+            status="active",
+        )
+        offer = make_offer_model(
+            user_id=21,
+            user=SimpleNamespace(account_name="tier1_source"),
+            offer_type=OfferType.BUY,
+            price=50000,
+            exclude_from_competitive_price=True,
+            price_warning_type="buy_above_highest_active",
+        )
+
+        public_view = offers_module.offer_to_response(
+            offer,
+            SimpleNamespace(offer_expiry_minutes=15),
+            viewer_user_id=None,
+            offer_owner_relation=owner_relation,
+            include_owner_identity=False,
+        )
+        self.assertIsNone(public_view.user_id)
+        self.assertEqual(public_view.user_account_name, "")
+        self.assertEqual(public_view.raw_price, 50000)
+        self.assertEqual(public_view.market_published_price, 50000)
+        self.assertEqual(public_view.viewer_effective_price, 50000)
+        self.assertFalse(public_view.customer_badge_visible)
+
+        owner_view = offers_module.offer_to_response(
+            offer,
+            SimpleNamespace(offer_expiry_minutes=15),
+            viewer_user_id=7,
+            offer_owner_relation=owner_relation,
+            include_owner_identity=True,
+        )
+        self.assertEqual(owner_view.user_id, 21)
+        self.assertEqual(owner_view.user_account_name, "tier1_source")
+        self.assertEqual(owner_view.viewer_effective_price, 50000)
+        self.assertTrue(owner_view.customer_badge_visible)
+        self.assertEqual(owner_view.customer_management_name, "مشتری ویژه")
+        self.assertEqual(owner_view.customer_tier, "tier1")
+
+        admin_like_view = offers_module.offer_to_response(
+            offer,
+            SimpleNamespace(offer_expiry_minutes=15),
+            viewer_user_id=88,
+            offer_owner_relation=owner_relation,
+            include_owner_identity=True,
+        )
+        self.assertEqual(admin_like_view.user_id, 21)
+        self.assertEqual(admin_like_view.user_account_name, "tier1_source")
+        self.assertEqual(admin_like_view.viewer_effective_price, 50000)
+        self.assertFalse(admin_like_view.customer_badge_visible)
+        self.assertIsNone(admin_like_view.customer_management_name)
+
+        tier2_view = offers_module.offer_to_response(
+            offer,
+            SimpleNamespace(offer_expiry_minutes=15),
+            viewer_user_id=31,
+            offer_owner_relation=owner_relation,
+            viewer_customer_relation=tier2_viewer_relation,
+            include_owner_identity=False,
+        )
+        self.assertIsNone(tier2_view.user_id)
+        self.assertEqual(tier2_view.user_account_name, "")
+        self.assertEqual(tier2_view.raw_price, 50000)
+        self.assertEqual(tier2_view.market_published_price, 50000)
+        self.assertEqual(tier2_view.viewer_effective_price, 49700)
+        self.assertFalse(tier2_view.customer_badge_visible)
+
     async def test_send_offer_to_channel_builds_buttons_and_handles_failures(self):
         wholesale_offer = make_offer_model(price=75000)
 

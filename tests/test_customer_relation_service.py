@@ -218,6 +218,14 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(round_customer_price("49750", OfferType.BUY), 49700)
         self.assertEqual(round_customer_price("50250", OfferType.SELL), 50300)
 
+    def test_round_customer_price_keeps_exact_hundreds_and_non_midpoints_on_the_correct_side(self):
+        self.assertEqual(round_customer_price("49701", OfferType.BUY), 49700)
+        self.assertEqual(round_customer_price("49799", OfferType.BUY), 49700)
+        self.assertEqual(round_customer_price("50201", OfferType.SELL), 50300)
+        self.assertEqual(round_customer_price("50299", OfferType.SELL), 50300)
+        self.assertEqual(round_customer_price("50300", OfferType.SELL), 50300)
+        self.assertEqual(round_customer_price("49700", OfferType.BUY), 49700)
+
     def test_apply_customer_commission_supports_examples_and_zero_rate_passthrough(self):
         self.assertEqual(apply_customer_commission(50000, "0.5", OfferType.BUY), 49700)
         self.assertEqual(apply_customer_commission(50000, "0.5", OfferType.SELL), 50300)
