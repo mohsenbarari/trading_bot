@@ -311,7 +311,7 @@ validation phase:
   - [ ] `رامین sell 188000` + `سینا request` => direct `سینا ↔ رامین @188000`.
 - [ ] notificationها، historyها، و UI summaryها باید با همین chainها هم‌راستا باشند.
 - [ ] Tier 2 canonical cases:
-  - [ ] owner-offer + own Tier2 responder: direct one-leg trade at `viewer_effective_price`.
+  - [x] owner-offer + own Tier2 responder: direct one-leg trade at `viewer_effective_price`.
   - [ ] owner/non-customer buy-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ source buyer @ raw_price`).
   - [ ] owner/non-customer sell-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ source seller @ raw_price`).
   - [ ] Tier1 sell-offer + same-owner Tier2 responder: two-leg chain (`Tier2 customer ↔ shared owner @ viewer_effective_price`, `shared owner ↔ Tier1 source seller @ raw_price`).
@@ -321,7 +321,7 @@ validation phase:
   - [ ] Owner source vs other owner: `مجید ←buyer / رامین ←seller @ 50000`.
   - [ ] Owner source vs own Tier1: `رامین ←buyer / سینا ←seller @ 100000`.
   - [ ] Owner source vs other Tier1: `پیمان ←buyer / مجید ←seller @ 200000`; `مجید ←buyer / رامین ←seller @ 200000`.
-  - [ ] Owner buy raw=`50000` vs own Tier2: `49750` rounds down to `49700`; `رامین ←buyer / علی ←seller @ 49700`.
+  - [x] Owner buy raw=`50000` vs own Tier2: `49750` rounds down to `49700`; `رامین ←buyer / علی ←seller @ 49700`.
   - [ ] Owner sell raw=`100000` vs other Tier2: `محمد ←buyer / مجید ←seller @ 100700`; `مجید ←buyer / رامین ←seller @ 100000`.
   - [ ] Tier1 source vs own owner: `رامین ←buyer / سینا ←seller @ 200000`.
   - [ ] Tier1 source vs other owner: `سینا ←buyer / رامین ←seller @ 50000`; `رامین ←buyer / مجید ←seller @ 50000`.

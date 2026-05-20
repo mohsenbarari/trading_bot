@@ -25,6 +25,10 @@ from core.utils import (
 )
 from core.services.accountant_chat_contract import AccountantChatIdentity, load_accountant_chat_identity_map
 from core.services.accountant_relation_service import build_trade_notification_audience_user_ids
+from core.services.customer_relation_service import (
+    apply_customer_commission,
+    get_active_customer_relation_for_customer,
+)
 from core.services.trade_service import (
     build_lot_unavailable_suggestion_payload,
     get_available_trade_amounts,
@@ -32,6 +36,7 @@ from core.services.trade_service import (
 )
 from core.services.user_account_status_service import is_user_trade_blocked
 from models.user import User
+from models.customer_relation import CustomerTier
 from models.offer import Offer, OfferType, OfferStatus
 from models.trade import Trade, TradeType, TradeStatus
 from models.commodity import Commodity
@@ -623,6 +628,23 @@ async def _execute_trade_authoritatively(
     
     if offer.user_id == owner_user.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="نمی‌توانید روی لفظ خودتان معامله کنید.")
+
+    responder_customer_relation = await get_active_customer_relation_for_customer(db, owner_user.id)
+    uses_owner_customer_trade_path = (
+        responder_customer_relation is not None
+        and responder_customer_relation.owner_user_id == offer.user_id
+    )
+    executed_trade_price = offer.price
+    if (
+        uses_owner_customer_trade_path
+        and getattr(getattr(responder_customer_relation, "customer_tier", None), "value", getattr(responder_customer_relation, "customer_tier", None))
+        == CustomerTier.TIER_2.value
+    ):
+        executed_trade_price = apply_customer_commission(
+            offer.price,
+            getattr(responder_customer_relation, "commission_rate", None),
+            offer.offer_type,
+        )
     
     # بررسی بلاک بین کاربران (پنهان - کاربر نباید متوجه بلاک شدن بشه)
     from core.services.block_service import is_blocked
@@ -704,7 +726,7 @@ async def _execute_trade_authoritatively(
         commodity_id=offer.commodity_id,
         trade_type=responder_trade_type,
         quantity=trade_quantity,
-        price=offer.price,
+        price=executed_trade_price,
         status=TradeStatus.COMPLETED,
         idempotency_key=trade_data.idempotency_key,
     )
@@ -806,7 +828,7 @@ async def _execute_trade_authoritatively(
     # پیام برای پاسخ‌دهنده
     responder_msg = (
         f"{respond_emoji} <b>{respond_type_fa}</b>\n\n"
-        f"💰 فی: {offer.price:,}\n"
+        f"💰 فی: {executed_trade_price:,}\n"
         f"📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
         f"👤 طرف معامله: {offer_user_display_name}\n"
@@ -817,7 +839,7 @@ async def _execute_trade_authoritatively(
     # پیام برای لفظ‌دهنده
     offer_owner_msg = (
         f"{offer_emoji} <b>{offer_type_fa}</b>\n\n"
-        f"💰 فی: {offer.price:,}\n"
+        f"💰 فی: {executed_trade_price:,}\n"
         f"📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
         f"👤 طرف معامله: {responder_user_display_name}\n"
@@ -833,7 +855,7 @@ async def _execute_trade_authoritatively(
     # ارسال نوتیفیکیشن اپ
     notif_msg_responder = (
         f"{respond_emoji} {respond_type_fa}\n"
-        f"💰 فی: {offer.price:,} | 📦 تعداد: {trade_quantity}\n"
+        f"💰 فی: {executed_trade_price:,} | 📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
         f"👤 طرف معامله: {offer_user_display_name}\n"
         f"🔢 شماره: {new_trade_number}"
@@ -841,7 +863,7 @@ async def _execute_trade_authoritatively(
     
     notif_msg_owner = (
         f"{offer_emoji} {offer_type_fa}\n"
-        f"💰 فی: {offer.price:,} | 📦 تعداد: {trade_quantity}\n"
+        f"💰 فی: {executed_trade_price:,} | 📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
         f"👤 طرف معامله: {responder_user_display_name}\n"
         f"🔢 شماره: {new_trade_number}"
@@ -893,7 +915,7 @@ async def _execute_trade_authoritatively(
             offer_id=offer.id,
             commodity_id=offer.commodity_id,
             quantity=trade_quantity,
-            price=offer.price,
+            price=executed_trade_price,
             commodity_name=offer.commodity.name if offer.commodity else None,
             trade_type=responder_trade_type.value,
             status=getattr(getattr(new_trade, "status", None), "value", None) or TradeStatus.COMPLETED.value,

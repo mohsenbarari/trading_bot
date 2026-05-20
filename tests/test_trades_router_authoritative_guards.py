@@ -83,6 +83,14 @@ def make_context(owner_user, actor_user=None):
 
 
 class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        customer_relation_patcher = patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        )
+        customer_relation_patcher.start()
+        self.addCleanup(customer_relation_patcher.stop)
+
     async def test_execute_trade_authoritatively_rejects_watch_restricted_and_limit_failures(self):
         trade_data = TradeCreate(offer_id=7, quantity=4)
 
@@ -228,7 +236,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "bad amount")
 
-        existing_trade = SimpleNamespace(id=88)
+        existing_trade = SimpleNamespace(id=88, offer_user_id=offer.user_id, responder_user_id=locked_user.id)
         db = FakeDB(
             execute_results=[
                 FakeExecuteResult(single=locked_user),
@@ -242,6 +250,9 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
         ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
             "api.routers.trades.validate_offer_trade_amount",
             return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
         ), patch("api.routers.trades.trade_to_response", return_value={"id": 88}) as response_mock:
             result = await _execute_trade_authoritatively(
                 TradeCreate(offer_id=7, quantity=4, idempotency_key="idem-1"),
@@ -251,7 +262,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
             )
 
         db.refresh.assert_awaited_once_with(offer, ["user", "commodity"])
-        response_mock.assert_called_once_with(existing_trade)
+        response_mock.assert_called_once_with(existing_trade, identity_map={})
         self.assertEqual(result, {"id": 88})
 
 
