@@ -83,6 +83,7 @@ async def resolve_direct_sender_display_name(
     *,
     user: object,
 ) -> str | None:
+    # Compatibility alias for older direct-only call sites and tests.
     return await resolve_relation_aware_sender_display_name(db, user=user)
 
 
