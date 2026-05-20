@@ -207,13 +207,18 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.id for item in default_result], [6, 7])
 
     async def test_send_typing_signal_and_mark_messages_read_publish_events(self):
-        current_user = SimpleNamespace(id=5)
+        current_user = SimpleNamespace(id=5, account_name="ali-user")
         db = object()
         typing_data = SimpleNamespace(receiver_id=9)
 
         with patch("api.routers.chat.publish_direct_typing_event", new=AsyncMock()) as typing_mock:
             result = await send_typing_signal(data=typing_data, current_user=current_user)
-        typing_mock.assert_awaited_once_with(receiver_id=9, sender_id=5, publisher=unittest.mock.ANY)
+        typing_mock.assert_awaited_once_with(
+            receiver_id=9,
+            sender_id=5,
+            sender_name="ali-user",
+            publisher=unittest.mock.ANY,
+        )
         self.assertIsNone(result)
 
         with patch("api.routers.chat.commit_direct_read_state", new=AsyncMock()) as commit_mock, patch(
@@ -223,6 +228,26 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
             result = await mark_messages_read(user_id=9, current_user=current_user, db=db)
         commit_mock.assert_awaited_once_with(db, reader=current_user, other_user_id=9)
         publish_mock.assert_awaited_once_with(other_user_id=9, reader_id=5, publisher=unittest.mock.ANY)
+        self.assertIsNone(result)
+
+    async def test_send_typing_signal_uses_relation_aware_sender_name_when_available(self):
+        current_user = SimpleNamespace(id=5, account_name="ali-user")
+        typing_data = SimpleNamespace(receiver_id=9)
+        db = FakeDB()
+
+        with patch(
+            "api.routers.chat.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={5: SimpleNamespace(display_name="دفتر مالک")}),
+        ) as identity_mock, patch("api.routers.chat.publish_direct_typing_event", new=AsyncMock()) as typing_mock:
+            result = await send_typing_signal(data=typing_data, current_user=current_user, db=db)
+
+        identity_mock.assert_awaited_once_with(db, [5])
+        typing_mock.assert_awaited_once_with(
+            receiver_id=9,
+            sender_id=5,
+            sender_name="دفتر مالک",
+            publisher=unittest.mock.ANY,
+        )
         self.assertIsNone(result)
 
     async def test_send_direct_activity_signal_publishes_general_activity(self):
