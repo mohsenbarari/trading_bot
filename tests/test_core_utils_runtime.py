@@ -163,6 +163,7 @@ class CoreUtilsRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 message='msg',
                 level=NotificationLevel.SUCCESS,
                 category=NotificationCategory.USER,
+                extra_payload={'route': '/users/19'},
             )
 
         self.assertEqual(notification.id, 7)
@@ -170,6 +171,7 @@ class CoreUtilsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once()
         redis_client.incr.assert_awaited_once_with('user:2:unread_count')
         publish_user_event.assert_awaited_once()
+        self.assertEqual(publish_user_event.await_args.args[2]['route'], '/users/19')
 
         redis_error_client = AsyncMock()
         redis_error_client.incr = AsyncMock(side_effect=RuntimeError('redis down'))

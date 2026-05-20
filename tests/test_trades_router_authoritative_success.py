@@ -184,6 +184,14 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             {
                 "level": NotificationLevel.SUCCESS,
                 "category": NotificationCategory.TRADE,
+                "extra_payload": {
+                    "route": "/users/9?account_name=seller",
+                    "trade_number": 10000,
+                    "counterparty_profile_user_id": 9,
+                    "counterparty_profile_account_name": "seller",
+                    "highlight_accountant_user_id": None,
+                    "highlight_accountant_relation_display_name": None,
+                },
             },
         )
         counter_mock.assert_awaited_once_with(db, locked_user, "trade", 4)
@@ -575,9 +583,15 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
 
         responder_notification = notif_mock.await_args_list[0].args[2]
         self.assertIn("حسابدار فروش", responder_notification)
+        self.assertEqual(
+            notif_mock.await_args_list[0].kwargs['extra_payload']['route'],
+            '/users/19?account_name=seller_owner&highlight_accountant_user_id=77&highlight_accountant_relation_display_name=%D8%AD%D8%B3%D8%A7%D8%A8%D8%AF%D8%A7%D8%B1+%D9%81%D8%B1%D9%88%D8%B4',
+        )
 
         trade_created_payload = publish_mock.await_args_list[0].args[1]
+        self.assertEqual(trade_created_payload['id'], 94)
         self.assertEqual(trade_created_payload["offer_user_name"], "حسابدار فروش")
+        self.assertEqual(trade_created_payload['status'], 'completed')
         self.assertEqual(trade_created_payload["offer_user_profile_user_id"], 19)
         self.assertEqual(trade_created_payload["offer_user_profile_account_name"], "seller_owner")
         self.assertEqual(trade_created_payload["offer_user_resolved_from_accountant_id"], offer_accountant_id)

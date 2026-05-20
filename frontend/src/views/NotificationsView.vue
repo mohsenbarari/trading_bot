@@ -29,6 +29,12 @@ const clearAll = async () => {
   }
 }
 
+const openNotificationRoute = (notification: { route?: unknown }) => {
+  const routePath = typeof notification.route === 'string' ? notification.route.trim() : ''
+  if (!routePath) return
+  router.push(routePath)
+}
+
 onMounted(async () => {
   await notificationStore.openNotificationCenter()
 })
@@ -69,6 +75,7 @@ onMounted(async () => {
           :key="notif.id"
           class="notif-item"
           :class="[`type-${notif.level || 'info'}`, { 'is-unread': !notif.is_read }]"
+          @click="openNotificationRoute(notif)"
         >
           <div class="notif-actions">
             <button class="action-btn delete-btn" @click.stop="notificationStore.deleteNotification(notif.id)" title="حذف">

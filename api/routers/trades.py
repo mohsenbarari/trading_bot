@@ -6,6 +6,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Mapping
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Request
@@ -203,12 +204,16 @@ async def _load_trade_identity_map(
 
 def _build_trade_created_event_payload(
     *,
+    trade_id: int | None,
     trade_number: int,
     offer_id: int | None,
+    commodity_id: int | None,
     quantity: int,
     price: int,
     commodity_name: str | None,
     trade_type: str,
+    status: str | None,
+    created_at: str | None,
     offer_user: object | None,
     offer_user_id: object,
     responder_user: object | None,
@@ -216,12 +221,16 @@ def _build_trade_created_event_payload(
     identity_map: Mapping[int, AccountantChatIdentity] | None,
 ) -> dict[str, object | None]:
     payload: dict[str, object | None] = {
+        "id": trade_id,
         "trade_number": trade_number,
         "offer_id": offer_id,
+        "commodity_id": commodity_id,
         "quantity": quantity,
         "price": price,
         "commodity_name": commodity_name,
         "trade_type": trade_type,
+        "status": status,
+        "created_at": created_at,
     }
     payload.update(
         _build_trade_participant_payload(
@@ -240,6 +249,59 @@ def _build_trade_created_event_payload(
         )
     )
     return payload
+
+
+def _build_trade_profile_route_from_payload(
+    field_prefix: str,
+    participant_payload: Mapping[str, object | None],
+) -> str | None:
+    profile_user_id = _coerce_trade_user_id(participant_payload.get(f"{field_prefix}_profile_user_id"))
+    if profile_user_id is None:
+        return None
+
+    query_params: dict[str, str] = {}
+    profile_account_name = participant_payload.get(f"{field_prefix}_profile_account_name")
+    if isinstance(profile_account_name, str) and profile_account_name.strip():
+        query_params["account_name"] = profile_account_name
+
+    highlight_accountant_user_id = _coerce_trade_user_id(
+        participant_payload.get(f"{field_prefix}_highlight_accountant_user_id")
+    )
+    if highlight_accountant_user_id is not None:
+        query_params["highlight_accountant_user_id"] = str(highlight_accountant_user_id)
+
+    highlight_relation_display_name = participant_payload.get(
+        f"{field_prefix}_highlight_accountant_relation_display_name"
+    )
+    if isinstance(highlight_relation_display_name, str) and highlight_relation_display_name.strip():
+        query_params["highlight_accountant_relation_display_name"] = highlight_relation_display_name
+
+    query_string = urlencode(query_params)
+    if query_string:
+        return f"/users/{profile_user_id}?{query_string}"
+    return f"/users/{profile_user_id}"
+
+
+def _build_trade_notification_extra_payload(
+    field_prefix: str,
+    participant_payload: Mapping[str, object | None],
+    *,
+    trade_number: int,
+) -> dict[str, object | None]:
+    return {
+        "route": _build_trade_profile_route_from_payload(field_prefix, participant_payload),
+        "trade_number": trade_number,
+        "counterparty_profile_user_id": _coerce_trade_user_id(
+            participant_payload.get(f"{field_prefix}_profile_user_id")
+        ),
+        "counterparty_profile_account_name": participant_payload.get(f"{field_prefix}_profile_account_name"),
+        "highlight_accountant_user_id": _coerce_trade_user_id(
+            participant_payload.get(f"{field_prefix}_highlight_accountant_user_id")
+        ),
+        "highlight_accountant_relation_display_name": participant_payload.get(
+            f"{field_prefix}_highlight_accountant_relation_display_name"
+        ),
+    }
 
 
 def trade_to_response(
@@ -788,18 +850,30 @@ async def _execute_trade_authoritatively(
     try:
         responder_audience = await build_trade_notification_audience_user_ids(db, [owner_user.id])
         offer_owner_audience = await build_trade_notification_audience_user_ids(db, [offer.user_id])
+        responder_notification_payload = _build_trade_notification_extra_payload(
+            "offer_user",
+            offer_user_payload,
+            trade_number=new_trade_number,
+        )
+        offer_owner_notification_payload = _build_trade_notification_extra_payload(
+            "responder_user",
+            responder_user_payload,
+            trade_number=new_trade_number,
+        )
 
         for audience_user_id in responder_audience:
             await create_user_notification(
                 db, audience_user_id, notif_msg_responder,
                 level=NotificationLevel.SUCCESS,
-                category=NotificationCategory.TRADE
+                category=NotificationCategory.TRADE,
+                extra_payload=responder_notification_payload,
             )
         for audience_user_id in offer_owner_audience:
             await create_user_notification(
                 db, audience_user_id, notif_msg_owner,
                 level=NotificationLevel.SUCCESS,
-                category=NotificationCategory.TRADE
+                category=NotificationCategory.TRADE,
+                extra_payload=offer_owner_notification_payload,
             )
     except:
         pass
@@ -814,12 +888,16 @@ async def _execute_trade_authoritatively(
     await publish_event(
         "trade:created",
         _build_trade_created_event_payload(
+            trade_id=getattr(new_trade, "id", None) or created_trade.id,
             trade_number=new_trade_number,
             offer_id=offer.id,
+            commodity_id=offer.commodity_id,
             quantity=trade_quantity,
             price=offer.price,
             commodity_name=offer.commodity.name if offer.commodity else None,
             trade_type=responder_trade_type.value,
+            status=getattr(getattr(new_trade, "status", None), "value", None) or TradeStatus.COMPLETED.value,
+            created_at=to_jalali_str(getattr(new_trade, "created_at", None)) or "",
             offer_user=offer.user,
             offer_user_id=created_trade.offer_user_id,
             responder_user=owner_user,
