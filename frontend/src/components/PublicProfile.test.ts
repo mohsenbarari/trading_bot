@@ -516,7 +516,12 @@ describe('PublicProfile.vue', () => {
         quantity: 1,
         price: 456000,
         trade_type: 'BUY',
-        offer_user_name: 'فروشنده',
+        offer_user_id: 61,
+        offer_user_name: 'حسابدار فروش',
+        offer_user_profile_user_id: 70,
+        offer_user_profile_account_name: 'owner-70',
+        offer_user_highlight_accountant_user_id: 61,
+        offer_user_highlight_accountant_relation_display_name: 'حسابدار فروش',
         responder_user_name: 'مالک',
         responder_user_id: 50,
       },
@@ -553,7 +558,20 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('🟢 خرید')
     expect(wrapper.text()).toContain('🔴 فروش')
     expect(wrapper.text()).toContain('بیننده')
-    expect(wrapper.text()).toContain('فروشنده')
+    expect(wrapper.text()).toContain('حسابدار فروش')
+
+    const accountantLink = wrapper.findAll('.profile-link-btn').find((node) => node.text().includes('حسابدار فروش'))
+    expect(accountantLink).toBeTruthy()
+    await accountantLink!.trigger('click')
+    expect(wrapper.emitted('navigate')?.[0]).toEqual([
+      'public_profile',
+      {
+        id: 70,
+        account_name: 'owner-70',
+        highlight_accountant_user_id: 61,
+        highlight_accountant_relation_display_name: 'حسابدار فروش',
+      },
+    ])
 
     await historyHeader!.trigger('click')
     await historyHeader!.trigger('click')

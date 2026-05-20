@@ -105,7 +105,12 @@ const myTradesFixture = [
     quantity: 5,
     price: 120000,
     offer_user_id: 9,
-    offer_user_name: 'seller-user',
+    offer_user_name: 'حسابدار فروش',
+    offer_user_profile_user_id: 77,
+    offer_user_profile_account_name: 'owner-77',
+    offer_user_resolved_from_accountant_id: 9,
+    offer_user_highlight_accountant_user_id: 9,
+    offer_user_highlight_accountant_relation_display_name: 'حسابدار فروش',
     responder_user_id: 7,
     responder_user_name: 'my-user',
     created_at: 'امروز',
@@ -238,6 +243,25 @@ describe('TradingView.vue', () => {
     expect(tradingViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/trades/my', {})
     expect(wrapper.text()).toContain('10001')
     expect(wrapper.text()).toContain('120,000')
+
+    wrapper.unmount()
+  })
+
+  it('navigates my-trades counterpart links through relation-aware profile metadata', async () => {
+    const wrapper = await mountTradingView({ initialTab: 'my_trades' })
+    await flushPromises()
+
+    await wrapper.get('.trade-card .profile-link').trigger('click')
+
+    expect(wrapper.emitted('navigate')?.[0]).toEqual([
+      'public_profile',
+      {
+        id: 77,
+        account_name: 'owner-77',
+        highlight_accountant_user_id: 9,
+        highlight_accountant_relation_display_name: 'حسابدار فروش',
+      },
+    ])
 
     wrapper.unmount()
   })

@@ -5,6 +5,7 @@ import OfferPreviewModal from './OfferPreviewModal.vue'
 import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue'
 import { useWebSocket } from '../composables/useWebSocket'
 import { useTradingSort } from '../composables/useTradingSort'
+import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIdentity'
 import { apiFetch, apiFetchJson } from '../utils/auth'
 
 const { connect: wsConnect, on: wsOn, off: wsOff } = useWebSocket()
@@ -63,8 +64,18 @@ interface Trade {
   price: number
   offer_user_id: number | null
   offer_user_name: string | null
+  offer_user_profile_user_id?: number | null
+  offer_user_profile_account_name?: string | null
+  offer_user_resolved_from_accountant_id?: number | null
+  offer_user_highlight_accountant_user_id?: number | null
+  offer_user_highlight_accountant_relation_display_name?: string | null
   responder_user_id: number | null
   responder_user_name: string | null
+  responder_user_profile_user_id?: number | null
+  responder_user_profile_account_name?: string | null
+  responder_user_resolved_from_accountant_id?: number | null
+  responder_user_highlight_accountant_user_id?: number | null
+  responder_user_highlight_accountant_relation_display_name?: string | null
   created_at: string
 }
 
@@ -529,6 +540,27 @@ function getUserTradeType(t: Trade) {
   return t.trade_type === 'active' ? 'active' : (t.trade_type === 'buy' ? 'sell' : 'buy')
 }
 
+function getTradeCounterpartyLabel(trade: Trade) {
+  return Number(trade.responder_user_id) === Number(props.user?.id)
+    ? trade.offer_user_name
+    : trade.responder_user_name
+}
+
+function getTradeCounterpartyProfileTarget(trade: Trade) {
+  return resolveTradeParticipantProfileTarget(
+    trade,
+    Number(trade.responder_user_id) === Number(props.user?.id) ? 'offer_user' : 'responder_user',
+  )
+}
+
+function openTradeCounterpartyProfile(trade: Trade) {
+  const target = getTradeCounterpartyProfileTarget(trade)
+  if (!target) {
+    return
+  }
+  emit('navigate', 'public_profile', target)
+}
+
 onMounted(() => {
   // Parallelize loading: Fire non-criticals in background
   loadCommodities()
@@ -883,9 +915,9 @@ watch(activeTab, (val) => {
               <span class="info-label">👤 طرف معامله:</span>
               <span 
                 class="info-value profile-link" 
-                @click.stop="$emit('navigate', 'public_profile', { id: trade.responder_user_id === user?.id ? trade.offer_user_id : trade.responder_user_id, account_name: trade.responder_user_id === user?.id ? trade.offer_user_name : trade.responder_user_name })"
+                @click.stop="openTradeCounterpartyProfile(trade)"
               >
-                {{ trade.responder_user_id === user?.id ? trade.offer_user_name : trade.responder_user_name }}
+                {{ getTradeCounterpartyLabel(trade) }}
               </span>
             </div>
             <div class="trade-info-row">

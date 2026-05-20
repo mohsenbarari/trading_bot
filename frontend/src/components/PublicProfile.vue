@@ -5,6 +5,7 @@ import LoadingSkeleton from './LoadingSkeleton.vue';
 import OwnerAccountantManagerModal from './OwnerAccountantManagerModal.vue';
 import UserProfile from './UserProfile.vue';
 import { isAdminRoleValue, readCachedCurrentUserRole, SUPER_ADMIN_ROLE } from '../utils/adminAccess';
+import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIdentity';
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
 
 const props = defineProps<{
@@ -58,8 +59,18 @@ interface MutualTradePreview {
   created_at: string;
   offer_user_id: number;
   offer_user_name?: string;
+  offer_user_profile_user_id?: number | null;
+  offer_user_profile_account_name?: string | null;
+  offer_user_resolved_from_accountant_id?: number | null;
+  offer_user_highlight_accountant_user_id?: number | null;
+  offer_user_highlight_accountant_relation_display_name?: string | null;
   responder_user_id: number;
   responder_user_name?: string;
+  responder_user_profile_user_id?: number | null;
+  responder_user_profile_account_name?: string | null;
+  responder_user_resolved_from_accountant_id?: number | null;
+  responder_user_highlight_accountant_user_id?: number | null;
+  responder_user_highlight_accountant_relation_display_name?: string | null;
   quantity: number;
   commodity_name: string;
   price: number;
@@ -424,6 +435,32 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
     return type === 'BUY' ? '🔴 فروش' : '🟢 خرید';
   }
 }
+
+function getTradeCounterpartyLabel(trade: MutualTradePreview) {
+  return Number(trade.responder_user_id) === Number(profileData.value?.id)
+    ? trade.offer_user_name
+    : trade.responder_user_name;
+}
+
+function getTradeCounterpartyProfileTarget(trade: MutualTradePreview) {
+  if (!profileData.value?.id) {
+    return null;
+  }
+
+  return resolveTradeParticipantProfileTarget(
+    trade,
+    Number(trade.responder_user_id) === Number(profileData.value.id) ? 'offer_user' : 'responder_user',
+  );
+}
+
+function openTradeCounterpartyProfile(trade: MutualTradePreview) {
+  const target = getTradeCounterpartyProfileTarget(trade);
+  if (!target) {
+    return;
+  }
+
+  emit('navigate', 'public_profile', target);
+}
 </script>
 
 <template>
@@ -660,7 +697,15 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
                     </div>
                     <div class="trade-counterparty">
                       <span class="label">طرف معامله:</span>
-                      <span class="value">{{ Number(trade.responder_user_id) === Number(profileData?.id) ? trade.offer_user_name : trade.responder_user_name }}</span>
+                      <button
+                        v-if="getTradeCounterpartyProfileTarget(trade)"
+                        type="button"
+                        class="value profile-link-btn"
+                        @click.stop="openTradeCounterpartyProfile(trade)"
+                      >
+                        {{ getTradeCounterpartyLabel(trade) }}
+                      </button>
+                      <span v-else class="value">{{ getTradeCounterpartyLabel(trade) }}</span>
                     </div>
                 </div>
             </div>
@@ -1246,6 +1291,22 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 .trade-counterparty .value {
   color: var(--ds-text-primary);
   font-weight: 700;
+}
+
+.profile-link-btn {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: #0f766e;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.profile-link-btn:hover,
+.profile-link-btn:focus-visible {
+  text-decoration: underline;
 }
 
 .spinner-small {

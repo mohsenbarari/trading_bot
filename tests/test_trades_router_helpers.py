@@ -85,12 +85,36 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         relation_aware_response = trades.trade_to_response(
             trade,
             identity_map={
-                11: SimpleNamespace(display_name="حسابدار فروش"),
-                22: SimpleNamespace(display_name="حسابدار خرید"),
+                11: SimpleNamespace(
+                    display_name="حسابدار فروش",
+                    profile_user_id=71,
+                    profile_account_name="owner-71",
+                    resolved_from_accountant_id=11,
+                    highlight_accountant_user_id=11,
+                    highlight_accountant_relation_display_name="حسابدار فروش",
+                ),
+                22: SimpleNamespace(
+                    display_name="حسابدار خرید",
+                    profile_user_id=82,
+                    profile_account_name="owner-82",
+                    resolved_from_accountant_id=22,
+                    highlight_accountant_user_id=22,
+                    highlight_accountant_relation_display_name="حسابدار خرید",
+                ),
             },
         )
         self.assertEqual(relation_aware_response.offer_user_name, "حسابدار فروش")
         self.assertEqual(relation_aware_response.responder_user_name, "حسابدار خرید")
+        self.assertEqual(relation_aware_response.offer_user_profile_user_id, 71)
+        self.assertEqual(relation_aware_response.offer_user_profile_account_name, "owner-71")
+        self.assertEqual(relation_aware_response.offer_user_resolved_from_accountant_id, 11)
+        self.assertEqual(relation_aware_response.offer_user_highlight_accountant_user_id, 11)
+        self.assertEqual(relation_aware_response.offer_user_highlight_accountant_relation_display_name, "حسابدار فروش")
+        self.assertEqual(relation_aware_response.responder_user_profile_user_id, 82)
+        self.assertEqual(relation_aware_response.responder_user_profile_account_name, "owner-82")
+        self.assertEqual(relation_aware_response.responder_user_resolved_from_accountant_id, 22)
+        self.assertEqual(relation_aware_response.responder_user_highlight_accountant_user_id, 22)
+        self.assertEqual(relation_aware_response.responder_user_highlight_accountant_relation_display_name, "حسابدار خرید")
 
         with patch("api.routers.trades.os.getenv", return_value=None):
             self.assertFalse(await trades.send_telegram_message(1, "hello"))

@@ -167,6 +167,32 @@ describe('PublicProfileView.vue', () => {
     })
   })
 
+  it('routes nested public-profile navigation requests with accountant highlight query metadata', async () => {
+    const PublicProfileView = (await import('./PublicProfileView.vue')).default
+    const wrapper = mount(PublicProfileView, {
+      global: {
+        stubs: {
+          PublicProfile: {
+            name: 'PublicProfile',
+            template: '<button class="profile-nav" @click="$emit(\'navigate\', \'public_profile\', { id: 71, account_name: \'owner71\', highlight_accountant_user_id: 19, highlight_accountant_relation_display_name: \'حسابدار فروش\' })">profile</button>',
+          },
+        },
+      },
+    })
+
+    await wrapper.get('.profile-nav').trigger('click')
+
+    expect(publicProfileViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'public-profile',
+      params: { id: '71' },
+      query: {
+        account_name: 'owner71',
+        highlight_accountant_user_id: '19',
+        highlight_accountant_relation_display_name: 'حسابدار فروش',
+      },
+    })
+  })
+
   it('uses router.back for non-chat navigation when browser history has a back entry', async () => {
     window.history.replaceState({ back: '/chat' }, '', '/users/44')
 
