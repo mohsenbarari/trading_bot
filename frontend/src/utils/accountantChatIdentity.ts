@@ -16,6 +16,23 @@ function normalizeAccountName(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+type TradeParticipantPrefix = 'offer_user' | 'responder_user'
+
+type TradeParticipantProfileSource = {
+  offer_user_id?: number | null
+  offer_user_name?: string | null
+  offer_user_profile_user_id?: number | null
+  offer_user_profile_account_name?: string | null
+  offer_user_highlight_accountant_user_id?: number | null
+  offer_user_highlight_accountant_relation_display_name?: string | null
+  responder_user_id?: number | null
+  responder_user_name?: string | null
+  responder_user_profile_user_id?: number | null
+  responder_user_profile_account_name?: string | null
+  responder_user_highlight_accountant_user_id?: number | null
+  responder_user_highlight_accountant_relation_display_name?: string | null
+}
+
 export function resolveConversationProfileTarget(
   conversation?: Pick<Conversation, 'other_user_id' | 'other_user_name' | 'profile_user_id' | 'profile_account_name' | 'highlight_accountant_user_id' | 'highlight_accountant_relation_display_name'> | null,
 ): PublicProfileTarget | null {
@@ -55,5 +72,38 @@ export function resolveForwardedProfileTarget(
     account_name: accountName,
     highlight_accountant_user_id: normalizePositiveInt(message.forwarded_from_highlight_accountant_user_id),
     highlight_accountant_relation_display_name: normalizeAccountName(message.forwarded_from_highlight_accountant_relation_display_name),
+  }
+}
+
+export function resolveTradeParticipantProfileTarget(
+  trade?: TradeParticipantProfileSource | null,
+  participantPrefix: TradeParticipantPrefix = 'offer_user',
+): PublicProfileTarget | null {
+  if (!trade) {
+    return null
+  }
+
+  const profileUserIdField = participantPrefix === 'offer_user' ? trade.offer_user_profile_user_id : trade.responder_user_profile_user_id
+  const userIdField = participantPrefix === 'offer_user' ? trade.offer_user_id : trade.responder_user_id
+  const profileAccountNameField = participantPrefix === 'offer_user' ? trade.offer_user_profile_account_name : trade.responder_user_profile_account_name
+  const accountNameField = participantPrefix === 'offer_user' ? trade.offer_user_name : trade.responder_user_name
+  const highlightUserIdField = participantPrefix === 'offer_user'
+    ? trade.offer_user_highlight_accountant_user_id
+    : trade.responder_user_highlight_accountant_user_id
+  const highlightRelationField = participantPrefix === 'offer_user'
+    ? trade.offer_user_highlight_accountant_relation_display_name
+    : trade.responder_user_highlight_accountant_relation_display_name
+
+  const targetId = normalizePositiveInt(profileUserIdField) ?? normalizePositiveInt(userIdField)
+  const accountName = normalizeAccountName(profileAccountNameField) ?? normalizeAccountName(accountNameField)
+  if (!targetId || !accountName) {
+    return null
+  }
+
+  return {
+    id: targetId,
+    account_name: accountName,
+    highlight_accountant_user_id: normalizePositiveInt(highlightUserIdField),
+    highlight_accountant_relation_display_name: normalizeAccountName(highlightRelationField),
   }
 }

@@ -80,8 +80,18 @@ class TradeResponse(BaseModel):
     status: str
     offer_user_id: Optional[int]
     offer_user_name: Optional[str]
+    offer_user_profile_user_id: Optional[int] = None
+    offer_user_profile_account_name: Optional[str] = None
+    offer_user_resolved_from_accountant_id: Optional[int] = None
+    offer_user_highlight_accountant_user_id: Optional[int] = None
+    offer_user_highlight_accountant_relation_display_name: Optional[str] = None
     responder_user_id: Optional[int]
     responder_user_name: Optional[str]
+    responder_user_profile_user_id: Optional[int] = None
+    responder_user_profile_account_name: Optional[str] = None
+    responder_user_resolved_from_accountant_id: Optional[int] = None
+    responder_user_highlight_accountant_user_id: Optional[int] = None
+    responder_user_highlight_accountant_relation_display_name: Optional[str] = None
     created_at: str
     
     class Config:
@@ -111,15 +121,14 @@ def _resolve_trade_participant_name(
     return getattr(user, "account_name", None)
 
 
-async def _load_trade_identity_map(
+async def _load_trade_identity_map_for_user_ids(
     db: AsyncSession,
-    trades: list[Trade],
+    user_ids: list[object] | tuple[object, ...],
 ) -> dict[int, AccountantChatIdentity]:
     participant_ids = sorted(
         {
             normalized_user_id
-            for trade in trades
-            for raw_user_id in (getattr(trade, "offer_user_id", None), getattr(trade, "responder_user_id", None))
+            for raw_user_id in user_ids
             for normalized_user_id in [_coerce_trade_user_id(raw_user_id)]
             if normalized_user_id is not None
         }
@@ -129,12 +138,128 @@ async def _load_trade_identity_map(
     return await load_accountant_chat_identity_map(db, participant_ids)
 
 
+def _build_trade_participant_payload(
+    field_prefix: str,
+    *,
+    user: object | None,
+    user_id: object,
+    identity_map: Mapping[int, AccountantChatIdentity] | None,
+) -> dict[str, object | None]:
+    normalized_user_id = _coerce_trade_user_id(user_id)
+    fallback_name = getattr(user, "account_name", None)
+
+    payload: dict[str, object | None] = {
+        f"{field_prefix}_id": normalized_user_id,
+        f"{field_prefix}_name": fallback_name,
+        f"{field_prefix}_profile_user_id": normalized_user_id,
+        f"{field_prefix}_profile_account_name": fallback_name,
+        f"{field_prefix}_resolved_from_accountant_id": None,
+        f"{field_prefix}_highlight_accountant_user_id": None,
+        f"{field_prefix}_highlight_accountant_relation_display_name": None,
+    }
+    if normalized_user_id is None or not identity_map:
+        return payload
+
+    identity = identity_map.get(normalized_user_id)
+    if identity is None:
+        return payload
+
+    payload[f"{field_prefix}_name"] = getattr(identity, "display_name", None) or fallback_name
+    payload[f"{field_prefix}_profile_user_id"] = (
+        _coerce_trade_user_id(getattr(identity, "profile_user_id", None))
+        or normalized_user_id
+    )
+    payload[f"{field_prefix}_profile_account_name"] = (
+        getattr(identity, "profile_account_name", None)
+        or fallback_name
+    )
+    payload[f"{field_prefix}_resolved_from_accountant_id"] = _coerce_trade_user_id(
+        getattr(identity, "resolved_from_accountant_id", None)
+    )
+    payload[f"{field_prefix}_highlight_accountant_user_id"] = _coerce_trade_user_id(
+        getattr(identity, "highlight_accountant_user_id", None)
+    )
+    payload[f"{field_prefix}_highlight_accountant_relation_display_name"] = getattr(
+        identity,
+        "highlight_accountant_relation_display_name",
+        None,
+    )
+    return payload
+
+
+async def _load_trade_identity_map(
+    db: AsyncSession,
+    trades: list[Trade],
+) -> dict[int, AccountantChatIdentity]:
+    return await _load_trade_identity_map_for_user_ids(
+        db,
+        [
+            raw_user_id
+            for trade in trades
+            for raw_user_id in (getattr(trade, "offer_user_id", None), getattr(trade, "responder_user_id", None))
+        ],
+    )
+
+
+def _build_trade_created_event_payload(
+    *,
+    trade_number: int,
+    offer_id: int | None,
+    quantity: int,
+    price: int,
+    commodity_name: str | None,
+    trade_type: str,
+    offer_user: object | None,
+    offer_user_id: object,
+    responder_user: object | None,
+    responder_user_id: object,
+    identity_map: Mapping[int, AccountantChatIdentity] | None,
+) -> dict[str, object | None]:
+    payload: dict[str, object | None] = {
+        "trade_number": trade_number,
+        "offer_id": offer_id,
+        "quantity": quantity,
+        "price": price,
+        "commodity_name": commodity_name,
+        "trade_type": trade_type,
+    }
+    payload.update(
+        _build_trade_participant_payload(
+            "offer_user",
+            user=offer_user,
+            user_id=offer_user_id,
+            identity_map=identity_map,
+        )
+    )
+    payload.update(
+        _build_trade_participant_payload(
+            "responder_user",
+            user=responder_user,
+            user_id=responder_user_id,
+            identity_map=identity_map,
+        )
+    )
+    return payload
+
+
 def trade_to_response(
     trade: Trade,
     *,
     identity_map: Mapping[int, AccountantChatIdentity] | None = None,
 ) -> TradeResponse:
     """تبدیل مدل Trade به پاسخ API"""
+    offer_user_payload = _build_trade_participant_payload(
+        "offer_user",
+        user=trade.offer_user,
+        user_id=trade.offer_user_id,
+        identity_map=identity_map,
+    )
+    responder_user_payload = _build_trade_participant_payload(
+        "responder_user",
+        user=trade.responder_user,
+        user_id=trade.responder_user_id,
+        identity_map=identity_map,
+    )
     return TradeResponse(
         id=trade.id,
         trade_number=trade.trade_number,
@@ -145,10 +270,8 @@ def trade_to_response(
         quantity=trade.quantity,
         price=trade.price,
         status=trade.status.value,
-        offer_user_id=trade.offer_user_id,
-        offer_user_name=_resolve_trade_participant_name(trade.offer_user, trade.offer_user_id, identity_map),
-        responder_user_id=trade.responder_user_id,
-        responder_user_name=_resolve_trade_participant_name(trade.responder_user, trade.responder_user_id, identity_map),
+        **offer_user_payload,
+        **responder_user_payload,
         created_at=to_jalali_str(trade.created_at) or ""
     )
 
@@ -494,7 +617,11 @@ async def _execute_trade_authoritatively(
         )
         existing_trade_obj = existing_trade.scalar_one_or_none()
         if existing_trade_obj:
-            return trade_to_response(existing_trade_obj)
+            existing_identity_map = await _load_trade_identity_map_for_user_ids(
+                db,
+                [existing_trade_obj.offer_user_id, existing_trade_obj.responder_user_id],
+            )
+            return trade_to_response(existing_trade_obj, identity_map=existing_identity_map)
     
     # گرفتن شماره معامله جدید
     max_trade_number = await db.scalar(select(func.max(Trade.trade_number)))
@@ -564,7 +691,29 @@ async def _execute_trade_authoritatively(
         )
         .where(Trade.id == new_trade.id)
     )
+    created_trade = new_trade
     new_trade = result.scalar_one()
+    participant_identity_map = await _load_trade_identity_map_for_user_ids(
+        db,
+        [
+            getattr(new_trade, "offer_user_id", None) or created_trade.offer_user_id,
+            getattr(new_trade, "responder_user_id", None) or created_trade.responder_user_id,
+        ],
+    )
+    offer_user_payload = _build_trade_participant_payload(
+        "offer_user",
+        user=offer.user,
+        user_id=getattr(new_trade, "offer_user_id", None) or created_trade.offer_user_id,
+        identity_map=participant_identity_map,
+    )
+    responder_user_payload = _build_trade_participant_payload(
+        "responder_user",
+        user=owner_user,
+        user_id=getattr(new_trade, "responder_user_id", None) or created_trade.responder_user_id,
+        identity_map=participant_identity_map,
+    )
+    offer_user_display_name = offer_user_payload.get("offer_user_name") or "نامشخص"
+    responder_user_display_name = responder_user_payload.get("responder_user_name") or "نامشخص"
     
     # ===== ارسال پیام‌های تلگرام در Background (غیر-بلاکینگ) =====
     # این کار باعث می‌شود پاسخ API سریعتر برگردد
@@ -598,7 +747,7 @@ async def _execute_trade_authoritatively(
         f"💰 فی: {offer.price:,}\n"
         f"📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
-        f"👤 طرف معامله: {offer.user.account_name if offer.user else 'نامشخص'}\n"
+        f"👤 طرف معامله: {offer_user_display_name}\n"
         f"🔢 شماره معامله: {new_trade_number}\n"
         f"🕐 زمان معامله: {trade_datetime}"
     )
@@ -609,7 +758,7 @@ async def _execute_trade_authoritatively(
         f"💰 فی: {offer.price:,}\n"
         f"📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
-        f"👤 طرف معامله: {owner_user.account_name}\n"
+        f"👤 طرف معامله: {responder_user_display_name}\n"
         f"🔢 شماره معامله: {new_trade_number}\n"
         f"🕐 زمان معامله: {trade_datetime}"
     )
@@ -624,7 +773,7 @@ async def _execute_trade_authoritatively(
         f"{respond_emoji} {respond_type_fa}\n"
         f"💰 فی: {offer.price:,} | 📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
-        f"👤 طرف معامله: {offer.user.account_name if offer.user else 'نامشخص'}\n"
+        f"👤 طرف معامله: {offer_user_display_name}\n"
         f"🔢 شماره: {new_trade_number}"
     )
     
@@ -632,7 +781,7 @@ async def _execute_trade_authoritatively(
         f"{offer_emoji} {offer_type_fa}\n"
         f"💰 فی: {offer.price:,} | 📦 تعداد: {trade_quantity}\n"
         f"🏷️ کالا: {offer.commodity.name}\n"
-        f"👤 طرف معامله: {owner_user.account_name}\n"
+        f"👤 طرف معامله: {responder_user_display_name}\n"
         f"🔢 شماره: {new_trade_number}"
     )
     
@@ -662,18 +811,22 @@ async def _execute_trade_authoritatively(
     
     # ارسال رویداد SSE
     from .realtime import publish_event
-    await publish_event("trade:created", {
-        "trade_number": new_trade_number,
-        "offer_id": offer.id,
-        "quantity": trade_quantity,
-        "price": offer.price,
-        "commodity_name": offer.commodity.name,
-        "trade_type": responder_trade_type.value,
-        "offer_user_id": offer.user_id,
-        "offer_user_name": offer.user.account_name if offer.user else "ناشناس",
-        "responder_user_id": owner_user.id,
-        "responder_user_name": owner_user.account_name
-    })
+    await publish_event(
+        "trade:created",
+        _build_trade_created_event_payload(
+            trade_number=new_trade_number,
+            offer_id=offer.id,
+            quantity=trade_quantity,
+            price=offer.price,
+            commodity_name=offer.commodity.name if offer.commodity else None,
+            trade_type=responder_trade_type.value,
+            offer_user=offer.user,
+            offer_user_id=created_trade.offer_user_id,
+            responder_user=owner_user,
+            responder_user_id=created_trade.responder_user_id,
+            identity_map=participant_identity_map,
+        ),
+    )
     await publish_event("offer:updated", {
         "id": offer.id,
         "remaining_quantity": offer.remaining_quantity,
@@ -681,7 +834,7 @@ async def _execute_trade_authoritatively(
         "status": offer.status.value
     })
     
-    return trade_to_response(new_trade)
+    return trade_to_response(new_trade, identity_map=participant_identity_map)
 
 
 @router.post("/", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)

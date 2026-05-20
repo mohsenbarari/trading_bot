@@ -57,13 +57,40 @@ const highlightAccountantUserId = computed(() => getQueryPositiveInt(route.query
 const highlightAccountantRelationDisplayName = computed(() => getQueryString(route.query.highlight_accountant_relation_display_name))
 const profileViewKey = computed(() => `${profileUser.value?.id || 'invalid-profile'}:${highlightAccountantUserId.value || 'no-highlight'}`)
 
-function handleNavigate(view: string, payload?: { userId?: number; userName?: string }) {
+function handleNavigate(
+  view: string,
+  payload?: {
+    userId?: number
+    userName?: string
+    id?: number
+    user_id?: number
+    account_name?: string
+    highlight_accountant_user_id?: number | null
+    highlight_accountant_relation_display_name?: string | null
+  },
+) {
   if (view === 'chat' && payload?.userId) {
     router.push({
       name: 'messenger',
       query: {
         user_id: String(payload.userId),
         user_name: payload.userName || '',
+      },
+    })
+    return
+  }
+
+  const profileId = Number(payload?.id ?? payload?.user_id)
+  if ((view === 'public_profile' || view === 'profile') && Number.isInteger(profileId) && profileId > 0) {
+    router.push({
+      name: 'public-profile',
+      params: { id: String(profileId) },
+      query: {
+        ...(payload?.account_name ? { account_name: payload.account_name } : {}),
+        ...(payload?.highlight_accountant_user_id ? { highlight_accountant_user_id: String(payload.highlight_accountant_user_id) } : {}),
+        ...(payload?.highlight_accountant_relation_display_name
+          ? { highlight_accountant_relation_display_name: payload.highlight_accountant_relation_display_name }
+          : {}),
       },
     })
     return

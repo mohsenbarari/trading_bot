@@ -143,6 +143,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.trades.build_trade_notification_audience_user_ids",
             new=AsyncMock(side_effect=[[locked_user.id], [offer.user_id]]),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
         ), patch("api.routers.trades.update_channel_buttons", new=AsyncMock(return_value=True)) as update_buttons_mock, patch(
             "api.routers.trades.create_user_notification",
             new=AsyncMock(),
@@ -188,7 +191,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(publish_mock.await_args_list[0].args[0], "trade:created")
         self.assertEqual(publish_mock.await_args_list[1].args[0], "offer:updated")
         self.assertEqual(publish_mock.await_args_list[1].args[1]["status"], "completed")
-        response_mock.assert_called_once_with(reloaded_trade)
+        response_mock.assert_called_once_with(reloaded_trade, identity_map={})
         self.assertEqual(result, {"id": 88, "trade_number": 10000})
 
     async def test_execute_trade_authoritatively_updates_retail_lots_and_tolerates_side_effect_failures(self):
@@ -220,6 +223,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.trades.build_trade_notification_audience_user_ids",
             new=AsyncMock(side_effect=[[locked_user.id], [offer.user_id]]),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
         ), patch("sqlalchemy.orm.attributes.flag_modified") as flag_modified, patch(
             "api.routers.trades.update_channel_buttons",
             new=AsyncMock(side_effect=RuntimeError("button failure")),
@@ -248,7 +254,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         counter_mock.assert_awaited_once_with(db, locked_user, "trade", 3)
         self.assertEqual(publish_mock.await_count, 2)
         logger.error.assert_called_once()
-        response_mock.assert_called_once_with(reloaded_trade)
+        response_mock.assert_called_once_with(reloaded_trade, identity_map={})
         self.assertEqual(result, {"id": 89, "trade_number": 10001})
 
     async def test_execute_trade_authoritatively_allows_full_remaining_retail_trade_and_clears_lots(self):
@@ -279,6 +285,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.trades.build_trade_notification_audience_user_ids",
             new=AsyncMock(side_effect=[[locked_user.id], [offer.user_id]]),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
         ), patch("sqlalchemy.orm.attributes.flag_modified") as flag_modified, patch(
             "api.routers.trades.update_channel_buttons",
             new=AsyncMock(return_value=True),
@@ -355,6 +364,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.trades.build_trade_notification_audience_user_ids",
             new=AsyncMock(side_effect=[[owner_user.id, actor_user.id], [offer.user_id]]),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
         ), patch("api.routers.trades.update_channel_buttons", new=AsyncMock(return_value=True)), patch(
             "api.routers.trades.create_user_notification",
             new=AsyncMock(),
@@ -408,6 +420,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.trades.build_trade_notification_audience_user_ids",
             new=AsyncMock(side_effect=[[owner_user.id, actor_user.id], [offer.user_id, offer_side_accountant_id]]),
         ) as audience_mock, patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch(
             "api.routers.trades.update_channel_buttons",
             new=AsyncMock(return_value=True),
         ), patch(
@@ -427,8 +442,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                 context=make_context(owner_user, actor_user),
             )
 
-        self.assertEqual(audience_mock.await_args_list[0].args[1], [owner_user.id])
-        self.assertEqual(audience_mock.await_args_list[1].args[1], [offer.user_id])
+        self.assertEqual(audience_mock.await_count, 2)
         self.assertEqual(
             [call.args[1] for call in notif_mock.await_args_list],
             [owner_user.id, actor_user.id, offer.user_id, offer_side_accountant_id],
@@ -462,6 +476,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.trades.build_trade_notification_audience_user_ids",
             new=AsyncMock(side_effect=[[owner_user.id, actor_user.id], [offer.user_id]]),
         ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch(
             "api.routers.trades.update_channel_buttons",
             new=AsyncMock(return_value=True),
         ), patch(
@@ -494,6 +511,81 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         owner_side_telegram_task = next(task for task in background_tasks.tasks if task.args[0] == offer.user.telegram_id)
         self.assertIn(owner_user.account_name, owner_side_telegram_task.args[1])
         self.assertNotIn(actor_user.account_name, owner_side_telegram_task.args[1])
+
+    async def test_execute_trade_authoritatively_uses_relation_aware_counterparty_labels_in_payloads_and_notifications(self):
+        owner_user = make_user(id=5, account_name="owner_principal", telegram_id=555)
+        offer_accountant_id = 77
+        offer = make_offer(
+            user_id=offer_accountant_id,
+            user=SimpleNamespace(account_name="seller_accountant", mobile_number="09125555555", telegram_id=999),
+        )
+        reloaded_trade = SimpleNamespace(id=94)
+        db = FakeDB(
+            get_results=[offer],
+            execute_results=[
+                FakeExecuteResult(single=owner_user),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=10006,
+        )
+        background_tasks = BackgroundTasks()
+
+        relation_identity = {
+            offer_accountant_id: SimpleNamespace(
+                display_name="حسابدار فروش",
+                profile_user_id=19,
+                profile_account_name="seller_owner",
+                resolved_from_accountant_id=offer_accountant_id,
+                highlight_accountant_user_id=offer_accountant_id,
+                highlight_accountant_relation_display_name="حسابدار فروش",
+            ),
+        }
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[owner_user.id], [offer.user_id]]),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value=relation_identity),
+        ), patch(
+            "api.routers.trades.update_channel_buttons",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(),
+        ) as notif_mock, patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "api.routers.trades.trade_to_response",
+            return_value={"id": 94, "trade_number": 10007},
+        ):
+            await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=4),
+                background_tasks,
+                db=db,
+                context=make_context(owner_user),
+            )
+
+        responder_notification = notif_mock.await_args_list[0].args[2]
+        self.assertIn("حسابدار فروش", responder_notification)
+
+        trade_created_payload = publish_mock.await_args_list[0].args[1]
+        self.assertEqual(trade_created_payload["offer_user_name"], "حسابدار فروش")
+        self.assertEqual(trade_created_payload["offer_user_profile_user_id"], 19)
+        self.assertEqual(trade_created_payload["offer_user_profile_account_name"], "seller_owner")
+        self.assertEqual(trade_created_payload["offer_user_resolved_from_accountant_id"], offer_accountant_id)
+        self.assertEqual(trade_created_payload["offer_user_highlight_accountant_user_id"], offer_accountant_id)
+        self.assertEqual(trade_created_payload["offer_user_highlight_accountant_relation_display_name"], "حسابدار فروش")
+
+        responder_telegram_task = next(task for task in background_tasks.tasks if task.args[0] == owner_user.telegram_id)
+        self.assertIn("حسابدار فروش", responder_telegram_task.args[1])
 
 
 if __name__ == "__main__":

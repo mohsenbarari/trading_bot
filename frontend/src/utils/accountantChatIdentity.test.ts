@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveConversationProfileTarget, resolveForwardedProfileTarget } from './accountantChatIdentity'
+import { resolveConversationProfileTarget, resolveForwardedProfileTarget, resolveTradeParticipantProfileTarget } from './accountantChatIdentity'
 
 describe('accountantChatIdentity', () => {
   it('resolves conversation profile targets with additive owner metadata first', () => {
@@ -97,5 +97,49 @@ describe('accountantChatIdentity', () => {
       }),
     ).toBeNull()
     expect(resolveForwardedProfileTarget(undefined)).toBeNull()
+  })
+
+  it('resolves trade participant profile targets with additive owner metadata first', () => {
+    expect(
+      resolveTradeParticipantProfileTarget({
+        offer_user_id: 12,
+        offer_user_name: 'raw-trade-accountant',
+        offer_user_profile_user_id: 88,
+        offer_user_profile_account_name: 'owner-88',
+        offer_user_highlight_accountant_user_id: 12,
+        offer_user_highlight_accountant_relation_display_name: 'حسابدار معامله',
+      }, 'offer_user'),
+    ).toEqual({
+      id: 88,
+      account_name: 'owner-88',
+      highlight_accountant_user_id: 12,
+      highlight_accountant_relation_display_name: 'حسابدار معامله',
+    })
+  })
+
+  it('falls back to raw trade participant identity and rejects invalid payloads', () => {
+    expect(
+      resolveTradeParticipantProfileTarget({
+        responder_user_id: 19,
+        responder_user_name: 'plain-responder',
+        responder_user_profile_user_id: null,
+        responder_user_profile_account_name: null,
+        responder_user_highlight_accountant_user_id: null,
+        responder_user_highlight_accountant_relation_display_name: null,
+      }, 'responder_user'),
+    ).toEqual({
+      id: 19,
+      account_name: 'plain-responder',
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+    })
+
+    expect(
+      resolveTradeParticipantProfileTarget({
+        offer_user_id: 0,
+        offer_user_name: '',
+      }, 'offer_user'),
+    ).toBeNull()
+    expect(resolveTradeParticipantProfileTarget(null, 'offer_user')).toBeNull()
   })
 })
