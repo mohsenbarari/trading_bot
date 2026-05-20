@@ -504,6 +504,8 @@ describe('PublicProfile.vue', () => {
         quantity: 2,
         price: 123000,
         trade_type: 'BUY',
+        trade_path_kind: 'owner_customer_tier2',
+        trade_path_summary: 'مالک ↔ مشتری سطح ۲',
         offer_user_name: 'مالک',
         responder_user_name: 'بیننده',
         responder_user_id: 99,
@@ -516,6 +518,8 @@ describe('PublicProfile.vue', () => {
         quantity: 1,
         price: 456000,
         trade_type: 'BUY',
+        trade_path_kind: 'owner_customer_tier1',
+        trade_path_summary: 'مالک ↔ مشتری سطح ۱',
         offer_user_id: 61,
         offer_user_name: 'حسابدار فروش',
         offer_user_profile_user_id: 70,
@@ -558,6 +562,8 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('🟢 خرید')
     expect(wrapper.text()).toContain('🔴 فروش')
     expect(wrapper.text()).toContain('بیننده')
+    expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۲')
+    expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۱')
     expect(wrapper.text()).toContain('حسابدار فروش')
 
     const accountantLink = wrapper.findAll('.profile-link-btn').find((node) => node.text().includes('حسابدار فروش'))

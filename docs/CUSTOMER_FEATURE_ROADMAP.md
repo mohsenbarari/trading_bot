@@ -314,7 +314,7 @@ validation phase:
   - [x] owner-offer + own Tier2 responder: direct one-leg trade at `viewer_effective_price`.
   - [x] owner/non-customer buy-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ source buyer @ raw_price`).
   - [x] owner/non-customer sell-offer + Tier2 responder: two-leg chain (`customer ↔ own owner @ viewer_effective_price`, `own owner ↔ source seller @ raw_price`).
-  - [ ] Tier1 sell-offer + same-owner Tier2 responder: two-leg chain (`Tier2 customer ↔ shared owner @ viewer_effective_price`, `shared owner ↔ Tier1 source seller @ raw_price`).
+  - [x] Tier1 sell-offer + same-owner Tier2 responder: two-leg chain (`Tier2 customer ↔ shared owner @ viewer_effective_price`, `shared owner ↔ Tier1 source seller @ raw_price`).
   - [ ] Tier1 offer + other-owner Tier2 responder: three-leg chain (`Tier1 source ↔ source owner @ raw_price`, `source owner ↔ responder owner @ raw_price`, `responder owner ↔ Tier2 responder @ viewer_effective_price`) with buyer/seller directions derived from offer type.
   - [ ] core rule: `Tier 2` responder leg always uses `viewer_effective_price`; all inter-owner/source legs preserve `raw_price`; source-side mediation depends on whether the source actor is `Owner`/non-customer or `Tier 1`.
 - [ ] Final matrix examples:
@@ -328,9 +328,10 @@ validation phase:
   - [ ] Tier1 source vs other owner: `سینا ←buyer / رامین ←seller @ 50000`; `رامین ←buyer / مجید ←seller @ 50000`.
   - [ ] Tier1 source vs same-owner Tier1: `سهراب ←buyer / رامین ←seller @ 100000`; `رامین ←buyer / سینا ←seller @ 100000`.
   - [ ] Tier1 source vs other-owner Tier1: `سینا ←buyer / رامین ←seller @ 200000`; `رامین ←buyer / مجید ←seller @ 200000`; `مجید ←buyer / پیمان ←seller @ 200000`.
-  - [ ] Tier1 sell raw=`50000` vs same-owner Tier2: `50250` rounds up to `50300`; `علی ←buyer / رامین ←seller @ 50300`; `رامین ←buyer / سینا ←seller @ 50000`.
+  - [x] Tier1 sell raw=`50000` vs same-owner Tier2: `50250` rounds up to `50300`; `علی ←buyer / رامین ←seller @ 50300`; `رامین ←buyer / سینا ←seller @ 50000`.
   - [ ] Tier1 buy raw=`100000` vs other-owner Tier2: `سینا ←buyer / رامین ←seller @ 100000`; `رامین ←buyer / مجید ←seller @ 100000`; `مجید ←buyer / محمد ←seller @ 99300`.
-- [ ] notificationها، historyها، و UI summaryها باید این chain را منعکس کنند، نه اینکه یک trade مستقیم customer ↔ customer بسازند.
+- [x] owner-customer legها در notification/history/UI summary حالا additive `trade_path_summary` دارند تا customer-facing/source legها به‌شکل fake customer ↔ customer دیده نشوند.
+- [ ] full business-chain grouping برای owner-owner bridge legها و کارت‌های grouped history همچنان deferred به Phase 7 می‌ماند.
 
 ### 5.15. سناریوی customer trading restriction
 

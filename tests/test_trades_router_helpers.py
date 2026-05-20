@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from api.routers import trades
 from core.enums import NotificationCategory, NotificationLevel
+from models.customer_relation import CustomerTier
 from models.offer import OfferStatus
 
 
@@ -102,6 +103,12 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
                     highlight_accountant_relation_display_name="حسابدار خرید",
                 ),
             },
+            customer_relation_map={
+                11: SimpleNamespace(
+                    owner_user_id=22,
+                    customer_tier=CustomerTier.TIER_1,
+                ),
+            },
         )
         self.assertEqual(relation_aware_response.offer_user_name, "حسابدار فروش")
         self.assertEqual(relation_aware_response.responder_user_name, "حسابدار خرید")
@@ -115,6 +122,8 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(relation_aware_response.responder_user_resolved_from_accountant_id, 22)
         self.assertEqual(relation_aware_response.responder_user_highlight_accountant_user_id, 22)
         self.assertEqual(relation_aware_response.responder_user_highlight_accountant_relation_display_name, "حسابدار خرید")
+        self.assertEqual(relation_aware_response.trade_path_kind, "owner_customer_tier1")
+        self.assertEqual(relation_aware_response.trade_path_summary, "مالک ↔ مشتری سطح ۱")
 
         event_payload = trades._build_trade_created_event_payload(
             trade_id=91,
@@ -149,12 +158,20 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
                     highlight_accountant_relation_display_name='حسابدار خرید',
                 ),
             },
+            customer_relation_map={
+                11: SimpleNamespace(
+                    owner_user_id=22,
+                    customer_tier=CustomerTier.TIER_1,
+                ),
+            },
         )
         self.assertEqual(event_payload['id'], 91)
         self.assertEqual(event_payload['commodity_id'], 5)
         self.assertEqual(event_payload['status'], 'completed')
         self.assertEqual(event_payload['created_at'], '1403/10/12')
         self.assertEqual(event_payload['offer_user_profile_user_id'], 71)
+        self.assertEqual(event_payload['trade_path_kind'], 'owner_customer_tier1')
+        self.assertEqual(event_payload['trade_path_summary'], 'مالک ↔ مشتری سطح ۱')
 
         profile_route = trades._build_trade_profile_route_from_payload('offer_user', event_payload)
         self.assertEqual(

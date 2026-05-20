@@ -75,6 +75,8 @@ interface MutualTradePreview {
   commodity_name: string;
   price: number;
   trade_type?: string;
+  trade_path_kind?: string | null;
+  trade_path_summary?: string | null;
 }
 
 interface ProfileStatCard {
@@ -706,6 +708,10 @@ function openTradeCounterpartyProfile(trade: MutualTradePreview) {
                         {{ getTradeCounterpartyLabel(trade) }}
                       </button>
                       <span v-else class="value">{{ getTradeCounterpartyLabel(trade) }}</span>
+                    </div>
+                    <div v-if="trade.trade_path_summary" class="trade-counterparty">
+                      <span class="label">مسیر:</span>
+                      <span class="value">{{ trade.trade_path_summary }}</span>
                     </div>
                 </div>
             </div>
