@@ -98,7 +98,7 @@ interface ProfileStatCard {
 }
 
 interface ProfileActionCard {
-  key: 'message' | 'settings' | 'admin_settings' | 'add_customer' | 'add_accountant';
+  key: 'message' | 'block_toggle' | 'settings' | 'admin_settings' | 'add_customer' | 'add_accountant';
   icon: string;
   label: string;
 }
@@ -116,6 +116,8 @@ const openSections = ref({
 });
 const avatarBusy = ref(false);
 const avatarInput = ref<HTMLInputElement | null>(null);
+const publicBlockBusy = ref(false);
+const publicBlockState = ref<boolean | null>(null);
 const showAccountantManager = ref(false);
 const showCustomerManager = ref(false);
 const showAdminUserManager = ref(false);
@@ -212,6 +214,24 @@ const targetCustomerHistoryContext = computed(() => {
 const showCustomerListSection = computed(() => {
   return customerRelations.value.length > 0 && (showOwnerSections.value || viewerIsSuperAdmin.value);
 });
+const showPublicBlockAction = computed(() => {
+  return showVisitorSections.value && !!profileData.value && customerProfileContext.value === null;
+});
+const publicBlockActionLabel = computed(() => {
+  if (publicBlockBusy.value) {
+    return 'در حال بررسی...';
+  }
+  if (publicBlockState.value === true) {
+    return 'رفع بلاک';
+  }
+  if (publicBlockState.value === false) {
+    return 'بلاک کاربر';
+  }
+  return 'بلاک / رفع بلاک';
+});
+const publicBlockActionIcon = computed(() => {
+  return publicBlockState.value ? '🔓' : '⛔';
+});
 const sharedStatCards = computed<ProfileStatCard[]>(() => {
   if (!profileData.value) return [];
 
@@ -227,13 +247,23 @@ const sharedStatCards = computed<ProfileStatCard[]>(() => {
 const visitorActionCards = computed<ProfileActionCard[]>(() => {
   if (!showVisitorSections.value) return [];
 
-  return [
+  const actions: ProfileActionCard[] = [
     {
       key: 'message',
       icon: '💬',
       label: 'ارسال پیام',
     },
   ];
+
+  if (showPublicBlockAction.value) {
+    actions.push({
+      key: 'block_toggle',
+      icon: publicBlockActionIcon.value,
+      label: publicBlockActionLabel.value,
+    });
+  }
+
+  return actions;
 });
 const ownerOnlyActions = computed<ProfileActionCard[]>(() => {
   if (!showOwnerSections.value) return [];
@@ -433,6 +463,65 @@ async function closeCustomerManager() {
   await loadProfile();
 }
 
+async function getCurrentPublicBlockState() {
+  if (!profileData.value || !props.jwtToken) {
+    throw new Error('نشست کاربری معتبر نیست.');
+  }
+
+  const response = await fetch(`${props.apiBaseUrl}/api/blocks/check/${profileData.value.id}`, {
+    headers: {
+      'Authorization': `Bearer ${props.jwtToken}`,
+    },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(parseApiError(payload, 'خطا در بررسی وضعیت بلاک کاربر'));
+  }
+
+  return Boolean((payload as { is_blocked_by_me?: unknown } | null)?.is_blocked_by_me);
+}
+
+async function togglePublicProfileBlock() {
+  if (!showPublicBlockAction.value || !profileData.value || !props.jwtToken || publicBlockBusy.value) return;
+
+  publicBlockBusy.value = true;
+  try {
+    const isBlocked = await getCurrentPublicBlockState();
+    publicBlockState.value = isBlocked;
+
+    const shouldUnblock = isBlocked;
+    const confirmed = window.confirm(
+      shouldUnblock
+        ? `آیا از رفع بلاک کاربر ${profileData.value.account_name} اطمینان دارید؟`
+        : `آیا از بلاک کاربر ${profileData.value.account_name} اطمینان دارید؟`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const response = await fetch(`${props.apiBaseUrl}/api/blocks/${profileData.value.id}`, {
+      method: shouldUnblock ? 'DELETE' : 'POST',
+      headers: {
+        'Authorization': `Bearer ${props.jwtToken}`,
+      },
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(parseApiError(payload, shouldUnblock ? 'رفع بلاک کاربر ناموفق بود.' : 'بلاک کاربر ناموفق بود.'));
+    }
+
+    publicBlockState.value = !shouldUnblock;
+    const successMessage = typeof (payload as { message?: unknown } | null)?.message === 'string'
+      ? (payload as { message: string }).message
+      : (shouldUnblock ? 'رفع بلاک کاربر انجام شد.' : 'کاربر با موفقیت بلاک شد.');
+    window.alert(successMessage);
+  } catch (e: any) {
+    window.alert(e?.message || 'خطا در اجرای عملیات بلاک کاربر.');
+  } finally {
+    publicBlockBusy.value = false;
+  }
+}
+
 function handleAdminUserManagerNavigate(view: string) {
   if (view === 'manage_users') {
     void closeAdminUserManager();
@@ -447,6 +536,8 @@ function handleActionClick(action: ProfileActionCard) {
   
   if (action.key === 'message') {
     emit('navigate', 'chat', { userId: profileData.value.id, userName: profileData.value.account_name });
+  } else if (action.key === 'block_toggle') {
+    void togglePublicProfileBlock();
   } else if (action.key === 'settings') {
     emit('navigate', 'settings');
   } else if (action.key === 'admin_settings') {
