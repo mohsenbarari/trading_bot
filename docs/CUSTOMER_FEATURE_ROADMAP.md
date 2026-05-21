@@ -390,7 +390,7 @@ history باید بسته به viewer یکی یا هر دو را نشان دهد
 ### 7.3.2. سناریوی Tier 2 روی owner-offer
 
 - [ ] اگر `Tier 2` روی آفر owner خودش request بزند، history همان direct trade owner ↔ customer را با price projected-to-customer نشان می‌دهد.
-- [ ] owner در این view customer context را به‌صورت صریح می‌بیند چون counterparty خودش customer خودش است.
+- [x] owner در این view customer context را به‌صورت صریح می‌بیند چون counterparty خودش customer خودش است.
 
 ### 7.3.3. سناریوی Tier 2 روی outsider-offer
 
@@ -404,32 +404,32 @@ history باید بسته به viewer یکی یا هر دو را نشان دهد
 
 اگر user3 تاریخچه مشترک با owner1 را ببیند:
 - [ ] اصل معامله را می‌بیند.
-- [ ] ولی customer context را نباید ببیند.
-- [ ] نه badge مشتری، نه management_name، نه relation hint.
+- [x] ولی customer context را نباید ببیند.
+- [x] نه badge مشتری، نه management_name، نه relation hint.
 
 دلیل:
-- [ ] customer identity برای counterpart private است مگر requirement دیگری بعداً آن را باز کند.
+- [x] customer identity برای counterpart private است مگر requirement دیگری بعداً آن را باز کند.
 
 ### 7.5. سناریوی owner در تاریخچه با خود customer
 
 اگر owner1 وارد پروفایل عمومی customer1 شود و تاریخچه را ببیند:
 - [ ] اینجا viewer دارد رابطه مستقیم owner ↔ customer را می‌بیند.
 - [x] backend read seam دیگر در این حالت روی mutual-history محدود نمی‌ماند و برای owner/accountant مجاز، rowهای خود customer را برمی‌گرداند.
-- [ ] هر trade باید طرف دیگر معامله را همراه context نمایش دهد.
-- [ ] مثلاً اگر customer1 با user3 معامله‌ای انجام داده، owner1 در لیست customer1 باید ببیند counterpart چه کسی بوده است.
-- [ ] در این view، customer context دیگر زائد است چون خود صفحه متعلق به customer1 است.
+- [x] هر trade باید طرف دیگر معامله را همراه context نمایش دهد.
+- [x] مثلاً اگر customer1 با user3 معامله‌ای انجام داده، owner1 در لیست customer1 باید ببیند counterpart چه کسی بوده است.
+- [x] در این view، customer context دیگر زائد است چون خود صفحه متعلق به customer1 است.
 
 ### 7.6. سناریوی accountant در تاریخچه customer
 
 - [x] accountant owner باید بتواند customerها و history آن‌ها را ببیند.
 - [ ] اما نباید owner-only management control ببیند.
-- [ ] نمایش history برای accountant باید شبیه owner باشد، با همان customer contextهای لازم.
+- [x] نمایش history برای accountant باید شبیه owner باشد، با همان customer contextهای لازم.
 
 ### 7.7. سناریوی admin در تاریخچه
 
 - [ ] `SUPER_ADMIN` باید history واقعی user هدف را در public profile ببیند، نه mutual history با خودش.
 - [x] برای public profile مشتری، `SUPER_ADMIN` حالا target-customer row history را می‌بیند، نه mutual-history با خودش.
-- [ ] اگر owner در یک view badge/customer context می‌بیند، `SUPER_ADMIN` هم باید همان context را ببیند.
+- [x] اگر owner در یک view badge/customer context می‌بیند، `SUPER_ADMIN` هم باید همان context را ببیند.
 - [ ] `MIDDLE_MANAGER` در public profile فقط mutual history عادی خودش با آن user را می‌بیند و هیچ customer-aware context اضافه‌ای ندارد.
 - [ ] این دقیقاً باید با sync اخیر public profile و admin user modal سازگار بماند؛ یعنی جایی که `SUPER_ADMIN` از public profile وارد تنظیمات user می‌شود، همان entity/context را ببیند.
 - [ ] این rule history-specific است و نباید به market visibility ویژه برای admin نشت کند.

@@ -79,6 +79,16 @@ interface Trade {
   responder_user_resolved_from_accountant_id?: number | null
   responder_user_highlight_accountant_user_id?: number | null
   responder_user_highlight_accountant_relation_display_name?: string | null
+  counterparty_user_id?: number | null
+  counterparty_name?: string | null
+  counterparty_profile_user_id?: number | null
+  counterparty_profile_account_name?: string | null
+  counterparty_highlight_accountant_user_id?: number | null
+  counterparty_highlight_accountant_relation_display_name?: string | null
+  customer_context_visible?: boolean
+  customer_context_user_id?: number | null
+  customer_context_management_name?: string | null
+  customer_context_tier?: 'tier1' | 'tier2' | null
   trade_path_kind?: string | null
   trade_path_summary?: string | null
   created_at: string
@@ -129,6 +139,18 @@ function normalizeTradeRealtimePayload(payload: unknown): Trade | null {
     responder_user_resolved_from_accountant_id: rawTrade.responder_user_resolved_from_accountant_id ?? null,
     responder_user_highlight_accountant_user_id: rawTrade.responder_user_highlight_accountant_user_id ?? null,
     responder_user_highlight_accountant_relation_display_name: rawTrade.responder_user_highlight_accountant_relation_display_name ?? null,
+    counterparty_user_id: rawTrade.counterparty_user_id ?? null,
+    counterparty_name: rawTrade.counterparty_name ?? null,
+    counterparty_profile_user_id: rawTrade.counterparty_profile_user_id ?? null,
+    counterparty_profile_account_name: rawTrade.counterparty_profile_account_name ?? null,
+    counterparty_highlight_accountant_user_id: rawTrade.counterparty_highlight_accountant_user_id ?? null,
+    counterparty_highlight_accountant_relation_display_name: rawTrade.counterparty_highlight_accountant_relation_display_name ?? null,
+    customer_context_visible: rawTrade.customer_context_visible === true,
+    customer_context_user_id: rawTrade.customer_context_user_id ?? null,
+    customer_context_management_name: rawTrade.customer_context_management_name ?? null,
+    customer_context_tier: rawTrade.customer_context_tier === 'tier1' || rawTrade.customer_context_tier === 'tier2'
+      ? rawTrade.customer_context_tier
+      : null,
     trade_path_kind: typeof rawTrade.trade_path_kind === 'string' ? rawTrade.trade_path_kind : null,
     trade_path_summary: typeof rawTrade.trade_path_summary === 'string' ? rawTrade.trade_path_summary : null,
     created_at: typeof rawTrade.created_at === 'string' && rawTrade.created_at.trim() ? rawTrade.created_at : 'همین الان',
@@ -308,7 +330,7 @@ function getOfferDisplayPrice(offer: Offer | null | undefined): number {
   return Number.isFinite(numeric) ? numeric : 0
 }
 
-function getCustomerTierLabel(tier: Offer['customer_tier']): string {
+function getCustomerTierLabel(tier: Offer['customer_tier'] | Trade['customer_context_tier']): string {
   if (tier === 'tier2') return 'سطح 2'
   if (tier === 'tier1') return 'سطح 1'
   return 'سطح نامشخص'
@@ -617,16 +639,43 @@ function getUserTradeType(t: Trade) {
 }
 
 function getTradeCounterpartyLabel(trade: Trade) {
+  if (typeof trade.counterparty_name === 'string' && trade.counterparty_name.trim()) {
+    return trade.counterparty_name
+  }
   return Number(trade.responder_user_id) === Number(props.user?.id)
     ? trade.offer_user_name
     : trade.responder_user_name
 }
 
 function getTradeCounterpartyProfileTarget(trade: Trade) {
+  if (
+    Number.isInteger(trade.counterparty_profile_user_id)
+    && typeof trade.counterparty_profile_account_name === 'string'
+    && trade.counterparty_profile_account_name.trim()
+  ) {
+    return {
+      id: Number(trade.counterparty_profile_user_id),
+      account_name: trade.counterparty_profile_account_name,
+      highlight_accountant_user_id: Number.isInteger(trade.counterparty_highlight_accountant_user_id)
+        ? Number(trade.counterparty_highlight_accountant_user_id)
+        : null,
+      highlight_accountant_relation_display_name:
+        typeof trade.counterparty_highlight_accountant_relation_display_name === 'string'
+          ? trade.counterparty_highlight_accountant_relation_display_name
+          : null,
+    }
+  }
   return resolveTradeParticipantProfileTarget(
     trade,
     Number(trade.responder_user_id) === Number(props.user?.id) ? 'offer_user' : 'responder_user',
   )
+}
+
+function showTradeCustomerContext(trade: Trade) {
+  if (!trade.customer_context_visible) {
+    return false
+  }
+  return Boolean(trade.customer_context_management_name || trade.customer_context_tier)
 }
 
 function openTradeCounterpartyProfile(trade: Trade) {
@@ -989,11 +1038,26 @@ watch(activeTab, (val) => {
             </div>
             <div class="trade-info-row">
               <span class="info-label">👤 طرف معامله:</span>
-              <span 
-                class="info-value profile-link" 
+              <span
+                v-if="!getTradeCounterpartyProfileTarget(trade)"
+                class="info-value"
+              >
+                {{ getTradeCounterpartyLabel(trade) }}
+              </span>
+              <span
+                v-else
+                class="info-value profile-link"
                 @click.stop="openTradeCounterpartyProfile(trade)"
               >
                 {{ getTradeCounterpartyLabel(trade) }}
+              </span>
+            </div>
+            <div v-if="showTradeCustomerContext(trade)" class="trade-info-row">
+              <span class="info-label">🪪 مشتری:</span>
+              <span class="info-value trade-customer-context-value">
+                <span class="customer-context-badge">مشتری</span>
+                <span v-if="trade.customer_context_management_name" class="customer-context-name">{{ trade.customer_context_management_name }}</span>
+                <span v-if="trade.customer_context_tier" class="customer-context-tier">{{ getCustomerTierLabel(trade.customer_context_tier) }}</span>
               </span>
             </div>
             <div v-if="trade.trade_path_summary" class="trade-info-row">
