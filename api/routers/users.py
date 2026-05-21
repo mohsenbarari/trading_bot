@@ -8,6 +8,7 @@ import pytz
 
 from core.db import get_db
 from core.services.accountant_relation_service import is_user_accountant
+from core.services.customer_relation_service import get_active_customer_relation_for_customer
 from core.services.user_account_status_service import transition_user_account_status
 from core.services.chat_room_service import sync_mandatory_channel_for_user_state_change
 from core.services.session_service import force_clear_sessions
@@ -23,6 +24,28 @@ import schemas
 # ===== Helper Functions for update_user =====
 
 IRAN_TZ = pytz.timezone('Asia/Tehran')
+
+
+async def attach_customer_user_context(db: AsyncSession, user: User) -> User:
+    relation = None
+    if hasattr(db, "execute"):
+        relation = await get_active_customer_relation_for_customer(db, user.id)
+
+    owner_user = getattr(relation, "owner_user", None) if relation else None
+    setattr(user, "is_customer", relation is not None)
+    setattr(user, "customer_tier", getattr(relation, "customer_tier", None) if relation else None)
+    setattr(user, "customer_owner_user_id", owner_user.id if owner_user and not owner_user.is_deleted else None)
+    setattr(
+        user,
+        "customer_owner_account_name",
+        owner_user.account_name if owner_user and not owner_user.is_deleted else None,
+    )
+    setattr(user, "customer_management_name", getattr(relation, "management_name", None) if relation else None)
+    return user
+
+
+def serialize_user_read(user: User) -> schemas.UserRead:
+    return schemas.UserRead.model_validate(user, from_attributes=True)
 
 
 def convert_to_utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -249,7 +272,7 @@ async def read_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     _ensure_actor_can_manage_target(actor, user)
-    return user
+    return serialize_user_read(await attach_customer_user_context(db, user))
 
 @router.put("/{user_id}", response_model=schemas.UserRead)
 async def update_user(
@@ -355,7 +378,7 @@ async def update_user(
     if unlimit_needed:
         asyncio.create_task(send_delayed_removal_notification_api(get_db, user.id, user.telegram_id, is_block=False))
     
-    return user
+    return serialize_user_read(await attach_customer_user_context(db, user))
 
 @router.delete("/{user_id}")
 async def delete_user(

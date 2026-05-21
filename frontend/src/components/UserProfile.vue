@@ -45,7 +45,19 @@ const canBlockUsers = ref(props.user?.can_block_users ?? true);
 const editMaxBlockedUsers = ref(props.user?.max_blocked_users ?? 10);
 const accountStatus = ref(props.user?.account_status ?? 'active');
 const isTerminatingSessions = ref(false);
+const showCustomerContext = computed(() => Boolean(
+  props.user?.is_customer
+  || props.user?.customer_management_name
+  || props.user?.customer_owner_account_name
+  || props.user?.customer_tier,
+));
 const canEditRole = !isCachedMiddleManager();
+
+function getCustomerTierLabel(value: string | null | undefined) {
+  if (value === 'tier2') return 'سطح 2';
+  if (value === 'tier1') return 'سطح 1';
+  return '---';
+}
 
 // --- Date Picker Logic ---
 const showCustomDateInput = ref(false);
@@ -756,6 +768,22 @@ async function deleteUser() {
               <span class="countdown-value">{{ countdownLimitation }}</span>
           </div>
       </div>
+
+          <div v-if="showCustomerContext" class="limitations-box customer-context-box">
+            <h4>👥 اطلاعات مشتری</h4>
+            <div class="limit-item">
+              <span>نام مدیریتی:</span>
+              <span>{{ user.customer_management_name || '---' }}</span>
+            </div>
+            <div class="limit-item">
+              <span>مالک:</span>
+              <span>{{ user.customer_owner_account_name || '---' }}</span>
+            </div>
+            <div class="limit-item">
+              <span>سطح مشتری:</span>
+              <span>{{ getCustomerTierLabel(user.customer_tier) }}</span>
+            </div>
+          </div>
 
       <!-- تنظیمات نشست -->
       <div v-if="isAdminView" class="sessions-config-box">

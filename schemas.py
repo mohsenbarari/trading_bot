@@ -94,6 +94,9 @@ class UserRead(UserBase):
     is_accountant: bool = False
     is_customer: bool = False
     customer_tier: CustomerTier | None = None
+    customer_owner_user_id: int | None = None
+    customer_owner_account_name: str | None = None
+    customer_management_name: str | None = None
     is_deleted: bool = False
     avatar_file_id: str | None = None
     created_at: datetime

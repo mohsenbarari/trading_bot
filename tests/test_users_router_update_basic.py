@@ -15,6 +15,10 @@ def make_user(**overrides):
     data = {
         "id": 5,
         "telegram_id": 999,
+        "username": None,
+        "full_name": "user5",
+        "account_name": "user5",
+        "mobile_number": "09120000005",
         "role": UserRole.WATCH,
         "account_status": UserAccountStatus.ACTIVE,
         "deactivated_at": None,
@@ -22,6 +26,8 @@ def make_user(**overrides):
         "messenger_blocked_at": None,
         "is_deleted": False,
         "deleted_at": None,
+        "avatar_file_id": None,
+        "created_at": datetime.utcnow(),
         "has_bot_access": True,
         "trading_restricted_until": None,
         "max_daily_trades": None,
@@ -31,6 +37,7 @@ def make_user(**overrides):
         "trades_count": 1,
         "commodities_traded_count": 2,
         "channel_messages_count": 3,
+        "last_seen_at": None,
         "max_sessions": 1,
         "max_accountants": 3,
         "max_customers": 5,
@@ -46,6 +53,7 @@ class FakeDB:
         self.user = user
         self.commits = 0
         self.refreshes = 0
+        self.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None))
 
     async def get(self, model, user_id):
         return self.user
@@ -112,7 +120,8 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         ) as limit_mock, patch("api.routers.users.asyncio.create_task") as create_task_mock:
             result = await update_user(5, update, db=db)
 
-        self.assertIs(result, user)
+        self.assertIsInstance(result, schemas.UserRead)
+        self.assertEqual(result.id, user.id)
         self.assertEqual(user.role, UserRole.STANDARD)
         self.assertTrue(user.has_bot_access)
         self.assertEqual(user.max_sessions, 3)
@@ -152,7 +161,7 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.users.asyncio.create_task"):
             result = await update_user(5, update, db=db)
 
-        self.assertIs(result, user)
+        self.assertIsInstance(result, schemas.UserRead)
         transition_mock.assert_awaited_once_with(db, user, UserAccountStatus.INACTIVE)
         self.assertEqual(db.commits, 1)
         self.assertEqual(db.refreshes, 1)
@@ -175,14 +184,13 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.users.asyncio.create_task"):
             result = await update_user(5, update, db=db)
 
-        self.assertIs(result, user)
+        self.assertIsInstance(result, schemas.UserRead)
         self.assertFalse(user.can_block_users)
         self.assertEqual(user.max_blocked_users, 100)
 
     async def test_update_user_ignores_legacy_bot_access_and_clamps_accountant_session_cap(self):
         user = make_user(has_bot_access=False, max_sessions=1)
         db = FakeDB(user)
-        db.execute = AsyncMock()
         update = schemas.UserUpdate(has_bot_access=True, max_sessions=3)
 
         with patch("api.routers.users.is_user_accountant", new=AsyncMock(return_value=True)), patch(
@@ -198,7 +206,7 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.users.asyncio.create_task"):
             result = await update_user(5, update, db=db)
 
-        self.assertIs(result, user)
+        self.assertIsInstance(result, schemas.UserRead)
         self.assertFalse(user.has_bot_access)
         self.assertEqual(user.max_sessions, 1)
 

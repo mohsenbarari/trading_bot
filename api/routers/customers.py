@@ -7,10 +7,10 @@ from core.config import settings
 from core.db import get_db
 from core.services.accountant_relation_service import EffectiveOwnerActor
 from core.services.customer_relation_service import (
-    cancel_pending_customer_relation,
     create_owner_customer_relation,
     list_owner_customer_relations,
     load_customer_relation_invitation_map,
+    unlink_owner_customer_relation,
     update_owner_customer_relation,
 )
 from core.sms import send_customer_invitation_sms
@@ -106,13 +106,13 @@ async def create_my_customer(
 
 
 @router.delete("/owner-relations/{relation_id}", response_model=schemas.CustomerRelationRead)
-async def cancel_my_pending_customer(
+async def unlink_my_customer(
     relation_id: int,
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     db: AsyncSession = Depends(get_db),
 ):
     ensure_owner_context(context)
-    relation = await cancel_pending_customer_relation(
+    relation = await unlink_owner_customer_relation(
         db,
         owner_user_id=context.owner_user.id,
         relation_id=relation_id,
