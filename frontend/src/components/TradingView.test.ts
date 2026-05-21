@@ -330,6 +330,80 @@ describe('TradingView.vue', () => {
     wrapper.unmount()
   })
 
+  it('upserts recipient-specific trade:created payloads for accountant audiences without polling', async () => {
+    const wrapper = await mountTradingView({ initialTab: 'my_trades', user: { id: 701, account_name: 'accountant-user' } })
+    await flushPromises()
+
+    const handlers = new Map<string, (payload: unknown) => void>(tradingViewMocks.wsOnMock.mock.calls as [string, (payload: unknown) => void][])
+    tradingViewMocks.apiFetchJsonMock.mockClear()
+
+    handlers.get('trade:created')?.({
+      id: 1001,
+      trade_number: 21001,
+      offer_id: 111,
+      commodity_id: 1,
+      trade_type: 'sell',
+      commodity_name: 'سکه',
+      quantity: 2,
+      price: 333000,
+      status: 'completed',
+      recipient_specific: true,
+      audience_user_ids: [701],
+      trade_path_kind: 'owner_customer_tier1',
+      trade_path_summary: 'مالک ↔ مشتری سطح ۱',
+      offer_user_id: 7,
+      offer_user_name: 'مالک اصلی',
+      responder_user_id: 55,
+      responder_user_name: 'خریدار بیرونی',
+      counterparty_user_id: 55,
+      counterparty_name: 'خریدار بیرونی',
+      customer_context_visible: true,
+      customer_context_management_name: 'مشتری حسابدار',
+      customer_context_tier: 'tier1',
+      created_at: 'همین الان',
+    })
+    await flushPromises()
+
+    expect(tradingViewMocks.apiFetchJsonMock).not.toHaveBeenCalledWith('/api/trades/my', {})
+    expect(wrapper.text()).toContain('21001')
+    expect(wrapper.text()).toContain('خریدار بیرونی')
+    expect(wrapper.text()).toContain('مشتری حسابدار')
+
+    wrapper.unmount()
+  })
+
+  it('ignores unrelated trade:created payloads without forcing a my-trades reload', async () => {
+    const wrapper = await mountTradingView({ initialTab: 'my_trades' })
+    await flushPromises()
+
+    const handlers = new Map<string, (payload: unknown) => void>(tradingViewMocks.wsOnMock.mock.calls as [string, (payload: unknown) => void][])
+    tradingViewMocks.apiFetchJsonMock.mockClear()
+
+    handlers.get('trade:created')?.({
+      id: 1002,
+      trade_number: 22002,
+      offer_id: 112,
+      commodity_id: 2,
+      trade_type: 'buy',
+      commodity_name: 'طلا',
+      quantity: 4,
+      price: 444000,
+      status: 'completed',
+      audience_user_ids: [88, 99],
+      offer_user_id: 88,
+      offer_user_name: 'کاربر دیگر',
+      responder_user_id: 99,
+      responder_user_name: 'کاربر دیگر ۲',
+      created_at: 'همین الان',
+    })
+    await flushPromises()
+
+    expect(tradingViewMocks.apiFetchJsonMock).not.toHaveBeenCalledWith('/api/trades/my', {})
+    expect(wrapper.text()).not.toContain('22002')
+
+    wrapper.unmount()
+  })
+
   it('renders customer context and viewer-specific display pricing on active offers', async () => {
     tradingViewMocks.apiFetchJsonMock.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/api/offers/' && (!options?.method || options.method === 'GET')) {

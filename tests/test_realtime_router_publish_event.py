@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from api.routers.realtime import publish_event
+from api.routers.realtime import publish_event, publish_user_event
 
 
 class FakeRedisClient:
@@ -43,6 +43,24 @@ class RealtimeRouterPublishEventTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.realtime.manager.broadcast", new=AsyncMock(side_effect=RuntimeError("ws down"))
         ):
             await publish_event("offer:created", {"safe": 1})
+
+    async def test_publish_user_event_publishes_only_to_notification_channel(self):
+        redis_client = FakeRedisClient()
+        data = {"safe": 1, "mobile_number": "0912"}
+
+        with patch("api.routers.realtime.redis.Redis", return_value=redis_client), patch(
+            "api.routers.realtime.manager.broadcast", new=AsyncMock()
+        ) as broadcast_mock:
+            await publish_user_event(7, "trade:created", data)
+
+        self.assertEqual(
+            redis_client.publish_calls,
+            [(
+                "notifications:7",
+                json.dumps({"event": "trade:created", "data": data}, ensure_ascii=False, default=str),
+            )],
+        )
+        broadcast_mock.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -57,6 +57,7 @@ function makeUser(overrides: Record<string, unknown> = {}) {
     channel_messages_count: 0,
     max_sessions: 2,
     max_accountants: 3,
+    max_customers: 5,
     ...overrides,
   }
 }
@@ -76,12 +77,17 @@ describe('UserProfile.vue', () => {
     vi.spyOn(window, 'confirm').mockImplementation(() => true)
   })
 
-  it('allows admin to update max accountants for an owner', async () => {
+  it('allows admin to update max accountants and max customers for an owner', async () => {
     const user = makeUser()
 
     apiFetchMock.mockResolvedValueOnce(makeResponse({
       ...user,
       max_accountants: 6,
+    }))
+    apiFetchMock.mockResolvedValueOnce(makeResponse({
+      ...user,
+      max_accountants: 6,
+      max_customers: 8,
     }))
 
     const UserProfile = (await import('./UserProfile.vue')).default
@@ -103,11 +109,21 @@ describe('UserProfile.vue', () => {
     await input.trigger('change')
     await flushPromises()
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/users/12', {
+    const maxCustomersInput = wrapper.get('.max-customers-input')
+    await maxCustomersInput.setValue('8')
+    await maxCustomersInput.trigger('change')
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/users/12', {
       method: 'PUT',
       body: JSON.stringify({ max_accountants: 6 }),
     })
+    expect(apiFetchMock.mock.calls).toContainEqual(['/api/users/12', {
+      method: 'PUT',
+      body: JSON.stringify({ max_customers: 8 }),
+    }])
     expect(user.max_accountants).toBe(6)
+    expect(user.max_customers).toBe(8)
   })
 
   it('allows admin to update block permissions and terminate all sessions', async () => {

@@ -1,0 +1,139 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+import schemas
+from api.deps import get_effective_owner_actor_context
+from core.config import settings
+from core.db import get_db
+from core.services.accountant_relation_service import EffectiveOwnerActor
+from core.services.customer_relation_service import (
+    cancel_pending_customer_relation,
+    create_owner_customer_relation,
+    list_owner_customer_relations,
+    load_customer_relation_invitation_map,
+    update_owner_customer_relation,
+)
+from core.sms import send_customer_invitation_sms
+
+
+router = APIRouter()
+
+
+def build_customer_registration_link(invitation_token: str) -> str | None:
+    frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
+    if not frontend_url:
+        return None
+    return f"{frontend_url}/register?token={invitation_token}"
+
+
+def serialize_customer_relation(relation, invitation=None) -> dict:
+    return {
+        "id": relation.id,
+        "owner_user_id": relation.owner_user_id,
+        "customer_user_id": relation.customer_user_id,
+        "customer_account_name": getattr(getattr(relation, "customer_user", None), "account_name", None),
+        "invitation_account_name": getattr(invitation, "account_name", None),
+        "mobile_number": getattr(invitation, "mobile_number", None),
+        "management_name": relation.management_name,
+        "customer_tier": relation.customer_tier,
+        "commission_rate": relation.commission_rate,
+        "min_trade_quantity": relation.min_trade_quantity,
+        "max_trade_quantity": relation.max_trade_quantity,
+        "max_daily_trades": relation.max_daily_trades,
+        "max_daily_commodity_volume": relation.max_daily_commodity_volume,
+        "status": relation.status,
+        "invitation_token": relation.invitation_token,
+        "registration_link": build_customer_registration_link(relation.invitation_token),
+        "expires_at": relation.expires_at,
+        "activated_at": relation.activated_at,
+        "deleted_at": relation.deleted_at,
+        "created_at": relation.created_at,
+    }
+
+
+def ensure_owner_context(context: EffectiveOwnerActor) -> None:
+    if context.is_accountant_context:
+        raise HTTPException(status_code=403, detail="Accountants cannot manage owner customers")
+
+
+@router.get("/owner-relations", response_model=list[schemas.CustomerRelationRead])
+async def list_my_customers(
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_owner_context(context)
+    relations = await list_owner_customer_relations(db, owner_user_id=context.owner_user.id)
+    invitation_map = await load_customer_relation_invitation_map(
+        db,
+        [relation.invitation_token for relation in relations],
+    )
+    return [
+        serialize_customer_relation(relation, invitation=invitation_map.get(relation.invitation_token))
+        for relation in relations
+    ]
+
+
+@router.post("/owner-relations", response_model=schemas.CustomerRelationRead)
+async def create_my_customer(
+    payload: schemas.CustomerRelationCreate,
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_owner_context(context)
+    relation, invitation = await create_owner_customer_relation(
+        db,
+        owner_user=context.owner_user,
+        account_name=payload.account_name,
+        management_name=payload.management_name,
+        mobile_number=payload.mobile_number,
+        customer_tier=payload.customer_tier,
+        commission_rate=payload.commission_rate,
+        min_trade_quantity=payload.min_trade_quantity,
+        max_trade_quantity=payload.max_trade_quantity,
+        max_daily_trades=payload.max_daily_trades,
+        max_daily_commodity_volume=payload.max_daily_commodity_volume,
+    )
+
+    registration_link = build_customer_registration_link(relation.invitation_token)
+    if registration_link:
+        send_customer_invitation_sms(
+            mobile=invitation.mobile_number,
+            management_name=relation.management_name,
+            web_link=registration_link,
+        )
+
+    return serialize_customer_relation(relation, invitation=invitation)
+
+
+@router.delete("/owner-relations/{relation_id}", response_model=schemas.CustomerRelationRead)
+async def cancel_my_pending_customer(
+    relation_id: int,
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_owner_context(context)
+    relation = await cancel_pending_customer_relation(
+        db,
+        owner_user_id=context.owner_user.id,
+        relation_id=relation_id,
+    )
+    invitation_map = await load_customer_relation_invitation_map(db, [relation.invitation_token])
+    return serialize_customer_relation(relation, invitation=invitation_map.get(relation.invitation_token))
+
+
+@router.patch("/owner-relations/{relation_id}", response_model=schemas.CustomerRelationRead)
+async def update_my_customer(
+    relation_id: int,
+    payload: schemas.CustomerRelationUpdate,
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_owner_context(context)
+    relation = await update_owner_customer_relation(
+        db,
+        owner_user_id=context.owner_user.id,
+        relation_id=relation_id,
+        update_data=payload.model_dump(exclude_unset=True),
+    )
+    invitation_map = await load_customer_relation_invitation_map(db, [relation.invitation_token])
+    return serialize_customer_relation(relation, invitation=invitation_map.get(relation.invitation_token))

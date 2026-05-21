@@ -40,6 +40,7 @@ const customLimitDate = ref('');
 const selectedRole = ref(props.user?.role || 'تماشا');
 const editMaxSessions = ref(props.user?.max_sessions ?? 1);
 const editMaxAccountants = ref(props.user?.max_accountants ?? 3);
+const editMaxCustomers = ref(props.user?.max_customers ?? 5);
 const canBlockUsers = ref(props.user?.can_block_users ?? true);
 const editMaxBlockedUsers = ref(props.user?.max_blocked_users ?? 10);
 const accountStatus = ref(props.user?.account_status ?? 'active');
@@ -76,6 +77,13 @@ watch(
   () => props.user?.max_accountants,
   (value) => {
     editMaxAccountants.value = value ?? 3;
+  }
+);
+
+watch(
+  () => props.user?.max_customers,
+  (value) => {
+    editMaxCustomers.value = value ?? 5;
   }
 );
 
@@ -576,6 +584,26 @@ async function saveMaxAccountants() {
   }
 }
 
+async function saveMaxCustomers() {
+  const normalizedValue = Number.isFinite(editMaxCustomers.value)
+    ? Math.max(0, Math.trunc(editMaxCustomers.value))
+    : 0;
+  editMaxCustomers.value = normalizedValue;
+
+  try {
+    const response = await apiFetch(`/api/users/${props.user.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ max_customers: normalizedValue })
+    });
+    if (!response.ok) throw new Error('خطا');
+    const updatedUser = await response.json();
+    Object.assign(props.user, updatedUser);
+  } catch (e) {
+    alert('خطا در ذخیره سقف مشتریان');
+    editMaxCustomers.value = props.user.max_customers ?? 5;
+  }
+}
+
 async function toggleBlockCapability() {
   const nextValue = !canBlockUsers.value;
 
@@ -751,6 +779,19 @@ async function deleteUser() {
               step="1"
               class="form-input-sm max-accountants-input"
               @change="saveMaxAccountants"
+            />
+          </div>
+        </div>
+        <div class="detail-item owner-limit-row">
+          <span class="label">حداکثر مشتریان مجاز</span>
+          <div class="inline-edit">
+            <input
+              v-model.number="editMaxCustomers"
+              type="number"
+              min="0"
+              step="1"
+              class="form-input-sm max-customers-input"
+              @change="saveMaxCustomers"
             />
           </div>
         </div>

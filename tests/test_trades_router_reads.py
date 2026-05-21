@@ -86,6 +86,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, [{"id": 1}, {"id": 2}])
         identity_mock.assert_awaited_once()
         relation_map_mock.assert_awaited_once()
+        self.assertTrue(relation_map_mock.await_args.kwargs["include_inactive_historical"])
         self.assertEqual(response_mock.call_count, 2)
         self.assertEqual(response_mock.call_args_list[0].args[0], trades[0])
         self.assertEqual(response_mock.call_args_list[0].kwargs["identity_map"], {})
@@ -127,7 +128,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         ) as identity_mock, patch(
             "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
             new=AsyncMock(return_value={}),
-        ), patch("api.routers.trades.trade_to_response", return_value={"id": 7}) as response_mock:
+        ) as relation_map_mock, patch("api.routers.trades.trade_to_response", return_value={"id": 7}) as response_mock:
             result = await get_trade(
                 trade_id=7,
                 db=FakeDB([FakeExecuteResult(single=trade)]),
@@ -135,6 +136,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
             )
 
         identity_mock.assert_awaited_once()
+        self.assertTrue(relation_map_mock.await_args.kwargs["include_inactive_historical"])
         response_mock.assert_called_once_with(
             trade,
             identity_map={},
@@ -161,7 +163,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         ) as identity_mock, patch(
             "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
             new=AsyncMock(return_value={}),
-        ), patch("api.routers.trades.trade_to_response", return_value={"id": 11}) as response_mock:
+        ) as relation_map_mock, patch("api.routers.trades.trade_to_response", return_value={"id": 11}) as response_mock:
             result = await get_trades_with_user(
                 other_user_id=7,
                 skip=0,
@@ -171,6 +173,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
             )
 
         identity_mock.assert_awaited_once()
+        self.assertTrue(relation_map_mock.await_args.kwargs["include_inactive_historical"])
         response_mock.assert_called_once_with(
             trades[0],
             identity_map={},

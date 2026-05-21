@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from api.routers import trades
 from core.enums import NotificationCategory, NotificationLevel
-from models.customer_relation import CustomerTier
+from models.customer_relation import CustomerRelationStatus, CustomerTier
 from models.offer import OfferStatus
 
 
@@ -57,6 +57,57 @@ class _AsyncSessionContext:
 
 
 class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
+    async def test_load_trade_customer_relation_map_preserves_historical_relations_when_requested(self):
+        active_relation = SimpleNamespace(
+            customer_user_id=42,
+            owner_user_id=7,
+            status=CustomerRelationStatus.ACTIVE,
+            deleted_at=None,
+            updated_at=None,
+            expires_at=None,
+            activated_at=datetime(2025, 1, 5, tzinfo=timezone.utc),
+            created_at=datetime(2025, 1, 4, tzinfo=timezone.utc),
+            management_name="مشتری فعال",
+            customer_tier=CustomerTier.TIER_1,
+        )
+        deleted_relation = SimpleNamespace(
+            customer_user_id=41,
+            owner_user_id=7,
+            status=CustomerRelationStatus.DELETED,
+            deleted_at=datetime(2025, 1, 8, tzinfo=timezone.utc),
+            updated_at=datetime(2025, 1, 8, tzinfo=timezone.utc),
+            expires_at=None,
+            activated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            management_name="مشتری حذف‌شده",
+            customer_tier=CustomerTier.TIER_2,
+        )
+        stale_deleted_relation = SimpleNamespace(
+            customer_user_id=42,
+            owner_user_id=7,
+            status=CustomerRelationStatus.REVOKED,
+            deleted_at=datetime(2024, 12, 30, tzinfo=timezone.utc),
+            updated_at=datetime(2024, 12, 30, tzinfo=timezone.utc),
+            expires_at=None,
+            activated_at=datetime(2024, 12, 1, tzinfo=timezone.utc),
+            created_at=datetime(2024, 12, 1, tzinfo=timezone.utc),
+            management_name="مشتری قدیمی",
+            customer_tier=CustomerTier.TIER_1,
+        )
+        db = AsyncMock()
+        db.execute.return_value = SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: [deleted_relation, stale_deleted_relation, active_relation])
+        )
+
+        relation_map = await trades._load_trade_customer_relation_map_for_user_ids(
+            db,
+            [41, 42],
+            include_inactive_historical=True,
+        )
+
+        self.assertIs(relation_map[41], deleted_relation)
+        self.assertIs(relation_map[42], active_relation)
+
     async def test_trade_to_response_and_telegram_helpers(self):
         trade = SimpleNamespace(
             id=1,
@@ -248,6 +299,59 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event_payload['offer_user_profile_user_id'], 71)
         self.assertEqual(event_payload['trade_path_kind'], 'owner_customer_tier1')
         self.assertEqual(event_payload['trade_path_summary'], 'مالک ↔ مشتری سطح ۱')
+        self.assertNotIn('audience_user_ids', event_payload)
+        self.assertNotIn('recipient_specific', event_payload)
+
+        recipient_payload = trades._build_trade_created_event_payload(
+            trade_id=92,
+            trade_number=10003,
+            offer_id=15,
+            commodity_id=6,
+            quantity=3,
+            price=82000,
+            commodity_name='Coin',
+            trade_type='sell',
+            status='completed',
+            created_at='1403/10/13',
+            offer_user=mediated_trade.offer_user,
+            offer_user_id=mediated_trade.offer_user_id,
+            responder_user=mediated_trade.responder_user,
+            responder_user_id=mediated_trade.responder_user_id,
+            actor_user_id=11,
+            identity_map={
+                22: SimpleNamespace(
+                    display_name='مالک معامله',
+                    profile_user_id=22,
+                    profile_account_name='owner-22',
+                    resolved_from_accountant_id=None,
+                    highlight_accountant_user_id=None,
+                    highlight_accountant_relation_display_name=None,
+                )
+            },
+            customer_relation_map={
+                11: SimpleNamespace(
+                    owner_user_id=22,
+                    customer_tier=CustomerTier.TIER_1,
+                    management_name='مشتری واسط',
+                ),
+            },
+            viewer_context=SimpleNamespace(
+                owner_user=SimpleNamespace(id=22, role=None),
+                actor_user=SimpleNamespace(id=22, role=None),
+                relation=None,
+                is_accountant_context=False,
+            ),
+            history_target_user_id=99,
+            recipient_specific=True,
+            audience_user_ids=[22, 33],
+        )
+        self.assertTrue(recipient_payload['recipient_specific'])
+        self.assertEqual(recipient_payload['counterparty_user_id'], 22)
+        self.assertEqual(recipient_payload['counterparty_name'], 'مالک معامله')
+        self.assertTrue(recipient_payload['customer_context_visible'])
+        self.assertEqual(recipient_payload['customer_context_management_name'], 'مشتری واسط')
+        self.assertEqual(recipient_payload['customer_context_tier'], CustomerTier.TIER_1.value)
+        self.assertEqual(recipient_payload['audience_user_ids'], [22, 33])
 
         profile_route = trades._build_trade_profile_route_from_payload('offer_user', event_payload)
         self.assertEqual(

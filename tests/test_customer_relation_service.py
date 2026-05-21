@@ -10,6 +10,8 @@ from core.services.customer_relation_service import (
     build_allowed_customer_chat_targets,
     build_customer_offer_read_model,
     CAPACITY_TRACKED_CUSTOMER_RELATION_STATUSES,
+    cancel_pending_customer_relation,
+    create_owner_customer_relation,
     CUSTOMER_INVITATION_PREFIX,
     get_active_customer_relation_for_customer,
     get_active_customer_relation_for_user,
@@ -19,17 +21,20 @@ from core.services.customer_relation_service import (
     is_customer_invitation_token,
     is_user_customer,
     load_offer_customer_read_context,
+    load_customer_relation_invitation_map,
     list_active_customers_for_owner,
     list_owner_customer_relations,
     round_customer_price,
     sweep_expired_pending_customer_relations,
+    update_owner_customer_relation,
     validate_customer_capacity,
     validate_customer_trade_limits,
     validate_owner_customer_capacity,
 )
 from core.utils import utc_now
-from models.customer_relation import CustomerRelation, CustomerRelationStatus
+from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.offer import OfferType
+from models.user import UserRole
 
 
 class FakeScalarResult:
@@ -62,11 +67,16 @@ class FakeDB:
     def __init__(self, execute_results=None):
         self.execute_results = list(execute_results or [])
         self.commit = AsyncMock()
+        self.refresh = AsyncMock()
+        self.added = []
 
     async def execute(self, _stmt):
         if not self.execute_results:
             raise AssertionError("Unexpected execute() call")
         return self.execute_results.pop(0)
+
+    def add(self, item):
+        self.added.append(item)
 
 
 class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -207,6 +217,114 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, [relation_one, relation_two])
         db.commit.assert_awaited_once()
+
+    async def test_load_customer_relation_invitation_map_returns_tokens(self):
+        invitation = SimpleNamespace(token=f"{CUSTOMER_INVITATION_PREFIX}abc", account_name="cust-1")
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[invitation])])
+
+        result = await load_customer_relation_invitation_map(db, {invitation.token})
+
+        self.assertEqual(result, {invitation.token: invitation})
+
+    async def test_create_owner_customer_relation_creates_pending_relation_and_standard_invitation(self):
+        owner = SimpleNamespace(id=7, max_customers=4)
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[]),
+                FakeExecuteResult(scalar_one_value=1),
+                FakeExecuteResult(scalar_one_value=None),
+                FakeExecuteResult(scalar_one_value=None),
+                FakeExecuteResult(scalar_one_value=None),
+            ]
+        )
+
+        relation, invitation = await create_owner_customer_relation(
+            db,
+            owner_user=owner,
+            account_name="customer_one",
+            management_name="مشتری اول",
+            mobile_number="09120000000",
+            customer_tier=CustomerTier.TIER_2,
+            commission_rate="0.5",
+            min_trade_quantity=1,
+            max_trade_quantity=5,
+            max_daily_trades=3,
+            max_daily_commodity_volume=10,
+        )
+
+        self.assertEqual(invitation.role, UserRole.STANDARD)
+        self.assertTrue(invitation.token.startswith(CUSTOMER_INVITATION_PREFIX))
+        self.assertEqual(relation.owner_user_id, 7)
+        self.assertEqual(relation.customer_tier, CustomerTier.TIER_2)
+        self.assertEqual(str(relation.commission_rate), "0.50")
+        self.assertEqual(relation.management_name, "مشتری اول")
+        self.assertEqual(len(db.added), 2)
+        db.commit.assert_awaited_once()
+        self.assertEqual(db.refresh.await_count, 2)
+
+    async def test_cancel_pending_customer_relation_revokes_relation_and_marks_invitation_used(self):
+        relation = SimpleNamespace(
+            id=9,
+            owner_user_id=7,
+            status=CustomerRelationStatus.PENDING,
+            deleted_at=None,
+            invitation_token=f"{CUSTOMER_INVITATION_PREFIX}cancel",
+        )
+        invitation = SimpleNamespace(token=relation.invitation_token, is_used=False, expires_at=None)
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(scalar_one_value=relation),
+                FakeExecuteResult(scalar_one_value=invitation),
+            ]
+        )
+
+        result = await cancel_pending_customer_relation(db, owner_user_id=7, relation_id=9)
+
+        self.assertIs(result, relation)
+        self.assertEqual(relation.status, CustomerRelationStatus.REVOKED)
+        self.assertTrue(invitation.is_used)
+        self.assertIsNotNone(relation.deleted_at)
+        db.commit.assert_awaited_once()
+        db.refresh.assert_awaited_once_with(relation)
+
+    async def test_update_owner_customer_relation_updates_limits_and_clears_commission_for_tier1(self):
+        relation = SimpleNamespace(
+            id=13,
+            owner_user_id=7,
+            status=CustomerRelationStatus.ACTIVE,
+            deleted_at=None,
+            customer_tier=CustomerTier.TIER_2,
+            commission_rate="0.75",
+            min_trade_quantity=1,
+            max_trade_quantity=9,
+            max_daily_trades=2,
+            max_daily_commodity_volume=20,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)])
+
+        result = await update_owner_customer_relation(
+            db,
+            owner_user_id=7,
+            relation_id=13,
+            update_data={
+                "customer_tier": CustomerTier.TIER_1,
+                "commission_rate": None,
+                "min_trade_quantity": 2,
+                "max_trade_quantity": 8,
+                "max_daily_trades": 4,
+                "max_daily_commodity_volume": 25,
+            },
+        )
+
+        self.assertIs(result, relation)
+        self.assertEqual(relation.customer_tier, CustomerTier.TIER_1)
+        self.assertIsNone(relation.commission_rate)
+        self.assertEqual(relation.min_trade_quantity, 2)
+        self.assertEqual(relation.max_trade_quantity, 8)
+        self.assertEqual(relation.max_daily_trades, 4)
+        self.assertEqual(relation.max_daily_commodity_volume, 25)
+        db.commit.assert_awaited_once()
+        db.refresh.assert_awaited_once_with(relation)
 
     async def test_is_user_customer_delegates_to_active_relation_lookup(self):
         relation = SimpleNamespace(id=9)

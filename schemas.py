@@ -6,7 +6,7 @@ from datetime import datetime
 from core.utils import normalize_persian_numerals, to_jalali_str
 from core.enums import UserRole, UserAccountStatus, NotificationLevel, NotificationCategory
 from models.accountant_relation import AccountantRelationStatus
-from models.customer_relation import CustomerTier
+from models.customer_relation import CustomerRelationStatus, CustomerTier
 
 # --- Token Schemas ---
 class Token(BaseModel):
@@ -117,6 +117,7 @@ class UserRead(UserBase):
     max_blocked_users: int = 10
     max_sessions: int = 1
     max_accountants: int = 3
+    max_customers: int = 5
     
     @computed_field
     def created_at_jalali(self) -> str | None:
@@ -190,6 +191,7 @@ class UserUpdate(BaseModel):
     max_blocked_users: Optional[int] = None
     max_sessions: Optional[int] = None
     max_accountants: Optional[int] = None
+    max_customers: Optional[int] = None
 
 
 class UserAvatarUpdate(BaseModel):
@@ -279,6 +281,65 @@ class PublicCustomerRelationSummary(BaseModel):
     customer_account_name: str | None = None
     management_name: str
     customer_tier: CustomerTier
+
+    class Config:
+        from_attributes = True
+
+
+class CustomerRelationCreate(BaseModel):
+    account_name: str
+    management_name: str = Field(..., min_length=1, max_length=120)
+    mobile_number: str = Field(..., pattern=r"^09[0-9]{9}$")
+    customer_tier: CustomerTier = CustomerTier.TIER_1
+    commission_rate: float | None = Field(default=None, ge=0, le=100)
+    min_trade_quantity: int | None = Field(default=None, ge=0)
+    max_trade_quantity: int | None = Field(default=None, ge=0)
+    max_daily_trades: int | None = Field(default=None, ge=0)
+    max_daily_commodity_volume: int | None = Field(default=None, ge=0)
+
+    @field_validator('mobile_number', mode='before')
+    @classmethod
+    def normalize_mobile_customer(cls, value):
+        return normalize_persian_numerals(value)
+
+    @field_validator('account_name', 'management_name', mode='before')
+    @classmethod
+    def strip_customer_strings(cls, value):
+        if value is None:
+            return value
+        return str(value).strip()
+
+
+class CustomerRelationUpdate(BaseModel):
+    customer_tier: CustomerTier | None = None
+    commission_rate: float | None = Field(default=None, ge=0, le=100)
+    min_trade_quantity: int | None = Field(default=None, ge=0)
+    max_trade_quantity: int | None = Field(default=None, ge=0)
+    max_daily_trades: int | None = Field(default=None, ge=0)
+    max_daily_commodity_volume: int | None = Field(default=None, ge=0)
+
+
+class CustomerRelationRead(BaseModel):
+    id: int
+    owner_user_id: int
+    customer_user_id: int | None = None
+    customer_account_name: str | None = None
+    invitation_account_name: str | None = None
+    mobile_number: str | None = None
+    management_name: str
+    customer_tier: CustomerTier
+    commission_rate: float | None = None
+    min_trade_quantity: int | None = None
+    max_trade_quantity: int | None = None
+    max_daily_trades: int | None = None
+    max_daily_commodity_volume: int | None = None
+    status: CustomerRelationStatus
+    invitation_token: str
+    registration_link: str | None = None
+    expires_at: datetime | None = None
+    activated_at: datetime | None = None
+    deleted_at: datetime | None = None
+    created_at: datetime
 
     class Config:
         from_attributes = True

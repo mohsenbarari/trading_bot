@@ -231,13 +231,17 @@ async def event_generator(user_id: int):
     """Generator برای SSE events"""
     async with redis.Redis(connection_pool=pool) as redis_client:
         pubsub = redis_client.pubsub()
-        
-        await pubsub.subscribe(
+
+        channels = [
             "events:offer:created",
             "events:offer:expired",
             "events:offer:updated",
-            "events:trade:created"
-        )
+            "events:trade:created",
+        ]
+        if user_id:
+            channels.append(f"notifications:{user_id}")
+
+        await pubsub.subscribe(*channels)
         
         heartbeat_interval = 15
         last_heartbeat = asyncio.get_event_loop().time()
@@ -252,10 +256,13 @@ async def event_generator(user_id: int):
                     raw_data = message.get("data", "")
                     data = raw_data.decode("utf-8") if isinstance(raw_data, bytes) else str(raw_data)
                     event_type = channel.replace("events:", "")
-                    
+
                     # Sanitize SSE data too
                     try:
                         parsed = json.loads(data)
+                        if channel.startswith("notifications:"):
+                            event_type = parsed.get("event", "notification")
+                            parsed = parsed.get("data", {})
                         safe = sanitize_payload(parsed)
                         data = json.dumps(safe)
                     except:
@@ -312,3 +319,23 @@ async def publish_event(event_type: str, data: dict):
         })
     except Exception as e:
         logging.warning(f"⚠️ Error broadcasting event {event_type}: {e}")
+
+
+async def publish_user_event(user_id: int | None, event_type: str, data: dict):
+    """Publish a user-scoped realtime event via the notifications channel."""
+    if not user_id:
+        return
+
+    payload = {
+        "event": event_type,
+        "data": data,
+    }
+
+    try:
+        async with redis.Redis(connection_pool=pool) as redis_client:
+            await redis_client.publish(
+                f"notifications:{int(user_id)}",
+                json.dumps(payload, ensure_ascii=False, default=str),
+            )
+    except Exception as e:
+        logging.warning(f"⚠️ Error publishing user event {event_type} for user {user_id}: {e}")

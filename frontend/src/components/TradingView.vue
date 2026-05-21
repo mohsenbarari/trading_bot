@@ -91,6 +91,8 @@ interface Trade {
   customer_context_tier?: 'tier1' | 'tier2' | null
   trade_path_kind?: string | null
   trade_path_summary?: string | null
+  audience_user_ids?: number[]
+  recipient_specific?: boolean
   created_at: string
 }
 
@@ -153,7 +155,62 @@ function normalizeTradeRealtimePayload(payload: unknown): Trade | null {
       : null,
     trade_path_kind: typeof rawTrade.trade_path_kind === 'string' ? rawTrade.trade_path_kind : null,
     trade_path_summary: typeof rawTrade.trade_path_summary === 'string' ? rawTrade.trade_path_summary : null,
+    audience_user_ids: Array.isArray((rawTrade as { audience_user_ids?: unknown }).audience_user_ids)
+      ? (rawTrade as { audience_user_ids: unknown[] }).audience_user_ids
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value))
+      : [],
+    recipient_specific: (rawTrade as { recipient_specific?: unknown }).recipient_specific === true,
     created_at: typeof rawTrade.created_at === 'string' && rawTrade.created_at.trim() ? rawTrade.created_at : 'همین الان',
+  }
+}
+
+function mergeRealtimeTrade(existingTrade: Trade, incomingTrade: Trade): Trade {
+  return {
+    ...existingTrade,
+    ...incomingTrade,
+    offer_user_name: incomingTrade.offer_user_name ?? existingTrade.offer_user_name,
+    offer_user_profile_user_id: incomingTrade.offer_user_profile_user_id ?? existingTrade.offer_user_profile_user_id,
+    offer_user_profile_account_name: incomingTrade.offer_user_profile_account_name ?? existingTrade.offer_user_profile_account_name,
+    offer_user_resolved_from_accountant_id:
+      incomingTrade.offer_user_resolved_from_accountant_id ?? existingTrade.offer_user_resolved_from_accountant_id,
+    offer_user_highlight_accountant_user_id:
+      incomingTrade.offer_user_highlight_accountant_user_id ?? existingTrade.offer_user_highlight_accountant_user_id,
+    offer_user_highlight_accountant_relation_display_name:
+      incomingTrade.offer_user_highlight_accountant_relation_display_name
+      ?? existingTrade.offer_user_highlight_accountant_relation_display_name,
+    responder_user_name: incomingTrade.responder_user_name ?? existingTrade.responder_user_name,
+    responder_user_profile_user_id:
+      incomingTrade.responder_user_profile_user_id ?? existingTrade.responder_user_profile_user_id,
+    responder_user_profile_account_name:
+      incomingTrade.responder_user_profile_account_name ?? existingTrade.responder_user_profile_account_name,
+    responder_user_resolved_from_accountant_id:
+      incomingTrade.responder_user_resolved_from_accountant_id ?? existingTrade.responder_user_resolved_from_accountant_id,
+    responder_user_highlight_accountant_user_id:
+      incomingTrade.responder_user_highlight_accountant_user_id ?? existingTrade.responder_user_highlight_accountant_user_id,
+    responder_user_highlight_accountant_relation_display_name:
+      incomingTrade.responder_user_highlight_accountant_relation_display_name
+      ?? existingTrade.responder_user_highlight_accountant_relation_display_name,
+    counterparty_user_id: incomingTrade.counterparty_user_id ?? existingTrade.counterparty_user_id,
+    counterparty_name: incomingTrade.counterparty_name ?? existingTrade.counterparty_name,
+    counterparty_profile_user_id:
+      incomingTrade.counterparty_profile_user_id ?? existingTrade.counterparty_profile_user_id,
+    counterparty_profile_account_name:
+      incomingTrade.counterparty_profile_account_name ?? existingTrade.counterparty_profile_account_name,
+    counterparty_highlight_accountant_user_id:
+      incomingTrade.counterparty_highlight_accountant_user_id ?? existingTrade.counterparty_highlight_accountant_user_id,
+    counterparty_highlight_accountant_relation_display_name:
+      incomingTrade.counterparty_highlight_accountant_relation_display_name
+      ?? existingTrade.counterparty_highlight_accountant_relation_display_name,
+    customer_context_visible: incomingTrade.customer_context_visible || existingTrade.customer_context_visible,
+    customer_context_user_id: incomingTrade.customer_context_user_id ?? existingTrade.customer_context_user_id,
+    customer_context_management_name:
+      incomingTrade.customer_context_management_name ?? existingTrade.customer_context_management_name,
+    customer_context_tier: incomingTrade.customer_context_tier ?? existingTrade.customer_context_tier,
+    trade_path_kind: incomingTrade.trade_path_kind ?? existingTrade.trade_path_kind,
+    trade_path_summary: incomingTrade.trade_path_summary ?? existingTrade.trade_path_summary,
+    audience_user_ids: incomingTrade.audience_user_ids?.length ? incomingTrade.audience_user_ids : existingTrade.audience_user_ids,
+    recipient_specific: incomingTrade.recipient_specific || existingTrade.recipient_specific,
   }
 }
 
@@ -168,12 +225,16 @@ function upsertTradeFromRealtime(payload: unknown): boolean {
     return false
   }
 
+  const isTargetedAudience = Array.isArray(trade.audience_user_ids)
+    && trade.audience_user_ids.some((audienceUserId) => Number(audienceUserId) === currentUserId)
   const isParticipant = Number(trade.offer_user_id) === currentUserId || Number(trade.responder_user_id) === currentUserId
-  if (!isParticipant) {
+  if (!isParticipant && !trade.recipient_specific && !isTargetedAudience) {
     return true
   }
 
-  myTrades.value = [trade, ...myTrades.value.filter((currentTrade) => currentTrade.id !== trade.id)]
+  const existingTrade = myTrades.value.find((currentTrade) => currentTrade.id === trade.id)
+  const nextTrade = existingTrade ? mergeRealtimeTrade(existingTrade, trade) : trade
+  myTrades.value = [nextTrade, ...myTrades.value.filter((currentTrade) => currentTrade.id !== trade.id)]
   return true
 }
 
