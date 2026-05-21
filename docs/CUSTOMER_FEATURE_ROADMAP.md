@@ -519,19 +519,19 @@ validation phase:
 customer relation در sync/replay/deletion drift نکند و lifecycle آن روی user lifecycle عادی سوار بماند.
 
 خروجی‌های لازم:
-- [ ] `customer_relations` به sync/change-log اضافه شود.
-- [ ] `users.max_customers` در sync payloadهای user همگرا شود.
-- [ ] relation delete/revoke/owner delete/customer delete paths converge شوند.
+- [x] `customer_relations` به sync/change-log اضافه شود.
+- [x] `users.max_customers` در sync payloadهای user همگرا شود.
+- [x] relation delete/revoke/owner delete/customer delete paths converge شوند.
 
 اصل lifecycle:
-- [ ] چون customer یک user عادی است، delete path باید بر lifecycle موجود user تکیه کند.
-- [ ] relation owner ← customer لایه‌ی اضافه است که همراه delete/revoke باید همگرا شود.
-- [ ] history/trade/message گذشته preserved می‌ماند.
+- [x] چون customer یک user عادی است، delete path باید بر lifecycle موجود user تکیه کند.
+- [x] relation owner ← customer لایه‌ی اضافه است که همراه delete/revoke باید همگرا شود.
+- [x] history/trade/message گذشته preserved می‌ماند.
 
 validation phase:
-- [ ] sync receive/resync tests.
-- [ ] owner delete/customer delete/relation revoke tests.
-- [ ] stale relation replay regression tests.
+- [x] sync receive/resync tests.
+- [x] owner delete/customer delete/relation revoke tests.
+- [x] stale relation replay regression tests.
 
 ## 10. Phase 9 - Release Gate and End-to-End Validation
 

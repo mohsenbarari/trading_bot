@@ -230,6 +230,62 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload[2]["table"], "trades")
         self.assertEqual(payload[2]["data"]["actor_user_id"], 11)
 
+    async def test_resync_preserves_customer_relations_and_user_max_customers_in_payload(self):
+        request = SimpleNamespace(headers={"X-Dev-Api-Key": "dev-key"})
+        user_entry = make_entry(
+            7,
+            table_name="users",
+            record_id=7,
+            data={
+                "telegram_id": 7001,
+                "full_name": "Owner User",
+                "max_customers": 9,
+            },
+        )
+        relation_entry = make_entry(
+            8,
+            table_name="customer_relations",
+            record_id=55,
+            data={
+                "owner_user_id": 7,
+                "customer_user_id": 12,
+                "created_by_user_id": 7,
+                "invitation_token": "cust-token",
+                "management_name": "مشتری ویژه",
+                "customer_tier": "tier2",
+                "commission_rate": "0.7",
+                "status": "deleted",
+                "deleted_at": "2026-05-21T09:00:00",
+            },
+        )
+        db = FakeDB([FakeExecuteResult([user_entry, relation_entry])])
+        calls = []
+        client_factory = lambda **kwargs: FakeAsyncClient(
+            response=SimpleNamespace(status_code=200, text="ok"),
+            calls=calls,
+            **kwargs,
+        )
+
+        with patch("api.routers.sync.settings.dev_api_key", "dev-key"), patch(
+            "api.routers.sync.default_peer_server_url", return_value="https://peer.example"
+        ), patch("api.routers.sync.settings.sync_api_key", "secret"), patch(
+            "api.routers.sync.time.time", return_value=1_700_000_333
+        ), patch("httpx.AsyncClient", side_effect=client_factory):
+            result = await resync_from_changelog(request=request, db=db)
+
+        self.assertEqual(result, {"status": "ok", "processed": 2, "errors": 0, "total_entries": 2})
+        self.assertTrue(user_entry.synced)
+        self.assertTrue(relation_entry.synced)
+        self.assertEqual(len(calls), 1)
+        _, content, _ = calls[0]
+        payload = json.loads(content)
+        self.assertEqual(payload[0]["table"], "users")
+        self.assertEqual(payload[0]["data"]["max_customers"], 9)
+        self.assertEqual(payload[1]["table"], "customer_relations")
+        self.assertEqual(payload[1]["data"]["management_name"], "مشتری ویژه")
+        self.assertEqual(payload[1]["data"]["status"], "deleted")
+        self.assertEqual(payload[1]["data"]["deleted_at"], "2026-05-21T09:00:00")
+
 
 if __name__ == "__main__":
     unittest.main()

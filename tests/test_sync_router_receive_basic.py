@@ -126,6 +126,44 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen_calls[3][2]["actor_user_id"], 71)
         rollout_mock.assert_awaited_once_with(db)
 
+    async def test_receive_sync_data_orders_customer_relations_and_preserves_user_max_customers(self):
+        db = FakeDB()
+        items = [
+            {"table": "trades", "operation": "INSERT", "id": 44, "data": {"offer_id": 90, "quantity": 2, "price": 125000}},
+            {
+                "table": "customer_relations",
+                "operation": "UPDATE",
+                "id": 31,
+                "data": {
+                    "owner_user_id": 7,
+                    "customer_user_id": 12,
+                    "management_name": "مشتری ویژه",
+                    "customer_tier": "tier2",
+                    "status": "deleted",
+                    "deleted_at": "2026-05-21T09:00:00",
+                },
+            },
+            {"table": "users", "operation": "UPDATE", "id": 7, "data": {"telegram_id": 7001, "max_customers": 9}},
+        ]
+        seen_calls = []
+
+        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers):
+            seen_calls.append((table, record_id, dict(data)))
+            return "ok"
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=fake_apply_item)) as apply_mock, patch(
+            "api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()
+        ) as rollout_mock, patch("api.routers.sync.settings.server_mode", "iran"):
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        self.assertEqual(result, {"status": "success", "processed": 3})
+        self.assertEqual(apply_mock.await_count, 3)
+        self.assertEqual([call[0] for call in seen_calls], ["users", "customer_relations", "trades"])
+        self.assertEqual(seen_calls[0][2]["max_customers"], 9)
+        self.assertEqual(seen_calls[1][2]["status"], "deleted")
+        self.assertEqual(seen_calls[1][2]["management_name"], "مشتری ویژه")
+        rollout_mock.assert_awaited_once_with(db)
+
 
 if __name__ == "__main__":
     unittest.main()
