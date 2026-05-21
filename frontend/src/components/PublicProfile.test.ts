@@ -612,6 +612,77 @@ describe('PublicProfile.vue', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('renders target-user history from the viewed profile perspective for super-admin viewers', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر ارشد' }))
+
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 60,
+      account_name: 'customer60',
+      avatar_file_id: null,
+      mobile_number: '09125556666',
+      address: 'تبریز',
+      created_at_jalali: '۱۴۰۵/۰۱/۱۲',
+      trades_count: 4,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+      customer_owner_user_id: 15,
+      customer_owner_account_name: 'owner15',
+      customer_management_name: 'مشتری راهبردی',
+      customer_tier: 'tier2',
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse([
+      {
+        id: 3,
+        trade_number: 10003,
+        created_at: 'امروز',
+        commodity_name: 'سکه',
+        quantity: 3,
+        price: 789000,
+        trade_type: 'BUY',
+        offer_user_id: 88,
+        offer_user_name: 'فروشنده بیرونی',
+        responder_user_id: 60,
+        responder_user_name: 'مشتری راهبردی',
+      },
+    ]))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 60, account_name: 'customer60' },
+        viewerUserId: 900,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات این کاربر'))
+    expect(historyHeader).toBeTruthy()
+    await historyHeader!.trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/trades/with/60', expect.objectContaining({
+      headers: {
+        Authorization: 'Bearer token',
+      },
+    }))
+    expect(wrapper.text()).toContain('🟢 خرید')
+    expect(wrapper.text()).toContain('مالک owner15')
+    expect(wrapper.text()).toContain('سطح 2')
+    expect(wrapper.text()).not.toContain('هیچ معامله مشترکی یافت نشد.')
+  })
+
   it('loads own trade history from the self endpoint and shows the empty state', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
