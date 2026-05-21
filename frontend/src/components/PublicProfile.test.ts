@@ -25,6 +25,7 @@ describe('PublicProfile.vue', () => {
     uploadAvatarImageMock.mockReset()
     vi.stubGlobal('fetch', vi.fn())
     vi.stubGlobal('alert', vi.fn())
+    vi.stubGlobal('confirm', vi.fn(() => true))
     localStorage.clear()
   })
 
@@ -185,6 +186,108 @@ describe('PublicProfile.vue', () => {
     await messageButton!.trigger('click')
 
     expect(wrapper.emitted('navigate')?.[0]).toEqual(['chat', { userId: 30, userName: 'plain30' }])
+  })
+
+  it('shows a block toggle next to the message action for non-customer profiles', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 30,
+      account_name: 'plain30',
+      avatar_file_id: null,
+      mobile_number: '09125555555',
+      address: 'تهران',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۳',
+      trades_count: 4,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ success: true, message: 'کاربر با موفقیت بلاک شد.' }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 30, account_name: 'plain30' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          OwnerCustomerManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const blockButton = wrapper.findAll('button').find((button) => button.text().includes('بلاک / رفع بلاک'))
+    expect(blockButton).toBeTruthy()
+
+    await blockButton!.trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/blocks/check/30', {
+      headers: {
+        Authorization: 'Bearer token',
+      },
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/blocks/30', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer token',
+      },
+    })
+    expect(vi.mocked(window.confirm)).toHaveBeenCalledWith('آیا از بلاک کاربر plain30 اطمینان دارید؟')
+    expect(vi.mocked(window.alert)).toHaveBeenCalledWith('کاربر با موفقیت بلاک شد.')
+    expect(wrapper.findAll('button').some((button) => button.text().includes('رفع بلاک'))).toBe(true)
+  })
+
+  it('hides the block toggle on customer public profiles', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 91,
+      account_name: 'customer91',
+      avatar_file_id: null,
+      mobile_number: '09127777777',
+      address: 'شیراز',
+      created_at_jalali: '۱۴۰۵/۰۲/۰۲',
+      trades_count: 5,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+      customer_owner_user_id: 20,
+      customer_owner_account_name: 'owner20',
+      customer_management_name: 'مشتری ویژه',
+      customer_tier: 'tier2',
+      customer_relations: [],
+    }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 91, account_name: 'customer91' },
+        viewerUserId: 20,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          OwnerCustomerManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.findAll('button').some((button) => button.text().includes('بلاک'))).toBe(false)
   })
 
   it('opens a local admin user manager for admin viewers on other profiles', async () => {
