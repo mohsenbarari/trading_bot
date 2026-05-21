@@ -268,6 +268,29 @@ const {
 
 watch(scrollIsViewingReply, (val) => { isViewingReply.value = val })
 
+const unreadMentionMessages = computed(() => {
+  if (!props.currentUserId) return []
+  return messages.value.filter((m) => {
+    if (m.sender_id === props.currentUserId) return false
+    if (m.is_read) return false
+    const mentions = Array.isArray(m.mentions) ? m.mentions : []
+    return mentions.includes(props.currentUserId) || m.mention_all === true
+  })
+})
+
+function handleScrollButtonClick() {
+  if (unreadMentionMessages.value.length > 0) {
+    const oldestMention = unreadMentionMessages.value[0]
+    if (!oldestMention) {
+      scrollToBottom()
+      return
+    }
+    scrollToMessage(oldestMention.id)
+  } else {
+    scrollToBottom()
+  }
+}
+
 watch([selectedUserId, selectedUserName], ([nextUserId, nextUserName]) => {
   syncSelectedConversationRoute(nextUserId, nextUserName)
 })
@@ -3362,9 +3385,11 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         <button 
           v-if="showScrollButton" 
           class="scroll-bottom-btn" 
-          @click="scrollToBottom"
+          :class="{ 'has-mention': unreadMentionMessages.length > 0 }"
+          @click="handleScrollButtonClick"
         >
           <span v-if="unreadNewMessagesCount > 0" class="scroll-badge">{{ unreadNewMessagesCount }}</span>
+          <span v-if="unreadMentionMessages.length > 0" class="scroll-mention-badge">@</span>
           <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
             <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
           </svg>
@@ -4378,6 +4403,41 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
   min-width: 18px;
   text-align: center;
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.scroll-mention-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background: #7c3aed;
+  color: white;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  animation: pulse-mention 2s infinite;
+}
+
+.scroll-bottom-btn.has-mention {
+  border: 1.5px solid #7c3aed;
+  color: #7c3aed;
+}
+
+@keyframes pulse-mention {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 /* Fix layout for absolute header */

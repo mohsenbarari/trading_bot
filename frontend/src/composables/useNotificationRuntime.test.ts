@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useNotificationRuntime } from './useNotificationRuntime'
 import { WS_NOTIFICATION_EVENTS } from '../types/notifications'
 import { BROWSER_NOTIFICATION_CLICK_EVENT } from '../utils/browserNotifications'
+import { cacheCurrentUserSummary, clearCurrentUserSummary } from '../utils/currentUser'
 
 const notificationRuntimeMocks = vi.hoisted(() => ({
   route: null as any,
@@ -14,6 +15,7 @@ const notificationRuntimeMocks = vi.hoisted(() => ({
     addToast: vi.fn(),
     isConversationMuted: vi.fn(),
     incrementChatUnread: vi.fn(),
+    incrementMentionUnread: vi.fn(),
     fetchInitialCounts: vi.fn(),
   },
   requestNotificationPermission: vi.fn(),
@@ -100,8 +102,10 @@ function mountRuntime() {
 
 describe('useNotificationRuntime', () => {
   beforeEach(() => {
+    clearCurrentUserSummary()
     localStorage.clear()
     localStorage.setItem('auth_token', 'token-1')
+    cacheCurrentUserSummary({ id: 7, role: 'عادی', account_name: 'ali' })
     notificationRuntimeMocks.handlers.clear()
     notificationRuntimeMocks.push.mockReset()
     notificationRuntimeMocks.connect.mockReset()
@@ -115,6 +119,7 @@ describe('useNotificationRuntime', () => {
     notificationRuntimeMocks.store.addToast.mockReset()
     notificationRuntimeMocks.store.isConversationMuted.mockReset()
     notificationRuntimeMocks.store.incrementChatUnread.mockReset()
+    notificationRuntimeMocks.store.incrementMentionUnread.mockReset()
     notificationRuntimeMocks.store.fetchInitialCounts.mockReset()
     notificationRuntimeMocks.store.addAppNotification.mockReturnValue({
       title: 'اعلان جدید',
@@ -277,6 +282,18 @@ describe('useNotificationRuntime', () => {
     expect(notificationRuntimeMocks.store.addToast).toHaveBeenCalledTimes(1)
 
     emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {
+      sender_id: 43,
+      sender_name: 'رضا',
+      message_type: 'text',
+      content: 'بی‌صدای منشن‌دار',
+      mentions: [7],
+    })
+    await flushPromises()
+    expect(notificationRuntimeMocks.store.incrementMentionUnread).toHaveBeenCalledWith(43)
+    expect(notificationRuntimeMocks.store.addToast).toHaveBeenCalledTimes(2)
+    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenCalledTimes(2)
+
+    emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {
       room_kind: 'channel',
       chat_id: 77,
       conversation_title: 'اطلاع‌رسانی',
@@ -293,7 +310,7 @@ describe('useNotificationRuntime', () => {
       route: '/chat?user_id=-77&user_name=%D8%A7%D8%B7%D9%84%D8%A7%D8%B9%E2%80%8C%D8%B1%D8%B3%D8%A7%D9%86%DB%8C',
       kind: 'chat',
     })
-    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenCalledTimes(1)
+    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenCalledTimes(2)
 
     wrapper.unmount()
   })

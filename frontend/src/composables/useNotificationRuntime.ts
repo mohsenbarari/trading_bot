@@ -14,6 +14,7 @@ import {
 } from '../utils/browserNotifications'
 import { unlockAudioContext } from '../utils/audio'
 import { resolveRoomConversationKey } from '../utils/chatRoomRouting'
+import { currentUserSummary } from '../utils/currentUser'
 
 type WebSocketEventHandler<T = any> = (data: T) => void
 
@@ -132,11 +133,20 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
         const shouldTreatAsUnread = !isViewingSameChat
         const isMutedConversation = notificationStore.isConversationMuted(conversationKey)
 
+        const currentUserId = currentUserSummary.value?.id
+        const isMentioned = currentUserId && (
+            (Array.isArray(payload.mentions) && payload.mentions.includes(currentUserId)) ||
+            payload.mention_all === true
+        )
+
         if (shouldTreatAsUnread) {
             notificationStore.incrementChatUnread(conversationKey)
+            if (isMentioned) {
+                notificationStore.incrementMentionUnread(conversationKey)
+            }
         }
 
-        if (!shouldTreatAsUnread || isMutedConversation) return
+        if (!shouldTreatAsUnread || (isMutedConversation && !isMentioned)) return
 
         const senderName = buildRealtimeConversationLabel(payload)
         const body = buildChatNotificationBody(payload)

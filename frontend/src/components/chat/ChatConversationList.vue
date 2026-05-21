@@ -426,6 +426,7 @@ onBeforeUnmount(() => {
                 conv.last_message_type,
                 conv.last_message_content,
                 conv.unread_count,
+                conv.unread_mention_count,
                 conv.is_muted,
                 conv.is_pinned,
                 conv.pinned_at,
@@ -489,6 +490,9 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="conversation-side">
+                <div v-if="conv.unread_mention_count > 0" class="unread-badge mention-badge" title="منشن جدید">
+                  @
+                </div>
                 <div v-if="conv.unread_count > 0" class="unread-badge">
                   {{ conv.unread_count.toLocaleString('fa-IR') }}
                 </div>
@@ -951,7 +955,9 @@ onBeforeUnmount(() => {
   position: relative;
   z-index: 1;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
   justify-content: center;
   min-width: 34px;
 }
@@ -974,6 +980,25 @@ onBeforeUnmount(() => {
   background: linear-gradient(135deg, #3390ec, #2563eb);
   color: #fff;
   box-shadow: 0 10px 18px rgba(37, 99, 235, 0.2);
+}
+
+.mention-badge {
+  background: #7c3aed !important;
+  color: #fff !important;
+  box-shadow: 0 4px 10px rgba(124, 58, 237, 0.3) !important;
+  animation: pulse-mention 2s infinite;
+}
+
+@keyframes pulse-mention {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .conversation-card--active .unread-badge {

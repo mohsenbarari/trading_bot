@@ -58,6 +58,8 @@ export interface ChatRealtimeNotificationPayload {
     room_kind?: 'direct' | 'channel' | string
     chat_id?: number | string
     conversation_title?: string
+    mentions?: number[]
+    mention_all?: boolean
 }
 
 export interface SessionLoginRequestPayload {

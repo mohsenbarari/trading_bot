@@ -97,8 +97,8 @@ class ChatRoomServiceRoomReadModelsTests(unittest.IsolatedAsyncioTestCase):
             execute_results=[
                 FakeExecuteResult(
                     rows=[
-                        (titled_chat, ChatMemberRole.ADMIN, "hello", None, 4, 10),
-                        (untitled_chat, None, None, None, None, 0),
+                        (titled_chat, ChatMemberRole.ADMIN, False, False, None, None, "hello", None, 4, 10, 2),
+                        (untitled_chat, None, False, False, None, None, None, None, None, 0, 0),
                     ]
                 )
             ]
@@ -115,9 +115,11 @@ class ChatRoomServiceRoomReadModelsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0].member_role, ChatMemberRole.ADMIN.value)
         self.assertEqual(rows[0].member_count, 10)
         self.assertEqual(rows[0].max_members, 100)
+        self.assertEqual(rows[0].unread_mention_count, 2)
         self.assertEqual(rows[1].id, -22)
         self.assertEqual(rows[1].other_user_name, "گروه 22")
         self.assertEqual(rows[1].unread_count, 0)
+        self.assertEqual(rows[1].unread_mention_count, 0)
         self.assertIsNone(rows[1].member_role)
         self.assertEqual(rows[1].member_count, 0)
         self.assertEqual(rows[1].max_members, GROUP_MAX_MEMBERS)
@@ -130,8 +132,8 @@ class ChatRoomServiceRoomReadModelsTests(unittest.IsolatedAsyncioTestCase):
             execute_results=[
                 FakeExecuteResult(
                     rows=[
-                        (admin_chat, ChatMemberRole.ADMIN, "notice", None, 2, 100),
-                        (member_chat, ChatMemberRole.MEMBER, None, None, None, 50),
+                        (admin_chat, ChatMemberRole.ADMIN, False, False, None, None, "notice", None, 2, 100, 1),
+                        (member_chat, ChatMemberRole.MEMBER, False, False, None, None, None, None, None, 50, 0),
                     ]
                 )
             ]
@@ -144,10 +146,12 @@ class ChatRoomServiceRoomReadModelsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0].room_kind, "channel")
         self.assertTrue(rows[0].can_send)
         self.assertEqual(rows[0].member_role, ChatMemberRole.ADMIN.value)
+        self.assertEqual(rows[0].unread_mention_count, 1)
         self.assertEqual(rows[1].id, -32)
         self.assertEqual(rows[1].other_user_name, "کانال 32")
         self.assertFalse(rows[1].can_send)
         self.assertEqual(rows[1].member_role, ChatMemberRole.MEMBER.value)
+        self.assertEqual(rows[1].unread_mention_count, 0)
         self.assertEqual(rows[0].member_count, 100)
         self.assertFalse(rows[0].is_mandatory)
         self.assertEqual(rows[1].member_count, 50)

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Dict, Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -45,6 +45,14 @@ class MessageReplyRead(BaseModel):
     content: str
     message_type: MessageType
     is_deleted: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class UserMentionRead(BaseModel):
+    user_id: int
+    account_name: str
 
     class Config:
         from_attributes = True
@@ -96,6 +104,9 @@ class MessageRead(BaseModel):
     reply_to_message: Optional[MessageReplyRead] = None
     reactions: List[MessageReactionRead] = Field(default_factory=list)
     recovery_action: Optional[RecoveryActionRead] = None
+    mentions: List[int] = Field(default_factory=list)
+    mention_all: bool = False
+    mention_details: List[UserMentionRead] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -119,6 +130,9 @@ class MessageRead(BaseModel):
             if getattr(obj, "forwarded_from", None)
             else None,
             "sender_name": obj.sender.account_name if getattr(obj, "sender", None) else None,
+            "mentions": getattr(obj, "mentions", []),
+            "mention_all": getattr(obj, "mention_all", False),
+            "mention_details": getattr(obj, "mention_details", []),
         }
         return cls(**data)
 
@@ -138,6 +152,8 @@ class MessageSend(BaseModel):
     message_type: MessageType = MessageType.TEXT
     reply_to_message_id: Optional[int] = None
     forwarded_from_id: Optional[int] = None
+    mentions: List[int] = Field(default_factory=list)
+    mention_all: bool = False
 
 
 class RoomMessageSend(BaseModel):
@@ -147,6 +163,8 @@ class RoomMessageSend(BaseModel):
     message_type: MessageType = MessageType.TEXT
     reply_to_message_id: Optional[int] = None
     forwarded_from_id: Optional[int] = None
+    mentions: List[int] = Field(default_factory=list)
+    mention_all: bool = False
 
 
 class MessageUpdate(BaseModel):
@@ -325,6 +343,7 @@ class ConversationRead(BaseModel):
     is_pinned: bool = False
     pinned_at: Optional[datetime] = None
     pin_order: Optional[int] = None
+    unread_mention_count: int = 0
 
     class Config:
         from_attributes = True
@@ -337,6 +356,7 @@ class PollResponse(BaseModel):
     unread_chats_count: int
     conversations_with_unread: List[dict]
     muted_conversation_ids: List[int] = Field(default_factory=list)
+    total_unread_mentions: int = 0
 
 
 class ConversationMuteUpdateRequest(BaseModel):

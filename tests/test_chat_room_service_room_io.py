@@ -17,11 +17,15 @@ from core.services.chat_room_service import (
 
 
 class FakeExecuteResult:
-    def __init__(self, *, scalar_one_or_none_value=None):
+    def __init__(self, *, scalar_one_or_none_value=None, rows=None):
         self._scalar_one_or_none_value = scalar_one_or_none_value
+        self._rows = rows or []
 
     def scalar_one_or_none(self):
         return self._scalar_one_or_none_value
+
+    def all(self):
+        return self._rows
 
 
 class FakeDB:
@@ -228,6 +232,86 @@ class ChatRoomServiceRoomIOTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(exc_info.exception.status_code, 500)
         self.assertEqual(exc_info.exception.detail, "Failed to reload group message")
+
+    async def test_send_group_message_resolves_mentions_from_content_and_explicit_ids(self):
+        now = datetime(2026, 5, 8, 2, 0, 0)
+        member = SimpleNamespace(last_read_message_id=None, last_read_at=None, updated_at=None)
+        chat = SimpleNamespace(id=70, last_message_id=None, last_message_at=None, updated_at=None)
+        sender = SimpleNamespace(id=9)
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(
+                    rows=[
+                        (9, "sender"),
+                        (12, "ali"),
+                        (15, "reza"),
+                        (20, "extra_user"),
+                    ]
+                )
+            ]
+        )
+        reloaded = SimpleNamespace(id=901, chat_id=70)
+
+        with patch(
+            "core.services.chat_room_service.get_active_group_member_or_403",
+            new=AsyncMock(return_value=member),
+        ), patch("core.services.chat_room_service._utcnow", return_value=now), patch(
+            "core.services.chat_room_service._reload_channel_message",
+            new=AsyncMock(return_value=reloaded),
+        ):
+            result = await send_group_message(
+                db,
+                chat=chat,
+                sender=sender,
+                content="سلام @ali و @reza و @all",
+                message_type=MessageType.TEXT,
+                mentions=[20, 999, 20],
+                mention_all=False,
+            )
+
+        self.assertIs(result, reloaded)
+        message = db.added[0]
+        self.assertEqual(message.mentions, [20, 12, 15])
+        self.assertTrue(message.mention_all)
+
+    async def test_send_channel_message_keeps_explicit_mentions_for_non_text_payloads(self):
+        now = datetime(2026, 5, 8, 2, 5, 0)
+        member = SimpleNamespace(
+            role=ChatMemberRole.ADMIN,
+            last_read_message_id=None,
+            last_read_at=None,
+            updated_at=None,
+        )
+        chat = SimpleNamespace(id=50, last_message_id=None, last_message_at=None, updated_at=None)
+        sender = SimpleNamespace(id=7)
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(rows=[(7, "sender"), (33, "member_33")])
+            ]
+        )
+        reloaded = SimpleNamespace(id=901, chat_id=50)
+
+        with patch(
+            "core.services.chat_room_service.get_active_channel_member_or_403",
+            new=AsyncMock(return_value=member),
+        ), patch("core.services.chat_room_service._utcnow", return_value=now), patch(
+            "core.services.chat_room_service._reload_channel_message",
+            new=AsyncMock(return_value=reloaded),
+        ):
+            result = await send_channel_message(
+                db,
+                chat=chat,
+                sender=sender,
+                content='{"caption":"@ali"}',
+                message_type=MessageType.IMAGE,
+                mentions=[33],
+                mention_all=True,
+            )
+
+        self.assertIs(result, reloaded)
+        message = db.added[0]
+        self.assertEqual(message.mentions, [33])
+        self.assertTrue(message.mention_all)
 
     async def test_mark_channel_messages_read_updates_member_and_broadcasts(self):
         now = datetime(2026, 5, 8, 1, 50, 0)
