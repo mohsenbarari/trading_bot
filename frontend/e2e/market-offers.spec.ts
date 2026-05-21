@@ -24,10 +24,24 @@ interface SeededCommoditySessionFixture extends SeededSessionFixture {
 
 interface CustomerPricingMarketFixture {
   owner: SeededSessionFixture
+  tier1Customer: SeededSessionFixture
   tier2Customer: SeededSessionFixture
   outsider: SeededSessionFixture
+  commodityId: number
   commodityName: string
   sourceManagementName: string
+}
+
+interface CustomerExecutionMarketFixture {
+  owner: SeededSessionFixture
+  tier2Customer: SeededSessionFixture
+  outsider: SeededSessionFixture
+  commodityId: number
+  commodityName: string
+  ownerOfferId: number
+  ownerOfferNote: string
+  outsiderOfferId: number
+  outsiderOfferNote: string
 }
 
 interface Commodity {
@@ -51,6 +65,17 @@ interface PersistedOfferRecord {
   notes: string | null
   excludeFromCompetitivePrice: boolean
   priceWarningType: string | null
+}
+
+interface PersistedTradeRecord {
+  id: number
+  offerId: number | null
+  offerUserId: number
+  responderUserId: number
+  actorUserId: number | null
+  price: number
+  quantity: number
+  tradeType: 'buy' | 'sell'
 }
 
 function runPythonInApp<T>(script: string): T {
@@ -395,6 +420,7 @@ async def main():
     ))
 
     owner_bundle = await create_session_bundle(db, owner, 'Playwright Customer Owner Device')
+    tier1_bundle = await create_session_bundle(db, source_customer, 'Playwright Tier1 Source Device')
     tier2_bundle = await create_session_bundle(db, tier2_customer, 'Playwright Tier2 Viewer Device')
     outsider_bundle = await create_session_bundle(db, outsider, 'Playwright Outsider Viewer Device')
 
@@ -402,10 +428,166 @@ async def main():
 
   print(json.dumps({
     'owner': owner_bundle,
+    'tier1Customer': tier1_bundle,
     'tier2Customer': tier2_bundle,
     'outsider': outsider_bundle,
+    'commodityId': commodity.id,
     'commodityName': commodity_name,
     'sourceManagementName': source_management_name,
+  }))
+
+asyncio.run(main())
+`)
+}
+
+function seedCustomerExecutionMarketFixture(label: string): CustomerExecutionMarketFixture {
+  return runPythonInApp<CustomerExecutionMarketFixture>(`
+import asyncio
+import json
+import uuid
+from datetime import timedelta
+from decimal import Decimal
+
+from core.db import AsyncSessionLocal
+from core.enums import UserRole
+from core.security import create_access_token, create_refresh_token
+from core.services.session_service import hash_token
+from models.commodity import Commodity
+from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
+from models.offer import Offer, OfferStatus, OfferType
+from models.session import Platform, UserSession
+from models.user import User
+
+label = ${JSON.stringify(label)}
+
+def build_mobile() -> str:
+  return f"09{int(uuid.uuid4().hex[:9], 16) % 1000000000:09d}"
+
+async def create_session_bundle(db, user, device_name):
+  refresh_token = create_refresh_token(subject=user.id)
+  session = UserSession(
+    user_id=user.id,
+    device_name=device_name,
+    device_ip='127.0.0.1',
+    platform=Platform.WEB,
+    refresh_token_hash=hash_token(refresh_token),
+    is_primary=True,
+    is_active=True,
+    expires_at=None,
+  )
+  db.add(session)
+  await db.flush()
+  access_token = create_access_token(
+    subject=user.id,
+    expires_delta=timedelta(minutes=60),
+    session_id=str(session.id),
+  )
+  return {
+    'userId': user.id,
+    'accountName': user.account_name,
+    'accessToken': access_token,
+    'refreshToken': refresh_token,
+  }
+
+async def main():
+  suffix = uuid.uuid4().hex[:10]
+  owner_offer_note = f"pw-owner-offer-{label}-{suffix[:6]}"
+  outsider_offer_note = f"pw-outsider-offer-{label}-{suffix[:6]}"
+
+  async with AsyncSessionLocal() as db:
+    commodity = Commodity(name=f"کالای اجرای مشتری {int(uuid.uuid4().hex[:8], 16) % 10000}")
+    owner = User(
+      account_name=f"pw_exec_owner_{label}_{suffix}",
+      mobile_number=build_mobile(),
+      full_name='Playwright Execution Owner',
+      address='Playwright Execution Owner',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    tier2_customer = User(
+      account_name=f"pw_exec_tier2_{label}_{suffix}",
+      mobile_number=build_mobile(),
+      full_name='Playwright Execution Tier2',
+      address='Playwright Execution Tier2',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    outsider = User(
+      account_name=f"pw_exec_outsider_{label}_{suffix}",
+      mobile_number=build_mobile(),
+      full_name='Playwright Execution Outsider',
+      address='Playwright Execution Outsider',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    db.add_all([commodity, owner, tier2_customer, outsider])
+    await db.flush()
+
+    db.add(CustomerRelation(
+      owner_user_id=owner.id,
+      customer_user_id=tier2_customer.id,
+      created_by_user_id=owner.id,
+      invitation_token=f"CUST-{uuid.uuid4().hex}",
+      management_name=f"مشتری اجرای سطح ۲ {suffix[:4]}",
+      customer_tier=CustomerTier.TIER_2,
+      commission_rate=Decimal('0.5'),
+      status=CustomerRelationStatus.ACTIVE,
+      activated_at=None,
+      deleted_at=None,
+    ))
+
+    owner_offer = Offer(
+      user_id=owner.id,
+      actor_user_id=owner.id,
+      offer_type=OfferType.BUY,
+      commodity_id=commodity.id,
+      quantity=4,
+      remaining_quantity=4,
+      price=50000,
+      is_wholesale=True,
+      lot_sizes=None,
+      original_lot_sizes=None,
+      notes=owner_offer_note,
+      status=OfferStatus.ACTIVE,
+      exclude_from_competitive_price=False,
+    )
+    outsider_offer = Offer(
+      user_id=outsider.id,
+      actor_user_id=outsider.id,
+      offer_type=OfferType.SELL,
+      commodity_id=commodity.id,
+      quantity=4,
+      remaining_quantity=4,
+      price=100000,
+      is_wholesale=True,
+      lot_sizes=None,
+      original_lot_sizes=None,
+      notes=outsider_offer_note,
+      status=OfferStatus.ACTIVE,
+      exclude_from_competitive_price=False,
+    )
+    db.add_all([owner_offer, outsider_offer])
+    await db.flush()
+
+    owner_bundle = await create_session_bundle(db, owner, 'Playwright Execution Owner Device')
+    tier2_bundle = await create_session_bundle(db, tier2_customer, 'Playwright Execution Tier2 Device')
+    outsider_bundle = await create_session_bundle(db, outsider, 'Playwright Execution Outsider Device')
+
+    await db.commit()
+
+  print(json.dumps({
+    'owner': owner_bundle,
+    'tier2Customer': tier2_bundle,
+    'outsider': outsider_bundle,
+    'commodityId': commodity.id,
+    'commodityName': commodity.name,
+    'ownerOfferId': owner_offer.id,
+    'ownerOfferNote': owner_offer_note,
+    'outsiderOfferId': outsider_offer.id,
+    'outsiderOfferNote': outsider_offer_note,
   }))
 
 asyncio.run(main())
@@ -447,6 +629,51 @@ async def main():
             'excludeFromCompetitivePrice': bool(offer.exclude_from_competitive_price),
             'priceWarningType': offer.price_warning_type,
         }))
+
+asyncio.run(main())
+`)
+}
+
+function fetchPersistedTradesForCommodity(commodityId: number, userIds: number[]): PersistedTradeRecord[] {
+  return runPythonInApp<PersistedTradeRecord[]>(`
+import asyncio
+import json
+
+from sqlalchemy import or_, select
+
+from core.db import AsyncSessionLocal
+from models.trade import Trade, TradeType
+
+commodity_id = ${commodityId}
+user_ids = ${JSON.stringify(userIds)}
+
+async def main():
+  async with AsyncSessionLocal() as db:
+    result = await db.execute(
+      select(Trade)
+      .where(
+        Trade.commodity_id == commodity_id,
+        or_(
+          Trade.offer_user_id.in_(user_ids),
+          Trade.responder_user_id.in_(user_ids),
+        ),
+      )
+      .order_by(Trade.id.asc())
+    )
+    trades = result.scalars().all()
+    print(json.dumps([
+      {
+        'id': trade.id,
+        'offerId': trade.offer_id,
+        'offerUserId': trade.offer_user_id,
+        'responderUserId': trade.responder_user_id,
+        'actorUserId': trade.actor_user_id,
+        'price': trade.price,
+        'quantity': trade.quantity,
+        'tradeType': 'buy' if trade.trade_type == TradeType.BUY else 'sell',
+      }
+      for trade in trades
+    ]))
 
 asyncio.run(main())
 `)
@@ -601,6 +828,125 @@ test.describe('Market offer creation regressions', () => {
     await expect(outsiderCard).toBeVisible()
     await expect(outsiderCard.locator('.price')).toHaveText('50,000')
     await expect(outsiderCard.locator('.customer-context-row')).toHaveCount(0)
+  })
+
+  test('tier1 customer can publish a sell offer while owner and tier2 viewers see raw versus projected prices', async ({ page }) => {
+    const fixture = seedCustomerPricingMarketFixture('tier1_sell_matrix')
+    const uniqueNote = `pw_tier1_sell_${Date.now()}`
+    const sellPrice = 50000
+
+    await setSeededSession(page, fixture.tier1Customer)
+    await page.goto('/market')
+
+    await openOfferPreview(page, `فروش ${fixture.commodityName} 6 عدد ${sellPrice}: ${uniqueNote}`)
+    await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
+    await confirmOfferPreview(page)
+    await expect(page.getByText('لفظ متنی ثبت شد')).toBeVisible()
+
+    await expect
+      .poll(() => fetchPersistedOfferByNotes(uniqueNote), { timeout: 30000 })
+      .toMatchObject({
+        userId: fixture.tier1Customer.userId,
+        offerType: 'sell',
+        price: sellPrice,
+        quantity: 6,
+      })
+
+    await setSeededSession(page, fixture.owner)
+    await page.goto('/market')
+
+    const ownerCard = page.locator('.offer-card-wrap', { hasText: uniqueNote }).first()
+    await expect(ownerCard).toBeVisible()
+    await expect(ownerCard.locator('.price')).toHaveText('50,000')
+    await expect(ownerCard.locator('.customer-context-badge')).toHaveText('مشتری')
+    await expect(ownerCard.locator('.customer-context-name')).toHaveText(fixture.sourceManagementName)
+    await expect(ownerCard.locator('.customer-context-tier')).toHaveText('سطح 1')
+
+    await setSeededSession(page, fixture.tier2Customer)
+    await page.goto('/market')
+
+    const tier2Card = page.locator('.offer-card-wrap', { hasText: uniqueNote }).first()
+    await expect(tier2Card).toBeVisible()
+    await expect(tier2Card.locator('.price')).toHaveText('50,300')
+    await expect(tier2Card.locator('.customer-context-row')).toHaveCount(0)
+  })
+
+  test('tier2 customer executes own-owner and outsider offers through the browser with direct and mediated trade legs', async ({ page, request }) => {
+    const fixture = seedCustomerExecutionMarketFixture('execution_matrix')
+
+    await setSeededSession(page, fixture.tier2Customer)
+    await page.goto('/market')
+
+    const ownerCard = page.locator('.offer-card-wrap', { hasText: fixture.ownerOfferNote }).first()
+    await expect(ownerCard).toBeVisible()
+    await expect(ownerCard.locator('.price')).toHaveText('49,700')
+
+    const ownerTradeButton = ownerCard.locator('.trade-btn').filter({ hasText: '4 عدد' }).first()
+    await ownerTradeButton.dblclick()
+    await expect
+      .poll(() => fetchPersistedTradesForCommodity(fixture.commodityId, [fixture.owner.userId, fixture.tier2Customer.userId, fixture.outsider.userId]), { timeout: 30000 })
+      .toEqual([
+        {
+          id: expect.any(Number),
+          offerId: fixture.ownerOfferId,
+          offerUserId: fixture.owner.userId,
+          responderUserId: fixture.tier2Customer.userId,
+          actorUserId: expect.any(Number),
+          price: 49700,
+          quantity: 4,
+          tradeType: 'sell',
+        },
+      ])
+
+    const outsiderCard = page.locator('.offer-card-wrap', { hasText: fixture.outsiderOfferNote }).first()
+    await expect(outsiderCard).toBeVisible()
+    await expect(outsiderCard.locator('.price')).toHaveText('100,500')
+
+    const outsiderTradeButton = outsiderCard.locator('.trade-btn').filter({ hasText: '4 عدد' }).first()
+    await outsiderTradeButton.dblclick()
+
+    await expect
+      .poll(() => fetchPersistedTradesForCommodity(fixture.commodityId, [fixture.owner.userId, fixture.tier2Customer.userId, fixture.outsider.userId]), { timeout: 30000 })
+      .toEqual([
+        {
+          id: expect.any(Number),
+          offerId: fixture.ownerOfferId,
+          offerUserId: fixture.owner.userId,
+          responderUserId: fixture.tier2Customer.userId,
+          actorUserId: expect.any(Number),
+          price: 49700,
+          quantity: 4,
+          tradeType: 'sell',
+        },
+        {
+          id: expect.any(Number),
+          offerId: fixture.outsiderOfferId,
+          offerUserId: fixture.outsider.userId,
+          responderUserId: fixture.owner.userId,
+          actorUserId: expect.any(Number),
+          price: 100000,
+          quantity: 4,
+          tradeType: 'buy',
+        },
+        {
+          id: expect.any(Number),
+          offerId: null,
+          offerUserId: fixture.owner.userId,
+          responderUserId: fixture.tier2Customer.userId,
+          actorUserId: expect.any(Number),
+          price: 100500,
+          quantity: 4,
+          tradeType: 'buy',
+        },
+      ])
+
+    const myTradesResponse = await request.get(`${BACKEND_BASE_URL}/api/trades/my`, {
+      headers: authHeaders(fixture.tier2Customer.accessToken),
+    })
+    expect(myTradesResponse.ok()).toBeTruthy()
+    const myTrades = await myTradesResponse.json() as Array<{ price: number; trade_path_summary?: string | null }>
+    expect(myTrades.some((trade) => Number(trade.price) === 49700)).toBeTruthy()
+    expect(myTrades.some((trade) => Number(trade.price) === 100500 && typeof trade.trade_path_summary === 'string' && trade.trade_path_summary.length > 0)).toBeTruthy()
   })
 
   test('sell outlier warning requires a second confirmation and persists exclusion flags', async ({ page, request }) => {
