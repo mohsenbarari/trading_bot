@@ -16,6 +16,8 @@ import {
 export const useNotificationStore = defineStore('notifications', () => {
     const chatUnreadCount = ref(0)
     const unreadChatUserIds = ref<number[]>([])
+    const unreadMentionCount = ref(0)
+    const unreadMentionChats = ref<number[]>([])
     const mutedConversationIds = ref<number[]>([])
     const appNotifications = ref<NormalizedAppNotification[]>([])
     const activeToasts = ref<ToastNotification[]>([])
@@ -114,7 +116,11 @@ export const useNotificationStore = defineStore('notifications', () => {
         appNotifications.value = trimNotificationList(nextNotifications)
     }
 
-    const syncUnreadChatIds = (conversations: Array<{ user_id?: unknown }> = [], fallbackCount = 0) => {
+    const syncUnreadChatIds = (
+        conversations: Array<{ user_id?: unknown; unread_mention_count?: unknown }> = [],
+        fallbackCount = 0,
+        fallbackMentionCount = 0
+    ) => {
         const nextIds = Array.from(new Set(
             conversations
                 .map((conversation) => normalizeConversationKey(conversation?.user_id))
@@ -125,6 +131,16 @@ export const useNotificationStore = defineStore('notifications', () => {
         chatUnreadCount.value = nextIds.length > 0 || fallbackCount === 0
             ? nextIds.length
             : fallbackCount
+
+        const nextMentionIds = conversations
+            .filter((c) => Number(c?.unread_mention_count || 0) > 0)
+            .map((c) => normalizeConversationKey(c?.user_id))
+            .filter((userId): userId is number => userId !== null)
+
+        unreadMentionChats.value = nextMentionIds
+        unreadMentionCount.value = nextMentionIds.length > 0
+            ? nextMentionIds.length
+            : fallbackMentionCount
     }
 
     const syncMutedConversationIds = (conversationIds: unknown[] = []) => {
@@ -165,7 +181,11 @@ export const useNotificationStore = defineStore('notifications', () => {
             const response = await apiFetch('/api/chat/poll')
             if (response.ok) {
                 const data = await response.json()
-                syncUnreadChatIds(data.conversations_with_unread || [], data.unread_chats_count || 0)
+                syncUnreadChatIds(
+                    data.conversations_with_unread || [],
+                    data.unread_chats_count || 0,
+                    data.total_unread_mentions || 0
+                )
                 syncMutedConversationIds(data.muted_conversation_ids || [])
             }
         } catch (error) {
@@ -193,11 +213,24 @@ export const useNotificationStore = defineStore('notifications', () => {
         }
     }
 
+    const incrementMentionUnread = (userId?: number | null) => {
+        const normalizedConversationId = normalizeConversationKey(userId)
+        if (normalizedConversationId === null) return
+
+        if (!unreadMentionChats.value.includes(normalizedConversationId)) {
+            unreadMentionChats.value = [...unreadMentionChats.value, normalizedConversationId]
+            unreadMentionCount.value = unreadMentionChats.value.length
+        }
+    }
+
     const markChatAsRead = (userId?: number | null) => {
         const normalizedConversationId = normalizeConversationKey(userId)
         if (normalizedConversationId === null) return
         unreadChatUserIds.value = unreadChatUserIds.value.filter((id) => id !== normalizedConversationId)
         chatUnreadCount.value = unreadChatUserIds.value.length
+
+        unreadMentionChats.value = unreadMentionChats.value.filter((id) => id !== normalizedConversationId)
+        unreadMentionCount.value = unreadMentionChats.value.length
     }
 
     const addAppNotification = (notification: AppRealtimeNotificationPayload) => {
@@ -326,6 +359,9 @@ export const useNotificationStore = defineStore('notifications', () => {
     return {
         chatUnreadCount,
         unreadChatUserIds,
+        unreadMentionCount,
+        unreadMentionChats,
+        incrementMentionUnread,
         mutedConversationIds,
         appNotifications,
         activeToasts,

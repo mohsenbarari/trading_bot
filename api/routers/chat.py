@@ -423,6 +423,7 @@ async def get_conversations(
             is_pinned=getattr(row, "is_pinned", False),
             pinned_at=getattr(row, "pinned_at", None),
             pin_order=getattr(row, "pin_order", None),
+            unread_mention_count=getattr(row, "unread_mention_count", 0),
         )
         for row in await list_group_conversations(db, current_user_id=current_user.id)
     ]
@@ -450,6 +451,7 @@ async def get_conversations(
             is_pinned=getattr(row, "is_pinned", False),
             pinned_at=getattr(row, "pinned_at", None),
             pin_order=getattr(row, "pin_order", None),
+            unread_mention_count=getattr(row, "unread_mention_count", 0),
         )
         for row in await list_channel_conversations(db, current_user_id=current_user.id)
     ]
@@ -734,14 +736,34 @@ async def _enrich_direct_message_reads(
 ) -> list[MessageRead]:
     if not messages:
         return messages
+
+    # Fetch mention details
+    all_mentioned_ids = set()
+    for msg in messages:
+        if getattr(msg, "mentions", None):
+            all_mentioned_ids.update(msg.mentions)
+
+    mention_details_map = {}
+    if all_mentioned_ids:
+        from models.user import User
+        stmt = select(User.id, User.account_name).where(User.id.in_(list(all_mentioned_ids)))
+        result = await db.execute(stmt)
+        for row in result.all():
+            mention_details_map[row.id] = row.account_name
+
     identity_map = await load_accountant_chat_identity_map(
         db,
         collect_message_identity_user_ids(messages),
     )
-    normalized_messages = [
-        apply_accountant_identity_to_message_payload(message.model_dump(), identity_map)
-        for message in messages
-    ]
+    normalized_messages = []
+    for message in messages:
+        payload = apply_accountant_identity_to_message_payload(message.model_dump(), identity_map)
+        mentions = payload.get("mentions") or []
+        payload["mention_details"] = [
+            {"user_id": uid, "account_name": mention_details_map.get(uid, f"user_{uid}")}
+            for uid in mentions
+        ]
+        normalized_messages.append(payload)
 
     recovery_action_map: dict[int, dict[str, object]] = {}
     if viewer_user_id is not None and hasattr(db, "execute"):
@@ -1521,6 +1543,8 @@ async def send_room_message(
     """ارسال post/message به room/group/channel روی foundation عمومی chat"""
     chat = await get_room_or_404(db, chat_id)
     if chat.type == ChatType.GROUP:
+        room_mentions = getattr(data, "mentions", [])
+        room_mention_all = getattr(data, "mention_all", False)
         message = await send_group_message(
             db,
             chat=chat,
@@ -1529,7 +1553,22 @@ async def send_room_message(
             message_type=data.message_type,
             reply_to_message_id=data.reply_to_message_id,
             forwarded_from_id=data.forwarded_from_id,
+            mentions=room_mentions,
+            mention_all=room_mention_all,
         )
+        
+        # Resolve mentions for real-time broadcast and payload
+        all_mentioned_ids = getattr(message, "mentions", None) or []
+        mention_details = []
+        if all_mentioned_ids:
+            stmt = select(User.id, User.account_name).where(User.id.in_(all_mentioned_ids))
+            result = await db.execute(stmt)
+            mention_details = [
+                {"user_id": row.id, "account_name": row.account_name}
+                for row in result.all()
+            ]
+        message.mention_details = mention_details
+
         response_message = await _serialize_direct_message_with_accountant_contract(
             db,
             message,
@@ -1547,6 +1586,8 @@ async def send_room_message(
             publisher=publish_user_event,
         )
     else:
+        room_mentions = getattr(data, "mentions", [])
+        room_mention_all = getattr(data, "mention_all", False)
         message = await send_channel_message(
             db,
             chat=chat,
@@ -1555,7 +1596,22 @@ async def send_room_message(
             message_type=data.message_type,
             reply_to_message_id=data.reply_to_message_id,
             forwarded_from_id=data.forwarded_from_id,
+            mentions=room_mentions,
+            mention_all=room_mention_all,
         )
+        
+        # Resolve mentions for real-time broadcast and payload
+        all_mentioned_ids = getattr(message, "mentions", None) or []
+        mention_details = []
+        if all_mentioned_ids:
+            stmt = select(User.id, User.account_name).where(User.id.in_(all_mentioned_ids))
+            result = await db.execute(stmt)
+            mention_details = [
+                {"user_id": row.id, "account_name": row.account_name}
+                for row in result.all()
+            ]
+        message.mention_details = mention_details
+
         response_message = await _serialize_direct_message_with_accountant_contract(
             db,
             message,
@@ -1833,11 +1889,13 @@ async def poll_messages(
 
     unread_chats_count = len(unread_convs)
     total_unread = sum(int(read_field(row, "unread_count", 0) or 0) for row in unread_convs)
+    total_unread_mentions = sum(int(read_field(row, "unread_mention_count", 0) or 0) for row in all_convs)
     conversations_with_unread = [
         {
             "user_id": int(read_field(row, "other_user_id", 0) or 0),
             "user_name": read_field(row, "other_user_name", "") or "",
             "unread_count": int(read_field(row, "unread_count", 0) or 0),
+            "unread_mention_count": int(read_field(row, "unread_mention_count", 0) or 0),
             "is_deleted": bool(read_field(row, "other_user_is_deleted", False)),
         }
         for row in unread_convs
@@ -1848,6 +1906,7 @@ async def poll_messages(
         unread_chats_count=unread_chats_count,
         conversations_with_unread=conversations_with_unread,
         muted_conversation_ids=muted_conversation_ids,
+        total_unread_mentions=total_unread_mentions,
     )
 
 

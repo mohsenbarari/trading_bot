@@ -422,7 +422,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAudioStore } from '../../stores/audio'
-import type { Message, MessageReaction, RecoveryAction } from '../../types/chat'
+import type { Message, MessageReaction, RecoveryAction, UserMentionDetail } from '../../types/chat'
 import ChatAlbumLayout from './ChatAlbumLayout.vue'
 import { resolveForwardedProfileTarget } from '../../utils/accountantChatIdentity'
 import { observeVisibility } from '../../utils/sharedVisibilityObserver'
@@ -1231,12 +1231,51 @@ function escapeHtml(unsafe: string) {
 }
 
 function highlightText(content: string) {
-  if (!props.searchQuery) return escapeHtml(content)
+  let escaped = escapeHtml(content)
 
-  const escapedContent = escapeHtml(content)
-  const escapedQuery = props.searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const regex = new RegExp(`(${escapedQuery})`, 'gi')
-  return escapedContent.replace(regex, '<mark class="in-bubble-highlight">$1</mark>')
+  if (props.searchQuery) {
+    const escapedQuery = props.searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(`(${escapedQuery})`, 'gi')
+    escaped = escaped.replace(regex, '<mark class="in-bubble-highlight">$1</mark>')
+  }
+
+  const mentionDetails = Array.isArray(props.msg.mention_details)
+    ? props.msg.mention_details
+    : []
+  const mentionedAccountNames = new Set(
+    mentionDetails
+      .map((detail: UserMentionDetail) => detail.account_name?.trim().toLowerCase())
+      .filter((accountName: string | undefined): accountName is string => Boolean(accountName))
+  )
+  const ownMentionAccountNames = new Set(
+    mentionDetails
+      .filter((detail: UserMentionDetail) => Number(detail.user_id) === props.currentUserId)
+      .map((detail: UserMentionDetail) => detail.account_name?.trim().toLowerCase())
+      .filter((accountName: string | undefined): accountName is string => Boolean(accountName))
+  )
+
+  // Parse and highlight recognized mentions only
+  escaped = escaped.replace(/@([a-zA-Z0-9_\u0600-\u06FF]+)/g, (match, username) => {
+    const lowerUser = username.toLowerCase()
+    if (lowerUser === 'all') {
+      if (!props.msg.mention_all) return match
+      return `<span class="message-mention own-mention">${match}</span>`
+    }
+
+    if (!mentionedAccountNames.has(lowerUser)) {
+      return match
+    }
+
+    const isOwnMention = ownMentionAccountNames.has(lowerUser)
+
+    if (isOwnMention) {
+      return `<span class="message-mention own-mention">${match}</span>`
+    } else {
+      return `<span class="message-mention">${match}</span>`
+    }
+  })
+
+  return escaped
 }
 
 const highlightedContent = computed(() => {
@@ -2063,6 +2102,21 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   color: inherit;
   border-radius: 2px;
   padding: 0 2px;
+}
+
+:deep(.message-mention) {
+  color: #2563eb;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+:deep(.message-mention.own-mention) {
+  background-color: rgba(124, 58, 237, 0.15);
+  color: #7c3aed;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid rgba(124, 58, 237, 0.25);
 }
 
 .progress-cancel {

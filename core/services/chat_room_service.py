@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import re
 from typing import Callable, Sequence, TypeVar
 import unicodedata
 
@@ -25,6 +26,7 @@ from core.services.customer_relation_service import is_user_customer
 
 SerializedMessageT = TypeVar("SerializedMessageT")
 RoomEventPublisher = Callable[[int, str, dict], object]
+MENTION_HANDLE_PATTERN = re.compile(r"(?<![\w@])@([a-zA-Z0-9_\u0600-\u06FF]+)")
 
 
 @dataclass
@@ -107,6 +109,7 @@ class ChannelConversationSummary:
     is_pinned: bool = False
     pinned_at: datetime | None = None
     pin_order: int | None = None
+    unread_mention_count: int = 0
 
 
 @dataclass
@@ -189,14 +192,17 @@ def _has_disallowed_control_chars(value: str | None) -> bool:
 
 
 def _unpack_conversation_projection_row(row):
-    if len(row) == 10:
+    if len(row) == 11:
         return row
+    if len(row) == 10:
+        # returns chat, member_role, is_muted, is_pinned, pinned_at, pin_order, last_content, last_type, unread, member_count, unread_mention_count
+        return row + (0,)
     if len(row) == 6:
         chat, member_role, last_content, last_type, unread, member_count = row
-        return chat, member_role, False, False, None, None, last_content, last_type, unread, member_count
+        return chat, member_role, False, False, None, None, last_content, last_type, unread, member_count, 0
     if len(row) == 9:
         chat, member_role, is_muted, is_pinned, pinned_at, last_content, last_type, unread, member_count = row
-        return chat, member_role, is_muted, is_pinned, pinned_at, None, last_content, last_type, unread, member_count
+        return chat, member_role, is_muted, is_pinned, pinned_at, None, last_content, last_type, unread, member_count, 0
     raise ValueError(f"Unexpected conversation projection row size: {len(row)}")
 
 
@@ -223,6 +229,76 @@ def _normalize_positive_user_ids(user_ids: Sequence[object]) -> list[int]:
         seen_user_ids.add(user_id)
         normalized.append(user_id)
     return normalized
+
+
+def _extract_unique_mention_handles(content: str | None) -> list[str]:
+    if not content:
+        return []
+
+    handles: list[str] = []
+    seen_handles: set[str] = set()
+    for raw_handle in MENTION_HANDLE_PATTERN.findall(content):
+        normalized_handle = raw_handle.strip().casefold()
+        if not normalized_handle or normalized_handle in seen_handles:
+            continue
+        seen_handles.add(normalized_handle)
+        handles.append(normalized_handle)
+    return handles
+
+
+async def _resolve_room_message_mentions(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    content: str | None,
+    message_type: MessageType,
+    mentions: Sequence[object] | None,
+    mention_all: bool,
+) -> tuple[list[int], bool]:
+    explicit_user_ids = _normalize_positive_user_ids(mentions or [])
+    parsed_handles = _extract_unique_mention_handles(content if message_type == MessageType.TEXT else None)
+
+    resolved_mention_all = bool(mention_all)
+    mention_handles: list[str] = []
+    for handle in parsed_handles:
+        if handle == "all":
+            resolved_mention_all = True
+            continue
+        mention_handles.append(handle)
+
+    if not explicit_user_ids and not mention_handles:
+        return [], resolved_mention_all
+
+    result = await db.execute(
+        select(ChatMember.user_id, User.account_name).join(User, User.id == ChatMember.user_id).where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+    )
+
+    member_user_ids: set[int] = set()
+    member_account_name_map: dict[str, int] = {}
+    for user_id, account_name in result.all():
+        normalized_user_id = int(user_id)
+        member_user_ids.add(normalized_user_id)
+        if isinstance(account_name, str) and account_name.strip():
+            member_account_name_map[account_name.casefold()] = normalized_user_id
+
+    resolved_user_ids: list[int] = []
+    seen_user_ids: set[int] = set()
+    for user_id in explicit_user_ids:
+        if user_id in member_user_ids and user_id not in seen_user_ids:
+            seen_user_ids.add(user_id)
+            resolved_user_ids.append(user_id)
+
+    for handle in mention_handles:
+        matched_user_id = member_account_name_map.get(handle)
+        if matched_user_id is None or matched_user_id in seen_user_ids:
+            continue
+        seen_user_ids.add(matched_user_id)
+        resolved_user_ids.append(matched_user_id)
+
+    return resolved_user_ids, resolved_mention_all
 
 
 async def _load_active_customer_owner_map(
@@ -1001,6 +1077,21 @@ async def list_group_conversations(
         .correlate(Chat, current_member)
         .scalar_subquery()
     )
+    unread_mention_count = (
+        select(func.count(Message.id))
+        .where(
+            Message.chat_id == Chat.id,
+            Message.sender_id != current_user_id,
+            Message.is_deleted.is_(False),
+            Message.id > func.coalesce(current_member.last_read_message_id, 0),
+            or_(
+                Message.mention_all.is_(True),
+                text("messages.mentions::jsonb @> CAST(:user_id_str AS jsonb)").bindparams(user_id_str=str(current_user_id))
+            )
+        )
+        .correlate(Chat, current_member)
+        .scalar_subquery()
+    )
     manual_unread_count = case(
         (
             (current_member.is_marked_unread.is_(True)) & (Chat.last_message_id.is_not(None)),
@@ -1035,6 +1126,7 @@ async def list_group_conversations(
             last_message_alias.message_type.label("last_message_type"),
             func.greatest(func.coalesce(unread_count, 0), manual_unread_count).label("unread_count"),
             active_member_count.label("member_count"),
+            func.coalesce(unread_mention_count, 0).label("unread_mention_count"),
         )
         .join(
             current_member,
@@ -1053,7 +1145,7 @@ async def list_group_conversations(
 
     rows: list[ChannelConversationSummary] = []
     for row in result.all():
-        chat, member_role, is_muted, is_pinned, pinned_at, pin_order, last_content, last_type, unread, member_count = _unpack_conversation_projection_row(row)
+        chat, member_role, is_muted, is_pinned, pinned_at, pin_order, last_content, last_type, unread, member_count, unread_mentions = _unpack_conversation_projection_row(row)
         synthetic_room_id = -int(chat.id)
         rows.append(
             ChannelConversationSummary(
@@ -1079,6 +1171,7 @@ async def list_group_conversations(
                 is_pinned=bool(is_pinned),
                 pinned_at=pinned_at,
                 pin_order=pin_order,
+                unread_mention_count=int(unread_mentions or 0),
             )
         )
     return rows
@@ -1427,6 +1520,21 @@ async def list_channel_conversations(
         .correlate(Chat, current_member)
         .scalar_subquery()
     )
+    unread_mention_count = (
+        select(func.count(Message.id))
+        .where(
+            Message.chat_id == Chat.id,
+            Message.sender_id != current_user_id,
+            Message.is_deleted.is_(False),
+            Message.id > func.coalesce(current_member.last_read_message_id, 0),
+            or_(
+                Message.mention_all.is_(True),
+                text("messages.mentions::jsonb @> CAST(:user_id_str AS jsonb)").bindparams(user_id_str=str(current_user_id))
+            )
+        )
+        .correlate(Chat, current_member)
+        .scalar_subquery()
+    )
     manual_unread_count = case(
         (
             (current_member.is_marked_unread.is_(True)) & (Chat.last_message_id.is_not(None)),
@@ -1461,6 +1569,7 @@ async def list_channel_conversations(
             last_message_alias.message_type.label("last_message_type"),
             func.greatest(func.coalesce(unread_count, 0), manual_unread_count).label("unread_count"),
             active_member_count.label("member_count"),
+            func.coalesce(unread_mention_count, 0).label("unread_mention_count"),
         )
         .join(
             current_member,
@@ -1479,7 +1588,7 @@ async def list_channel_conversations(
 
     rows: list[ChannelConversationSummary] = []
     for row in result.all():
-        chat, member_role, is_muted, is_pinned, pinned_at, pin_order, last_content, last_type, unread, member_count = _unpack_conversation_projection_row(row)
+        chat, member_role, is_muted, is_pinned, pinned_at, pin_order, last_content, last_type, unread, member_count, unread_mentions = _unpack_conversation_projection_row(row)
         synthetic_room_id = -int(chat.id)
         rows.append(
             ChannelConversationSummary(
@@ -1505,6 +1614,7 @@ async def list_channel_conversations(
                 is_pinned=bool(is_pinned),
                 pinned_at=pinned_at,
                 pin_order=pin_order,
+                unread_mention_count=int(unread_mentions or 0),
             )
         )
     return rows
@@ -2269,6 +2379,8 @@ async def send_channel_message(
     message_type: MessageType,
     reply_to_message_id: int | None = None,
     forwarded_from_id: int | None = None,
+    mentions: list[int] | None = None,
+    mention_all: bool = False,
 ) -> Message:
     member = await get_active_channel_member_or_403(db, chat=chat, user_id=sender.id)
     if member.role != ChatMemberRole.ADMIN:
@@ -2278,6 +2390,15 @@ async def send_channel_message(
         reply_to_message = await db.get(Message, reply_to_message_id)
         if reply_to_message is None or reply_to_message.chat_id != chat.id:
             raise HTTPException(status_code=400, detail="Reply target is not part of this channel")
+
+    resolved_mentions, resolved_mention_all = await _resolve_room_message_mentions(
+        db,
+        chat=chat,
+        content=content,
+        message_type=message_type,
+        mentions=mentions,
+        mention_all=mention_all,
+    )
 
     now = _utcnow()
     message = Message(
@@ -2290,6 +2411,8 @@ async def send_channel_message(
         forwarded_from_id=forwarded_from_id,
         is_read=True,
         created_at=now,
+        mentions=resolved_mentions,
+        mention_all=resolved_mention_all,
     )
     db.add(message)
     await db.flush()
@@ -2318,6 +2441,8 @@ async def send_group_message(
     message_type: MessageType,
     reply_to_message_id: int | None = None,
     forwarded_from_id: int | None = None,
+    mentions: list[int] | None = None,
+    mention_all: bool = False,
 ) -> Message:
     member = await get_active_group_member_or_403(db, chat=chat, user_id=sender.id)
 
@@ -2325,6 +2450,15 @@ async def send_group_message(
         reply_to_message = await db.get(Message, reply_to_message_id)
         if reply_to_message is None or reply_to_message.chat_id != chat.id:
             raise HTTPException(status_code=400, detail="Reply target is not part of this group")
+
+    resolved_mentions, resolved_mention_all = await _resolve_room_message_mentions(
+        db,
+        chat=chat,
+        content=content,
+        message_type=message_type,
+        mentions=mentions,
+        mention_all=mention_all,
+    )
 
     now = _utcnow()
     message = Message(
@@ -2337,6 +2471,8 @@ async def send_group_message(
         forwarded_from_id=forwarded_from_id,
         is_read=True,
         created_at=now,
+        mentions=resolved_mentions,
+        mention_all=resolved_mention_all,
     )
     db.add(message)
     await db.flush()

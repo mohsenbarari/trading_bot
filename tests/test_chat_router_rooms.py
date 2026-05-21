@@ -107,6 +107,8 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
             message_type="text",
             reply_to_message_id=10,
             forwarded_from_id=20,
+            mentions=[],
+            mention_all=False,
         )
         users_mock.assert_awaited_once_with(db, chat_id=70)
         serialize_message_mock.assert_awaited_once_with(db, message, viewer_user_id=5)
@@ -158,6 +160,8 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
             message_type="text",
             reply_to_message_id=None,
             forwarded_from_id=None,
+            mentions=[],
+            mention_all=False,
         )
         users_mock.assert_awaited_once_with(db, chat_id=71)
         serialize_message_mock.assert_awaited_once_with(db, message, viewer_user_id=5)

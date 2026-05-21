@@ -28,6 +28,7 @@ export interface Conversation {
     is_pinned?: boolean
     pinned_at?: string | null
     pin_order?: number | null
+    unread_mention_count?: number
 }
 
 export type ChatListItem = Conversation
@@ -35,6 +36,11 @@ export type ChatListItem = Conversation
 export interface MessageReaction {
     emoji: string
     user_id: number
+}
+
+export interface UserMentionDetail {
+    user_id: number
+    account_name: string
 }
 
 export interface RecoveryAction {
@@ -82,6 +88,9 @@ export interface Message {
     sender_resolved_from_accountant_id?: number | null
     sender_highlight_accountant_user_id?: number | null
     sender_highlight_accountant_relation_display_name?: string | null
+    mentions?: number[]
+    mention_all?: boolean
+    mention_details?: UserMentionDetail[]
     reactions?: MessageReaction[]
     recovery_action?: RecoveryAction | null
     reply_to_message?: {

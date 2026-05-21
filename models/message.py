@@ -41,6 +41,8 @@ class Message(Base):
     is_deleted = Column(Boolean, nullable=False, default=False)
     edit_history = Column(JSON, nullable=False, default=list)
     reactions = Column(JSON, nullable=False, default=list)
+    mentions = Column(JSON, nullable=False, default=list)
+    mention_all = Column(Boolean, nullable=False, default=False)
 
     __table_args__ = (
         Index(

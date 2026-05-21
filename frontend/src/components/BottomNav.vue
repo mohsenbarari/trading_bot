@@ -62,7 +62,8 @@ function toggleNav() {
             <component :is="item.icon" :size="22" :stroke-width="route.name === item.name ? 2.5 : 1.8" />
             
             <!-- Unread Badge for Messenger -->
-            <div v-if="item.name === 'messenger' && notificationStore.chatUnreadCount > 0" class="nav-unread-badge">
+            <div v-if="item.name === 'messenger' && notificationStore.chatUnreadCount > 0" class="nav-unread-badge" :class="{ 'has-mention': notificationStore.unreadMentionCount > 0 }">
+              <span v-if="notificationStore.unreadMentionCount > 0" class="mention-at">@</span>
               {{ notificationStore.chatUnreadCount > 99 ? '99+' : notificationStore.chatUnreadCount }}
             </div>
           </div>
@@ -91,7 +92,8 @@ function toggleNav() {
             <div class="relative">
               <component :is="item.icon" :size="20" />
               <!-- Unread Badge for FAB menu -->
-              <div v-if="item.name === 'messenger' && notificationStore.chatUnreadCount > 0" class="fab-unread-badge">
+              <div v-if="item.name === 'messenger' && notificationStore.chatUnreadCount > 0" class="fab-unread-badge" :class="{ 'has-mention': notificationStore.unreadMentionCount > 0 }">
+                 <span v-if="notificationStore.unreadMentionCount > 0" class="mention-at">@</span>
                  {{ notificationStore.chatUnreadCount > 9 ? '9+' : notificationStore.chatUnreadCount }}
               </div>
             </div>
@@ -210,6 +212,34 @@ function toggleNav() {
   border: 1.5px solid var(--ds-bg-card);
   box-shadow: var(--ds-shadow-sm);
   z-index: 10;
+}
+
+.nav-unread-badge.has-mention,
+.fab-unread-badge.has-mention {
+  background: #7c3aed !important;
+  box-shadow: 0 0 8px rgba(124, 58, 237, 0.6);
+  animation: pulse-mention 2s infinite;
+}
+
+.mention-at {
+  font-size: 0.6rem;
+  margin-right: 1px;
+  font-weight: 800;
+}
+
+@keyframes pulse-mention {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.7);
+  }
+  70% {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 6px rgba(124, 58, 237, 0);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0);
+  }
 }
 
 .fab-unread-badge {

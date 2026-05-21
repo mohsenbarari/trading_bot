@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ChatMessageItem from './ChatMessageItem.vue'
+import { cacheCurrentUserSummary, clearCurrentUserSummary } from '../../utils/currentUser'
 
 const chatMessageItemMocks = vi.hoisted(() => ({
   audioStore: null as {
@@ -272,15 +273,38 @@ describe('ChatMessageItem.vue', () => {
     nextPlayShouldReject = false
     FakeAudio.instances = []
     localStorage.setItem('auth_token', 'test-token')
+    cacheCurrentUserSummary({ id: 7, role: 'عادی', account_name: 'ali' })
     vi.stubGlobal('Audio', FakeAudio)
     vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
 
   afterEach(() => {
+    clearCurrentUserSummary()
     localStorage.clear()
     if (originalAudio) {
       vi.stubGlobal('Audio', originalAudio)
     }
+  })
+
+  it('highlights recognized own and non-own mentions while ignoring unrelated handles', async () => {
+    const wrapper = mountTextMessage({
+      content: 'سلام @ali @reza @ghost @all',
+      mentions: [7, 9],
+      mention_all: true,
+      mention_details: [
+        { user_id: 7, account_name: 'ali' },
+        { user_id: 9, account_name: 'reza' },
+      ],
+    })
+
+    await flushPromises()
+
+    const html = wrapper.html()
+    expect(html).toContain('<span class="message-mention own-mention">@ali</span>')
+    expect(html).toContain('<span class="message-mention">@reza</span>')
+    expect(html).toContain('<span class="message-mention own-mention">@all</span>')
+    expect(html).not.toContain('<span class="message-mention">@ghost</span>')
+    expect(html).not.toContain('<span class="message-mention own-mention">@ghost</span>')
   })
 
   it('renders the voice waveform and toggles playback state', async () => {
