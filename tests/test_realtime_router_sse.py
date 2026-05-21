@@ -57,7 +57,23 @@ class RealtimeRouterSseTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("event: offer:created", first)
         self.assertIn('"safe": 1', first)
         self.assertNotIn("mobile_number", first)
+        self.assertIn("notifications:5", pubsub.subscribed)
         self.assertEqual(pubsub.unsubscribe_calls, 2)
+
+    async def test_event_generator_formats_notification_channel_events(self):
+        pubsub = FakePubSub([
+            {"type": "message", "channel": b"notifications:5", "data": b'{"event":"trade:created","data":{"safe": 9, "mobile_number": "0912"}}'},
+        ])
+
+        with patch("api.routers.realtime.redis.Redis", return_value=FakeRedisClient(pubsub)):
+            generator = event_generator(user_id=5)
+            first = await generator.__anext__()
+            with self.assertRaises(asyncio.CancelledError):
+                await generator.__anext__()
+
+        self.assertIn("event: trade:created", first)
+        self.assertIn('"safe": 9', first)
+        self.assertNotIn("mobile_number", first)
 
     async def test_sse_stream_wraps_generator_with_expected_headers(self):
         response = await sse_stream(request=SimpleNamespace(), current_user=SimpleNamespace(id=7))

@@ -33,6 +33,7 @@ def make_user(**overrides):
         "channel_messages_count": 3,
         "max_sessions": 1,
         "max_accountants": 3,
+        "max_customers": 5,
         "can_block_users": True,
         "max_blocked_users": 10,
     }
@@ -92,7 +93,13 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
     async def test_update_user_updates_role_ignores_legacy_bot_access_and_owner_limits(self):
         user = make_user()
         db = FakeDB(user)
-        update = schemas.UserUpdate(role=UserRole.STANDARD, has_bot_access=False, max_sessions=99, max_accountants=6)
+        update = schemas.UserUpdate(
+            role=UserRole.STANDARD,
+            has_bot_access=False,
+            max_sessions=99,
+            max_accountants=6,
+            max_customers=9,
+        )
 
         with patch("api.routers.users.is_user_accountant", new=AsyncMock(return_value=False)), patch(
             "api.routers.users.track_limitation_changes", return_value=([], False, False)
@@ -110,6 +117,7 @@ class UsersRouterUpdateBasicTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(user.has_bot_access)
         self.assertEqual(user.max_sessions, 3)
         self.assertEqual(user.max_accountants, 6)
+        self.assertEqual(user.max_customers, 9)
         self.assertEqual(db.commits, 1)
         self.assertEqual(db.refreshes, 1)
         mandatory_sync_mock.assert_awaited_once_with(

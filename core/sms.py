@@ -102,3 +102,18 @@ def send_accountant_invitation_sms(
         f"{web_link}"
     )
     return send_sms(mobile, message)
+
+
+def send_customer_invitation_sms(
+    mobile: str,
+    management_name: str,
+    web_link: str,
+) -> bool:
+    """Send customer invitation SMS with a web-only registration link."""
+    message = (
+        f"{management_name} عزیز\n"
+        f"دعوت ثبت‌نام مشتری سامانه معاملاتی\n"
+        f"تکمیل ثبت‌نام فقط از طریق وب‌اپ انجام می‌شود:\n"
+        f"{web_link}"
+    )
+    return send_sms(mobile, message)

@@ -105,6 +105,12 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         trade_relation_map_patcher.start()
         self.addCleanup(trade_relation_map_patcher.stop)
+        user_event_patcher = patch(
+            "api.routers.realtime.publish_user_event",
+            new=AsyncMock(),
+        )
+        self.publish_user_event_mock = user_event_patcher.start()
+        self.addCleanup(user_event_patcher.stop)
 
     async def test_execute_trade_authoritatively_converts_stale_commit_to_conflict(self):
         locked_user = make_user()
@@ -137,6 +143,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_trade_authoritatively_persists_trade_and_runs_side_effects(self):
         locked_user = make_user()
+        context = make_context(locked_user)
         offer = make_offer()
         reloaded_trade = SimpleNamespace(id=88)
         db = FakeDB(
@@ -175,7 +182,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                 TradeCreate(offer_id=7, quantity=4),
                 background_tasks,
                 db=db,
-                context=make_context(locked_user),
+                context=context,
             )
 
         self.assertEqual(len(db.added), 1)
@@ -214,11 +221,24 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(publish_mock.await_args_list[0].args[0], "trade:created")
         self.assertEqual(publish_mock.await_args_list[1].args[0], "offer:updated")
         self.assertEqual(publish_mock.await_args_list[1].args[1]["status"], "completed")
-        response_mock.assert_called_once_with(reloaded_trade, identity_map={}, customer_relation_map={})
+        self.assertEqual(self.publish_user_event_mock.await_count, 1)
+        self.assertEqual(self.publish_user_event_mock.await_args_list[0].args[0], locked_user.id)
+        self.assertEqual(self.publish_user_event_mock.await_args_list[0].args[1], "trade:created")
+        self.assertTrue(self.publish_user_event_mock.await_args_list[0].args[2]["recipient_specific"])
+        self.assertEqual(self.publish_user_event_mock.await_args_list[0].args[2]["trade_number"], 10000)
+        self.assertEqual(publish_mock.await_args_list[0].args[1]["audience_user_ids"], [locked_user.id, offer.user_id])
+        response_mock.assert_called_once_with(
+            reloaded_trade,
+            identity_map={},
+            customer_relation_map={},
+            viewer_context=context,
+            history_target_user_id=locked_user.id,
+        )
         self.assertEqual(result, {"id": 88, "trade_number": 10000})
 
     async def test_execute_trade_authoritatively_updates_retail_lots_and_tolerates_side_effect_failures(self):
         locked_user = make_user()
+        context = make_context(locked_user)
         offer = make_offer(
             offer_type=OfferType.BUY,
             is_wholesale=False,
@@ -266,7 +286,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                 TradeCreate(offer_id=7, quantity=3),
                 background_tasks,
                 db=db,
-                context=make_context(locked_user),
+                context=context,
             )
 
         self.assertEqual(offer.remaining_quantity, 1)
@@ -277,7 +297,13 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         counter_mock.assert_awaited_once_with(db, locked_user, "trade", 3)
         self.assertEqual(publish_mock.await_count, 2)
         logger.error.assert_called_once()
-        response_mock.assert_called_once_with(reloaded_trade, identity_map={}, customer_relation_map={})
+        response_mock.assert_called_once_with(
+            reloaded_trade,
+            identity_map={},
+            customer_relation_map={},
+            viewer_context=context,
+            history_target_user_id=locked_user.id,
+        )
         self.assertEqual(result, {"id": 89, "trade_number": 10001})
 
     async def test_execute_trade_authoritatively_allows_full_remaining_retail_trade_and_clears_lots(self):
@@ -550,7 +576,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
             "api.routers.trades.trade_to_response",
-            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None, **_kwargs: {
                 "id": trade.id,
                 "trade_number": trade.trade_number,
                 "offer_id": trade.offer_id,
@@ -641,7 +667,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
             "api.routers.trades.trade_to_response",
-            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None, **_kwargs: {
                 "id": trade.id,
                 "trade_number": trade.trade_number,
                 "offer_id": trade.offer_id,
@@ -762,7 +788,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
             "api.routers.trades.trade_to_response",
-            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None, **_kwargs: {
                 "id": trade.id,
                 "trade_number": trade.trade_number,
                 "offer_id": trade.offer_id,
@@ -893,7 +919,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
             "api.routers.trades.trade_to_response",
-            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None, **_kwargs: {
                 "id": trade.id,
                 "trade_number": trade.trade_number,
                 "offer_id": trade.offer_id,
@@ -1031,7 +1057,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
             "api.routers.trades.trade_to_response",
-            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None, **_kwargs: {
                 "id": trade.id,
                 "trade_number": trade.trade_number,
                 "offer_id": trade.offer_id,
@@ -1154,7 +1180,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
             "api.routers.trades.trade_to_response",
-            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None, **_kwargs: {
                 "id": trade.id,
                 "trade_number": trade.trade_number,
                 "offer_id": trade.offer_id,
@@ -1275,7 +1301,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
             "api.routers.trades.trade_to_response",
-            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None, **_kwargs: {
                 "id": trade.id,
                 "trade_number": trade.trade_number,
                 "offer_id": trade.offer_id,
@@ -1406,7 +1432,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
             "api.routers.trades.trade_to_response",
-            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None, **_kwargs: {
                 "id": trade.id,
                 "trade_number": trade.trade_number,
                 "offer_id": trade.offer_id,
@@ -1535,7 +1561,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
             "api.routers.trades.trade_to_response",
-            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None, **_kwargs: {
                 "id": trade.id,
                 "trade_number": trade.trade_number,
                 "offer_id": trade.offer_id,
@@ -1656,7 +1682,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
             "api.routers.trades.trade_to_response",
-            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None, **_kwargs: {
                 "id": trade.id,
                 "trade_number": trade.trade_number,
                 "offer_id": trade.offer_id,
@@ -1764,7 +1790,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
             "api.routers.trades.trade_to_response",
-            side_effect=lambda trade, identity_map=None, customer_relation_map=None: {
+            side_effect=lambda trade, identity_map=None, customer_relation_map=None, **_kwargs: {
                 "id": trade.id,
                 "trade_number": trade.trade_number,
                 "offer_id": trade.offer_id,

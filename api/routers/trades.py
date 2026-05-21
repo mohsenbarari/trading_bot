@@ -5,6 +5,7 @@ API Router for Trade Management - MiniApp Integration
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import List, Optional, Mapping
 from urllib.parse import urlencode
 
@@ -247,6 +248,8 @@ async def _viewer_can_access_trade_history_row(
 async def _load_trade_customer_relation_map_for_user_ids(
     db: AsyncSession,
     user_ids: list[object] | tuple[object, ...],
+    *,
+    include_inactive_historical: bool = False,
 ) -> dict[int, CustomerRelation]:
     participant_ids = sorted(
         {
@@ -259,19 +262,73 @@ async def _load_trade_customer_relation_map_for_user_ids(
     if not participant_ids:
         return {}
 
-    result = await db.execute(
-        select(CustomerRelation).where(
-            CustomerRelation.customer_user_id.in_(participant_ids),
-            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
-            CustomerRelation.deleted_at.is_(None),
+    if include_inactive_historical:
+        result = await db.execute(
+            select(CustomerRelation).where(
+                CustomerRelation.customer_user_id.in_(participant_ids),
+                CustomerRelation.status.in_(
+                    [
+                        CustomerRelationStatus.ACTIVE,
+                        CustomerRelationStatus.EXPIRED,
+                        CustomerRelationStatus.REVOKED,
+                        CustomerRelationStatus.DELETED,
+                    ]
+                ),
+            )
         )
-    )
+    else:
+        result = await db.execute(
+            select(CustomerRelation).where(
+                CustomerRelation.customer_user_id.in_(participant_ids),
+                CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+                CustomerRelation.deleted_at.is_(None),
+            )
+        )
     relations = result.scalars().all()
-    return {
-        relation.customer_user_id: relation
-        for relation in relations
-        if _coerce_trade_user_id(getattr(relation, "customer_user_id", None)) is not None
-    }
+    if not include_inactive_historical:
+        return {
+            relation.customer_user_id: relation
+            for relation in relations
+            if _coerce_trade_user_id(getattr(relation, "customer_user_id", None)) is not None
+        }
+
+    def _relation_sort_timestamp(relation: CustomerRelation | object) -> datetime:
+        timestamp = (
+            getattr(relation, "deleted_at", None)
+            or getattr(relation, "updated_at", None)
+            or getattr(relation, "expires_at", None)
+            or getattr(relation, "activated_at", None)
+            or getattr(relation, "created_at", None)
+        )
+        if timestamp is None:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        if timestamp.tzinfo is None:
+            return timestamp.replace(tzinfo=timezone.utc)
+        return timestamp.astimezone(timezone.utc)
+
+    def _relation_sort_key(relation: CustomerRelation | object) -> tuple[int, datetime, datetime]:
+        raw_status_value = getattr(relation, "status", None)
+        status_value = getattr(raw_status_value, "value", raw_status_value)
+        is_active = int(
+            status_value == CustomerRelationStatus.ACTIVE.value
+            and getattr(relation, "deleted_at", None) is None
+        )
+        created_at = getattr(relation, "created_at", None)
+        if created_at is None:
+            created_at = datetime.min.replace(tzinfo=timezone.utc)
+        elif created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        else:
+            created_at = created_at.astimezone(timezone.utc)
+        return (is_active, _relation_sort_timestamp(relation), created_at)
+
+    relation_map: dict[int, CustomerRelation] = {}
+    for relation in sorted(relations, key=_relation_sort_key, reverse=True):
+        customer_user_id = _coerce_trade_user_id(getattr(relation, "customer_user_id", None))
+        if customer_user_id is None or customer_user_id in relation_map:
+            continue
+        relation_map[customer_user_id] = relation
+    return relation_map
 
 
 def _build_trade_path_payload(
@@ -389,45 +446,181 @@ def _build_trade_created_event_payload(
     offer_user_id: object,
     responder_user: object | None,
     responder_user_id: object,
+    actor_user_id: object | None = None,
     identity_map: Mapping[int, AccountantChatIdentity] | None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None = None,
+    viewer_context: EffectiveOwnerActor | None = None,
+    history_target_user_id: int | None = None,
+    audience_user_ids: list[int] | tuple[int, ...] | None = None,
+    recipient_specific: bool = False,
 ) -> dict[str, object | None]:
+    trade_like = SimpleNamespace(
+        id=trade_id,
+        trade_number=trade_number,
+        offer_id=offer_id,
+        trade_type=SimpleNamespace(value=trade_type),
+        commodity_id=commodity_id,
+        commodity=SimpleNamespace(name=commodity_name) if commodity_name else None,
+        quantity=quantity,
+        price=price,
+        status=SimpleNamespace(value=status) if status else None,
+        offer_user_id=_coerce_trade_user_id(offer_user_id),
+        offer_user=offer_user,
+        responder_user_id=_coerce_trade_user_id(responder_user_id),
+        responder_user=responder_user,
+        actor_user_id=_coerce_trade_user_id(actor_user_id),
+        created_at=None,
+    )
+    offer_user_payload = _build_trade_participant_payload(
+        "offer_user",
+        user=offer_user,
+        user_id=offer_user_id,
+        identity_map=identity_map,
+    )
+    responder_user_payload = _build_trade_participant_payload(
+        "responder_user",
+        user=responder_user,
+        user_id=responder_user_id,
+        identity_map=identity_map,
+    )
     payload: dict[str, object | None] = {
         "id": trade_id,
         "trade_number": trade_number,
         "offer_id": offer_id,
+        "trade_type": trade_type,
         "commodity_id": commodity_id,
+        "commodity_name": commodity_name or "نامشخص",
         "quantity": quantity,
         "price": price,
-        "commodity_name": commodity_name,
-        "trade_type": trade_type,
         "status": status,
-        "created_at": created_at,
-    }
-    payload.update(
-        _build_trade_participant_payload(
-            "offer_user",
-            user=offer_user,
-            user_id=offer_user_id,
-            identity_map=identity_map,
-        )
-    )
-    payload.update(
-        _build_trade_participant_payload(
-            "responder_user",
-            user=responder_user,
-            user_id=responder_user_id,
-            identity_map=identity_map,
-        )
-    )
-    payload.update(
-        _build_trade_path_payload(
+        "created_at": created_at or "",
+        **offer_user_payload,
+        **responder_user_payload,
+        **_build_trade_counterparty_projection_payload(
+            trade=trade_like,
+            offer_user_payload=offer_user_payload,
+            responder_user_payload=responder_user_payload,
+            history_target_user_id=history_target_user_id,
+            customer_relation_map=customer_relation_map,
+        ),
+        **_build_trade_customer_context_payload(
+            trade=trade_like,
+            viewer_context=viewer_context,
+            history_target_user_id=history_target_user_id,
+            customer_relation_map=customer_relation_map,
+        ),
+        **_build_trade_path_payload(
             offer_user_id=offer_user_id,
             responder_user_id=responder_user_id,
             customer_relation_map=customer_relation_map,
+        ),
+    }
+    if audience_user_ids is not None:
+        payload["audience_user_ids"] = sorted(
+            {
+                normalized_user_id
+                for raw_user_id in audience_user_ids
+                for normalized_user_id in [_coerce_trade_user_id(raw_user_id)]
+                if normalized_user_id is not None
+            }
         )
-    )
+    if recipient_specific:
+        payload["recipient_specific"] = True
     return payload
+
+
+def _build_trade_history_viewer_context(user: object | None) -> EffectiveOwnerActor | None:
+    if _coerce_trade_user_id(getattr(user, "id", None)) is None:
+        return None
+    return EffectiveOwnerActor(
+        owner_user=user,
+        actor_user=user,
+        relation=None,
+        is_accountant_context=False,
+    )
+
+
+async def _publish_trade_created_realtime(
+    *,
+    trade: Trade | object,
+    fallback_trade_id: int | None,
+    fallback_trade_number: int,
+    fallback_offer_id: int | None,
+    fallback_commodity_id: int | None,
+    fallback_quantity: int,
+    fallback_price: int,
+    fallback_status: str | None,
+    fallback_created_at: str | None,
+    fallback_offer_user_id: int | None,
+    fallback_responder_user_id: int | None,
+    commodity_name: str | None,
+    fallback_trade_type: str,
+    offer_user: object | None,
+    responder_user: object | None,
+    identity_map: Mapping[int, AccountantChatIdentity] | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+    responder_audience_user_ids: list[int] | tuple[int, ...] | None,
+    offer_owner_audience_user_ids: list[int] | tuple[int, ...] | None,
+) -> None:
+    from .realtime import publish_event, publish_user_event
+
+    trade_type_value = getattr(getattr(trade, "trade_type", None), "value", None) or fallback_trade_type
+    common_payload = {
+        "trade_id": getattr(trade, "id", None) or fallback_trade_id,
+        "trade_number": getattr(trade, "trade_number", None) or fallback_trade_number,
+        "offer_id": getattr(trade, "offer_id", None) or fallback_offer_id,
+        "commodity_id": getattr(trade, "commodity_id", None) or fallback_commodity_id,
+        "quantity": getattr(trade, "quantity", None) or fallback_quantity,
+        "price": getattr(trade, "price", None) or fallback_price,
+        "commodity_name": commodity_name,
+        "trade_type": trade_type_value,
+        "status": getattr(getattr(trade, "status", None), "value", None) or fallback_status,
+        "created_at": to_jalali_str(getattr(trade, "created_at", None)) or fallback_created_at or "",
+        "offer_user": offer_user,
+        "offer_user_id": getattr(trade, "offer_user_id", None) or fallback_offer_user_id,
+        "responder_user": responder_user,
+        "responder_user_id": getattr(trade, "responder_user_id", None) or fallback_responder_user_id,
+        "actor_user_id": getattr(trade, "actor_user_id", None),
+        "identity_map": identity_map,
+        "customer_relation_map": customer_relation_map,
+    }
+
+    realtime_audiences = [
+        (responder_audience_user_ids or [], responder_user),
+        (offer_owner_audience_user_ids or [], offer_user),
+    ]
+    for audience_user_ids, principal_user in realtime_audiences:
+        principal_user_id = _coerce_trade_user_id(getattr(principal_user, "id", None))
+        if not audience_user_ids or principal_user_id is None:
+            continue
+
+        recipient_payload = _build_trade_created_event_payload(
+            **common_payload,
+            viewer_context=_build_trade_history_viewer_context(principal_user),
+            history_target_user_id=principal_user_id,
+            recipient_specific=True,
+        )
+        for audience_user_id in audience_user_ids:
+            await publish_user_event(audience_user_id, "trade:created", recipient_payload)
+
+    generic_audience = sorted(
+        {
+            normalized_user_id
+            for raw_user_id in [
+                *(list(responder_audience_user_ids or [])),
+                *(list(offer_owner_audience_user_ids or [])),
+            ]
+            for normalized_user_id in [_coerce_trade_user_id(raw_user_id)]
+            if normalized_user_id is not None
+        }
+    )
+    await publish_event(
+        "trade:created",
+        _build_trade_created_event_payload(
+            **common_payload,
+            audience_user_ids=generic_audience,
+        ),
+    )
 
 
 def _build_trade_profile_route_from_payload(
@@ -1373,6 +1566,16 @@ async def _execute_trade_authoritatively(
             leg_trade_obj = leg_context["trade"]
             leg_offer_user = leg_context["offer_user"]
             leg_responder_user = leg_context["responder_user"]
+            leg_context["responder_audience"] = [
+                normalized_user_id
+                for normalized_user_id in [_coerce_trade_user_id(getattr(leg_trade_obj, "responder_user_id", None))]
+                if normalized_user_id is not None
+            ]
+            leg_context["offer_audience"] = [
+                normalized_user_id
+                for normalized_user_id in [_coerce_trade_user_id(getattr(leg_trade_obj, "offer_user_id", None))]
+                if normalized_user_id is not None
+            ]
             leg_offer_payload = _build_trade_participant_payload(
                 "offer_user",
                 user=leg_offer_user,
@@ -1414,6 +1617,8 @@ async def _execute_trade_authoritatively(
                     db,
                     [getattr(leg_trade_obj, "offer_user_id", None)],
                 )
+                leg_context["responder_audience"] = leg_responder_audience
+                leg_context["offer_audience"] = leg_offer_audience
                 await _create_trade_notifications_for_leg(
                     audience_user_ids=leg_responder_audience,
                     message=leg_notif_responder,
@@ -1451,6 +1656,8 @@ async def _execute_trade_authoritatively(
         if offer.user:
             background_tasks.add_task(send_telegram_message_sync, offer.user.telegram_id, offer_owner_msg)
 
+        responder_audience = [owner_user.id]
+        offer_owner_audience = [offer.user_id]
         try:
             responder_audience = await build_trade_notification_audience_user_ids(db, [owner_user.id])
             offer_owner_audience = await build_trade_notification_audience_user_ids(db, [offer.user_id])
@@ -1488,53 +1695,54 @@ async def _execute_trade_authoritatively(
     await increment_user_counter(db, owner_user, 'trade', trade_quantity)
     
     # ارسال رویداد SSE
-    from .realtime import publish_event
     if uses_customer_trade_chain:
         for leg_context in [chain_leg_contexts[-1], *chain_leg_contexts[:-1]]:
             leg_trade_obj = leg_context["trade"]
-            await publish_event(
-                "trade:created",
-                _build_trade_created_event_payload(
-                    trade_id=getattr(leg_trade_obj, "id", None),
-                    trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
-                    offer_id=getattr(leg_trade_obj, "offer_id", None),
-                    commodity_id=offer.commodity_id,
-                    quantity=trade_quantity,
-                    price=getattr(leg_trade_obj, "price", offer.price),
-                    commodity_name=offer.commodity.name if offer.commodity else None,
-                    trade_type=responder_trade_type.value,
-                    status=getattr(getattr(leg_trade_obj, "status", None), "value", None) or TradeStatus.COMPLETED.value,
-                    created_at=to_jalali_str(getattr(leg_trade_obj, "created_at", None)) or "",
-                    offer_user=leg_context["offer_user"],
-                    offer_user_id=getattr(leg_trade_obj, "offer_user_id", None),
-                    responder_user=leg_context["responder_user"],
-                    responder_user_id=getattr(leg_trade_obj, "responder_user_id", None),
-                    identity_map=participant_identity_map,
-                    customer_relation_map=participant_customer_relation_map,
-                ),
-            )
-    else:
-        await publish_event(
-            "trade:created",
-            _build_trade_created_event_payload(
-                trade_id=getattr(response_trade, "id", None) or created_trade.id,
-                trade_number=response_trade_number,
-                offer_id=getattr(response_trade, "offer_id", None),
-                commodity_id=offer.commodity_id,
-                quantity=trade_quantity,
-                price=executed_trade_price,
+            await _publish_trade_created_realtime(
+                trade=leg_trade_obj,
+                fallback_trade_id=getattr(leg_trade_obj, "id", None),
+                fallback_trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
+                fallback_offer_id=getattr(leg_trade_obj, "offer_id", None),
+                fallback_commodity_id=offer.commodity_id,
+                fallback_quantity=trade_quantity,
+                fallback_price=getattr(leg_trade_obj, "price", offer.price),
+                fallback_status=getattr(getattr(leg_trade_obj, "status", None), "value", None) or TradeStatus.COMPLETED.value,
+                fallback_created_at=to_jalali_str(getattr(leg_trade_obj, "created_at", None)) or "",
+                fallback_offer_user_id=getattr(leg_trade_obj, "offer_user_id", None),
+                fallback_responder_user_id=getattr(leg_trade_obj, "responder_user_id", None),
                 commodity_name=offer.commodity.name if offer.commodity else None,
-                trade_type=responder_trade_type.value,
-                status=getattr(getattr(response_trade, "status", None), "value", None) or TradeStatus.COMPLETED.value,
-                created_at=to_jalali_str(getattr(response_trade, "created_at", None)) or "",
-                offer_user=response_offer_user,
-                offer_user_id=created_trade.offer_user_id,
-                responder_user=response_responder_user,
-                responder_user_id=created_trade.responder_user_id,
+                fallback_trade_type=responder_trade_type.value,
+                offer_user=leg_context["offer_user"],
+                responder_user=leg_context["responder_user"],
                 identity_map=participant_identity_map,
                 customer_relation_map=participant_customer_relation_map,
-            ),
+                responder_audience_user_ids=leg_context.get("responder_audience"),
+                offer_owner_audience_user_ids=leg_context.get("offer_audience"),
+            )
+    else:
+        await _publish_trade_created_realtime(
+            trade=response_trade,
+            fallback_trade_id=getattr(response_trade, "id", None) or created_trade.id,
+            fallback_trade_number=response_trade_number,
+            fallback_offer_id=getattr(response_trade, "offer_id", None) or created_trade.offer_id,
+            fallback_commodity_id=offer.commodity_id,
+            fallback_quantity=trade_quantity,
+            fallback_price=executed_trade_price,
+            fallback_status=getattr(getattr(response_trade, "status", None), "value", None) or TradeStatus.COMPLETED.value,
+            fallback_created_at=to_jalali_str(getattr(response_trade, "created_at", None)) or "",
+            fallback_offer_user_id=created_trade.offer_user_id,
+            fallback_responder_user_id=created_trade.responder_user_id,
+            commodity_name=offer.commodity.name if offer.commodity else None,
+            fallback_trade_type=responder_trade_type.value,
+            offer_user=response_offer_user,
+            responder_user=response_responder_user,
+            identity_map=participant_identity_map,
+            customer_relation_map=participant_customer_relation_map,
+            responder_audience_user_ids=responder_audience,
+            offer_owner_audience_user_ids=offer_owner_audience,
         )
+
+    from .realtime import publish_event
     await publish_event("offer:updated", {
         "id": offer.id,
         "remaining_quantity": offer.remaining_quantity,
@@ -1546,6 +1754,8 @@ async def _execute_trade_authoritatively(
         response_trade,
         identity_map=participant_identity_map,
         customer_relation_map=participant_customer_relation_map,
+        viewer_context=context,
+        history_target_user_id=owner_user.id,
     )
 
 
@@ -1660,6 +1870,7 @@ async def get_my_trades(
                 getattr(trade, "actor_user_id", None),
             )
         ],
+        include_inactive_historical=True,
     )
     return [
         trade_to_response(
@@ -1703,6 +1914,7 @@ async def get_trade(
     customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
         db,
         [trade.offer_user_id, trade.responder_user_id, getattr(trade, "actor_user_id", None)],
+        include_inactive_historical=True,
     )
     return trade_to_response(
         trade,
@@ -1776,6 +1988,7 @@ async def get_trades_with_user(
                 getattr(trade, "actor_user_id", None),
             )
         ],
+        include_inactive_historical=True,
     )
     return [
         trade_to_response(

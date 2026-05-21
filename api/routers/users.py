@@ -316,6 +316,10 @@ async def update_user(
     if 'max_accountants' in update_data and update_data['max_accountants'] is not None:
         user.max_accountants = max(0, update_data['max_accountants'])
 
+    # --- 4e. Customer Capacity ---
+    if 'max_customers' in update_data and update_data['max_customers'] is not None:
+        user.max_customers = max(0, update_data['max_customers'])
+
     await sync_mandatory_channel_for_user_state_change(
         db,
         user=user,

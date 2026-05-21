@@ -354,51 +354,51 @@ validation phase:
 
 ### 7.1. اصل بنیادی
 
-- [ ] trade از دید actor ممکن است توسط customer انجام شده باشد.
-- [ ] اما از دید business relation، owner مرجع principal آن رابطه است.
-- [ ] history باید این دو لایه را قاطی نکند.
-- [ ] در سناریوهای customer-mediated، history باید بداند که یک business action ممکن است به چند trade row شکسته شده باشد.
+- [x] trade از دید actor ممکن است توسط customer انجام شده باشد.
+- [x] اما از دید business relation، owner مرجع principal آن رابطه است.
+- [x] history باید این دو لایه را قاطی نکند.
+- [x] در سناریوهای customer-mediated، history باید بداند که یک business action ممکن است به چند trade row شکسته شده باشد.
 
 ### 7.2. دو حقیقت هم‌زمان در history
 
-- [ ] `principal relation truth`: این معامله در graph تجاری owner رخ داده است.
-- [ ] `actor context truth`: این عملیات مشخص را خود customer انجام داده است.
+- [x] `principal relation truth`: این معامله در graph تجاری owner رخ داده است.
+- [x] `actor context truth`: این عملیات مشخص را خود customer انجام داده است.
 
 history باید بسته به viewer یکی یا هر دو را نشان دهد.
 
 ### 7.3. سناریوی owner در تاریخچه با user عادی دیگر
 
 اگر customer1 از owner1 با user3 معامله کند و owner1 تاریخچه مشترک خودش با user3 را ببیند:
-- [ ] معامله باید در history owner1 ↔ user3 دیده شود.
-- [ ] کنار آن یک context کوچک مشتری نمایش داده شود.
-- [ ] این context باید حداقل شامل badge `مشتری` و `management_name` customer1 باشد.
+- [x] معامله باید در history owner1 ↔ user3 دیده شود.
+- [x] کنار آن یک context کوچک مشتری نمایش داده شود.
+- [x] این context باید حداقل شامل badge `مشتری` و `management_name` customer1 باشد.
 
 هدف این نمایش:
-- [ ] owner بفهمد این معامله از کانال کدام customer اتفاق افتاده است.
-- [ ] بدون آنکه trade principal owner/user3 از هم بپاشد.
+- [x] owner بفهمد این معامله از کانال کدام customer اتفاق افتاده است.
+- [x] بدون آنکه trade principal owner/user3 از هم بپاشد.
 
 ### 7.3.1. سناریوی customer ↔ customer با ownerهای متفاوت
 
-- [ ] اگر یک customer از ownerA و یک customer از ownerB در دو سمت یک business action باشند، history نباید این اتفاق را به‌صورت یک trade مستقیم customer ↔ customer نمایش دهد.
-- [ ] هر طرف باید leg مرتبط با خودش را در history خود ببیند.
-- [ ] ownerA و ownerB باید leg بین‌مالکی (`ownerB ↔ ownerA`) را هم در historyهای مرتبط خود ببینند.
-- [ ] source customer باید leg `ownerA ↔ customerA` را ببیند.
-- [ ] responder customer باید leg `customerB ↔ ownerB` را ببیند.
-- [ ] mutual history بین ownerA و ownerB باید بر leg واسطه‌ای بین دو owner تکیه کند، نه بر customer endpointها.
-- [ ] این chain برای `Tier 1` قطعی است و با قیمت یکسان در همه legs ثبت می‌شود.
+- [x] اگر یک customer از ownerA و یک customer از ownerB در دو سمت یک business action باشند، history نباید این اتفاق را به‌صورت یک trade مستقیم customer ↔ customer نمایش دهد.
+- [x] هر طرف باید leg مرتبط با خودش را در history خود ببیند.
+- [x] ownerA و ownerB باید leg بین‌مالکی (`ownerB ↔ ownerA`) را هم در historyهای مرتبط خود ببینند.
+- [x] source customer باید leg `ownerA ↔ customerA` را ببیند.
+- [x] responder customer باید leg `customerB ↔ ownerB` را ببیند.
+- [x] mutual history بین ownerA و ownerB باید بر leg واسطه‌ای بین دو owner تکیه کند، نه بر customer endpointها.
+- [x] این chain برای `Tier 1` قطعی است و با قیمت یکسان در همه legs ثبت می‌شود.
 
 ### 7.3.2. سناریوی Tier 2 روی owner-offer
 
-- [ ] اگر `Tier 2` روی آفر owner خودش request بزند، history همان direct trade owner ↔ customer را با price projected-to-customer نشان می‌دهد.
+- [x] اگر `Tier 2` روی آفر owner خودش request بزند، history همان direct trade owner ↔ customer را با price projected-to-customer نشان می‌دهد.
 - [x] owner در این view customer context را به‌صورت صریح می‌بیند چون counterparty خودش customer خودش است.
 
 ### 7.3.3. سناریوی Tier 2 روی outsider-offer
 
-- [ ] اگر `Tier 2` روی آفر buy یا sell بیرونی request بزند، history باید دو leg را جدا نگه دارد.
-- [ ] customer فقط leg خودش با owner خودش را می‌بیند.
-- [ ] owner customer هر دو leg را با customer context مناسب می‌بیند.
-- [ ] counterparty بیرونی فقط leg مجاز مربوط به خودش را می‌بیند و customer identityهای پشت ownerها برای او sanitize می‌شود.
-- [ ] اگر source actor یک `Tier 1` باشد و responder بیرون از همان owner relation باشد، history باید source-owner leg را نیز حفظ کند؛ leg بین‌مالکی به source owner ختم می‌شود و source owner leg جداگانه به خود `Tier 1` ختم می‌شود.
+- [x] اگر `Tier 2` روی آفر buy یا sell بیرونی request بزند، history باید دو leg را جدا نگه دارد.
+- [x] customer فقط leg خودش با owner خودش را می‌بیند.
+- [x] owner customer هر دو leg را با customer context مناسب می‌بیند.
+- [x] counterparty بیرونی فقط leg مجاز مربوط به خودش را می‌بیند و customer identityهای پشت ownerها برای او sanitize می‌شود.
+- [x] اگر source actor یک `Tier 1` باشد و responder بیرون از همان owner relation باشد، history باید source-owner leg را نیز حفظ کند؛ leg بین‌مالکی به source owner ختم می‌شود و source owner leg جداگانه به خود `Tier 1` ختم می‌شود.
 
 ### 7.4. سناریوی counterpart در تاریخچه با owner
 
@@ -413,7 +413,7 @@ history باید بسته به viewer یکی یا هر دو را نشان دهد
 ### 7.5. سناریوی owner در تاریخچه با خود customer
 
 اگر owner1 وارد پروفایل عمومی customer1 شود و تاریخچه را ببیند:
-- [ ] اینجا viewer دارد رابطه مستقیم owner ↔ customer را می‌بیند.
+- [x] اینجا viewer دارد رابطه مستقیم owner ↔ customer را می‌بیند.
 - [x] backend read seam دیگر در این حالت روی mutual-history محدود نمی‌ماند و برای owner/accountant مجاز، rowهای خود customer را برمی‌گرداند.
 - [x] هر trade باید طرف دیگر معامله را همراه context نمایش دهد.
 - [x] مثلاً اگر customer1 با user3 معامله‌ای انجام داده، owner1 در لیست customer1 باید ببیند counterpart چه کسی بوده است.
@@ -422,61 +422,61 @@ history باید بسته به viewer یکی یا هر دو را نشان دهد
 ### 7.6. سناریوی accountant در تاریخچه customer
 
 - [x] accountant owner باید بتواند customerها و history آن‌ها را ببیند.
-- [ ] اما نباید owner-only management control ببیند.
+- [x] اما نباید owner-only management control ببیند.
 - [x] نمایش history برای accountant باید شبیه owner باشد، با همان customer contextهای لازم.
 
 ### 7.7. سناریوی admin در تاریخچه
 
-- [ ] `SUPER_ADMIN` باید history واقعی user هدف را در public profile ببیند، نه mutual history با خودش.
+- [x] `SUPER_ADMIN` باید history واقعی user هدف را در public profile ببیند، نه mutual history با خودش.
 - [x] برای public profile مشتری، `SUPER_ADMIN` حالا target-customer row history را می‌بیند، نه mutual-history با خودش.
 - [x] اگر owner در یک view badge/customer context می‌بیند، `SUPER_ADMIN` هم باید همان context را ببیند.
-- [ ] `MIDDLE_MANAGER` در public profile فقط mutual history عادی خودش با آن user را می‌بیند و هیچ customer-aware context اضافه‌ای ندارد.
+- [x] `MIDDLE_MANAGER` در public profile فقط mutual history عادی خودش با آن user را می‌بیند و هیچ customer-aware context اضافه‌ای ندارد.
 - [ ] این دقیقاً باید با sync اخیر public profile و admin user modal سازگار بماند؛ یعنی جایی که `SUPER_ADMIN` از public profile وارد تنظیمات user می‌شود، همان entity/context را ببیند.
 - [ ] این rule history-specific است و نباید به market visibility ویژه برای admin نشت کند.
 
 ### 7.8. سناریوی customer در تاریخچه خودش
 
-- [ ] customer باید trade history خودش را مثل یک user عادی ببیند.
-- [ ] نباید internal commission metadata یا owner policy reasoning را ببیند.
-- [ ] اگر context اضافه‌ای نشان داده می‌شود، فقط چیزهایی که user عادی هم می‌تواند برای trade خودش ببیند.
+- [x] customer باید trade history خودش را مثل یک user عادی ببیند.
+- [x] نباید internal commission metadata یا owner policy reasoning را ببیند.
+- [x] اگر context اضافه‌ای نشان داده می‌شود، فقط چیزهایی که user عادی هم می‌تواند برای trade خودش ببیند.
 
 ### 7.9. سناریوی multiple customers of same owner
 
 اگر owner چند customer داشته باشد و در history مشترک owner با userX چند trade از customerهای مختلف وجود داشته باشد:
-- [ ] هر trade باید customer context خودش را جداگانه بگیرد.
-- [ ] badge/customer label نباید کلی و یک‌جا در header history بیاید، چون trade-by-trade متفاوت است.
-- [ ] ordering history و filterها نباید با customer projection بشکنند.
+- [x] هر trade باید customer context خودش را جداگانه بگیرد.
+- [x] badge/customer label نباید کلی و یک‌جا در header history بیاید، چون trade-by-trade متفاوت است.
+- [x] ordering history و filterها نباید با customer projection بشکنند.
 
 ### 7.10. سناریوی delete/unlink customer روی history
 
 اگر customer relation حذف یا revoke شود:
-- [ ] history گذشته نباید از بین برود.
-- [ ] context tradeهای قبلی باید تا حد امکان preserved بماند.
-- [ ] baseline پروژه برای userهای عادی و middle admin همین الان history-preserving soft delete است: user row حذف فیزیکی نمی‌شود، `account_name/mobile` suffix می‌خورند، trade rows باقی می‌مانند، و frontend suffix را برای display پاک می‌کند.
-- [ ] customer lifecycle هم باید همین اصل را inherit کند: حذف/revoke نباید history را نابود کند.
-- [ ] برای customer-specific context، همان الگوی existing soft delete authoritative است: relation row باید soft-deleted/revoked باقی بماند تا `management_name` historical از lookup داده‌ی soft-deleted برگردد؛ snapshot trade-time جدید برای این فاز نیاز نیست.
-- [ ] public profile deleted user می‌تواند unavailable شود، اما trade history و display nameهای historical باید پایدار بمانند.
+- [x] history گذشته نباید از بین برود.
+- [x] context tradeهای قبلی باید تا حد امکان preserved بماند.
+- [x] baseline پروژه برای userهای عادی و middle admin همین الان history-preserving soft delete است: user row حذف فیزیکی نمی‌شود، `account_name/mobile` suffix می‌خورد، trade rows باقی می‌مانند، و frontend suffix را برای display پاک می‌کند.
+- [x] customer lifecycle هم باید همین اصل را inherit کند: حذف/revoke نباید history را نابود کند.
+- [x] برای customer-specific context، همان الگوی existing soft delete authoritative است: relation row باید soft-deleted/revoked باقی بماند تا `management_name` historical از lookup داده‌ی soft-deleted برگردد؛ snapshot trade-time جدید برای این فاز نیاز نیست.
+- [x] public profile deleted user می‌تواند unavailable شود، اما trade history و display nameهای historical باید پایدار بمانند.
 
 ### 7.11. سناریوی block/restriction propagation در history
 
-- [ ] block یا restriction باید tradeهای جدید را متوقف کند.
-- [ ] اما history گذشته را تغییر نمی‌دهد.
-- [ ] اگر trade در دوره‌ای انجام شده که customer فعال بوده، بعداً revoke شدن relation نباید آن history را rewrite کند.
+- [x] block یا restriction باید tradeهای جدید را متوقف کند.
+- [x] اما history گذشته را تغییر نمی‌دهد.
+- [x] اگر trade در دوره‌ای انجام شده که customer فعال بوده، بعداً revoke شدن relation نباید آن history را rewrite کند.
 
 ### 7.12. projection design اصل‌محور
 
-- [ ] history serialization نباید با if/elseهای پراکنده در چند endpoint ساخته شود.
-- [ ] یک helper یا projection seam customer-aware لازم است تا:
-  - [ ] owner/admin/accountant view را غنی کند
-  - [ ] counterpart/public view را sanitize کند
-  - [ ] customer self-view را minimal نگه دارد
+- [x] history serialization نباید با if/elseهای پراکنده در چند endpoint ساخته شود.
+- [x] یک helper یا projection seam customer-aware لازم است تا:
+  - [x] owner/admin/accountant view را غنی کند
+  - [x] counterpart/public view را sanitize کند
+  - [x] customer self-view را minimal نگه دارد
 
 ### 7.13. validation phase برای history
 
-- [ ] mutual history tests برای owner/customer/counterparty/admin/accountant matrix.
-- [ ] public profile history rendering tests.
-- [ ] e2e برای badge/customer context visibility.
-- [ ] revoke/delete regression برای historical context persistence.
+- [x] mutual history tests برای owner/customer/counterparty/admin/accountant matrix.
+- [x] public profile history rendering tests.
+- [x] e2e برای badge/customer context visibility.
+- [x] revoke/delete regression برای historical context persistence.
 
 ## 8. Phase 7 - Public Profile, Owner Management, and Admin Sync
 
@@ -492,7 +492,7 @@ customer management و customer visibility روی contract فعلی PublicProfil
 - [ ] customer section owner-only در `PublicProfile.vue` اضافه می‌شود.
 - [x] فقط `SUPER_ADMIN` باید در همان profile surface customer visibility را ببیند، ولی actionهای owner-only را نه.
 - [x] `MIDDLE_MANAGER` نباید customer public profile و customer list در public profile owner را ببیند.
-- [ ] اگر `SUPER_ADMIN` از public profile وارد modal تنظیمات کاربر شد، همان data contract باید customer-related fields را هم در `UserProfile.vue` نشان دهد.
+- [x] اگر `SUPER_ADMIN` از public profile وارد modal تنظیمات کاربر شد، همان data contract باید customer-related fields را هم در `UserProfile.vue` نشان دهد.
 - [ ] بنابراین customer settings duplication بین `PublicProfile.vue` و `AdminView.vue` ممنوع است؛ منبع مدیریت باید همان `UserProfile.vue` بماند.
 - [x] برای customer surface نباید از helper عمومی `isAdminRoleValue()` استفاده شود؛ gate این بخش باید صریحاً `SUPER_ADMIN` را از `MIDDLE_MANAGER` جدا کند.
 - [x] `users_public` و searchهای وابسته به آن باید customer visibility را server-side و relation-aware enforce کنند تا هم public profile نشت نکند و هم featureهای chat/search با rule جدید سازگار بمانند.
@@ -504,7 +504,7 @@ customer management و customer visibility روی contract فعلی PublicProfil
 خروجی‌های لازم:
 - [ ] owner customer manager modal / section
 - [x] super-admin-visible customer summary in public profile
-- [ ] `UserProfile.vue` support for `max_customers` and customer-aware admin controls
+- [x] `UserProfile.vue` support for `max_customers` and customer-aware admin controls
 - [ ] route/state sync بین public profile و admin user settings برای customer surfaces
 
 validation phase:
