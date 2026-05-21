@@ -172,6 +172,43 @@ const customerProfileContext = computed(() => {
     customerTier: profileData.value.customer_tier,
   };
 });
+const showTargetTradeHistory = computed(() => {
+  if (!profileData.value) return false;
+  if (isOwnProfile.value) return true;
+  if (viewerIsSuperAdmin.value) return true;
+  return customerProfileContext.value !== null;
+});
+const tradeHistoryPerspectiveUserId = computed(() => {
+  if (showTargetTradeHistory.value) {
+    const profileUserId = Number(profileData.value?.id);
+    return Number.isInteger(profileUserId) && profileUserId > 0 ? profileUserId : null;
+  }
+
+  const viewerUserId = Number(props.viewerUserId);
+  return Number.isInteger(viewerUserId) && viewerUserId > 0 ? viewerUserId : null;
+});
+const tradeHistoryTitle = computed(() => {
+  if (isOwnProfile.value) {
+    return 'تاریخچه معاملات من';
+  }
+  return showTargetTradeHistory.value ? 'تاریخچه معاملات این کاربر' : 'تاریخچه معاملات مشترک';
+});
+const tradeHistoryEmptyText = computed(() => {
+  if (isOwnProfile.value) {
+    return 'هنوز هیچ معامله‌ای انجام نداده‌اید.';
+  }
+  return showTargetTradeHistory.value ? 'هیچ معامله‌ای برای این کاربر یافت نشد.' : 'هیچ معامله مشترکی یافت نشد.';
+});
+const targetCustomerHistoryContext = computed(() => {
+  if (isOwnProfile.value || !showTargetTradeHistory.value || !customerProfileContext.value) {
+    return null;
+  }
+
+  return {
+    ownerAccountName: customerProfileContext.value.ownerAccountName,
+    customerTier: customerProfileContext.value.customerTier,
+  };
+});
 const showCustomerListSection = computed(() => {
   return customerRelations.value.length > 0 && (showOwnerSections.value || viewerIsSuperAdmin.value);
 });
@@ -433,10 +470,9 @@ function getCustomerTierLabel(tier: PublicCustomerRelationSummary['customer_tier
 
 function getTradeBadgeClass(trade: MutualTradePreview) {
   const type = trade.trade_type?.toUpperCase();
-  // We always show the perspective of the VIEWER (the person logged in)
-  const isViewerResponder = Number(trade.responder_user_id) === Number(props.viewerUserId);
+  const isPerspectiveResponder = Number(trade.responder_user_id) === Number(tradeHistoryPerspectiveUserId.value);
   
-  if (isViewerResponder) {
+  if (isPerspectiveResponder) {
     return type === 'BUY' ? 'buy' : 'sell';
   } else {
     return type === 'BUY' ? 'sell' : 'buy';
@@ -445,10 +481,9 @@ function getTradeBadgeClass(trade: MutualTradePreview) {
 
 function getTradeBadgeLabel(trade: MutualTradePreview) {
   const type = trade.trade_type?.toUpperCase();
-  // We always show the perspective of the VIEWER (the person logged in)
-  const isViewerResponder = Number(trade.responder_user_id) === Number(props.viewerUserId);
+  const isPerspectiveResponder = Number(trade.responder_user_id) === Number(tradeHistoryPerspectiveUserId.value);
   
-  if (isViewerResponder) {
+  if (isPerspectiveResponder) {
     return type === 'BUY' ? '🟢 خرید' : '🔴 فروش';
   } else {
     return type === 'BUY' ? '🔴 فروش' : '🟢 خرید';
@@ -495,9 +530,29 @@ function getTradeCounterpartyProfileTarget(trade: MutualTradePreview) {
 
 function showTradeCustomerContext(trade: MutualTradePreview) {
   if (!trade.customer_context_visible) {
-    return false;
+    return targetCustomerHistoryContext.value !== null;
   }
   return Boolean(trade.customer_context_management_name || trade.customer_context_tier);
+}
+
+function getTradeCustomerContextManagementName(trade: MutualTradePreview) {
+  return typeof trade.customer_context_management_name === 'string' && trade.customer_context_management_name.trim()
+    ? trade.customer_context_management_name
+    : null;
+}
+
+function getTradeCustomerContextOwnerAccountName(trade: MutualTradePreview) {
+  if (trade.customer_context_visible) {
+    return null;
+  }
+  return targetCustomerHistoryContext.value?.ownerAccountName ?? null;
+}
+
+function getTradeCustomerContextTier(trade: MutualTradePreview) {
+  if (trade.customer_context_tier === 'tier1' || trade.customer_context_tier === 'tier2') {
+    return trade.customer_context_tier;
+  }
+  return targetCustomerHistoryContext.value?.customerTier ?? null;
 }
 
 function openTradeCounterpartyProfile(trade: MutualTradePreview) {
@@ -735,7 +790,7 @@ function openOwnerCustomerProfile(relation: PublicCustomerRelationSummary) {
           <div class="ds-accordion-header" @click="toggleHistory">
             <div class="ds-accordion-header-info">
               <Activity :size="18" class="text-amber-600" />
-              <h2>{{ isOwnProfile ? 'تاریخچه معاملات من' : 'تاریخچه معاملات مشترک' }}</h2>
+              <h2>{{ tradeHistoryTitle }}</h2>
             </div>
             <ChevronLeft :size="20" class="ds-accordion-icon" />
           </div>
@@ -745,7 +800,7 @@ function openOwnerCustomerProfile(relation: PublicCustomerRelationSummary) {
                <LoadingSkeleton :count="3" :height="60" />
             </div>
             <p v-else-if="mutualTrades.length === 0" class="empty-text">
-              {{ isOwnProfile ? 'هنوز هیچ معامله‌ای انجام نداده‌اید.' : 'هیچ معامله مشترکی یافت نشد.' }}
+              {{ tradeHistoryEmptyText }}
             </p>
             <div v-else class="history-list">
                 <div v-for="trade in mutualTrades" :key="trade.id" class="mini-trade-card">
@@ -781,11 +836,12 @@ function openOwnerCustomerProfile(relation: PublicCustomerRelationSummary) {
                       <span class="value">{{ trade.trade_path_summary }}</span>
                     </div>
                     <div v-if="showTradeCustomerContext(trade)" class="trade-counterparty">
-                      <span class="label">مشتری:</span>
+                      <span class="label">رابطه:</span>
                       <span class="value trade-customer-context-value">
                         <span class="customer-context-badge">مشتری</span>
-                        <span v-if="trade.customer_context_management_name">{{ trade.customer_context_management_name }}</span>
-                        <span v-if="trade.customer_context_tier">{{ getCustomerTierLabel(trade.customer_context_tier) }}</span>
+                        <span v-if="getTradeCustomerContextManagementName(trade)">{{ getTradeCustomerContextManagementName(trade) }}</span>
+                        <span v-else-if="getTradeCustomerContextOwnerAccountName(trade)">مالک {{ getTradeCustomerContextOwnerAccountName(trade) }}</span>
+                        <span v-if="getTradeCustomerContextTier(trade)">{{ getCustomerTierLabel(getTradeCustomerContextTier(trade)) }}</span>
                       </span>
                     </div>
                 </div>

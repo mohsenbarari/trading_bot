@@ -1956,7 +1956,7 @@ async def get_trades_with_user(
         selectinload(Trade.commodity)
     )
 
-    if target_customer_relation is not None:
+    if target_customer_relation is not None or _is_super_admin_trade_history_viewer(context):
         query = query.where(
             or_(
                 Trade.offer_user_id == other_user_id,

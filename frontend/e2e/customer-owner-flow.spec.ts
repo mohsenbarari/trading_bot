@@ -39,6 +39,15 @@ interface DeletedCustomerPayload {
   userDeleted: boolean | null
 }
 
+interface AdminHistoryFixture {
+  superAdmin: SessionUser
+  ownerUserId: number
+  ownerAccountName: string
+  customerUserId: number
+  customerAccountName: string
+  customerManagementName: string
+}
+
 function resolveAppContainerName() {
   const stdout = execFileSync('docker', ['ps', '--format', '{{.Names}}'], {
     encoding: 'utf8',
@@ -235,6 +244,168 @@ asyncio.run(main())
 `)
 }
 
+function seedAdminHistoryFixture(label: string): AdminHistoryFixture {
+  return runPythonInApp<AdminHistoryFixture>(`
+import asyncio
+import json
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import select, func
+
+from core.db import AsyncSessionLocal
+from core.enums import UserRole
+from core.security import create_access_token, create_refresh_token
+from core.services.session_service import hash_token
+from models.commodity import Commodity
+from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
+from models.session import Platform, UserSession
+from models.trade import Trade, TradeStatus, TradeType
+from models.user import User
+
+label = ${JSON.stringify(label)}
+
+def random_mobile():
+  mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+  return f"09{mobile_seed:09d}"
+
+async def main():
+  suffix = uuid.uuid4().hex[:10]
+  customer_management_name = 'مشتری تاریخچه‌ای'
+
+  async with AsyncSessionLocal() as db:
+    super_admin = User(
+      account_name=f"pw_customer_hist_admin_{label}_{suffix}",
+      mobile_number=random_mobile(),
+      full_name='Playwright Customer History Admin',
+      address='Playwright Customer History Admin',
+      role=UserRole.SUPER_ADMIN,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    owner = User(
+      account_name=f"pw_customer_hist_owner_{label}_{suffix}",
+      mobile_number=random_mobile(),
+      full_name='Playwright Customer History Owner',
+      address='Playwright Customer History Owner',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+      max_customers=5,
+    )
+    customer = User(
+      account_name=f"pw_customer_hist_customer_{label}_{suffix}",
+      mobile_number=random_mobile(),
+      full_name=customer_management_name,
+      address='Playwright Customer History Customer',
+      role=UserRole.STANDARD,
+      has_bot_access=False,
+      max_sessions=1,
+    )
+    outsider = User(
+      account_name=f"pw_customer_hist_outsider_{label}_{suffix}",
+      mobile_number=random_mobile(),
+      full_name='Playwright Customer History Outsider',
+      address='Playwright Customer History Outsider',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    commodity = Commodity(name=f"PW Customer History Commodity {suffix}")
+
+    db.add_all([super_admin, owner, customer, outsider, commodity])
+    await db.flush()
+
+    relation = CustomerRelation(
+      owner_user_id=owner.id,
+      customer_user_id=customer.id,
+      created_by_user_id=owner.id,
+      invitation_token=uuid.uuid4().hex,
+      management_name=customer_management_name,
+      customer_tier=CustomerTier.TIER_2,
+      commission_rate=1.25,
+      status=CustomerRelationStatus.ACTIVE,
+      activated_at=datetime.now(timezone.utc),
+      expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+    )
+    db.add(relation)
+
+    max_trade_number = (await db.scalar(select(func.max(Trade.trade_number)))) or 9999
+    now = datetime.now(timezone.utc)
+
+    owner_history_trade = Trade(
+      trade_number=max_trade_number + 1,
+      offer_id=None,
+      offer_user_id=outsider.id,
+      offer_user_mobile=outsider.mobile_number,
+      responder_user_id=owner.id,
+      responder_user_mobile=owner.mobile_number,
+      actor_user_id=customer.id,
+      commodity_id=commodity.id,
+      trade_type=TradeType.BUY,
+      quantity=2,
+      price=501000,
+      status=TradeStatus.COMPLETED,
+      created_at=now - timedelta(minutes=2),
+    )
+    customer_history_trade = Trade(
+      trade_number=max_trade_number + 2,
+      offer_id=None,
+      offer_user_id=outsider.id,
+      offer_user_mobile=outsider.mobile_number,
+      responder_user_id=customer.id,
+      responder_user_mobile=customer.mobile_number,
+      actor_user_id=customer.id,
+      commodity_id=commodity.id,
+      trade_type=TradeType.BUY,
+      quantity=5,
+      price=602200,
+      status=TradeStatus.COMPLETED,
+      created_at=now - timedelta(minutes=1),
+    )
+    db.add_all([owner_history_trade, customer_history_trade])
+
+    refresh_token = create_refresh_token(subject=super_admin.id)
+    session = UserSession(
+      user_id=super_admin.id,
+      device_name='Playwright Customer History Admin Device',
+      device_ip='127.0.0.1',
+      platform=Platform.WEB,
+      refresh_token_hash=hash_token(refresh_token),
+      is_primary=True,
+      is_active=True,
+      expires_at=None,
+    )
+    db.add(session)
+    await db.flush()
+
+    access_token = create_access_token(
+      subject=super_admin.id,
+      expires_delta=timedelta(minutes=60),
+      session_id=str(session.id),
+    )
+
+    await db.commit()
+
+  print(json.dumps({
+    'superAdmin': {
+      'userId': super_admin.id,
+      'accountName': super_admin.account_name,
+      'accessToken': access_token,
+      'refreshToken': refresh_token,
+      'roleLabel': super_admin.role.value,
+    },
+    'ownerUserId': owner.id,
+    'ownerAccountName': owner.account_name,
+    'customerUserId': customer.id,
+    'customerAccountName': customer.account_name,
+    'customerManagementName': customer_management_name,
+  }))
+
+asyncio.run(main())
+`)
+}
+
 function authHeaders(accessToken: string) {
   return {
     Authorization: `Bearer ${accessToken}`,
@@ -403,5 +574,39 @@ test.describe('customer owner lifecycle', () => {
       })
 
     await expect(modal).toContainText('ارتباط مشتری قطع شد')
+  })
+
+  test('super-admin sees target trade history from the viewed public-profile perspective', async ({ page, request }) => {
+    test.setTimeout(180000)
+
+    const fixture = seedAdminHistoryFixture('public_profile_history')
+
+    await waitForBackendReady(request)
+    await setAuthTokens(page, fixture.superAdmin)
+
+    await page.goto(`/users/${fixture.ownerUserId}`)
+    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: fixture.customerManagementName })).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات مشترک' })).toHaveCount(0)
+
+    const ownerHistoryHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات این کاربر' }).first()
+    await ownerHistoryHeader.click()
+
+    const ownerHistoryCard = page.locator('.history-list .mini-trade-card').filter({ hasText: '2 عدد' }).first()
+    await expect(ownerHistoryCard).toContainText('🟢 خرید')
+    await expect(ownerHistoryCard).toContainText(fixture.customerManagementName)
+    await expect(ownerHistoryCard).toContainText('سطح 2')
+
+    await page.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: fixture.customerManagementName }).click()
+    await page.waitForURL(new RegExp(`/users/${fixture.customerUserId}(?:\\?.*)?$`))
+    await expect(page.locator('.customer-context-banner')).toContainText(fixture.ownerAccountName)
+
+    const customerHistoryHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات این کاربر' }).first()
+    await customerHistoryHeader.click()
+
+    const customerHistoryCard = page.locator('.history-list .mini-trade-card').filter({ hasText: '5 عدد' }).first()
+    await expect(customerHistoryCard).toContainText('🟢 خرید')
+    await expect(customerHistoryCard).toContainText(`مالک ${fixture.ownerAccountName}`)
+    await expect(customerHistoryCard).toContainText('سطح 2')
   })
 })

@@ -300,6 +300,37 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("trades.responder_user_id = 50", sql)
         self.assertIn("trades.actor_user_id = 50", sql)
 
+    async def test_get_trades_with_user_switches_to_target_history_for_super_admin_non_customer_target(self):
+        context = self.make_context(owner_id=902, owner_role=UserRole.SUPER_ADMIN)
+        trades = [SimpleNamespace(id=24, offer_user_id=51, responder_user_id=77, actor_user_id=None)]
+        db = FakeDB([FakeExecuteResult(values=trades)])
+
+        with patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.trade_to_response", return_value={"id": 24}) as response_mock:
+            result = await get_trades_with_user(other_user_id=51, skip=0, limit=20, db=db, context=context)
+
+        self.assertEqual(result, [{"id": 24}])
+        response_mock.assert_called_once_with(
+            trades[0],
+            identity_map={},
+            customer_relation_map={},
+            viewer_context=context,
+            history_target_user_id=51,
+        )
+        sql = compile_sql(db.statements[0])
+        self.assertIn("trades.offer_user_id = 51", sql)
+        self.assertIn("trades.responder_user_id = 51", sql)
+        self.assertIn("trades.actor_user_id = 51", sql)
+        self.assertNotIn("trades.offer_user_id = 902 AND trades.responder_user_id = 51", sql)
+
     async def test_get_trades_with_user_keeps_mutual_history_for_unauthorized_customer_view(self):
         context = self.make_context(owner_id=8, actor_id=18)
         trades = [SimpleNamespace(id=23, offer_user_id=8, responder_user_id=50, actor_user_id=None)]
