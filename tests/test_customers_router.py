@@ -7,9 +7,9 @@ from fastapi import HTTPException
 
 import schemas
 from api.routers.customers import (
-    cancel_my_pending_customer,
     create_my_customer,
     list_my_customers,
+    unlink_my_customer,
     update_my_customer,
 )
 from models.customer_relation import CustomerTier
@@ -98,7 +98,7 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(listed[0]["registration_link"], "https://app.example/register?token=CUST-token")
         self.assertEqual(listed[0]["mobile_number"], "09120000000")
 
-    async def test_cancel_owner_pending_customer_returns_serialized_relation(self):
+    async def test_unlink_owner_customer_returns_serialized_relation(self):
         relation = SimpleNamespace(
             id=9,
             owner_user_id=7,
@@ -122,7 +122,7 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
 
         with patch(
-            "api.routers.customers.cancel_pending_customer_relation",
+            "api.routers.customers.unlink_owner_customer_relation",
             new=AsyncMock(return_value=relation),
         ), patch(
             "api.routers.customers.load_customer_relation_invitation_map",
@@ -131,7 +131,7 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.customers.settings",
             SimpleNamespace(frontend_url="https://app.example"),
         ):
-            result = await cancel_my_pending_customer(9, context=context, db=FakeDB())
+            result = await unlink_my_customer(9, context=context, db=FakeDB())
 
         self.assertEqual(result["id"], 9)
         self.assertEqual(result["registration_link"], "https://app.example/register?token=CUST-token")

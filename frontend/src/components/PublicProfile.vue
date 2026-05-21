@@ -3,6 +3,7 @@ import { computed, ref, onMounted } from 'vue';
 import { ChevronDown, ChevronLeft, User as UserIcon, Activity, ArrowRight, ChevronRight } from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import OwnerAccountantManagerModal from './OwnerAccountantManagerModal.vue';
+import OwnerCustomerManagerModal from './OwnerCustomerManagerModal.vue';
 import UserProfile from './UserProfile.vue';
 import { isAdminRoleValue, readCachedCurrentUserRole, SUPER_ADMIN_ROLE } from '../utils/adminAccess';
 import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIdentity';
@@ -116,6 +117,7 @@ const openSections = ref({
 const avatarBusy = ref(false);
 const avatarInput = ref<HTMLInputElement | null>(null);
 const showAccountantManager = ref(false);
+const showCustomerManager = ref(false);
 const showAdminUserManager = ref(false);
 const adminUserData = ref<any>(null);
 const adminUserLoading = ref(false);
@@ -389,6 +391,11 @@ async function closeAdminUserManager() {
   await loadProfile();
 }
 
+async function closeCustomerManager() {
+  showCustomerManager.value = false;
+  await loadProfile();
+}
+
 function handleAdminUserManagerNavigate(view: string) {
   if (view === 'manage_users') {
     void closeAdminUserManager();
@@ -408,7 +415,7 @@ function handleActionClick(action: ProfileActionCard) {
   } else if (action.key === 'admin_settings') {
     void openAdminUserManager();
   } else if (action.key === 'add_customer') {
-    alert('قابلیت افزودن مشتری به زودی اضافه خواهد شد.');
+    showCustomerManager.value = true;
   } else if (action.key === 'add_accountant') {
     showAccountantManager.value = true;
   }
@@ -500,6 +507,17 @@ function openTradeCounterpartyProfile(trade: MutualTradePreview) {
   }
 
   emit('navigate', 'public_profile', target);
+}
+
+function openOwnerCustomerProfile(relation: PublicCustomerRelationSummary) {
+  if (!relation.customer_user_id || !relation.customer_account_name) {
+    return;
+  }
+
+  emit('navigate', 'public_profile', {
+    id: relation.customer_user_id,
+    account_name: relation.customer_account_name,
+  });
 }
 </script>
 
@@ -660,8 +678,19 @@ function openTradeCounterpartyProfile(trade: MutualTradePreview) {
               >
                 <div class="public-customer-card-head">
                   <div>
-                    <h4>{{ relation.management_name }}</h4>
-                    <p class="public-customer-handle">@{{ relation.customer_account_name || 'unknown' }}</p>
+                    <button
+                      v-if="relation.customer_user_id && relation.customer_account_name"
+                      type="button"
+                      class="profile-link-btn public-customer-profile-link customer-profile-link-btn"
+                      @click.stop="openOwnerCustomerProfile(relation)"
+                    >
+                      <span class="public-customer-link-title">{{ relation.management_name }}</span>
+                      <span class="public-customer-handle">@{{ relation.customer_account_name }}</span>
+                    </button>
+                    <template v-else>
+                      <h4>{{ relation.management_name }}</h4>
+                      <p class="public-customer-handle">@{{ relation.customer_account_name || 'unknown' }}</p>
+                    </template>
                   </div>
                   <span class="public-customer-tier-badge">{{ getCustomerTierLabel(relation.customer_tier) }}</span>
                 </div>
@@ -783,6 +812,11 @@ function openTradeCounterpartyProfile(trade: MutualTradePreview) {
     <OwnerAccountantManagerModal
       v-if="showAccountantManager"
       @close="showAccountantManager = false"
+    />
+
+    <OwnerCustomerManagerModal
+      v-if="showCustomerManager"
+      @close="closeCustomerManager"
     />
 
     <Teleport to="body">
@@ -1207,6 +1241,20 @@ function openTradeCounterpartyProfile(trade: MutualTradePreview) {
 .public-customer-card-head h4 {
   margin: 0;
   font-size: 1rem;
+  color: #1d4ed8;
+}
+
+.public-customer-profile-link {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: right;
+}
+
+.public-customer-link-title {
+  font-size: 1rem;
+  font-weight: 800;
   color: #1d4ed8;
 }
 

@@ -448,6 +448,56 @@ async def cancel_pending_customer_relation(
     return relation
 
 
+async def unlink_owner_customer_relation(
+    db: AsyncSession,
+    *,
+    owner_user_id: int,
+    relation_id: int,
+) -> CustomerRelation:
+    stmt = (
+        select(CustomerRelation)
+        .options(joinedload(CustomerRelation.customer_user))
+        .where(
+            CustomerRelation.id == relation_id,
+            CustomerRelation.owner_user_id == owner_user_id,
+        )
+    )
+    relation = (await db.execute(stmt)).scalar_one_or_none()
+    if not relation:
+        raise HTTPException(status_code=404, detail="رابطه مشتری یافت نشد")
+
+    if relation.deleted_at is not None or relation.status in (
+        CustomerRelationStatus.EXPIRED,
+        CustomerRelationStatus.REVOKED,
+        CustomerRelationStatus.DELETED,
+    ):
+        raise HTTPException(status_code=400, detail="این رابطه قبلاً بسته شده است")
+
+    if relation.status == CustomerRelationStatus.PENDING:
+        return await cancel_pending_customer_relation(
+            db,
+            owner_user_id=owner_user_id,
+            relation_id=relation_id,
+        )
+
+    if relation.status != CustomerRelationStatus.ACTIVE:
+        raise HTTPException(status_code=400, detail="فقط مشتری pending یا active قابل قطع ارتباط است")
+
+    from core.services.user_deletion_service import delete_user_account
+
+    customer_user = relation.customer_user
+    if customer_user and not customer_user.is_deleted:
+        await delete_user_account(db, customer_user)
+
+    now = _utcnow_naive()
+    relation.status = CustomerRelationStatus.DELETED
+    relation.deleted_at = now
+
+    await db.commit()
+    await db.refresh(relation)
+    return relation
+
+
 async def update_owner_customer_relation(
     db: AsyncSession,
     *,

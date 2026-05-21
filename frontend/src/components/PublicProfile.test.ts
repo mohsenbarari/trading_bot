@@ -210,10 +210,16 @@ describe('PublicProfile.vue', () => {
       mobile_number: '09121110000',
       role: 'عادی',
       account_status: 'active',
+      is_customer: true,
+      customer_owner_user_id: 20,
+      customer_owner_account_name: 'owner20',
+      customer_management_name: 'مشتری ویژه',
+      customer_tier: 'tier2',
       has_bot_access: false,
       trading_restricted_until: null,
       max_sessions: 1,
       max_accountants: 3,
+      max_customers: 5,
       can_block_users: true,
       max_blocked_users: 10,
     }))
@@ -234,7 +240,7 @@ describe('PublicProfile.vue', () => {
           UserProfile: {
             props: ['user'],
             emits: ['navigate'],
-            template: '<div class="user-profile-stub"><span>{{ user.account_name }}</span><button @click="$emit(\'navigate\', \'manage_users\')">close user profile</button></div>',
+            template: '<div class="user-profile-stub"><span>{{ user.account_name }}</span><span class="stub-customer-name">{{ user.customer_management_name }}</span><button @click="$emit(\'navigate\', \'manage_users\')">close user profile</button></div>',
           },
         },
       },
@@ -254,6 +260,7 @@ describe('PublicProfile.vue', () => {
     }))
     expect(wrapper.find('.user-profile-stub').exists()).toBe(true)
     expect(wrapper.text()).toContain('managed61')
+    expect(wrapper.text()).toContain('مشتری ویژه')
     expect(wrapper.emitted('navigate')).toBeUndefined()
 
     await wrapper.get('.user-profile-stub button').trigger('click')
@@ -425,7 +432,7 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('آپلود ناموفق بود')
   })
 
-  it('exposes owner actions for settings navigation and accountant-manager modal opening', async () => {
+  it('exposes owner actions for settings navigation and owner customer/accountant manager modals', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 44,
@@ -452,6 +459,9 @@ describe('PublicProfile.vue', () => {
       global: {
         stubs: {
           LoadingSkeleton: true,
+          OwnerCustomerManagerModal: {
+            template: '<button class="owner-customer-modal-stub" @click="$emit(\'close\')">customer modal</button>',
+          },
           OwnerAccountantManagerModal: {
             template: '<button class="owner-accountant-modal-stub" @click="$emit(\'close\')">accountant modal</button>',
           },
@@ -466,13 +476,17 @@ describe('PublicProfile.vue', () => {
     await settingsButton!.trigger('click')
     expect(wrapper.emitted('navigate')?.[0]).toEqual(['settings'])
 
+    const accountantButton = wrapper.findAll('button').find((button) => button.text().includes('حسابداران'))
+    expect(accountantButton).toBeTruthy()
+
     const customerButton = wrapper.findAll('button').find((button) => button.text().includes('مشتریان'))
     expect(customerButton).toBeTruthy()
     await customerButton!.trigger('click')
-    expect(vi.mocked(alert)).toHaveBeenCalledWith('قابلیت افزودن مشتری به زودی اضافه خواهد شد.')
+    expect(wrapper.find('.owner-customer-modal-stub').exists()).toBe(true)
+    await wrapper.get('.owner-customer-modal-stub').trigger('click')
+    expect(wrapper.find('.owner-customer-modal-stub').exists()).toBe(false)
+    expect(vi.mocked(alert)).not.toHaveBeenCalled()
 
-    const accountantButton = wrapper.findAll('button').find((button) => button.text().includes('حسابداران'))
-    expect(accountantButton).toBeTruthy()
     await accountantButton!.trigger('click')
 
     expect(wrapper.find('.owner-accountant-modal-stub').exists()).toBe(true)
@@ -834,6 +848,15 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('مشتری ویژه')
     expect(wrapper.text()).toContain('customer91')
     expect(wrapper.text()).toContain('سطح 1')
+
+    await wrapper.get('.customer-profile-link-btn').trigger('click')
+    expect(wrapper.emitted('navigate')?.[0]).toEqual([
+      'public_profile',
+      {
+        id: 91,
+        account_name: 'customer91',
+      },
+    ])
   })
 
   it('does not show owner customer list for middle-manager viewers', async () => {

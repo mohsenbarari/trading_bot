@@ -26,6 +26,7 @@ from core.services.customer_relation_service import (
     list_owner_customer_relations,
     round_customer_price,
     sweep_expired_pending_customer_relations,
+    unlink_owner_customer_relation,
     update_owner_customer_relation,
     validate_customer_capacity,
     validate_customer_trade_limits,
@@ -35,6 +36,7 @@ from core.utils import utc_now
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.offer import OfferType
 from models.user import UserRole
+from unittest.mock import patch
 
 
 class FakeScalarResult:
@@ -225,6 +227,27 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         result = await load_customer_relation_invitation_map(db, {invitation.token})
 
         self.assertEqual(result, {invitation.token: invitation})
+
+    async def test_unlink_owner_customer_relation_soft_deletes_active_customer_and_marks_relation_deleted(self):
+        customer_user = SimpleNamespace(id=81, is_deleted=False)
+        relation = SimpleNamespace(
+            id=14,
+            owner_user_id=7,
+            customer_user=customer_user,
+            status=CustomerRelationStatus.ACTIVE,
+            deleted_at=None,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)])
+
+        with patch("core.services.user_deletion_service.delete_user_account", new=AsyncMock()) as delete_mock:
+            result = await unlink_owner_customer_relation(db, owner_user_id=7, relation_id=14)
+
+        self.assertIs(result, relation)
+        delete_mock.assert_awaited_once_with(db, customer_user)
+        self.assertEqual(relation.status, CustomerRelationStatus.DELETED)
+        self.assertIsNotNone(relation.deleted_at)
+        db.commit.assert_awaited_once()
+        db.refresh.assert_awaited_once_with(relation)
 
     async def test_create_owner_customer_relation_creates_pending_relation_and_standard_invitation(self):
         owner = SimpleNamespace(id=7, max_customers=4)

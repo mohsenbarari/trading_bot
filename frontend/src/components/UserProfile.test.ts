@@ -126,6 +126,34 @@ describe('UserProfile.vue', () => {
     expect(user.max_customers).toBe(8)
   })
 
+  it('renders read-only customer context for customer targets in admin view', async () => {
+    const user = makeUser({
+      is_customer: true,
+      customer_owner_account_name: 'owner20',
+      customer_management_name: 'مشتری ویژه',
+      customer_tier: 'tier2',
+    })
+
+    const UserProfile = (await import('./UserProfile.vue')).default
+    const wrapper = mount(UserProfile, {
+      props: {
+        user,
+        isAdminView: true,
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('اطلاعات مشتری')
+    expect(wrapper.text()).toContain('مشتری ویژه')
+    expect(wrapper.text()).toContain('owner20')
+    expect(wrapper.text()).toContain('سطح 2')
+  })
+
   it('allows admin to update block permissions and terminate all sessions', async () => {
     const user = makeUser({
       id: 15,
