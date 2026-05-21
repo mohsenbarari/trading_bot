@@ -539,26 +539,26 @@ validation phase:
 بستن release با اطمینان از اینکه customer نه overly-restricted شده و نه privacy ruleها را نقض می‌کند.
 
 حداقل سناریوهای E2E:
-- [ ] owner creates customer invite
-- [ ] customer registers via web
-- [ ] owner edits commission and limits
-- [ ] Tier 1 customer creates sell offer
-- [ ] owner sees raw price + badge on Tier 1 offer
-- [ ] Tier 2 viewer sees projected buy/sell prices based on own commission
-- [ ] Tier 2 executes request on own-owner offer and outsider offer
-- [ ] admin sees owner-facing customer context
-- [ ] customer allowed direct chat with owner succeeds
-- [ ] customer direct chat with unrelated user is denied
-- [ ] customer cannot join channel / create group
-- [ ] owner mutual history with third-party shows customer badge + management name
-- [ ] third-party mutual history with owner hides customer context
+- [x] owner creates customer invite
+- [x] customer registers via web
+- [x] owner edits commission and limits
+- [x] Tier 1 customer creates sell offer
+- [x] owner sees raw price + badge on Tier 1 offer
+- [x] Tier 2 viewer sees projected buy/sell prices based on own commission
+- [x] Tier 2 executes request on own-owner offer and outsider offer
+- [x] admin sees owner-facing customer context
+- [x] customer allowed direct chat with owner succeeds
+- [x] customer direct chat with unrelated user is denied
+- [x] customer cannot join channel / create group
+- [x] owner mutual history with third-party shows customer badge + management name
+- [x] third-party mutual history with owner hides customer context
 
 release gate:
-- [ ] focused backend suite سبز
-- [ ] focused frontend unit suite سبز
-- [ ] customer Playwright flow سبز
-- [ ] sync/replay suite سبز
-- [ ] `make foreign` deploy green
+- [x] focused backend suite سبز
+- [x] focused frontend unit suite سبز
+- [x] customer Playwright flow سبز
+- [x] sync/replay suite سبز
+- [x] `make foreign` deploy green
 
 ## 11. سوال‌های فنی جدیدی که بعد از پاسخ‌های فاز 0 هنوز باید فقط در implementation phase بسته شوند
 
