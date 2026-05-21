@@ -300,11 +300,56 @@ describe('ChatMessageItem.vue', () => {
     await flushPromises()
 
     const html = wrapper.html()
-    expect(html).toContain('<span class="message-mention own-mention">@ali</span>')
-    expect(html).toContain('<span class="message-mention">@reza</span>')
+    expect(html).toContain('<span class="message-mention own-mention clickable" data-mention-user-id="7">@ali</span>')
+    expect(html).toContain('<span class="message-mention clickable" data-mention-user-id="9">@reza</span>')
     expect(html).toContain('<span class="message-mention own-mention">@all</span>')
     expect(html).not.toContain('<span class="message-mention">@ghost</span>')
     expect(html).not.toContain('<span class="message-mention own-mention">@ghost</span>')
+  })
+
+  it('emits open-public-profile when a mention is clicked', async () => {
+    const wrapper = mountTextMessage({
+      content: 'hello @ali',
+      mention_details: [
+        { user_id: 9, account_name: 'ali' }
+      ]
+    })
+    
+    await flushPromises()
+    
+    const mention = wrapper.find('.message-mention.clickable')
+    expect(mention.exists()).toBe(true)
+    
+    await mention.trigger('click')
+    
+    const events = wrapper.emitted('open-public-profile')
+    expect(events).toBeTruthy()
+    expect(events![0]![0]).toEqual({ id: 9, account_name: 'ali' })
+    expect(wrapper.emitted('click-message')).toBeFalsy()
+  })
+
+  it('opens public profile from single media caption mentions too', async () => {
+    const wrapper = mountMediaMessage({
+      content: JSON.stringify({
+        file_id: 'image-71',
+        thumbnail: 'data:image/png;base64,thumb',
+        caption: 'caption @ali',
+      }),
+      mention_details: [
+        { user_id: 9, account_name: 'ali' },
+      ],
+    })
+
+    await flushPromises()
+
+    const mention = wrapper.find('.media-caption .message-mention.clickable')
+    expect(mention.exists()).toBe(true)
+
+    await mention.trigger('click')
+
+    const events = wrapper.emitted('open-public-profile')
+    expect(events).toBeTruthy()
+    expect(events![0]![0]).toEqual({ id: 9, account_name: 'ali' })
   })
 
   it('renders the voice waveform and toggles playback state', async () => {

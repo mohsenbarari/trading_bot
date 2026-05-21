@@ -94,7 +94,7 @@
       
       <!-- Text -->
       <template v-if="msg.message_type === 'text'">
-        <p v-html="highlightedContent"></p>
+        <p v-html="highlightedContent" @click="handleContentClick($event)"></p>
       </template>
       
       <!-- Album -->
@@ -113,7 +113,7 @@
           @delete-item="$emit('delete-album-item', $event)"
           @toggle-download-item="$emit('toggle-album-download-item', $event)"
         />
-        <p v-if="mediaCaption" class="media-caption" v-html="highlightedMediaCaption"></p>
+        <p v-if="mediaCaption" class="media-caption" v-html="highlightedMediaCaption" @click="handleContentClick($event)"></p>
       </template>
 
       <!-- Media (Image/Video) -->
@@ -195,7 +195,7 @@
             </div>
           </template>
         </div>
-        <p v-if="mediaCaption" class="media-caption" v-html="highlightedMediaCaption"></p>
+            <p v-if="mediaCaption" class="media-caption" v-html="highlightedMediaCaption" @click="handleContentClick($event)"></p>
       </template>
       
       <!-- Voice Message -->
@@ -1242,11 +1242,14 @@ function highlightText(content: string) {
   const mentionDetails = Array.isArray(props.msg.mention_details)
     ? props.msg.mention_details
     : []
-  const mentionedAccountNames = new Set(
-    mentionDetails
-      .map((detail: UserMentionDetail) => detail.account_name?.trim().toLowerCase())
-      .filter((accountName: string | undefined): accountName is string => Boolean(accountName))
-  )
+  
+  const mentionMap = new Map<string, number>()
+  mentionDetails.forEach((detail: UserMentionDetail) => {
+    if (detail.account_name) {
+      mentionMap.set(detail.account_name.trim().toLowerCase(), detail.user_id)
+    }
+  })
+
   const ownMentionAccountNames = new Set(
     mentionDetails
       .filter((detail: UserMentionDetail) => Number(detail.user_id) === props.currentUserId)
@@ -1262,16 +1265,18 @@ function highlightText(content: string) {
       return `<span class="message-mention own-mention">${match}</span>`
     }
 
-    if (!mentionedAccountNames.has(lowerUser)) {
+    const userId = mentionMap.get(lowerUser)
+    if (userId === undefined) {
       return match
     }
 
     const isOwnMention = ownMentionAccountNames.has(lowerUser)
+    const attr = `data-mention-user-id="${userId}"`
 
     if (isOwnMention) {
-      return `<span class="message-mention own-mention">${match}</span>`
+      return `<span class="message-mention own-mention clickable" ${attr}>${match}</span>`
     } else {
-      return `<span class="message-mention">${match}</span>`
+      return `<span class="message-mention clickable" ${attr}>${match}</span>`
     }
   })
 
@@ -1429,6 +1434,41 @@ function handleForwardedProfileClick() {
   }
 
   emit('open-public-profile', target)
+}
+
+function handleContentClick(event: MouseEvent) {
+  const targetElement = event.target instanceof Element ? event.target : null
+  if (!targetElement) {
+    return
+  }
+
+  const mentionSpan = targetElement.closest('.message-mention.clickable') as HTMLElement | null
+  if (!mentionSpan) {
+    return
+  }
+
+  const userId = mentionSpan.getAttribute('data-mention-user-id')
+  if (!userId) {
+    return
+  }
+
+  event.stopPropagation()
+
+  if (props.isSelectionMode) {
+    emit('select', props.msg)
+    return
+  }
+
+  const normalizedUserId = Number(userId)
+  const mentionDetails: UserMentionDetail[] = Array.isArray(props.msg.mention_details)
+    ? props.msg.mention_details
+    : []
+  const detail = mentionDetails.find((detail: UserMentionDetail) => Number(detail.user_id) === normalizedUserId)
+
+  emit('open-public-profile', {
+    id: normalizedUserId,
+    account_name: detail?.account_name || ''
+  })
 }
 
 function handleRecoveryActionClick(action: 'approve' | 'reject' | 'request_identity') {
@@ -2109,6 +2149,10 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   font-weight: 700;
   text-decoration: none;
   cursor: pointer;
+}
+
+:deep(.message-mention.clickable:hover) {
+  text-decoration: underline;
 }
 
 :deep(.message-mention.own-mention) {
