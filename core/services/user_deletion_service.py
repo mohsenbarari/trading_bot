@@ -15,6 +15,7 @@ from core.services.chat_room_service import sync_mandatory_channel_for_user_stat
 from core.services.session_service import deactivate_active_sessions, publish_session_revocation
 from core.utils import send_telegram_notification
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
+from models.customer_relation import CustomerRelation, CustomerRelationStatus
 from models.invitation import Invitation
 from models.offer import Offer, OfferStatus
 from models.trade import Trade
@@ -68,6 +69,14 @@ def _utcnow_naive():
 
 
 async def _invalidate_accountant_invitation(db: AsyncSession, invitation_token: str, now) -> None:
+    invitation_stmt = select(Invitation).where(Invitation.token == invitation_token)
+    invitation = (await db.execute(invitation_stmt)).scalar_one_or_none()
+    if invitation:
+        invitation.is_used = True
+        invitation.expires_at = now
+
+
+async def _invalidate_customer_invitation(db: AsyncSession, invitation_token: str, now) -> None:
     invitation_stmt = select(Invitation).where(Invitation.token == invitation_token)
     invitation = (await db.execute(invitation_stmt)).scalar_one_or_none()
     if invitation:
@@ -135,6 +144,66 @@ async def _close_linked_accountant_relations(db: AsyncSession, user: User) -> No
         relation.deleted_at = relation.deleted_at or now
 
 
+async def _close_owned_customer_relations(
+    db: AsyncSession,
+    user: User,
+    *,
+    processed_user_ids: set[int],
+    effects: list[_DeletedUserEffect],
+) -> None:
+    now = _utcnow_naive()
+    stmt = (
+        select(CustomerRelation)
+        .options(joinedload(CustomerRelation.customer_user))
+        .where(
+            CustomerRelation.owner_user_id == user.id,
+            CustomerRelation.deleted_at.is_(None),
+        )
+    )
+    relations = list((await db.execute(stmt)).scalars().all())
+    for relation in relations:
+        if (
+            relation.status == CustomerRelationStatus.ACTIVE
+            and relation.customer_user is not None
+            and not relation.customer_user.is_deleted
+        ):
+            await _delete_user_account_in_transaction(
+                db,
+                relation.customer_user,
+                processed_user_ids=processed_user_ids,
+                effects=effects,
+            )
+
+        if relation.status == CustomerRelationStatus.PENDING:
+            relation.status = CustomerRelationStatus.REVOKED
+            await _invalidate_customer_invitation(db, relation.invitation_token, now)
+        elif relation.status == CustomerRelationStatus.ACTIVE:
+            relation.status = CustomerRelationStatus.DELETED
+
+        if relation.status in (
+            CustomerRelationStatus.REVOKED,
+            CustomerRelationStatus.DELETED,
+            CustomerRelationStatus.EXPIRED,
+        ):
+            relation.deleted_at = relation.deleted_at or now
+
+
+async def _close_linked_customer_relations(db: AsyncSession, user: User) -> None:
+    now = _utcnow_naive()
+    stmt = select(CustomerRelation).where(
+        CustomerRelation.customer_user_id == user.id,
+        CustomerRelation.deleted_at.is_(None),
+    )
+    relations = list((await db.execute(stmt)).scalars().all())
+    for relation in relations:
+        if relation.status == CustomerRelationStatus.PENDING:
+            relation.status = CustomerRelationStatus.REVOKED
+            await _invalidate_customer_invitation(db, relation.invitation_token, now)
+        elif relation.status == CustomerRelationStatus.ACTIVE:
+            relation.status = CustomerRelationStatus.DELETED
+        relation.deleted_at = relation.deleted_at or now
+
+
 async def _delete_user_account_in_transaction(
     db: AsyncSession,
     user: User,
@@ -152,6 +221,8 @@ async def _delete_user_account_in_transaction(
 
     await _close_owned_accountant_relations(db, user, processed_user_ids=processed_user_ids, effects=effects)
     await _close_linked_accountant_relations(db, user)
+    await _close_owned_customer_relations(db, user, processed_user_ids=processed_user_ids, effects=effects)
+    await _close_linked_customer_relations(db, user)
 
     await db.execute(
         update(Trade)
