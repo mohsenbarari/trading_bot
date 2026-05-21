@@ -72,6 +72,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             offer_user=SimpleNamespace(account_name="seller"),
             responder_user_id=22,
             responder_user=SimpleNamespace(account_name="buyer"),
+            actor_user_id=None,
             created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
         )
 
@@ -107,6 +108,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
                 11: SimpleNamespace(
                     owner_user_id=22,
                     customer_tier=CustomerTier.TIER_1,
+                    management_name="مشتری مستقیم",
                 ),
             },
         )
@@ -124,6 +126,80 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(relation_aware_response.responder_user_highlight_accountant_relation_display_name, "حسابدار خرید")
         self.assertEqual(relation_aware_response.trade_path_kind, "owner_customer_tier1")
         self.assertEqual(relation_aware_response.trade_path_summary, "مالک ↔ مشتری سطح ۱")
+
+        mediated_trade = SimpleNamespace(
+            id=2,
+            trade_number=10002,
+            offer_id=15,
+            trade_type=SimpleNamespace(value="sell"),
+            commodity_id=6,
+            commodity=SimpleNamespace(name="Coin"),
+            quantity=3,
+            price=82000,
+            status=SimpleNamespace(value="completed"),
+            offer_user_id=22,
+            offer_user=SimpleNamespace(account_name="owner-account"),
+            responder_user_id=99,
+            responder_user=SimpleNamespace(account_name="outsider-account"),
+            actor_user_id=11,
+            created_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+        )
+        owner_view_response = trades.trade_to_response(
+            mediated_trade,
+            identity_map={
+                22: SimpleNamespace(
+                    display_name="مالک معامله",
+                    profile_user_id=22,
+                    profile_account_name="owner-22",
+                    resolved_from_accountant_id=None,
+                    highlight_accountant_user_id=None,
+                    highlight_accountant_relation_display_name=None,
+                )
+            },
+            customer_relation_map={
+                11: SimpleNamespace(
+                    owner_user_id=22,
+                    customer_tier=CustomerTier.TIER_1,
+                    management_name="مشتری واسط",
+                ),
+            },
+            viewer_context=SimpleNamespace(
+                owner_user=SimpleNamespace(id=22, role=None),
+                actor_user=SimpleNamespace(id=22, role=None),
+                relation=None,
+                is_accountant_context=False,
+            ),
+            history_target_user_id=99,
+        )
+        self.assertEqual(owner_view_response.counterparty_user_id, 22)
+        self.assertEqual(owner_view_response.counterparty_name, "مالک معامله")
+        self.assertEqual(owner_view_response.counterparty_profile_user_id, 22)
+        self.assertEqual(owner_view_response.counterparty_profile_account_name, "owner-22")
+        self.assertTrue(owner_view_response.customer_context_visible)
+        self.assertEqual(owner_view_response.customer_context_user_id, 11)
+        self.assertEqual(owner_view_response.customer_context_management_name, "مشتری واسط")
+        self.assertEqual(owner_view_response.customer_context_tier, CustomerTier.TIER_1.value)
+
+        customer_view_response = trades.trade_to_response(
+            mediated_trade,
+            customer_relation_map={
+                11: SimpleNamespace(
+                    owner_user_id=22,
+                    customer_tier=CustomerTier.TIER_1,
+                    management_name="مشتری واسط",
+                ),
+            },
+            viewer_context=SimpleNamespace(
+                owner_user=SimpleNamespace(id=11, role=None),
+                actor_user=SimpleNamespace(id=11, role=None),
+                relation=None,
+                is_accountant_context=False,
+            ),
+            history_target_user_id=11,
+        )
+        self.assertEqual(customer_view_response.counterparty_user_id, 99)
+        self.assertEqual(customer_view_response.counterparty_name, "outsider-account")
+        self.assertFalse(customer_view_response.customer_context_visible)
 
         event_payload = trades._build_trade_created_event_payload(
             trade_id=91,

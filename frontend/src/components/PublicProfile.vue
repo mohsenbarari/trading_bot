@@ -71,6 +71,16 @@ interface MutualTradePreview {
   responder_user_resolved_from_accountant_id?: number | null;
   responder_user_highlight_accountant_user_id?: number | null;
   responder_user_highlight_accountant_relation_display_name?: string | null;
+  counterparty_user_id?: number | null;
+  counterparty_name?: string | null;
+  counterparty_profile_user_id?: number | null;
+  counterparty_profile_account_name?: string | null;
+  counterparty_highlight_accountant_user_id?: number | null;
+  counterparty_highlight_accountant_relation_display_name?: string | null;
+  customer_context_visible?: boolean;
+  customer_context_user_id?: number | null;
+  customer_context_management_name?: string | null;
+  customer_context_tier?: 'tier1' | 'tier2' | null;
   quantity: number;
   commodity_name: string;
   price: number;
@@ -439,6 +449,9 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
 }
 
 function getTradeCounterpartyLabel(trade: MutualTradePreview) {
+  if (typeof trade.counterparty_name === 'string' && trade.counterparty_name.trim()) {
+    return trade.counterparty_name;
+  }
   return Number(trade.responder_user_id) === Number(profileData.value?.id)
     ? trade.offer_user_name
     : trade.responder_user_name;
@@ -449,10 +462,35 @@ function getTradeCounterpartyProfileTarget(trade: MutualTradePreview) {
     return null;
   }
 
+  if (
+    Number.isInteger(trade.counterparty_profile_user_id)
+    && typeof trade.counterparty_profile_account_name === 'string'
+    && trade.counterparty_profile_account_name.trim()
+  ) {
+    return {
+      id: Number(trade.counterparty_profile_user_id),
+      account_name: trade.counterparty_profile_account_name,
+      highlight_accountant_user_id: Number.isInteger(trade.counterparty_highlight_accountant_user_id)
+        ? Number(trade.counterparty_highlight_accountant_user_id)
+        : null,
+      highlight_accountant_relation_display_name:
+        typeof trade.counterparty_highlight_accountant_relation_display_name === 'string'
+          ? trade.counterparty_highlight_accountant_relation_display_name
+          : null,
+    };
+  }
+
   return resolveTradeParticipantProfileTarget(
     trade,
     Number(trade.responder_user_id) === Number(profileData.value.id) ? 'offer_user' : 'responder_user',
   );
+}
+
+function showTradeCustomerContext(trade: MutualTradePreview) {
+  if (!trade.customer_context_visible) {
+    return false;
+  }
+  return Boolean(trade.customer_context_management_name || trade.customer_context_tier);
 }
 
 function openTradeCounterpartyProfile(trade: MutualTradePreview) {
@@ -712,6 +750,14 @@ function openTradeCounterpartyProfile(trade: MutualTradePreview) {
                     <div v-if="trade.trade_path_summary" class="trade-counterparty">
                       <span class="label">مسیر:</span>
                       <span class="value">{{ trade.trade_path_summary }}</span>
+                    </div>
+                    <div v-if="showTradeCustomerContext(trade)" class="trade-counterparty">
+                      <span class="label">مشتری:</span>
+                      <span class="value trade-customer-context-value">
+                        <span class="customer-context-badge">مشتری</span>
+                        <span v-if="trade.customer_context_management_name">{{ trade.customer_context_management_name }}</span>
+                        <span v-if="trade.customer_context_tier">{{ getCustomerTierLabel(trade.customer_context_tier) }}</span>
+                      </span>
                     </div>
                 </div>
             </div>

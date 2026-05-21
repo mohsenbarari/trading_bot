@@ -113,6 +113,16 @@ const myTradesFixture = [
     offer_user_resolved_from_accountant_id: 9,
     offer_user_highlight_accountant_user_id: 9,
     offer_user_highlight_accountant_relation_display_name: 'حسابدار فروش',
+    counterparty_user_id: 77,
+    counterparty_name: 'حسابدار فروش',
+    counterparty_profile_user_id: 77,
+    counterparty_profile_account_name: 'owner-77',
+    counterparty_highlight_accountant_user_id: 9,
+    counterparty_highlight_accountant_relation_display_name: 'حسابدار فروش',
+    customer_context_visible: true,
+    customer_context_user_id: 55,
+    customer_context_management_name: 'مشتری واسط',
+    customer_context_tier: 'tier2',
     responder_user_id: 7,
     responder_user_name: 'my-user',
     created_at: 'امروز',
@@ -246,6 +256,7 @@ describe('TradingView.vue', () => {
     expect(wrapper.text()).toContain('10001')
     expect(wrapper.text()).toContain('120,000')
     expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۲')
+    expect(wrapper.text()).toContain('مشتری واسط')
 
     wrapper.unmount()
   })

@@ -520,6 +520,16 @@ describe('PublicProfile.vue', () => {
         trade_type: 'BUY',
         trade_path_kind: 'owner_customer_tier1',
         trade_path_summary: 'مالک ↔ مشتری سطح ۱',
+        counterparty_user_id: 70,
+        counterparty_name: 'حسابدار فروش',
+        counterparty_profile_user_id: 70,
+        counterparty_profile_account_name: 'owner-70',
+        counterparty_highlight_accountant_user_id: 61,
+        counterparty_highlight_accountant_relation_display_name: 'حسابدار فروش',
+        customer_context_visible: true,
+        customer_context_user_id: 61,
+        customer_context_management_name: 'مشتری واسط',
+        customer_context_tier: 'tier1',
         offer_user_id: 61,
         offer_user_name: 'حسابدار فروش',
         offer_user_profile_user_id: 70,
@@ -565,6 +575,8 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۲')
     expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۱')
     expect(wrapper.text()).toContain('حسابدار فروش')
+    expect(wrapper.text()).toContain('مشتری واسط')
+    expect(wrapper.text()).toContain('سطح 1')
 
     const accountantLink = wrapper.findAll('.profile-link-btn').find((node) => node.text().includes('حسابدار فروش'))
     expect(accountantLink).toBeTruthy()
