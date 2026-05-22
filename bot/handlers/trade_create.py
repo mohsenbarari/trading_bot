@@ -47,6 +47,19 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+BOT_MARKET_CLOSED_MESSAGE = (
+    "بعلت بسته بودن بازار درخواست شما ثبت نشد\n"
+    "لطفا در زمان فعال بودن بازار اقدام به ثبت درخواست کنید."
+)
+
+
+async def _bot_market_is_open() -> bool:
+    from core.services.market_transition_service import evaluate_current_market_schedule
+
+    async with AsyncSessionLocal() as session:
+        evaluation = await evaluate_current_market_schedule(session)
+    return bool(getattr(evaluation, "is_open", False))
+
 
 def _get_price_warning_keyboard(confirm_callback_data: str, cancel_callback_data: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -87,6 +100,10 @@ async def handle_trade_button(message: types.Message, state: FSMContext, user: O
                 parse_mode="Markdown",
             )
             return
+
+    if not await _bot_market_is_open():
+        await message.answer(BOT_MARKET_CLOSED_MESSAGE)
+        return
 
     await state.clear()
     await message.answer(
@@ -461,6 +478,12 @@ async def _handle_trade_confirm_core(
     warning_acknowledged: bool = False,
 ) -> None:
     if not user:
+        await callback.answer()
+        return
+
+    if not await _bot_market_is_open():
+        await callback.message.edit_text(BOT_MARKET_CLOSED_MESSAGE)
+        await state.clear()
         await callback.answer()
         return
 
@@ -863,6 +886,10 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
     # اگر در state دیگری هستیم، پردازش نکن
     current_state = await state.get_state()
     if current_state is not None:
+        return
+
+    if not await _bot_market_is_open():
+        await message.answer(BOT_MARKET_CLOSED_MESSAGE)
         return
     
     from bot.utils.offer_parser import parse_offer_text, ParsedOffer

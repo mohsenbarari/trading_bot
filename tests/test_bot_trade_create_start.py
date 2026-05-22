@@ -29,8 +29,14 @@ class BotTradeCreateStartTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("حساب شما مسدود است", restricted_text)
         self.assertIn("1405/02/18 - 12:00", restricted_text)
 
+        closed_user = SimpleNamespace(role=UserRole.STANDARD, trading_restricted_until=None)
+        with patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=False)):
+            await handle_trade_button(message, state, user=closed_user)
+        self.assertEqual(message.answer.await_args_list[-1].args[0], "بعلت بسته بودن بازار درخواست شما ثبت نشد\nلطفا در زمان فعال بودن بازار اقدام به ثبت درخواست کنید.")
+
         allowed_user = SimpleNamespace(role=UserRole.STANDARD, trading_restricted_until=None)
-        await handle_trade_button(message, state, user=allowed_user)
+        with patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=True)):
+            await handle_trade_button(message, state, user=allowed_user)
         state.clear.assert_awaited_once()
         self.assertIn("ثبت لفظ دکمه‌ای غیرفعال شده", message.answer.await_args_list[-1].args[0])
         self.assertIn("خ امام 30تا 75800", message.answer.await_args_list[-1].args[0])
