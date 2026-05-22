@@ -16,7 +16,7 @@ from pathlib import Path
 from threading import Thread
 from typing import Any, Optional, Callable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 __all__ = [
     "TradingSettings",
@@ -66,6 +66,13 @@ class TradingSettings(BaseModel):
     anti_abuse_daily_base: int = 2
     anti_abuse_weekly_base: int = 5
     anti_abuse_monthly_base: int = 7
+
+    # --- schedule بازار ---
+    market_schedule_enabled: bool = False
+    market_timezone: str = "Asia/Tehran"
+    market_open_time_local: str = "09:00"
+    market_close_time_local: str = "18:00"
+    market_closed_weekdays: list[int] = Field(default_factory=list)
     
     # --- مقادیر محاسباتی ---
     @property

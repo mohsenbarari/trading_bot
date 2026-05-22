@@ -38,6 +38,21 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings.lot_min_size, 7)
         self.assertEqual(settings.lot_max_count, 3)
 
+    async def test_trading_settings_schedule_fields_are_json_serializable(self):
+        settings = trading_settings.TradingSettings(
+            market_schedule_enabled=True,
+            market_open_time_local='08:30',
+            market_close_time_local='17:15',
+            market_closed_weekdays=[4, 5],
+        )
+
+        dumped = settings.model_dump()
+        json.dumps(dumped)
+
+        self.assertTrue(dumped['market_schedule_enabled'])
+        self.assertEqual(dumped['market_timezone'], 'Asia/Tehran')
+        self.assertEqual(dumped['market_closed_weekdays'], [4, 5])
+
     async def test_load_from_json_success_and_failure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             file_path = Path(tmpdir) / 'settings.json'
