@@ -172,8 +172,12 @@
   - existing privileged target-user history export
 - [ ] هماهنگ کردن naming فایل، timezone، و labelها با context فعلی history.
 - [ ] اطمینان از این که export از همان filter state جاری UI استفاده می کند.
-- [ ] ساخت و review کردن نمونه اولیه فایل `Excel` و `PDF` قبل از finalize کردن endpoint و UX export.
-- [ ] برای `mutual history export` ordinary viewer، summary/header باید minimal بماند: فقط `نام target` و `بازه زمانی`. جدول هم فقط `نوع معامله` perspective-based را نگه دارد و هیچ ستون `role/counterparty/path` نداشته باشد.
+- [x] ساخت و review کردن نمونه اولیه فایل `Excel` و `PDF` قبل از finalize کردن endpoint و UX export.
+- [ ] contract نهایی export در همین scope به صورت minimal و production-like قفل می شود؛ summary جداگانه، metadata اضافی، و framingهایی مثل `history type / viewer role / trade path` خارج از scope همین فاز هستند.
+- [ ] برای `self history export`، header باید فقط `نام خود کاربر` و `بازه زمانی` را نشان دهد. جدول هم `نوع معامله` را فقط از perspective خود همان کاربر نشان دهد و هیچ ستون `role/counterparty/path` نداشته باشد.
+- [ ] برای `mutual history export` ordinary viewer، header باید فقط `نام target` و `بازه زمانی` را نشان دهد. جدول هم فقط `نوع معامله` perspective-based را نگه دارد و هیچ ستون `role/counterparty/path` نداشته باشد.
+- [ ] برای `existing privileged target-user history export`، header باید فقط `نام target` و `بازه زمانی` را نشان دهد. جدول هم `نوع معامله` را از perspective خود target نشان دهد و هیچ ستون `role/counterparty/path` نداشته باشد.
+- [ ] اگر filter بازه یا کالا روی UI فعال باشد، همان filter فقط scope ردیف های export را تعیین می کند و نیازی به summary اضافی در header ایجاد نمی کند.
 
 ### فاز 6: تست و non-regression
 
@@ -194,16 +198,11 @@
   - custom range export
   - blocked interaction generic UX
 
-## 6. سوال ها و ابهام های باز قبل از شروع اجرا
+## 6. سوال ها و ابهام های باقیمانده قبل از شروع اجرا
 
-- [ ] برای نمونه اولیه `PDF` و `Excel`، آیا تمایل دارید فایل فقط جدول را نشان دهد یا یک summary header سبک هم داشته باشد؟
-  پیشنهاد فعلی: summary سبک شامل نوع history، بازه، کالای فیلترشده و تعداد ردیف ها.
-
-- [ ] export PDF باید فقط table ساده باشد یا summary هم داشته باشد؟
-  پیشنهاد فعلی: در فاز اول فقط table filtered rows + metadata بازه/کالا.
-
-- [ ] وقتی viewer خودش target را بلاک کرده، آیا `ارسال پیام` باید همچنان visible بماند یا باید با UX دیگری replace شود؟
-  پیشنهاد فعلی: visible بماند، چون block فقط market-only است و نباید به chat محدودیت بدهد.
+- [x] در scope فعلی public profile، ابهام product-critical برای export mutual/self/privileged history باقی نمانده است.
+- [x] `PDF` و `Excel` هر دو با header minimal جلو می روند و summary اضافی در scope فاز اول اضافه نمی شود.
+- [x] وقتی viewer خودش target را بلاک کرده، `ارسال پیام` همچنان visible می ماند، چون block فقط market-only است و نباید روی chat یا سایر surfaceها اثری بگذارد.
 
 ## 7. ایده های مفید ولی خارج از scope همین مرحله
 
