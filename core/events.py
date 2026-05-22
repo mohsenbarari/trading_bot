@@ -797,6 +797,99 @@ def setup_trading_settings_events():
     logger.info("✅ TradingSetting event listeners registered")
 
 
+def setup_market_schedule_override_events():
+    """Setup event listeners for MarketScheduleOverride model."""
+    from models.market_schedule_override import MarketScheduleOverride
+
+    def market_schedule_override_payload(target):
+        override_type = target.override_type.value if getattr(target, "override_type", None) else None
+        return {
+            "id": target.id,
+            "date": target.date.isoformat() if getattr(target, "date", None) else None,
+            "override_type": override_type,
+            "open_time_local": target.open_time_local.isoformat() if getattr(target, "open_time_local", None) else None,
+            "close_time_local": target.close_time_local.isoformat() if getattr(target, "close_time_local", None) else None,
+            "note": target.note,
+            "created_by_user_id": target.created_by_user_id,
+            "created_at": target.created_at.isoformat() if getattr(target, "created_at", None) else None,
+            "updated_at": target.updated_at.isoformat() if getattr(target, "updated_at", None) else None,
+        }
+
+    @event.listens_for(MarketScheduleOverride, 'after_insert')
+    def on_market_schedule_override_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "market_schedule_overrides", target.id, "INSERT", market_schedule_override_payload(target))
+        except Exception as e:
+            logger.error(f"Error in market_schedule_override after_insert event: {e}")
+
+    @event.listens_for(MarketScheduleOverride, 'after_update')
+    def on_market_schedule_override_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "market_schedule_overrides", target.id, "UPDATE", market_schedule_override_payload(target))
+        except Exception as e:
+            logger.error(f"Error in market_schedule_override after_update event: {e}")
+
+    @event.listens_for(MarketScheduleOverride, 'after_delete')
+    def on_market_schedule_override_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "market_schedule_overrides", target.id, "DELETE", {"id": target.id})
+        except Exception as e:
+            logger.error(f"Error in market_schedule_override after_delete event: {e}")
+
+    logger.info("✅ MarketScheduleOverride event listeners registered")
+
+
+def setup_market_runtime_state_events():
+    """Setup event listeners for MarketRuntimeState model."""
+    from models.market_runtime_state import MarketRuntimeState
+
+    def market_runtime_state_payload(target):
+        return {
+            "id": target.id,
+            "is_open": target.is_open,
+            "active_web_notice_visible": target.active_web_notice_visible,
+            "offers_since_last_open": target.offers_since_last_open,
+            "last_transition_at": target.last_transition_at.isoformat() if getattr(target, "last_transition_at", None) else None,
+            "created_at": target.created_at.isoformat() if getattr(target, "created_at", None) else None,
+            "updated_at": target.updated_at.isoformat() if getattr(target, "updated_at", None) else None,
+        }
+
+    @event.listens_for(MarketRuntimeState, 'after_insert')
+    def on_market_runtime_state_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "market_runtime_state", target.id, "INSERT", market_runtime_state_payload(target))
+        except Exception as e:
+            logger.error(f"Error in market_runtime_state after_insert event: {e}")
+
+    @event.listens_for(MarketRuntimeState, 'after_update')
+    def on_market_runtime_state_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "market_runtime_state", target.id, "UPDATE", market_runtime_state_payload(target))
+        except Exception as e:
+            logger.error(f"Error in market_runtime_state after_update event: {e}")
+
+    @event.listens_for(MarketRuntimeState, 'after_delete')
+    def on_market_runtime_state_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "market_runtime_state", target.id, "DELETE", {"id": target.id})
+        except Exception as e:
+            logger.error(f"Error in market_runtime_state after_delete event: {e}")
+
+    logger.info("✅ MarketRuntimeState event listeners registered")
+
+
 def setup_invitation_events():
     """Setup event listeners for Invitation model"""
     from models.invitation import Invitation
@@ -906,6 +999,8 @@ def setup_all_events():
     setup_commodity_events()
     setup_commodity_alias_events()
     setup_trading_settings_events()
+    setup_market_schedule_override_events()
+    setup_market_runtime_state_events()
     setup_user_block_events()
     setup_notification_events()
     logger.info("🎯 All event listeners initialized")
