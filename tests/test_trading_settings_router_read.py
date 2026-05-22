@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from api.routers.trading_settings import get_settings
+from api.routers.trading_settings import get_market_state, get_settings
 
 
 def make_settings(**overrides):
@@ -36,6 +36,25 @@ class TradingSettingsRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.lot_max_count, 8)
         self.assertEqual(result.invitation_expiry_minutes, 10080)
         self.assertEqual(result.anti_abuse_monthly_base, 11)
+
+    async def test_get_market_state_maps_runtime_view_to_response(self):
+        runtime_view = SimpleNamespace(
+            is_open=False,
+            active_web_notice_visible=True,
+            offers_since_last_open=2,
+            last_transition_at=None,
+            next_transition_at=None,
+        )
+
+        with patch(
+            "api.routers.trading_settings.get_market_runtime_view",
+            new=AsyncMock(return_value=runtime_view),
+        ):
+            result = await get_market_state(db=SimpleNamespace())
+
+        self.assertFalse(result.is_open)
+        self.assertTrue(result.active_web_notice_visible)
+        self.assertEqual(result.offers_since_last_open, 2)
 
 
 if __name__ == "__main__":

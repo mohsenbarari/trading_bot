@@ -15,6 +15,7 @@ const marketViewMocks = vi.hoisted(() => ({
   clearBackStackMock: vi.fn(),
   apiFetchMock: vi.fn(),
   apiFetchJsonMock: vi.fn(),
+  wsHandlers: new Map<string, Set<(data: any) => void>>(),
 }))
 
 vi.mock('../composables/useOffers', () => ({
@@ -76,6 +77,23 @@ vi.mock('../utils/auth', () => ({
   apiFetchJson: marketViewMocks.apiFetchJsonMock,
 }))
 
+vi.mock('../composables/useWebSocket', () => ({
+  useWebSocket: () => ({
+    on: (event: string, callback: (data: any) => void) => {
+      const handlers = marketViewMocks.wsHandlers.get(event) ?? new Set<(data: any) => void>()
+      handlers.add(callback)
+      marketViewMocks.wsHandlers.set(event, handlers)
+    },
+    off: (event: string, callback: (data: any) => void) => {
+      const handlers = marketViewMocks.wsHandlers.get(event)
+      handlers?.delete(callback)
+      if (handlers && handlers.size === 0) {
+        marketViewMocks.wsHandlers.delete(event)
+      }
+    },
+  }),
+}))
+
 const offersFixture = [
   {
     id: 1,
@@ -116,6 +134,10 @@ function errorResponse(status: number, data: unknown) {
   }
 }
 
+function emitWs(event: string, data: any) {
+  marketViewMocks.wsHandlers.get(event)?.forEach((callback) => callback(data))
+}
+
 async function mountMarketView() {
   const MarketView = (await import('./MarketView.vue')).default
   return mount(MarketView, {
@@ -152,10 +174,20 @@ describe('MarketView.vue', () => {
     marketViewMocks.clearBackStackMock.mockReset()
     marketViewMocks.apiFetchMock.mockReset()
     marketViewMocks.apiFetchJsonMock.mockReset()
+    marketViewMocks.wsHandlers.clear()
 
     marketViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
       if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
       if (path === '/api/offers/') return responseOf({ success: true, id: 1001 })
       return responseOf(null)
@@ -192,6 +224,7 @@ describe('MarketView.vue', () => {
     expect(marketViewMocks.startPollingMock).toHaveBeenCalled()
     expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/')
     expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/')
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/market-state')
     expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/auth/me')
     expect(wrapper.find('.offers-count').text()).toBe('1')
     expect(wrapper.find('.offers-expiry').text()).toBe('45')
@@ -246,6 +279,52 @@ describe('MarketView.vue', () => {
     }))
     expect((wrapper.find('.text-offer-input').element as HTMLInputElement).value).toBe('')
     expect(marketViewMocks.fetchOffersMock).toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('renders closed-market notice, disables the composer, and reacts to market runtime websocket events', async () => {
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: false,
+          active_web_notice_visible: true,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect(wrapper.find('.market-runtime-notice').text()).toContain('پایان فعالیت بازار')
+    expect(wrapper.find('.text-offer-input').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.send-btn').attributes('disabled')).toBeDefined()
+
+    emitWs('market:opened', {
+      is_open: true,
+      active_web_notice_visible: true,
+      offers_since_last_open: 0,
+    })
+    await nextTick()
+
+    expect(wrapper.find('.market-runtime-notice').text()).toContain('شروع فعالیت بازار')
+    expect(wrapper.find('.text-offer-input').attributes('disabled')).toBeUndefined()
+
+    emitWs('market:notice_hidden', {
+      is_open: true,
+      active_web_notice_visible: false,
+      offers_since_last_open: 2,
+    })
+    await nextTick()
+
+    expect(wrapper.find('.market-runtime-notice').exists()).toBe(false)
 
     wrapper.unmount()
   })
