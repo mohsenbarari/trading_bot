@@ -48,6 +48,22 @@ interface PublicProfileHistoryFilterFixture {
   wideToDate: string
 }
 
+interface PublicProfilePresenceFixture {
+  viewer: SessionUser
+  onlineTargetUserId: number
+  onlineTargetAccountName: string
+  offlineTargetUserId: number
+  offlineTargetAccountName: string
+}
+
+interface PublicProfileBlockedMarketFixture {
+  viewer: SessionUser
+  targetUserId: number
+  targetAccountName: string
+  offerNote: string
+  tradeAmount: number
+}
+
 function resolveAppContainerName() {
   const stdout = execFileSync('docker', ['ps', '--format', '{{.Names}}'], {
     encoding: 'utf8',
@@ -383,7 +399,7 @@ def random_mobile():
 
 async def main():
   suffix = uuid.uuid4().hex[:10]
-  now = datetime.now(timezone.utc)
+  now = datetime.utcnow()
   narrow_from = (now - timedelta(days=45)).date().isoformat()
   narrow_to = now.date().isoformat()
   wide_from = (now - timedelta(days=365)).date().isoformat()
@@ -528,6 +544,212 @@ async def main():
     'narrowToDate': narrow_to,
     'wideFromDate': wide_from,
     'wideToDate': wide_to,
+  }))
+
+asyncio.run(main())
+`)
+}
+
+function seedPublicProfilePresenceFixture(label: string): PublicProfilePresenceFixture {
+  return runPythonInApp<PublicProfilePresenceFixture>(`
+import asyncio
+import json
+import uuid
+from datetime import datetime, timedelta
+
+from core.db import AsyncSessionLocal
+from core.enums import UserRole
+from core.security import create_access_token, create_refresh_token
+from core.services.session_service import hash_token
+from models.session import Platform, UserSession
+from models.user import User
+
+label = ${JSON.stringify(label)}
+
+def random_mobile():
+  mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+  return f"09{mobile_seed:09d}"
+
+async def main():
+  suffix = uuid.uuid4().hex[:10]
+  now = datetime.utcnow()
+
+  async with AsyncSessionLocal() as db:
+    viewer = User(
+      account_name=f"pw_pp_presence_viewer_{label}_{suffix}",
+      mobile_number=random_mobile(),
+      full_name='Playwright Public Profile Presence Viewer',
+      address='Playwright Public Profile Presence Viewer',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    online_target = User(
+      account_name=f"pw_pp_presence_online_{label}_{suffix}",
+      mobile_number=random_mobile(),
+      full_name='Playwright Public Profile Online Target',
+      address='Playwright Public Profile Online Target',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+      last_seen_at=now,
+    )
+    offline_target = User(
+      account_name=f"pw_pp_presence_offline_{label}_{suffix}",
+      mobile_number=random_mobile(),
+      full_name='Playwright Public Profile Offline Target',
+      address='Playwright Public Profile Offline Target',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+      last_seen_at=now - timedelta(minutes=10),
+    )
+
+    db.add_all([viewer, online_target, offline_target])
+    await db.flush()
+
+    refresh_token = create_refresh_token(subject=viewer.id)
+    session = UserSession(
+      user_id=viewer.id,
+      device_name='Playwright Public Profile Presence Device',
+      device_ip='127.0.0.1',
+      platform=Platform.WEB,
+      refresh_token_hash=hash_token(refresh_token),
+      is_primary=True,
+      is_active=True,
+      expires_at=None,
+    )
+    db.add(session)
+    await db.flush()
+
+    access_token = create_access_token(
+      subject=viewer.id,
+      expires_delta=timedelta(minutes=60),
+      session_id=str(session.id),
+    )
+
+    await db.commit()
+
+  print(json.dumps({
+    'viewer': {
+      'userId': viewer.id,
+      'accountName': viewer.account_name,
+      'accessToken': access_token,
+      'refreshToken': refresh_token,
+    },
+    'onlineTargetUserId': online_target.id,
+    'onlineTargetAccountName': online_target.account_name,
+    'offlineTargetUserId': offline_target.id,
+    'offlineTargetAccountName': offline_target.account_name,
+  }))
+
+asyncio.run(main())
+`)
+}
+
+function seedPublicProfileBlockedMarketFixture(label: string): PublicProfileBlockedMarketFixture {
+  return runPythonInApp<PublicProfileBlockedMarketFixture>(`
+import asyncio
+import json
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from core.db import AsyncSessionLocal
+from core.enums import UserRole
+from core.security import create_access_token, create_refresh_token
+from core.services.session_service import hash_token
+from models.commodity import Commodity
+from models.offer import Offer, OfferStatus, OfferType
+from models.session import Platform, UserSession
+from models.user import User
+
+label = ${JSON.stringify(label)}
+
+def random_mobile():
+  mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+  return f"09{mobile_seed:09d}"
+
+async def main():
+  suffix = uuid.uuid4().hex[:10]
+  offer_note = f"pw_block_market_{label}_{suffix}"
+
+  async with AsyncSessionLocal() as db:
+    viewer = User(
+      account_name=f"pw_pp_block_viewer_{label}_{suffix}",
+      mobile_number=random_mobile(),
+      full_name='Playwright Public Profile Block Viewer',
+      address='Playwright Public Profile Block Viewer',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+      can_block_users=True,
+      max_blocked_users=5,
+    )
+    target = User(
+      account_name=f"pw_pp_block_target_{label}_{suffix}",
+      mobile_number=random_mobile(),
+      full_name='Playwright Public Profile Block Target',
+      address='Playwright Public Profile Block Target',
+      role=UserRole.STANDARD,
+      has_bot_access=True,
+      max_sessions=1,
+    )
+    commodity = Commodity(name=f"PW Block Commodity {suffix[:5]}")
+
+    db.add_all([viewer, target, commodity])
+    await db.flush()
+
+    offer = Offer(
+      user_id=target.id,
+      actor_user_id=target.id,
+      home_server='foreign',
+      offer_type=OfferType.SELL,
+      commodity_id=commodity.id,
+      quantity=2,
+      remaining_quantity=2,
+      price=321000,
+      is_wholesale=True,
+      lot_sizes=None,
+      original_lot_sizes=None,
+      status=OfferStatus.ACTIVE,
+      notes=offer_note,
+      created_at=datetime.now(timezone.utc),
+    )
+    db.add(offer)
+
+    refresh_token = create_refresh_token(subject=viewer.id)
+    session = UserSession(
+      user_id=viewer.id,
+      device_name='Playwright Public Profile Block Device',
+      device_ip='127.0.0.1',
+      platform=Platform.WEB,
+      refresh_token_hash=hash_token(refresh_token),
+      is_primary=True,
+      is_active=True,
+      expires_at=None,
+    )
+    db.add(session)
+    await db.flush()
+
+    access_token = create_access_token(
+      subject=viewer.id,
+      expires_delta=timedelta(minutes=60),
+      session_id=str(session.id),
+    )
+
+    await db.commit()
+
+  print(json.dumps({
+    'viewer': {
+      'userId': viewer.id,
+      'accountName': viewer.account_name,
+      'accessToken': access_token,
+      'refreshToken': refresh_token,
+    },
+    'targetUserId': target.id,
+    'targetAccountName': target.account_name,
+    'offerNote': offer_note,
+    'tradeAmount': 2,
   }))
 
 asyncio.run(main())
@@ -781,5 +1003,78 @@ test.describe('Trade history accountant context', () => {
     const customExportUrl = new URL(customExportResponse.url())
     expect(customExportUrl.searchParams.get('from_date')).toBe(fixture.wideFromDate)
     expect(customExportUrl.searchParams.get('to_date')).toBe(fixture.wideToDate)
+  })
+
+  test('public profile presence renders online and last-seen states from the shared presence contract', async ({ page, request }) => {
+    await waitForBackendReady(request)
+    const fixture = seedPublicProfilePresenceFixture('presence_rendering')
+
+    await loginWithSeededSession(page, fixture.viewer)
+
+    await page.goto(`/users/${fixture.onlineTargetUserId}?account_name=${encodeURIComponent(fixture.onlineTargetAccountName)}`)
+    await expect(page.locator('.public-profile-view')).toContainText(fixture.onlineTargetAccountName)
+
+    const onlinePresence = page.locator('.profile-presence-status')
+    await expect(onlinePresence).toHaveText('آنلاین')
+    await expect(onlinePresence).toHaveClass(/online/)
+
+    await page.goto(`/users/${fixture.offlineTargetUserId}?account_name=${encodeURIComponent(fixture.offlineTargetAccountName)}`)
+    await expect(page.locator('.public-profile-view')).toContainText(fixture.offlineTargetAccountName)
+
+    const offlinePresence = page.locator('.profile-presence-status')
+    await expect(offlinePresence).toContainText('آخرین بازدید')
+    await expect(offlinePresence).toContainText('دقیقه پیش')
+    await expect(offlinePresence).not.toHaveClass(/online/)
+  })
+
+  test('blocking a user from public profile keeps market trade execution errors generic', async ({ page, request }) => {
+    await waitForBackendReady(request)
+    const fixture = seedPublicProfileBlockedMarketFixture('blocked_market_generic')
+
+    await loginWithSeededSession(page, fixture.viewer)
+    await page.goto(`/users/${fixture.targetUserId}?account_name=${encodeURIComponent(fixture.targetAccountName)}`)
+    await expect(page.locator('.public-profile-view')).toContainText(fixture.targetAccountName)
+
+    const blockButton = page.locator('.visitor-action-btn').filter({ hasText: 'بلاک کاربر' }).first()
+    await expect(blockButton).toBeVisible()
+
+    const dialogMessages: string[] = []
+    const dialogHandler = async (dialog: any) => {
+      dialogMessages.push(dialog.message())
+      await dialog.accept()
+    }
+    page.on('dialog', dialogHandler)
+    await blockButton.click()
+    await expect.poll(() => dialogMessages.length, { timeout: 30000 }).toBeGreaterThanOrEqual(2)
+    page.off('dialog', dialogHandler)
+
+    expect(dialogMessages[0]).toContain(`بلاک کاربر ${fixture.targetAccountName}`)
+    expect(dialogMessages[1]).toContain('مسدود شد')
+
+    await expect(page.locator('.visitor-action-btn').filter({ hasText: 'رفع بلاک' }).first()).toBeVisible()
+
+    await page.goto('/market')
+    const offerCard = page.locator('.offer-card-wrap', { hasText: fixture.offerNote }).first()
+    await expect(offerCard).toBeVisible()
+
+    const executeButton = offerCard.locator('.trade-btn').filter({ hasText: `${fixture.tradeAmount} عدد` }).first()
+    const tradeResponsePromise = page.waitForResponse((response) => {
+      if (response.request().method() !== 'POST') return false
+      const url = new URL(response.url())
+      return url.pathname === '/api/trades/'
+    })
+
+    await executeButton.dblclick()
+    const tradeResponse = await tradeResponsePromise
+    expect(tradeResponse.status()).toBe(400)
+    await expect(offerCard.locator('.trade-btn').filter({ hasText: `${fixture.tradeAmount} عدد` }).first()).toBeVisible()
+
+    const payload = await tradeResponse.json()
+    expect(payload?.detail).toBe('امکان انجام این معامله وجود ندارد.')
+
+    const tradeErrorToast = page.locator('div').filter({ hasText: 'امکان انجام این معامله وجود ندارد.' }).last()
+    await expect(tradeErrorToast).toBeVisible()
+    await expect(tradeErrorToast).not.toContainText('بلاک')
+    await expect(tradeErrorToast).not.toContainText(fixture.targetAccountName)
   })
 })

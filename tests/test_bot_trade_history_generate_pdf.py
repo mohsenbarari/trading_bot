@@ -21,6 +21,28 @@ def make_trade():
 
 
 class BotTradeHistoryGeneratePdfTests(unittest.IsolatedAsyncioTestCase):
+    async def test_generate_pdf_uses_shared_export_service_with_profile_subject_and_date_range(self):
+        current_user = SimpleNamespace(id=2)
+        trades = [make_trade()]
+
+        with patch("bot.handlers.trade_history.build_trade_history_export_rows", return_value=["row"]) as rows_mock, patch(
+            "bot.handlers.trade_history.build_trade_history_date_range_label",
+            return_value="بازه زمانی: تست",
+        ) as label_mock, patch(
+            "bot.handlers.trade_history.generate_trade_history_pdf_file",
+            return_value="/tmp/shared.pdf",
+        ) as pdf_mock:
+            filename = await generate_pdf(trades, None, current_user, months=6)
+
+        self.assertEqual(filename, "/tmp/shared.pdf")
+        rows_mock.assert_called_once_with(trades, 2)
+        label_mock.assert_called_once()
+        pdf_mock.assert_called_once_with(
+            subject_name="پروفایل من",
+            date_range_label="بازه زمانی: تست",
+            rows=["row"],
+        )
+
     async def test_generate_pdf_creates_pdf_file(self):
         class DummyDoc:
             def __init__(self, filename, **kwargs):
