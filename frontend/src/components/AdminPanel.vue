@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { isCachedMiddleManager } from '../utils/adminAccess'
+import { isCachedMiddleManager, isCachedSuperAdmin } from '../utils/adminAccess'
 
 defineEmits(['navigate']);
 
@@ -12,11 +12,19 @@ const actions = computed(() => {
     ]
   }
 
+  if (isCachedSuperAdmin()) {
+    return [
+      { key: 'create_invitation', label: '➕ ارسال لینک دعوت', variant: 'primary' },
+      { key: 'manage_commodities', label: '📦 مدیریت کالاها', variant: 'secondary' },
+      { key: 'manage_users', label: '👥 مدیریت کاربران', variant: 'secondary' },
+      { key: 'settings', label: '⚙️ تنظیمات سیستم', variant: 'secondary' },
+    ]
+  }
+
   return [
     { key: 'create_invitation', label: '➕ ارسال لینک دعوت', variant: 'primary' },
     { key: 'manage_commodities', label: '📦 مدیریت کالاها', variant: 'secondary' },
     { key: 'manage_users', label: '👥 مدیریت کاربران', variant: 'secondary' },
-    { key: 'settings', label: '⚙️ تنظیمات سیستم', variant: 'secondary' },
   ]
 })
 </script>

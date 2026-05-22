@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, ChevronLeft } from 'lucide-vue-next'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
@@ -11,6 +11,7 @@ import TradingSettings from '../components/TradingSettings.vue'
 import CreateInvitationView from '../components/CreateInvitationView.vue'
 import CreateChannelView from '../components/CreateChannelView.vue'
 import UserProfile from '../components/UserProfile.vue'
+import { isCachedSuperAdmin } from '../utils/adminAccess'
 
 const router = useRouter()
 const route = useRoute()
@@ -19,6 +20,7 @@ const jwtToken = ref<string | null>(null)
 const apiBaseUrl = '' // Relative path for proxy
 const selectedUserForProfile = ref<any>(null)
 const isLoadingRouteUserProfile = ref(false)
+const canAccessSystemSettings = computed(() => isCachedSuperAdmin())
 
 function getRouteUserProfileId(): number | null {
   if (route.query.section !== 'user_profile') {
@@ -91,6 +93,11 @@ function goToMenu() {
 
 function handleNavigate(section: string, data?: any) {
   console.log('Navigate to:', section, data)
+
+  if (section === 'settings' && !canAccessSystemSettings.value) {
+    goToMenu()
+    return
+  }
   
   if (section === 'user_profile' && data) {
      if (currentSection.value !== 'menu') {
@@ -120,6 +127,15 @@ function handleNavigate(section: string, data?: any) {
     })
   }
 }
+
+watch(
+  () => currentSection.value,
+  (section) => {
+    if (section === 'settings' && !canAccessSystemSettings.value) {
+      goToMenu()
+    }
+  }
+)
 
 function handleOpenPublicProfile(payload?: { id?: number; account_name?: string }) {
   const normalizedId = Number(payload?.id)
@@ -208,8 +224,8 @@ onUnmounted(() => clearBackStack())
                   در حال بارگذاری پروفایل کاربر...
                 </div>
 
-                <TradingSettings 
-                   v-else-if="currentSection === 'settings'" 
+                 <TradingSettings 
+                   v-else-if="currentSection === 'settings' && canAccessSystemSettings" 
                    :apiBaseUrl="apiBaseUrl" 
                    :jwtToken="jwtToken" 
                 />

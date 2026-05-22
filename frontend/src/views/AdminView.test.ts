@@ -44,6 +44,7 @@ describe('AdminView.vue', () => {
     adminViewMocks.apiFetchMock.mockReset()
     localStorage.clear()
     localStorage.setItem('auth_token', 'admin-jwt-token')
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر ارشد' }))
   })
 
   function mountView() {
@@ -249,6 +250,19 @@ describe('AdminView.vue', () => {
     wrapper.unmount()
 
     expect(adminViewMocks.clearBackStackMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks system settings navigation for middle managers', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    vm.handleNavigate('settings')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(wrapper.find('.trading-settings-stub').exists()).toBe(false)
   })
 
   it('reacts to route query changes after mount and executes stored back callbacks', async () => {

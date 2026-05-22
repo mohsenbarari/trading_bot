@@ -42,6 +42,10 @@ export function isCachedMiddleManager(): boolean {
   return readCachedCurrentUserRole() === MIDDLE_MANAGER_ROLE
 }
 
+export function isCachedSuperAdmin(): boolean {
+  return readCachedCurrentUserRole() === SUPER_ADMIN_ROLE
+}
+
 export function getInvitableRoleOptions(role: string | null | undefined = readCachedCurrentUserRole()): RoleOption[] {
   if (role === MIDDLE_MANAGER_ROLE) {
     return [...MIDDLE_MANAGER_INVITABLE_ROLE_OPTIONS]
