@@ -1,0 +1,246 @@
+# Roadmap زمان‌بندی بازار و اعلان‌های شروع/پایان
+
+این سند roadmap اختصاصی feature «باز/بسته بودن بازار بر اساس روز، ساعت، تعطیلی تقویمی، و overrideهای ادمین» است. تا قبل از این، برای این feature در `docs/` سند مستقلی وجود نداشت و اشاره‌های موجود فقط به gate شدن بازار در سناریوی `inactive user` محدود بودند، نه زمان‌بندی خود بازار.
+
+هدف این roadmap این است که contract محصول، seamهای واقعی کد، transitionهای runtime، و surfaceهای UI/Telegram/Bot را قبل از implementation قفل کند.
+
+## 0. Snapshot تصمیم‌های قطعی این فاز
+
+- [x] بازار نباید 24/7 باز باشد و باید بر اساس ruleهای زمانی و روزی کنترل شود.
+- [x] schedule پایه باید قابل تنظیم توسط سوپرادمین باشد.
+- [x] تعطیلی‌های تقویمی و overrideهای خاص باید از schedule پایه جدا مدل شوند.
+- [x] با تمام شدن تایم بازار، همه آفرهای `ACTIVE` باید هم در وب‌اپ و هم در تلگرام منقضی شوند.
+- [x] با بسته شدن بازار، پیام «پایان فعالیت بازار» باید در کانال تلگرامی و در وب‌اپ منتشر شود.
+- [x] با بسته شدن بازار، chatbox / input ثبت آفر در صفحه بازار وب باید غیرفعال شود.
+- [x] اگر کاربر در بات هنگام بسته بودن بازار اقدام به ثبت آفر کرد، باید دقیقاً این پیام را بگیرد:
+  - [x] `بعلت بسته بودن بازار درخواست شما ثبت نشد`
+  - [x] `لطفا در زمان فعال بودن بازار اقدام به ثبت درخواست کنید.`
+- [x] با باز شدن بازار، پیام «پایان فعالیت بازار» در صفحه وب بازار باید حذف و پیام «شروع فعالیت بازار» منتشر شود.
+- [x] با باز شدن بازار، chatbox / input ثبت آفر در صفحه وب بازار باید دوباره فعال شود.
+- [x] در کانال تلگرام، پیام قبلی «پایان فعالیت بازار» نیازی به حذف ندارد.
+- [x] در کانال تلگرام، با باز شدن بازار باید پیام «شروع فعالیت بازار» منتشر شود.
+- [x] با باز شدن بازار، امکان ثبت آفر در بات دوباره فعال شود.
+- [x] در وب‌اپ، پیام «شروع فعالیت بازار» باید بعد از ثبت دومین آفر محو شود.
+- [x] transitionهای باز/بسته شدن بازار باید idempotent باشند؛ یعنی loop یا restart نباید دوباره همان side effectها را تکرار کند.
+- [x] پیام‌های start/end در وب نباید فقط local state باشند؛ باید طوری طراحی شوند که با refresh، reconnect، و open شدن market page در تب دیگر از بین نروند.
+
+## 1. seamهای فعلی کد که این feature را درگیر می‌کنند
+
+### 1.1. schedule و settings
+
+- [x] `core/trading_settings.py` seam فعلی settings سراسری و Redis/DB-backed پروژه است.
+- [x] `api/routers/trading_settings.py` surface فعلی read/update/reset تنظیمات سیستم است.
+- [x] `bot/handlers/panel.py` surface فعلی بات برای نمایش/ویرایش بخشی از trading settings است.
+
+### 1.2. transitionهای خودکار و background loops
+
+- [x] `core/offer_expiry.py` loop فعلی auto-expire آفرها را بر اساس `offer_expiry_minutes` انجام می‌دهد.
+- [x] `main.py` همین حالا `offer_expiry_loop()` و loopهای background دیگر را در `lifespan` با `asyncio.create_task(...)` بالا می‌آورد.
+- [x] پس market schedule transition loop seam طبیعی و هم‌سبک با loopهای موجود دارد و لازم نیست worker جدیدی برای MVP ساخته شود.
+
+### 1.3. create / execute surfaces
+
+- [x] `api/routers/offers.py` create-offer authority فعلی برای وب است.
+- [x] `api/routers/trades.py` execute-trade authority فعلی برای اجرای معامله است.
+- [x] `bot/handlers/trade_create.py` هم مسیر text offer و هم مسیر wizard/FSM ایجاد آفر در بات را نگه می‌دارد.
+
+### 1.4. وب‌اپ بازار
+
+- [x] `frontend/src/views/MarketView.vue` surface فعلی market page و text-offer chatbox را نگه می‌دارد.
+- [x] `frontend/src/composables/useOffers.ts` / websocket offer runtime، offer list را با `offer:created` و `offer:expired` به‌روزرسانی می‌کند.
+- [x] `frontend/src/components/TradingView.vue` نیز همچنان websocket-driven است و offer/trade runtime را مصرف می‌کند.
+
+## 2. پیشنهاد مدل داده
+
+### 2.1. schedule پایه در trading settings
+
+- [ ] schedule پایه در `core/trading_settings.py` بماند، نه در جدول exceptionها.
+- [ ] فیلدهای additive پیشنهادی برای schedule پایه:
+  - [ ] `market_schedule_enabled`
+  - [ ] `market_timezone` (پیش‌فرض: `Asia/Tehran`)
+  - [ ] `market_open_time_local`
+  - [ ] `market_close_time_local`
+  - [ ] `market_closed_weekdays`
+- [ ] برای MVP، یک window یکنواخت روزانه کافی است و per-weekday custom hours لازم نیست مگر product بعداً بخواهد.
+
+### 2.2. exceptionها در جدول جدا
+
+- [ ] تعطیلی‌های تقویمی و overrideهای خاص نباید داخل key-value فعلی فشرده شوند.
+- [ ] یک جدول جدید مثل `market_schedule_overrides` لازم است.
+- [ ] هر row حداقل این contract را داشته باشد:
+  - [ ] `date`
+  - [ ] `override_type` (`closed_all_day`, `open_all_day`, `custom_hours`)
+  - [ ] `open_time_local` nullable
+  - [ ] `close_time_local` nullable
+  - [ ] `note`
+  - [ ] `created_by_user_id`
+  - [ ] `updated_at`
+- [ ] این جدول باید مثل سایر entityهای اصلی وارد sync/change_log شود.
+
+### 2.3. runtime state جدا از settings
+
+- [ ] برای start/end web notice و rule «بعد از دومین آفر، پیام شروع محو شود» یک state runtime لازم است و نباید فقط از schedule مشتق شود.
+- [ ] یک singleton/runtime table مثل `market_runtime_state` پیشنهاد می‌شود.
+- [ ] contract پیشنهادی:
+  - [ ] `is_open`
+  - [ ] `last_transition_at`
+  - [ ] `current_session_started_at`
+  - [ ] `current_session_closed_at`
+  - [ ] `active_web_notice_kind` (`opened`, `closed`, `none`)
+  - [ ] `active_web_notice_visible`
+  - [ ] `offers_since_last_open`
+  - [ ] `last_channel_open_announcement_at`
+  - [ ] `last_channel_close_announcement_at`
+- [ ] اگر بعداً audit کامل‌تر لازم شد، event journal جداگانه می‌تواند اضافه شود، اما برای MVP همین singleton state کافی است.
+
+## 3. سرویس‌ها و loopهای runtime
+
+### 3.1. سرویس authoritative تصمیم‌گیری
+
+- [ ] یک سرویس مشترک مثل `core/services/market_schedule_service.py` اضافه شود.
+- [ ] این سرویس باید تنها مرجع truth برای این سؤال باشد: «الان بازار باز است یا بسته؟»
+- [ ] خروجی سرویس باید علاوه بر bool، reason و next transition را هم بدهد.
+- [ ] ترتیب تصمیم‌گیری باید این باشد:
+  - [ ] override روز خاص
+  - [ ] تعطیلی کامل روز
+  - [ ] روز بسته هفتگی
+  - [ ] window ساعتی روزانه
+
+### 3.2. loop transition
+
+- [ ] یک loop جدید مثل `market_schedule_loop()` در `main.py` به background tasks اضافه شود.
+- [ ] loop باید فقط transition detect کند؛ business side effectها را به `market_transition_service` بسپارد.
+- [ ] loop باید idempotent باشد و restart/race باعث دوباره‌انتشار notice یا دوباره-expire شدن همان آفرها نشود.
+
+### 3.3. transition بسته شدن بازار
+
+- [ ] با transition به حالت closed باید این side effectها به‌ترتیب و اتمیک تا حد ممکن اجرا شوند:
+  - [ ] همه آفرهای `ACTIVE` لوکال expire شوند.
+  - [ ] keyboard پیام‌های کانال offerها حذف شود.
+  - [ ] برای هر offer، `offer:expired` realtime publish شود تا وب‌اپ فوراً sync شود.
+  - [ ] `market_runtime_state` به وضعیت `closed` برود.
+  - [ ] `active_web_notice_kind=closed` و `active_web_notice_visible=true` شود.
+  - [ ] پیام «پایان فعالیت بازار» در کانال تلگرام publish شود.
+  - [ ] رویداد realtime جدید `market:closed` برای clientهای وب publish شود.
+- [ ] انقضای بازار-بسته باید از auto-expire زمانی عادی از نظر business reason قابل تمایز باشد، حتی اگر status نهایی هر دو `EXPIRED` بماند.
+
+### 3.4. transition باز شدن بازار
+
+- [ ] با transition به حالت open باید این side effectها اجرا شوند:
+  - [ ] `market_runtime_state` به وضعیت `open` برود.
+  - [ ] `active_web_notice_kind=opened` و `active_web_notice_visible=true` شود.
+  - [ ] `offers_since_last_open=0` reset شود.
+  - [ ] پیام «شروع فعالیت بازار» در کانال تلگرام publish شود.
+  - [ ] رویداد realtime جدید `market:opened` برای clientهای وب publish شود.
+- [ ] پیام قبلی «پایان فعالیت بازار» در کانال حذف نمی‌شود.
+- [ ] آفرهای expireشده‌ی session قبلی revive نمی‌شوند؛ بازار فقط برای آفرهای جدید باز می‌شود.
+
+## 4. contract رفتار وب‌اپ
+
+### 4.1. Market page
+
+- [ ] `frontend/src/views/MarketView.vue` باید state جدید بازار را consume کند.
+- [ ] وقتی بازار بسته است:
+  - [ ] banner/notice «پایان فعالیت بازار» در market page نمایش داده شود.
+  - [ ] chatbox / input ثبت آفر غیرفعال شود.
+  - [ ] ارسال با Enter و click هم از UI block شود.
+  - [ ] draft محلی کاربر حفظ شود مگر product خلاف آن را بخواهد.
+- [ ] وقتی بازار باز می‌شود:
+  - [ ] banner قبلی «پایان فعالیت بازار» حذف شود.
+  - [ ] banner «شروع فعالیت بازار» نمایش داده شود.
+  - [ ] chatbox / input دوباره فعال شود.
+
+### 4.2. محو شدن پیام شروع بازار بعد از دومین آفر
+
+- [ ] rule فعلی roadmap این است که banner «شروع فعالیت بازار» در وب بعد از ثبت دومین آفر محو شود.
+- [ ] این behavior باید بر اساس state سراسری بازار باشد، نه صرفاً local state یک tab.
+- [ ] بنابراین create-offer success path باید `offers_since_last_open` را افزایش دهد.
+- [ ] وقتی این شمارنده به 2 رسید:
+  - [ ] `active_web_notice_visible=false` شود.
+  - [ ] یک realtime event مثل `market:notice_hidden` برای clientهای باز publish شود.
+
+### 4.3. realtime contract وب
+
+- [ ] `useOffers` یا یک composable مستقل بازار باید eventهای جدید را consume کند:
+  - [ ] `market:closed`
+  - [ ] `market:opened`
+  - [ ] `market:notice_hidden`
+- [ ] UI بازار نباید برای دیدن start/end notice فقط به polling وابسته باشد.
+- [ ] refresh و open کردن market page در تب جدید باید آخرین state persisted را درست نشان دهد.
+
+## 5. contract رفتار بات و کانال تلگرام
+
+### 5.1. ثبت آفر در بات هنگام بسته بودن بازار
+
+- [ ] `bot/handlers/trade_create.py` باید قبل از ورود به parse/preview/send flow، market-open policy را enforce کند.
+- [ ] این guard باید هم text-offer path و هم wizard/FSM path را پوشش دهد.
+- [ ] copy قطعی bot هنگام بسته بودن بازار:
+  - [ ] `بعلت بسته بودن بازار درخواست شما ثبت نشد`
+  - [ ] `لطفا در زمان فعال بودن بازار اقدام به ثبت درخواست کنید.`
+
+### 5.2. کانال تلگرام
+
+- [ ] در close transition، پیام «پایان فعالیت بازار» در کانال publish شود.
+- [ ] در open transition، پیام «شروع فعالیت بازار» در کانال publish شود.
+- [ ] close announcement قبلی در کانال حذف نمی‌شود.
+- [ ] از لحظه بازگشایی، امکان ثبت آفر در بات دوباره فعال می‌شود.
+
+## 6. contract backend create/execute
+
+- [ ] `api/routers/offers.py` باید روی create-offer authority، market-open policy را enforce کند.
+- [ ] اگر بازار بسته باشد، create-offer باید با error business مناسب reject شود.
+- [ ] `api/routers/trades.py` نیز باید guard هم‌راستا داشته باشد، حتی اگر close transition همه آفرها را expire کرده باشد؛ چون backend authority نباید فقط به UI یا transition side effect تکیه کند.
+
+## 7. UI مدیریت ادمین برای schedule و exceptionها
+
+- [ ] در `TradingSettings.vue` یک سکشن مستقل برای schedule پایه اضافه شود.
+- [ ] exceptionهای تقویمی/overrideها باید manager جداگانه داشته باشند، نه چند input عددی داخل فرم فعلی.
+- [ ] capabilityهای لازم برای UI ادمین:
+  - [ ] تعیین روزهای بسته هفتگی
+  - [ ] تعیین ساعت باز و بسته شدن روزانه
+  - [ ] ثبت تعطیلی تقویمی
+  - [ ] ثبت روز باز استثنایی
+  - [ ] ثبت ساعت سفارشی برای یک روز خاص
+  - [ ] نمایش preview از وضعیت فعلی بازار و next transition
+
+## 8. تست و non-regression
+
+### 8.1. backend
+
+- [ ] unit tests برای schedule evaluation با timezone `Asia/Tehran`
+- [ ] unit tests برای override precedence
+- [ ] unit tests برای close/open transition idempotency
+- [ ] unit tests برای expire-all-active-offers on close
+- [ ] unit tests برای create-offer / create-trade denial وقتی بازار بسته است
+
+### 8.2. bot
+
+- [ ] tests برای text offer path هنگام بسته بودن بازار با copy دقیق
+- [ ] tests برای wizard start/confirm path هنگام بسته بودن بازار
+- [ ] tests برای publish start/end message به کانال
+
+### 8.3. frontend
+
+- [ ] Vitest برای MarketView notice rendering و disabled state
+- [ ] Vitest برای remove/show start/end notice روی eventهای realtime
+- [ ] Playwright برای close transition، open transition، disable/enable شدن chatbox، و hide شدن start notice بعد از دومین آفر
+
+## 9. challengeها و سوال‌های باز بعد از audit
+
+### 9.1. معنی دقیق «بعد از ثبت دومین آفر»
+
+- [ ] آیا منظور شما دومین آفر **سراسری بازار** بعد از بازگشایی است؟
+- [ ] یا دومین آفرِ همان کاربر / همان session / همان tab؟
+- [ ] پیشنهاد فنی من برای MVP: «دومین آفر سراسری پذیرفته‌شده بعد از current open transition» مبنا باشد، چون با persisted runtime state و realtime هم‌راستاست.
+
+### 9.2. scope دقیق chatbox غیرفعال‌شونده در وب
+
+- [ ] در کد فعلی، `MarketView.vue` surface اصلی market page است، اما `TradingView.vue` هم منطق offer-entry/state مشابه دارد.
+- [ ] آیا منظورتان از «chatbox موجود در بازار» فقط `MarketView` است؟
+- [ ] یا هر surface وبی که کاربر از آن می‌تواند لفظ ثبت کند باید هم‌زمان disable شود؟
+
+## 10. معیار آماده‌بودن برای implementation
+
+- [ ] سوال 9.1 بسته شود.
+- [ ] سوال 9.2 بسته شود.
+- [ ] بعد از بسته‌شدن این دو ambiguity، roadmap برای ورود به implementation phase آماده است.
