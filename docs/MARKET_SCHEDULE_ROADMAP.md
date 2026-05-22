@@ -56,14 +56,14 @@
 
 ### 2.1. schedule پایه در trading settings
 
-- [ ] schedule پایه در `core/trading_settings.py` بماند، نه در جدول exceptionها.
-- [ ] فیلدهای additive پیشنهادی برای schedule پایه:
-  - [ ] `market_schedule_enabled`
-  - [ ] `market_timezone` (پیش‌فرض: `Asia/Tehran`)
-  - [ ] `market_open_time_local`
-  - [ ] `market_close_time_local`
-  - [ ] `market_closed_weekdays`
-- [ ] برای MVP، یک window یکنواخت روزانه کافی است و per-weekday custom hours لازم نیست مگر product بعداً بخواهد.
+- [x] schedule پایه در `core/trading_settings.py` بماند، نه در جدول exceptionها.
+- [x] فیلدهای additive پیشنهادی برای schedule پایه:
+  - [x] `market_schedule_enabled`
+  - [x] `market_timezone` (پیش‌فرض: `Asia/Tehran`)
+  - [x] `market_open_time_local`
+  - [x] `market_close_time_local`
+  - [x] `market_closed_weekdays`
+- [x] برای MVP، یک window یکنواخت روزانه کافی است و per-weekday custom hours لازم نیست مگر product بعداً بخواهد.
 
 ### 2.2. exceptionها در جدول جدا
 
@@ -94,14 +94,14 @@
 
 ### 3.1. سرویس authoritative تصمیم‌گیری
 
-- [ ] یک سرویس مشترک مثل `core/services/market_schedule_service.py` اضافه شود.
-- [ ] این سرویس باید تنها مرجع truth برای این سؤال باشد: «الان بازار باز است یا بسته؟»
-- [ ] خروجی سرویس باید علاوه بر bool، reason و next transition را هم بدهد.
-- [ ] ترتیب تصمیم‌گیری باید این باشد:
-  - [ ] override روز خاص
-  - [ ] تعطیلی کامل روز
-  - [ ] روز بسته هفتگی
-  - [ ] window ساعتی روزانه
+- [x] یک سرویس مشترک مثل `core/services/market_schedule_service.py` اضافه شود.
+- [x] این سرویس باید تنها مرجع truth برای این سؤال باشد: «الان بازار باز است یا بسته؟»
+- [x] خروجی سرویس باید علاوه بر bool، reason و next transition را هم بدهد.
+- [x] ترتیب تصمیم‌گیری باید این باشد:
+  - [x] override روز خاص
+  - [x] تعطیلی کامل روز
+  - [x] روز بسته هفتگی
+  - [x] window ساعتی روزانه
 
 ### 3.2. loop transition
 
@@ -256,7 +256,10 @@
   - [x] migration additive برای هر دو table اضافه شد.
   - [x] `change_log` / sync mapping / ORM event listener برای هر دو surface اضافه شد.
   - [x] validation محدود این phase با `tests.test_market_schedule_foundation` و `tests.test_migration_smoke` سبز شد.
-- [ ] Phase 2 - Shared schedule evaluation service
+- [x] Phase 2 - Shared schedule evaluation service
+  - [x] فیلدهای schedule پایه به `TradingSettings` به‌صورت JSON-safe اضافه شد.
+  - [x] `core/services/market_schedule_service.py` precedence و next transition را به‌صورت pure محاسبه می‌کند.
+  - [x] validation محدود این phase با `tests.test_market_schedule_service` و `tests.test_core_trading_settings_runtime` سبز شد.
 - [ ] Phase 3 - Transition loop and side effects
 - [ ] Phase 4 - Backend offer/trade authority guards
 - [ ] Phase 5 - Market web runtime and realtime notices
