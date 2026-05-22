@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from api.deps import verify_super_admin_or_dev_key
+from api.deps import verify_super_admin
 
 from core.trading_settings import (
     TradingSettings, 
@@ -74,7 +74,7 @@ async def get_settings():
     )
 
 
-@router.put("/", response_model=TradingSettingsResponse, dependencies=[Depends(verify_super_admin_or_dev_key)])
+@router.put("/", response_model=TradingSettingsResponse, dependencies=[Depends(verify_super_admin)])
 async def update_settings(updates: TradingSettingsUpdate):
     """بروزرسانی تنظیمات - فقط ادمین ارشد"""
     current = await load_trading_settings_async()
@@ -122,7 +122,7 @@ async def update_settings(updates: TradingSettingsUpdate):
     )
 
 
-@router.post("/reset", response_model=TradingSettingsResponse, dependencies=[Depends(verify_super_admin_or_dev_key)])
+@router.post("/reset", response_model=TradingSettingsResponse, dependencies=[Depends(verify_super_admin)])
 async def reset_settings():
     """بازنشانی تنظیمات به مقادیر پیش‌فرض - فقط ادمین ارشد"""
     default_settings = TradingSettings()
