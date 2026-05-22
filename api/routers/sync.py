@@ -9,6 +9,7 @@ import hashlib
 import time
 import json
 import logging
+from datetime import date as date_cls, datetime, time as time_cls
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -26,8 +27,10 @@ TABLE_ORDER = {
     "commodities": 8,
     "commodity_aliases": 9,
     "trading_settings": 10,
-    "offers": 11,
-    "trades": 12,
+    "market_schedule_overrides": 11,
+    "market_runtime_state": 12,
+    "offers": 13,
+    "trades": 14,
 }
 
 async def verify_signature(request: Request):
@@ -86,9 +89,10 @@ from models.trade import Trade
 from models.commodity import Commodity, CommodityAlias
 from models.chat import Chat
 from models.chat_member import ChatMember
+from models.market_runtime_state import MarketRuntimeState
+from models.market_schedule_override import MarketScheduleOverride
 from models.trading_setting import TradingSetting
 from models.user_block import UserBlock
-from datetime import datetime
 from core.services.chat_room_service import ensure_mandatory_channel_rollout
 
 # Counter fields that should use MAX logic (greatest value wins) to avoid losing increments
@@ -115,6 +119,8 @@ SEQUENCE_MAP = {
     "notifications": ("notifications_id_seq", "notifications"),
     "commodities": ("commodities_id_seq", "commodities"),
     "commodity_aliases": ("commodity_aliases_id_seq", "commodity_aliases"),
+    "market_schedule_overrides": ("market_schedule_overrides_id_seq", "market_schedule_overrides"),
+    "market_runtime_state": ("market_runtime_state_id_seq", "market_runtime_state"),
     "user_blocks": ("user_blocks_id_seq", "user_blocks"),
 }
 
@@ -131,6 +137,8 @@ def get_model_class(table_name: str):
         "trades": Trade,
         "commodities": Commodity,
         "commodity_aliases": CommodityAlias,
+        "market_schedule_overrides": MarketScheduleOverride,
+        "market_runtime_state": MarketRuntimeState,
         "trading_settings": TradingSetting,
         "user_blocks": UserBlock
     }
@@ -381,9 +389,23 @@ def _parse_item(item: dict):
 
     # Parse datetime fields
     for key, value in list(data.items()):
-        if isinstance(value, str) and key.endswith('_at'):
+        if not isinstance(value, str):
+            continue
+        if key.endswith('_at'):
             try:
                 data[key] = datetime.fromisoformat(value)
+            except ValueError:
+                pass
+            continue
+        if key == 'date':
+            try:
+                data[key] = date_cls.fromisoformat(value)
+            except ValueError:
+                pass
+            continue
+        if key.endswith('_time_local'):
+            try:
+                data[key] = time_cls.fromisoformat(value)
             except ValueError:
                 pass
 

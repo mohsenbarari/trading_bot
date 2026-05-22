@@ -8,6 +8,7 @@
 
 - [x] بازار نباید 24/7 باز باشد و باید بر اساس ruleهای زمانی و روزی کنترل شود.
 - [x] schedule پایه باید قابل تنظیم توسط سوپرادمین باشد.
+- [x] مدیریت schedule و exceptionها فقط از طریق وب‌اپ انجام می‌شود و برای این feature نیازی به UI تنظیمات در بات تلگرام نیست.
 - [x] تعطیلی‌های تقویمی و overrideهای خاص باید از schedule پایه جدا مدل شوند.
 - [x] با تمام شدن تایم بازار، همه آفرهای `ACTIVE` باید هم در وب‌اپ و هم در تلگرام منقضی شوند.
 - [x] با بسته شدن بازار، پیام «پایان فعالیت بازار» باید در کانال تلگرامی و در وب‌اپ منتشر شود.
@@ -17,6 +18,7 @@
   - [x] `لطفا در زمان فعال بودن بازار اقدام به ثبت درخواست کنید.`
 - [x] با باز شدن بازار، پیام «پایان فعالیت بازار» در صفحه وب بازار باید حذف و پیام «شروع فعالیت بازار» منتشر شود.
 - [x] با باز شدن بازار، chatbox / input ثبت آفر در صفحه وب بازار باید دوباره فعال شود.
+- [x] پیام «شروع فعالیت بازار» در وب فقط یک reminder ساده است که از این لحظه امکان ثبت آفر و معامله دوباره برقرار شده است؛ این بخش نیازی به UX یا state اضافه‌ی نمایشی فراتر از حد لازم ندارد.
 - [x] در کانال تلگرام، پیام قبلی «پایان فعالیت بازار» نیازی به حذف ندارد.
 - [x] در کانال تلگرام، با باز شدن بازار باید پیام «شروع فعالیت بازار» منتشر شود.
 - [x] با باز شدن بازار، امکان ثبت آفر در بات دوباره فعال شود.
@@ -30,7 +32,7 @@
 
 - [x] `core/trading_settings.py` seam فعلی settings سراسری و Redis/DB-backed پروژه است.
 - [x] `api/routers/trading_settings.py` surface فعلی read/update/reset تنظیمات سیستم است.
-- [x] `bot/handlers/panel.py` surface فعلی بات برای نمایش/ویرایش بخشی از trading settings است.
+- [x] `bot/handlers/panel.py` surface فعلی بات برای تنظیمات سیستم وجود دارد، اما طبق تصمیم محصول برای این feature خارج از scope مدیریت schedule است و parity با وب لازم ندارد.
 
 ### 1.2. transitionهای خودکار و background loops
 
@@ -79,19 +81,14 @@
 
 ### 2.3. runtime state جدا از settings
 
-- [ ] برای start/end web notice و rule «بعد از دومین آفر، پیام شروع محو شود» یک state runtime لازم است و نباید فقط از schedule مشتق شود.
+- [ ] برای notice بسته/باز بودن وب و rule «بعد از دومین آفر، پیام شروع محو شود» یک state runtime حداقلی لازم است و نباید فقط از schedule مشتق شود.
 - [ ] یک singleton/runtime table مثل `market_runtime_state` پیشنهاد می‌شود.
-- [ ] contract پیشنهادی:
+- [ ] contract حداقلی پیشنهادی:
   - [ ] `is_open`
   - [ ] `last_transition_at`
-  - [ ] `current_session_started_at`
-  - [ ] `current_session_closed_at`
-  - [ ] `active_web_notice_kind` (`opened`, `closed`, `none`)
   - [ ] `active_web_notice_visible`
   - [ ] `offers_since_last_open`
-  - [ ] `last_channel_open_announcement_at`
-  - [ ] `last_channel_close_announcement_at`
-- [ ] اگر بعداً audit کامل‌تر لازم شد، event journal جداگانه می‌تواند اضافه شود، اما برای MVP همین singleton state کافی است.
+- [ ] این state فقط باید حداقل اطلاعات لازم برای reminder وب، idempotent transition، و hide شدن notice شروع بعد از دومین آفر را نگه دارد؛ نه بیشتر.
 
 ## 3. سرویس‌ها و loopهای runtime
 
@@ -128,7 +125,7 @@
 
 - [ ] با transition به حالت open باید این side effectها اجرا شوند:
   - [ ] `market_runtime_state` به وضعیت `open` برود.
-  - [ ] `active_web_notice_kind=opened` و `active_web_notice_visible=true` شود.
+  - [ ] `active_web_notice_visible=true` شود.
   - [ ] `offers_since_last_open=0` reset شود.
   - [ ] پیام «شروع فعالیت بازار» در کانال تلگرام publish شود.
   - [ ] رویداد realtime جدید `market:opened` برای clientهای وب publish شود.
@@ -147,7 +144,7 @@
   - [ ] draft محلی کاربر حفظ شود مگر product خلاف آن را بخواهد.
 - [ ] وقتی بازار باز می‌شود:
   - [ ] banner قبلی «پایان فعالیت بازار» حذف شود.
-  - [ ] banner «شروع فعالیت بازار» نمایش داده شود.
+  - [ ] banner «شروع فعالیت بازار» به‌صورت یک reminder ساده نمایش داده شود.
   - [ ] chatbox / input دوباره فعال شود.
 
 ### 4.2. محو شدن پیام شروع بازار بعد از دومین آفر
@@ -194,6 +191,7 @@
 
 ## 7. UI مدیریت ادمین برای schedule و exceptionها
 
+- [ ] این بخش فقط در وب‌اپ مدیریت می‌شود و برای MVP هیچ UI مدیریتی در بات تلگرام به آن اضافه نمی‌شود.
 - [ ] در `TradingSettings.vue` یک سکشن مستقل برای schedule پایه اضافه شود.
 - [ ] exceptionهای تقویمی/overrideها باید manager جداگانه داشته باشند، نه چند input عددی داخل فرم فعلی.
 - [ ] capabilityهای لازم برای UI ادمین:
@@ -239,8 +237,28 @@
 - [x] route زنده بازار در فرانت فعلی `/market` است و به `frontend/src/views/MarketView.vue` وصل است.
 - [x] `frontend/src/components/TradingView.vue` فعلاً route/view زنده بازار نیست و در usage فعلی فقط فایل component و test suite خودش دیده می‌شود؛ پس scope این roadmap برای chatbox وب، `MarketView.vue` است.
 
+### 9.3. scope مدیریت schedule
+
+- [x] این ambiguity بسته شد.
+- [x] contract قطعی: مدیریت schedule و exceptionها فقط در وب‌اپ انجام می‌شود و برای این feature نیازی به توسعه UI تنظیمات متناظر در بات تلگرام نیست.
+
 ## 10. معیار آماده‌بودن برای implementation
 
 - [x] سوال 9.1 بسته شد.
 - [x] سوال 9.2 بسته شد.
 - [x] roadmap از نظر contract محصولی لازم برای ورود به implementation phase آماده است.
+
+## 11. وضعیت اجرای phaseها
+
+- [x] Phase 1 - Data foundation
+  - [x] مدل `market_schedule_overrides` اضافه شد.
+  - [x] مدل `market_runtime_state` اضافه شد.
+  - [x] migration additive برای هر دو table اضافه شد.
+  - [x] `change_log` / sync mapping / ORM event listener برای هر دو surface اضافه شد.
+  - [x] validation محدود این phase با `tests.test_market_schedule_foundation` و `tests.test_migration_smoke` سبز شد.
+- [ ] Phase 2 - Shared schedule evaluation service
+- [ ] Phase 3 - Transition loop and side effects
+- [ ] Phase 4 - Backend offer/trade authority guards
+- [ ] Phase 5 - Market web runtime and realtime notices
+- [ ] Phase 6 - Admin web schedule management UI
+- [ ] Phase 7 - Focused regression coverage and rollout
