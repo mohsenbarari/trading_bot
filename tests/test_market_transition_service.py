@@ -189,6 +189,49 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("market_schedule_overrides.date >= '2026-05-22'", compiled)
         self.assertIn("market_schedule_overrides.date <= '2026-05-25'", compiled)
 
+    async def test_evaluate_current_market_schedule_loads_settings_overrides_and_evaluates(self):
+        db = SimpleNamespace()
+        current_time = datetime(2026, 5, 22, 8, 30, tzinfo=timezone.utc)
+        trading_settings = SimpleNamespace(market_schedule_enabled=True)
+        evaluation = MarketScheduleEvaluation(
+            is_open=False,
+            reason="after_daily_window_close",
+            next_transition_at=datetime(2026, 5, 23, 9, 0, tzinfo=timezone.utc),
+            timezone="Asia/Tehran",
+        )
+        overrides = [SimpleNamespace(id=1)]
+
+        with patch(
+            "core.services.market_transition_service.get_trading_settings_async",
+            new=AsyncMock(return_value=trading_settings),
+        ), patch(
+            "core.services.market_transition_service.get_market_timezone_name",
+            return_value="Asia/Tehran",
+        ), patch.object(
+            market_transition_service,
+            "load_market_schedule_overrides_window",
+            new=AsyncMock(return_value=overrides),
+        ) as load_mock, patch(
+            "core.services.market_transition_service.evaluate_market_schedule",
+            return_value=evaluation,
+        ) as evaluate_mock:
+            result = await market_transition_service.evaluate_current_market_schedule(
+                db,
+                current_time=current_time,
+            )
+
+        self.assertIs(result, evaluation)
+        load_mock.assert_awaited_once_with(
+            db,
+            timezone_name="Asia/Tehran",
+            current_time=current_time,
+        )
+        evaluate_mock.assert_called_once_with(
+            trading_settings,
+            current_time=current_time,
+            overrides=overrides,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

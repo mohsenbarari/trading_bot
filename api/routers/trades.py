@@ -26,6 +26,7 @@ from core.utils import (
 )
 from core.services.accountant_chat_contract import AccountantChatIdentity, load_accountant_chat_identity_map
 from core.services.accountant_relation_service import build_trade_notification_audience_user_ids
+from core.services.market_transition_service import evaluate_current_market_schedule
 from core.services.customer_relation_service import (
     apply_customer_commission,
     get_active_customer_relation_for_customer,
@@ -47,6 +48,9 @@ from core.trade_forwarding import forward_trade_to_home_server, verify_internal_
 
 
 logger = logging.getLogger(__name__)
+
+
+MARKET_CLOSED_DETAIL = "بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید."
 
 
 router = APIRouter(
@@ -1102,6 +1106,13 @@ async def _execute_trade_authoritatively(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="حساب شما غیرفعال است و امکان انجام معامله ندارید.",
+        )
+
+    market_evaluation = await evaluate_current_market_schedule(db)
+    if not market_evaluation.is_open:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=MARKET_CLOSED_DETAIL,
         )
     
     # بررسی مسدودیت (قبل از قفل)

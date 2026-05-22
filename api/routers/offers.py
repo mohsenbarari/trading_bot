@@ -19,6 +19,7 @@ from core.db import get_db
 from core.config import settings
 from core.trading_settings import get_trading_settings
 from core.utils import check_user_limits, increment_user_counter, to_jalali_str
+from core.services.market_transition_service import evaluate_current_market_schedule
 from core.services.trade_service import get_available_trade_amounts
 from core.services.customer_relation_service import (
     build_customer_offer_read_model,
@@ -35,6 +36,9 @@ from core.server_routing import current_server
 
 
 logger = logging.getLogger(__name__)
+
+
+MARKET_CLOSED_DETAIL = "بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید."
 
 
 def _resolve_offer_owner_context(
@@ -304,6 +308,13 @@ async def create_offer(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="حساب شما غیرفعال است و دسترسی شما به بازار بسته شده است.",
+        )
+
+    market_evaluation = await evaluate_current_market_schedule(db)
+    if not market_evaluation.is_open:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=MARKET_CLOSED_DETAIL,
         )
     
     # بررسی مسدودیت

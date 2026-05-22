@@ -98,6 +98,20 @@ def make_reloaded_offer(*, offer_id=77, channel_message_id=None, notes="urgent")
 
 
 class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        market_eval_patcher = patch(
+            "api.routers.offers.evaluate_current_market_schedule",
+            new=AsyncMock(return_value=SimpleNamespace(is_open=True, reason="daily_window_open")),
+        )
+        market_eval_patcher.start()
+        self.addCleanup(market_eval_patcher.stop)
+        customer_relation_patcher = patch(
+            "api.routers.offers.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        )
+        customer_relation_patcher.start()
+        self.addCleanup(customer_relation_patcher.stop)
+
     async def test_create_offer_stamps_home_server_and_links_republished_offer(self):
         commodity = SimpleNamespace(id=1)
         old_offer = SimpleNamespace(user_id=5, status=OfferStatus.ACTIVE, republished_offer_id=None)

@@ -111,6 +111,12 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         self.publish_user_event_mock = user_event_patcher.start()
         self.addCleanup(user_event_patcher.stop)
+        market_eval_patcher = patch(
+            "api.routers.trades.evaluate_current_market_schedule",
+            new=AsyncMock(return_value=SimpleNamespace(is_open=True, reason="daily_window_open")),
+        )
+        market_eval_patcher.start()
+        self.addCleanup(market_eval_patcher.stop)
 
     async def test_execute_trade_authoritatively_converts_stale_commit_to_conflict(self):
         locked_user = make_user()
