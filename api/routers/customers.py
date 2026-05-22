@@ -1,5 +1,9 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 import schemas
 from api.deps import get_effective_owner_actor_context
@@ -13,7 +17,10 @@ from core.services.customer_relation_service import (
     unlink_owner_customer_relation,
     update_owner_customer_relation,
 )
+from core.services.session_service import get_active_sessions, logout_session
 from core.sms import send_customer_invitation_sms
+from models.customer_relation import CustomerRelation, CustomerRelationStatus
+from models.session import UserSession
 
 
 router = APIRouter()
@@ -51,9 +58,67 @@ def serialize_customer_relation(relation, invitation=None) -> dict:
     }
 
 
+def serialize_customer_session(session: UserSession) -> dict:
+    return {
+        "id": str(session.id),
+        "device_name": session.device_name,
+        "device_ip": session.device_ip,
+        "platform": session.platform.value if hasattr(session.platform, "value") else str(session.platform),
+        "home_server": session.home_server or "foreign",
+        "is_primary": session.is_primary,
+        "is_active": session.is_active,
+        "created_at": session.created_at,
+        "last_active_at": session.last_active_at,
+    }
+
+
 def ensure_owner_context(context: EffectiveOwnerActor) -> None:
     if context.is_accountant_context:
         raise HTTPException(status_code=403, detail="Accountants cannot manage owner customers")
+
+
+async def get_active_owner_customer_relation(
+    db: AsyncSession,
+    *,
+    owner_user_id: int,
+    relation_id: int,
+) -> CustomerRelation:
+    stmt = (
+        select(CustomerRelation)
+        .options(joinedload(CustomerRelation.customer_user))
+        .where(
+            CustomerRelation.id == relation_id,
+            CustomerRelation.owner_user_id == owner_user_id,
+        )
+    )
+    relation = (await db.execute(stmt)).scalar_one_or_none()
+    if relation is None:
+        raise HTTPException(status_code=404, detail="رابطه مشتری یافت نشد")
+    if relation.deleted_at is not None or relation.status != CustomerRelationStatus.ACTIVE:
+        raise HTTPException(status_code=400, detail="فقط مشتری فعال نشست قابل مدیریت دارد")
+    customer_user = relation.customer_user
+    if relation.customer_user_id is None or customer_user is None or customer_user.is_deleted:
+        raise HTTPException(status_code=400, detail="برای این مشتری نشست فعالی قابل مدیریت نیست")
+    return relation
+
+
+async def get_active_customer_session(
+    db: AsyncSession,
+    *,
+    customer_user_id: int,
+    session_id: uuid.UUID,
+) -> UserSession:
+    stmt = select(UserSession).where(
+        and_(
+            UserSession.id == session_id,
+            UserSession.user_id == customer_user_id,
+            UserSession.is_active == True,
+        )
+    )
+    session = (await db.execute(stmt)).scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="نشست یافت نشد")
+    return session
 
 
 @router.get("/owner-relations", response_model=list[schemas.CustomerRelationRead])
@@ -137,3 +202,50 @@ async def update_my_customer(
     )
     invitation_map = await load_customer_relation_invitation_map(db, [relation.invitation_token])
     return serialize_customer_relation(relation, invitation=invitation_map.get(relation.invitation_token))
+
+
+@router.get("/owner-relations/{relation_id}/sessions", response_model=list[dict])
+async def list_my_customer_sessions(
+    relation_id: int,
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_owner_context(context)
+    relation = await get_active_owner_customer_relation(
+        db,
+        owner_user_id=context.owner_user.id,
+        relation_id=relation_id,
+    )
+    sessions = await get_active_sessions(db, relation.customer_user_id)
+    return [serialize_customer_session(session) for session in sessions]
+
+
+@router.delete("/owner-relations/{relation_id}/sessions/{session_id}")
+async def terminate_my_customer_session(
+    relation_id: int,
+    session_id: str,
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_owner_context(context)
+    try:
+        normalized_session_id = uuid.UUID(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="شناسه نشست نامعتبر است") from exc
+
+    relation = await get_active_owner_customer_relation(
+        db,
+        owner_user_id=context.owner_user.id,
+        relation_id=relation_id,
+    )
+    session = await get_active_customer_session(
+        db,
+        customer_user_id=relation.customer_user_id,
+        session_id=normalized_session_id,
+    )
+    promoted_session = await logout_session(db, session)
+    return {
+        "detail": "نشست مشتری با موفقیت پایان یافت",
+        "terminated_session_id": str(session.id),
+        "promoted_primary_session_id": str(promoted_session.id) if promoted_session else None,
+    }

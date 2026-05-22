@@ -32,6 +32,18 @@ interface CustomerRelation {
   created_at: string
 }
 
+interface CustomerSessionSummary {
+  id: string
+  device_name: string
+  device_ip: string | null
+  platform: string
+  home_server: string
+  is_primary: boolean
+  is_active: boolean
+  created_at: string | null
+  last_active_at: string | null
+}
+
 function makeEmptyCreateForm() {
   return {
     account_name: '',
@@ -66,6 +78,10 @@ const editingRelationId = ref<number | null>(null)
 const error = ref('')
 const notice = ref('')
 const copiedRelationId = ref<number | null>(null)
+const openSessionsRelationId = ref<number | null>(null)
+const sessionsByRelationId = ref<Record<number, CustomerSessionSummary[]>>({})
+const loadingSessionsRelationId = ref<number | null>(null)
+const terminatingSessionId = ref<string | null>(null)
 const currentTimeMs = ref(Date.now())
 
 const createForm = reactive(makeEmptyCreateForm())
@@ -96,6 +112,23 @@ function formatDateTime(value: string | null) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('fa-IR')
+}
+
+function getRelationSessions(relationId: number) {
+  return sessionsByRelationId.value[relationId] ?? []
+}
+
+function formatSessionPlatform(platform: string) {
+  if (platform === 'telegram_mini_app') return 'تلگرام'
+  if (platform === 'android') return 'اندروید'
+  if (platform === 'web') return 'وب'
+  return platform || 'نامشخص'
+}
+
+function formatHomeServer(homeServer: string) {
+  if (homeServer === 'iran') return 'ایران'
+  if (homeServer === 'foreign') return 'خارج'
+  return homeServer || 'نامشخص'
 }
 
 function normalizeOptionalNumber(value: string | number | null | undefined) {
@@ -243,11 +276,79 @@ async function loadRelations(options?: { silent?: boolean }) {
       throw new Error(parseApiError(payload, 'دریافت لیست مشتریان ناموفق بود.'))
     }
     relations.value = Array.isArray(payload) ? payload : []
+    if (openSessionsRelationId.value !== null) {
+      const openRelation = relations.value.find((relation) => relation.id === openSessionsRelationId.value)
+      if (!openRelation || openRelation.status !== 'active' || !openRelation.customer_user_id) {
+        openSessionsRelationId.value = null
+      }
+    }
   } catch (err: any) {
     error.value = err?.message || 'دریافت لیست مشتریان ناموفق بود.'
   } finally {
     isLoading.value = false
     isRefreshing.value = false
+  }
+}
+
+async function loadSessionsForRelation(relationId: number) {
+  loadingSessionsRelationId.value = relationId
+  error.value = ''
+
+  try {
+    const response = await apiFetch(`/api/customers/owner-relations/${relationId}/sessions`, {
+      method: 'GET',
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      throw new Error(parseApiError(payload, 'دریافت نشست‌های مشتری ناموفق بود.'))
+    }
+    sessionsByRelationId.value = {
+      ...sessionsByRelationId.value,
+      [relationId]: Array.isArray(payload) ? (payload as CustomerSessionSummary[]) : [],
+    }
+  } catch (err: any) {
+    error.value = err?.message || 'دریافت نشست‌های مشتری ناموفق بود.'
+  } finally {
+    if (loadingSessionsRelationId.value === relationId) {
+      loadingSessionsRelationId.value = null
+    }
+  }
+}
+
+async function toggleSessionPanel(relation: CustomerRelation) {
+  if (relation.status !== 'active' || !relation.customer_user_id) return
+  if (openSessionsRelationId.value === relation.id) {
+    openSessionsRelationId.value = null
+    return
+  }
+  openSessionsRelationId.value = relation.id
+  await loadSessionsForRelation(relation.id)
+}
+
+async function terminateCustomerSession(relation: CustomerRelation, session: CustomerSessionSummary) {
+  if (terminatingSessionId.value === session.id) return
+  if (!window.confirm(`نشست «${session.device_name || 'دستگاه مشتری'}» پایان یابد؟`)) return
+
+  terminatingSessionId.value = session.id
+  error.value = ''
+  notice.value = ''
+
+  try {
+    const response = await apiFetch(`/api/customers/owner-relations/${relation.id}/sessions/${session.id}`, {
+      method: 'DELETE',
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      throw new Error(parseApiError(payload, 'پایان دادن نشست مشتری ناموفق بود.'))
+    }
+    notice.value = parseApiError(payload, 'نشست مشتری با موفقیت پایان یافت.')
+    await loadSessionsForRelation(relation.id)
+  } catch (err: any) {
+    error.value = err?.message || 'پایان دادن نشست مشتری ناموفق بود.'
+  } finally {
+    if (terminatingSessionId.value === session.id) {
+      terminatingSessionId.value = null
+    }
   }
 }
 
@@ -358,6 +459,9 @@ async function unlinkRelation(relation: CustomerRelation) {
     relations.value = relations.value.filter((item) => item.id !== relation.id)
     if (editingRelationId.value === relation.id) {
       clearEditState()
+    }
+    if (openSessionsRelationId.value === relation.id) {
+      openSessionsRelationId.value = null
     }
     notice.value = isPending ? 'دعوت مشتری لغو شد.' : 'ارتباط مشتری قطع شد و دسترسی او غیرفعال گردید.'
   } catch (err: any) {
@@ -572,6 +676,14 @@ onBeforeUnmount(() => {
               <div v-else class="customer-actions">
                 <button type="button" class="secondary-btn start-edit" @click="startEditing(relation)">ویرایش</button>
                 <button
+                  v-if="relation.status === 'active' && relation.customer_user_id"
+                  type="button"
+                  class="secondary-btn toggle-sessions"
+                  @click="toggleSessionPanel(relation)"
+                >
+                  {{ openSessionsRelationId === relation.id ? 'بستن نشست‌ها' : 'نشست‌های فعال' }}
+                </button>
+                <button
                   v-if="relation.status === 'pending' && relation.registration_link"
                   type="button"
                   class="secondary-btn copy-link"
@@ -595,6 +707,57 @@ onBeforeUnmount(() => {
                 >
                   قطع ارتباط
                 </button>
+              </div>
+
+              <div v-if="relation.status === 'active' && openSessionsRelationId === relation.id" class="session-panel">
+                <div class="session-panel-header">
+                  <div>
+                    <h6>نشست‌های فعال مشتری</h6>
+                    <p>نشست‌های فعال این مشتری را می‌توانید ببینید و هر نشست را جداگانه خاتمه دهید.</p>
+                  </div>
+                  <button
+                    type="button"
+                    class="ghost-btn refresh-sessions"
+                    :disabled="loadingSessionsRelationId === relation.id"
+                    @click="loadSessionsForRelation(relation.id)"
+                  >
+                    {{ loadingSessionsRelationId === relation.id ? 'در حال نوسازی...' : 'نوسازی' }}
+                  </button>
+                </div>
+
+                <div v-if="loadingSessionsRelationId === relation.id" class="customer-loading session-loading">
+                  در حال دریافت نشست‌های مشتری...
+                </div>
+                <div v-else-if="!getRelationSessions(relation.id).length" class="customer-empty session-empty">
+                  در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.
+                </div>
+                <ul v-else class="session-list">
+                  <li v-for="session in getRelationSessions(relation.id)" :key="session.id" class="session-item">
+                    <div class="session-item-main">
+                      <div class="session-item-top">
+                        <strong>{{ session.device_name || 'دستگاه ناشناس' }}</strong>
+                        <div class="session-badges">
+                          <span v-if="session.is_primary" class="session-badge primary">primary</span>
+                          <span class="session-badge neutral">{{ formatSessionPlatform(session.platform) }}</span>
+                          <span class="session-badge neutral">{{ formatHomeServer(session.home_server) }}</span>
+                        </div>
+                      </div>
+                      <div class="session-item-meta">
+                        <span>آخرین فعالیت: {{ formatDateTime(session.last_active_at) }}</span>
+                        <span>شروع نشست: {{ formatDateTime(session.created_at) }}</span>
+                        <span v-if="session.device_ip">IP: {{ session.device_ip }}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      class="danger-btn terminate-session"
+                      :disabled="terminatingSessionId === session.id"
+                      @click="terminateCustomerSession(relation, session)"
+                    >
+                      {{ terminatingSessionId === session.id ? 'در حال پایان...' : 'پایان نشست' }}
+                    </button>
+                  </li>
+                </ul>
               </div>
             </article>
           </div>
@@ -872,6 +1035,112 @@ onBeforeUnmount(() => {
   color: #b91c1c;
 }
 
+.session-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.4);
+}
+
+.session-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.session-panel-header h6 {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+
+.session-panel-header p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.7;
+}
+
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.session-item-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-item-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.session-item-top strong {
+  color: #0f172a;
+}
+
+.session-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.session-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.session-badge.primary {
+  background: rgba(16, 185, 129, 0.16);
+  color: #047857;
+}
+
+.session-badge.neutral {
+  background: rgba(148, 163, 184, 0.14);
+  color: #475569;
+}
+
+.session-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.terminate-session {
+  flex-shrink: 0;
+}
+
 .edit-panel {
   display: flex;
   flex-direction: column;
@@ -894,7 +1163,9 @@ onBeforeUnmount(() => {
 
   .customer-manager-header,
   .panel-title-row,
-  .customer-card-head {
+  .customer-card-head,
+  .session-panel-header,
+  .session-item {
     flex-direction: column;
   }
 

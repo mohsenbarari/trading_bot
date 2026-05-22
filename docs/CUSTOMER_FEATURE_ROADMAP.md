@@ -503,12 +503,14 @@ customer management و customer visibility روی contract فعلی PublicProfil
 
 خروجی‌های لازم:
 - [x] owner customer manager modal / section
+- [x] owner از همان customer manager modal به نشست‌های active مشتری دسترسی داشته باشد و بتواند هر نشست را جداگانه terminate کند.
 - [x] super-admin-visible customer summary in public profile
 - [x] `UserProfile.vue` support for `max_customers` and customer-aware admin controls
 - [x] route/state sync بین public profile و admin user settings برای customer surfaces
 
 validation phase:
 - [x] owner profile customer CRUD UI سبز شود.
+- [x] owner profile customer session list/terminate UI سبز شود.
 - [x] super-admin public-profile → user-settings handoff سبز شود.
 - [x] super-admin target-user history load/perspective tests سبز شود.
 - [x] public profile visibility matrix for customer/accountant/admin/user عادی سبز شود.
