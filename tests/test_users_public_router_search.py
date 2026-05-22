@@ -71,6 +71,7 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
             result = await search_public_users(q=None, limit=25, db=db, current_user=current_user)
 
         self.assertEqual([item.id for item in result], [7, 6])
+        self.assertNotIn("role", result[0].model_dump())
         stmt_text = str(db.stmts[0])
         self.assertIn("users.is_deleted = false", stmt_text.lower())
         self.assertIn("users.id !=", stmt_text.lower())
@@ -121,6 +122,7 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0].resolved_from_accountant_id, 7)
         self.assertEqual(result[0].highlight_accountant_user_id, 7)
         self.assertEqual(result[0].highlight_accountant_relation_display_name, "حسابدار فروش")
+        self.assertNotIn("role", result[0].model_dump())
 
     async def test_search_public_users_skips_owner_resolved_to_current_user(self):
         current_user = SimpleNamespace(id=5, role=UserRole.STANDARD)

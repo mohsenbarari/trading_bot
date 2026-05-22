@@ -54,6 +54,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.accountant_relations, [])
         self.assertEqual(result.customer_relations, [])
         self.assertIsNone(result.customer_management_name)
+        self.assertNotIn("role", result.model_dump())
         self.assertEqual(db.calls[0][1], 7)
 
     async def test_read_public_user_raises_404_for_missing_or_deleted_user(self):
@@ -140,6 +141,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.accountant_relations), 1)
         self.assertEqual(result.accountant_relations[0].accountant_user_id, 44)
         self.assertEqual(result.accountant_relations[0].relation_display_name, "حسابدار فروش")
+        self.assertNotIn("role", result.model_dump())
         self.assertEqual(db.calls, [])
 
     async def test_read_public_user_returns_customer_context_for_owner_tree_viewer(self):
