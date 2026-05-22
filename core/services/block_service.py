@@ -12,6 +12,34 @@ from models.user import User
 from models.user_block import UserBlock
 
 
+BLOCK_STATUS_REASON_CAPABILITY_DISABLED = "capability_disabled"
+BLOCK_STATUS_REASON_LIMIT_REACHED = "limit_reached"
+
+
+def _build_block_status_payload(user: User, current_blocked: int) -> dict:
+    remaining = max(0, user.max_blocked_users - current_blocked) if user.can_block_users else 0
+    can_block_now = bool(user.can_block_users and remaining > 0)
+    reason_code: str | None = None
+    reason_message: str | None = None
+
+    if not user.can_block_users:
+        reason_code = BLOCK_STATUS_REASON_CAPABILITY_DISABLED
+        reason_message = "قابلیت بلاک برای شما غیرفعال است."
+    elif remaining <= 0:
+        reason_code = BLOCK_STATUS_REASON_LIMIT_REACHED
+        reason_message = f"ظرفیت بلاک شما تکمیل است. حداکثر {user.max_blocked_users} کاربر را می‌توانید بلاک کنید."
+
+    return {
+        "can_block": bool(user.can_block_users),
+        "can_block_now": can_block_now,
+        "max_blocked": user.max_blocked_users,
+        "current_blocked": current_blocked,
+        "remaining": remaining,
+        "reason_code": reason_code,
+        "reason_message": reason_message,
+    }
+
+
 async def can_user_block(db: AsyncSession, user_id: int) -> Tuple[bool, str, dict]:
     """
     بررسی می‌کند که آیا کاربر می‌تواند کاربر دیگری را بلاک کند.
@@ -24,12 +52,7 @@ async def can_user_block(db: AsyncSession, user_id: int) -> Tuple[bool, str, dic
         return False, "کاربر یافت نشد.", {}
     
     if not user.can_block_users:
-        return False, "❌ قابلیت مسدود کردن برای شما غیرفعال است.", {
-            "can_block": False,
-            "max_blocked": user.max_blocked_users,
-            "current_blocked": 0,
-            "remaining": 0
-        }
+        return False, "❌ قابلیت مسدود کردن برای شما غیرفعال است.", _build_block_status_payload(user, 0)
     
     # تعداد بلاک‌های فعلی
     current_blocked = await db.scalar(
@@ -37,21 +60,12 @@ async def can_user_block(db: AsyncSession, user_id: int) -> Tuple[bool, str, dic
     )
     
     remaining = user.max_blocked_users - current_blocked
+    status_payload = _build_block_status_payload(user, current_blocked)
     
     if remaining <= 0:
-        return False, f"❌ شما حداکثر {user.max_blocked_users} کاربر را می‌توانید مسدود کنید.", {
-            "can_block": False,
-            "max_blocked": user.max_blocked_users,
-            "current_blocked": current_blocked,
-            "remaining": 0
-        }
+        return False, f"❌ شما حداکثر {user.max_blocked_users} کاربر را می‌توانید مسدود کنید.", status_payload
     
-    return True, "", {
-        "can_block": True,
-        "max_blocked": user.max_blocked_users,
-        "current_blocked": current_blocked,
-        "remaining": remaining
-    }
+    return True, "", status_payload
 
 
 async def block_user(db: AsyncSession, blocker_id: int, blocked_id: int) -> Tuple[bool, str]:
@@ -189,12 +203,7 @@ async def get_block_status(db: AsyncSession, user_id: int) -> dict:
         select(func.count()).where(UserBlock.blocker_id == user_id)
     )
     
-    return {
-        "can_block": user.can_block_users,
-        "max_blocked": user.max_blocked_users,
-        "current_blocked": current_blocked,
-        "remaining": max(0, user.max_blocked_users - current_blocked) if user.can_block_users else 0
-    }
+    return _build_block_status_payload(user, current_blocked)
 
 
 async def is_blocked_by(db: AsyncSession, blocker_id: int, blocked_id: int) -> bool:

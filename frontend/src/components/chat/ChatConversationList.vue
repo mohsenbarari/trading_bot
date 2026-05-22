@@ -484,7 +484,7 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="conversation-side">
-                <div v-if="conv.unread_mention_count > 0" class="unread-badge mention-badge" title="منشن جدید">
+                <div v-if="(conv.unread_mention_count ?? 0) > 0" class="unread-badge mention-badge" title="منشن جدید">
                   @
                 </div>
                 <div v-if="conv.unread_count > 0" class="unread-badge">

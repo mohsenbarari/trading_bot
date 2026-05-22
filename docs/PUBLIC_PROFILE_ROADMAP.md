@@ -169,12 +169,12 @@
 
 ### فاز 3: block UX hardening بدون افشای بلاک
 
-- [ ] استفاده از `GET /api/blocks/status` برای capability-aware UI در پروفایل عمومی.
-- [ ] نمایش disable state مناسب برای blocker وقتی سقف بلاک پر شده یا capability خاموش است.
-- [ ] audit کردن pathهای market/offer interaction برای هر message/detail ای که بتواند به blocked user سرنخ قابل اتکا بدهد.
-- [ ] استانداردسازی copyهای generic در pathهای تعاملی blocked داخل market.
-- [ ] اطمینان از این که state محلی PublicProfile فقط برای blocker روشن است و هیچ event/payload عمومی درباره بلاک شدن تولید نمی شود.
-- [ ] اطمینان از این که block هیچ محدودیتی روی chat و سایر surfaceها اعمال نمی کند.
+- [x] استفاده از `GET /api/blocks/status` برای capability-aware UI در پروفایل عمومی.
+- [x] نمایش disable state مناسب برای blocker وقتی سقف بلاک پر شده یا capability خاموش است.
+- [x] audit کردن pathهای market/offer interaction برای هر message/detail ای که بتواند به blocked user سرنخ قابل اتکا بدهد.
+- [x] استانداردسازی و test-lock کردن copyهای generic در pathهای تعاملی blocked داخل market.
+- [x] اطمینان از این که state محلی PublicProfile فقط برای blocker روشن است و هیچ event/payload عمومی درباره بلاک شدن تولید نمی شود.
+- [x] اطمینان از این که block هیچ محدودیتی روی chat و سایر surfaceها اعمال نمی کند.
 
 ### فاز 4: queryable history در پروفایل عمومی
 
@@ -216,12 +216,12 @@
   - users_public contract tests
   - trade history filter tests
   - export permission/filter tests
-  - blocked-path generic-message tests
+  - [x] blocked-path generic-message tests
 - [ ] frontend unit:
   - PublicProfile presence
   - PublicProfile filter state
   - PublicProfile export action state
-  - block UX disable/loading/success states
+  - [x] block UX disable/loading/success states
 - [ ] Playwright:
   - public profile presence rendering
   - mutual history filtering by date and commodity

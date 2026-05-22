@@ -19,11 +19,38 @@ function makeResponse(payload: unknown, ok = true, status = ok ? 200 : 400): Res
   })
 }
 
+function defaultFetchResponse(input: string): Promise<Response> {
+  if (input.endsWith('/api/blocks/status')) {
+    return Promise.resolve(makeResponse({
+      can_block: true,
+      can_block_now: true,
+      max_blocked: 10,
+      current_blocked: 0,
+      remaining: 10,
+      reason_code: null,
+      reason_message: null,
+    }))
+  }
+
+  if (/\/api\/blocks\/check\/\d+$/.test(input)) {
+    return Promise.resolve(makeResponse({ is_blocked_by_me: false }))
+  }
+
+  return Promise.reject(new Error(`Unhandled fetch call in PublicProfile.test.ts: ${input}`))
+}
+
 describe('PublicProfile.vue', () => {
   beforeEach(() => {
     buildChatFileUrlMock.mockClear()
     uploadAvatarImageMock.mockReset()
-    vi.stubGlobal('fetch', vi.fn())
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url
+      return defaultFetchResponse(url)
+    }))
     vi.stubGlobal('alert', vi.fn())
     vi.stubGlobal('confirm', vi.fn(() => true))
     localStorage.clear()
@@ -285,6 +312,15 @@ describe('PublicProfile.vue', () => {
       highlight_accountant_relation_display_name: null,
       accountant_relations: [],
     }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: true,
+      can_block_now: true,
+      max_blocked: 3,
+      current_blocked: 1,
+      remaining: 2,
+      reason_code: null,
+      reason_message: null,
+    }))
     fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
     fetchMock.mockResolvedValueOnce(makeResponse({ success: true, message: 'کاربر با موفقیت بلاک شد.' }))
 
@@ -307,18 +343,23 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const blockButton = wrapper.findAll('button').find((button) => button.text().includes('بلاک / رفع بلاک'))
+    const blockButton = wrapper.findAll('button').find((button) => button.text().includes('بلاک کاربر'))
     expect(blockButton).toBeTruthy()
 
     await blockButton!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/blocks/check/30', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/blocks/status', {
       headers: {
         Authorization: 'Bearer token',
       },
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/blocks/30', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/blocks/check/30', {
+      headers: {
+        Authorization: 'Bearer token',
+      },
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/blocks/30', {
       method: 'POST',
       headers: {
         Authorization: 'Bearer token',
@@ -327,6 +368,123 @@ describe('PublicProfile.vue', () => {
     expect(vi.mocked(window.confirm)).toHaveBeenCalledWith('آیا از بلاک کاربر plain30 اطمینان دارید؟')
     expect(vi.mocked(window.alert)).toHaveBeenCalledWith('کاربر با موفقیت بلاک شد.')
     expect(wrapper.findAll('button').some((button) => button.text().includes('رفع بلاک'))).toBe(true)
+  })
+
+  it('disables the block action with a capability-aware reason when new blocks are not allowed', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 30,
+      account_name: 'plain30',
+      avatar_file_id: null,
+      mobile_number: '09125555555',
+      address: 'تهران',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۳',
+      trades_count: 4,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: true,
+      can_block_now: false,
+      max_blocked: 1,
+      current_blocked: 1,
+      remaining: 0,
+      reason_code: 'limit_reached',
+      reason_message: 'ظرفیت بلاک شما تکمیل است. حداکثر 1 کاربر را می‌توانید بلاک کنید.',
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 30, account_name: 'plain30' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          OwnerCustomerManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const blockButton = wrapper.findAll('button').find((button) => button.text().includes('بلاک کاربر'))
+    expect(blockButton).toBeTruthy()
+    expect(blockButton!.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('ظرفیت بلاک شما تکمیل است')
+    await blockButton!.trigger('click')
+    expect(vi.mocked(window.confirm)).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps unblock available even when new blocks are globally disabled for the viewer', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 30,
+      account_name: 'plain30',
+      avatar_file_id: null,
+      mobile_number: '09125555555',
+      address: 'تهران',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۳',
+      trades_count: 4,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: false,
+      can_block_now: false,
+      max_blocked: 3,
+      current_blocked: 1,
+      remaining: 0,
+      reason_code: 'capability_disabled',
+      reason_message: 'قابلیت بلاک برای شما غیرفعال است.',
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: true }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ success: true, message: 'رفع بلاک انجام شد.' }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 30, account_name: 'plain30' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          OwnerCustomerManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const unblockButton = wrapper.findAll('button').find((button) => button.text().includes('رفع بلاک'))
+    expect(unblockButton).toBeTruthy()
+    expect(unblockButton!.attributes('disabled')).toBeUndefined()
+
+    await unblockButton!.trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/blocks/30', {
+      method: 'DELETE',
+      headers: {
+        Authorization: 'Bearer token',
+      },
+    })
+    expect(vi.mocked(window.confirm)).toHaveBeenCalledWith('آیا از رفع بلاک کاربر plain30 اطمینان دارید؟')
+    expect(vi.mocked(window.alert)).toHaveBeenCalledWith('رفع بلاک انجام شد.')
   })
 
   it('loads the project users directory for self profiles and navigates through result rows', async () => {
@@ -439,6 +597,16 @@ describe('PublicProfile.vue', () => {
         },
       ],
     }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: true,
+      can_block_now: true,
+      max_blocked: 10,
+      current_blocked: 0,
+      remaining: 10,
+      reason_code: null,
+      reason_message: null,
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
     fetchMock.mockResolvedValueOnce(makeResponse([
       {
         id: 20,
@@ -471,7 +639,7 @@ describe('PublicProfile.vue', () => {
     await directoryHeader!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/users-public/44/project-users?limit=25', {
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/users-public/44/project-users?limit=25', {
       headers: {
         Authorization: 'Bearer token',
       },
@@ -584,6 +752,16 @@ describe('PublicProfile.vue', () => {
       accountant_relations: [],
     }))
     fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: true,
+      can_block_now: true,
+      max_blocked: 10,
+      current_blocked: 0,
+      remaining: 10,
+      reason_code: null,
+      reason_message: null,
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
       id: 61,
       account_name: 'managed61',
       mobile_number: '09121110000',
@@ -632,7 +810,7 @@ describe('PublicProfile.vue', () => {
     await adminSettingsButton!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/users/61', expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/users/61', expect.objectContaining({
       headers: {
         Authorization: 'Bearer token',
       },
@@ -888,6 +1066,16 @@ describe('PublicProfile.vue', () => {
       highlight_accountant_relation_display_name: null,
       accountant_relations: [],
     }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: true,
+      can_block_now: true,
+      max_blocked: 10,
+      current_blocked: 0,
+      remaining: 10,
+      reason_code: null,
+      reason_message: null,
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
     fetchMock.mockResolvedValueOnce(makeResponse([
       {
         id: 1,
@@ -957,7 +1145,7 @@ describe('PublicProfile.vue', () => {
     await historyHeader!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/trades/with/50', expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/trades/with/50', expect.objectContaining({
       headers: {
         Authorization: 'Bearer token',
       },
@@ -988,7 +1176,8 @@ describe('PublicProfile.vue', () => {
     await historyHeader!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const historyCalls = fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/50')
+    expect(historyCalls).toHaveLength(1)
   })
 
   it('renders target-user history from the viewed profile perspective for super-admin viewers', async () => {

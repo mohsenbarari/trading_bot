@@ -109,6 +109,18 @@ interface ProfileActionCard {
   key: 'message' | 'block_toggle' | 'settings' | 'admin_settings' | 'add_customer' | 'add_accountant';
   icon: string;
   label: string;
+  description?: string | null;
+  disabled?: boolean;
+}
+
+interface PublicBlockStatus {
+  can_block: boolean;
+  can_block_now: boolean;
+  max_blocked: number;
+  current_blocked: number;
+  remaining: number;
+  reason_code?: string | null;
+  reason_message?: string | null;
 }
 
 const profileData = ref<PublicUser | null>(null);
@@ -127,6 +139,7 @@ const avatarBusy = ref(false);
 const avatarInput = ref<HTMLInputElement | null>(null);
 const publicBlockBusy = ref(false);
 const publicBlockState = ref<boolean | null>(null);
+const publicBlockStatus = ref<PublicBlockStatus | null>(null);
 const showAccountantManager = ref(false);
 const showCustomerManager = ref(false);
 const showAdminUserManager = ref(false);
@@ -242,6 +255,17 @@ const showProjectUsersSection = computed(() => {
 const showPublicBlockAction = computed(() => {
   return showVisitorSections.value && !!profileData.value && customerProfileContext.value === null;
 });
+const publicBlockActionDisabled = computed(() => {
+  if (publicBlockState.value === true) return false;
+  if (!publicBlockStatus.value) return false;
+  return !publicBlockStatus.value.can_block_now;
+});
+const publicBlockActionDescription = computed(() => {
+  if (publicBlockState.value === true) {
+    return null;
+  }
+  return publicBlockStatus.value?.reason_message || null;
+});
 const publicBlockActionLabel = computed(() => {
   if (publicBlockBusy.value) {
     return 'در حال بررسی...';
@@ -285,6 +309,8 @@ const visitorActionCards = computed<ProfileActionCard[]>(() => {
       key: 'block_toggle',
       icon: publicBlockActionIcon.value,
       label: publicBlockActionLabel.value,
+      description: publicBlockActionDescription.value,
+      disabled: publicBlockBusy.value || publicBlockActionDisabled.value,
     });
   }
 
@@ -338,6 +364,12 @@ async function loadProfile() {
     if (!response.ok) throw new Error('خطا در دریافت اطلاعات کاربر');
     
     profileData.value = await response.json();
+    if (showPublicBlockAction.value) {
+      await refreshPublicBlockUiState();
+    } else {
+      publicBlockState.value = null;
+      publicBlockStatus.value = null;
+    }
     if (highlightedAccountantUserId.value && accountantRelations.value.length > 0) {
       openSections.value.accountants = true;
     }
@@ -555,13 +587,99 @@ async function getCurrentPublicBlockState() {
   return Boolean((payload as { is_blocked_by_me?: unknown } | null)?.is_blocked_by_me);
 }
 
+function normalizePublicBlockStatus(payload: Partial<PublicBlockStatus> | null | undefined): PublicBlockStatus {
+  const canBlock = Boolean(payload?.can_block);
+  const maxBlocked = Number(payload?.max_blocked ?? 0);
+  const currentBlocked = Math.max(0, Number(payload?.current_blocked ?? 0));
+  const remaining = canBlock ? Math.max(0, Number(payload?.remaining ?? Math.max(0, maxBlocked - currentBlocked))) : 0;
+  const canBlockNow = typeof payload?.can_block_now === 'boolean'
+    ? payload.can_block_now
+    : (canBlock && remaining > 0);
+
+  return {
+    can_block: canBlock,
+    can_block_now: canBlockNow,
+    max_blocked: maxBlocked,
+    current_blocked: currentBlocked,
+    remaining,
+    reason_code: typeof payload?.reason_code === 'string' ? payload.reason_code : null,
+    reason_message: typeof payload?.reason_message === 'string' ? payload.reason_message : null,
+  };
+}
+
+function derivePublicBlockStatus(currentStatus: PublicBlockStatus, nextBlockedCount: number): PublicBlockStatus {
+  const currentBlocked = Math.max(0, nextBlockedCount);
+  const remaining = currentStatus.can_block ? Math.max(0, currentStatus.max_blocked - currentBlocked) : 0;
+  const canBlockNow = currentStatus.can_block && remaining > 0;
+  let reasonCode: string | null = null;
+  let reasonMessage: string | null = null;
+
+  if (!currentStatus.can_block) {
+    reasonCode = 'capability_disabled';
+    reasonMessage = 'قابلیت بلاک برای شما غیرفعال است.';
+  } else if (!canBlockNow) {
+    reasonCode = 'limit_reached';
+    reasonMessage = `ظرفیت بلاک شما تکمیل است. حداکثر ${currentStatus.max_blocked} کاربر را می‌توانید بلاک کنید.`;
+  }
+
+  return {
+    ...currentStatus,
+    current_blocked: currentBlocked,
+    remaining,
+    can_block_now: canBlockNow,
+    reason_code: reasonCode,
+    reason_message: reasonMessage,
+  };
+}
+
+async function getPublicBlockStatus() {
+  if (!props.jwtToken) {
+    throw new Error('نشست کاربری معتبر نیست.');
+  }
+
+  const response = await fetch(`${props.apiBaseUrl}/api/blocks/status`, {
+    headers: {
+      'Authorization': `Bearer ${props.jwtToken}`,
+    },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(parseApiError(payload, 'خطا در دریافت وضعیت بلاک کاربر'));
+  }
+
+  return normalizePublicBlockStatus(payload as Partial<PublicBlockStatus> | null);
+}
+
+async function refreshPublicBlockUiState() {
+  if (!showPublicBlockAction.value) {
+    publicBlockStatus.value = null;
+    publicBlockState.value = null;
+    return;
+  }
+
+  const [statusPayload, blockedByMe] = await Promise.all([
+    getPublicBlockStatus(),
+    getCurrentPublicBlockState(),
+  ]);
+
+  publicBlockStatus.value = statusPayload;
+  publicBlockState.value = blockedByMe;
+}
+
 async function togglePublicProfileBlock() {
   if (!showPublicBlockAction.value || !profileData.value || !props.jwtToken || publicBlockBusy.value) return;
 
   publicBlockBusy.value = true;
   try {
-    const isBlocked = await getCurrentPublicBlockState();
-    publicBlockState.value = isBlocked;
+    if (publicBlockState.value === null || publicBlockStatus.value === null) {
+      await refreshPublicBlockUiState();
+    }
+
+    const isBlocked = publicBlockState.value === true;
+    if (!isBlocked && publicBlockStatus.value && !publicBlockStatus.value.can_block_now) {
+      window.alert(publicBlockStatus.value.reason_message || 'امکان بلاک کاربر در حال حاضر وجود ندارد.');
+      return;
+    }
 
     const shouldUnblock = isBlocked;
     const confirmed = window.confirm(
@@ -585,6 +703,10 @@ async function togglePublicProfileBlock() {
     }
 
     publicBlockState.value = !shouldUnblock;
+    if (publicBlockStatus.value) {
+      const nextBlockedCount = publicBlockStatus.value.current_blocked + (shouldUnblock ? -1 : 1);
+      publicBlockStatus.value = derivePublicBlockStatus(publicBlockStatus.value, nextBlockedCount);
+    }
     const successMessage = typeof (payload as { message?: unknown } | null)?.message === 'string'
       ? (payload as { message: string }).message
       : (shouldUnblock ? 'رفع بلاک کاربر انجام شد.' : 'کاربر با موفقیت بلاک شد.');
@@ -984,10 +1106,13 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             v-for="action in visitorActionCards"
             :key="action.key"
             class="settings-btn visitor-action-btn"
+            :disabled="Boolean(action.disabled)"
+            :title="action.description || undefined"
             @click="handleActionClick(action)"
           >
             <span class="stat-icon">{{ action.icon }}</span>
             <span class="stat-label">{{ action.label }}</span>
+            <span v-if="action.description" class="action-description">{{ action.description }}</span>
           </button>
         </div>
       </section>
@@ -1511,6 +1636,22 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 .settings-btn:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(75, 85, 99, 0.4);
+}
+
+.settings-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+  transform: none;
+  box-shadow: 0 1px 4px rgba(75, 85, 99, 0.16);
+}
+
+.action-description {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .message-btn .stat-icon, .settings-btn .stat-icon {
