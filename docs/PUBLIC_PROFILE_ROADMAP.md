@@ -204,6 +204,38 @@
 - [x] `PDF` و `Excel` هر دو با header minimal جلو می روند و summary اضافی در scope فاز اول اضافه نمی شود.
 - [x] وقتی viewer خودش target را بلاک کرده، `ارسال پیام` همچنان visible می ماند، چون block فقط market-only است و نباید روی chat یا سایر surfaceها اثری بگذارد.
 
+### 6.1 سوال ها و ابهام های فنی که باید قبل از اجرا بسته شوند
+
+- [ ] `api/routers/users_public.py` الان برای `/search` و `/{id}` از یک schema مشترک `UserPublicRead` استفاده می کند. آیا در فاز hardening باید یک schema سبک تر مثل `UserPublicSearchRead` برای search جدا شود یا فعلاً همان contract مشترک نگه داشته شود؟
+  پیشنهاد فعلی: برای کم کردن blast radius و جلوگیری از overfetch / data leakage، schema جستجو از schema پروفایل جدا شود.
+
+- [ ] `frontend/src/components/PublicProfile.vue` هنوز برای profile/history/block/admin همه جا از `fetch` خام استفاده می کند. آیا قبل از افزودن filter/export/status باید این component به `apiFetch` / `apiFetchJson` مهاجرت کند تا refresh token، reconnect، و error handling یکسان شود؟
+  پیشنهاد فعلی: بله؛ قبل از توسعه فازهای 2 تا 5 این migration انجام شود.
+
+- [ ] منطق presence الان حداقل در `ChatConversationList.vue`، `ChatView.vue` و `useChatMessages.ts` تکراری است و parsing UTC هم یکدست نیست. آیا فاز presence فقط helper جدید برای PublicProfile می سازد یا همزمان همه consumerها را به seam مشترک migrate می کند؟
+  پیشنهاد فعلی: یک source of truth مشترک برای parse + online threshold + format ساخته شود و همه consumerهای فعلی در همان فاز migrate شوند.
+
+- [ ] `GET /api/trades/with/{other_user_id}` در `api/routers/trades.py` الان overloaded است: برای ordinary viewer یعنی mutual history، ولی برای owner/accountant و `SUPER_ADMIN` می تواند target-user history کامل باشد. آیا filter/export روی همین route overloaded سوار می شود یا endpoint / mode صریح برای `mutual` در برابر `target` اضافه می کنیم؟
+  پیشنهاد فعلی: mode صریح در backend اضافه شود تا permission logic، export contract، و test matrix شفاف بماند.
+
+- [ ] perspective history الان دو منبع حقیقت دارد: backend در `trade_to_response()` بر اساس `history_target_user_id` بخشی از projection را می سازد، ولی `PublicProfile.vue` badge `خرید / فروش` را client-side از `tradeHistoryPerspectiveUserId` محاسبه می کند. آیا برای filter/export باید perspective نهایی server-authoritative شود؟
+  پیشنهاد فعلی: بله؛ backend باید perspective canonical را تولید کند تا UI list و export file از هم diverge نکنند.
+
+- [ ] contract دقیق query زمانی برای history/export چیست؟ آیا UI Jalali فقط در picker می ماند و request نهایی همیشه `from_date` / `to_date` را به صورت ISO/Gregorian و با boundary صریح روز می فرستد، یا backend باید Jalali input را هم parse کند؟
+  پیشنهاد فعلی: Jalali فقط در UI بماند و request نهایی با boundary صریح و server-safe به صورت ISO ارسال شود.
+
+- [ ] برای filter کالا، آیا canonical input فقط `commodity_id` انتخاب شده از `GET /api/commodities/` است یا در همین فاز `commodity_query` text-based با resolution روی aliasها هم پشتیبانی می شود؟
+  پیشنهاد فعلی: برای فاز اول فقط `commodity_id` پشتیبانی شود تا list/export determinism ساده و testable بماند.
+
+- [ ] history list الان paginated / truncated است (`limit=20/50`) ولی export باید کل dataset فیلترشده را بدهد. آیا export endpoint باید عمداً pagination را bypass کند و full filtered query بزند، یا list هم باید قبل از export full-load شود؟
+  پیشنهاد فعلی: export server-side full query مستقل از pagination UI بزند و list همچنان lightweight بماند.
+
+- [ ] `GET /api/blocks/status` فقط capacity/count برمی گرداند و reason code ندارد. آیا برای UX capability-aware لازم است این route با machine-readable reason مثل `feature_disabled` / `limit_reached` توسعه یابد؟
+  پیشنهاد فعلی: بله؛ تا UI مجبور به parse متن فارسی یا infer از اعداد نباشد.
+
+- [ ] extraction از `bot/handlers/trade_history.py` دقیقاً در چه مرزی انجام شود: فقط rendererهای `Excel/PDF`، یا query / projection / file naming هم داخل service مشترک برود؟
+  پیشنهاد فعلی: service مشترک باید query-to-document pipeline را مالک باشد و bot/web فقط wrapper transport باقی بمانند.
+
 ## 7. ایده های مفید ولی خارج از scope همین مرحله
 
 - [x] `یادداشت خصوصی / alias` برای هر viewer روی هر user.
