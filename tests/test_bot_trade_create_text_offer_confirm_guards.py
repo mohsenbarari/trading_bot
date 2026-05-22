@@ -11,6 +11,11 @@ def make_callback():
 
 
 class BotTradeCreateTextOfferConfirmGuardTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.market_patcher = patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=True))
+        self.market_patcher.start()
+        self.addCleanup(self.market_patcher.stop)
+
     async def test_handle_text_offer_confirm_handles_missing_user_and_limit_guards(self):
         callback = make_callback()
         state = SimpleNamespace(get_data=AsyncMock(return_value={}), clear=AsyncMock())

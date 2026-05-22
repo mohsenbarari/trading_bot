@@ -25,6 +25,11 @@ class FakeSessionContext:
 
 
 class BotTradeCreateTextOfferConfirmCompetitiveTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.market_patcher = patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=True))
+        self.market_patcher.start()
+        self.addCleanup(self.market_patcher.stop)
+
     async def test_handle_text_offer_confirm_handles_active_offer_cap_and_competitive_price_failure(self):
         user = SimpleNamespace(id=1, limitations_expire_at=None)
         base_data = {

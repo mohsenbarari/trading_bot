@@ -12,6 +12,11 @@ def make_callback():
 
 
 class BotTradeCreateConfirmLimitGuardTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.market_patcher = patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=True))
+        self.market_patcher.start()
+        self.addCleanup(self.market_patcher.stop)
+
     async def test_handle_trade_confirm_handles_channel_message_and_trade_limits(self):
         user = SimpleNamespace(limitations_expire_at=datetime.utcnow() + timedelta(days=1), id=1)
         state = SimpleNamespace(get_data=AsyncMock(return_value={"quantity": 12}), clear=AsyncMock())

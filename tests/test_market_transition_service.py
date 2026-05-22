@@ -57,6 +57,15 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         db.add.assert_called_once_with(state)
         db.commit.assert_awaited_once()
 
+    async def test_acquire_market_runtime_lock_uses_database_advisory_lock(self):
+        db = SimpleNamespace(execute=AsyncMock())
+
+        await market_transition_service._acquire_market_runtime_lock(db)
+
+        stmt, params = db.execute.await_args.args
+        self.assertIn("pg_advisory_xact_lock", str(stmt))
+        self.assertEqual(params, {"lock_key": market_transition_service.MARKET_RUNTIME_ADVISORY_LOCK_KEY})
+
     async def test_apply_market_schedule_transition_is_idempotent_when_runtime_matches(self):
         state = MarketRuntimeState(id=1, is_open=True, active_web_notice_visible=False, offers_since_last_open=1)
         db = SimpleNamespace(
@@ -71,11 +80,14 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             timezone="Asia/Tehran",
         )
 
-        with patch.object(market_transition_service, "_send_market_channel_notice", new=AsyncMock()) as notice_mock, patch(
+        with patch.object(market_transition_service, "_acquire_market_runtime_lock", new=AsyncMock()) as lock_mock, patch.object(
+            market_transition_service, "_send_market_channel_notice", new=AsyncMock()
+        ) as notice_mock, patch(
             "core.services.market_transition_service.publish_event_sync"
         ) as publish_mock:
             result = await market_transition_service.apply_market_schedule_transition(db, evaluation)
 
+        lock_mock.assert_awaited_once_with(db)
         self.assertFalse(result.changed)
         self.assertIsNone(result.transition)
         db.commit.assert_not_awaited()
@@ -98,7 +110,9 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         now = datetime(2026, 5, 22, 8, 0, tzinfo=timezone.utc)
 
-        with patch.object(market_transition_service, "_send_market_channel_notice", new=AsyncMock()) as notice_mock, patch(
+        with patch.object(market_transition_service, "_acquire_market_runtime_lock", new=AsyncMock()) as lock_mock, patch.object(
+            market_transition_service, "_send_market_channel_notice", new=AsyncMock()
+        ) as notice_mock, patch(
             "core.services.market_transition_service.publish_event_sync"
         ) as publish_mock:
             result = await market_transition_service.apply_market_schedule_transition(
@@ -107,6 +121,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
                 current_time=now,
             )
 
+        lock_mock.assert_awaited_once_with(db)
         self.assertTrue(result.changed)
         self.assertEqual(result.transition, "opened")
         self.assertTrue(state.is_open)
@@ -142,7 +157,9 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         now = datetime(2026, 5, 22, 18, 0, tzinfo=timezone.utc)
 
-        with patch.object(market_transition_service, "_send_market_channel_notice", new=AsyncMock()) as notice_mock, patch(
+        with patch.object(market_transition_service, "_acquire_market_runtime_lock", new=AsyncMock()) as lock_mock, patch.object(
+            market_transition_service, "_send_market_channel_notice", new=AsyncMock()
+        ) as notice_mock, patch(
             "core.services.market_transition_service.remove_channel_buttons",
             new=AsyncMock(),
         ) as remove_buttons_mock, patch(
@@ -157,6 +174,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
                 current_time=now,
             )
 
+        lock_mock.assert_awaited_once_with(db)
         self.assertTrue(result.changed)
         self.assertEqual(result.transition, "closed")
         self.assertEqual(result.expired_offer_ids, (11, 12))
@@ -287,11 +305,16 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=evaluation),
         ), patch.object(
             market_transition_service,
-            "get_or_create_market_runtime_state",
-            new=AsyncMock(return_value=(state, False)),
+            "_acquire_market_runtime_lock",
+            new=AsyncMock(),
+        ) as lock_mock, patch.object(
+            market_transition_service,
+            "get_market_runtime_state",
+            new=AsyncMock(return_value=state),
         ), patch("core.services.market_transition_service.publish_event_sync") as publish_mock:
             result = await market_transition_service.register_market_offer_created(db)
 
+        lock_mock.assert_awaited_once_with(db)
         self.assertIs(result, state)
         self.assertEqual(state.offers_since_last_open, 2)
         self.assertFalse(state.active_web_notice_visible)

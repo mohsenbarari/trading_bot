@@ -44,6 +44,11 @@ class FakeSessionContext:
 
 
 class BotTradeCreateTextOfferWarningConfirmTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.market_patcher = patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=True))
+        self.market_patcher.start()
+        self.addCleanup(self.market_patcher.stop)
+
     def make_state(self):
         return SimpleNamespace(
             get_data=AsyncMock(
