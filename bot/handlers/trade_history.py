@@ -18,6 +18,10 @@ from models.trade import Trade, TradeType, TradeStatus
 from models.offer import Offer, OfferType
 from models.commodity import Commodity
 from core.db import AsyncSessionLocal
+from core.services.trade_history_export_service import (
+    build_trade_history_export_rows,
+    resolve_counterparty_account_name_for_perspective,
+)
 import jdatetime
 from datetime import timezone, timedelta
 
@@ -259,33 +263,22 @@ async def generate_excel(trades, target_user, current_user) -> str:
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center")
     
+    export_rows = build_trade_history_export_rows(trades, current_user.id)
+
     # داده‌ها
-    for row_idx, trade in enumerate(trades, 2):
-        counterparty = None
-        if trade.responder_user_id == current_user.id:
-            is_buy = trade.trade_type == TradeType.BUY
-            if is_self:
-                counterparty = trade.offer_user.account_name
-        else:
-            is_buy = trade.trade_type != TradeType.BUY
-            if is_self:
-                counterparty = trade.responder_user.account_name
-            
-        created_at_iran = trade.created_at.astimezone(IRAN_TZ) if trade.created_at.tzinfo else trade.created_at
-        jalali_date = jdatetime.datetime.fromgregorian(datetime=created_at_iran)
-        
+    for row_idx, (trade, export_row) in enumerate(zip(trades, export_rows), 2):
         row_data = [
-            trade.price,
-            trade.quantity,
-            trade.commodity.name,
-            "خرید" if is_buy else "فروش",
+            export_row.price,
+            export_row.quantity,
+            export_row.commodity_name,
+            export_row.trade_type_label,
         ]
         if is_self:
-            row_data.append(counterparty)
+            row_data.append(resolve_counterparty_account_name_for_perspective(trade, current_user.id))
             
         row_data.extend([
-            jalali_date.strftime("%H:%M:%S"),
-            jalali_date.strftime("%Y/%m/%d")
+            export_row.time_label,
+            export_row.date_label,
         ])
         
         for col_idx, value in enumerate(row_data, 1):

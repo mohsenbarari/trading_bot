@@ -218,15 +218,15 @@
   - [x] export permission/filter tests
   - [x] blocked-path generic-message tests
 - [ ] frontend unit:
-  - PublicProfile presence
+  - [x] PublicProfile presence
   - [x] PublicProfile filter state
   - [x] PublicProfile export action state
   - [x] block UX disable/loading/success states
 - [ ] Playwright:
   - public profile presence rendering
-  - mutual history filtering by date and commodity
-  - self history export presets
-  - custom range export
+  - [x] mutual history filtering by date and commodity
+  - [x] self history export presets
+  - [x] custom range export
   - blocked interaction generic UX
 
 ## 6. سوال ها و ابهام های باقیمانده قبل از شروع اجرا
