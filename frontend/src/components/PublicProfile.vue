@@ -7,6 +7,7 @@ import OwnerCustomerManagerModal from './OwnerCustomerManagerModal.vue';
 import UserProfile from './UserProfile.vue';
 import { isAdminRoleValue, readCachedCurrentUserRole, SUPER_ADMIN_ROLE } from '../utils/adminAccess';
 import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIdentity';
+import { apiFetch } from '../utils/auth';
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
 import { formatLastSeenStatus, isUserOnline as isPresenceOnline } from '../utils/userPresence';
 
@@ -297,13 +298,25 @@ const targetCustomerHistoryContext = computed(() => {
 const showCustomerListSection = computed(() => {
   return customerRelations.value.length > 0 && (showOwnerSections.value || viewerIsSuperAdmin.value);
 });
-const showProjectUsersSection = computed(() => {
-  const routeUserId = Number(props.user?.id);
+const viewerIsDisplayedOwnerAccountant = computed(() => {
   const viewerUserId = Number(props.viewerUserId);
-  if (!Number.isInteger(routeUserId) || routeUserId <= 0) return false;
-  if (!Number.isInteger(viewerUserId) || viewerUserId <= 0) return false;
+  if (!Number.isInteger(viewerUserId) || viewerUserId <= 0) {
+    return false;
+  }
+
+  const resolvedFromAccountantId = Number(profileData.value?.resolved_from_accountant_id);
+  if (Number.isInteger(resolvedFromAccountantId) && resolvedFromAccountantId === viewerUserId) {
+    return true;
+  }
+
+  return accountantRelations.value.some(
+    (relation) => Number(relation.accountant_user_id) === viewerUserId,
+  );
+});
+const showProjectUsersSection = computed(() => {
+  if (!profileData.value) return false;
   if (customerProfileContext.value !== null) return false;
-  return routeUserId === viewerUserId;
+  return isOwnProfile.value || viewerIsDisplayedOwnerAccountant.value;
 });
 const showPublicBlockAction = computed(() => {
   return showVisitorSections.value && !!profileData.value && customerProfileContext.value === null;
@@ -408,11 +421,7 @@ async function loadProfile() {
   }
 
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/users-public/${props.user.id}`, {
-      headers: {
-        'Authorization': `Bearer ${props.jwtToken}`
-      }
-    });
+    const response = await apiFetch(`/api/users-public/${props.user.id}`);
 
     if (!response.ok) throw new Error('خطا در دریافت اطلاعات کاربر');
     
@@ -492,8 +501,8 @@ function buildHistoryQueryParams(format?: 'excel' | 'pdf') {
 
 function buildTradeHistoryEndpoint(isExport = false) {
   const basePath = isOwnProfile.value
-    ? `${props.apiBaseUrl}/api/trades/my`
-    : `${props.apiBaseUrl}/api/trades/with/${profileData.value?.id}`;
+    ? '/api/trades/my'
+    : `/api/trades/with/${profileData.value?.id}`;
   return isExport ? `${basePath}/export` : basePath;
 }
 
@@ -547,11 +556,7 @@ async function loadHistoryCommodityOptions() {
 
   historyCommodityOptionsLoading.value = true;
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/commodities/`, {
-      headers: {
-        'Authorization': `Bearer ${props.jwtToken}`,
-      },
-    });
+    const response = await apiFetch('/api/commodities/');
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
       throw new Error(parseApiError(payload, 'خطا در دریافت فهرست کالاها'));
@@ -619,11 +624,7 @@ async function downloadHistoryExport(format: 'excel' | 'pdf') {
   try {
     const params = buildHistoryQueryParams(format);
     const endpoint = `${buildTradeHistoryEndpoint(true)}?${params.toString()}`;
-    const response = await fetch(endpoint, {
-      headers: {
-        'Authorization': `Bearer ${props.jwtToken}`,
-      },
-    });
+    const response = await apiFetch(endpoint);
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
       throw new Error(parseApiError(payload, 'خطا در دریافت خروجی تاریخچه معاملات'));
@@ -657,12 +658,8 @@ async function updateOwnAvatar(avatarFileId: string | null) {
     throw new Error('نشست کاربری معتبر نیست.')
   }
 
-  const response = await fetch(`${props.apiBaseUrl}/api/auth/me/avatar`, {
+  const response = await apiFetch('/api/auth/me/avatar', {
     method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${props.jwtToken}`,
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({ avatar_file_id: avatarFileId }),
   })
 
@@ -730,32 +727,36 @@ async function loadMutualTrades(force = false) {
     return;
   }
 
-    isHistoryLoading.value = true;
+  isHistoryLoading.value = true;
   historyError.value = '';
-    try {
+  try {
     const params = buildHistoryQueryParams();
     const endpoint = `${buildTradeHistoryEndpoint()}${params.toString() ? `?${params.toString()}` : ''}`;
-            
-        const response = await fetch(endpoint, {
-            headers: { 'Authorization': `Bearer ${props.jwtToken}` }
-        });
+    const response = await apiFetch(endpoint);
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
       throw new Error(parseApiError(payload, 'خطا در دریافت تاریخچه معاملات'));
-        }
+    }
     mutualTrades.value = Array.isArray(payload) ? payload as MutualTradePreview[] : [];
     historyLoadedQueryKey.value = queryKey;
   } catch (e: any) {
-        console.error("Failed to load history", e);
+    console.error("Failed to load history", e);
     historyError.value = e?.message || 'خطا در دریافت تاریخچه معاملات';
     mutualTrades.value = [];
-    } finally {
-        isHistoryLoading.value = false;
-    }
+  } finally {
+    isHistoryLoading.value = false;
+  }
 }
 
 async function loadProjectUsersDirectory(force = false) {
-  if (!showProjectUsersSection.value || !props.user?.id || !props.jwtToken || projectUsersLoading.value) {
+  const targetProfileUserId = Number(profileData.value?.id);
+  if (
+    !showProjectUsersSection.value
+    || !Number.isInteger(targetProfileUserId)
+    || targetProfileUserId <= 0
+    || !props.jwtToken
+    || projectUsersLoading.value
+  ) {
     return;
   }
 
@@ -772,11 +773,7 @@ async function loadProjectUsersDirectory(force = false) {
     if (normalizedQuery) {
       params.set('q', normalizedQuery);
     }
-    const response = await fetch(`${props.apiBaseUrl}/api/users-public/${props.user.id}/project-users?${params.toString()}`, {
-      headers: {
-        'Authorization': `Bearer ${props.jwtToken}`,
-      },
-    });
+    const response = await apiFetch(`/api/users-public/${targetProfileUserId}/project-users?${params.toString()}`);
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
       throw new Error(parseApiError(payload, 'خطا در دریافت لیست کاربران پروژه'));
@@ -809,11 +806,7 @@ async function openAdminUserManager() {
   adminUserLoading.value = true;
   adminUserError.value = '';
   try {
-    const response = await fetch(`${props.apiBaseUrl}/api/users/${profileData.value.id}`, {
-      headers: {
-        'Authorization': `Bearer ${props.jwtToken}`,
-      },
-    });
+    const response = await apiFetch(`/api/users/${profileData.value.id}`);
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
       throw new Error(parseApiError(payload, 'خطا در دریافت تنظیمات کاربر'));
@@ -844,11 +837,7 @@ async function getCurrentPublicBlockState() {
     throw new Error('نشست کاربری معتبر نیست.');
   }
 
-  const response = await fetch(`${props.apiBaseUrl}/api/blocks/check/${profileData.value.id}`, {
-    headers: {
-      'Authorization': `Bearer ${props.jwtToken}`,
-    },
-  });
+  const response = await apiFetch(`/api/blocks/check/${profileData.value.id}`);
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     throw new Error(parseApiError(payload, 'خطا در بررسی وضعیت بلاک کاربر'));
@@ -907,11 +896,7 @@ async function getPublicBlockStatus() {
     throw new Error('نشست کاربری معتبر نیست.');
   }
 
-  const response = await fetch(`${props.apiBaseUrl}/api/blocks/status`, {
-    headers: {
-      'Authorization': `Bearer ${props.jwtToken}`,
-    },
-  });
+  const response = await apiFetch('/api/blocks/status');
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     throw new Error(parseApiError(payload, 'خطا در دریافت وضعیت بلاک کاربر'));
@@ -961,11 +946,8 @@ async function togglePublicProfileBlock() {
       return;
     }
 
-    const response = await fetch(`${props.apiBaseUrl}/api/blocks/${profileData.value.id}`, {
+    const response = await apiFetch(`/api/blocks/${profileData.value.id}`, {
       method: shouldUnblock ? 'DELETE' : 'POST',
-      headers: {
-        'Authorization': `Bearer ${props.jwtToken}`,
-      },
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {

@@ -53,6 +53,9 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
         ):
             result = await list_project_users_directory(7, q="0912", limit=25, db=db, current_user=current_user)
 
@@ -71,17 +74,49 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("lower(users.account_name) like lower", stmt_text)
         self.assertIn("lower(users.mobile_number) like lower", stmt_text)
 
-    async def test_list_project_users_directory_denies_non_self_requests(self):
-        db = FakeDB([])
+    async def test_list_project_users_directory_allows_active_accountant_for_owner_profile(self):
+        db = FakeDB([
+            FakeExecuteResult([
+                make_user(id=20, account_name="owner20", mobile_number="09120000020"),
+                make_user(id=9, account_name="manager9", role=UserRole.MIDDLE_MANAGER, mobile_number="09120000009"),
+            ])
+        ])
 
-        with self.assertRaises(HTTPException) as exc_info:
-            await list_project_users_directory(
-                7,
+        with patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=SimpleNamespace(owner_user_id=20)),
+        ):
+            result = await list_project_users_directory(
+                20,
                 q=None,
                 limit=25,
                 db=db,
-                current_user=SimpleNamespace(id=99, role=UserRole.STANDARD),
+                current_user=SimpleNamespace(id=44, role=UserRole.STANDARD),
             )
+
+        self.assertEqual([row.id for row in result], [20, 9])
+
+    async def test_list_project_users_directory_denies_unrelated_requests(self):
+        db = FakeDB([])
+
+        with patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await list_project_users_directory(
+                    7,
+                    q=None,
+                    limit=25,
+                    db=db,
+                    current_user=SimpleNamespace(id=99, role=UserRole.STANDARD),
+                )
 
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(db.stmts, [])
@@ -92,6 +127,9 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=SimpleNamespace(owner_user_id=21)),
+        ), patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await list_project_users_directory(

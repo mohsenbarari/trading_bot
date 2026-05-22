@@ -3,6 +3,7 @@ import { ref, onMounted, watch } from 'vue'
 import LoadingSkeleton from '../LoadingSkeleton.vue'
 import ChatUserListRow from './ChatUserListRow.vue'
 import { UsersRound } from 'lucide-vue-next'
+import { apiFetchJson } from '../../utils/auth'
 
 const props = defineProps<{
   show: boolean
@@ -15,8 +16,6 @@ const emit = defineEmits<{
   (e: 'start-chat', userId: number, userName: string): void
   (e: 'create-group'): void
 }>()
-
-const token = localStorage.getItem('auth_token') || ''
 
 type SearchUser = {
   id: number
@@ -52,19 +51,13 @@ function getUserBadges(user: SearchUser) {
 const searchUsers = async (query: string = '') => {
   isLoading.value = true
   try {
-    const url = new URL('/api/users-public/search', window.location.origin)
+    const params = new URLSearchParams()
     if (query) {
-      url.searchParams.append('q', query)
+      params.set('q', query)
     }
-    url.searchParams.append('limit', '50')
-    
-    const res = await fetch(url.toString(), {
-      headers: { 
-        'Authorization': `Bearer ${token}` 
-      }
-    })
-    if (!res.ok) throw new Error('Network response was not ok')
-    users.value = await res.json()
+    params.set('limit', '50')
+
+    users.value = await apiFetchJson(`/api/users-public/search?${params.toString()}`)
   } catch (err) {
     console.error('Failed to search users:', err)
   } finally {

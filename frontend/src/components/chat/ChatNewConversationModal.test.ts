@@ -131,11 +131,11 @@ describe('ChatNewConversationModal.vue', () => {
     expect(String(url)).toContain('/api/users-public/search')
     expect(String(url)).toContain('q=ali')
     expect(String(url)).toContain('limit=50')
-    expect(options).toEqual({
-      headers: {
+    expect(options).toEqual(expect.objectContaining({
+      headers: expect.objectContaining({
         Authorization: 'Bearer jwt-token',
-      },
-    })
+      }),
+    }))
   })
 
   it('reloads results when the modal is opened later and emits close from the header button', async () => {
@@ -161,7 +161,14 @@ describe('ChatNewConversationModal.vue', () => {
 
   it('logs failed user searches and keeps the empty state visible', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    fetchMock.mockRejectedValueOnce(new Error('network down'))
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: 'bad request' }), {
+        status: 400,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }),
+    )
 
     const wrapper = buildWrapper({
       show: true,

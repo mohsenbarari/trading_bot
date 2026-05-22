@@ -58,6 +58,7 @@ describe('PublicProfile.vue', () => {
     vi.stubGlobal('alert', vi.fn())
     vi.stubGlobal('confirm', vi.fn(() => true))
     localStorage.clear()
+    localStorage.setItem('auth_token', 'token')
   })
 
   it('shows owner-resolution context when the public profile resolves from an accountant', async () => {
@@ -102,11 +103,11 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/users-public/44', {
-      headers: {
+    expect(fetchMock).toHaveBeenCalledWith('/api/users-public/44', expect.objectContaining({
+      headers: expect.objectContaining({
         Authorization: 'Bearer token',
-      },
-    })
+      }),
+    }))
     expect(wrapper.text()).toContain('نمایش پروفایل مالک اصلی')
     expect(wrapper.text()).toContain('حسابدار فروش')
     expect(wrapper.text()).toContain('owner20')
@@ -353,22 +354,22 @@ describe('PublicProfile.vue', () => {
     await blockButton!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/blocks/status', {
-      headers: {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/blocks/status', expect.objectContaining({
+      headers: expect.objectContaining({
         Authorization: 'Bearer token',
-      },
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/blocks/check/30', {
-      headers: {
+      }),
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/blocks/check/30', expect.objectContaining({
+      headers: expect.objectContaining({
         Authorization: 'Bearer token',
-      },
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/blocks/30', {
+      }),
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/blocks/30', expect.objectContaining({
       method: 'POST',
-      headers: {
+      headers: expect.objectContaining({
         Authorization: 'Bearer token',
-      },
-    })
+      }),
+    }))
     expect(vi.mocked(window.confirm)).toHaveBeenCalledWith('آیا از بلاک کاربر plain30 اطمینان دارید؟')
     expect(vi.mocked(window.alert)).toHaveBeenCalledWith('کاربر با موفقیت بلاک شد.')
     expect(wrapper.findAll('button').some((button) => button.text().includes('رفع بلاک'))).toBe(true)
@@ -481,12 +482,12 @@ describe('PublicProfile.vue', () => {
     await unblockButton!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/blocks/30', {
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/blocks/30', expect.objectContaining({
       method: 'DELETE',
-      headers: {
+      headers: expect.objectContaining({
         Authorization: 'Bearer token',
-      },
-    })
+      }),
+    }))
     expect(vi.mocked(window.confirm)).toHaveBeenCalledWith('آیا از رفع بلاک کاربر plain30 اطمینان دارید؟')
     expect(vi.mocked(window.alert)).toHaveBeenCalledWith('رفع بلاک انجام شد.')
   })
@@ -550,11 +551,11 @@ describe('PublicProfile.vue', () => {
     await directoryHeader!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/users-public/44/project-users?limit=25', {
-      headers: {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/users-public/44/project-users?limit=25', expect.objectContaining({
+      headers: expect.objectContaining({
         Authorization: 'Bearer token',
-      },
-    })
+      }),
+    }))
     expect(wrapper.text()).toContain('manager61')
     expect(wrapper.text()).toContain('09121110000')
 
@@ -571,11 +572,11 @@ describe('PublicProfile.vue', () => {
     await wrapper.get('.project-users-search-submit').trigger('submit')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/users-public/44/project-users?limit=25&q=manager', {
-      headers: {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/users-public/44/project-users?limit=25&q=manager', expect.objectContaining({
+      headers: expect.objectContaining({
         Authorization: 'Bearer token',
-      },
-    })
+      }),
+    }))
     expect(wrapper.text()).toContain('manager61')
   })
 
@@ -643,11 +644,11 @@ describe('PublicProfile.vue', () => {
     await directoryHeader!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/users-public/44/project-users?limit=25', {
-      headers: {
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/users-public/20/project-users?limit=25', expect.objectContaining({
+      headers: expect.objectContaining({
         Authorization: 'Bearer token',
-      },
-    })
+      }),
+    }))
     expect(wrapper.text()).toContain('owner20')
   })
 
@@ -815,9 +816,9 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/users/61', expect.objectContaining({
-      headers: {
+      headers: expect.objectContaining({
         Authorization: 'Bearer token',
-      },
+      }),
     }))
     expect(wrapper.find('.user-profile-stub').exists()).toBe(true)
     expect(wrapper.text()).toContain('managed61')

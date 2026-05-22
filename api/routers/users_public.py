@@ -86,12 +86,49 @@ def _serialize_project_user_directory_entry(user: User) -> schemas.ProjectUserDi
     return schemas.ProjectUserDirectoryEntry.model_validate(user, from_attributes=True)
 
 
+def _serialize_public_search_result(
+    user: User,
+    *,
+    resolved_from_accountant_id: int | None = None,
+    highlight_accountant_user_id: int | None = None,
+    highlight_accountant_relation_display_name: str | None = None,
+    customer_owner_user_id: int | None = None,
+    customer_owner_account_name: str | None = None,
+    customer_management_name: str | None = None,
+    customer_tier=None,
+) -> schemas.PublicUserSearchResult:
+    search_result = schemas.PublicUserSearchResult.model_validate(user, from_attributes=True)
+    return search_result.model_copy(update={
+        "resolved_from_accountant_id": resolved_from_accountant_id,
+        "highlight_accountant_user_id": highlight_accountant_user_id,
+        "highlight_accountant_relation_display_name": highlight_accountant_relation_display_name,
+        "customer_owner_user_id": customer_owner_user_id,
+        "customer_owner_account_name": customer_owner_account_name,
+        "customer_management_name": customer_management_name,
+        "customer_tier": customer_tier,
+    })
+
+
 def _is_super_admin(user: User) -> bool:
     return getattr(user, "role", None) == UserRole.SUPER_ADMIN
 
 
 def _can_view_owner_customer_list(current_user: User, owner_user_id: int) -> bool:
     return current_user.id == owner_user_id or _is_super_admin(current_user)
+
+
+def _can_view_project_users_directory(
+    current_user: User,
+    owner_user_id: int,
+    *,
+    viewer_accountant_relation: AccountantRelation | None,
+) -> bool:
+    if current_user.id == owner_user_id:
+        return True
+    return (
+        viewer_accountant_relation is not None
+        and getattr(viewer_accountant_relation, "owner_user_id", None) == owner_user_id
+    )
 
 
 def _can_view_customer_profile(
@@ -179,7 +216,7 @@ async def _resolve_public_search_rows(
     rows: list[User],
     *,
     current_user: User,
-) -> list[schemas.UserPublicRead]:
+) -> list[schemas.PublicUserSearchResult]:
     user_ids = [user.id for user in rows if getattr(user, "id", None) is not None]
     if not user_ids:
         return []
@@ -207,7 +244,7 @@ async def _resolve_public_search_rows(
         .options(joinedload(CustomerRelation.owner_user))
         .where(
             CustomerRelation.customer_user_id.in_(user_ids),
-            CustomerRelation.status == "active",
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
             CustomerRelation.deleted_at.is_(None),
         )
     )
@@ -218,7 +255,7 @@ async def _resolve_public_search_rows(
         if relation.customer_user_id is not None
     }
 
-    serialized_rows: list[schemas.UserPublicRead] = []
+    serialized_rows: list[schemas.PublicUserSearchResult] = []
     seen_user_ids: set[int] = set()
     for user in rows:
         relation = relation_by_accountant_id.get(user.id)
@@ -227,7 +264,7 @@ async def _resolve_public_search_rows(
             if owner_user.id == current_user.id or owner_user.id in seen_user_ids:
                 continue
             serialized_rows.append(
-                _serialize_public_user(
+                _serialize_public_search_result(
                     owner_user,
                     resolved_from_accountant_id=user.id,
                     highlight_accountant_user_id=user.id,
@@ -248,7 +285,7 @@ async def _resolve_public_search_rows(
 
             owner_user = customer_relation.owner_user
             serialized_rows.append(
-                _serialize_public_user(
+                _serialize_public_search_result(
                     user,
                     customer_owner_user_id=owner_user.id if owner_user and not owner_user.is_deleted else None,
                     customer_owner_account_name=owner_user.account_name if owner_user and not owner_user.is_deleted else None,
@@ -261,12 +298,12 @@ async def _resolve_public_search_rows(
 
         if user.id == current_user.id or user.id in seen_user_ids:
             continue
-        serialized_rows.append(_serialize_public_user(user))
+        serialized_rows.append(_serialize_public_search_result(user))
         seen_user_ids.add(user.id)
 
     return serialized_rows
 
-@router.get("/search", response_model=List[schemas.UserPublicRead])
+@router.get("/search", response_model=List[schemas.PublicUserSearchResult])
 async def search_public_users(
     q: Optional[str] = Query(None, min_length=1),
     limit: int = 50,
@@ -302,12 +339,17 @@ async def list_project_users_directory(
     current_user: User = Depends(get_current_user),
 ):
     """لیست کاربران پروژه برای self public profile یا accountant-resolved owner profile."""
-    if current_user.id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
     current_customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
     if current_customer_relation is not None:
         raise HTTPException(status_code=403, detail="Customers cannot view the project users directory")
+
+    viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
+    if not _can_view_project_users_directory(
+        current_user,
+        user_id,
+        viewer_accountant_relation=viewer_accountant_relation,
+    ):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     stmt = _build_project_user_directory_stmt(q=q, limit=limit)
     rows = (await db.execute(stmt)).scalars().all()
