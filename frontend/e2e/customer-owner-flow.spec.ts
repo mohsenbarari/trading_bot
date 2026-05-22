@@ -32,6 +32,17 @@ interface OwnerCustomerRelationPayload {
   registration_link?: string | null
 }
 
+type PendingOwnerCustomerRelation = OwnerCustomerRelationPayload & {
+  status: 'pending'
+  invitation_token: string
+  registration_link: string
+}
+
+type ActiveOwnerCustomerRelation = OwnerCustomerRelationPayload & {
+  status: 'active'
+  customer_user_id: number
+}
+
 interface DeletedCustomerPayload {
   relationStatus: string | null
   relationDeletedAt: string | null
@@ -578,6 +589,73 @@ async function fetchOwnerCustomerRelations(request: APIRequestContext, accessTok
   return response.json() as Promise<OwnerCustomerRelationPayload[]>
 }
 
+async function findOwnerCustomerRelation(
+  request: APIRequestContext,
+  accessToken: string,
+  predicate: (relation: OwnerCustomerRelationPayload) => boolean,
+): Promise<OwnerCustomerRelationPayload | undefined> {
+  return (await fetchOwnerCustomerRelations(request, accessToken)).find(predicate)
+}
+
+function isPendingOwnerCustomerRelation(
+  relation: OwnerCustomerRelationPayload | null | undefined,
+): relation is PendingOwnerCustomerRelation {
+  return Boolean(
+    relation
+      && relation.status === 'pending'
+      && typeof relation.invitation_token === 'string'
+      && relation.invitation_token.length > 0
+      && typeof relation.registration_link === 'string'
+      && relation.registration_link.length > 0,
+  )
+}
+
+function isActiveOwnerCustomerRelation(
+  relation: OwnerCustomerRelationPayload | null | undefined,
+): relation is ActiveOwnerCustomerRelation {
+  return Boolean(
+    relation
+      && relation.status === 'active'
+      && typeof relation.customer_user_id === 'number',
+  )
+}
+
+async function waitForPendingOwnerCustomerRelation(
+  request: APIRequestContext,
+  accessToken: string,
+  predicate: (relation: OwnerCustomerRelationPayload) => boolean,
+): Promise<PendingOwnerCustomerRelation> {
+  await expect
+    .poll(async () => isPendingOwnerCustomerRelation(await findOwnerCustomerRelation(request, accessToken, predicate)), { timeout: 30000 })
+    .toBe(true)
+
+  const relation = await findOwnerCustomerRelation(request, accessToken, predicate)
+  if (!isPendingOwnerCustomerRelation(relation)) {
+    throw new Error('Pending customer relation was not found')
+  }
+
+  return relation
+}
+
+async function waitForActiveOwnerCustomerRelation(
+  request: APIRequestContext,
+  accessToken: string,
+  relationId: number,
+): Promise<ActiveOwnerCustomerRelation> {
+  await expect
+    .poll(async () => isActiveOwnerCustomerRelation(
+      await findOwnerCustomerRelation(request, accessToken, (relation) => relation.id === relationId),
+    ), { timeout: 30000 })
+    .toBe(true)
+
+  const relation = await findOwnerCustomerRelation(request, accessToken, (item) => item.id === relationId)
+  if (!isActiveOwnerCustomerRelation(relation)) {
+    throw new Error('Activated customer relation was not found')
+  }
+
+  return relation
+}
+
 test.describe('customer owner lifecycle', () => {
   test('owner can create update and unlink a customer, and super-admin can follow the customer handoff', async ({ page, request }) => {
     test.setTimeout(180000)
@@ -610,25 +688,14 @@ test.describe('customer owner lifecycle', () => {
     await modal.locator('input.create-max-daily-volume').fill('40')
     await modal.locator('button.submit-create').click()
 
-    let pendingRelation: OwnerCustomerRelationPayload | null = null
-    await expect
-      .poll(async () => {
-        const relations = await fetchOwnerCustomerRelations(request, owner.accessToken)
-        pendingRelation = relations.find((relation) => relation.management_name === managementName) ?? null
-        return pendingRelation?.status ?? null
-      }, { timeout: 30000 })
-      .toBe('pending')
-
-    const confirmedPendingRelation = requireValue(pendingRelation, 'Pending customer relation was not found')
+    const confirmedPendingRelation = await waitForPendingOwnerCustomerRelation(
+      request,
+      owner.accessToken,
+      (relation) => relation.management_name === managementName,
+    )
     const pendingRelationId = confirmedPendingRelation.id
-    const registrationToken = requireValue(
-      confirmedPendingRelation.invitation_token,
-      'Pending customer relation is missing invitation token',
-    )
-    const registrationLink = requireValue(
-      confirmedPendingRelation.registration_link,
-      'Pending customer relation is missing registration link',
-    )
+    const registrationToken = confirmedPendingRelation.invitation_token
+    const registrationLink = confirmedPendingRelation.registration_link
 
     expect(registrationLink).toContain('/register')
     await expect(modal.locator('.customer-card').filter({ hasText: managementName })).toContainText('در انتظار ثبت‌نام')
@@ -670,22 +737,13 @@ test.describe('customer owner lifecycle', () => {
     await page.locator('.owner-profile-section .settings-btn').filter({ hasText: 'مشتریان' }).click()
     await expect(modal).toBeVisible({ timeout: 30000 })
 
-    let activatedCustomer: OwnerCustomerRelationPayload | null = null
-
     await modal.locator('button').filter({ hasText: 'بروزرسانی لیست' }).click()
-    await expect
-      .poll(async () => {
-        const relations = await fetchOwnerCustomerRelations(request, owner.accessToken)
-        activatedCustomer = relations.find((relation) => relation.id === pendingRelationId) ?? null
-        return activatedCustomer?.status ?? null
-      }, { timeout: 30000 })
-      .toBe('active')
-
-    const confirmedActivatedCustomer = requireValue(activatedCustomer, 'Activated customer relation was not found')
-    const activatedCustomerUserId = requireValue(
-      confirmedActivatedCustomer.customer_user_id,
-      'Activated customer relation is missing customer user id',
+    const confirmedActivatedCustomer = await waitForActiveOwnerCustomerRelation(
+      request,
+      owner.accessToken,
+      pendingRelationId,
     )
+    const activatedCustomerUserId = confirmedActivatedCustomer.customer_user_id
 
     const activeCard = modal.locator('.customer-card').filter({ hasText: managementName }).first()
     await expect(activeCard).toContainText('فعال')
@@ -700,7 +758,7 @@ test.describe('customer owner lifecycle', () => {
     await expect
       .poll(async () => {
         const relations = await fetchOwnerCustomerRelations(request, owner.accessToken)
-        const updated = relations.find((relation) => relation.id === pendingRelation?.id)
+        const updated = relations.find((relation) => relation.id === pendingRelationId)
         return JSON.stringify({
           commission_rate: updated?.commission_rate,
           max_trade_quantity: updated?.max_trade_quantity,
