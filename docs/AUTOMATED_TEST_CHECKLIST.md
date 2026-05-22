@@ -146,6 +146,7 @@ Scope rules:
 - [x] Revalidate `frontend/e2e/channel-media.spec.ts`, `frontend/e2e/direct-chat.spec.ts`, and `frontend/e2e/mandatory-channel.spec.ts` serially with a clean green pass (`49/49`).
 - [x] Revalidate `frontend/e2e/notifications.spec.ts` serially against the current auth/realtime runtime (`4/4`).
 - [x] Add a lightweight Playwright regression for accountant-aware trade history profile navigation in `frontend/e2e/trade-history-accountant.spec.ts`.
+- [x] Extend `frontend/e2e/trade-history-accountant.spec.ts` with public-profile history filter and export query-state regressions for mutual and self views across Chromium/Firefox/WebKit.
 - [x] Extend `frontend/e2e/notifications.spec.ts` with trade notification-center route coverage so owner-resolved profile links survive the notification history fetch path.
 - [x] Re-sync `frontend/e2e/admin-smoke.spec.ts` and `frontend/e2e/auth.spec.ts` with the current channel-manager entry flow and profile/settings routing.
 - [x] Revalidate the full frontend Playwright suite serially with a clean green pass (`83/83`).

@@ -10,6 +10,7 @@ from core.services.trade_history_export_service import (
     build_trade_history_export_rows,
     generate_trade_history_excel_file,
     generate_trade_history_pdf_file,
+    resolve_counterparty_account_name_for_perspective,
     resolve_trade_type_label_for_perspective,
 )
 from models.trade import TradeType
@@ -43,6 +44,14 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
         self.assertEqual(rows[0].trade_number, 10001)
         self.assertEqual(rows[0].trade_type_label, "خرید")
         self.assertEqual(rows[0].commodity_name, "سکه")
+
+    def test_resolve_counterparty_account_name_from_perspective(self):
+        trade = make_trade()
+        trade.offer_user = SimpleNamespace(account_name="offer-side")
+        trade.responder_user = SimpleNamespace(account_name="responder-side")
+
+        self.assertEqual(resolve_counterparty_account_name_for_perspective(trade, 2), "offer-side")
+        self.assertEqual(resolve_counterparty_account_name_for_perspective(trade, 99), "responder-side")
 
     def test_generate_trade_history_excel_file_creates_xlsx(self):
         class DummyCell:
