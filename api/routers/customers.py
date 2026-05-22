@@ -58,18 +58,18 @@ def serialize_customer_relation(relation, invitation=None) -> dict:
     }
 
 
-def serialize_customer_session(session: UserSession) -> dict:
-    return {
-        "id": str(session.id),
-        "device_name": session.device_name,
-        "device_ip": session.device_ip,
-        "platform": session.platform.value if hasattr(session.platform, "value") else str(session.platform),
-        "home_server": session.home_server or "foreign",
-        "is_primary": session.is_primary,
-        "is_active": session.is_active,
-        "created_at": session.created_at,
-        "last_active_at": session.last_active_at,
-    }
+def serialize_customer_session(session: UserSession) -> schemas.CustomerSessionRead:
+    return schemas.CustomerSessionRead(
+        id=str(session.id),
+        device_name=session.device_name,
+        device_ip=session.device_ip,
+        platform=session.platform.value if hasattr(session.platform, "value") else str(session.platform),
+        home_server=session.home_server or "foreign",
+        is_primary=session.is_primary,
+        is_active=session.is_active,
+        created_at=session.created_at,
+        last_active_at=session.last_active_at,
+    )
 
 
 def ensure_owner_context(context: EffectiveOwnerActor) -> None:
@@ -204,7 +204,7 @@ async def update_my_customer(
     return serialize_customer_relation(relation, invitation=invitation_map.get(relation.invitation_token))
 
 
-@router.get("/owner-relations/{relation_id}/sessions", response_model=list[dict])
+@router.get("/owner-relations/{relation_id}/sessions", response_model=list[schemas.CustomerSessionRead])
 async def list_my_customer_sessions(
     relation_id: int,
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
@@ -220,7 +220,7 @@ async def list_my_customer_sessions(
     return [serialize_customer_session(session) for session in sessions]
 
 
-@router.delete("/owner-relations/{relation_id}/sessions/{session_id}")
+@router.delete("/owner-relations/{relation_id}/sessions/{session_id}", response_model=schemas.CustomerSessionTerminateResponse)
 async def terminate_my_customer_session(
     relation_id: int,
     session_id: str,

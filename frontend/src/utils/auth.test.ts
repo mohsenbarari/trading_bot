@@ -204,7 +204,13 @@ describe('auth utils', () => {
   it('authGuard fetches /api/auth/me when admin cache is missing', async () => {
     const token = makeJwt(Math.floor(Date.now() / 1000) + 3600)
     localStorage.setItem('auth_token', token)
-    fetchMock.mockResolvedValueOnce(makeJsonResponse({ id: 7, role: 'مدیر میانی', account_name: 'manager7' }))
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({
+      id: 7,
+      role: 'مدیر میانی',
+      account_name: 'manager7',
+      is_customer: true,
+      customer_tier: 'tier2',
+    }))
 
     const { authGuard } = await import(authModulePath)
     const next = vi.fn()
@@ -218,6 +224,8 @@ describe('auth utils', () => {
     expect(JSON.parse(localStorage.getItem('current_user_summary') || '{}')).toMatchObject({
       role: 'مدیر میانی',
       account_name: 'manager7',
+      is_customer: true,
+      customer_tier: 'tier2',
     })
   })
 

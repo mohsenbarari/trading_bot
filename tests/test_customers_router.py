@@ -9,17 +9,37 @@ from fastapi import HTTPException
 import schemas
 from api.routers.customers import (
     create_my_customer,
+    get_active_customer_session,
+    get_active_owner_customer_relation,
     list_my_customers,
     list_my_customer_sessions,
     terminate_my_customer_session,
     unlink_my_customer,
     update_my_customer,
 )
-from models.customer_relation import CustomerTier
+from models.customer_relation import CustomerRelationStatus, CustomerTier
 
 
 class FakeDB:
     pass
+
+
+class FakeExecuteResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar_one_or_none(self):
+        return self.value
+
+
+class ExecuteDB:
+    def __init__(self, *values):
+        self.values = list(values)
+
+    async def execute(self, _stmt):
+        if not self.values:
+            raise AssertionError("Unexpected execute() call")
+        return FakeExecuteResult(self.values.pop(0))
 
 
 class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
@@ -212,8 +232,74 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
 
         relation_mock.assert_awaited_once()
         sessions_mock.assert_awaited_once_with(unittest.mock.ANY, 12)
-        self.assertEqual(result[0]["device_name"], "Chrome on Android")
-        self.assertTrue(result[0]["is_primary"])
+        self.assertEqual(result[0].device_name, "Chrome on Android")
+        self.assertTrue(result[0].is_primary)
+
+    async def test_customer_session_routes_reject_accountant_context(self):
+        context = SimpleNamespace(is_accountant_context=True, owner_user=SimpleNamespace(id=7))
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await list_my_customer_sessions(9, context=context, db=FakeDB())
+        self.assertEqual(exc_info.exception.status_code, 403)
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await terminate_my_customer_session(
+                9,
+                "11111111-1111-1111-1111-111111111111",
+                context=context,
+                db=FakeDB(),
+            )
+        self.assertEqual(exc_info.exception.status_code, 403)
+
+    async def test_get_active_owner_customer_relation_rejects_inactive_or_deleted_relation(self):
+        base_relation = SimpleNamespace(
+            deleted_at=None,
+            status=CustomerRelationStatus.PENDING,
+            customer_user_id=12,
+            customer_user=SimpleNamespace(is_deleted=False),
+        )
+        with self.assertRaises(HTTPException) as exc_info:
+            await get_active_owner_customer_relation(ExecuteDB(base_relation), owner_user_id=7, relation_id=9)
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        deleted_relation = SimpleNamespace(
+            deleted_at=datetime.utcnow(),
+            status=CustomerRelationStatus.ACTIVE,
+            customer_user_id=12,
+            customer_user=SimpleNamespace(is_deleted=False),
+        )
+        with self.assertRaises(HTTPException) as exc_info:
+            await get_active_owner_customer_relation(ExecuteDB(deleted_relation), owner_user_id=7, relation_id=9)
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+    async def test_get_active_owner_customer_relation_rejects_missing_or_deleted_customer_user(self):
+        no_customer_relation = SimpleNamespace(
+            deleted_at=None,
+            status=CustomerRelationStatus.ACTIVE,
+            customer_user_id=None,
+            customer_user=None,
+        )
+        with self.assertRaises(HTTPException) as exc_info:
+            await get_active_owner_customer_relation(ExecuteDB(no_customer_relation), owner_user_id=7, relation_id=9)
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        deleted_customer_relation = SimpleNamespace(
+            deleted_at=None,
+            status=CustomerRelationStatus.ACTIVE,
+            customer_user_id=12,
+            customer_user=SimpleNamespace(is_deleted=True),
+        )
+        with self.assertRaises(HTTPException) as exc_info:
+            await get_active_owner_customer_relation(ExecuteDB(deleted_customer_relation), owner_user_id=7, relation_id=9)
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+    async def test_get_active_customer_session_requires_active_customer_session(self):
+        session_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await get_active_customer_session(ExecuteDB(None), customer_user_id=12, session_id=session_id)
+
+        self.assertEqual(exc_info.exception.status_code, 404)
 
     async def test_terminate_my_customer_session_logs_out_selected_customer_session(self):
         context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))

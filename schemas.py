@@ -348,6 +348,24 @@ class CustomerRelationRead(BaseModel):
         from_attributes = True
 
 
+class CustomerSessionRead(BaseModel):
+    id: str
+    device_name: str
+    device_ip: str | None = None
+    platform: str
+    home_server: str
+    is_primary: bool
+    is_active: bool
+    created_at: datetime | None = None
+    last_active_at: datetime | None = None
+
+
+class CustomerSessionTerminateResponse(BaseModel):
+    detail: str
+    terminated_session_id: str
+    promoted_primary_session_id: str | None = None
+
+
 # --- ۳. اعتبارسنج (validator) اضافه شد ---
 class InvitationBase(BaseModel):
     account_name: str
