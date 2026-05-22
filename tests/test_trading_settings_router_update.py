@@ -24,6 +24,11 @@ def make_settings(**overrides):
         "anti_abuse_daily_base": 2,
         "anti_abuse_weekly_base": 5,
         "anti_abuse_monthly_base": 7,
+        "market_schedule_enabled": False,
+        "market_timezone": "Asia/Tehran",
+        "market_open_time_local": "09:00",
+        "market_close_time_local": "18:00",
+        "market_closed_weekdays": [],
         "invitation_expiry_minutes": 10080,
         "lot_min_size": 1,
         "lot_max_count": 10,
@@ -35,6 +40,12 @@ def make_settings(**overrides):
 class TradingSettingsRouterUpdateTests(unittest.IsolatedAsyncioTestCase):
     async def test_update_settings_rejects_invalid_min_max_and_save_failure(self):
         current = make_settings(offer_min_quantity=10, offer_max_quantity=5)
+        with patch("api.routers.trading_settings.load_trading_settings_async", new=AsyncMock(return_value=current)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await update_settings(TradingSettingsUpdate())
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        current = make_settings(market_open_time_local="18:00", market_close_time_local="09:00")
         with patch("api.routers.trading_settings.load_trading_settings_async", new=AsyncMock(return_value=current)):
             with self.assertRaises(HTTPException) as exc_info:
                 await update_settings(TradingSettingsUpdate())
@@ -52,8 +63,24 @@ class TradingSettingsRouterUpdateTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_settings_merges_only_non_none_fields_and_returns_reloaded_settings(self):
         current = make_settings()
-        updated = make_settings(offer_expiry_minutes=45, offer_max_quantity=50, anti_abuse_weekly_base=9)
-        updates = TradingSettingsUpdate(offer_expiry_minutes=45, offer_max_quantity=None, anti_abuse_weekly_base=9)
+        updated = make_settings(
+            offer_expiry_minutes=45,
+            offer_max_quantity=50,
+            anti_abuse_weekly_base=9,
+            market_schedule_enabled=True,
+            market_open_time_local="10:00",
+            market_close_time_local="17:00",
+            market_closed_weekdays=[4],
+        )
+        updates = TradingSettingsUpdate(
+            offer_expiry_minutes=45,
+            offer_max_quantity=None,
+            anti_abuse_weekly_base=9,
+            market_schedule_enabled=True,
+            market_open_time_local="10:00",
+            market_close_time_local="17:00",
+            market_closed_weekdays=[4, 4],
+        )
 
         with patch(
             "api.routers.trading_settings.load_trading_settings_async",
@@ -77,6 +104,11 @@ class TradingSettingsRouterUpdateTests(unittest.IsolatedAsyncioTestCase):
                 "anti_abuse_daily_base": 2,
                 "anti_abuse_weekly_base": 9,
                 "anti_abuse_monthly_base": 7,
+                "market_schedule_enabled": True,
+                "market_timezone": "Asia/Tehran",
+                "market_open_time_local": "10:00",
+                "market_close_time_local": "17:00",
+                "market_closed_weekdays": [4],
                 "invitation_expiry_minutes": 10080,
                 "lot_min_size": 1,
                 "lot_max_count": 10,
@@ -85,6 +117,11 @@ class TradingSettingsRouterUpdateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.offer_expiry_minutes, 45)
         self.assertEqual(result.offer_max_quantity, 50)
         self.assertEqual(result.anti_abuse_weekly_base, 9)
+        self.assertTrue(result.market_schedule_enabled)
+        self.assertEqual(result.market_open_time_local, "10:00")
+        self.assertEqual(result.market_close_time_local, "17:00")
+        self.assertEqual(result.market_closed_weekdays, [4])
+
 
 
 if __name__ == "__main__":

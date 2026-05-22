@@ -28,6 +28,11 @@ const defaultSettings = {
   anti_abuse_daily_base: 2,
   anti_abuse_weekly_base: 5,
   anti_abuse_monthly_base: 7,
+  market_schedule_enabled: false,
+  market_timezone: 'Asia/Tehran',
+  market_open_time_local: '09:00',
+  market_close_time_local: '18:00',
+  market_closed_weekdays: [],
 }
 
 const loadedSettings = {
@@ -41,7 +46,22 @@ const loadedSettings = {
   anti_abuse_daily_base: 6,
   anti_abuse_weekly_base: 9,
   anti_abuse_monthly_base: 12,
+  market_schedule_enabled: true,
+  market_timezone: 'Asia/Tehran',
+  market_open_time_local: '10:00',
+  market_close_time_local: '17:00',
+  market_closed_weekdays: [4],
 }
+
+const marketState = {
+  is_open: false,
+  active_web_notice_visible: true,
+  offers_since_last_open: 1,
+  last_transition_at: null,
+  next_transition_at: '2026-05-22T10:30:00Z',
+}
+
+let overrideRecords: Array<any> = []
 
 async function mountTradingSettings() {
   const TradingSettings = (await import('./TradingSettings.vue')).default
@@ -57,10 +77,53 @@ describe('TradingSettings.vue', () => {
   beforeEach(() => {
     tradingSettingsMocks.apiFetchMock.mockReset()
     vi.stubGlobal('confirm', vi.fn(() => true))
+    overrideRecords = [
+      {
+        id: 1,
+        date: '2026-05-24',
+        override_type: 'closed_all_day',
+        open_time_local: null,
+        close_time_local: null,
+        note: 'تعطیلی رسمی',
+      },
+      {
+        id: 2,
+        date: '2026-05-25',
+        override_type: 'custom_hours',
+        open_time_local: '11:00',
+        close_time_local: '14:00',
+        note: 'شیفت کوتاه',
+      },
+    ]
     tradingSettingsMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       const method = options?.method || 'GET'
       if (path === '/api/trading-settings/' && method === 'GET') {
         return responseOf(loadedSettings)
+      }
+      if (path === '/api/trading-settings/market-state' && method === 'GET') {
+        return responseOf(marketState)
+      }
+      if (path === '/api/trading-settings/market-overrides' && method === 'GET') {
+        return responseOf(overrideRecords)
+      }
+      if (path === '/api/trading-settings/market-overrides' && method === 'POST') {
+        const body = JSON.parse(options?.body as string)
+        const created = { id: overrideRecords.length + 10, ...body }
+        overrideRecords = [...overrideRecords, created]
+        return responseOf(created)
+      }
+      const overrideMatch = path.match(/^\/api\/trading-settings\/market-overrides\/(\d+)$/)
+      if (overrideMatch && method === 'PUT') {
+        const overrideId = Number(overrideMatch[1])
+        const body = JSON.parse(options?.body as string)
+        const updated = { id: overrideId, ...body }
+        overrideRecords = overrideRecords.map((item) => (item.id === overrideId ? updated : item))
+        return responseOf(updated)
+      }
+      if (overrideMatch && method === 'DELETE') {
+        const overrideId = Number(overrideMatch[1])
+        overrideRecords = overrideRecords.filter((item) => item.id !== overrideId)
+        return responseOf({ success: true })
       }
       if (path === '/api/trading-settings/' && method === 'PUT') {
         return responseOf(JSON.parse(options?.body as string))
@@ -77,16 +140,24 @@ describe('TradingSettings.vue', () => {
     await flushPromises()
 
     expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/', { method: 'GET' })
+    expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/market-state', { method: 'GET' })
+    expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/market-overrides', { method: 'GET' })
     expect(wrapper.text()).toContain('امنیت و نشست‌ها')
+    expect(wrapper.text()).toContain('برنامه بازار')
 
     const headers = wrapper.findAll('.ds-accordion-header')
     await headers[0]!.trigger('click')
     await headers[3]!.trigger('click')
+    await headers[4]!.trigger('click')
+    await headers[5]!.trigger('click')
     await flushPromises()
 
     const accordions = wrapper.findAll('.ds-accordion')
     expect(accordions[0]!.classes()).toContain('open')
     expect(accordions[3]!.classes()).toContain('open')
+    expect(wrapper.get('[data-testid="market-state-card"]').text()).toContain('بسته')
+    expect(wrapper.get('[data-testid="market-state-card"]').text()).toContain('یادآور فعال')
+    expect(wrapper.findAll('[data-testid="market-override-row"]').length).toBe(2)
 
     const inputs = wrapper.findAll('.ds-input')
     expect(inputs[0]!.attributes('placeholder')).toBe('3')
@@ -120,6 +191,10 @@ describe('TradingSettings.vue', () => {
     const inputs = wrapper.findAll('.ds-input')
     await inputs[1]!.setValue('30')
     await inputs[8]!.setValue('14')
+    await wrapper.get('[data-testid="market-schedule-enabled"]').setValue(false)
+    await wrapper.get('[data-testid="market-open-time"]').setValue('09:30')
+    await wrapper.get('[data-testid="market-close-time"]').setValue('16:45')
+    await wrapper.get('[data-testid="weekday-3"]').setValue(true)
     await wrapper.find('.ds-btn.primary.action-btn').trigger('click')
     await flushPromises()
 
@@ -138,6 +213,10 @@ describe('TradingSettings.vue', () => {
           anti_abuse_daily_base: 6,
           anti_abuse_weekly_base: 14,
           anti_abuse_monthly_base: 12,
+          market_schedule_enabled: false,
+          market_open_time_local: '09:30',
+          market_close_time_local: '16:45',
+          market_closed_weekdays: [3, 4],
         }),
       }),
     )
@@ -146,6 +225,43 @@ describe('TradingSettings.vue', () => {
     expect(inputs[1]!.attributes('placeholder')).toBe('30')
     expect((inputs[8]!.element as HTMLInputElement).value).toBe('')
     expect(inputs[8]!.attributes('placeholder')).toBe('14')
+
+    wrapper.unmount()
+  })
+
+  it('creates, edits, and deletes market calendar overrides', async () => {
+    const wrapper = await mountTradingSettings()
+    await flushPromises()
+
+    const headers = wrapper.findAll('.ds-accordion-header')
+    await headers[5]!.trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="override-date"]').setValue('2026-05-30')
+    await wrapper.get('[data-testid="override-type"]').setValue('custom_hours')
+    await wrapper.get('[data-testid="override-open-time"]').setValue('12:00')
+    await wrapper.get('[data-testid="override-close-time"]').setValue('15:30')
+    await wrapper.get('[data-testid="override-note"]').setValue('جلسه خاص')
+    await wrapper.get('[data-testid="override-save"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('استثنای تقویمی با موفقیت ثبت شد')
+    expect(wrapper.findAll('[data-testid="market-override-row"]').length).toBe(3)
+    expect(wrapper.text()).toContain('جلسه خاص')
+
+    await wrapper.get('[data-testid="override-edit-1"]').trigger('click')
+    await wrapper.get('[data-testid="override-note"]').setValue('تعطیلی اصلاح‌شده')
+    await wrapper.get('[data-testid="override-save"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('استثنای تقویمی با موفقیت ویرایش شد')
+    expect(wrapper.text()).toContain('تعطیلی اصلاح‌شده')
+
+    await wrapper.get('[data-testid="override-delete-2"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('استثنای تقویمی حذف شد')
+    expect(wrapper.findAll('[data-testid="market-override-row"]').length).toBe(2)
 
     wrapper.unmount()
   })

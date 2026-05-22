@@ -17,6 +17,11 @@ def make_settings(**overrides):
         "anti_abuse_daily_base": 2,
         "anti_abuse_weekly_base": 5,
         "anti_abuse_monthly_base": 7,
+        "market_schedule_enabled": True,
+        "market_timezone": "Asia/Tehran",
+        "market_open_time_local": "09:30",
+        "market_close_time_local": "16:15",
+        "market_closed_weekdays": [4],
         "invitation_expiry_minutes": 10080,
         "lot_min_size": 1,
         "lot_max_count": 10,
@@ -36,6 +41,10 @@ class TradingSettingsRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.lot_max_count, 8)
         self.assertEqual(result.invitation_expiry_minutes, 10080)
         self.assertEqual(result.anti_abuse_monthly_base, 11)
+        self.assertTrue(result.market_schedule_enabled)
+        self.assertEqual(result.market_open_time_local, "09:30")
+        self.assertEqual(result.market_close_time_local, "16:15")
+        self.assertEqual(result.market_closed_weekdays, [4])
 
     async def test_get_market_state_maps_runtime_view_to_response(self):
         runtime_view = SimpleNamespace(
