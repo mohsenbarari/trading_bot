@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { ArrowUp, ArrowDown, ArrowUpDown, X, Loader2, Send, ChevronLeft } from 'lucide-vue-next'
 import { useOffers } from '../composables/useOffers'
 import { useTradingSort } from '../composables/useTradingSort'
+import { useWebSocket } from '../composables/useWebSocket'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import OffersList from '../components/OffersList.vue'
 import OfferPreviewModal from '../components/OfferPreviewModal.vue'
@@ -44,11 +45,29 @@ interface OfferPriceWarning {
   difference_percent: number
 }
 
+interface MarketRuntimeState {
+  is_open: boolean
+  active_web_notice_visible: boolean
+  offers_since_last_open: number
+  last_transition_at: string | null
+  next_transition_at: string | null
+}
+
 type CustomerTierValue = 'tier1' | 'tier2' | null
 
+const MARKET_CLOSED_DETAIL = 'بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید.'
+
 const { offers, isLoading, fetchOffers, startPolling, stopPolling } = useOffers()
+const { on: wsOn, off: wsOff } = useWebSocket()
 const currentUserId = ref<number | undefined>(undefined)
 const currentUserCustomerTier = ref<CustomerTierValue>(null)
+const marketRuntime = ref<MarketRuntimeState>({
+  is_open: true,
+  active_web_notice_visible: false,
+  offers_since_last_open: 0,
+  last_transition_at: null,
+  next_transition_at: null,
+})
 
 const {
   filterType,
@@ -79,6 +98,10 @@ const pendingOfferPreview = ref<ParsedOfferPreview | null>(null)
 const previewError = ref('')
 const previewWarning = ref<OfferPriceWarning | null>(null)
 const isTier2Customer = computed(() => currentUserCustomerTier.value === 'tier2')
+const isMarketOpen = computed(() => marketRuntime.value.is_open)
+const showMarketNotice = computed(() => !marketRuntime.value.is_open || marketRuntime.value.active_web_notice_visible)
+const marketNoticeText = computed(() => (marketRuntime.value.is_open ? 'شروع فعالیت بازار' : 'پایان فعالیت بازار'))
+const marketInputPlaceholder = computed(() => (isMarketOpen.value ? randomPlaceholder.value : 'بازار بسته است'))
 
 // Computed
 const randomPlaceholder = computed(() => {
@@ -111,6 +134,54 @@ async function fetchTradingSettings() {
     }
 }
 
+async function fetchMarketState() {
+    try {
+        const res = await apiFetch('/api/trading-settings/market-state')
+        if (res.ok) {
+            const data = await res.json()
+            marketRuntime.value = {
+              ...marketRuntime.value,
+              ...data,
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load market state', e)
+    }
+}
+
+function applyMarketRuntimePatch(patch: Partial<MarketRuntimeState>) {
+  marketRuntime.value = {
+    ...marketRuntime.value,
+    ...patch,
+  }
+}
+
+function handleMarketOpened(data: Partial<MarketRuntimeState> | undefined) {
+  applyMarketRuntimePatch({
+    is_open: true,
+    active_web_notice_visible: data?.active_web_notice_visible ?? true,
+    offers_since_last_open: data?.offers_since_last_open ?? 0,
+    last_transition_at: data?.last_transition_at ?? marketRuntime.value.last_transition_at,
+  })
+}
+
+function handleMarketClosed(data: Partial<MarketRuntimeState> | undefined) {
+  applyMarketRuntimePatch({
+    is_open: false,
+    active_web_notice_visible: data?.active_web_notice_visible ?? true,
+    offers_since_last_open: data?.offers_since_last_open ?? marketRuntime.value.offers_since_last_open,
+    last_transition_at: data?.last_transition_at ?? marketRuntime.value.last_transition_at,
+  })
+}
+
+function handleMarketNoticeHidden(data: Partial<MarketRuntimeState> | undefined) {
+  applyMarketRuntimePatch({
+    active_web_notice_visible: false,
+    offers_since_last_open: data?.offers_since_last_open ?? marketRuntime.value.offers_since_last_open,
+    last_transition_at: data?.last_transition_at ?? marketRuntime.value.last_transition_at,
+  })
+}
+
 function buildOfferCreatePayload(offer: ParsedOfferPreview) {
   return {
     offer_type: offer.trade_type,
@@ -131,6 +202,10 @@ function cancelOfferPreview() {
 
 async function confirmOfferPreview() {
   if (!pendingOfferPreview.value) return
+  if (!isMarketOpen.value) {
+    previewError.value = MARKET_CLOSED_DETAIL
+    return
+  }
   if (isTier2Customer.value) {
     previewError.value = 'مشتری سطح 2 مجاز به ثبت لفظ نیست و فقط می‌تواند روی لفظ‌های دیگر درخواست بزند.'
     return
@@ -171,6 +246,10 @@ async function confirmOfferPreview() {
 function parseAndSubmitTextOffer() {
   if (isTier2Customer.value) {
     parseError.value = 'مشتری سطح 2 مجاز به ثبت لفظ نیست و فقط می‌تواند روی لفظ‌های دیگر درخواست بزند.'
+    return
+  }
+  if (!isMarketOpen.value) {
+    parseError.value = MARKET_CLOSED_DETAIL
     return
   }
   if (!offerText.value.trim()) return
@@ -223,12 +302,19 @@ onMounted(() => {
     startPolling()
     fetchCommodities()
     fetchTradingSettings()
+  fetchMarketState()
     fetchCurrentUser()
+  wsOn('market:opened', handleMarketOpened)
+  wsOn('market:closed', handleMarketClosed)
+  wsOn('market:notice_hidden', handleMarketNoticeHidden)
 })
 
 onUnmounted(() => {
     stopPolling()
     clearBackStack()
+  wsOff('market:opened', handleMarketOpened)
+  wsOff('market:closed', handleMarketClosed)
+  wsOff('market:notice_hidden', handleMarketNoticeHidden)
 })
 </script>
 
@@ -299,6 +385,16 @@ onUnmounted(() => {
       </transition>
     </div>
 
+    <transition name="fade">
+      <div
+        v-if="showMarketNotice"
+        class="market-runtime-notice"
+        :class="marketRuntime.is_open ? 'market-runtime-notice--open' : 'market-runtime-notice--closed'"
+      >
+        {{ marketNoticeText }}
+      </div>
+    </transition>
+
     <!-- Offers List -->
     <div class="market-content">
       <div class="content-inner">
@@ -337,13 +433,14 @@ onUnmounted(() => {
             <input 
               v-model="offerText"
               type="text" 
-              :placeholder="randomPlaceholder"
+              :placeholder="marketInputPlaceholder"
               class="text-offer-input"
+              :disabled="!isMarketOpen || isSubmitting"
               @keydown.enter="parseAndSubmitTextOffer"
             >
             <button 
               @click="parseAndSubmitTextOffer"
-              :disabled="!offerText.trim() || isSubmitting"
+              :disabled="!isMarketOpen || !offerText.trim() || isSubmitting"
               class="send-btn"
             >
               <Loader2 v-if="isSubmitting" class="animate-spin" :size="20" />
@@ -507,6 +604,28 @@ onUnmounted(() => {
   padding: 1rem 0 7rem;
 }
 
+.market-runtime-notice {
+  margin: 0.75rem 1rem 0;
+  padding: 0.8rem 1rem;
+  border-radius: var(--ds-radius-lg);
+  font-size: 0.84rem;
+  font-weight: 800;
+  text-align: center;
+  border: 1px solid transparent;
+}
+
+.market-runtime-notice--open {
+  background: rgba(15, 118, 110, 0.09);
+  color: #0f766e;
+  border-color: rgba(15, 118, 110, 0.18);
+}
+
+.market-runtime-notice--closed {
+  background: rgba(185, 28, 28, 0.08);
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.16);
+}
+
 .content-inner {
   max-width: var(--ds-page-max-width);
   margin: 0 auto;
@@ -584,6 +703,12 @@ onUnmounted(() => {
   border-color: var(--ds-primary-400);
   background: var(--ds-bg-card);
   box-shadow: 0 0 0 4px var(--ds-primary-50);
+}
+
+.text-offer-input:disabled {
+  background: var(--ds-bg-disabled);
+  color: var(--ds-text-disabled);
+  cursor: not-allowed;
 }
 
 .send-btn {

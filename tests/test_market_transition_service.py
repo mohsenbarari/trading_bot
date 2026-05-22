@@ -232,6 +232,73 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             overrides=overrides,
         )
 
+    async def test_get_market_runtime_view_merges_runtime_notice_state_with_current_evaluation(self):
+        db = SimpleNamespace()
+        evaluation = MarketScheduleEvaluation(
+            is_open=False,
+            reason="after_daily_window_close",
+            next_transition_at=datetime(2026, 5, 23, 9, 0, tzinfo=timezone.utc),
+            timezone="Asia/Tehran",
+        )
+        state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=1,
+            last_transition_at=datetime(2026, 5, 22, 8, 0, tzinfo=timezone.utc),
+        )
+
+        with patch.object(
+            market_transition_service,
+            "evaluate_current_market_schedule",
+            new=AsyncMock(return_value=evaluation),
+        ), patch.object(
+            market_transition_service,
+            "get_market_runtime_state",
+            new=AsyncMock(return_value=state),
+        ):
+            result = await market_transition_service.get_market_runtime_view(db)
+
+        self.assertFalse(result.is_open)
+        self.assertTrue(result.active_web_notice_visible)
+        self.assertEqual(result.offers_since_last_open, 1)
+        self.assertEqual(result.last_transition_at, state.last_transition_at)
+        self.assertEqual(result.next_transition_at, evaluation.next_transition_at)
+
+    async def test_register_market_offer_created_hides_notice_after_second_offer(self):
+        db = SimpleNamespace(commit=AsyncMock())
+        evaluation = MarketScheduleEvaluation(
+            is_open=True,
+            reason="daily_window_open",
+            next_transition_at=datetime(2026, 5, 22, 18, 0, tzinfo=timezone.utc),
+            timezone="Asia/Tehran",
+        )
+        state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=1,
+            last_transition_at=datetime(2026, 5, 22, 9, 0, tzinfo=timezone.utc),
+        )
+
+        with patch.object(
+            market_transition_service,
+            "evaluate_current_market_schedule",
+            new=AsyncMock(return_value=evaluation),
+        ), patch.object(
+            market_transition_service,
+            "get_or_create_market_runtime_state",
+            new=AsyncMock(return_value=(state, False)),
+        ), patch("core.services.market_transition_service.publish_event_sync") as publish_mock:
+            result = await market_transition_service.register_market_offer_created(db)
+
+        self.assertIs(result, state)
+        self.assertEqual(state.offers_since_last_open, 2)
+        self.assertFalse(state.active_web_notice_visible)
+        db.commit.assert_awaited_once()
+        publish_mock.assert_called_once()
+        self.assertEqual(publish_mock.call_args.args[0], "market:notice_hidden")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -111,6 +111,12 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         customer_relation_patcher.start()
         self.addCleanup(customer_relation_patcher.stop)
+        register_offer_patcher = patch(
+            "api.routers.offers.register_market_offer_created",
+            new=AsyncMock(),
+        )
+        self.register_market_offer_created_mock = register_offer_patcher.start()
+        self.addCleanup(register_offer_patcher.stop)
 
     async def test_create_offer_stamps_home_server_and_links_republished_offer(self):
         commodity = SimpleNamespace(id=1)
@@ -167,6 +173,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         publish_mock.assert_awaited_once()
         response_mock.assert_called_once_with(reloaded_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
         self.assertEqual(result, {"id": 77, "user_id": 5})
+        self.register_market_offer_created_mock.assert_awaited_once_with(db)
 
     async def test_create_offer_persists_channel_message_and_publishes_created_event(self):
         commodity = SimpleNamespace(id=1)

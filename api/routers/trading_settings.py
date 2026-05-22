@@ -1,10 +1,15 @@
 # api/routers/trading_settings.py
 """API برای مدیریت تنظیمات سیستم معاملاتی"""
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from datetime import datetime
 from typing import Optional
 
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
+
+from core.db import get_db
+from core.services.market_transition_service import get_market_runtime_view
 from api.deps import verify_super_admin
 
 from core.trading_settings import (
@@ -53,6 +58,14 @@ class TradingSettingsResponse(BaseModel):
     lot_max_count: int
 
 
+class MarketRuntimeStateResponse(BaseModel):
+    is_open: bool
+    active_web_notice_visible: bool
+    offers_since_last_open: int
+    last_transition_at: Optional[datetime] = None
+    next_transition_at: Optional[datetime] = None
+
+
 @router.get("/", response_model=TradingSettingsResponse)
 async def get_settings():
     """دریافت تنظیمات فعلی - برای همه کاربران قابل دسترس"""
@@ -71,6 +84,18 @@ async def get_settings():
         invitation_expiry_minutes=settings.invitation_expiry_minutes,
         lot_min_size=settings.lot_min_size,
         lot_max_count=settings.lot_max_count,
+    )
+
+
+@router.get("/market-state", response_model=MarketRuntimeStateResponse)
+async def get_market_state(db: AsyncSession = Depends(get_db)):
+    state = await get_market_runtime_view(db)
+    return MarketRuntimeStateResponse(
+        is_open=state.is_open,
+        active_web_notice_visible=state.active_web_notice_visible,
+        offers_since_last_open=state.offers_since_last_open,
+        last_transition_at=state.last_transition_at,
+        next_transition_at=state.next_transition_at,
     )
 
 

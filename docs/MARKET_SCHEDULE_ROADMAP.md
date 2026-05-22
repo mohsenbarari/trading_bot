@@ -136,35 +136,35 @@
 
 ### 4.1. Market page
 
-- [ ] `frontend/src/views/MarketView.vue` باید state جدید بازار را consume کند.
-- [ ] وقتی بازار بسته است:
-  - [ ] banner/notice «پایان فعالیت بازار» در market page نمایش داده شود.
-  - [ ] chatbox / input ثبت آفر غیرفعال شود.
-  - [ ] ارسال با Enter و click هم از UI block شود.
-  - [ ] draft محلی کاربر حفظ شود مگر product خلاف آن را بخواهد.
-- [ ] وقتی بازار باز می‌شود:
-  - [ ] banner قبلی «پایان فعالیت بازار» حذف شود.
-  - [ ] banner «شروع فعالیت بازار» به‌صورت یک reminder ساده نمایش داده شود.
-  - [ ] chatbox / input دوباره فعال شود.
+- [x] `frontend/src/views/MarketView.vue` باید state جدید بازار را consume کند.
+- [x] وقتی بازار بسته است:
+  - [x] banner/notice «پایان فعالیت بازار» در market page نمایش داده شود.
+  - [x] chatbox / input ثبت آفر غیرفعال شود.
+  - [x] ارسال با Enter و click هم از UI block شود.
+  - [x] draft محلی کاربر حفظ شود مگر product خلاف آن را بخواهد.
+- [x] وقتی بازار باز می‌شود:
+  - [x] banner قبلی «پایان فعالیت بازار» حذف شود.
+  - [x] banner «شروع فعالیت بازار» به‌صورت یک reminder ساده نمایش داده شود.
+  - [x] chatbox / input دوباره فعال شود.
 
 ### 4.2. محو شدن پیام شروع بازار بعد از دومین آفر
 
 - [x] interpretation قطعی محصول: banner «شروع فعالیت بازار» در وب بعد از ثبت دومین آفر سراسری پذیرفته‌شده بازار بعد از current open transition محو می‌شود، فارغ از این‌که آن دو آفر را چه کاربری ثبت کرده باشد.
 - [x] rationale قطعی محصول: بعد از دیده‌شدن آفرها، دیگر خود لیست بازار نشان می‌دهد که بازار باز است و نیازی به notice جداگانه نیست.
-- [ ] این behavior باید بر اساس state سراسری بازار باشد، نه صرفاً local state یک tab.
-- [ ] بنابراین create-offer success path باید `offers_since_last_open` را افزایش دهد.
-- [ ] وقتی این شمارنده به 2 رسید:
-  - [ ] `active_web_notice_visible=false` شود.
-  - [ ] یک realtime event مثل `market:notice_hidden` برای clientهای باز publish شود.
+- [x] این behavior باید بر اساس state سراسری بازار باشد، نه صرفاً local state یک tab.
+- [x] بنابراین create-offer success path باید `offers_since_last_open` را افزایش دهد.
+- [x] وقتی این شمارنده به 2 رسید:
+  - [x] `active_web_notice_visible=false` شود.
+  - [x] یک realtime event مثل `market:notice_hidden` برای clientهای باز publish شود.
 
 ### 4.3. realtime contract وب
 
-- [ ] `useOffers` یا یک composable مستقل بازار باید eventهای جدید را consume کند:
-  - [ ] `market:closed`
-  - [ ] `market:opened`
-  - [ ] `market:notice_hidden`
-- [ ] UI بازار نباید برای دیدن start/end notice فقط به polling وابسته باشد.
-- [ ] refresh و open کردن market page در تب جدید باید آخرین state persisted را درست نشان دهد.
+- [x] `useOffers` یا یک composable مستقل بازار باید eventهای جدید را consume کند:
+  - [x] `market:closed`
+  - [x] `market:opened`
+  - [x] `market:notice_hidden`
+- [x] UI بازار نباید برای دیدن start/end notice فقط به polling وابسته باشد.
+- [x] refresh و open کردن market page در تب جدید باید آخرین state persisted را درست نشان دهد.
 
 ## 5. contract رفتار بات و کانال تلگرام
 
@@ -220,8 +220,8 @@
 
 ### 8.3. frontend
 
-- [ ] Vitest برای MarketView notice rendering و disabled state
-- [ ] Vitest برای remove/show start/end notice روی eventهای realtime
+- [x] Vitest برای MarketView notice rendering و disabled state
+- [x] Vitest برای remove/show start/end notice روی eventهای realtime
 - [ ] Playwright برای close transition، open transition، disable/enable شدن chatbox، و hide شدن start notice بعد از دومین آفر
 
 ## 9. challengeها و سوال‌های باز بعد از audit
@@ -269,6 +269,10 @@
   - [x] `api/routers/offers.py` و `api/routers/trades.py` هر دو runtime schedule را مستقیم evaluate می‌کنند و روی closed-market با business conflict برمی‌گردند.
   - [x] authority دیگر فقط به expire side effect یا UI disable تکیه نمی‌کند و boundary raceهای close transition را هم می‌بندد.
   - [x] validation محدود این phase با `tests.test_market_transition_service`، `tests.test_offers_router_create_guards`، `tests.test_offers_router_create_success`، `tests.test_trades_router_authoritative_guards` و `tests.test_trades_router_authoritative_success` سبز شد.
-- [ ] Phase 5 - Market web runtime and realtime notices
+- [x] Phase 5 - Market web runtime and realtime notices
+  - [x] public runtime endpoint برای state جاری بازار و persisted notice روی `trading-settings/market-state` اضافه شد.
+  - [x] `create_offer` شمارنده `offers_since_last_open` را جلو می‌برد و روی آفر دوم `market:notice_hidden` publish می‌کند.
+  - [x] `frontend/src/views/MarketView.vue` state اولیه بازار و realtime `market:*` را consume می‌کند و notice/disable state را روی `/market` اعمال می‌کند.
+  - [x] validation محدود این phase با `tests.test_market_transition_service`، `tests.test_trading_settings_router_read`، `tests.test_offers_router_create_success` و `frontend/src/views/MarketView.test.ts` سبز شد.
 - [ ] Phase 6 - Admin web schedule management UI
 - [ ] Phase 7 - Focused regression coverage and rollout

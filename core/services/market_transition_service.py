@@ -42,6 +42,15 @@ class MarketTransitionResult:
     expired_offer_ids: tuple[int, ...] = ()
 
 
+@dataclass(slots=True)
+class MarketRuntimeView:
+    is_open: bool
+    active_web_notice_visible: bool
+    offers_since_last_open: int
+    last_transition_at: datetime | None
+    next_transition_at: datetime | None
+
+
 def _coerce_utc_now(current_time: datetime | None = None) -> datetime:
     if current_time is None:
         return utc_now()
@@ -54,7 +63,7 @@ def _build_market_event_payload(
     state: MarketRuntimeState,
     *,
     transition: str,
-    notice_text: str,
+    notice_text: str | None,
 ) -> dict:
     return {
         "is_open": state.is_open,
@@ -153,6 +162,58 @@ async def evaluate_current_market_schedule(
         current_time=current_time,
         overrides=overrides,
     )
+
+
+async def get_market_runtime_view(
+    db: AsyncSession,
+    *,
+    current_time: datetime | None = None,
+) -> MarketRuntimeView:
+    evaluation = await evaluate_current_market_schedule(db, current_time=current_time)
+    state = await get_market_runtime_state(db)
+    return MarketRuntimeView(
+        is_open=evaluation.is_open,
+        active_web_notice_visible=bool(getattr(state, "active_web_notice_visible", False)),
+        offers_since_last_open=int(getattr(state, "offers_since_last_open", 0) or 0),
+        last_transition_at=getattr(state, "last_transition_at", None),
+        next_transition_at=evaluation.next_transition_at,
+    )
+
+
+async def register_market_offer_created(
+    db: AsyncSession,
+    *,
+    current_time: datetime | None = None,
+) -> MarketRuntimeState:
+    evaluation = await evaluate_current_market_schedule(db, current_time=current_time)
+    state, _ = await get_or_create_market_runtime_state(
+        db,
+        evaluation=evaluation,
+        current_time=current_time,
+    )
+    state.is_open = evaluation.is_open
+    state.offers_since_last_open = int(state.offers_since_last_open or 0) + 1
+    should_hide_notice = bool(
+        state.active_web_notice_visible and state.offers_since_last_open >= 2
+    )
+    if should_hide_notice:
+        state.active_web_notice_visible = False
+    await db.commit()
+
+    if should_hide_notice:
+        try:
+            publish_event_sync(
+                "market:notice_hidden",
+                _build_market_event_payload(
+                    state,
+                    transition="notice_hidden",
+                    notice_text=None,
+                ),
+            )
+        except Exception as exc:
+            logger.warning("Failed to publish market:notice_hidden event: %s", exc)
+
+    return state
 
 
 async def _load_active_local_offers(db: AsyncSession) -> list[Offer]:
