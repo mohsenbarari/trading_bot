@@ -200,6 +200,47 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0].customer_management_name, "مشتری ویژه")
         self.assertEqual(result[0].customer_tier, CustomerTier.TIER_2)
 
+    async def test_search_public_users_returns_customer_rows_for_same_owner_accountant_viewer(self):
+        current_user = SimpleNamespace(id=44, role=UserRole.STANDARD)
+        customer = make_user(
+            id=91,
+            account_name="customer91",
+            mobile_number="09125555555",
+            address="کرج",
+            last_seen_at=__import__("datetime").datetime(2026, 1, 5, 9, 45, 0),
+        )
+        owner_user = make_user(id=20, account_name="owner20")
+        db = FakeDB([
+            FakeExecuteResult([customer]),
+            FakeExecuteResult([]),
+            FakeExecuteResult([
+                SimpleNamespace(
+                    customer_user_id=91,
+                    owner_user_id=20,
+                    owner_user=owner_user,
+                    management_name="مشتری ویژه",
+                    customer_tier=CustomerTier.TIER_1,
+                )
+            ]),
+        ])
+
+        with patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=SimpleNamespace(owner_user_id=20)),
+        ):
+            result = await search_public_users(q="customer", limit=10, db=db, current_user=current_user)
+
+        self.assertEqual([item.id for item in result], [91])
+        self.assertEqual(result[0].account_name, "customer91")
+        self.assertEqual(result[0].mobile_number, "09125555555")
+        self.assertEqual(result[0].address, "کرج")
+        self.assertEqual(result[0].last_seen_at, __import__("datetime").datetime(2026, 1, 5, 9, 45, 0))
+        self.assertEqual(result[0].customer_owner_user_id, 20)
+        self.assertEqual(result[0].customer_owner_account_name, "owner20")
+        self.assertEqual(result[0].customer_management_name, "مشتری ویژه")
+        self.assertEqual(result[0].customer_tier, CustomerTier.TIER_1)
+        self.assertNotIn("role", result[0].model_dump())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -212,22 +212,32 @@
 
 ### فاز 6: تست و non-regression
 
-- [ ] backend:
-  - users_public contract tests
+- [x] backend:
+  - [x] users_public contract tests
   - [x] trade history filter tests
   - [x] export permission/filter tests
   - [x] blocked-path generic-message tests
-- [ ] frontend unit:
+- [x] frontend unit:
   - [x] PublicProfile presence
   - [x] PublicProfile filter state
   - [x] PublicProfile export action state
   - [x] block UX disable/loading/success states
-- [ ] Playwright:
+- [x] Playwright:
   - [x] public profile presence rendering
   - [x] mutual history filtering by date and commodity
   - [x] self history export presets
   - [x] custom range export
   - [x] blocked interaction generic UX
+- [x] final focused validation rerun شد:
+  - backend: `tests.test_users_public_router_read`, `tests.test_users_public_router_search`, `tests.test_users_public_project_users`, `tests.test_trades_router_reads`, `tests.test_trades_router_history_exports`, `tests.test_trade_history_export_service`, `tests.test_bot_trade_history_generate_pdf`, `tests.test_bot_trade_history_export_pdf`
+  - frontend unit: `frontend/src/components/PublicProfile.test.ts`
+  - Playwright browser matrix: `frontend/e2e/trade-history-accountant.spec.ts` روی `chromium/firefox/webkit`
+
+### وضعیت نهایی roadmap
+
+- [x] roadmap اجرایی public profile در scope تعریف شده این سند بسته شده است.
+- [x] contract عمومی backend، UI فرانت، history/export، project-users directory، presence، و block UX همگی test-backed و sync با سند هستند.
+- [x] در این closure slice تغییر runtime جدیدی به feature اضافه نشد؛ فقط gap نهایی تست backend بسته و status نهایی roadmap reconcile شد.
 
 ## 6. سوال ها و ابهام های باقیمانده قبل از شروع اجرا
 

@@ -186,6 +186,54 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.customer_management_name, "مشتری ویژه")
         self.assertEqual(result.customer_tier, CustomerTier.TIER_2)
 
+    async def test_read_public_user_returns_customer_context_for_same_owner_accountant_viewer(self):
+        customer_user = SimpleNamespace(
+            id=91,
+            is_deleted=False,
+            account_name="customer91",
+            role=UserRole.STANDARD,
+            mobile_number="09127777777",
+            address="شیراز",
+            avatar_file_id=None,
+            created_at=__import__("datetime").datetime(2026, 1, 3),
+            trades_count=3,
+            last_seen_at=__import__("datetime").datetime(2026, 1, 4, 8, 30, 0),
+        )
+        owner_user = SimpleNamespace(id=21, account_name="owner21", is_deleted=False)
+        relation = SimpleNamespace(
+            owner_user_id=21,
+            customer_user_id=91,
+            owner_user=owner_user,
+            customer_user=customer_user,
+            management_name="مشتری ویژه",
+            customer_tier=CustomerTier.TIER_1,
+        )
+        viewer_accountant_relation = SimpleNamespace(owner_user_id=21)
+
+        with patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(side_effect=[viewer_accountant_relation, None]),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=relation),
+        ):
+            result = await read_public_user(
+                91,
+                db=FakeDB(None),
+                current_user=SimpleNamespace(id=44, role=UserRole.STANDARD),
+            )
+
+        self.assertEqual(result.id, 91)
+        self.assertEqual(result.account_name, "customer91")
+        self.assertEqual(result.mobile_number, "09127777777")
+        self.assertEqual(result.address, "شیراز")
+        self.assertEqual(result.last_seen_at, __import__("datetime").datetime(2026, 1, 4, 8, 30, 0))
+        self.assertEqual(result.customer_owner_user_id, 21)
+        self.assertEqual(result.customer_owner_account_name, "owner21")
+        self.assertEqual(result.customer_management_name, "مشتری ویژه")
+        self.assertEqual(result.customer_tier, CustomerTier.TIER_1)
+        self.assertNotIn("role", result.model_dump())
+
     async def test_read_public_user_hides_customer_profile_from_middle_manager(self):
         customer_user = SimpleNamespace(id=91, is_deleted=False)
         owner_user = SimpleNamespace(id=21, account_name="owner21", is_deleted=False)
