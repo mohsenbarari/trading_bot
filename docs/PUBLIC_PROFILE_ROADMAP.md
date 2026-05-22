@@ -178,49 +178,49 @@
 
 ### فاز 4: queryable history در پروفایل عمومی
 
-- [ ] افزودن query params استاندارد به read pathهای trade history برای:
+- [x] افزودن query params استاندارد به read pathهای trade history برای:
   - `from_date`
   - `to_date`
   - `commodity_id` یا `commodity_query`
-- [ ] افزودن filter bar سبک به accordion history در PublicProfile.
-- [ ] presetهای زمانی در UI:
+- [x] افزودن filter bar سبک به accordion history در PublicProfile.
+- [x] presetهای زمانی در UI:
   - `1 ماهه`
   - `3 ماهه`
   - `6 ماهه`
   - `1 ساله`
   - `بازه دلخواه`
-- [ ] picker بازه زمانی باید با نمایش فارسی/Jalali هم راستا باشد ولی query نهایی باید unambiguous و server-safe بماند.
-- [ ] filter کالا باید به شکل lightweight single-select search/select طراحی شود، نه dropdown سنگین و ثابت.
-- [ ] query builder frontend باید بتواند همزمان بازه زمانی و کالای انتخاب شده را در یک درخواست history اعمال کند.
+- [x] picker بازه زمانی باید با نمایش فارسی/Jalali هم راستا باشد ولی query نهایی باید unambiguous و server-safe بماند.
+- [x] filter کالا باید به شکل lightweight single-select search/select طراحی شود، نه dropdown سنگین و ثابت.
+- [x] query builder frontend باید بتواند همزمان بازه زمانی و کالای انتخاب شده را در یک درخواست history اعمال کند.
 
 ### فاز 5: export history برای web public profile
 
-- [ ] استخراج منطق `Excel` history از `bot/handlers/trade_history.py` به service مشترک backend.
-- [ ] طراحی service export جدید برای `PDF` به جای placeholder فعلی bot.
-- [ ] افزودن endpointهای export برای same-perspective history:
+- [x] ایجاد service export backend برای `Excel/PDF` history در web public profile.
+- [x] طراحی service export جدید برای `PDF` به جای placeholder فعلی bot.
+- [x] افزودن endpointهای export برای same-perspective history:
   - self history export
   - mutual history export
   - existing privileged target-user history export
-- [ ] هماهنگ کردن naming فایل، timezone، و labelها با context فعلی history.
-- [ ] اطمینان از این که export از همان filter state جاری UI استفاده می کند.
+- [x] هماهنگ کردن naming فایل، timezone، و labelها با context فعلی history.
+- [x] اطمینان از این که export از همان filter state جاری UI استفاده می کند.
 - [x] ساخت و review کردن نمونه اولیه فایل `Excel` و `PDF` قبل از finalize کردن endpoint و UX export.
-- [ ] contract نهایی export در همین scope به صورت minimal و production-like قفل می شود؛ summary جداگانه، metadata اضافی، و framingهایی مثل `history type / viewer role / trade path` خارج از scope همین فاز هستند.
-- [ ] برای `self history export`، header باید فقط `نام خود کاربر` و `بازه زمانی` را نشان دهد. جدول هم `نوع معامله` را فقط از perspective خود همان کاربر نشان دهد و هیچ ستون `role/counterparty/path` نداشته باشد.
-- [ ] برای `mutual history export` ordinary viewer، header باید فقط `نام target` و `بازه زمانی` را نشان دهد. جدول هم فقط `نوع معامله` perspective-based را نگه دارد و هیچ ستون `role/counterparty/path` نداشته باشد.
-- [ ] برای `existing privileged target-user history export`، header باید فقط `نام target` و `بازه زمانی` را نشان دهد. جدول هم `نوع معامله` را از perspective خود target نشان دهد و هیچ ستون `role/counterparty/path` نداشته باشد.
-- [ ] اگر filter بازه یا کالا روی UI فعال باشد، همان filter فقط scope ردیف های export را تعیین می کند و نیازی به summary اضافی در header ایجاد نمی کند.
+- [x] contract نهایی export در همین scope به صورت minimal و production-like قفل می شود؛ summary جداگانه، metadata اضافی، و framingهایی مثل `history type / viewer role / trade path` خارج از scope همین فاز هستند.
+- [x] برای `self history export`، header باید فقط `نام خود کاربر` و `بازه زمانی` را نشان دهد. جدول هم `نوع معامله` را فقط از perspective خود همان کاربر نشان دهد و هیچ ستون `role/counterparty/path` نداشته باشد.
+- [x] برای `mutual history export` ordinary viewer، header باید فقط `نام target` و `بازه زمانی` را نشان دهد. جدول هم فقط `نوع معامله` perspective-based را نگه دارد و هیچ ستون `role/counterparty/path` نداشته باشد.
+- [x] برای `existing privileged target-user history export`، header باید فقط `نام target` و `بازه زمانی` را نشان دهد. جدول هم `نوع معامله` را از perspective خود target نشان دهد و هیچ ستون `role/counterparty/path` نداشته باشد.
+- [x] اگر filter بازه یا کالا روی UI فعال باشد، همان filter فقط scope ردیف های export را تعیین می کند و نیازی به summary اضافی در header ایجاد نمی کند.
 
 ### فاز 6: تست و non-regression
 
 - [ ] backend:
   - users_public contract tests
-  - trade history filter tests
-  - export permission/filter tests
+  - [x] trade history filter tests
+  - [x] export permission/filter tests
   - [x] blocked-path generic-message tests
 - [ ] frontend unit:
   - PublicProfile presence
-  - PublicProfile filter state
-  - PublicProfile export action state
+  - [x] PublicProfile filter state
+  - [x] PublicProfile export action state
   - [x] block UX disable/loading/success states
 - [ ] Playwright:
   - public profile presence rendering
@@ -243,7 +243,7 @@
 - [x] برای history/filter/export روی `api/routers/trades.py` mode صریح برای `mutual` در برابر `target` اضافه می شود و route overloaded فعلی مبنای نهایی contract نمی ماند.
 - [x] perspective history و `نوع معامله` server-authoritative می شود تا list UI و export file از هم diverge نکنند.
 - [x] UI Jalali فقط در picker باقی می ماند و request نهایی history/export با boundary صریح روز و به صورت ISO/Gregorian به backend می رود.
-- [x] filter کالا در فاز اول فقط `commodity_id` را می پذیرد و `commodity_query` text-based فعلاً وارد scope نمی شود.
+- [x] filter کالا در فاز اول با `commodity_query` سبک و suggestionهای commodity list جلو می رود و backend همچنان `commodity_id` را هم به صورت additive می پذیرد.
 - [x] export همیشه full filtered query مستقل از pagination UI می زند و به limit/offset list وابسته نمی شود.
 - [x] `GET /api/blocks/status` برای UX capability-aware با reason code machine-readable توسعه می یابد.
 - [x] extraction از `bot/handlers/trade_history.py` در مرز query-to-document pipeline انجام می شود؛ bot/web فقط transport wrapper باقی می مانند.

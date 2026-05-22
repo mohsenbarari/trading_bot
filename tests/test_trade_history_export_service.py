@@ -1,0 +1,202 @@
+import os
+import sys
+import unittest
+from datetime import date, datetime
+from types import ModuleType, SimpleNamespace
+from unittest.mock import patch
+
+from core.services.trade_history_export_service import (
+    build_trade_history_date_range_label,
+    build_trade_history_export_rows,
+    generate_trade_history_excel_file,
+    generate_trade_history_pdf_file,
+    resolve_trade_type_label_for_perspective,
+)
+from models.trade import TradeType
+
+
+def make_trade():
+    return SimpleNamespace(
+        trade_number=10001,
+        responder_user_id=2,
+        trade_type=TradeType.BUY,
+        commodity=SimpleNamespace(name="سکه"),
+        quantity=3,
+        price=150000,
+        created_at=datetime(2026, 1, 1, 12, 0, 0),
+    )
+
+
+class TradeHistoryExportServiceTests(unittest.TestCase):
+    def test_resolve_trade_type_label_from_perspective(self):
+        trade = make_trade()
+        self.assertEqual(resolve_trade_type_label_for_perspective(trade, 2), "خرید")
+        self.assertEqual(resolve_trade_type_label_for_perspective(trade, 99), "فروش")
+
+    def test_build_trade_history_date_range_label(self):
+        self.assertEqual(build_trade_history_date_range_label(None, None), "بازه زمانی: همه تاریخ‌ها")
+        self.assertIn("بازه زمانی:", build_trade_history_date_range_label(date(2026, 5, 1), date(2026, 5, 31)))
+
+    def test_build_trade_history_export_rows(self):
+        rows = build_trade_history_export_rows([make_trade()], 2)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].trade_number, 10001)
+        self.assertEqual(rows[0].trade_type_label, "خرید")
+        self.assertEqual(rows[0].commodity_name, "سکه")
+
+    def test_generate_trade_history_excel_file_creates_xlsx(self):
+        class DummyCell:
+            def __init__(self, value=None):
+                self.value = value
+                self.fill = None
+                self.font = None
+                self.alignment = None
+
+        class DummySheet:
+            def __init__(self):
+                self.title = ""
+                self.sheet_view = SimpleNamespace(rightToLeft=False)
+                self._cells = {}
+                self.column_dimensions = {key: SimpleNamespace(width=None) for key in ["A", "B", "C", "D", "E", "F", "G", "H"]}
+
+            def cell(self, row, column, value=None):
+                key = (row, column)
+                cell = self._cells.setdefault(key, DummyCell())
+                if value is not None:
+                    cell.value = value
+                return cell
+
+        class DummyWorkbook:
+            def __init__(self):
+                self.active = DummySheet()
+
+            def save(self, filename):
+                with open(filename, "wb") as handle:
+                    handle.write(b"xlsx")
+
+        class DummyStyle:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+        openpyxl_mod = ModuleType("openpyxl")
+        openpyxl_mod.Workbook = DummyWorkbook
+        styles_mod = ModuleType("openpyxl.styles")
+        styles_mod.Font = DummyStyle
+        styles_mod.Alignment = DummyStyle
+        styles_mod.PatternFill = DummyStyle
+
+        with patch.dict(sys.modules, {"openpyxl": openpyxl_mod, "openpyxl.styles": styles_mod}):
+            filename = generate_trade_history_excel_file(
+                subject_name="owner",
+                date_range_label="بازه زمانی: همه تاریخ‌ها",
+                rows=build_trade_history_export_rows([make_trade()], 2),
+            )
+
+        try:
+            self.assertTrue(filename.endswith(".xlsx"))
+            self.assertTrue(os.path.exists(filename))
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
+    def test_generate_trade_history_pdf_file_creates_pdf(self):
+        class DummyDoc:
+            def __init__(self, filename, **kwargs):
+                self.filename = filename
+
+            def build(self, elements):
+                with open(self.filename, "wb") as handle:
+                    handle.write(b"pdf")
+
+        class DummyTable:
+            def __init__(self, data, colWidths=None):
+                self.data = data
+                self.colWidths = colWidths
+
+            def setStyle(self, style):
+                self.style = style
+
+        class DummyParagraph:
+            def __init__(self, text, style):
+                self.text = text
+                self.style = style
+
+        class DummySpacer:
+            def __init__(self, *args):
+                self.args = args
+
+        class DummyStyle:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+        class DummyTTFont:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+        reportlab_mod = ModuleType("reportlab")
+        lib_mod = ModuleType("reportlab.lib")
+        colors_mod = ModuleType("reportlab.lib.colors")
+        colors_mod.white = "white"
+        colors_mod.HexColor = lambda value: value
+        pagesizes_mod = ModuleType("reportlab.lib.pagesizes")
+        pagesizes_mod.A4 = (595, 842)
+        platypus_mod = ModuleType("reportlab.platypus")
+        platypus_mod.SimpleDocTemplate = DummyDoc
+        platypus_mod.Table = DummyTable
+        platypus_mod.TableStyle = lambda commands: commands
+        platypus_mod.Paragraph = DummyParagraph
+        platypus_mod.Spacer = DummySpacer
+        styles_mod = ModuleType("reportlab.lib.styles")
+        styles_mod.getSampleStyleSheet = lambda: {}
+        styles_mod.ParagraphStyle = DummyStyle
+        pdfbase_mod = ModuleType("reportlab.pdfbase")
+        pdfmetrics_mod = ModuleType("reportlab.pdfbase.pdfmetrics")
+        pdfmetrics_mod.registerFont = lambda font: None
+        ttfonts_mod = ModuleType("reportlab.pdfbase.ttfonts")
+        ttfonts_mod.TTFont = DummyTTFont
+        enums_mod = ModuleType("reportlab.lib.enums")
+        enums_mod.TA_CENTER = 1
+        enums_mod.TA_RIGHT = 2
+        arabic_mod = ModuleType("arabic_reshaper")
+        arabic_mod.reshape = lambda text: text
+        bidi_mod = ModuleType("bidi")
+        bidi_algo_mod = ModuleType("bidi.algorithm")
+        bidi_algo_mod.get_display = lambda text: text
+
+        with patch.dict(
+            sys.modules,
+            {
+                "reportlab": reportlab_mod,
+                "reportlab.lib": lib_mod,
+                "reportlab.lib.colors": colors_mod,
+                "reportlab.lib.pagesizes": pagesizes_mod,
+                "reportlab.platypus": platypus_mod,
+                "reportlab.lib.styles": styles_mod,
+                "reportlab.pdfbase": pdfbase_mod,
+                "reportlab.pdfbase.pdfmetrics": pdfmetrics_mod,
+                "reportlab.pdfbase.ttfonts": ttfonts_mod,
+                "reportlab.lib.enums": enums_mod,
+                "arabic_reshaper": arabic_mod,
+                "bidi": bidi_mod,
+                "bidi.algorithm": bidi_algo_mod,
+            },
+        ):
+            filename = generate_trade_history_pdf_file(
+                subject_name="owner",
+                date_range_label="بازه زمانی: همه تاریخ‌ها",
+                rows=build_trade_history_export_rows([make_trade()], 2),
+            )
+
+        try:
+            self.assertTrue(filename.endswith(".pdf"))
+            self.assertTrue(os.path.exists(filename))
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
+
+if __name__ == "__main__":
+    unittest.main()
