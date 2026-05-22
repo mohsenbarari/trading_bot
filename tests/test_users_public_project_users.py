@@ -59,6 +59,11 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row.id for row in result], [7, 9])
         self.assertEqual(result[0].account_name, "owner7")
         self.assertEqual(result[0].mobile_number, "09120000007")
+        self.assertEqual(result[0].model_dump(), {
+            "id": 7,
+            "account_name": "owner7",
+            "mobile_number": "09120000007",
+        })
 
         stmt_text = str(db.stmts[0]).lower()
         self.assertIn("users.role in", stmt_text)
