@@ -98,6 +98,12 @@ interface MutualTradePreview {
   trade_path_summary?: string | null;
 }
 
+interface CommodityFilterOption {
+  id: number;
+  name: string;
+  suggestions: string[];
+}
+
 interface ProfileStatCard {
   key: string;
   icon: string;
@@ -128,6 +134,16 @@ const mutualTrades = ref<MutualTradePreview[]>([]);
 const isLoading = ref(true);
 const error = ref('');
 const isHistoryLoading = ref(false);
+const historyError = ref('');
+const historyFromDate = ref('');
+const historyToDate = ref('');
+const historyCommodityQuery = ref('');
+const historyActivePresetMonths = ref<number | null>(null);
+const historyLoadedQueryKey = ref('');
+const historyExportingFormat = ref<'excel' | 'pdf' | null>(null);
+const historyCommodityOptions = ref<CommodityFilterOption[]>([]);
+const historyCommodityOptionsLoading = ref(false);
+const historyCommodityOptionsLoaded = ref(false);
 const openSections = ref({
   info: false,
   history: false,
@@ -230,6 +246,43 @@ const tradeHistoryEmptyText = computed(() => {
     return 'هنوز هیچ معامله‌ای انجام نداده‌اید.';
   }
   return showTargetTradeHistory.value ? 'هیچ معامله‌ای برای این کاربر یافت نشد.' : 'هیچ معامله مشترکی یافت نشد.';
+});
+const historyPresetOptions = [
+  { label: '۱ ماه', months: 1 },
+  { label: '۳ ماه', months: 3 },
+  { label: '۶ ماه', months: 6 },
+  { label: '۱۲ ماه', months: 12 },
+];
+const hasActiveHistoryFilters = computed(() => {
+  return Boolean(historyFromDate.value || historyToDate.value || historyCommodityQuery.value.trim());
+});
+const historyCommoditySuggestions = computed(() => {
+  const uniqueSuggestions = new Set<string>();
+  historyCommodityOptions.value.forEach((option) => {
+    option.suggestions.forEach((suggestion) => {
+      if (suggestion) uniqueSuggestions.add(suggestion);
+    });
+  });
+  return Array.from(uniqueSuggestions);
+});
+const historyFilterSummary = computed(() => {
+  const parts: string[] = [];
+  if (historyFromDate.value || historyToDate.value) {
+    const fromLabel = formatHistoryDateLabel(historyFromDate.value);
+    const toLabel = formatHistoryDateLabel(historyToDate.value);
+    if (fromLabel && toLabel) {
+      parts.push(`بازه: ${fromLabel} تا ${toLabel}`);
+    } else if (fromLabel) {
+      parts.push(`از ${fromLabel}`);
+    } else if (toLabel) {
+      parts.push(`تا ${toLabel}`);
+    }
+  }
+  const commodityLabel = historyCommodityQuery.value.trim();
+  if (commodityLabel) {
+    parts.push(`کالا: ${commodityLabel}`);
+  }
+  return parts.join(' | ');
 });
 const targetCustomerHistoryContext = computed(() => {
   if (isOwnProfile.value || !showTargetTradeHistory.value || !customerProfileContext.value) {
@@ -395,6 +448,205 @@ function parseApiError(payload: unknown, fallback: string) {
   return fallback
 }
 
+function toDateInputValue(value: Date) {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, '0');
+  const day = `${value.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatHistoryDateLabel(value: string) {
+  if (!value) return '';
+  const normalized = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(normalized.getTime())) return value;
+  return normalized.toLocaleDateString('fa-IR-u-ca-persian');
+}
+
+function buildHistoryQueryKey() {
+  return JSON.stringify({
+    from_date: historyFromDate.value || null,
+    to_date: historyToDate.value || null,
+    commodity_query: historyCommodityQuery.value.trim() || null,
+    self: isOwnProfile.value,
+    target_id: profileData.value?.id ?? null,
+  });
+}
+
+function buildHistoryQueryParams(format?: 'excel' | 'pdf') {
+  const params = new URLSearchParams();
+  if (format) {
+    params.set('format', format);
+  }
+  if (historyFromDate.value) {
+    params.set('from_date', historyFromDate.value);
+  }
+  if (historyToDate.value) {
+    params.set('to_date', historyToDate.value);
+  }
+  const commodityQuery = historyCommodityQuery.value.trim();
+  if (commodityQuery) {
+    params.set('commodity_query', commodityQuery);
+  }
+  return params;
+}
+
+function buildTradeHistoryEndpoint(isExport = false) {
+  const basePath = isOwnProfile.value
+    ? `${props.apiBaseUrl}/api/trades/my`
+    : `${props.apiBaseUrl}/api/trades/with/${profileData.value?.id}`;
+  return isExport ? `${basePath}/export` : basePath;
+}
+
+function validateHistoryFilters() {
+  if (historyFromDate.value && historyToDate.value && historyFromDate.value > historyToDate.value) {
+    return 'بازه زمانی انتخاب‌شده معتبر نیست.';
+  }
+  return null;
+}
+
+function normalizeCommodityOptions(payload: unknown): CommodityFilterOption[] {
+  if (!Array.isArray(payload)) return [];
+  return payload
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const commodity = item as {
+        id?: unknown;
+        name?: unknown;
+        aliases?: unknown;
+      };
+      const id = Number(commodity.id);
+      const name = typeof commodity.name === 'string' ? commodity.name.trim() : '';
+      if (!Number.isInteger(id) || id <= 0 || !name) {
+        return null;
+      }
+      const aliases = Array.isArray(commodity.aliases)
+        ? commodity.aliases
+            .map((aliasItem) => {
+              if (typeof aliasItem === 'string') return aliasItem.trim();
+              if (aliasItem && typeof aliasItem === 'object' && 'alias' in aliasItem) {
+                const aliasValue = (aliasItem as { alias?: unknown }).alias;
+                return typeof aliasValue === 'string' ? aliasValue.trim() : '';
+              }
+              return '';
+            })
+            .filter(Boolean)
+        : [];
+      return {
+        id,
+        name,
+        suggestions: Array.from(new Set([name, ...aliases])),
+      } as CommodityFilterOption;
+    })
+    .filter((item): item is CommodityFilterOption => item !== null);
+}
+
+async function loadHistoryCommodityOptions() {
+  if (!props.jwtToken || historyCommodityOptionsLoading.value || historyCommodityOptionsLoaded.value) {
+    return;
+  }
+
+  historyCommodityOptionsLoading.value = true;
+  try {
+    const response = await fetch(`${props.apiBaseUrl}/api/commodities/`, {
+      headers: {
+        'Authorization': `Bearer ${props.jwtToken}`,
+      },
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(parseApiError(payload, 'خطا در دریافت فهرست کالاها'));
+    }
+    historyCommodityOptions.value = normalizeCommodityOptions(payload);
+    historyCommodityOptionsLoaded.value = true;
+  } catch (e) {
+    console.error('Failed to load commodity suggestions', e);
+  } finally {
+    historyCommodityOptionsLoading.value = false;
+  }
+}
+
+function handleHistoryDateInput() {
+  historyActivePresetMonths.value = null;
+}
+
+async function applyHistoryPreset(months: number) {
+  const end = new Date();
+  const start = new Date(end);
+  start.setMonth(start.getMonth() - months);
+  historyActivePresetMonths.value = months;
+  historyFromDate.value = toDateInputValue(start);
+  historyToDate.value = toDateInputValue(end);
+  await loadMutualTrades(true);
+}
+
+async function resetHistoryFilters() {
+  historyActivePresetMonths.value = null;
+  historyFromDate.value = '';
+  historyToDate.value = '';
+  historyCommodityQuery.value = '';
+  historyLoadedQueryKey.value = '';
+  historyError.value = '';
+  if (openSections.value.history) {
+    await loadMutualTrades(true);
+  }
+}
+
+async function applyHistoryFilters() {
+  await loadMutualTrades(true);
+}
+
+function resolveDownloadFilename(headerValue: string | null, fallback: string) {
+  if (!headerValue) return fallback;
+  const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+  const quotedMatch = headerValue.match(/filename="?([^";]+)"?/i);
+  return quotedMatch?.[1] || fallback;
+}
+
+async function downloadHistoryExport(format: 'excel' | 'pdf') {
+  if (!profileData.value || !props.jwtToken || historyExportingFormat.value) return;
+
+  const validationError = validateHistoryFilters();
+  if (validationError) {
+    historyError.value = validationError;
+    return;
+  }
+
+  historyExportingFormat.value = format;
+  historyError.value = '';
+  try {
+    const params = buildHistoryQueryParams(format);
+    const endpoint = `${buildTradeHistoryEndpoint(true)}?${params.toString()}`;
+    const response = await fetch(endpoint, {
+      headers: {
+        'Authorization': `Bearer ${props.jwtToken}`,
+      },
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(parseApiError(payload, 'خطا در دریافت خروجی تاریخچه معاملات'));
+    }
+
+    const blob = await response.blob();
+    const fallbackName = `trade_history.${format === 'excel' ? 'xlsx' : 'pdf'}`;
+    const downloadName = resolveDownloadFilename(response.headers.get('content-disposition'), fallbackName);
+    const blobUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl;
+    anchor.download = downloadName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (e: any) {
+    historyError.value = e?.message || 'خطا در دریافت خروجی تاریخچه معاملات';
+  } finally {
+    historyExportingFormat.value = null;
+  }
+}
+
 function triggerAvatarPicker() {
   if (avatarBusy.value || !isOwnProfile.value) return
   avatarInput.value?.click()
@@ -457,28 +709,46 @@ async function clearAvatar() {
 }
 
 async function toggleHistory() {
-    openSections.value.history = !openSections.value.history;
-    if (!openSections.value.history || mutualTrades.value.length > 0) return;
-    await loadMutualTrades();
+  openSections.value.history = !openSections.value.history;
+  if (!openSections.value.history) return;
+  await loadMutualTrades();
+  void loadHistoryCommodityOptions();
 }
 
-async function loadMutualTrades() {
+async function loadMutualTrades(force = false) {
     if (!profileData.value || isHistoryLoading.value) return;
 
+  const validationError = validateHistoryFilters();
+  if (validationError) {
+    historyError.value = validationError;
+    mutualTrades.value = [];
+    return;
+  }
+
+  const queryKey = buildHistoryQueryKey();
+  if (!force && historyLoadedQueryKey.value === queryKey) {
+    return;
+  }
+
     isHistoryLoading.value = true;
+  historyError.value = '';
     try {
-        const endpoint = isOwnProfile.value 
-            ? `${props.apiBaseUrl}/api/trades/my` 
-            : `${props.apiBaseUrl}/api/trades/with/${profileData.value.id}`;
+    const params = buildHistoryQueryParams();
+    const endpoint = `${buildTradeHistoryEndpoint()}${params.toString() ? `?${params.toString()}` : ''}`;
             
         const response = await fetch(endpoint, {
             headers: { 'Authorization': `Bearer ${props.jwtToken}` }
         });
-        if (response.ok) {
-            mutualTrades.value = await response.json();
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(parseApiError(payload, 'خطا در دریافت تاریخچه معاملات'));
         }
-    } catch (e) {
+    mutualTrades.value = Array.isArray(payload) ? payload as MutualTradePreview[] : [];
+    historyLoadedQueryKey.value = queryKey;
+  } catch (e: any) {
         console.error("Failed to load history", e);
+    historyError.value = e?.message || 'خطا در دریافت تاریخچه معاملات';
+    mutualTrades.value = [];
     } finally {
         isHistoryLoading.value = false;
     }
@@ -1144,6 +1414,76 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
           </div>
 
           <div v-show="openSections.history" class="ds-accordion-body">
+            <div class="history-toolbar">
+              <div class="history-presets">
+                <button
+                  v-for="preset in historyPresetOptions"
+                  :key="preset.months"
+                  type="button"
+                  class="history-chip"
+                  :class="{ active: historyActivePresetMonths === preset.months }"
+                  @click.stop="applyHistoryPreset(preset.months)"
+                >
+                  {{ preset.label }}
+                </button>
+              </div>
+
+              <div class="history-filter-grid">
+                <label class="history-filter-field">
+                  <span>از تاریخ</span>
+                  <input v-model="historyFromDate" type="date" @input="handleHistoryDateInput" />
+                </label>
+                <label class="history-filter-field">
+                  <span>تا تاریخ</span>
+                  <input v-model="historyToDate" type="date" @input="handleHistoryDateInput" />
+                </label>
+                <label class="history-filter-field history-filter-field-wide">
+                  <span>کالا</span>
+                  <input
+                    v-model="historyCommodityQuery"
+                    list="public-profile-history-commodities"
+                    type="text"
+                    placeholder="نام یا alias کالا"
+                    @keyup.enter="applyHistoryFilters"
+                  />
+                  <datalist id="public-profile-history-commodities">
+                    <option v-for="suggestion in historyCommoditySuggestions" :key="suggestion" :value="suggestion" />
+                  </datalist>
+                </label>
+              </div>
+
+              <div class="history-filter-actions">
+                <button type="button" class="history-action-btn primary" @click.stop="applyHistoryFilters">اعمال فیلتر</button>
+                <button
+                  type="button"
+                  class="history-action-btn"
+                  :disabled="!hasActiveHistoryFilters && !historyLoadedQueryKey"
+                  @click.stop="resetHistoryFilters"
+                >
+                  حذف فیلتر
+                </button>
+                <button
+                  type="button"
+                  class="history-action-btn"
+                  :disabled="isHistoryLoading || historyExportingFormat !== null"
+                  @click.stop="downloadHistoryExport('excel')"
+                >
+                  {{ historyExportingFormat === 'excel' ? 'در حال دانلود...' : 'خروجی Excel' }}
+                </button>
+                <button
+                  type="button"
+                  class="history-action-btn"
+                  :disabled="isHistoryLoading || historyExportingFormat !== null"
+                  @click.stop="downloadHistoryExport('pdf')"
+                >
+                  {{ historyExportingFormat === 'pdf' ? 'در حال دانلود...' : 'خروجی PDF' }}
+                </button>
+              </div>
+
+              <p v-if="historyFilterSummary" class="history-filter-summary">{{ historyFilterSummary }}</p>
+              <p v-if="historyError" class="error-text history-error-text">{{ historyError }}</p>
+            </div>
+
             <div v-if="isHistoryLoading">
                <LoadingSkeleton :count="3" :height="60" />
             </div>
@@ -1688,6 +2028,103 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
     gap: var(--ds-section-gap);
 }
 
+.history-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
+}
+
+.history-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.history-chip {
+  border: 1px solid rgba(217, 119, 6, 0.18);
+  background: rgba(255, 251, 235, 0.9);
+  color: #9a3412;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.history-chip.active {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: white;
+  border-color: transparent;
+}
+
+.history-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.history-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.84rem;
+  color: var(--ds-text-secondary);
+}
+
+.history-filter-field-wide {
+  grid-column: span 2;
+}
+
+.history-filter-field input {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--ds-text-primary);
+}
+
+.history-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.history-action-btn {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  background: white;
+  color: var(--ds-text-primary);
+  padding: 10px 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.history-action-btn.primary {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  border-color: transparent;
+  color: white;
+}
+
+.history-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.history-filter-summary {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: 0.82rem;
+}
+
+.history-error-text {
+  margin: 0;
+}
+
 .public-accountant-list {
   display: flex;
   flex-direction: column;
@@ -1925,6 +2362,16 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
     color: var(--ds-text-secondary);
     font-size: 13px;
     padding: 10px;
+}
+
+@media (max-width: 640px) {
+  .history-filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .history-filter-field-wide {
+    grid-column: span 1;
+  }
 }
 </style>
 

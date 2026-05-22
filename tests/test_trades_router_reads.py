@@ -1,4 +1,5 @@
 import unittest
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -95,6 +96,54 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response_mock.call_args_list[0].kwargs["history_target_user_id"], 5)
         sql = compile_sql(db.statements[0])
         self.assertIn("trades.actor_user_id = 5", sql)
+
+    async def test_get_my_trades_applies_optional_date_and_commodity_filters(self):
+        db = FakeDB([FakeExecuteResult(values=[])])
+        context = self.make_context(owner_id=5)
+
+        with patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value={}),
+        ):
+            result = await get_my_trades(
+                skip=0,
+                limit=50,
+                from_date=date(2026, 5, 1),
+                to_date=date(2026, 5, 10),
+                commodity_id=7,
+                commodity_query="امامی",
+                db=db,
+                context=context,
+            )
+
+        self.assertEqual(result, [])
+        sql = compile_sql(db.statements[0])
+        self.assertIn("trades.created_at >= '2026-05-01 00:00:00'", sql)
+        self.assertIn("trades.created_at < '2026-05-11 00:00:00'", sql)
+        self.assertIn("trades.commodity_id = 7", sql)
+        self.assertIn("commodities.name ILIKE '%%امامی%%'", sql)
+        self.assertIn("commodity_aliases.alias ILIKE '%%امامی%%'", sql)
+
+    async def test_get_my_trades_rejects_invalid_date_range(self):
+        db = FakeDB()
+        context = self.make_context(owner_id=5)
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await get_my_trades(
+                skip=0,
+                limit=50,
+                from_date=date(2026, 5, 10),
+                to_date=date(2026, 5, 1),
+                db=db,
+                context=context,
+            )
+
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "بازه زمانی انتخاب‌شده معتبر نیست.")
+        self.assertEqual(db.statements, [])
 
     async def test_get_trade_enforces_not_found_and_access_control(self):
         context = self.make_context(owner_id=5, actor_id=12)
@@ -330,6 +379,38 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("trades.responder_user_id = 51", sql)
         self.assertIn("trades.actor_user_id = 51", sql)
         self.assertNotIn("trades.offer_user_id = 902 AND trades.responder_user_id = 51", sql)
+
+    async def test_get_trades_with_user_applies_filters_on_pair_history(self):
+        context = self.make_context(owner_id=5)
+        db = FakeDB([FakeExecuteResult(values=[])])
+
+        with patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value={}),
+        ):
+            result = await get_trades_with_user(
+                other_user_id=7,
+                skip=0,
+                limit=20,
+                from_date=date(2026, 4, 1),
+                to_date=date(2026, 4, 30),
+                commodity_query="طلا",
+                db=db,
+                context=context,
+            )
+
+        self.assertEqual(result, [])
+        sql = compile_sql(db.statements[0])
+        self.assertIn("trades.offer_user_id = 5 AND trades.responder_user_id = 7", sql)
+        self.assertIn("trades.created_at >= '2026-04-01 00:00:00'", sql)
+        self.assertIn("trades.created_at < '2026-05-01 00:00:00'", sql)
+        self.assertIn("commodities.name ILIKE '%%طلا%%'", sql)
 
     async def test_get_trades_with_user_keeps_mutual_history_for_unauthorized_customer_view(self):
         context = self.make_context(owner_id=8, actor_id=18)

@@ -4,18 +4,19 @@ API Router for Trade Management - MiniApp Integration
 """
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from typing import List, Optional, Mapping
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.background import BackgroundTask
 
 from core.db import get_db
 from core.config import settings
@@ -27,6 +28,12 @@ from core.utils import (
 from core.services.accountant_chat_contract import AccountantChatIdentity, load_accountant_chat_identity_map
 from core.services.accountant_relation_service import build_trade_notification_audience_user_ids
 from core.services.market_transition_service import evaluate_current_market_schedule
+from core.services.trade_history_export_service import (
+    build_trade_history_date_range_label,
+    build_trade_history_export_rows,
+    generate_trade_history_excel_file,
+    generate_trade_history_pdf_file,
+)
 from core.services.customer_relation_service import (
     apply_customer_commission,
     get_active_customer_relation_for_customer,
@@ -41,7 +48,7 @@ from models.user import User, UserRole
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.offer import Offer, OfferType, OfferStatus
 from models.trade import Trade, TradeType, TradeStatus
-from models.commodity import Commodity
+from models.commodity import Commodity, CommodityAlias
 from api.deps import EffectiveOwnerActor, get_current_user, get_effective_owner_actor_context
 from core.server_routing import current_server, is_remote_home, normalize_server
 from core.trade_forwarding import forward_trade_to_home_server, verify_internal_signature
@@ -215,6 +222,160 @@ async def _resolve_viewable_customer_history_relation(
     if not _viewer_can_access_customer_history_relation(relation=relation, context=context):
         return None
     return relation
+
+
+def _normalize_history_commodity_query(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _validate_trade_history_date_range(from_date: date | None, to_date: date | None) -> None:
+    if from_date and to_date and from_date > to_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="بازه زمانی انتخاب‌شده معتبر نیست.",
+        )
+
+
+def _resolve_history_filter_arg(value):
+    if getattr(value.__class__, "__module__", "") == "fastapi.params":
+        return getattr(value, "default", None)
+    return value
+
+
+def _apply_trade_history_filters(
+    query,
+    *,
+    from_date: date | None,
+    to_date: date | None,
+    commodity_id: int | None,
+    commodity_query: str | None,
+):
+    from_date = _resolve_history_filter_arg(from_date)
+    to_date = _resolve_history_filter_arg(to_date)
+    commodity_id = _resolve_history_filter_arg(commodity_id)
+    commodity_query = _resolve_history_filter_arg(commodity_query)
+
+    _validate_trade_history_date_range(from_date, to_date)
+
+    if from_date is not None:
+        query = query.where(Trade.created_at >= datetime.combine(from_date, time.min))
+    if to_date is not None:
+        query = query.where(Trade.created_at < datetime.combine(to_date + timedelta(days=1), time.min))
+    if commodity_id is not None:
+        query = query.where(Trade.commodity_id == commodity_id)
+
+    normalized_commodity_query = _normalize_history_commodity_query(commodity_query)
+    if normalized_commodity_query:
+        pattern = f"%{normalized_commodity_query}%"
+        query = query.where(
+            Trade.commodity.has(
+                or_(
+                    Commodity.name.ilike(pattern),
+                    Commodity.aliases.any(CommodityAlias.alias.ilike(pattern)),
+                )
+            )
+        )
+
+    return query
+
+
+def _build_trade_history_select():
+    return select(Trade).options(
+        selectinload(Trade.offer_user),
+        selectinload(Trade.responder_user),
+        selectinload(Trade.commodity),
+    )
+
+
+def _build_my_trades_query(
+    owner_user_id: int,
+    *,
+    from_date: date | None,
+    to_date: date | None,
+    commodity_id: int | None,
+    commodity_query: str | None,
+):
+    query = _build_trade_history_select().where(
+        or_(
+            Trade.offer_user_id == owner_user_id,
+            Trade.responder_user_id == owner_user_id,
+            Trade.actor_user_id == owner_user_id,
+        )
+    )
+    return _apply_trade_history_filters(
+        query,
+        from_date=from_date,
+        to_date=to_date,
+        commodity_id=commodity_id,
+        commodity_query=commodity_query,
+    )
+
+
+async def _build_trades_with_user_query(
+    db: AsyncSession,
+    *,
+    other_user_id: int,
+    context: EffectiveOwnerActor,
+    from_date: date | None,
+    to_date: date | None,
+    commodity_id: int | None,
+    commodity_query: str | None,
+):
+    owner_user = context.owner_user
+    target_customer_relation = await _resolve_viewable_customer_history_relation(
+        db,
+        customer_user_id=other_user_id,
+        context=context,
+    )
+
+    query = _build_trade_history_select()
+    if target_customer_relation is not None or _is_super_admin_trade_history_viewer(context):
+        query = query.where(
+            or_(
+                Trade.offer_user_id == other_user_id,
+                Trade.responder_user_id == other_user_id,
+                Trade.actor_user_id == other_user_id,
+            )
+        )
+    else:
+        query = query.where(
+            or_(
+                and_(Trade.offer_user_id == owner_user.id, Trade.responder_user_id == other_user_id),
+                and_(Trade.offer_user_id == other_user_id, Trade.responder_user_id == owner_user.id),
+            )
+        )
+
+    query = _apply_trade_history_filters(
+        query,
+        from_date=from_date,
+        to_date=to_date,
+        commodity_id=commodity_id,
+        commodity_query=commodity_query,
+    )
+    return query, target_customer_relation
+
+
+def _build_trade_history_export_subject_name(*, current_user: object, target_user: object | None) -> str:
+    if target_user is not None:
+        return getattr(target_user, "account_name", None) or "history"
+    return getattr(current_user, "account_name", None) or "history"
+
+
+def _build_trade_history_download_name(subject_name: str, extension: str) -> str:
+    safe_subject = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in subject_name.strip()) or "history"
+    return f"trade_history_{safe_subject}.{extension}"
+
+
+def _build_trade_history_file_response(*, path: str, media_type: str, filename: str):
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=filename,
+        background=BackgroundTask(os.remove, path),
+    )
 
 
 async def _viewer_can_access_trade_history_row(
@@ -1844,26 +2005,23 @@ async def execute_trade_internal(
 async def get_my_trades(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
+    commodity_id: Optional[int] = Query(None, ge=1),
+    commodity_query: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
     """
     دریافت تاریخچه معاملات کاربر
     """
-    from sqlalchemy import or_
-
     owner_user = context.owner_user
-    
-    query = select(Trade).options(
-        selectinload(Trade.offer_user),
-        selectinload(Trade.responder_user),
-        selectinload(Trade.commodity)
-    ).where(
-        or_(
-            Trade.offer_user_id == owner_user.id,
-            Trade.responder_user_id == owner_user.id,
-            Trade.actor_user_id == owner_user.id,
-        )
+    query = _build_my_trades_query(
+        owner_user.id,
+        from_date=from_date,
+        to_date=to_date,
+        commodity_id=commodity_id,
+        commodity_query=commodity_query,
     ).order_by(Trade.created_at.desc()).offset(skip).limit(limit)
     
     result = await db.execute(query)
@@ -1893,6 +2051,56 @@ async def get_my_trades(
         )
         for t in trades
     ]
+
+
+@router.get("/my/export")
+async def export_my_trades(
+    format: str = Query(..., pattern="^(excel|pdf)$"),
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
+    commodity_id: Optional[int] = Query(None, ge=1),
+    commodity_query: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    owner_user = context.owner_user
+    query = _build_my_trades_query(
+        owner_user.id,
+        from_date=from_date,
+        to_date=to_date,
+        commodity_id=commodity_id,
+        commodity_query=commodity_query,
+    ).order_by(Trade.created_at.desc())
+    trades = (await db.execute(query)).scalars().all()
+    if not trades:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="معامله‌ای برای خروجی گرفتن یافت نشد.")
+
+    subject_name = _build_trade_history_export_subject_name(current_user=owner_user, target_user=None)
+    date_range_label = build_trade_history_date_range_label(from_date, to_date)
+    export_rows = build_trade_history_export_rows(trades, owner_user.id)
+
+    if format == "excel":
+        output_path = generate_trade_history_excel_file(
+            subject_name=subject_name,
+            date_range_label=date_range_label,
+            rows=export_rows,
+        )
+        return _build_trade_history_file_response(
+            path=output_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=_build_trade_history_download_name(subject_name, "xlsx"),
+        )
+
+    output_path = generate_trade_history_pdf_file(
+        subject_name=subject_name,
+        date_range_label=date_range_label,
+        rows=export_rows,
+    )
+    return _build_trade_history_file_response(
+        path=output_path,
+        media_type="application/pdf",
+        filename=_build_trade_history_download_name(subject_name, "pdf"),
+    )
 
 
 @router.get("/{trade_id}", response_model=TradeResponse)
@@ -1941,47 +2149,31 @@ async def get_trades_with_user(
     other_user_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=50),
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
+    commodity_id: Optional[int] = Query(None, ge=1),
+    commodity_query: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
     """
     دریافت تاریخچه معاملات با یک کاربر خاص
     """
-    from sqlalchemy import and_, or_
-
     owner_user = context.owner_user
     
     # کاربر نمی‌تواند معاملات خودش با خودش را بگیرد (که منطقاً وجود ندارد)
     if other_user_id == owner_user.id:
         return []
 
-    target_customer_relation = await _resolve_viewable_customer_history_relation(
+    query, _target_customer_relation = await _build_trades_with_user_query(
         db,
-        customer_user_id=other_user_id,
+        other_user_id=other_user_id,
         context=context,
+        from_date=from_date,
+        to_date=to_date,
+        commodity_id=commodity_id,
+        commodity_query=commodity_query,
     )
-
-    query = select(Trade).options(
-        selectinload(Trade.offer_user),
-        selectinload(Trade.responder_user),
-        selectinload(Trade.commodity)
-    )
-
-    if target_customer_relation is not None or _is_super_admin_trade_history_viewer(context):
-        query = query.where(
-            or_(
-                Trade.offer_user_id == other_user_id,
-                Trade.responder_user_id == other_user_id,
-                Trade.actor_user_id == other_user_id,
-            )
-        )
-    else:
-        query = query.where(
-            or_(
-                and_(Trade.offer_user_id == owner_user.id, Trade.responder_user_id == other_user_id),
-                and_(Trade.offer_user_id == other_user_id, Trade.responder_user_id == owner_user.id)
-            )
-        )
     query = query.order_by(Trade.created_at.desc()).offset(skip).limit(limit)
     
     result = await db.execute(query)
@@ -2011,3 +2203,71 @@ async def get_trades_with_user(
         )
         for t in trades
     ]
+
+
+@router.get("/with/{other_user_id}/export")
+async def export_trades_with_user(
+    other_user_id: int,
+    format: str = Query(..., pattern="^(excel|pdf)$"),
+    from_date: Optional[date] = Query(None),
+    to_date: Optional[date] = Query(None),
+    commodity_id: Optional[int] = Query(None, ge=1),
+    commodity_query: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    owner_user = context.owner_user
+    if other_user_id == owner_user.id:
+        return await export_my_trades(
+            format=format,
+            from_date=from_date,
+            to_date=to_date,
+            commodity_id=commodity_id,
+            commodity_query=commodity_query,
+            db=db,
+            context=context,
+        )
+
+    query, target_customer_relation = await _build_trades_with_user_query(
+        db,
+        other_user_id=other_user_id,
+        context=context,
+        from_date=from_date,
+        to_date=to_date,
+        commodity_id=commodity_id,
+        commodity_query=commodity_query,
+    )
+    trades = (await db.execute(query.order_by(Trade.created_at.desc()))).scalars().all()
+    if not trades:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="معامله‌ای برای خروجی گرفتن یافت نشد.")
+
+    target_user = await db.get(User, other_user_id)
+    subject_name = _build_trade_history_export_subject_name(current_user=owner_user, target_user=target_user)
+    date_range_label = build_trade_history_date_range_label(from_date, to_date)
+    export_rows = build_trade_history_export_rows(
+        trades,
+        other_user_id if (target_customer_relation is not None or _is_super_admin_trade_history_viewer(context)) else owner_user.id,
+    )
+
+    if format == "excel":
+        output_path = generate_trade_history_excel_file(
+            subject_name=subject_name,
+            date_range_label=date_range_label,
+            rows=export_rows,
+        )
+        return _build_trade_history_file_response(
+            path=output_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=_build_trade_history_download_name(subject_name, "xlsx"),
+        )
+
+    output_path = generate_trade_history_pdf_file(
+        subject_name=subject_name,
+        date_range_label=date_range_label,
+        rows=export_rows,
+    )
+    return _build_trade_history_file_response(
+        path=output_path,
+        media_type="application/pdf",
+        filename=_build_trade_history_download_name(subject_name, "pdf"),
+    )

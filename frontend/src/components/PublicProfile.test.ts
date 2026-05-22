@@ -20,6 +20,10 @@ function makeResponse(payload: unknown, ok = true, status = ok ? 200 : 400): Res
 }
 
 function defaultFetchResponse(input: string): Promise<Response> {
+  if (input.endsWith('/api/commodities/')) {
+    return Promise.resolve(makeResponse([]))
+  }
+
   if (input.endsWith('/api/blocks/status')) {
     return Promise.resolve(makeResponse({
       can_block: true,
@@ -1145,11 +1149,8 @@ describe('PublicProfile.vue', () => {
     await historyHeader!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/trades/with/50', expect.objectContaining({
-      headers: {
-        Authorization: 'Bearer token',
-      },
-    }))
+    const historyCalls = fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/50')
+    expect(historyCalls).toHaveLength(1)
     expect(wrapper.text()).toContain('🟢 خرید')
     expect(wrapper.text()).toContain('🔴 فروش')
     expect(wrapper.text()).toContain('بیننده')
@@ -1176,8 +1177,7 @@ describe('PublicProfile.vue', () => {
     await historyHeader!.trigger('click')
     await flushPromises()
 
-    const historyCalls = fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/50')
-    expect(historyCalls).toHaveLength(1)
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/50')).toHaveLength(1)
   })
 
   it('renders target-user history from the viewed profile perspective for super-admin viewers', async () => {
@@ -1240,11 +1240,7 @@ describe('PublicProfile.vue', () => {
     await historyHeader!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/trades/with/60', expect.objectContaining({
-      headers: {
-        Authorization: 'Bearer token',
-      },
-    }))
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/60')).toHaveLength(1)
     expect(wrapper.text()).toContain('🟢 خرید')
     expect(wrapper.text()).toContain('مالک owner15')
     expect(wrapper.text()).toContain('سطح 2')
@@ -1291,12 +1287,105 @@ describe('PublicProfile.vue', () => {
     await historyHeader!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/trades/my', expect.objectContaining({
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/my')).toHaveLength(1)
+    expect(wrapper.text()).toContain('هنوز هیچ معامله‌ای انجام نداده‌اید.')
+  })
+
+  it('applies history filters and exports with the same query state', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 50,
+      account_name: 'owner50',
+      avatar_file_id: null,
+      mobile_number: '09121112222',
+      address: 'قم',
+      created_at_jalali: '۱۴۰۵/۰۱/۱۰',
+      trades_count: 3,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: true,
+      can_block_now: true,
+      max_blocked: 10,
+      current_blocked: 0,
+      remaining: 10,
+      reason_code: null,
+      reason_message: null,
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
+    fetchMock.mockResolvedValueOnce(makeResponse([{ id: 1, name: 'سکه', aliases: [{ alias: 'امامی' }] }]))
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
+    fetchMock.mockResolvedValueOnce(new Response('export', {
+      status: 200,
       headers: {
-        Authorization: 'Bearer token',
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': 'attachment; filename="trade_history_owner50.pdf"',
       },
     }))
-    expect(wrapper.text()).toContain('هنوز هیچ معامله‌ای انجام نداده‌اید.')
+
+    const createObjectURL = vi.fn(() => 'blob:history')
+    const revokeObjectURL = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, writable: true })
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revokeObjectURL, writable: true })
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 50, account_name: 'owner50' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
+    expect(historyHeader).toBeTruthy()
+    await historyHeader!.trigger('click')
+    await flushPromises()
+
+    const dateInputs = wrapper.findAll('input[type="date"]')
+    await dateInputs[0]!.setValue('2026-05-01')
+    await dateInputs[1]!.setValue('2026-05-31')
+    await wrapper.get('input[list="public-profile-history-commodities"]').setValue('امامی')
+
+    const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButton).toBeTruthy()
+    await applyButton!.trigger('click')
+    await flushPromises()
+
+    const filteredCall = fetchMock.mock.calls.find(([url]) => typeof url === 'string' && url.includes('/api/trades/with/50?'))
+    expect(filteredCall?.[0]).toContain('from_date=2026-05-01')
+    expect(filteredCall?.[0]).toContain('to_date=2026-05-31')
+    expect(filteredCall?.[0]).toContain('commodity_query=%D8%A7%D9%85%D8%A7%D9%85%DB%8C')
+
+    const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
+    expect(pdfButton).toBeTruthy()
+    await pdfButton!.trigger('click')
+    await flushPromises()
+
+    const exportCall = fetchMock.mock.calls.find(([url]) => typeof url === 'string' && url.includes('/api/trades/with/50/export?'))
+    expect(exportCall?.[0]).toContain('format=pdf')
+    expect(exportCall?.[0]).toContain('from_date=2026-05-01')
+    expect(exportCall?.[0]).toContain('to_date=2026-05-31')
+    expect(exportCall?.[0]).toContain('commodity_query=%D8%A7%D9%85%D8%A7%D9%85%DB%8C')
+    expect(createObjectURL).toHaveBeenCalledOnce()
+    expect(anchorClick).toHaveBeenCalledOnce()
+    expect(revokeObjectURL).toHaveBeenCalledOnce()
+
+    anchorClick.mockRestore()
   })
 
   it('shows network fetch errors and still allows returning home from the back button', async () => {

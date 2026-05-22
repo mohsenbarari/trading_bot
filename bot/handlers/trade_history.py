@@ -299,9 +299,6 @@ async def generate_excel(trades, target_user, current_user) -> str:
 
 async def generate_pdf(trades, target_user, current_user) -> str:
     """ایجاد فایل PDF (فقط نام فایل برگردانده می‌شود)"""
-    # در اینجا از یک شبیه‌ساز ساده استفاده می‌کنیم چون نصب پکیج‌های PDF سنگین است
-    # و معمولاً در این محیط‌ها ترجیح بر Excel است.
-    # اما کد مشابه قبلی را قرار می‌دهیم.
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     with open(temp_file.name, "wb") as f:
         f.write(b"PDF content placeholder")
