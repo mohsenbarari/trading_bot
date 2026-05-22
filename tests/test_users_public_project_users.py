@@ -1,0 +1,105 @@
+import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from fastapi import HTTPException
+
+from api.routers.users_public import list_project_users_directory
+from models.user import UserRole
+
+
+class FakeExecuteResult:
+    def __init__(self, values):
+        self._values = list(values)
+
+    def scalars(self):
+        return SimpleNamespace(all=lambda: list(self._values))
+
+
+class FakeDB:
+    def __init__(self, results):
+        self.results = list(results)
+        self.stmts = []
+
+    async def execute(self, stmt):
+        self.stmts.append(stmt)
+        if not self.results:
+            raise AssertionError("Unexpected execute() call")
+        return self.results.pop(0)
+
+
+def make_user(**overrides):
+    data = {
+        "id": 7,
+        "is_deleted": False,
+        "account_name": "user7",
+        "role": UserRole.STANDARD,
+        "mobile_number": "09120000000",
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
+    async def test_list_project_users_directory_returns_filtered_rows_for_self_profile(self):
+        current_user = SimpleNamespace(id=7, role=UserRole.STANDARD)
+        db = FakeDB([
+            FakeExecuteResult([
+                make_user(id=7, account_name="owner7", mobile_number="09120000007"),
+                make_user(id=9, account_name="manager9", role=UserRole.MIDDLE_MANAGER, mobile_number="09120000009"),
+            ])
+        ])
+
+        with patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await list_project_users_directory(7, q="0912", limit=25, db=db, current_user=current_user)
+
+        self.assertEqual([row.id for row in result], [7, 9])
+        self.assertEqual(result[0].account_name, "owner7")
+        self.assertEqual(result[0].mobile_number, "09120000007")
+
+        stmt_text = str(db.stmts[0]).lower()
+        self.assertIn("users.role in", stmt_text)
+        self.assertIn("not (exists", stmt_text)
+        self.assertIn("lower(users.account_name) like lower", stmt_text)
+        self.assertIn("lower(users.mobile_number) like lower", stmt_text)
+
+    async def test_list_project_users_directory_denies_non_self_requests(self):
+        db = FakeDB([])
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await list_project_users_directory(
+                7,
+                q=None,
+                limit=25,
+                db=db,
+                current_user=SimpleNamespace(id=99, role=UserRole.STANDARD),
+            )
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(db.stmts, [])
+
+    async def test_list_project_users_directory_denies_customers(self):
+        db = FakeDB([])
+
+        with patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=SimpleNamespace(owner_user_id=21)),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await list_project_users_directory(
+                    91,
+                    q=None,
+                    limit=25,
+                    db=db,
+                    current_user=SimpleNamespace(id=91, role=UserRole.STANDARD),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(db.stmts, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

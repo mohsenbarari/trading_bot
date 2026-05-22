@@ -150,12 +150,12 @@
 
 ### فاز 1.5: لیست کاربران پروژه در پروفایل خود / مالک
 
-- [ ] طراحی route و schema اختصاصی برای project users directory در surface عمومی.
-- [ ] enforce کردن policy دسترسی برای self profile و accountant-resolved owner profile.
-- [ ] اعمال فیلتر role + relation برای حذف حسابداران و مشتریان از این list.
-- [ ] افزودن section یا accordion سبک در `PublicProfile.vue` برای نمایش این list.
-- [ ] wiring navigation هر row به public profile target بدون ورود به admin surface.
-- [ ] افزودن backend و frontend tests برای access-control، filtering، و navigation contract این list.
+- [x] طراحی route و schema اختصاصی برای project users directory در surface عمومی.
+- [x] enforce کردن policy دسترسی برای self profile و accountant-resolved owner profile.
+- [x] اعمال فیلتر role + relation برای حذف حسابداران و مشتریان از این list.
+- [x] افزودن section یا accordion سبک در `PublicProfile.vue` برای نمایش این list.
+- [x] wiring navigation هر row به public profile target بدون ورود به admin surface.
+- [x] افزودن backend و frontend tests برای access-control، filtering، و navigation contract این list.
 
 ### فاز 2: اضافه کردن online / last seen به PublicProfile
 
@@ -248,16 +248,11 @@
 - [x] `GET /api/blocks/status` برای UX capability-aware با reason code machine-readable توسعه می یابد.
 - [x] extraction از `bot/handlers/trade_history.py` در مرز query-to-document pipeline انجام می شود؛ bot/web فقط transport wrapper باقی می مانند.
 
-### 6.2 سوال ها و ابهام های فنی باقیمانده برای لیست کاربران پروژه
+### 6.2 تصمیم های نهایی برای لیست کاربران پروژه
 
-- [ ] منظور از `نام کاربر` در این list دقیقاً `account_name` است یا اگر `full_name` پر بود باید همان نمایش داده شود؟
-  پیشنهاد فعلی: `account_name` به عنوان canonical display name استفاده شود، چون navigation contract و surface فعلی PublicProfile بر همان بنا شده است.
-
-- [ ] آیا row خود owner / viewer هم باید در این list نمایش داده شود یا برای جلوگیری از self-navigation حذف شود؟
-  پیشنهاد فعلی: row خود owner هم بماند تا list از نظر dataset کامل باشد و فقط navigation به همان profile به صورت no-op یا harmless باقی بماند.
-
-- [ ] آیا فاز اول این list باید search/pagination داشته باشد یا یک load ساده همه کاربران پروژه کافی است؟
-  پیشنهاد فعلی: از ابتدا search سبک server-side اضافه شود، چون تعداد کاربران پروژه می تواند رشد کند و route جدید بهتر است از روز اول bounded بماند.
+- [x] `نام کاربر` در این list به صورت canonical همان `account_name` است.
+- [x] row خود owner / viewer در dataset می ماند و navigation به همان public profile harmless تلقی می شود.
+- [x] فاز اول این list با search سبک server-side و بدون pagination UI جلو می رود.
 
 ## 7. ایده های مفید ولی خارج از scope همین مرحله
 

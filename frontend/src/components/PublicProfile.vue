@@ -54,6 +54,12 @@ interface PublicCustomerRelationSummary {
   customer_tier: 'tier1' | 'tier2';
 }
 
+interface ProjectUserDirectoryEntry {
+  id: number;
+  account_name: string;
+  mobile_number: string;
+}
+
 interface MutualTradePreview {
   id: number;
   trade_number: number;
@@ -113,6 +119,7 @@ const openSections = ref({
   history: false,
   accountants: false,
   customers: false,
+  projectUsers: false,
 });
 const avatarBusy = ref(false);
 const avatarInput = ref<HTMLInputElement | null>(null);
@@ -124,6 +131,12 @@ const showAdminUserManager = ref(false);
 const adminUserData = ref<any>(null);
 const adminUserLoading = ref(false);
 const adminUserError = ref('');
+const projectUsers = ref<ProjectUserDirectoryEntry[]>([]);
+const projectUsersLoading = ref(false);
+const projectUsersError = ref('');
+const projectUsersQuery = ref('');
+const projectUsersLoaded = ref(false);
+const lastLoadedProjectUsersQuery = ref('');
 const viewerRole = computed(() => readCachedCurrentUserRole());
 const isOwnProfile = computed(() => {
   if (!profileData.value) return false;
@@ -213,6 +226,14 @@ const targetCustomerHistoryContext = computed(() => {
 });
 const showCustomerListSection = computed(() => {
   return customerRelations.value.length > 0 && (showOwnerSections.value || viewerIsSuperAdmin.value);
+});
+const showProjectUsersSection = computed(() => {
+  const routeUserId = Number(props.user?.id);
+  const viewerUserId = Number(props.viewerUserId);
+  if (!Number.isInteger(routeUserId) || routeUserId <= 0) return false;
+  if (!Number.isInteger(viewerUserId) || viewerUserId <= 0) return false;
+  if (customerProfileContext.value !== null) return false;
+  return routeUserId === viewerUserId;
 });
 const showPublicBlockAction = computed(() => {
   return showVisitorSections.value && !!profileData.value && customerProfileContext.value === null;
@@ -425,6 +446,55 @@ async function loadMutualTrades() {
     } finally {
         isHistoryLoading.value = false;
     }
+}
+
+async function loadProjectUsersDirectory(force = false) {
+  if (!showProjectUsersSection.value || !props.user?.id || !props.jwtToken || projectUsersLoading.value) {
+    return;
+  }
+
+  const normalizedQuery = projectUsersQuery.value.trim();
+  if (!force && projectUsersLoaded.value && lastLoadedProjectUsersQuery.value === normalizedQuery) {
+    return;
+  }
+
+  projectUsersLoading.value = true;
+  projectUsersError.value = '';
+  try {
+    const params = new URLSearchParams();
+    params.set('limit', '25');
+    if (normalizedQuery) {
+      params.set('q', normalizedQuery);
+    }
+    const response = await fetch(`${props.apiBaseUrl}/api/users-public/${props.user.id}/project-users?${params.toString()}`, {
+      headers: {
+        'Authorization': `Bearer ${props.jwtToken}`,
+      },
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(parseApiError(payload, 'خطا در دریافت لیست کاربران پروژه'));
+    }
+
+    projectUsers.value = Array.isArray(payload) ? payload as ProjectUserDirectoryEntry[] : [];
+    projectUsersLoaded.value = true;
+    lastLoadedProjectUsersQuery.value = normalizedQuery;
+  } catch (e: any) {
+    projectUsersError.value = e?.message || 'خطا در دریافت لیست کاربران پروژه';
+  } finally {
+    projectUsersLoading.value = false;
+  }
+}
+
+async function toggleProjectUsersSection() {
+  openSections.value.projectUsers = !openSections.value.projectUsers;
+  if (!openSections.value.projectUsers) return;
+  await loadProjectUsersDirectory();
+}
+
+async function submitProjectUsersSearch() {
+  projectUsersLoaded.value = false;
+  await loadProjectUsersDirectory(true);
 }
 
 async function openAdminUserManager() {
@@ -665,6 +735,13 @@ function openOwnerCustomerProfile(relation: PublicCustomerRelationSummary) {
     account_name: relation.customer_account_name,
   });
 }
+
+function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
+  emit('navigate', 'public_profile', {
+    id: user.id,
+    account_name: user.account_name,
+  });
+}
 </script>
 
 <template>
@@ -768,6 +845,56 @@ function openOwnerCustomerProfile(relation: PublicCustomerRelationSummary) {
                   <span class="stat-label">{{ stat.label }}</span>
                   <span class="stat-value">{{ stat.value }}</span>
               </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="showProjectUsersSection" class="profile-section project-users-section">
+        <div class="ds-accordion" :class="{ open: openSections.projectUsers }">
+          <div class="ds-accordion-header" @click="toggleProjectUsersSection">
+            <div class="ds-accordion-header-info">
+              <UserIcon :size="18" class="text-amber-600" />
+              <h2>کاربران پروژه</h2>
+            </div>
+            <ChevronLeft :size="20" class="ds-accordion-icon" />
+          </div>
+
+          <div v-show="openSections.projectUsers" class="ds-accordion-body">
+            <form class="project-users-search" @submit.prevent="submitProjectUsersSearch">
+              <input
+                v-model="projectUsersQuery"
+                type="search"
+                class="project-users-search-input"
+                placeholder="جستجو با نام کاربری یا شماره تماس"
+              />
+              <button type="submit" class="project-users-search-submit" :disabled="projectUsersLoading">
+                {{ projectUsersLoading ? 'در حال جستجو...' : 'جستجو' }}
+              </button>
+            </form>
+
+            <p v-if="projectUsersError" class="admin-user-error">{{ projectUsersError }}</p>
+            <div v-else-if="projectUsersLoading">
+              <LoadingSkeleton :count="3" :height="52" />
+            </div>
+            <p v-else-if="projectUsers.length === 0" class="empty-text">
+              {{ projectUsersQuery.trim() ? 'کاربری با این جستجو پیدا نشد.' : 'کاربر پروژه‌ای برای نمایش وجود ندارد.' }}
+            </p>
+            <div v-else class="project-users-list">
+              <article
+                v-for="projectUser in projectUsers"
+                :key="projectUser.id"
+                class="project-user-card"
+              >
+                <button
+                  type="button"
+                  class="profile-link-btn project-user-link-btn"
+                  @click.stop="openProjectUserProfile(projectUser)"
+                >
+                  {{ projectUser.account_name }}
+                </button>
+                <span class="project-user-mobile">{{ projectUser.mobile_number }}</span>
+              </article>
             </div>
           </div>
         </div>
@@ -1099,6 +1226,76 @@ function openOwnerCustomerProfile(relation: PublicCustomerRelationSummary) {
   font-size: 0.86rem;
   line-height: 1.7;
   color: #1e3a8a;
+}
+
+.project-users-search {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.project-users-search-input {
+  flex: 1 1 220px;
+  min-height: 42px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 0 14px;
+  font-size: 0.92rem;
+  color: var(--ds-text-primary);
+}
+
+.project-users-search-input:focus {
+  outline: none;
+  border-color: rgba(245, 158, 11, 0.48);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
+}
+
+.project-users-search-submit {
+  border: 0;
+  border-radius: 14px;
+  min-height: 42px;
+  padding: 0 16px;
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+  color: #fff;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.project-users-search-submit:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.project-users-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.project-user-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+}
+
+.project-user-link-btn {
+  font-size: 0.94rem;
+  font-weight: 800;
+}
+
+.project-user-mobile {
+  color: var(--ds-text-secondary);
+  font-size: 0.85rem;
+  direction: ltr;
+  text-align: left;
 }
 
 .profile-avatar-actions {
