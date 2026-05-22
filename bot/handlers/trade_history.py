@@ -19,7 +19,9 @@ from models.offer import Offer, OfferType
 from models.commodity import Commodity
 from core.db import AsyncSessionLocal
 from core.services.trade_history_export_service import (
+    build_trade_history_date_range_label,
     build_trade_history_export_rows,
+    generate_trade_history_pdf_file,
     resolve_counterparty_account_name_for_perspective,
 )
 import jdatetime
@@ -290,12 +292,24 @@ async def generate_excel(trades, target_user, current_user) -> str:
     return temp_file.name
 
 
-async def generate_pdf(trades, target_user, current_user) -> str:
-    """ایجاد فایل PDF (فقط نام فایل برگردانده می‌شود)"""
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    with open(temp_file.name, "wb") as f:
-        f.write(b"PDF content placeholder")
-    return temp_file.name
+async def generate_pdf(trades, target_user, current_user, months: Optional[int] = None) -> str:
+    """ایجاد فایل PDF با استفاده از سرویس مشترک خروجی تاریخچه معاملات"""
+    export_rows = build_trade_history_export_rows(trades, current_user.id)
+    display_name = target_user.account_name if target_user else "پروفایل من"
+
+    from_date = None
+    to_date = None
+    if months and months > 0:
+        today = datetime.now(timezone.utc).date()
+        to_date = today
+        from_date = today - timedelta(days=months * 30)
+
+    date_range_label = build_trade_history_date_range_label(from_date, to_date)
+    return generate_trade_history_pdf_file(
+        subject_name=display_name,
+        date_range_label=date_range_label,
+        rows=export_rows,
+    )
 
 
 # --- دانلود Excel ---
@@ -354,7 +368,7 @@ async def export_pdf(callback: types.CallbackQuery, callback_data: ExportHistory
         return
     
     try:
-        filename = await generate_pdf(trades, target_user, user)
+        filename = await generate_pdf(trades, target_user, user, months=months)
         
         display_name = target_user.account_name if target_user else "پروفایل من"
         

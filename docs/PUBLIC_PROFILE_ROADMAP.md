@@ -77,12 +77,12 @@
 
 ### 3.6 وضعیت فعلی history و export
 
-- [x] PublicProfile history الان فقط read path دارد و از `GET /api/trades/my` یا `GET /api/trades/with/{user_id}` استفاده می کند.
-- [x] filter زمانی/کالایی در web public profile فعلاً وجود ندارد.
-- [x] export web برای history فعلاً وجود ندارد.
+- [x] PublicProfile history الان هم read path و هم export path دارد و از `GET /api/trades/my`، `GET /api/trades/with/{user_id}` و endpointهای export متناظر استفاده می کند.
+- [x] filter زمانی/کالایی در web public profile الان فعال است و query state آن روی همان history/export pathها اعمال می شود.
+- [x] export web برای history الان برای `Excel` و `PDF` با همان filter state جاری UI در دسترس است.
 - [x] bot trade history همین الان presetهای زمانی `1/3/6 ماه` و export `Excel/PDF` دارد.
 - [x] `bot/handlers/trade_history.py` seam واضحی برای reuse یا extraction منطق export فراهم می کند.
-- [x] `generate_pdf()` در bot فعلاً placeholder ساده است و برای web-grade export کافی نیست.
+- [x] `generate_pdf()` در bot دیگر placeholder نیست و از service مشترک export برای تولید PDF واقعی با label بازه زمانی انتخابی استفاده می کند.
 
 ### 3.7 وضعیت فعلی لیست کاربران پروژه
 
@@ -223,11 +223,11 @@
   - [x] PublicProfile export action state
   - [x] block UX disable/loading/success states
 - [ ] Playwright:
-  - public profile presence rendering
+  - [x] public profile presence rendering
   - [x] mutual history filtering by date and commodity
   - [x] self history export presets
   - [x] custom range export
-  - blocked interaction generic UX
+  - [x] blocked interaction generic UX
 
 ## 6. سوال ها و ابهام های باقیمانده قبل از شروع اجرا
 
