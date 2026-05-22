@@ -37,6 +37,7 @@ describe('PublicProfile.vue', () => {
       avatar_file_id: null,
       mobile_number: '09124444444',
       address: 'مشهد',
+      last_seen_at: new Date(Date.now() - 60_000).toISOString(),
       created_at_jalali: '۱۴۰۵/۰۱/۰۲',
       trades_count: 12,
       resolved_from_accountant_id: 44,
@@ -78,6 +79,87 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('نمایش پروفایل مالک اصلی')
     expect(wrapper.text()).toContain('حسابدار فروش')
     expect(wrapper.text()).toContain('owner20')
+    expect(wrapper.text()).toContain('آنلاین')
+  })
+
+  it('shows formatted last-seen text in the profile hero when a timestamp exists', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-22T12:00:00Z'))
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 30,
+      account_name: 'plain30',
+      avatar_file_id: null,
+      mobile_number: '09125555555',
+      address: 'تهران',
+      last_seen_at: '2026-05-22T11:55:00Z',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۳',
+      trades_count: 4,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 30, account_name: 'plain30' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('آخرین بازدید 5 دقیقه پیش')
+  })
+
+  it('keeps the profile hero silent when no last-seen timestamp exists', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 30,
+      account_name: 'plain30',
+      avatar_file_id: null,
+      mobile_number: '09125555555',
+      address: 'تهران',
+      last_seen_at: null,
+      created_at_jalali: '۱۴۰۵/۰۱/۰۳',
+      trades_count: 4,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 30, account_name: 'plain30' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.profile-presence-status').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('آخرین بازدید')
+    expect(wrapper.text()).not.toContain('آنلاین')
   })
 
   it('does not show the owner-resolution banner for direct public profiles', async () => {

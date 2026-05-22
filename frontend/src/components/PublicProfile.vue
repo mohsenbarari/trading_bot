@@ -8,6 +8,7 @@ import UserProfile from './UserProfile.vue';
 import { isAdminRoleValue, readCachedCurrentUserRole, SUPER_ADMIN_ROLE } from '../utils/adminAccess';
 import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIdentity';
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
+import { formatLastSeenStatus, isUserOnline as isPresenceOnline } from '../utils/userPresence';
 
 const props = defineProps<{
   user: { id: number; account_name: string } | null;
@@ -27,6 +28,7 @@ interface PublicUser {
   avatar_file_id?: string | null;
   mobile_number: string;
   address: string;
+  last_seen_at?: string | null;
   created_at_jalali: string;
   trades_count: number;
   resolved_from_accountant_id?: number | null;
@@ -148,6 +150,8 @@ const showVisitorSections = computed(() => !isOwnProfile.value);
 const showOwnerSections = computed(() => isOwnProfile.value);
 const showAdminSections = computed(() => !isOwnProfile.value && viewerIsAdmin.value);
 const profileAvatarUrl = computed(() => buildChatFileUrl(profileData.value?.avatar_file_id ?? null, props.apiBaseUrl));
+const profilePresenceStatus = computed(() => formatLastSeenStatus(profileData.value?.last_seen_at, { emptyText: null }));
+const profileIsOnline = computed(() => isPresenceOnline(profileData.value?.last_seen_at));
 const accountantRelations = computed<PublicAccountantRelationSummary[]>(() => {
   return Array.isArray(profileData.value?.accountant_relations) ? profileData.value!.accountant_relations! : [];
 });
@@ -786,6 +790,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
           </div>
           <div class="profile-hero-copy">
             <h3>{{ profileData.account_name }}</h3>
+            <p v-if="profilePresenceStatus" class="profile-presence-status" :class="{ online: profileIsOnline }">{{ profilePresenceStatus }}</p>
           </div>
           <div v-if="showOwnerSections" class="profile-avatar-actions">
             <button class="profile-avatar-btn primary" :disabled="avatarBusy" @click="triggerAvatarPicker">
@@ -1173,6 +1178,17 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   margin: 0;
   font-size: 1.15rem;
   color: var(--ds-text-primary);
+}
+
+.profile-presence-status {
+  margin: 6px 0 0;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--ds-text-secondary);
+}
+
+.profile-presence-status.online {
+  color: #f59e0b;
 }
 
 .accountant-resolution-banner {
