@@ -1,4 +1,5 @@
 import unittest
+import uuid
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -9,6 +10,8 @@ import schemas
 from api.routers.customers import (
     create_my_customer,
     list_my_customers,
+    list_my_customer_sessions,
+    terminate_my_customer_session,
     unlink_my_customer,
     update_my_customer,
 )
@@ -180,6 +183,74 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         update_mock.assert_awaited_once()
         self.assertEqual(update_mock.await_args.kwargs["update_data"]["commission_rate"], 0.8)
         self.assertEqual(result["management_name"], "مشتری ارشد")
+
+    async def test_list_my_customer_sessions_returns_active_customer_sessions(self):
+        context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
+        relation = SimpleNamespace(customer_user_id=12)
+        sessions = [
+            SimpleNamespace(
+                id="session-1",
+                device_name="Chrome on Android",
+                device_ip="10.0.0.10",
+                platform=SimpleNamespace(value="web"),
+                home_server="foreign",
+                is_primary=True,
+                is_active=True,
+                created_at=datetime.utcnow(),
+                last_active_at=datetime.utcnow(),
+            )
+        ]
+
+        with patch(
+            "api.routers.customers.get_active_owner_customer_relation",
+            new=AsyncMock(return_value=relation),
+        ) as relation_mock, patch(
+            "api.routers.customers.get_active_sessions",
+            new=AsyncMock(return_value=sessions),
+        ) as sessions_mock:
+            result = await list_my_customer_sessions(9, context=context, db=FakeDB())
+
+        relation_mock.assert_awaited_once()
+        sessions_mock.assert_awaited_once_with(unittest.mock.ANY, 12)
+        self.assertEqual(result[0]["device_name"], "Chrome on Android")
+        self.assertTrue(result[0]["is_primary"])
+
+    async def test_terminate_my_customer_session_logs_out_selected_customer_session(self):
+        context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
+        relation = SimpleNamespace(customer_user_id=12)
+        session = SimpleNamespace(id=uuid.UUID("11111111-1111-1111-1111-111111111111"))
+        promoted = SimpleNamespace(id=uuid.UUID("22222222-2222-2222-2222-222222222222"))
+
+        with patch(
+            "api.routers.customers.get_active_owner_customer_relation",
+            new=AsyncMock(return_value=relation),
+        ) as relation_mock, patch(
+            "api.routers.customers.get_active_customer_session",
+            new=AsyncMock(return_value=session),
+        ) as session_mock, patch(
+            "api.routers.customers.logout_session",
+            new=AsyncMock(return_value=promoted),
+        ) as logout_mock:
+            result = await terminate_my_customer_session(
+                9,
+                "11111111-1111-1111-1111-111111111111",
+                context=context,
+                db=FakeDB(),
+            )
+
+        relation_mock.assert_awaited_once()
+        session_mock.assert_awaited_once()
+        logout_mock.assert_awaited_once_with(unittest.mock.ANY, session)
+        self.assertEqual(result["terminated_session_id"], "11111111-1111-1111-1111-111111111111")
+        self.assertEqual(result["promoted_primary_session_id"], "22222222-2222-2222-2222-222222222222")
+
+    async def test_terminate_my_customer_session_rejects_invalid_session_id(self):
+        context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await terminate_my_customer_session(9, "bad-session-id", context=context, db=FakeDB())
+
+        self.assertEqual(exc_info.exception.status_code, 400)
 
 
 if __name__ == "__main__":
