@@ -130,6 +130,33 @@ class AuthRouterSessionFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["access_token"], "new-access")
         self.assertEqual(result["refresh_token"], "good")
 
+    async def test_refresh_access_token_ignores_customer_invitation_paths(self):
+        req = RefreshTokenRequest(refresh_token="good")
+        payload = {"type": "refresh", "sub": 5}
+        user = SimpleNamespace(id=5, is_deleted=False, home_server="foreign")
+        now = datetime.now(timezone.utc)
+        session = SimpleNamespace(
+            id="sess-1",
+            expires_at=now + timedelta(days=1),
+            home_server="foreign",
+            last_active_at=None,
+        )
+
+        with patch("jose.jwt.decode", return_value=payload), patch(
+            "api.routers.auth.get_session_by_refresh_token",
+            new=AsyncMock(return_value=session),
+        ), patch("core.utils.utc_now", return_value=now), patch(
+            "api.routers.auth.create_access_token",
+            return_value="new-access",
+        ), patch(
+            "api.routers.auth.is_customer_invitation_token",
+            side_effect=AssertionError("refresh must not inspect invitation tokens"),
+        ):
+            result = await refresh_access_token(req, db=FakeDB([FakeExecuteResult(user)]))
+
+        self.assertEqual(result["access_token"], "new-access")
+        self.assertEqual(result["refresh_token"], "good")
+
     async def test_refresh_access_token_rejects_users_whose_messenger_access_is_now_blocked(self):
         req = RefreshTokenRequest(refresh_token="good")
         payload = {"type": "refresh", "sub": 5}

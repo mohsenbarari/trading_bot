@@ -386,11 +386,6 @@ async def refresh_access_token(
         if not user_id:
             raise HTTPException(status_code=401, detail="توکن نامعتبر است")
         
-        customer_relation = None
-        if is_customer_invitation_token(req.token):
-            customer_relation = await get_pending_customer_relation_by_invitation_token(db, req.token)
-            if not customer_relation:
-                raise HTTPException(status_code=400, detail="دعوت‌نامه مشتری نامعتبر یا منقضی شده است")
         stmt = select(User).where(User.id == int(user_id))
         user = (await db.execute(stmt)).scalar_one_or_none()
         
@@ -412,12 +407,6 @@ async def refresh_access_token(
         from core.utils import utc_now
         if session.expires_at and session.expires_at < utc_now():
             raise HTTPException(status_code=401, detail="SESSION_EXPIRED_REQUIRE_OTP")
-        
-        if customer_relation:
-            customer_relation.customer_user_id = new_user.id
-            customer_relation.status = CustomerRelationStatus.ACTIVE
-            customer_relation.activated_at = utc_now()
-            customer_relation.deleted_at = None
         # Update last_active_at
         session.last_active_at = utc_now()
         

@@ -44,6 +44,12 @@ interface CustomerSessionSummary {
   last_active_at: string | null
 }
 
+interface CustomerSessionTerminateResponse {
+  detail: string
+  terminated_session_id: string
+  promoted_primary_session_id: string | null
+}
+
 function makeEmptyCreateForm() {
   return {
     account_name: '',
@@ -341,7 +347,8 @@ async function terminateCustomerSession(relation: CustomerRelation, session: Cus
     if (!response.ok) {
       throw new Error(parseApiError(payload, 'پایان دادن نشست مشتری ناموفق بود.'))
     }
-    notice.value = parseApiError(payload, 'نشست مشتری با موفقیت پایان یافت.')
+    const result = payload as CustomerSessionTerminateResponse | null
+    notice.value = result?.detail || 'نشست مشتری با موفقیت پایان یافت.'
     await loadSessionsForRelation(relation.id)
   } catch (err: any) {
     error.value = err?.message || 'پایان دادن نشست مشتری ناموفق بود.'

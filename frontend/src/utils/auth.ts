@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 import type { RouteLocationNormalized, NavigationGuardNext } from 'vue-router';
 import { isAdminRoleValue, readCachedCurrentUserRole } from './adminAccess';
+import { cacheCurrentUserSummary } from './currentUser';
 
 export const isAppConnecting = ref(false);
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -99,27 +100,7 @@ export async function isAuthenticated(): Promise<boolean> {
 }
 
 function cacheCurrentUserSummaryFromAuthMe(payload: any) {
-    if (!payload || typeof payload !== 'object') return;
-
-    let existing: Record<string, unknown> = {};
-    try {
-        existing = JSON.parse(localStorage.getItem('current_user_summary') || '{}');
-    } catch {
-        existing = {};
-    }
-
-    localStorage.setItem('current_user_summary', JSON.stringify({
-        ...existing,
-        id: payload.id,
-        role: payload.role,
-        full_name: payload.full_name,
-        account_name: payload.account_name,
-        account_status: payload.account_status,
-        global_lock_grace_expires_at: payload.global_lock_grace_expires_at,
-        global_web_locked_at: payload.global_web_locked_at,
-        is_accountant: payload.is_accountant,
-        is_customer: payload.is_customer,
-    }));
+    cacheCurrentUserSummary(payload);
 }
 
 function readCachedCurrentUserAccountStatus(): string | null {
