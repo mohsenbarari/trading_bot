@@ -96,6 +96,12 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
         )
         trade_relation_map_patcher.start()
         self.addCleanup(trade_relation_map_patcher.stop)
+        market_eval_patcher = patch(
+            "api.routers.trades.evaluate_current_market_schedule",
+            new=AsyncMock(return_value=SimpleNamespace(is_open=True, reason="daily_window_open")),
+        )
+        self.market_eval_mock = market_eval_patcher.start()
+        self.addCleanup(market_eval_patcher.stop)
 
     async def test_execute_trade_authoritatively_rejects_watch_restricted_and_limit_failures(self):
         trade_data = TradeCreate(offer_id=7, quantity=4)
@@ -128,6 +134,23 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "حساب شما غیرفعال است و امکان انجام معامله ندارید.")
+
+        self.market_eval_mock.return_value = SimpleNamespace(is_open=False, reason="after_daily_window_close")
+        with patch("api.routers.trades.check_user_limits") as limits_mock:
+            with self.assertRaises(HTTPException) as exc_info:
+                await _execute_trade_authoritatively(
+                    trade_data,
+                    BackgroundTasks(),
+                    db=FakeDB(),
+                    context=make_context(make_user()),
+                )
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertEqual(
+            exc_info.exception.detail,
+            "بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید.",
+        )
+        limits_mock.assert_not_called()
+        self.market_eval_mock.return_value = SimpleNamespace(is_open=True, reason="daily_window_open")
 
         db = FakeDB(execute_results=[FakeExecuteResult(single=make_user())])
         with patch("api.routers.trades.check_user_limits", return_value=(False, "trade blocked")):

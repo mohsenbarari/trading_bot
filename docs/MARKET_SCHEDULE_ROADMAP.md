@@ -185,9 +185,9 @@
 
 ## 6. contract backend create/execute
 
-- [ ] `api/routers/offers.py` باید روی create-offer authority، market-open policy را enforce کند.
-- [ ] اگر بازار بسته باشد، create-offer باید با error business مناسب reject شود.
-- [ ] `api/routers/trades.py` نیز باید guard هم‌راستا داشته باشد، حتی اگر close transition همه آفرها را expire کرده باشد؛ چون backend authority نباید فقط به UI یا transition side effect تکیه کند.
+- [x] `api/routers/offers.py` باید روی create-offer authority، market-open policy را enforce کند.
+- [x] اگر بازار بسته باشد، create-offer باید با error business مناسب reject شود.
+- [x] `api/routers/trades.py` نیز باید guard هم‌راستا داشته باشد، حتی اگر close transition همه آفرها را expire کرده باشد؛ چون backend authority نباید فقط به UI یا transition side effect تکیه کند.
 
 ## 7. UI مدیریت ادمین برای schedule و exceptionها
 
@@ -210,7 +210,7 @@
 - [x] unit tests برای override precedence
 - [x] unit tests برای close/open transition idempotency
 - [x] unit tests برای expire-all-active-offers on close
-- [ ] unit tests برای create-offer / create-trade denial وقتی بازار بسته است
+- [x] unit tests برای create-offer / create-trade denial وقتی بازار بسته است
 
 ### 8.2. bot
 
@@ -265,7 +265,10 @@
   - [x] `core/services/market_transition_service.py` side effectهای open/close، noticeهای کانال، و realtime `market:*` را متمرکز کرد.
   - [x] `offers.expire_reason` اضافه شد تا `market_closed` از `time_limit` متمایز بماند.
   - [x] validation محدود این phase با `tests.test_market_transition_service`، `tests.test_market_schedule_loop`، `tests.test_main_lifespan`، `tests.test_offer_expiry` و `tests.test_migration_smoke` سبز شد.
-- [ ] Phase 4 - Backend offer/trade authority guards
+- [x] Phase 4 - Backend offer/trade authority guards
+  - [x] `api/routers/offers.py` و `api/routers/trades.py` هر دو runtime schedule را مستقیم evaluate می‌کنند و روی closed-market با business conflict برمی‌گردند.
+  - [x] authority دیگر فقط به expire side effect یا UI disable تکیه نمی‌کند و boundary raceهای close transition را هم می‌بندد.
+  - [x] validation محدود این phase با `tests.test_market_transition_service`، `tests.test_offers_router_create_guards`، `tests.test_offers_router_create_success`، `tests.test_trades_router_authoritative_guards` و `tests.test_trades_router_authoritative_success` سبز شد.
 - [ ] Phase 5 - Market web runtime and realtime notices
 - [ ] Phase 6 - Admin web schedule management UI
 - [ ] Phase 7 - Focused regression coverage and rollout

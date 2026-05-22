@@ -14,6 +14,7 @@ from core.config import settings
 from core.events import publish_event_sync
 from core.offer_expiry import remove_channel_buttons
 from core.server_routing import current_server
+from core.trading_settings import get_trading_settings_async
 from core.utils import utc_now
 from models.market_runtime_state import MarketRuntimeState
 from models.market_schedule_override import MarketScheduleOverride
@@ -22,6 +23,8 @@ from models.offer import Offer, OfferStatus
 from .market_schedule_service import (
     MarketScheduleEvaluation,
     NEXT_TRANSITION_SEARCH_DAYS,
+    evaluate_market_schedule,
+    get_market_timezone_name,
 )
 
 
@@ -131,6 +134,25 @@ async def load_market_schedule_overrides_window(
         .order_by(MarketScheduleOverride.date.asc(), MarketScheduleOverride.id.asc())
     )
     return list(result.scalars().all())
+
+
+async def evaluate_current_market_schedule(
+    db: AsyncSession,
+    *,
+    current_time: datetime | None = None,
+) -> MarketScheduleEvaluation:
+    trading_settings = await get_trading_settings_async()
+    timezone_name = get_market_timezone_name(trading_settings)
+    overrides = await load_market_schedule_overrides_window(
+        db,
+        timezone_name=timezone_name,
+        current_time=current_time,
+    )
+    return evaluate_market_schedule(
+        trading_settings,
+        current_time=current_time,
+        overrides=overrides,
+    )
 
 
 async def _load_active_local_offers(db: AsyncSession) -> list[Offer]:

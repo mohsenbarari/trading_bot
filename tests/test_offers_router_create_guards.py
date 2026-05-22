@@ -62,6 +62,14 @@ def make_context(owner_user=None, actor_user=None):
 
 
 class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        market_eval_patcher = patch(
+            "api.routers.offers.evaluate_current_market_schedule",
+            new=AsyncMock(return_value=SimpleNamespace(is_open=True, reason="daily_window_open")),
+        )
+        self.market_eval_mock = market_eval_patcher.start()
+        self.addCleanup(market_eval_patcher.stop)
+
     async def test_create_offer_rejects_watch_users(self):
         with self.assertRaises(HTTPException) as exc_info:
             await create_offer(make_offer(), db=FakeDB(), context=make_context(make_user(role=UserRole.WATCH)))
@@ -84,6 +92,21 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "حساب شما غیرفعال است و دسترسی شما به بازار بسته شده است.")
+
+    async def test_create_offer_rejects_when_market_is_closed(self):
+        current_user = make_user()
+        self.market_eval_mock.return_value = SimpleNamespace(is_open=False, reason="after_daily_window_close")
+
+        with patch("api.routers.offers.check_user_limits") as check_limits_mock:
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_offer(make_offer(), db=FakeDB(), context=make_context(current_user))
+
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertEqual(
+            exc_info.exception.detail,
+            "بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید.",
+        )
+        check_limits_mock.assert_not_called()
 
     async def test_create_offer_rejects_tier2_customers(self):
         current_user = make_user()
