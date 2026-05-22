@@ -159,10 +159,10 @@
 
 ### فاز 2: اضافه کردن online / last seen به PublicProfile
 
-- [ ] extract کردن helper مشترک برای presence از `ChatConversationList.vue` به utility/composable مشترک.
-- [ ] افزودن rendering `آنلاین` یا `آخرین بازدید ...` به hero پروفایل.
-- [ ] اطمینان از یکسان بودن threshold و formatting با messenger.
-- [ ] افزودن Vitest برای presence states:
+- [x] extract کردن helper مشترک برای presence از `ChatConversationList.vue` به utility/composable مشترک.
+- [x] افزودن rendering `آنلاین` یا `آخرین بازدید ...` به hero پروفایل.
+- [x] اطمینان از یکسان بودن threshold و formatting با messenger.
+- [x] افزودن Vitest برای presence states:
   - online
   - offline with timestamp
   - no timestamp

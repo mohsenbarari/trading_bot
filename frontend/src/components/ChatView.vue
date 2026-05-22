@@ -39,6 +39,7 @@ import {
 } from '../utils/chatRoomRouting'
 import { resolveConversationProfileTarget } from '../utils/accountantChatIdentity'
 import { isAdminRole } from '../utils/currentUser'
+import { isUserOnline } from '../utils/userPresence'
 
 // Props
 const props = defineProps<{
@@ -1420,12 +1421,6 @@ function formatDateForSeparator(dateStr: string): string {
     const label = date.toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' });
     dateSeparatorLabelCache.set(dateStr, label)
     return label
-}
-
-function isUserOnline(lastSeen: string | null | undefined): boolean {
-  if (!lastSeen) return false
-  const date = new Date(lastSeen)
-  return (new Date().getTime() - date.getTime()) < 180000
 }
 
 const performSearch = () => {

@@ -6,6 +6,7 @@ import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { discardBackState, popBackState, pushBackState } from '../../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial } from '../../utils/chatFiles'
 import { getConversationPreviewText } from '../../utils/chatMessagePreview'
+import { isUserOnline } from '../../utils/userPresence'
 import {
   ArrowDown,
   ArrowUp,
@@ -149,13 +150,6 @@ function getConversationActivityText(conv: Conversation) {
   }
 
   return ''
-}
-
-function isUserOnline(lastSeen: string | null | undefined): boolean {
-  if (!lastSeen) return false
-  const serverStr = lastSeen.endsWith('Z') ? lastSeen : `${lastSeen}Z`
-  const date = new Date(serverStr)
-  return (new Date().getTime() - date.getTime()) < 180000
 }
 
 const displayedConversations = computed(() => props.conversations)

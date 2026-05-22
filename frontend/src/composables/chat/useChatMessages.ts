@@ -20,6 +20,7 @@ import {
     buildOptimisticMessageFromUpload,
     waitForChatUploadBackgroundReady,
 } from '../../services/chatUploadBackground'
+import { formatLastSeenStatus } from '../../utils/userPresence'
 
 export interface UseChatMessagesOptions {
     apiBaseUrl: string
@@ -232,36 +233,6 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     let pollTimer: number | null = null
     const POLL_INTERVAL = 30000
     let statusPollTimer: number | null = null
-
-    function formatLastSeen(date: Date): string {
-        const now = new Date()
-        const diffSeconds = Math.floor((now.getTime() - date.getTime()) / 1000)
-
-        if (diffSeconds < 180) return 'آنلاین'
-        if (diffSeconds < 3600) {
-            const mins = Math.floor(diffSeconds / 60)
-            return `آخرین بازدید ${mins} دقیقه پیش`
-        }
-
-        const isToday = now.getDate() === date.getDate() &&
-            now.getMonth() === date.getMonth() &&
-            now.getFullYear() === date.getFullYear()
-
-        const hours = date.getHours().toString().padStart(2, '0')
-        const mins = date.getMinutes().toString().padStart(2, '0')
-
-        if (isToday) return `آخرین بازدید امروز ${hours}:${mins}`
-
-        const yesterday = new Date(now)
-        yesterday.setDate(yesterday.getDate() - 1)
-        const isYesterday = yesterday.getDate() === date.getDate() &&
-            yesterday.getMonth() === date.getMonth() &&
-            yesterday.getFullYear() === date.getFullYear()
-
-        if (isYesterday) return `آخرین بازدید دیروز ${hours}:${mins}`
-
-        return `آخرین بازدید ${date.toLocaleDateString('fa-IR')}`
-    }
 
     async function apiFetch(endpoint: string, fetchOptions: RequestInit = {}) {
         return await apiFetchJson(`/api${endpoint}`, fetchOptions)
@@ -649,13 +620,9 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             const userData = await apiFetch(`/users-public/${userId}`)
             if (!userData) return
 
-            if (userData.last_seen_at) {
-                const serverStr = userData.last_seen_at.endsWith('Z') ? userData.last_seen_at : userData.last_seen_at + 'Z';
-                const serverDate = new Date(serverStr)
-                targetUserStatus.value = formatLastSeen(serverDate)
-            } else {
-                targetUserStatus.value = 'آخرین بازدید خیلی وقت پیش'
-            }
+            targetUserStatus.value = formatLastSeenStatus(userData.last_seen_at, {
+                emptyText: 'آخرین بازدید خیلی وقت پیش',
+            }) || 'آخرین بازدید خیلی وقت پیش'
         } catch (e) {
             console.error("Error fetching status", e)
         }
