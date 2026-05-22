@@ -1,4 +1,5 @@
 import unittest
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -186,6 +187,37 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "ok")
         self.assertEqual(update_builder.values_payload, {"full_name": "User Name"})
+        self.assertEqual(db.execute_calls[1], ("MERGE_UPDATE", {"is_sync": True}))
+
+    async def test_apply_item_merges_market_schedule_override_by_date(self):
+        duplicate_error = Exception("duplicate key value violates unique constraint")
+        db = FakeDB([
+            __import__("sqlalchemy").exc.IntegrityError("stmt", {}, duplicate_error),
+            SimpleNamespace(),
+        ])
+        model = type("MarketScheduleOverrideModel", (), {"date": object()})
+        update_builder = UpdateBuilder()
+        payload = {
+            "date": date(2026, 5, 22),
+            "override_type": "closed_all_day",
+            "note": "holiday",
+        }
+
+        with patch("api.routers.sync._build_upsert_stmt", return_value="UPSERT"), patch(
+            "api.routers.sync.update", return_value=update_builder
+        ):
+            result = await _apply_item(
+                db,
+                "market_schedule_overrides",
+                "INSERT",
+                99,
+                payload,
+                model=model,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(update_builder.values_payload, {"override_type": "closed_all_day", "note": "holiday"})
         self.assertEqual(db.execute_calls[1], ("MERGE_UPDATE", {"is_sync": True}))
 
     async def test_apply_item_merges_mandatory_chat_and_membership_to_local_singletons(self):

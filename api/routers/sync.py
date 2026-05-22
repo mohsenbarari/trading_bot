@@ -104,6 +104,7 @@ NATURAL_KEYS = {
     "commodity_aliases": "alias",
     "users": "telegram_id",
     "invitations": "token",
+    "market_schedule_overrides": "date",
     "trades": "trade_number",
 }
 

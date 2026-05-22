@@ -8,6 +8,11 @@ from core.enums import UserRole
 
 
 class BotTradeCreateTextOfferGuardTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.market_patcher = patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=True))
+        self.market_patcher.start()
+        self.addCleanup(self.market_patcher.stop)
+
     async def test_handle_text_offer_handles_watch_restriction_and_active_state_guard(self):
         message = SimpleNamespace(text="خ ربع 30تا 75800", answer=AsyncMock())
         state = SimpleNamespace(get_state=AsyncMock(return_value=None))

@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 MARKET_OPENED_CHANNEL_NOTICE = "🟢 شروع فعالیت بازار"
 MARKET_CLOSED_CHANNEL_NOTICE = "🔴 پایان فعالیت بازار"
+MARKET_RUNTIME_ADVISORY_LOCK_KEY = 202605220901
 
 
 @dataclass(slots=True)
@@ -75,6 +76,27 @@ def _build_market_event_payload(
     }
 
 
+def _build_initial_market_runtime_state(
+    evaluation: MarketScheduleEvaluation,
+    *,
+    current_time: datetime | None = None,
+) -> MarketRuntimeState:
+    return MarketRuntimeState(
+        id=1,
+        is_open=evaluation.is_open,
+        active_web_notice_visible=False,
+        offers_since_last_open=0,
+        last_transition_at=_coerce_utc_now(current_time),
+    )
+
+
+async def _acquire_market_runtime_lock(db: AsyncSession) -> None:
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_key)"),
+        {"lock_key": MARKET_RUNTIME_ADVISORY_LOCK_KEY},
+    )
+
+
 async def _send_market_channel_notice(text: str) -> None:
     bot_token = settings.bot_token or os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
@@ -111,13 +133,7 @@ async def get_or_create_market_runtime_state(
     if state is not None:
         return state, False
 
-    state = MarketRuntimeState(
-        id=1,
-        is_open=evaluation.is_open,
-        active_web_notice_visible=False,
-        offers_since_last_open=0,
-        last_transition_at=_coerce_utc_now(current_time),
-    )
+    state = _build_initial_market_runtime_state(evaluation, current_time=current_time)
     db.add(state)
     await db.commit()
     return state, True
@@ -186,11 +202,11 @@ async def register_market_offer_created(
     current_time: datetime | None = None,
 ) -> MarketRuntimeState:
     evaluation = await evaluate_current_market_schedule(db, current_time=current_time)
-    state, _ = await get_or_create_market_runtime_state(
-        db,
-        evaluation=evaluation,
-        current_time=current_time,
-    )
+    await _acquire_market_runtime_lock(db)
+    state = await get_market_runtime_state(db)
+    if state is None:
+        state = _build_initial_market_runtime_state(evaluation, current_time=current_time)
+        db.add(state)
     state.is_open = evaluation.is_open
     state.offers_since_last_open = int(state.offers_since_last_open or 0) + 1
     should_hide_notice = bool(
@@ -322,12 +338,12 @@ async def apply_market_schedule_transition(
     *,
     current_time: datetime | None = None,
 ) -> MarketTransitionResult:
-    state, created = await get_or_create_market_runtime_state(
-        db,
-        evaluation=evaluation,
-        current_time=current_time,
-    )
-    if created:
+    await _acquire_market_runtime_lock(db)
+    state = await get_market_runtime_state(db)
+    if state is None:
+        state = _build_initial_market_runtime_state(evaluation, current_time=current_time)
+        db.add(state)
+        await db.commit()
         return MarketTransitionResult(changed=False, transition=None, state=state)
 
     if state.is_open == evaluation.is_open:

@@ -44,6 +44,11 @@ class FakeSessionContext:
 
 
 class BotTradeCreateTextOfferConfirmSuccessTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.market_patcher = patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=True))
+        self.market_patcher.start()
+        self.addCleanup(self.market_patcher.stop)
+
     async def test_fake_session_helpers_cover_existing_ids_and_empty_update_get(self):
         session = FakeSession()
         already_identified = SimpleNamespace(id=700)
