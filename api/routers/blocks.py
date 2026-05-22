@@ -42,9 +42,12 @@ class BlockedUserResponse(BaseModel):
 
 class BlockStatusResponse(BaseModel):
     can_block: bool
+    can_block_now: bool
     max_blocked: int
     current_blocked: int
     remaining: int
+    reason_code: Optional[str] = None
+    reason_message: Optional[str] = None
 
 
 class UserSearchResult(BaseModel):

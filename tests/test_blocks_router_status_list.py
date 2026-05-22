@@ -8,7 +8,15 @@ from api.routers.blocks import get_my_block_status, get_my_blocked_users
 class BlocksRouterStatusListTests(unittest.IsolatedAsyncioTestCase):
     async def test_get_my_block_status_delegates_to_service(self):
         current_user = SimpleNamespace(id=5)
-        payload = {"can_block": True, "max_blocked": 3, "current_blocked": 1, "remaining": 2}
+        payload = {
+            "can_block": True,
+            "can_block_now": True,
+            "max_blocked": 3,
+            "current_blocked": 1,
+            "remaining": 2,
+            "reason_code": None,
+            "reason_message": None,
+        }
 
         with patch("api.routers.blocks.get_block_status", new=AsyncMock(return_value=payload)) as service_mock:
             result = await get_my_block_status(db=SimpleNamespace(), current_user=current_user)

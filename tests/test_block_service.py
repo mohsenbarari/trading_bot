@@ -37,6 +37,8 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(can_block)
         self.assertIn("غیرفعال", error)
         self.assertEqual(status["remaining"], 0)
+        self.assertFalse(status["can_block_now"])
+        self.assertEqual(status["reason_code"], block_service.BLOCK_STATUS_REASON_CAPABILITY_DISABLED)
         db.scalar.assert_not_awaited()
 
     async def test_can_user_block_returns_limit_reached_status(self):
@@ -49,6 +51,9 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("حداکثر 2", error)
         self.assertEqual(status["current_blocked"], 2)
         self.assertEqual(status["remaining"], 0)
+        self.assertTrue(status["can_block"])
+        self.assertFalse(status["can_block_now"])
+        self.assertEqual(status["reason_code"], block_service.BLOCK_STATUS_REASON_LIMIT_REACHED)
 
     async def test_can_user_block_returns_remaining_capacity(self):
         user = SimpleNamespace(can_block_users=True, max_blocked_users=5)
@@ -59,6 +64,8 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(can_block)
         self.assertEqual(error, "")
         self.assertEqual(status["remaining"], 3)
+        self.assertTrue(status["can_block_now"])
+        self.assertIsNone(status["reason_code"])
 
     async def test_block_user_rejects_self_block(self):
         db = SimpleNamespace(scalar=AsyncMock(), add=Mock(), commit=AsyncMock())
@@ -163,6 +170,21 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         status = await block_service.get_block_status(db, 51)
         self.assertEqual(status["remaining"], 3)
         self.assertTrue(status["can_block"])
+        self.assertTrue(status["can_block_now"])
+        self.assertIsNone(status["reason_code"])
+
+        disabled_user = SimpleNamespace(can_block_users=False, max_blocked_users=4)
+        disabled_db = SimpleNamespace(get=AsyncMock(return_value=disabled_user), scalar=AsyncMock(return_value=0))
+        disabled_status = await block_service.get_block_status(disabled_db, 52)
+        self.assertFalse(disabled_status["can_block_now"])
+        self.assertEqual(disabled_status["reason_code"], block_service.BLOCK_STATUS_REASON_CAPABILITY_DISABLED)
+
+        full_user = SimpleNamespace(can_block_users=True, max_blocked_users=2)
+        full_db = SimpleNamespace(get=AsyncMock(return_value=full_user), scalar=AsyncMock(return_value=2))
+        full_status = await block_service.get_block_status(full_db, 53)
+        self.assertTrue(full_status["can_block"])
+        self.assertFalse(full_status["can_block_now"])
+        self.assertEqual(full_status["reason_code"], block_service.BLOCK_STATUS_REASON_LIMIT_REACHED)
 
     async def test_is_blocked_by_returns_boolean(self):
         db = SimpleNamespace(scalar=AsyncMock(side_effect=[object(), None]))

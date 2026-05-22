@@ -77,6 +77,7 @@ class BotTradeExecuteBlockedTests(unittest.IsolatedAsyncioTestCase):
             callback = make_callback()
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=SimpleNamespace())
             self.assertIn("در دسترس نیست", callback.answer.await_args.args[0])
+            self.assertNotIn("مسدود", callback.answer.await_args.args[0])
 
 
 if __name__ == "__main__":
