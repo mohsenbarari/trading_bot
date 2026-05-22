@@ -16,6 +16,7 @@ from core.redis import init_redis, close_redis
 from core.db import AsyncSessionLocal, init_db
 from core.events import setup_event_listeners
 from core.connectivity import connectivity_monitor_loop
+from core.market_schedule_loop import market_schedule_loop
 from core.offer_expiry import offer_expiry_loop
 from core.session_expiry import session_expiry_loop
 from core.user_account_status_loop import user_account_status_loop
@@ -51,6 +52,7 @@ async def lifespan(app: FastAPI):
     
     # Start offer auto-expiry background task
     asyncio.create_task(offer_expiry_loop())
+    asyncio.create_task(market_schedule_loop())
     asyncio.create_task(session_expiry_loop())
     asyncio.create_task(user_account_status_loop())
     

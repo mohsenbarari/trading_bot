@@ -81,14 +81,14 @@
 
 ### 2.3. runtime state جدا از settings
 
-- [ ] برای notice بسته/باز بودن وب و rule «بعد از دومین آفر، پیام شروع محو شود» یک state runtime حداقلی لازم است و نباید فقط از schedule مشتق شود.
-- [ ] یک singleton/runtime table مثل `market_runtime_state` پیشنهاد می‌شود.
-- [ ] contract حداقلی پیشنهادی:
-  - [ ] `is_open`
-  - [ ] `last_transition_at`
-  - [ ] `active_web_notice_visible`
-  - [ ] `offers_since_last_open`
-- [ ] این state فقط باید حداقل اطلاعات لازم برای reminder وب، idempotent transition، و hide شدن notice شروع بعد از دومین آفر را نگه دارد؛ نه بیشتر.
+- [x] برای notice بسته/باز بودن وب و rule «بعد از دومین آفر، پیام شروع محو شود» یک state runtime حداقلی لازم است و نباید فقط از schedule مشتق شود.
+- [x] یک singleton/runtime table مثل `market_runtime_state` پیشنهاد می‌شود.
+- [x] contract حداقلی پیشنهادی:
+  - [x] `is_open`
+  - [x] `last_transition_at`
+  - [x] `active_web_notice_visible`
+  - [x] `offers_since_last_open`
+- [x] این state فقط باید حداقل اطلاعات لازم برای reminder وب، idempotent transition، و hide شدن notice شروع بعد از دومین آفر را نگه دارد؛ نه بیشتر.
 
 ## 3. سرویس‌ها و loopهای runtime
 
@@ -105,32 +105,32 @@
 
 ### 3.2. loop transition
 
-- [ ] یک loop جدید مثل `market_schedule_loop()` در `main.py` به background tasks اضافه شود.
-- [ ] loop باید فقط transition detect کند؛ business side effectها را به `market_transition_service` بسپارد.
-- [ ] loop باید idempotent باشد و restart/race باعث دوباره‌انتشار notice یا دوباره-expire شدن همان آفرها نشود.
+- [x] یک loop جدید مثل `market_schedule_loop()` در `main.py` به background tasks اضافه شود.
+- [x] loop باید فقط transition detect کند؛ business side effectها را به `market_transition_service` بسپارد.
+- [x] loop باید idempotent باشد و restart/race باعث دوباره‌انتشار notice یا دوباره-expire شدن همان آفرها نشود.
 
 ### 3.3. transition بسته شدن بازار
 
-- [ ] با transition به حالت closed باید این side effectها به‌ترتیب و اتمیک تا حد ممکن اجرا شوند:
-  - [ ] همه آفرهای `ACTIVE` لوکال expire شوند.
-  - [ ] keyboard پیام‌های کانال offerها حذف شود.
-  - [ ] برای هر offer، `offer:expired` realtime publish شود تا وب‌اپ فوراً sync شود.
-  - [ ] `market_runtime_state` به وضعیت `closed` برود.
-  - [ ] `active_web_notice_kind=closed` و `active_web_notice_visible=true` شود.
-  - [ ] پیام «پایان فعالیت بازار» در کانال تلگرام publish شود.
-  - [ ] رویداد realtime جدید `market:closed` برای clientهای وب publish شود.
-- [ ] انقضای بازار-بسته باید از auto-expire زمانی عادی از نظر business reason قابل تمایز باشد، حتی اگر status نهایی هر دو `EXPIRED` بماند.
+- [x] با transition به حالت closed باید این side effectها به‌ترتیب و اتمیک تا حد ممکن اجرا شوند:
+  - [x] همه آفرهای `ACTIVE` لوکال expire شوند.
+  - [x] keyboard پیام‌های کانال offerها حذف شود.
+  - [x] برای هر offer، `offer:expired` realtime publish شود تا وب‌اپ فوراً sync شود.
+  - [x] `market_runtime_state` به وضعیت `closed` برود.
+  - [x] `is_open=false` و `active_web_notice_visible=true` به‌عنوان state اعلان پایان بازار persist شود.
+  - [x] پیام «پایان فعالیت بازار» در کانال تلگرام publish شود.
+  - [x] رویداد realtime جدید `market:closed` برای clientهای وب publish شود.
+- [x] انقضای بازار-بسته باید از auto-expire زمانی عادی از نظر business reason قابل تمایز باشد، حتی اگر status نهایی هر دو `EXPIRED` بماند.
 
 ### 3.4. transition باز شدن بازار
 
-- [ ] با transition به حالت open باید این side effectها اجرا شوند:
-  - [ ] `market_runtime_state` به وضعیت `open` برود.
-  - [ ] `active_web_notice_visible=true` شود.
-  - [ ] `offers_since_last_open=0` reset شود.
-  - [ ] پیام «شروع فعالیت بازار» در کانال تلگرام publish شود.
-  - [ ] رویداد realtime جدید `market:opened` برای clientهای وب publish شود.
-- [ ] پیام قبلی «پایان فعالیت بازار» در کانال حذف نمی‌شود.
-- [ ] آفرهای expireشده‌ی session قبلی revive نمی‌شوند؛ بازار فقط برای آفرهای جدید باز می‌شود.
+- [x] با transition به حالت open باید این side effectها اجرا شوند:
+  - [x] `market_runtime_state` به وضعیت `open` برود.
+  - [x] `active_web_notice_visible=true` شود.
+  - [x] `offers_since_last_open=0` reset شود.
+  - [x] پیام «شروع فعالیت بازار» در کانال تلگرام publish شود.
+  - [x] رویداد realtime جدید `market:opened` برای clientهای وب publish شود.
+- [x] پیام قبلی «پایان فعالیت بازار» در کانال حذف نمی‌شود.
+- [x] آفرهای expireشده‌ی session قبلی revive نمی‌شوند؛ بازار فقط برای آفرهای جدید باز می‌شود.
 
 ## 4. contract رفتار وب‌اپ
 
@@ -178,9 +178,9 @@
 
 ### 5.2. کانال تلگرام
 
-- [ ] در close transition، پیام «پایان فعالیت بازار» در کانال publish شود.
-- [ ] در open transition، پیام «شروع فعالیت بازار» در کانال publish شود.
-- [ ] close announcement قبلی در کانال حذف نمی‌شود.
+- [x] در close transition، پیام «پایان فعالیت بازار» در کانال publish شود.
+- [x] در open transition، پیام «شروع فعالیت بازار» در کانال publish شود.
+- [x] close announcement قبلی در کانال حذف نمی‌شود.
 - [ ] از لحظه بازگشایی، امکان ثبت آفر در بات دوباره فعال می‌شود.
 
 ## 6. contract backend create/execute
@@ -206,10 +206,10 @@
 
 ### 8.1. backend
 
-- [ ] unit tests برای schedule evaluation با timezone `Asia/Tehran`
-- [ ] unit tests برای override precedence
-- [ ] unit tests برای close/open transition idempotency
-- [ ] unit tests برای expire-all-active-offers on close
+- [x] unit tests برای schedule evaluation با timezone `Asia/Tehran`
+- [x] unit tests برای override precedence
+- [x] unit tests برای close/open transition idempotency
+- [x] unit tests برای expire-all-active-offers on close
 - [ ] unit tests برای create-offer / create-trade denial وقتی بازار بسته است
 
 ### 8.2. bot
@@ -260,7 +260,11 @@
   - [x] فیلدهای schedule پایه به `TradingSettings` به‌صورت JSON-safe اضافه شد.
   - [x] `core/services/market_schedule_service.py` precedence و next transition را به‌صورت pure محاسبه می‌کند.
   - [x] validation محدود این phase با `tests.test_market_schedule_service` و `tests.test_core_trading_settings_runtime` سبز شد.
-- [ ] Phase 3 - Transition loop and side effects
+- [x] Phase 3 - Transition loop and side effects
+  - [x] `core/market_schedule_loop.py` به startup اضافه شد و transition detect را به service جدا سپرد.
+  - [x] `core/services/market_transition_service.py` side effectهای open/close، noticeهای کانال، و realtime `market:*` را متمرکز کرد.
+  - [x] `offers.expire_reason` اضافه شد تا `market_closed` از `time_limit` متمایز بماند.
+  - [x] validation محدود این phase با `tests.test_market_transition_service`، `tests.test_market_schedule_loop`، `tests.test_main_lifespan`، `tests.test_offer_expiry` و `tests.test_migration_smoke` سبز شد.
 - [ ] Phase 4 - Backend offer/trade authority guards
 - [ ] Phase 5 - Market web runtime and realtime notices
 - [ ] Phase 6 - Admin web schedule management UI

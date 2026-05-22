@@ -93,6 +93,7 @@ class OfferResponse(BaseModel):
     original_lot_sizes: Optional[List[int]]
     notes: Optional[str]
     status: str
+    expire_reason: Optional[str] = None
     channel_message_id: Optional[int]
     customer_badge_visible: bool = False
     customer_management_name: Optional[str] = None
@@ -174,6 +175,7 @@ def offer_to_response(
         original_lot_sizes=offer.original_lot_sizes,
         notes=offer.notes,
         status=offer.status.value,
+        expire_reason=offer.expire_reason,
         channel_message_id=offer.channel_message_id,
         customer_badge_visible=offer_read_model.customer_badge_visible,
         customer_management_name=offer_read_model.customer_management_name,

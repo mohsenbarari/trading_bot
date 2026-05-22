@@ -88,7 +88,7 @@ async def expire_stale_offers() -> int:
         await session.execute(
             update(Offer)
             .where(Offer.id.in_(offer_ids), Offer.home_server == current_server())
-            .values(status=OfferStatus.EXPIRED)
+            .values(status=OfferStatus.EXPIRED, expire_reason="time_limit")
         )
         await session.commit()
         
