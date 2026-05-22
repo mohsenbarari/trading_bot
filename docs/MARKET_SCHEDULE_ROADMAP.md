@@ -191,16 +191,16 @@
 
 ## 7. UI مدیریت ادمین برای schedule و exceptionها
 
-- [ ] این بخش فقط در وب‌اپ مدیریت می‌شود و برای MVP هیچ UI مدیریتی در بات تلگرام به آن اضافه نمی‌شود.
-- [ ] در `TradingSettings.vue` یک سکشن مستقل برای schedule پایه اضافه شود.
-- [ ] exceptionهای تقویمی/overrideها باید manager جداگانه داشته باشند، نه چند input عددی داخل فرم فعلی.
-- [ ] capabilityهای لازم برای UI ادمین:
-  - [ ] تعیین روزهای بسته هفتگی
-  - [ ] تعیین ساعت باز و بسته شدن روزانه
-  - [ ] ثبت تعطیلی تقویمی
-  - [ ] ثبت روز باز استثنایی
-  - [ ] ثبت ساعت سفارشی برای یک روز خاص
-  - [ ] نمایش preview از وضعیت فعلی بازار و next transition
+- [x] این بخش فقط در وب‌اپ مدیریت می‌شود و برای MVP هیچ UI مدیریتی در بات تلگرام به آن اضافه نمی‌شود.
+- [x] در `TradingSettings.vue` یک سکشن مستقل برای schedule پایه اضافه شود.
+- [x] exceptionهای تقویمی/overrideها باید manager جداگانه داشته باشند، نه چند input عددی داخل فرم فعلی.
+- [x] capabilityهای لازم برای UI ادمین:
+  - [x] تعیین روزهای بسته هفتگی
+  - [x] تعیین ساعت باز و بسته شدن روزانه
+  - [x] ثبت تعطیلی تقویمی
+  - [x] ثبت روز باز استثنایی
+  - [x] ثبت ساعت سفارشی برای یک روز خاص
+  - [x] نمایش preview از وضعیت فعلی بازار و next transition
 
 ## 8. تست و non-regression
 
@@ -222,6 +222,7 @@
 
 - [x] Vitest برای MarketView notice rendering و disabled state
 - [x] Vitest برای remove/show start/end notice روی eventهای realtime
+- [x] Vitest برای `TradingSettings.vue` schedule base / preview / override manager
 - [ ] Playwright برای close transition، open transition، disable/enable شدن chatbox، و hide شدن start notice بعد از دومین آفر
 
 ## 9. challengeها و سوال‌های باز بعد از audit
@@ -274,5 +275,9 @@
   - [x] `create_offer` شمارنده `offers_since_last_open` را جلو می‌برد و روی آفر دوم `market:notice_hidden` publish می‌کند.
   - [x] `frontend/src/views/MarketView.vue` state اولیه بازار و realtime `market:*` را consume می‌کند و notice/disable state را روی `/market` اعمال می‌کند.
   - [x] validation محدود این phase با `tests.test_market_transition_service`، `tests.test_trading_settings_router_read`، `tests.test_offers_router_create_success` و `frontend/src/views/MarketView.test.ts` سبز شد.
-- [ ] Phase 6 - Admin web schedule management UI
+- [x] Phase 6 - Admin web schedule management UI
+  - [x] `api/routers/trading_settings.py` فیلدهای schedule پایه را در read/update/reset contract اکسپوز می‌کند.
+  - [x] CRUD استثناهای تقویمی بازار روی همان router اضافه شد و با sync/event foundation موجود سازگار است.
+  - [x] `frontend/src/components/TradingSettings.vue` حالا preview وضعیت فعلی بازار، تنظیم روزهای بسته/ساعات پایه، و manager استثناها را دارد.
+  - [x] validation محدود این phase با `tests.test_trading_settings_router_read`، `tests.test_trading_settings_router_update`، `tests.test_trading_settings_router_overrides` و `frontend/src/components/TradingSettings.test.ts` سبز شد.
 - [ ] Phase 7 - Focused regression coverage and rollout
