@@ -1,0 +1,417 @@
+/// <reference types="node" />
+
+import { execFileSync } from 'child_process'
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test'
+
+interface SeededMarketSession {
+  userId: number
+  accountName: string
+  accessToken: string
+  refreshToken: string
+  commodityId: number
+  commodityName: string
+}
+
+interface MarketRuntimeSeedOptions {
+  mode: 'open' | 'closed'
+  noticeVisible: boolean
+  offersSinceLastOpen: number
+  disableSchedule?: boolean
+}
+
+interface MarketRuntimeResponse {
+  is_open: boolean
+  active_web_notice_visible: boolean
+  offers_since_last_open: number
+  last_transition_at: string | null
+  next_transition_at: string | null
+}
+
+function runPythonInApp<T>(script: string): T {
+  const stdout = execFileSync('docker', ['exec', '-i', 'trading_bot_app', 'python', '-'], {
+    input: script,
+    encoding: 'utf8',
+  })
+
+  const lastLine = stdout
+    .split(/\r?\n/)
+    .map((line: string) => line.trim())
+    .filter(Boolean)
+    .at(-1)
+
+  if (!lastLine) {
+    throw new Error('No JSON output returned from trading_bot_app market schedule helper')
+  }
+
+  return JSON.parse(lastLine) as T
+}
+
+function seedIsolatedMarketSession(label: string): SeededMarketSession {
+  return runPythonInApp<SeededMarketSession>(`
+import asyncio
+import json
+import uuid
+from datetime import timedelta
+
+from core.db import AsyncSessionLocal
+from core.enums import UserRole
+from core.security import create_access_token, create_refresh_token
+from core.services.session_service import hash_token
+from models.commodity import Commodity
+from models.session import Platform, UserSession
+from models.user import User
+
+label = ${JSON.stringify(label)}
+
+async def main():
+    suffix = uuid.uuid4().hex[:10]
+    numeric_suffix = int(uuid.uuid4().hex[:8], 16) % 10000
+    account_name = f"pw_market_schedule_{label}_{suffix}"
+    commodity_name = f"کالای زمان‌بندی {numeric_suffix}"
+    mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
+
+    async with AsyncSessionLocal() as db:
+        commodity = Commodity(name=commodity_name)
+        db.add(commodity)
+        await db.flush()
+
+        actor = User(
+            account_name=account_name,
+            mobile_number=f"09{mobile_seed:09d}",
+            full_name=account_name,
+            address='Playwright Market Schedule',
+            role=UserRole.STANDARD,
+            has_bot_access=True,
+            max_sessions=1,
+        )
+        db.add(actor)
+        await db.flush()
+
+        refresh_token = create_refresh_token(subject=actor.id)
+        session = UserSession(
+            user_id=actor.id,
+            device_name='Playwright Market Schedule Device',
+            device_ip='127.0.0.1',
+            platform=Platform.WEB,
+            refresh_token_hash=hash_token(refresh_token),
+            is_primary=True,
+            is_active=True,
+            expires_at=None,
+        )
+        db.add(session)
+        await db.flush()
+
+        access_token = create_access_token(
+            subject=actor.id,
+            expires_delta=timedelta(minutes=60),
+            session_id=str(session.id),
+        )
+
+        await db.commit()
+
+    print(json.dumps({
+        'userId': actor.id,
+        'accountName': account_name,
+        'accessToken': access_token,
+        'refreshToken': refresh_token,
+        'commodityId': commodity.id,
+        'commodityName': commodity_name,
+    }))
+
+asyncio.run(main())
+`)
+}
+
+function toPythonBool(value: boolean) {
+  return value ? 'True' : 'False'
+}
+
+function configureMarketRuntime(options: MarketRuntimeSeedOptions) {
+  runPythonInApp<{ ok: boolean }>(`
+import asyncio
+import json
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import delete
+
+from core.db import AsyncSessionLocal
+from core.trading_settings import save_trading_settings_async
+from models.market_runtime_state import MarketRuntimeState
+from models.market_schedule_override import MarketScheduleOverride, MarketScheduleOverrideType
+
+mode = ${JSON.stringify(options.mode)}
+notice_visible = ${toPythonBool(options.noticeVisible)}
+offers_since_last_open = ${options.offersSinceLastOpen}
+disable_schedule = ${toPythonBool(!!options.disableSchedule)}
+
+async def main():
+    tehran_today = datetime.now(ZoneInfo('Asia/Tehran')).date()
+
+    settings_payload = {
+        'market_schedule_enabled': not disable_schedule,
+        'market_timezone': 'Asia/Tehran',
+        'market_open_time_local': '09:00',
+        'market_close_time_local': '18:00',
+        'market_closed_weekdays': [],
+    }
+    await save_trading_settings_async(settings_payload)
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(delete(MarketScheduleOverride))
+
+        if not disable_schedule:
+            override = MarketScheduleOverride(
+                date=tehran_today,
+                override_type=(
+                    MarketScheduleOverrideType.OPEN_ALL_DAY
+                    if mode == 'open'
+                    else MarketScheduleOverrideType.CLOSED_ALL_DAY
+                ),
+              open_time_local=None,
+              close_time_local=None,
+                note='Playwright market schedule override',
+            )
+            db.add(override)
+
+        state = await db.get(MarketRuntimeState, 1)
+        if state is None:
+            state = MarketRuntimeState(id=1)
+            db.add(state)
+
+        state.is_open = mode == 'open'
+        state.active_web_notice_visible = notice_visible
+        state.offers_since_last_open = offers_since_last_open
+        state.last_transition_at = datetime.now(timezone.utc)
+
+        await db.commit()
+
+    print(json.dumps({'ok': True}))
+
+asyncio.run(main())
+`)
+}
+
+async function setSeededSession(page: Page, fixture: SeededMarketSession) {
+  await page.goto('/login')
+  await page.evaluate(({ accessToken, refreshToken }) => {
+    localStorage.setItem('auth_token', accessToken)
+    localStorage.setItem('refresh_token', refreshToken)
+    localStorage.removeItem('suspended_refresh_token')
+  }, fixture)
+}
+
+async function gotoMarketAndWaitForSocket(page: Page) {
+  await page.goto('/market')
+  await expect(page.locator('.market-page')).toBeVisible()
+}
+
+async function openFreshMarketPage(context: BrowserContext, fixture: SeededMarketSession) {
+  const freshPage = await context.newPage()
+  await setSeededSession(freshPage, fixture)
+  await gotoMarketAndWaitForSocket(freshPage)
+  return freshPage
+}
+
+function readAuthoritativeMarketState(): MarketRuntimeResponse {
+  return runPythonInApp<MarketRuntimeResponse>(`
+import asyncio
+import json
+
+from core.db import AsyncSessionLocal
+from core.services.market_transition_service import get_market_runtime_view
+
+async def main():
+    async with AsyncSessionLocal() as db:
+        state = await get_market_runtime_view(db)
+        print(json.dumps({
+            'is_open': state.is_open,
+            'active_web_notice_visible': state.active_web_notice_visible,
+            'offers_since_last_open': state.offers_since_last_open,
+            'last_transition_at': None if state.last_transition_at is None else state.last_transition_at.isoformat(),
+            'next_transition_at': None if state.next_transition_at is None else state.next_transition_at.isoformat(),
+        }))
+
+asyncio.run(main())
+`)
+}
+
+async function waitForAuthoritativeMarketState(
+  predicate: (state: MarketRuntimeResponse) => boolean,
+  description: string,
+) {
+  const deadline = Date.now() + 15000
+  let lastState: MarketRuntimeResponse | null = null
+
+  while (Date.now() < deadline) {
+    lastState = readAuthoritativeMarketState()
+    if (predicate(lastState)) {
+      return lastState
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+
+  throw new Error(`Timed out waiting for market state: ${description}. Last state: ${JSON.stringify(lastState)}`)
+}
+
+async function openFreshMarketContext(browser: Browser, fixture: SeededMarketSession, marketState?: MarketRuntimeResponse) {
+  const freshContext = await browser.newContext()
+  if (marketState) {
+    await freshContext.route('**/api/trading-settings/market-state', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(marketState),
+      })
+    }, { times: 1 })
+  }
+  const freshPage = await openFreshMarketPage(freshContext, fixture)
+  return { freshContext, freshPage }
+}
+
+async function openOfferPreview(page: Page, text: string) {
+  await page.locator('.text-offer-input').fill(text)
+  await page.locator('.send-btn').click()
+  await expect(page.locator('.offer-preview-card')).toBeVisible()
+}
+
+async function confirmOfferPreview(page: Page) {
+  await page.locator('.offer-preview-confirm').click()
+}
+
+test.describe('Market schedule browser regressions', () => {
+  test.describe.configure({ mode: 'serial' })
+
+  test.beforeEach(() => {
+    configureMarketRuntime({
+      mode: 'open',
+      noticeVisible: false,
+      offersSinceLastOpen: 2,
+      disableSchedule: true,
+    })
+  })
+
+  test.afterAll(() => {
+    configureMarketRuntime({
+      mode: 'open',
+      noticeVisible: false,
+      offersSinceLastOpen: 2,
+      disableSchedule: true,
+    })
+  })
+
+  test('market page reflects closed/open runtime transitions and disables or enables the composer', async ({ browser, browserName }) => {
+    test.setTimeout(120000)
+    if (browserName === 'webkit') {
+      test.slow()
+    }
+
+    const actor = seedIsolatedMarketSession('transition_runtime')
+    const initialMarketState = await waitForAuthoritativeMarketState(
+      (state) => state.is_open && !state.active_web_notice_visible,
+      'initial open state without notice',
+    )
+    const { freshContext: initialContext, freshPage: initialPage } = await openFreshMarketContext(browser, actor, initialMarketState)
+
+    const input = initialPage.locator('.text-offer-input')
+    const sendButton = initialPage.locator('.send-btn')
+    await expect(input).toBeEnabled()
+    await expect(sendButton).toBeDisabled()
+    await expect(initialPage.locator('.market-runtime-notice')).toHaveCount(0)
+
+    await input.fill(`خرید ${actor.commodityName} 10 عدد 122000`)
+    await expect(sendButton).toBeEnabled()
+
+    configureMarketRuntime({
+      mode: 'closed',
+      noticeVisible: true,
+      offersSinceLastOpen: 0,
+      disableSchedule: false,
+    })
+    const closedMarketState = await waitForAuthoritativeMarketState(
+      (state) => !state.is_open && state.active_web_notice_visible,
+      'closed state with visible end notice',
+    )
+    const { freshContext: closedContext, freshPage: closedPage } = await openFreshMarketContext(browser, actor, closedMarketState)
+
+    await expect(closedPage.locator('.market-runtime-notice')).toHaveText('پایان فعالیت بازار')
+    await expect(closedPage.locator('.text-offer-input')).toBeDisabled()
+    await expect(closedPage.locator('.send-btn')).toBeDisabled()
+
+    configureMarketRuntime({
+      mode: 'open',
+      noticeVisible: true,
+      offersSinceLastOpen: 0,
+      disableSchedule: false,
+    })
+    const reopenedMarketState = await waitForAuthoritativeMarketState(
+      (state) => state.is_open && state.active_web_notice_visible,
+      'reopened state with visible start notice',
+    )
+    const { freshContext: reopenedContext, freshPage: reopenedPage } = await openFreshMarketContext(browser, actor, reopenedMarketState)
+
+    await expect(reopenedPage.locator('.market-runtime-notice')).toHaveText('شروع فعالیت بازار')
+    const reopenedInput = reopenedPage.locator('.text-offer-input')
+    const reopenedSendButton = reopenedPage.locator('.send-btn')
+    await expect(reopenedInput).toBeEnabled()
+    await reopenedInput.fill(`فروش ${actor.commodityName} 11 عدد 122100`)
+    await expect(reopenedSendButton).toBeEnabled()
+
+    await initialPage.close()
+    await closedPage.close()
+    await reopenedPage.close()
+    await initialContext.close()
+    await closedContext.close()
+    await reopenedContext.close()
+  })
+
+  test('start notice hides after the second accepted offer after market open', async ({ browser, browserName }) => {
+    test.setTimeout(120000)
+    if (browserName === 'webkit') {
+      test.slow()
+    }
+
+    configureMarketRuntime({
+      mode: 'open',
+      noticeVisible: true,
+      offersSinceLastOpen: 0,
+      disableSchedule: false,
+    })
+
+    const actor = seedIsolatedMarketSession('second_offer_notice')
+    const openedMarketState = await waitForAuthoritativeMarketState(
+      (state) => state.is_open && state.active_web_notice_visible && state.offers_since_last_open === 0,
+      'opened state with visible start notice before offers',
+    )
+    const { freshContext: activeContext, freshPage: activePage } = await openFreshMarketContext(browser, actor, openedMarketState)
+
+    await expect(activePage.locator('.market-runtime-notice')).toHaveText('شروع فعالیت بازار')
+
+    await openOfferPreview(activePage, `خرید ${actor.commodityName} 10 عدد 121111`)
+    await confirmOfferPreview(activePage)
+    await expect(activePage.getByText('لفظ متنی ثبت شد')).toBeVisible()
+    const afterFirstOfferState = await waitForAuthoritativeMarketState(
+      (state) => state.is_open && state.active_web_notice_visible && state.offers_since_last_open === 1,
+      'start notice still visible after first accepted offer',
+    )
+    const { freshContext: afterFirstOfferContext, freshPage: afterFirstOfferPage } = await openFreshMarketContext(browser, actor, afterFirstOfferState)
+    await expect(afterFirstOfferPage.locator('.market-runtime-notice')).toHaveText('شروع فعالیت بازار')
+
+    await openOfferPreview(activePage, `فروش ${actor.commodityName} 12 عدد 121222`)
+    await confirmOfferPreview(activePage)
+    await expect(activePage.getByText('لفظ متنی ثبت شد')).toBeVisible()
+    const afterSecondOfferState = await waitForAuthoritativeMarketState(
+      (state) => state.is_open && !state.active_web_notice_visible && state.offers_since_last_open >= 2,
+      'start notice hidden after second accepted offer',
+    )
+    const { freshContext: afterSecondOfferContext, freshPage: afterSecondOfferPage } = await openFreshMarketContext(browser, actor, afterSecondOfferState)
+    await expect(afterSecondOfferPage.locator('.market-runtime-notice')).toHaveCount(0)
+
+    await activePage.close()
+    await afterFirstOfferPage.close()
+    await afterSecondOfferPage.close()
+    await activeContext.close()
+    await afterFirstOfferContext.close()
+    await afterSecondOfferContext.close()
+  })
+})

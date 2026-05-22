@@ -67,17 +67,17 @@
 
 ### 2.2. exceptionها در جدول جدا
 
-- [ ] تعطیلی‌های تقویمی و overrideهای خاص نباید داخل key-value فعلی فشرده شوند.
-- [ ] یک جدول جدید مثل `market_schedule_overrides` لازم است.
-- [ ] هر row حداقل این contract را داشته باشد:
-  - [ ] `date`
-  - [ ] `override_type` (`closed_all_day`, `open_all_day`, `custom_hours`)
-  - [ ] `open_time_local` nullable
-  - [ ] `close_time_local` nullable
-  - [ ] `note`
-  - [ ] `created_by_user_id`
-  - [ ] `updated_at`
-- [ ] این جدول باید مثل سایر entityهای اصلی وارد sync/change_log شود.
+- [x] تعطیلی‌های تقویمی و overrideهای خاص نباید داخل key-value فعلی فشرده شوند.
+- [x] یک جدول جدید مثل `market_schedule_overrides` لازم است.
+- [x] هر row حداقل این contract را داشته باشد:
+  - [x] `date`
+  - [x] `override_type` (`closed_all_day`, `open_all_day`, `custom_hours`)
+  - [x] `open_time_local` nullable
+  - [x] `close_time_local` nullable
+  - [x] `note`
+  - [x] `created_by_user_id`
+  - [x] `updated_at`
+- [x] این جدول باید مثل سایر entityهای اصلی وارد sync/change_log شود.
 
 ### 2.3. runtime state جدا از settings
 
@@ -170,18 +170,18 @@
 
 ### 5.1. ثبت آفر در بات هنگام بسته بودن بازار
 
-- [ ] `bot/handlers/trade_create.py` باید قبل از ورود به parse/preview/send flow، market-open policy را enforce کند.
-- [ ] این guard باید هم text-offer path و هم wizard/FSM path را پوشش دهد.
-- [ ] copy قطعی bot هنگام بسته بودن بازار:
-  - [ ] `بعلت بسته بودن بازار درخواست شما ثبت نشد`
-  - [ ] `لطفا در زمان فعال بودن بازار اقدام به ثبت درخواست کنید.`
+- [x] `bot/handlers/trade_create.py` باید قبل از ورود به parse/preview/send flow، market-open policy را enforce کند.
+- [x] این guard باید هم text-offer path و هم wizard/FSM path را پوشش دهد.
+- [x] copy قطعی bot هنگام بسته بودن بازار:
+  - [x] `بعلت بسته بودن بازار درخواست شما ثبت نشد`
+  - [x] `لطفا در زمان فعال بودن بازار اقدام به ثبت درخواست کنید.`
 
 ### 5.2. کانال تلگرام
 
 - [x] در close transition، پیام «پایان فعالیت بازار» در کانال publish شود.
 - [x] در open transition، پیام «شروع فعالیت بازار» در کانال publish شود.
 - [x] close announcement قبلی در کانال حذف نمی‌شود.
-- [ ] از لحظه بازگشایی، امکان ثبت آفر در بات دوباره فعال می‌شود.
+- [x] از لحظه بازگشایی، امکان ثبت آفر در بات دوباره فعال می‌شود.
 
 ## 6. contract backend create/execute
 
@@ -214,16 +214,16 @@
 
 ### 8.2. bot
 
-- [ ] tests برای text offer path هنگام بسته بودن بازار با copy دقیق
-- [ ] tests برای wizard start/confirm path هنگام بسته بودن بازار
-- [ ] tests برای publish start/end message به کانال
+- [x] tests برای text offer path هنگام بسته بودن بازار با copy دقیق
+- [x] tests برای wizard start/confirm path هنگام بسته بودن بازار
+- [x] tests برای publish start/end message به کانال
 
 ### 8.3. frontend
 
 - [x] Vitest برای MarketView notice rendering و disabled state
 - [x] Vitest برای remove/show start/end notice روی eventهای realtime
 - [x] Vitest برای `TradingSettings.vue` schedule base / preview / override manager
-- [ ] Playwright برای close transition، open transition، disable/enable شدن chatbox، و hide شدن start notice بعد از دومین آفر
+- [x] Playwright برای close transition، open transition، disable/enable شدن chatbox، و hide شدن start notice بعد از دومین آفر
 
 ## 9. challengeها و سوال‌های باز بعد از audit
 
@@ -280,4 +280,8 @@
   - [x] CRUD استثناهای تقویمی بازار روی همان router اضافه شد و با sync/event foundation موجود سازگار است.
   - [x] `frontend/src/components/TradingSettings.vue` حالا preview وضعیت فعلی بازار، تنظیم روزهای بسته/ساعات پایه، و manager استثناها را دارد.
   - [x] validation محدود این phase با `tests.test_trading_settings_router_read`، `tests.test_trading_settings_router_update`، `tests.test_trading_settings_router_overrides` و `frontend/src/components/TradingSettings.test.ts` سبز شد.
-- [ ] Phase 7 - Focused regression coverage and rollout
+- [x] Phase 7 - Focused regression coverage and rollout
+  - [x] `bot/handlers/trade_create.py` با guard مشترک روی start/text/confirm pathها به market-open policy وصل شد و copy قطعی بسته‌بودن بازار را برمی‌گرداند.
+  - [x] regression bot برای start path، text-offer parse path، و wizard/text confirm path اضافه شد و existing channel-notice tests به‌عنوان پوشش open/close publish sync شدند.
+  - [x] `frontend/e2e/market-schedule.spec.ts` اضافه شد و persisted browser behavior برای close/open state و hide شدن start notice بعد از دومین آفر را در matrix مرورگر قفل کرد.
+  - [x] validation محدود این phase با `tests.test_bot_trade_create_start`، `tests.test_bot_trade_create_text_offer_parse_flow`، `tests.test_bot_trade_create_market_closed`، `tests.test_market_transition_service`، و `frontend/e2e/market-schedule.spec.ts` روی Chromium/Firefox/WebKit سبز شد.
