@@ -24,6 +24,11 @@
 - [x] در پروفایل یک کاربر دیگر، export فقط باید `تاریخچه مشترک` را دانلود کند.
 - [x] filter کالا در این فاز `single-select` است و باید بتواند همزمان با filter تاریخی اعمال شود.
 - [x] قبل از finalize کردن export، نمونه فایل `PDF` و `Excel` باید review شود.
+- [x] هر کاربر باید در پروفایل خودش بتواند لیست کاربران پروژه را ببیند.
+- [x] حسابداران فعال همان کاربر هم باید روی پروفایل resolved owner به همین لیست دسترسی داشته باشند.
+- [x] مشتریان در هر دو سطح نباید به لیست کاربران پروژه دسترسی داشته باشند.
+- [x] این لیست فقط شامل کاربران پروژه با نقش های `عادی`، `مدیر میانی` و `مدیر ارشد` است؛ حسابداران و مشتریان در آن جایی ندارند.
+- [x] داده هر ردیف در این لیست فقط `نام کاربر` و `شماره تماس` است و کلیک روی نام باید viewer را به پروفایل عمومی همان کاربر ببرد.
 
 ## 2. توضیح شفاف ایده ای که فعلاً در scope نیست
 
@@ -79,6 +84,14 @@
 - [x] `bot/handlers/trade_history.py` seam واضحی برای reuse یا extraction منطق export فراهم می کند.
 - [x] `generate_pdf()` در bot فعلاً placeholder ساده است و برای web-grade export کافی نیست.
 
+### 3.7 وضعیت فعلی لیست کاربران پروژه
+
+- [x] route آماده ای برای «لیست کاربران پروژه» با permission و contract مورد نیاز این feature وجود ندارد.
+- [x] `GET /api/users/` در `api/routers/users.py` admin-only است و contract آن برای این surface بیش از حد privileged و پرحجم است.
+- [x] `GET /api/users-public/search` در `api/routers/users_public.py` هم مناسب این نیاز نیست، چون search-based است، از contract عمومی سنگین استفاده می کند، و accountant/customer contextها را هم resolve می کند.
+- [x] `PublicProfile.vue` الان owner-only action surface دارد، اما gate فعلی آن (`showOwnerSections`) باعث می شود accountant ای که owner profile را می بیند به owner-only sectionها دسترسی نداشته باشد.
+- [x] در این پروژه حسابدار/مشتری بودن از relationهای فعال می آید، نه فقط از role؛ بنابراین فیلتر «فقط کاربران پروژه» را نمی توان صرفاً با role پیاده کرد.
+
 ## 4. تصمیم های طراحی که باید مستقیم وارد اجرا شوند
 
 ### 4.1 حریم نقش ها
@@ -116,6 +129,15 @@
 - [x] در خروجی mutual history ordinary viewer ستون های `role`، `counterparty` و `path` نباید نمایش داده شوند.
 - [x] review نمونه فایل های `PDF` و `Excel` بخشی از این فاز است.
 
+### 4.5 لیست کاربران پروژه در پروفایل خود/مالک
+
+- [x] این feature باید backend route اختصاصی و contract اختصاصی خودش را داشته باشد و نباید روی `GET /api/users/` یا `GET /api/users-public/search` سوار شود.
+- [x] دسترسی به این لیست فقط در self profile و owner-resolved profile برای حسابداران فعال همان owner مجاز است.
+- [x] customerها در هر دو سطح به این لیست دسترسی ندارند، حتی اگر profile target همان owner آن ها باشد.
+- [x] فیلتر اعضای این لیست باید هم role-based باشد (`عادی`، `مدیر میانی`، `مدیر ارشد`) و هم relation-based تا هر userی که accountant/customer فعال است حذف شود.
+- [x] row data باید عمداً minimal بماند: فقط نام قابل نمایش و شماره تماس، به همراه شناسه لازم برای navigation به public profile.
+- [x] این feature باید از public-profile navigation contract موجود استفاده کند و وارد surfaceهای admin management نشود.
+
 ## 5. roadmap اجرایی پیشنهادی
 
 ### فاز 1: hardening قرارداد عمومی پروفایل
@@ -125,6 +147,15 @@
 - [ ] audit کردن consumerهای frontend که از `UserPublicRead` استفاده می کنند تا جایی به `role` متکی نباشند.
 - [ ] افزودن unittest و Vitest برای lock کردن حذف role از surface عمومی.
 - [x] `mobile_number` و `address` در این فاز باید public بمانند.
+
+### فاز 1.5: لیست کاربران پروژه در پروفایل خود / مالک
+
+- [ ] طراحی route و schema اختصاصی برای project users directory در surface عمومی.
+- [ ] enforce کردن policy دسترسی برای self profile و accountant-resolved owner profile.
+- [ ] اعمال فیلتر role + relation برای حذف حسابداران و مشتریان از این list.
+- [ ] افزودن section یا accordion سبک در `PublicProfile.vue` برای نمایش این list.
+- [ ] wiring navigation هر row به public profile target بدون ورود به admin surface.
+- [ ] افزودن backend و frontend tests برای access-control، filtering، و navigation contract این list.
 
 ### فاز 2: اضافه کردن online / last seen به PublicProfile
 
@@ -204,37 +235,29 @@
 - [x] `PDF` و `Excel` هر دو با header minimal جلو می روند و summary اضافی در scope فاز اول اضافه نمی شود.
 - [x] وقتی viewer خودش target را بلاک کرده، `ارسال پیام` همچنان visible می ماند، چون block فقط market-only است و نباید روی chat یا سایر surfaceها اثری بگذارد.
 
-### 6.1 سوال ها و ابهام های فنی که باید قبل از اجرا بسته شوند
+### 6.1 تصمیم های فنی پذیرفته شده برای شروع اجرا
 
-- [ ] `api/routers/users_public.py` الان برای `/search` و `/{id}` از یک schema مشترک `UserPublicRead` استفاده می کند. آیا در فاز hardening باید یک schema سبک تر مثل `UserPublicSearchRead` برای search جدا شود یا فعلاً همان contract مشترک نگه داشته شود؟
-  پیشنهاد فعلی: برای کم کردن blast radius و جلوگیری از overfetch / data leakage، schema جستجو از schema پروفایل جدا شود.
+- [x] `api/routers/users_public.py` برای search و profile به دو contract سبک تر و مجزا split می شود تا overfetch و data leakage کم شود.
+- [x] `frontend/src/components/PublicProfile.vue` قبل از توسعه phaseهای history/export/status به `apiFetch` / `apiFetchJson` مهاجرت می کند.
+- [x] presence با یک source of truth مشترک برای parse + online threshold + format پیاده می شود و consumerهای فعلی هم به همان seam migrate می شوند.
+- [x] برای history/filter/export روی `api/routers/trades.py` mode صریح برای `mutual` در برابر `target` اضافه می شود و route overloaded فعلی مبنای نهایی contract نمی ماند.
+- [x] perspective history و `نوع معامله` server-authoritative می شود تا list UI و export file از هم diverge نکنند.
+- [x] UI Jalali فقط در picker باقی می ماند و request نهایی history/export با boundary صریح روز و به صورت ISO/Gregorian به backend می رود.
+- [x] filter کالا در فاز اول فقط `commodity_id` را می پذیرد و `commodity_query` text-based فعلاً وارد scope نمی شود.
+- [x] export همیشه full filtered query مستقل از pagination UI می زند و به limit/offset list وابسته نمی شود.
+- [x] `GET /api/blocks/status` برای UX capability-aware با reason code machine-readable توسعه می یابد.
+- [x] extraction از `bot/handlers/trade_history.py` در مرز query-to-document pipeline انجام می شود؛ bot/web فقط transport wrapper باقی می مانند.
 
-- [ ] `frontend/src/components/PublicProfile.vue` هنوز برای profile/history/block/admin همه جا از `fetch` خام استفاده می کند. آیا قبل از افزودن filter/export/status باید این component به `apiFetch` / `apiFetchJson` مهاجرت کند تا refresh token، reconnect، و error handling یکسان شود؟
-  پیشنهاد فعلی: بله؛ قبل از توسعه فازهای 2 تا 5 این migration انجام شود.
+### 6.2 سوال ها و ابهام های فنی باقیمانده برای لیست کاربران پروژه
 
-- [ ] منطق presence الان حداقل در `ChatConversationList.vue`، `ChatView.vue` و `useChatMessages.ts` تکراری است و parsing UTC هم یکدست نیست. آیا فاز presence فقط helper جدید برای PublicProfile می سازد یا همزمان همه consumerها را به seam مشترک migrate می کند؟
-  پیشنهاد فعلی: یک source of truth مشترک برای parse + online threshold + format ساخته شود و همه consumerهای فعلی در همان فاز migrate شوند.
+- [ ] منظور از `نام کاربر` در این list دقیقاً `account_name` است یا اگر `full_name` پر بود باید همان نمایش داده شود؟
+  پیشنهاد فعلی: `account_name` به عنوان canonical display name استفاده شود، چون navigation contract و surface فعلی PublicProfile بر همان بنا شده است.
 
-- [ ] `GET /api/trades/with/{other_user_id}` در `api/routers/trades.py` الان overloaded است: برای ordinary viewer یعنی mutual history، ولی برای owner/accountant و `SUPER_ADMIN` می تواند target-user history کامل باشد. آیا filter/export روی همین route overloaded سوار می شود یا endpoint / mode صریح برای `mutual` در برابر `target` اضافه می کنیم؟
-  پیشنهاد فعلی: mode صریح در backend اضافه شود تا permission logic، export contract، و test matrix شفاف بماند.
+- [ ] آیا row خود owner / viewer هم باید در این list نمایش داده شود یا برای جلوگیری از self-navigation حذف شود؟
+  پیشنهاد فعلی: row خود owner هم بماند تا list از نظر dataset کامل باشد و فقط navigation به همان profile به صورت no-op یا harmless باقی بماند.
 
-- [ ] perspective history الان دو منبع حقیقت دارد: backend در `trade_to_response()` بر اساس `history_target_user_id` بخشی از projection را می سازد، ولی `PublicProfile.vue` badge `خرید / فروش` را client-side از `tradeHistoryPerspectiveUserId` محاسبه می کند. آیا برای filter/export باید perspective نهایی server-authoritative شود؟
-  پیشنهاد فعلی: بله؛ backend باید perspective canonical را تولید کند تا UI list و export file از هم diverge نکنند.
-
-- [ ] contract دقیق query زمانی برای history/export چیست؟ آیا UI Jalali فقط در picker می ماند و request نهایی همیشه `from_date` / `to_date` را به صورت ISO/Gregorian و با boundary صریح روز می فرستد، یا backend باید Jalali input را هم parse کند؟
-  پیشنهاد فعلی: Jalali فقط در UI بماند و request نهایی با boundary صریح و server-safe به صورت ISO ارسال شود.
-
-- [ ] برای filter کالا، آیا canonical input فقط `commodity_id` انتخاب شده از `GET /api/commodities/` است یا در همین فاز `commodity_query` text-based با resolution روی aliasها هم پشتیبانی می شود؟
-  پیشنهاد فعلی: برای فاز اول فقط `commodity_id` پشتیبانی شود تا list/export determinism ساده و testable بماند.
-
-- [ ] history list الان paginated / truncated است (`limit=20/50`) ولی export باید کل dataset فیلترشده را بدهد. آیا export endpoint باید عمداً pagination را bypass کند و full filtered query بزند، یا list هم باید قبل از export full-load شود؟
-  پیشنهاد فعلی: export server-side full query مستقل از pagination UI بزند و list همچنان lightweight بماند.
-
-- [ ] `GET /api/blocks/status` فقط capacity/count برمی گرداند و reason code ندارد. آیا برای UX capability-aware لازم است این route با machine-readable reason مثل `feature_disabled` / `limit_reached` توسعه یابد؟
-  پیشنهاد فعلی: بله؛ تا UI مجبور به parse متن فارسی یا infer از اعداد نباشد.
-
-- [ ] extraction از `bot/handlers/trade_history.py` دقیقاً در چه مرزی انجام شود: فقط rendererهای `Excel/PDF`، یا query / projection / file naming هم داخل service مشترک برود؟
-  پیشنهاد فعلی: service مشترک باید query-to-document pipeline را مالک باشد و bot/web فقط wrapper transport باقی بمانند.
+- [ ] آیا فاز اول این list باید search/pagination داشته باشد یا یک load ساده همه کاربران پروژه کافی است؟
+  پیشنهاد فعلی: از ابتدا search سبک server-side اضافه شود، چون تعداد کاربران پروژه می تواند رشد کند و route جدید بهتر است از روز اول bounded بماند.
 
 ## 7. ایده های مفید ولی خارج از scope همین مرحله
 
