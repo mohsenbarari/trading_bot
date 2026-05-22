@@ -173,6 +173,24 @@ class UserPublicRead(BaseModel):
         from_attributes = True
 
 
+class PublicUserSearchResult(BaseModel):
+    id: int
+    account_name: str
+    full_name: str | None = None
+    mobile_number: str
+    avatar_file_id: str | None = None
+    resolved_from_accountant_id: int | None = None
+    highlight_accountant_user_id: int | None = None
+    highlight_accountant_relation_display_name: str | None = None
+    customer_owner_user_id: int | None = None
+    customer_owner_account_name: str | None = None
+    customer_management_name: str | None = None
+    customer_tier: CustomerTier | None = None
+
+    class Config:
+        from_attributes = True
+
+
 class ProjectUserDirectoryEntry(BaseModel):
     id: int
     account_name: str

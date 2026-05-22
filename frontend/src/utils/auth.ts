@@ -89,11 +89,8 @@ export async function isAuthenticated(): Promise<boolean> {
     if (refresh) {
         const result = await tryRefreshToken();
         if (result === 'success') return true;
-        
-        // Prevent booting offline users to the login screen
-        if (result === 'network_error') return true;
-        
-        // Only boot to login if the backend explicitly rejected the token
+
+        suspendSession();
         return false;
     }
     return false;
@@ -200,11 +197,9 @@ export function setupExpiryTimer() {
                 // Attempt refresh 60 seconds before it actually expires
                 if (now >= payload.exp - 60) {
                     const result = await tryRefreshToken();
-                    if (result === 'auth_error') {
-                        // The server explicitly invalidated the refresh token
+                    if (result !== 'success') {
                         suspendSession();
                     }
-                    // For 'network_error', we do nothing and let the fetch retry automatically on the next interval
                 }
             }
         }
@@ -328,8 +323,8 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
                     throw new Error('نشست شما منقضی شده است. لطفا مجددا وارد شوید');
                 }
                 
-                // Treat 'network_error' as a connection drop, loop again
-                throw new Error('NetworkError');
+                    suspendSession();
+                    throw new Error('نشست شما منقضی شده است. لطفا مجددا وارد شوید');
             }
 
             if (response.status >= 500) {

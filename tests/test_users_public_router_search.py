@@ -72,6 +72,9 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([item.id for item in result], [7, 6])
         self.assertNotIn("role", result[0].model_dump())
+        self.assertNotIn("address", result[0].model_dump())
+        self.assertNotIn("last_seen_at", result[0].model_dump())
+        self.assertNotIn("trades_count", result[0].model_dump())
         stmt_text = str(db.stmts[0])
         self.assertIn("users.is_deleted = false", stmt_text.lower())
         self.assertIn("users.id !=", stmt_text.lower())
@@ -123,6 +126,7 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0].highlight_accountant_user_id, 7)
         self.assertEqual(result[0].highlight_accountant_relation_display_name, "حسابدار فروش")
         self.assertNotIn("role", result[0].model_dump())
+        self.assertNotIn("address", result[0].model_dump())
 
     async def test_search_public_users_skips_owner_resolved_to_current_user(self):
         current_user = SimpleNamespace(id=5, role=UserRole.STANDARD)
@@ -233,13 +237,13 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.id for item in result], [91])
         self.assertEqual(result[0].account_name, "customer91")
         self.assertEqual(result[0].mobile_number, "09125555555")
-        self.assertEqual(result[0].address, "کرج")
-        self.assertEqual(result[0].last_seen_at, __import__("datetime").datetime(2026, 1, 5, 9, 45, 0))
         self.assertEqual(result[0].customer_owner_user_id, 20)
         self.assertEqual(result[0].customer_owner_account_name, "owner20")
         self.assertEqual(result[0].customer_management_name, "مشتری ویژه")
         self.assertEqual(result[0].customer_tier, CustomerTier.TIER_1)
         self.assertNotIn("role", result[0].model_dump())
+        self.assertNotIn("address", result[0].model_dump())
+        self.assertNotIn("last_seen_at", result[0].model_dump())
 
 
 if __name__ == "__main__":
