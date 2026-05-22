@@ -21,6 +21,18 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
     async def test_lifespan_starts_expected_tasks_on_iran_and_closes_redis(self):
         created = []
 
+        async def connectivity_monitor_loop():
+            return None
+
+        async def offer_expiry_loop():
+            return None
+
+        async def market_schedule_loop():
+            return None
+
+        async def session_expiry_loop():
+            return None
+
         def fake_create_task(coro):
             name = getattr(getattr(coro, "cr_code", None), "co_name", "unknown")
             created.append(name)
@@ -36,9 +48,11 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
             "main.setup_event_listeners"
         ) as setup_mock, patch("main.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
             "main.ensure_mandatory_channel_rollout", new=AsyncMock()
-        ) as rollout_mock, patch("main.connectivity_monitor_loop", new=AsyncMock()), patch(
-            "main.offer_expiry_loop", new=AsyncMock()
-        ), patch("main.session_expiry_loop", new=AsyncMock()), patch("main.asyncio.create_task", side_effect=fake_create_task):
+        ) as rollout_mock, patch("main.connectivity_monitor_loop", new=connectivity_monitor_loop), patch(
+            "main.offer_expiry_loop", new=offer_expiry_loop
+        ), patch("main.market_schedule_loop", new=market_schedule_loop), patch(
+            "main.session_expiry_loop", new=session_expiry_loop
+        ), patch("main.asyncio.create_task", side_effect=fake_create_task):
             async with main.lifespan(main.app):
                 pass
 
@@ -48,11 +62,24 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         rollout_mock.assert_awaited_once_with(session)
         session.commit.assert_awaited_once()
         close_redis_mock.assert_awaited_once()
-        self.assertEqual(len(created), 4)
+        self.assertEqual(len(created), 5)
+        self.assertIn("market_schedule_loop", created)
         self.assertIn("user_account_status_loop", created)
 
     async def test_lifespan_skips_connectivity_monitor_outside_iran(self):
         created = []
+
+        async def connectivity_monitor_loop():
+            return None
+
+        async def offer_expiry_loop():
+            return None
+
+        async def market_schedule_loop():
+            return None
+
+        async def session_expiry_loop():
+            return None
 
         def fake_create_task(coro):
             name = getattr(getattr(coro, "cr_code", None), "co_name", "unknown")
@@ -68,16 +95,19 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         ), patch("main.close_redis", new=AsyncMock()), patch("main.setup_event_listeners"), patch(
             "main.AsyncSessionLocal", return_value=_AsyncSessionContext(session)
         ), patch("main.ensure_mandatory_channel_rollout", new=AsyncMock()) as rollout_mock, patch(
-            "main.connectivity_monitor_loop", new=AsyncMock()
-        ), patch("main.offer_expiry_loop", new=AsyncMock()), patch(
-            "main.session_expiry_loop", new=AsyncMock()
+            "main.connectivity_monitor_loop", new=connectivity_monitor_loop
+        ), patch("main.offer_expiry_loop", new=offer_expiry_loop), patch(
+            "main.market_schedule_loop", new=market_schedule_loop
+        ), patch(
+            "main.session_expiry_loop", new=session_expiry_loop
         ), patch("main.asyncio.create_task", side_effect=fake_create_task):
             async with main.lifespan(main.app):
                 pass
 
         rollout_mock.assert_awaited_once_with(session)
         session.commit.assert_awaited_once()
-        self.assertEqual(len(created), 3)
+        self.assertEqual(len(created), 4)
+        self.assertIn("market_schedule_loop", created)
         self.assertIn("user_account_status_loop", created)
 
     async def test_lifespan_rolls_back_mandatory_rollout_failures(self):
