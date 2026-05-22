@@ -142,10 +142,10 @@
 
 ### فاز 1: hardening قرارداد عمومی پروفایل
 
-- [ ] حذف `role` از `schemas.UserPublicRead`.
-- [ ] به روزرسانی `_serialize_public_user()` و تمام callsiteهای `users_public` برای contract جدید.
-- [ ] audit کردن consumerهای frontend که از `UserPublicRead` استفاده می کنند تا جایی به `role` متکی نباشند.
-- [ ] افزودن unittest و Vitest برای lock کردن حذف role از surface عمومی.
+- [x] حذف `role` از `schemas.UserPublicRead`.
+- [x] به روزرسانی `_serialize_public_user()` و تمام callsiteهای `users_public` برای contract جدید.
+- [x] audit کردن consumerهای frontend که از `UserPublicRead` استفاده می کنند تا جایی به `role` متکی نباشند.
+- [x] افزودن unittest و Vitest برای lock کردن حذف role از surface عمومی.
 - [x] `mobile_number` و `address` در این فاز باید public بمانند.
 
 ### فاز 1.5: لیست کاربران پروژه در پروفایل خود / مالک

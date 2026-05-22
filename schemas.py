@@ -149,7 +149,6 @@ class UserPublicRead(BaseModel):
     """شمای عمومی کاربر برای نمایش به دیگران"""
     id: int
     account_name: str
-    role: UserRole
     mobile_number: str
     address: str
     avatar_file_id: str | None = None
