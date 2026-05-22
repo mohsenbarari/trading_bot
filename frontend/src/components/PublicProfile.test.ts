@@ -247,6 +247,200 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.findAll('button').some((button) => button.text().includes('رفع بلاک'))).toBe(true)
   })
 
+  it('loads the project users directory for self profiles and navigates through result rows', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 44,
+      account_name: 'owner44',
+      avatar_file_id: null,
+      mobile_number: '09127777777',
+      address: 'اصفهان',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۵',
+      trades_count: 18,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse([
+      {
+        id: 44,
+        account_name: 'owner44',
+        mobile_number: '09127777777',
+      },
+      {
+        id: 61,
+        account_name: 'manager61',
+        mobile_number: '09121110000',
+      },
+    ]))
+    fetchMock.mockResolvedValueOnce(makeResponse([
+      {
+        id: 61,
+        account_name: 'manager61',
+        mobile_number: '09121110000',
+      },
+    ]))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 44, account_name: 'owner44' },
+        viewerUserId: 44,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerCustomerManagerModal: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const directoryHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('کاربران پروژه'))
+    expect(directoryHeader).toBeTruthy()
+    await directoryHeader!.trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/users-public/44/project-users?limit=25', {
+      headers: {
+        Authorization: 'Bearer token',
+      },
+    })
+    expect(wrapper.text()).toContain('manager61')
+    expect(wrapper.text()).toContain('09121110000')
+
+    await wrapper.get('.project-user-link-btn').trigger('click')
+    expect(wrapper.emitted('navigate')?.[0]).toEqual([
+      'public_profile',
+      {
+        id: 44,
+        account_name: 'owner44',
+      },
+    ])
+
+    await wrapper.get('.project-users-search-input').setValue('manager')
+    await wrapper.get('.project-users-search-submit').trigger('submit')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/users-public/44/project-users?limit=25&q=manager', {
+      headers: {
+        Authorization: 'Bearer token',
+      },
+    })
+    expect(wrapper.text()).toContain('manager61')
+  })
+
+  it('shows the project users directory on accountant self profiles resolved to the owner', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 20,
+      account_name: 'owner20',
+      avatar_file_id: null,
+      mobile_number: '09124444444',
+      address: 'مشهد',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۲',
+      trades_count: 12,
+      resolved_from_accountant_id: 44,
+      highlight_accountant_user_id: 44,
+      highlight_accountant_relation_display_name: 'حسابدار فروش',
+      accountant_relations: [
+        {
+          accountant_user_id: 44,
+          accountant_account_name: 'acct44',
+          relation_display_name: 'حسابدار فروش',
+          duty_description: 'پیگیری معاملات',
+        },
+      ],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse([
+      {
+        id: 20,
+        account_name: 'owner20',
+        mobile_number: '09124444444',
+      },
+    ]))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 44, account_name: 'acct44' },
+        viewerUserId: 44,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerCustomerManagerModal: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const directoryHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('کاربران پروژه'))
+    expect(directoryHeader).toBeTruthy()
+    await directoryHeader!.trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/users-public/44/project-users?limit=25', {
+      headers: {
+        Authorization: 'Bearer token',
+      },
+    })
+    expect(wrapper.text()).toContain('owner20')
+  })
+
+  it('hides the project users directory on customer self profiles', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 91,
+      account_name: 'customer91',
+      avatar_file_id: null,
+      mobile_number: '09127777777',
+      address: 'شیراز',
+      created_at_jalali: '۱۴۰۵/۰۲/۰۲',
+      trades_count: 5,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+      customer_owner_user_id: 20,
+      customer_owner_account_name: 'owner20',
+      customer_management_name: 'مشتری ویژه',
+      customer_tier: 'tier2',
+      customer_relations: [],
+    }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 91, account_name: 'customer91' },
+        viewerUserId: 91,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerCustomerManagerModal: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('کاربران پروژه')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('hides the block toggle on customer public profiles', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({

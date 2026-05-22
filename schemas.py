@@ -173,6 +173,15 @@ class UserPublicRead(BaseModel):
     class Config:
         from_attributes = True
 
+
+class ProjectUserDirectoryEntry(BaseModel):
+    id: int
+    account_name: str
+    mobile_number: str
+
+    class Config:
+        from_attributes = True
+
 class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
     account_status: Optional[UserAccountStatus] = None

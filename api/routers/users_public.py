@@ -8,7 +8,7 @@ from models.accountant_relation import AccountantRelation, AccountantRelationSta
 from core.db import get_db
 from core.services.accountant_relation_service import get_active_accountant_relation_for_accountant, list_active_accountants_for_owner
 from core.services.customer_relation_service import get_active_customer_relation_for_customer, list_active_customers_for_owner
-from models.customer_relation import CustomerRelation
+from models.customer_relation import CustomerRelation, CustomerRelationStatus
 from models.user import User, UserRole
 from api.deps import get_current_user
 
@@ -17,6 +17,13 @@ import schemas
 router = APIRouter(
     tags=["Public Users"],
     dependencies=[Depends(get_current_user)]
+)
+
+
+PROJECT_DIRECTORY_ROLES = (
+    UserRole.STANDARD,
+    UserRole.MIDDLE_MANAGER,
+    UserRole.SUPER_ADMIN,
 )
 
 
@@ -75,6 +82,10 @@ def _serialize_public_customer_relation(
     )
 
 
+def _serialize_project_user_directory_entry(user: User) -> schemas.ProjectUserDirectoryEntry:
+    return schemas.ProjectUserDirectoryEntry.model_validate(user, from_attributes=True)
+
+
 def _is_super_admin(user: User) -> bool:
     return getattr(user, "role", None) == UserRole.SUPER_ADMIN
 
@@ -99,6 +110,50 @@ def _can_view_customer_profile(
         viewer_accountant_relation is not None
         and getattr(viewer_accountant_relation, "owner_user_id", None) == relation.owner_user_id
     )
+
+
+def _build_project_user_directory_stmt(
+    *,
+    q: str | None,
+    limit: int,
+):
+    active_accountant_exists = (
+        select(AccountantRelation.id)
+        .where(
+            AccountantRelation.accountant_user_id == User.id,
+            AccountantRelation.status == AccountantRelationStatus.ACTIVE,
+            AccountantRelation.deleted_at.is_(None),
+        )
+        .exists()
+    )
+    active_customer_exists = (
+        select(CustomerRelation.id)
+        .where(
+            CustomerRelation.customer_user_id == User.id,
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+            CustomerRelation.deleted_at.is_(None),
+        )
+        .exists()
+    )
+
+    stmt = select(User).where(
+        User.is_deleted == False,
+        User.role.in_(PROJECT_DIRECTORY_ROLES),
+        ~active_accountant_exists,
+        ~active_customer_exists,
+    )
+
+    normalized_query = (q or "").strip()
+    if normalized_query:
+        search_pattern = f"%{normalized_query}%"
+        stmt = stmt.where(
+            or_(
+                User.account_name.ilike(search_pattern),
+                User.mobile_number.ilike(search_pattern),
+            )
+        )
+
+    return stmt.order_by(User.account_name.asc(), User.id.asc()).limit(limit)
 
 
 async def _load_public_accountant_relation_summaries(
@@ -236,6 +291,27 @@ async def search_public_users(
     result = await db.execute(query)
     users = result.scalars().all()
     return await _resolve_public_search_rows(db, users, current_user=current_user)
+
+
+@router.get("/{user_id}/project-users", response_model=List[schemas.ProjectUserDirectoryEntry])
+async def list_project_users_directory(
+    user_id: int,
+    q: Optional[str] = Query(None, min_length=1),
+    limit: int = Query(25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """لیست کاربران پروژه برای self public profile یا accountant-resolved owner profile."""
+    if current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    current_customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
+    if current_customer_relation is not None:
+        raise HTTPException(status_code=403, detail="Customers cannot view the project users directory")
+
+    stmt = _build_project_user_directory_stmt(q=q, limit=limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [_serialize_project_user_directory_entry(user) for user in rows]
 
 @router.get("/{user_id}", response_model=schemas.UserPublicRead)
 async def read_public_user(
