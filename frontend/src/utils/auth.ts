@@ -90,8 +90,10 @@ export async function isAuthenticated(): Promise<boolean> {
     if (refresh) {
         const result = await tryRefreshToken();
         if (result === 'success') return true;
-
-        suspendSession();
+        
+        if (result === 'auth_error') {
+            suspendSession();
+        }
         return false;
     }
     return false;
@@ -198,7 +200,7 @@ export function setupExpiryTimer() {
                 // Attempt refresh 60 seconds before it actually expires
                 if (now >= payload.exp - 60) {
                     const result = await tryRefreshToken();
-                    if (result !== 'success') {
+                    if (result === 'auth_error') {
                         suspendSession();
                     }
                 }
