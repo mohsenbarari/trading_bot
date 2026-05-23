@@ -94,7 +94,6 @@ const tradingSettings = ref<TradingSettings>({
 const offerText = ref('')
 const parseError = ref('')
 const isSubmitting = ref(false)
-const successMessage = ref('')
 const pendingOfferPreview = ref<ParsedOfferPreview | null>(null)
 const previewError = ref('')
 const previewWarning = ref<OfferPriceWarning | null>(null)
@@ -237,11 +236,9 @@ async function confirmOfferPreview() {
       }, payload)
     }
 
-    successMessage.value = 'لفظ متنی ثبت شد'
     offerText.value = ''
     pendingOfferPreview.value = null
     previewWarning.value = null
-    setTimeout(() => successMessage.value = '', 3000)
     fetchOffers()
   } catch (e: any) {
     previewError.value = getUserFacingErrorMessage(e, {
@@ -317,9 +314,7 @@ async function cancelAllOffers() {
         fallbackMessage: 'خطا در لغو لفظ‌ها',
       })
     }
-    successMessage.value = 'همه لفظ‌های فعال شما منقضی شدند'
     offerText.value = ''
-    setTimeout(() => successMessage.value = '', 3000)
     fetchOffers()
   } catch (e: any) {
     parseError.value = getUserFacingErrorMessage(e, {
@@ -380,13 +375,6 @@ onUnmounted(() => {
 
 <template>
   <div class="market-page ds-page">
-    
-    <!-- Success Toast -->
-    <transition name="fade">
-        <div v-if="successMessage" class="ds-toast success">
-            {{ successMessage }}
-        </div>
-    </transition>
 
     <!-- Header: Filters & Sort -->
     <div class="market-header">
