@@ -37,6 +37,7 @@ describe('useChatMessages', () => {
   let messages: ReturnType<typeof ref<any[]>>
   let conversations: ReturnType<typeof ref<any[]>>
   let error: ReturnType<typeof ref<string>>
+  let messagePanelError: ReturnType<typeof ref<string>>
   let isLoadingMessages: ReturnType<typeof ref<boolean>>
   let isSending: ReturnType<typeof ref<boolean>>
   let unreadNewMessagesCount: ReturnType<typeof ref<number>>
@@ -59,7 +60,7 @@ describe('useChatMessages', () => {
   let alertSpy: ReturnType<typeof vi.spyOn>
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>
 
-  function createSubject() {
+  function createSubject(options: { withMessagePanelError?: boolean } = {}) {
     scope = effectScope()
     scope.run(() => {
       subject = useChatMessages({
@@ -70,6 +71,7 @@ describe('useChatMessages', () => {
         messages: messages as any,
         conversations: conversations as any,
         error: error as any,
+        ...(options.withMessagePanelError ? { messagePanelError: messagePanelError as any } : {}),
         isLoadingMessages: isLoadingMessages as any,
         isSending: isSending as any,
         unreadNewMessagesCount: unreadNewMessagesCount as any,
@@ -107,6 +109,7 @@ describe('useChatMessages', () => {
     messages = ref<any[]>([])
     conversations = ref<any[]>([])
     error = ref('')
+    messagePanelError = ref('')
     isLoadingMessages = ref(false)
     isSending = ref(false)
     unreadNewMessagesCount = ref(0)
@@ -153,7 +156,7 @@ describe('useChatMessages', () => {
 
     messageMocks.apiFetchJson.mockRejectedValueOnce(new Error('load failed'))
     await subject.loadConversations()
-    expect(error.value).toBe('load failed')
+    expect(error.value).toBe('دریافت گفتگوها ممکن نشد.')
   })
 
   it('loads chat messages, merges pending optimistic uploads, and marks the chat as read', async () => {
@@ -507,7 +510,11 @@ describe('useChatMessages', () => {
     subject.startPolling()
     vi.advanceTimersByTime(30000)
     await flushPromises()
-    expect(messageMocks.apiFetchJson).toHaveBeenCalledWith('/api/chat/conversations', {})
+    expect(messageMocks.apiFetchJson).toHaveBeenCalledWith('/api/chat/conversations', {}, expect.objectContaining({
+      surface: 'messenger',
+      scope: 'list',
+      operation: 'load-list',
+    }))
 
     subject.stopPolling()
     subject.stopStatusPolling()
@@ -520,7 +527,11 @@ describe('useChatMessages', () => {
     ])
 
     await subject.loadMessages(12, false, 88)
-    expect(messageMocks.apiFetchJson).toHaveBeenCalledWith(expect.stringContaining('around_id=88'), {})
+    expect(messageMocks.apiFetchJson).toHaveBeenCalledWith(expect.stringContaining('around_id=88'), {}, expect.objectContaining({
+      surface: 'messenger',
+      scope: 'panel',
+      operation: 'load-detail',
+    }))
     expect((messages.value ?? []).map((message) => message.id)).toEqual([88])
     expect(subject.hasOlderMessages.value).toBe(true)
     expect(isLoadingMessages.value).toBe(false)
@@ -541,8 +552,20 @@ describe('useChatMessages', () => {
     createSubject()
     messageMocks.apiFetchJson.mockRejectedValueOnce(new Error('history failed'))
     await subject.loadMessages(12)
-    expect(error.value).toBe('history failed')
+    expect(error.value).toBe('دریافت پیام‌های این گفتگو ممکن نشد.')
     expect(isLoadingMessages.value).toBe(false)
+  })
+
+  it('routes active message-load failures to the pane-scoped error when provided', async () => {
+    createSubject({ withMessagePanelError: true })
+    messages.value = [{ id: 1, sender_id: 12, receiver_id: 7, content: 'old', message_type: 'text' }]
+    messageMocks.apiFetchJson.mockRejectedValueOnce(new Error('history failed'))
+
+    await subject.loadMessages(12)
+
+    expect(messagePanelError.value).toBe('دریافت پیام‌های این گفتگو ممکن نشد.')
+    expect(error.value).toBe('')
+    expect(messages.value.map((message) => message.id)).toEqual([1])
   })
 
   it('updates unread state for silent refreshes and keeps bottom anchoring for outgoing/current-user messages', async () => {

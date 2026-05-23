@@ -1,5 +1,6 @@
 import { ref, watch, type Ref, nextTick } from 'vue'
 import { apiFetchJson } from '../../utils/auth'
+import { getUserFacingErrorMessage, type ErrorPolicyContext } from '../../utils/httpErrorPolicy'
 import type { Conversation, Message } from '../../types/chat'
 import { useNotificationStore } from '../../stores/notifications'
 import {
@@ -30,6 +31,7 @@ export interface UseChatMessagesOptions {
     messages: Ref<Message[]>
     conversations: Ref<Conversation[]>
     error: Ref<string>
+    messagePanelError?: Ref<string>
     isLoadingMessages: Ref<boolean>
     isSending: Ref<boolean>
     unreadNewMessagesCount: Ref<number>
@@ -59,6 +61,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         messages,
         conversations,
         error,
+        messagePanelError,
         isLoadingMessages,
         isSending,
         unreadNewMessagesCount,
@@ -234,8 +237,8 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     const POLL_INTERVAL = 30000
     let statusPollTimer: number | null = null
 
-    async function apiFetch(endpoint: string, fetchOptions: RequestInit = {}) {
-        return await apiFetchJson(`/api${endpoint}`, fetchOptions)
+    async function apiFetch(endpoint: string, fetchOptions: RequestInit = {}, errorContext: ErrorPolicyContext = {}) {
+        return await apiFetchJson(`/api${endpoint}`, fetchOptions, errorContext)
     }
 
     function buildMessagesEndpoint(userId: number, query: string) {
@@ -251,15 +254,32 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     }
 
     async function loadConversations() {
+        const hasExistingConversations = Array.isArray(conversations.value) && conversations.value.length > 0
         try {
-            conversations.value = await apiFetch('/chat/conversations')
+            const loadedConversations = await apiFetch('/chat/conversations', {}, {
+                surface: 'messenger',
+                scope: 'list',
+                operation: 'load-list',
+                preserveExistingData: hasExistingConversations,
+                resourceLabel: 'لیست گفتگوها',
+                fallbackMessage: 'دریافت گفتگوها ممکن نشد.',
+            })
+            conversations.value = Array.isArray(loadedConversations) ? loadedConversations : []
+            error.value = ''
             notificationStore.syncMutedConversationIds(
                 conversations.value
                     .filter((conversation) => conversation.is_muted)
                     .map((conversation) => conversation.other_user_id)
             )
         } catch (e: any) {
-            error.value = e.message
+            error.value = getUserFacingErrorMessage(e, {
+                surface: 'messenger',
+                scope: 'list',
+                operation: 'load-list',
+                preserveExistingData: hasExistingConversations,
+                resourceLabel: 'لیست گفتگوها',
+                fallbackMessage: 'دریافت گفتگوها ممکن نشد.',
+            })
         }
     }
 
@@ -297,9 +317,20 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 }
             }
 
-            const loadedMessages = await apiFetch(url)
+            const loadedMessages = await apiFetch(url, {}, {
+                surface: 'messenger',
+                scope: 'panel',
+                operation: aroundId ? 'load-detail' : (silent ? 'background-refresh' : 'load-detail'),
+                preserveExistingData: silent || messages.value.length > 0,
+                resourceLabel: 'گفتگو',
+                fallbackMessage: 'دریافت پیام‌های این گفتگو ممکن نشد.',
+            })
             if (!isActiveLoadRequest(requestId, userId)) {
                 return
+            }
+            if (!silent) {
+                if (messagePanelError) messagePanelError.value = ''
+                else error.value = ''
             }
 
             // Append any pending background-service uploads for this user
@@ -363,7 +394,18 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 void markAsRead()
             }
         } catch (e: any) {
-            if (!effectiveSilent && isActiveLoadRequest(requestId, userId)) error.value = e.message
+            if (!effectiveSilent && isActiveLoadRequest(requestId, userId)) {
+                const message = getUserFacingErrorMessage(e, {
+                    surface: 'messenger',
+                    scope: 'panel',
+                    operation: aroundId ? 'load-detail' : 'load-detail',
+                    preserveExistingData: messages.value.length > 0,
+                    resourceLabel: 'گفتگو',
+                    fallbackMessage: 'دریافت پیام‌های این گفتگو ممکن نشد.',
+                })
+                if (messagePanelError) messagePanelError.value = message
+                else error.value = message
+            }
             if (!effectiveSilent && isLatestLoadRequest(requestId)) isLoadingMessages.value = false
         } finally {
             if (!effectiveSilent && isLatestLoadRequest(requestId) && isLoadingMessages.value) {

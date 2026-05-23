@@ -2,6 +2,7 @@ import { ref } from 'vue';
 import type { RouteLocationNormalized, NavigationGuardNext } from 'vue-router';
 import { isAdminRoleValue, readCachedCurrentUserRole } from './adminAccess';
 import { cacheCurrentUserSummary } from './currentUser';
+import { createHttpErrorFromResponse, type ErrorPolicyContext } from './httpErrorPolicy';
 
 export const isAppConnecting = ref(false);
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -356,11 +357,10 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
 
 import { cleanDeletedSuffixes } from './formatters';
 
-export async function apiFetchJson(url: string, options: RequestInit = {}) {
+export async function apiFetchJson(url: string, options: RequestInit = {}, errorContext: ErrorPolicyContext = {}) {
     const response = await apiFetch(url, options);
     if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.detail || `خطا: ${response.status}`);
+        throw await createHttpErrorFromResponse(response, errorContext);
     }
     if (response.status === 204) return null;
     return response.json();

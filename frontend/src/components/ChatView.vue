@@ -67,6 +67,7 @@ const emit = defineEmits<{
 // State
 const isLoading = ref(true)
 const error = ref('')
+const messagePanelError = ref('')
 
 // Conversations & Messages
 const conversations = ref<Conversation[]>([])
@@ -304,6 +305,7 @@ const messagesLogic = useChatMessages({
   messages,
   conversations,
   error,
+  messagePanelError,
   isLoadingMessages,
   isSending,
   unreadNewMessagesCount,
@@ -1627,6 +1629,7 @@ const clearSelection = () => {
 const selectConversation = (conv: Conversation) => {
   selectedUserId.value = conv.other_user_id
   selectedUserName.value = conv.other_user_name
+  messagePanelError.value = ''
   if (conv.room_kind === 'channel') {
     showAttachmentMenu.value = false
     showStickerPicker.value = false
@@ -1639,6 +1642,7 @@ const selectConversation = (conv: Conversation) => {
     selectedUserId.value = null
     selectedUserName.value = ''
     messages.value = []
+    messagePanelError.value = ''
   })
 }
 
@@ -1656,11 +1660,13 @@ function openConversationFromRoute(targetId: number, fallbackName = '') {
 
   selectedUserId.value = targetId
   selectedUserName.value = resolvedName
+  messagePanelError.value = ''
   void loadMessages(targetId)
   pushBackState(() => {
     selectedUserId.value = null
     selectedUserName.value = ''
     messages.value = []
+    messagePanelError.value = ''
   })
 }
 
@@ -1684,11 +1690,13 @@ const startNewChat = (userId: number, userName: string) => {
   }
   selectedUserId.value = userId
   selectedUserName.value = userName
+  messagePanelError.value = ''
   loadMessages(userId)
   pushBackState(() => {
     selectedUserId.value = null
     selectedUserName.value = ''
     messages.value = []
+    messagePanelError.value = ''
   })
 }
 
@@ -1748,6 +1756,7 @@ function clearActiveConversationState() {
   selectedUserName.value = ''
   messages.value = []
   error.value = ''
+  messagePanelError.value = ''
   unreadNewMessagesCount.value = 0
   showAttachmentMenu.value = false
   showStickerPicker.value = false
@@ -1784,6 +1793,7 @@ async function handleChannelManagerOpenChannel(payload: { chatId: number; title:
 
   selectedUserId.value = conversationKey
   selectedUserName.value = payload.title
+  messagePanelError.value = ''
   showAttachmentMenu.value = false
   showStickerPicker.value = false
   void loadMessages(conversationKey)
@@ -1820,6 +1830,7 @@ async function handleGroupCreated(group: { id: number; title: string }) {
   await loadConversations()
   selectedUserId.value = conversationKey
   selectedUserName.value = group.title
+  messagePanelError.value = ''
   showAttachmentMenu.value = false
   showStickerPicker.value = false
   void loadMessages(conversationKey)
@@ -1827,6 +1838,7 @@ async function handleGroupCreated(group: { id: number; title: string }) {
     selectedUserId.value = null
     selectedUserName.value = ''
     messages.value = []
+    messagePanelError.value = ''
   })
 }
 
@@ -3330,7 +3342,15 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
             <span>در حال بارگذاری پیام‌های قبلی...</span>
           </div>
 
-          <div v-if="messages.length === 0" class="empty-state">
+          <div v-if="messagePanelError" class="chat-panel-error" role="status">
+            <div>
+              <strong>دریافت گفتگو انجام نشد</strong>
+              <p>{{ messagePanelError }}</p>
+            </div>
+            <button @click="messagePanelError = ''; selectedUserId && loadMessages(selectedUserId)">تلاش مجدد</button>
+          </div>
+
+          <div v-else-if="messages.length === 0" class="empty-state">
             <span>💬</span>
             <p>شروع گفتگو...</p>
           </div>
@@ -4447,6 +4467,44 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
   flex-direction: column;
   justify-content: center;
   align-items: center;
+}
+
+.chat-panel-error {
+  margin: 18px auto;
+  width: min(92%, 420px);
+  padding: 14px 16px;
+  border: 1px solid rgba(220, 38, 38, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 247, 237, 0.96);
+  color: #7f1d1d;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chat-panel-error strong {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.chat-panel-error p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.chat-panel-error button {
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 10px;
+  background: #b91c1c;
+  color: #fff;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
 }
 /* Context Menu */
 .context-menu {

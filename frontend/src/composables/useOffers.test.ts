@@ -154,6 +154,6 @@ describe('useOffers', () => {
 
     await offersApi.fetchOffers()
     expect(offersApi.offers.value).toEqual([{ id: 11, price: 350 }])
-    expect(offersApi.error.value).toBe('network unstable')
+    expect(offersApi.error.value).toBe('دریافت لیست لفظ‌ها ممکن نشد.')
   })
 })

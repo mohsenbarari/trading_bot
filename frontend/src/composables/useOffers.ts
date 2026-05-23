@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue';
 import { useWebSocket } from './useWebSocket.ts';
 import { apiFetch } from '../utils/auth';
+import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy';
 
 const offers = ref<any[]>([]);
 const isLoading = ref(false);
@@ -61,19 +62,37 @@ export function useOffers() {
 
         try {
             const response = await apiFetch('/api/offers/');
-            if (response.ok) {
-                const data = await response.json();
-                if (Array.isArray(data)) {
-                    // Filter out already-expired offers client-side
-                    const nowSec = Date.now() / 1000
-                    offers.value = data.filter((o: any) => !o.expires_at_ts || o.expires_at_ts > nowSec);
-                    error.value = '';
-                }
+            if (!response.ok) {
+                throw await createHttpErrorFromResponse(response, {
+                    surface: 'market',
+                    scope: 'list',
+                    operation: silent ? 'background-refresh' : 'load-list',
+                    preserveExistingData: true,
+                    resourceLabel: 'لیست لفظ‌ها',
+                    fallbackMessage: 'دریافت لیست لفظ‌ها ممکن نشد.',
+                })
+            }
+
+            const data = await response.json();
+            if (Array.isArray(data)) {
+                // Filter out already-expired offers client-side
+                const nowSec = Date.now() / 1000
+                offers.value = data.filter((o: any) => !o.expires_at_ts || o.expires_at_ts > nowSec);
+                error.value = '';
             }
         } catch (e: any) {
             // Don't clear offers on transient errors to prevent blinking
             console.error('Fetch offers error:', e);
-            if (!silent) error.value = e.message;
+            if (!silent) {
+                error.value = getUserFacingErrorMessage(e, {
+                    surface: 'market',
+                    scope: 'list',
+                    operation: 'load-list',
+                    preserveExistingData: true,
+                    resourceLabel: 'لیست لفظ‌ها',
+                    fallbackMessage: 'دریافت لیست لفظ‌ها ممکن نشد.',
+                });
+            }
         } finally {
             if (!silent) isLoading.value = false;
             isFetching = false;
