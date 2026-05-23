@@ -37,7 +37,6 @@ const emit = defineEmits<{
 const tradingOfferId = ref<number | null>(null);
 const tradingAmount = ref<number | null>(null);
 const tradeError = ref('');
-const tradeSuccess = ref('');
 const tradeSuggestion = ref<TradeLotSuggestionState | null>(null);
 const cancelingOfferId = ref<number | null>(null);
 
@@ -270,8 +269,6 @@ async function executeTrade(offerId: number, quantity: number) {
 
     if (response.ok) {
       tradeSuggestion.value = null;
-      tradeSuccess.value = `معامله ${quantity} عدد با موفقیت انجام شد ✅`;
-      setTimeout(() => tradeSuccess.value = '', 4000);
       emit('trade-completed');
     } else {
       if (data?.error_code === 'TRADE_LOT_UNAVAILABLE' && Array.isArray(data.available_lots) && data.available_lots.length > 0) {
@@ -304,8 +301,6 @@ async function cancelOwnOffer(offerId: number) {
       tradeError.value = data?.detail || 'خطا در منقضی کردن لفظ';
       setTimeout(() => tradeError.value = '', 5000);
     } else {
-      tradeSuccess.value = 'لفظ با موفقیت منقضی شد';
-      setTimeout(() => tradeSuccess.value = '', 4000);
       emit('trade-completed');
     }
   } catch (e: any) {
@@ -335,12 +330,6 @@ async function cancelOwnOffer(offerId: number) {
     @close="closeTradeSuggestion"
     @select-lot="(amount) => tradeSuggestion && executeTrade(tradeSuggestion.offerId, amount)"
   />
-    <!-- Trade Success Toast -->
-    <transition name="fade">
-        <div v-if="tradeSuccess" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-gradient-to-r from-green-500 to-green-600 text-white px-5 py-2.5 rounded-2xl text-sm font-bold shadow-lg shadow-green-500/25">
-            {{ tradeSuccess }}
-        </div>
-    </transition>
     <!-- Trade Error Toast -->
     <transition name="fade">
         <div v-if="tradeError" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-gradient-to-r from-red-500 to-red-600 text-white px-5 py-2.5 rounded-2xl text-sm font-bold shadow-lg shadow-red-500/25">
