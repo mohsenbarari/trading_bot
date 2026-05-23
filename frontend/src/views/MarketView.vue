@@ -8,6 +8,7 @@ import { pushBackState, popBackState, clearBackStack } from '../composables/useB
 import OffersList from '../components/OffersList.vue'
 import OfferPreviewModal from '../components/OfferPreviewModal.vue'
 import { apiFetch, apiFetchJson } from '../utils/auth'
+import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy'
 
 interface Commodity {
   id: number
@@ -227,7 +228,13 @@ async function confirmOfferPreview() {
         previewWarning.value = payload.warning as OfferPriceWarning
         return
       }
-      throw new Error(payload?.detail || `خطا: ${response.status}`)
+      throw await createHttpErrorFromResponse(response, {
+        surface: 'market',
+        scope: 'form',
+        operation: 'submit',
+        userInitiated: true,
+        fallbackMessage: 'ثبت لفظ انجام نشد.',
+      }, payload)
     }
 
     successMessage.value = 'لفظ متنی ثبت شد'
@@ -237,7 +244,13 @@ async function confirmOfferPreview() {
     setTimeout(() => successMessage.value = '', 3000)
     fetchOffers()
   } catch (e: any) {
-    previewError.value = e.message || 'خطا در ثبت لفظ'
+    previewError.value = getUserFacingErrorMessage(e, {
+      surface: 'market',
+      scope: 'form',
+      operation: 'submit',
+      userInitiated: true,
+      fallbackMessage: 'خطا در ثبت لفظ',
+    })
   } finally {
     isSubmitting.value = false
   }
@@ -261,7 +274,13 @@ function parseAndSubmitTextOffer() {
   apiFetchJson('/api/offers/parse', {
       method: 'POST',
       body: JSON.stringify({ text: offerText.value })
-  })
+    }, {
+      surface: 'market',
+      scope: 'field',
+      operation: 'submit',
+      userInitiated: true,
+      fallbackMessage: 'خطا در پردازش متن',
+    })
   .then(res => {
       if (res.success && res.data) {
           pendingOfferPreview.value = res.data as ParsedOfferPreview
@@ -270,7 +289,13 @@ function parseAndSubmitTextOffer() {
           throw new Error(res.error || 'خطا در پردازش متن')
       }
   })
-  .catch(e => parseError.value = e.message)
+  .catch(e => parseError.value = getUserFacingErrorMessage(e, {
+      surface: 'market',
+      scope: 'field',
+      operation: 'submit',
+      userInitiated: true,
+      fallbackMessage: 'خطا در پردازش متن',
+  }))
   .finally(() => isSubmitting.value = false)
 }
 

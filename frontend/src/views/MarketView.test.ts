@@ -258,6 +258,10 @@ describe('MarketView.vue', () => {
     expect(marketViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/offers/parse', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ text: 'خرید طلای آب‌شده 50 عدد 222222' }),
+    }), expect.objectContaining({
+      surface: 'market',
+      scope: 'field',
+      operation: 'submit',
     }))
     expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
 
