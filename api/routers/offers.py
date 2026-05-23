@@ -740,6 +740,54 @@ async def expire_offer(
     return None
 
 
+@router.post("/cancel-all", status_code=status.HTTP_200_OK)
+async def cancel_all_active_offers(
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context)
+):
+    """
+    منقضی کردن تمام لفظ‌های فعال کاربر (برای دستور نشد)
+    """
+    owner_user = context.owner_user
+    
+    query = select(Offer).where(
+        Offer.user_id == owner_user.id,
+        Offer.status == OfferStatus.ACTIVE
+    )
+    result = await db.execute(query)
+    offers = result.scalars().all()
+    
+    if not offers:
+        return {"cancelled_count": 0}
+        
+    bot_token = os.getenv("BOT_TOKEN")
+    channel_id = settings.channel_id
+    from .realtime import publish_event
+    from core.cache import decr_active_offer_count
+    
+    async with httpx.AsyncClient() as client:
+        for offer in offers:
+            offer.status = OfferStatus.EXPIRED
+            
+            if offer.channel_message_id and bot_token and channel_id:
+                url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
+                payload = {
+                    "chat_id": channel_id,
+                    "message_id": offer.channel_message_id
+                }
+                try:
+                    await client.post(url, json=payload, timeout=5)
+                except Exception as e:
+                    logger.warning(f"Error removing channel buttons for offer {offer.id}: {e}")
+            
+            await publish_event("offer:expired", {"id": offer.id})
+            await decr_active_offer_count(owner_user.id)
+            
+    await db.commit()
+    
+    return {"cancelled_count": len(offers)}
+
+
 @router.post("/parse", response_model=ParseOfferResponse)
 async def parse_offer_text(
     request: ParseOfferRequest,

@@ -39,6 +39,7 @@ const tradingAmount = ref<number | null>(null);
 const tradeError = ref('');
 const tradeSuccess = ref('');
 const tradeSuggestion = ref<TradeLotSuggestionState | null>(null);
+const cancelingOfferId = ref<number | null>(null);
 
 // Confirmation state (double-tap like Telegram)
 const pendingConfirm = ref<string | null>(null); // "offerId:amount"
@@ -292,6 +293,28 @@ async function executeTrade(offerId: number, quantity: number) {
 function closeTradeSuggestion() {
   tradeSuggestion.value = null;
 }
+
+async function cancelOwnOffer(offerId: number) {
+  cancelingOfferId.value = offerId;
+  tradeError.value = '';
+  try {
+    const response = await apiFetch(`/api/offers/${offerId}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      tradeError.value = data?.detail || 'خطا در منقضی کردن لفظ';
+      setTimeout(() => tradeError.value = '', 5000);
+    } else {
+      tradeSuccess.value = 'لفظ با موفقیت منقضی شد';
+      setTimeout(() => tradeSuccess.value = '', 4000);
+      emit('trade-completed');
+    }
+  } catch (e: any) {
+    tradeError.value = e.message || 'خطا در ارتباط با سرور';
+    setTimeout(() => tradeError.value = '', 5000);
+  } finally {
+    cancelingOfferId.value = null;
+  }
+}
 </script>
 
 <template>
@@ -399,8 +422,15 @@ function closeTradeSuggestion() {
                 <span v-else>{{ amount }} عدد</span>
               </button>
             </div>
-            <div v-else-if="isOwnOffer(offer)" class="own-offer-indicator">
-              لفظ شما
+            <div v-else-if="isOwnOffer(offer)" class="own-offer-actions">
+              <button 
+                @click="cancelOwnOffer(offer.id)" 
+                :disabled="cancelingOfferId === offer.id"
+                class="cancel-own-offer-btn"
+              >
+                <Loader2 v-if="cancelingOfferId === offer.id" class="inline animate-spin mr-1" :size="14" />
+                منقضی کردن لفظ
+              </button>
             </div>
           </div>
 
@@ -709,15 +739,34 @@ function closeTradeSuggestion() {
 }
 
 /* ── Own offer ── */
-.own-offer-indicator {
+.own-offer-actions {
   width: 100%;
-  text-align: center;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--ds-text-placeholder);
-  background: var(--ds-bg-hover);
-  font-weight: 500;
+  display: flex;
+}
+
+.cancel-own-offer-btn {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-600);
+  border: 1px solid var(--ds-danger-200);
+  border-radius: var(--ds-radius-sm);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.cancel-own-offer-btn:hover {
+  background: var(--ds-danger-100);
+}
+
+.cancel-own-offer-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 /* ── Soft pulse for confirm state ── */

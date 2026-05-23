@@ -9,6 +9,98 @@ const route = useRoute()
 const isExpanded = ref(false)
 const notificationStore = useNotificationStore()
 
+// Draggable FAB state
+const fabPosition = ref({ x: null as number | null, y: null as number | null })
+const isDragging = ref(false)
+const dragStart = ref({ x: 0, y: 0 })
+const startPos = ref({ x: 0, y: 0 })
+
+function loadFabPosition() {
+  const saved = localStorage.getItem('fab_position')
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved)
+      if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+        fabPosition.value = parsed
+      }
+    } catch(e){}
+  }
+}
+
+const fabStyle = computed(() => {
+  if (fabPosition.value.x !== null && fabPosition.value.y !== null) {
+    return {
+      left: `${fabPosition.value.x}px`,
+      top: `${fabPosition.value.y}px`,
+      bottom: 'auto',
+      right: 'auto'
+    }
+  }
+  return {}
+})
+
+function onDragStart(e: TouchEvent | MouseEvent) {
+  const evt = e instanceof TouchEvent ? e.touches[0] : e
+  dragStart.value = { x: evt.clientX, y: evt.clientY }
+  
+  if (fabPosition.value.x === null) {
+    const el = document.querySelector('.fab-container') as HTMLElement
+    if (el) {
+      const rect = el.getBoundingClientRect()
+      startPos.value = { x: rect.left, y: rect.top }
+    } else {
+      startPos.value = { x: 16, y: window.innerHeight - 60 }
+    }
+  } else {
+    startPos.value = { x: fabPosition.value.x, y: fabPosition.value.y }
+  }
+  
+  isDragging.value = false
+  
+  if (e instanceof MouseEvent) {
+    document.addEventListener('mousemove', onDragMove)
+    document.addEventListener('mouseup', onDragEnd)
+  } else {
+    document.addEventListener('touchmove', onDragMove, { passive: false })
+    document.addEventListener('touchend', onDragEnd)
+  }
+}
+
+function onDragMove(e: TouchEvent | MouseEvent) {
+  const evt = e instanceof TouchEvent ? e.touches[0] : (e as MouseEvent)
+  const dx = evt.clientX - dragStart.value.x
+  const dy = evt.clientY - dragStart.value.y
+  
+  if (!isDragging.value && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+    isDragging.value = true
+  }
+  
+  if (isDragging.value) {
+    if (e.cancelable) e.preventDefault()
+    let newX = startPos.value.x + dx
+    let newY = startPos.value.y + dy
+    
+    const maxX = window.innerWidth - 44
+    const maxY = window.innerHeight - 44
+    newX = Math.max(0, Math.min(newX, maxX))
+    newY = Math.max(0, Math.min(newY, maxY))
+    
+    fabPosition.value = { x: newX, y: newY }
+  }
+}
+
+function onDragEnd(e: Event) {
+  document.removeEventListener('mousemove', onDragMove)
+  document.removeEventListener('mouseup', onDragEnd)
+  document.removeEventListener('touchmove', onDragMove)
+  document.removeEventListener('touchend', onDragEnd)
+  
+  if (isDragging.value) {
+    localStorage.setItem('fab_position', JSON.stringify(fabPosition.value))
+    setTimeout(() => { isDragging.value = false }, 50)
+  }
+}
+
 // Auto-collapse on the market page
 const isMarketPage = computed(() => route.name === 'market')
 const isMessengerPage = computed(() => route.name === 'messenger')
@@ -19,6 +111,7 @@ watch(() => route.name, () => {
 })
 
 onMounted(async () => {
+  loadFabPosition()
   const token = localStorage.getItem('auth_token')
   if (!token) return
   void primeCurrentUserSummary()
@@ -43,6 +136,7 @@ const navItems = computed(() => {
 })
 
 function toggleNav() {
+  if (isDragging.value) return;
   isExpanded.value = !isExpanded.value
 }
 </script>
@@ -74,7 +168,7 @@ function toggleNav() {
   </nav>
 
   <!-- ═══ Collapsed FAB on market & messenger ═══ -->
-  <div v-else class="fab-container">
+  <div v-else class="fab-container" :style="fabStyle">
     <!-- Overlay -->
     <transition name="fade">
       <div v-if="isExpanded" class="fab-overlay" @click="isExpanded = false"></div>
@@ -104,7 +198,13 @@ function toggleNav() {
     </transition>
 
     <!-- Toggle button -->
-    <button class="fab-btn" @click="toggleNav" :class="{ 'fab-open': isExpanded }">
+    <button 
+      class="fab-btn" 
+      @click="toggleNav" 
+      @mousedown="onDragStart"
+      @touchstart="onDragStart"
+      :class="{ 'fab-open': isExpanded }"
+    >
       <transition name="spin" mode="out-in">
         <X v-if="isExpanded" :size="20" key="close" />
         <Menu v-else :size="20" key="menu" />
