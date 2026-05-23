@@ -175,7 +175,10 @@ async def listen_redis_events(websocket: WebSocket, user_id: int = None):
                 "events:offer:updated",
                 "events:offer:cancelled",
                 "events:offer:completed",
-                "events:trade:created"
+                "events:trade:created",
+                "events:market:opened",
+                "events:market:closed",
+                "events:market:notice_hidden"
             ]
             # Subscribe to user-specific notification channel
             if user_id:
@@ -237,6 +240,9 @@ async def event_generator(user_id: int):
             "events:offer:expired",
             "events:offer:updated",
             "events:trade:created",
+            "events:market:opened",
+            "events:market:closed",
+            "events:market:notice_hidden"
         ]
         if user_id:
             channels.append(f"notifications:{user_id}")
