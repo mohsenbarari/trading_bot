@@ -715,7 +715,7 @@ onUnmounted(() => {
 
 .text-offer-input {
   width: 100%;
-  padding: 0.75rem 1rem 0.75rem 3.5rem;
+  padding: 0.75rem 3.5rem 0.75rem 1rem;
   background: var(--ds-bg-inset);
   border: 1px solid var(--ds-border-light);
   border-radius: var(--ds-radius-lg);
@@ -738,7 +738,7 @@ onUnmounted(() => {
 
 .send-btn {
   position: absolute;
-  left: 0.5rem;
+  right: 0.5rem;
   top: 50%;
   transform: translateY(-50%);
   padding: 0.5rem;
