@@ -847,6 +847,54 @@ def has_trade_indicator(text: str) -> bool:
     return bool(re.search(pattern, offer_part))
 
 
+@router.message(F.text.func(lambda text: text and text.strip() == "نشد"))
+async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext, user: Optional[User]):
+    if not user:
+        return
+        
+    async with AsyncSessionLocal() as session:
+        query = select(Offer).where(
+            Offer.user_id == user.id,
+            Offer.status == OfferStatus.ACTIVE
+        )
+        result = await session.execute(query)
+        offers = result.scalars().all()
+        
+        if not offers:
+            await message.answer("شما هیچ لفظ فعالی ندارید.")
+            return
+            
+        import os
+        import httpx
+        from api.routers.realtime import publish_event
+        from core.cache import decr_active_offer_count
+        
+        bot_token = os.getenv("BOT_TOKEN")
+        channel_id = settings.channel_id
+        
+        async with httpx.AsyncClient() as client:
+            for offer in offers:
+                offer.status = OfferStatus.EXPIRED
+                
+                if offer.channel_message_id and bot_token and channel_id:
+                    url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
+                    payload = {
+                        "chat_id": channel_id,
+                        "message_id": offer.channel_message_id
+                    }
+                    try:
+                        await client.post(url, json=payload, timeout=5)
+                    except Exception:
+                        pass
+                
+                await publish_event("offer:expired", {"id": offer.id})
+                await decr_active_offer_count(user.id)
+                
+        await session.commit()
+        
+    await message.answer(f"✅ تمام لفظ‌های فعال شما ({len(offers)} لفظ) منقضی شدند.")
+
+
 @router.message(F.text.func(has_trade_indicator))
 async def handle_text_offer(message: types.Message, state: FSMContext, user: Optional[User], bot: Bot):
     """پردازش لفظ متنی (خ/ف)"""

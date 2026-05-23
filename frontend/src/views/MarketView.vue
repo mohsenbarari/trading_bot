@@ -266,6 +266,10 @@ function parseAndSubmitTextOffer() {
     return
   }
   if (!offerText.value.trim()) return
+  if (offerText.value.trim() === 'نشد') {
+    cancelAllOffers()
+    return
+  }
   isSubmitting.value = true
   parseError.value = ''
   previewError.value = ''
@@ -297,6 +301,37 @@ function parseAndSubmitTextOffer() {
       fallbackMessage: 'خطا در پردازش متن',
   }))
   .finally(() => isSubmitting.value = false)
+}
+
+async function cancelAllOffers() {
+  isSubmitting.value = true
+  parseError.value = ''
+  try {
+    const response = await apiFetch('/api/offers/cancel-all', { method: 'POST' })
+    if (!response.ok) {
+      throw await createHttpErrorFromResponse(response, {
+        surface: 'market',
+        scope: 'field',
+        operation: 'submit',
+        userInitiated: true,
+        fallbackMessage: 'خطا در لغو لفظ‌ها',
+      })
+    }
+    successMessage.value = 'همه لفظ‌های فعال شما منقضی شدند'
+    offerText.value = ''
+    setTimeout(() => successMessage.value = '', 3000)
+    fetchOffers()
+  } catch (e: any) {
+    parseError.value = getUserFacingErrorMessage(e, {
+      surface: 'market',
+      scope: 'field',
+      operation: 'submit',
+      userInitiated: true,
+      fallbackMessage: 'خطا در لغو لفظ‌ها',
+    })
+  } finally {
+    isSubmitting.value = false
+  }
 }
 
 async function fetchCurrentUser() {
@@ -358,13 +393,13 @@ onUnmounted(() => {
       <div class="header-controls">
         <div class="tabs-container">
           <button 
-            v-for="tab in ['all', 'buy', 'sell']" 
+            v-for="tab in ['all', 'buy', 'sell', 'my']" 
             :key="tab"
             @click="filterType = tab as any"
             class="tab-btn"
             :class="{ active: filterType === tab }"
           >
-            {{ tab === 'all' ? 'همه' : (tab === 'buy' ? 'خریدار' : 'فروشنده') }}
+            {{ tab === 'all' ? 'همه' : (tab === 'buy' ? 'خریدار' : (tab === 'sell' ? 'فروشنده' : 'لفظ های شما')) }}
           </button>
         </div>
 

@@ -1,7 +1,7 @@
 import { computed, ref, type Ref } from 'vue'
 
 type SortDirection = 'none' | 'asc' | 'desc'
-type FilterType = 'all' | 'buy' | 'sell'
+type FilterType = 'all' | 'buy' | 'sell' | 'my'
 
 type SortableOffer = {
   offer_type: 'buy' | 'sell' | string
@@ -23,7 +23,9 @@ export function useTradingSort<T extends SortableOffer>(offers: Ref<T[]>) {
   const filteredOffers = computed(() => {
     let result = offers.value
 
-    if (filterType.value !== 'all') {
+    if (filterType.value === 'my') {
+      result = result.filter((offer: any) => offer.is_own_offer)
+    } else if (filterType.value !== 'all') {
       result = result.filter((offer) => offer.offer_type === filterType.value)
     }
 
