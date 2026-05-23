@@ -155,7 +155,6 @@ async function requestOtp() {
     }
     
     const data = await res.json()
-      localStorage.removeItem('suspended_refresh_token')
     lastMethod.value = data.method
     
     // If Telegram -> 30s timer, else 120s
@@ -187,7 +186,6 @@ async function resendOtpSms() {
     }
     
     const data = await res.json()
-      localStorage.removeItem('suspended_refresh_token')
     
     // SMS Sent successfully
     lastMethod.value = 'sms'
