@@ -1,6 +1,5 @@
 services:
   app:
-    build: .
     image: trading_bot_base
     container_name: trading_bot_app
     restart: always
@@ -32,7 +31,6 @@ services:
       - trading_net
 
   bot:
-    build: .
     image: trading_bot_base
     container_name: trading_bot_bot
     restart: always
@@ -48,7 +46,6 @@ services:
       - trading_net
 
   sync_worker:
-    build: .
     image: trading_bot_base
     container_name: trading_bot_sync_worker
     profiles: ["disabled"]
@@ -73,7 +70,6 @@ services:
       - trading_net
 
   migration:
-    build: .
     image: trading_bot_base
     container_name: trading_bot_migration
 
