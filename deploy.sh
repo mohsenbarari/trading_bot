@@ -206,15 +206,11 @@ case "$TARGET" in
         deploy_iran
         ;;
     foreign)
-        print_header "🛑 Stopping containers to free RAM for build..."
-        docker compose down || true
         prepare_pip_packages
         build_frontend
         deploy_foreign
         ;;
     all)
-        print_header "🛑 Stopping containers to free RAM for build..."
-        docker compose down || true
         prepare_pip_packages
         build_frontend
         deploy_iran
