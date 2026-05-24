@@ -183,10 +183,8 @@ deploy_foreign() {
 
     cd "$PROJECT_DIR"
     # Docker containers are already stopped before build to free RAM
-    echo "⏳ Building Docker image sequentially without BuildKit to prevent server crash..."
-    DOCKER_BUILDKIT=0 docker build -t trading_bot_base .
-    echo "⏳ Starting foreign services..."
-    docker compose up -d --wait --wait-timeout 180
+    echo "⏳ Waiting for foreign services to become ready..."
+    docker compose up -d --build --wait --wait-timeout 180
 
     echo "✅ Foreign deployment complete!"
     docker compose ps
