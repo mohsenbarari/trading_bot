@@ -181,7 +181,7 @@ deploy_foreign() {
     print_header "🌍 Deploying Foreign Server (local)"
 
     cd "$PROJECT_DIR"
-    docker compose down
+    # Docker containers are already stopped before build to free RAM
     echo "⏳ Waiting for foreign services to become ready..."
     docker compose up -d --build --wait --wait-timeout 180
 
@@ -205,11 +205,15 @@ case "$TARGET" in
         deploy_iran
         ;;
     foreign)
+        print_header "🛑 Stopping containers to free RAM for build..."
+        docker compose down || true
         prepare_pip_packages
         build_frontend
         deploy_foreign
         ;;
     all)
+        print_header "🛑 Stopping containers to free RAM for build..."
+        docker compose down || true
         prepare_pip_packages
         build_frontend
         deploy_iran
