@@ -81,7 +81,8 @@ build_frontend() {
     print_header "📦 Building Frontend"
     cd "$FRONTEND_DIR"
     npm install --silent
-    npm run build
+    # Limit Node memory to prevent OOM killer on low-RAM servers
+    NODE_OPTIONS="--max-old-space-size=512" npm run build
 
     if [ ! -d "$DIST_DIR" ]; then
         echo "❌ Build directory ($DIST_DIR) not found!"
