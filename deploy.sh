@@ -81,8 +81,8 @@ build_frontend() {
     print_header "📦 Building Frontend"
     cd "$FRONTEND_DIR"
     npm install --silent
-    # Limit Node memory to prevent OOM killer on low-RAM servers
-    NODE_OPTIONS="--max-old-space-size=512" npm run build
+    # Limit Node memory to 1024MB to prevent OOM
+    NODE_OPTIONS="--max-old-space-size=1024" npm run build
 
     if [ ! -d "$DIST_DIR" ]; then
         echo "❌ Build directory ($DIST_DIR) not found!"
@@ -183,8 +183,10 @@ deploy_foreign() {
 
     cd "$PROJECT_DIR"
     # Docker containers are already stopped before build to free RAM
-    echo "⏳ Waiting for foreign services to become ready..."
-    docker compose up -d --build --wait --wait-timeout 180
+    echo "⏳ Building Docker image sequentially without BuildKit to prevent server crash..."
+    DOCKER_BUILDKIT=0 docker build -t trading_bot_base .
+    echo "⏳ Starting foreign services..."
+    docker compose up -d --wait --wait-timeout 180
 
     echo "✅ Foreign deployment complete!"
     docker compose ps
