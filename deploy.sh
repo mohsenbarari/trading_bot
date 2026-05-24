@@ -134,6 +134,8 @@ deploy_iran() {
     print_header "🇮🇷 Deploying to Iran Server ($IRAN_HOST)"
 
     cd "$PROJECT_DIR"
+    echo "⏳ Building Docker image for Iran Server explicitly..."
+    DOCKER_BUILDKIT=1 docker build -f Dockerfile.iran -t trading_bot_base_iran .
 
     # 2a. Check for uncommitted changes & push to GitHub
     echo "📤 Syncing code via git..."
@@ -182,9 +184,11 @@ deploy_foreign() {
     print_header "🌍 Deploying Foreign Server (local)"
 
     cd "$PROJECT_DIR"
-    # Docker containers are already stopped before build to free RAM
+    echo "⏳ Building Docker image explicitly to prevent compose parallel export OOM..."
+    DOCKER_BUILDKIT=1 docker build -t trading_bot_base .
+
     echo "⏳ Waiting for foreign services to become ready..."
-    docker compose up -d --build --wait --wait-timeout 180
+    docker compose up -d --wait --wait-timeout 180
 
     echo "✅ Foreign deployment complete!"
     docker compose ps
