@@ -2,7 +2,6 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { ArrowUp, ArrowDown, ArrowUpDown, X, Loader2, Send, ChevronLeft } from 'lucide-vue-next'
 import { useOffers } from '../composables/useOffers'
-import { useTradingSort } from '../composables/useTradingSort'
 import { useWebSocket } from '../composables/useWebSocket'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import OffersList from '../components/OffersList.vue'
@@ -70,15 +69,19 @@ const marketRuntime = ref<MarketRuntimeState>({
   next_transition_at: null,
 })
 
-const {
-  filterType,
-  sortCommodity,
-  sortDirection,
-  showSortPanel,
-  filteredOffers,
-  toggleSort,
-  clearSort,
-} = useTradingSort(offers)
+const filterType = ref<'all' | 'buy' | 'sell' | 'my'>('all')
+
+const filteredOffers = computed(() => {
+  let list = offers.value || []
+  if (filterType.value !== 'all') {
+    if (filterType.value === 'my') {
+      list = list.filter(o => o.is_own_offer)
+    } else {
+      list = list.filter(o => o.offer_type === filterType.value)
+    }
+  }
+  return list
+})
 
 const commodities = ref<Commodity[]>([])
 const commoditiesLoading = ref(false)
@@ -376,7 +379,7 @@ onUnmounted(() => {
 <template>
   <div class="market-page ds-page">
 
-    <!-- Header: Filters & Sort -->
+    <!-- Header: Filters -->
     <div class="market-header">
       <div class="header-controls">
         <div class="tabs-container">
@@ -390,47 +393,7 @@ onUnmounted(() => {
             {{ tab === 'all' ? 'همه' : (tab === 'buy' ? 'خریدار' : (tab === 'sell' ? 'فروشنده' : 'لفظ های شما')) }}
           </button>
         </div>
-
-        <button 
-          @click="showSortPanel = !showSortPanel"
-          class="sort-toggle-btn"
-          :class="{ active: showSortPanel || sortDirection !== 'none' }"
-        >
-          <ArrowUpDown v-if="sortDirection === 'none'" :size="18" />
-          <ArrowUp v-else-if="sortDirection === 'asc'" :size="18" />
-          <ArrowDown v-else :size="18" />
-          <span class="btn-label">مرتب‌سازی</span>
-        </button>
       </div>
-
-      <transition name="slide">
-        <div v-if="showSortPanel" class="sort-panel ds-card">
-          <div class="sort-panel-header">
-             <span class="panel-title">انتخاب کالا برای مرتب‌سازی قیمت:</span>
-             <button v-if="sortDirection !== 'none'" @click="clearSort" class="clear-sort-btn">
-                <X :size="14" /> حذف فیلتر
-             </button>
-          </div>
-          
-          <div v-if="commoditiesLoading" class="panel-loading">
-             <Loader2 class="animate-spin" :size="24" />
-          </div>
-          
-          <div v-else class="commodity-grid">
-            <button
-              v-for="c in commodities"
-              :key="c.id"
-              @click="toggleSort(c.name)"
-              class="commodity-btn"
-              :class="{ active: sortCommodity === c.name }"
-            >
-              {{ c.name }}
-              <span v-if="sortCommodity === c.name && sortDirection === 'asc'" class="dir-arrow">↑</span>
-              <span v-if="sortCommodity === c.name && sortDirection === 'desc'" class="dir-arrow">↓</span>
-            </button>
-          </div>
-        </div>
-      </transition>
     </div>
 
     <transition name="fade">
