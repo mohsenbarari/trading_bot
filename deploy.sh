@@ -34,6 +34,124 @@ print_header() {
     echo "============================================"
 }
 
+resource_guard_enabled() {
+    [ "${DEPLOY_RESOURCE_GUARD_ENABLED:-1}" != "0" ]
+}
+
+sample_cpu_usage() {
+    read -r _ user nice system idle iowait irq softirq steal _ < /proc/stat
+    local total=$((user + nice + system + idle + iowait + irq + softirq + steal))
+    local idle_all=$((idle + iowait))
+    echo "$total $idle_all"
+}
+
+sample_memory_usage() {
+    awk '
+        /^MemTotal:/ {mt=$2}
+        /^MemAvailable:/ {ma=$2}
+        /^SwapTotal:/ {st=$2}
+        /^SwapFree:/ {sf=$2}
+        END {
+            mu=mt-ma
+            mp=(mt>0)?(mu*100/mt):0
+            su=st-sf
+            sp=(st>0)?(su*100/st):0
+            printf "%d %d %d %d %d %d\n", mt, ma, mu, mp, st, sp
+        }
+    ' /proc/meminfo
+}
+
+terminate_guarded_process() {
+    local cmd_pid="$1"
+    pkill -TERM -P "$cmd_pid" 2>/dev/null || true
+    kill -TERM "$cmd_pid" 2>/dev/null || true
+    sleep 5
+    pkill -KILL -P "$cmd_pid" 2>/dev/null || true
+    kill -KILL "$cmd_pid" 2>/dev/null || true
+}
+
+run_with_local_resource_guard() {
+    local label="$1"
+    shift
+
+    if ! resource_guard_enabled; then
+        "$@"
+        return $?
+    fi
+
+    local sample_seconds="${DEPLOY_RESOURCE_GUARD_SAMPLE_SECONDS:-5}"
+    local max_streak="${DEPLOY_RESOURCE_GUARD_MAX_STREAK:-4}"
+    local max_mem_percent="${DEPLOY_RESOURCE_GUARD_MAX_MEM_PERCENT:-95}"
+    local max_swap_percent="${DEPLOY_RESOURCE_GUARD_MAX_SWAP_PERCENT:-70}"
+    local min_mem_available_kb="${DEPLOY_RESOURCE_GUARD_MIN_MEM_AVAILABLE_KB:-262144}"
+    local cpu_with_high_mem_percent="${DEPLOY_RESOURCE_GUARD_CPU_WITH_HIGH_MEM_PERCENT:-97}"
+    local cpu_only_percent="${DEPLOY_RESOURCE_GUARD_CPU_ONLY_PERCENT:-99}"
+    local cpu_only_max_streak="${DEPLOY_RESOURCE_GUARD_CPU_ONLY_MAX_STREAK:-12}"
+    local sample_index=0
+    local pressure_streak=0
+    local cpu_only_streak=0
+    local prev_total prev_idle
+
+    print_header "🛡️ Resource Guard: $label"
+    echo "   sample=${sample_seconds}s mem>=${max_mem_percent}% swap>=${max_swap_percent}% cpu>=${cpu_only_percent}%"
+
+    "$@" &
+    local cmd_pid=$!
+    read -r prev_total prev_idle <<EOF
+$(sample_cpu_usage)
+EOF
+
+    while kill -0 "$cmd_pid" 2>/dev/null; do
+        sleep "$sample_seconds"
+        sample_index=$((sample_index + 1))
+
+        local total idle total_delta idle_delta cpu_percent
+        read -r total idle <<EOF
+$(sample_cpu_usage)
+EOF
+        total_delta=$((total - prev_total))
+        idle_delta=$((idle - prev_idle))
+        prev_total=$total
+        prev_idle=$idle
+        if [ "$total_delta" -le 0 ]; then
+            cpu_percent=0
+        else
+            cpu_percent=$(((1000 * (total_delta - idle_delta) / total_delta + 5) / 10))
+        fi
+
+        local mem_total mem_available mem_used mem_percent swap_total swap_percent
+        read -r mem_total mem_available mem_used mem_percent swap_total swap_percent <<EOF
+$(sample_memory_usage)
+EOF
+
+        echo "   [guard] t=$((sample_index * sample_seconds))s cpu=${cpu_percent}% mem=${mem_percent}% avail=$((mem_available / 1024))MB swap=${swap_percent}%"
+
+        if [ "$mem_available" -lt "$min_mem_available_kb" ] \
+            || [ "$mem_percent" -ge "$max_mem_percent" ] \
+            || [ "$swap_percent" -ge "$max_swap_percent" ] \
+            || { [ "$cpu_percent" -ge "$cpu_with_high_mem_percent" ] && [ "$mem_percent" -ge "$((max_mem_percent - 2))" ]; }; then
+            pressure_streak=$((pressure_streak + 1))
+        else
+            pressure_streak=0
+        fi
+
+        if [ "$cpu_percent" -ge "$cpu_only_percent" ]; then
+            cpu_only_streak=$((cpu_only_streak + 1))
+        else
+            cpu_only_streak=0
+        fi
+
+        if [ "$pressure_streak" -ge "$max_streak" ] || [ "$cpu_only_streak" -ge "$cpu_only_max_streak" ]; then
+            echo "❌ Resource guard triggered for '$label'. Stopping the running command to protect the server."
+            terminate_guarded_process "$cmd_pid"
+            wait "$cmd_pid"
+            return 124
+        fi
+    done
+
+    wait "$cmd_pid"
+}
+
 # ==========================================
 # Auto Cleanup Logic (Every 10 deploys)
 # ==========================================
@@ -79,10 +197,7 @@ print_header "🚀 Deploy: $TARGET"
 # ==========================================
 build_frontend() {
     print_header "📦 Building Frontend"
-    cd "$FRONTEND_DIR"
-    npm install --silent
-    # Limit Node memory to 1024MB to prevent OOM
-    NODE_OPTIONS="--max-old-space-size=1024" npm run build
+    run_with_local_resource_guard "Frontend build" bash -lc "cd \"$FRONTEND_DIR\" && npm install --silent && NODE_OPTIONS=\"--max-old-space-size=1024\" npm run build"
 
     if [ ! -d "$DIST_DIR" ]; then
         echo "❌ Build directory ($DIST_DIR) not found!"
@@ -185,10 +300,10 @@ deploy_foreign() {
 
     cd "$PROJECT_DIR"
     echo "⏳ Building Docker image explicitly to prevent compose parallel export OOM..."
-    DOCKER_BUILDKIT=1 docker build -t trading_bot_base .
+    run_with_local_resource_guard "Foreign Docker image build" env DOCKER_BUILDKIT=1 docker build -t trading_bot_base .
 
     echo "⏳ Waiting for foreign services to become ready..."
-    docker compose up -d --wait --wait-timeout 180
+    run_with_local_resource_guard "Foreign service startup" docker compose up -d --wait --wait-timeout 180
 
     echo "✅ Foreign deployment complete!"
     docker compose ps
