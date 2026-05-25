@@ -149,12 +149,15 @@ describe('useNotificationRuntime', () => {
 
     emitWsEvent(WS_NOTIFICATION_EVENTS.wsReconnect)
     emitWsEvent(WS_NOTIFICATION_EVENTS.sessionRevoked)
-    expect(notificationRuntimeMocks.store.fetchInitialCounts).toHaveBeenCalledTimes(2)
+    expect(notificationRuntimeMocks.store.fetchInitialCounts).toHaveBeenCalledTimes(1)
     expect(notificationRuntimeMocks.ensureSessionValidation).toHaveBeenCalledTimes(2)
 
     setRoute('/market', '/market')
     await nextTick()
     expect(notificationRuntimeMocks.connect).toHaveBeenCalledTimes(2)
+    expect(notificationRuntimeMocks.store.fetchInitialCounts).toHaveBeenCalledTimes(1)
+
+    emitWsEvent(WS_NOTIFICATION_EVENTS.wsReconnect)
     expect(notificationRuntimeMocks.store.fetchInitialCounts).toHaveBeenCalledTimes(2)
 
     window.dispatchEvent(new CustomEvent(BROWSER_NOTIFICATION_CLICK_EVENT, {
