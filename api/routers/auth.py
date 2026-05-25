@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, Security
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_, update
 from datetime import datetime, timedelta
 import logging
 from pydantic import BaseModel
@@ -9,6 +9,7 @@ import random
 import hashlib
 import hmac
 import time
+from jose import JWTError, jwt
 from core.db import get_db
 from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
 from models.accountant_relation import AccountantRelationStatus
@@ -26,7 +27,7 @@ from bot.utils.redis_helpers import get_redis
 from core.notifications import send_telegram_message
 from core.sms import send_otp_sms, send_sms
 from core.connectivity import is_internet_connected
-from api.deps import get_current_user, oauth2_scheme
+from api.deps import get_current_user, get_current_user_optional, oauth2_scheme, oauth2_scheme_optional, api_key_header
 import schemas
 
 
@@ -59,6 +60,9 @@ from core.services.customer_relation_service import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+TEST_ACCOUNT_SWITCH_CLAIM = "dev_account_switch"
+TEST_ACCOUNT_SWITCH_DEVICE_NAME = "Dashboard Test Switcher"
 
 
 def _raise_inactive_account_error() -> None:
@@ -98,6 +102,83 @@ def _extract_device_info(request) -> dict:
 def _login_home_server(raw_request: Request, *, is_telegram: bool = False) -> str:
     return server_from_request(raw_request, force_telegram_foreign=is_telegram)
 
+
+def _extract_request_real_ip(raw_request: Request) -> str:
+    client_ip = raw_request.client.host if raw_request.client else ""
+    forwarded = raw_request.headers.get("x-forwarded-for", "")
+    return forwarded.split(",")[0].strip() if forwarded else client_ip
+
+
+def _is_local_dev_request(raw_request: Request) -> bool:
+    real_ip = _extract_request_real_ip(raw_request)
+    if real_ip in ("127.0.0.1", "::1", "localhost"):
+        return True
+    return real_ip.startswith("172.") or real_ip.startswith("192.168.") or real_ip.startswith("10.")
+
+
+def _has_test_switch_claim(token: Optional[str]) -> bool:
+    if not token:
+        return False
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+    except JWTError:
+        return False
+
+    return payload.get(TEST_ACCOUNT_SWITCH_CLAIM) is True
+
+
+def _test_switch_token_data() -> dict:
+    return {TEST_ACCOUNT_SWITCH_CLAIM: True}
+
+
+def _serialize_test_switch_user_option(
+    user: User,
+    *,
+    is_accountant: bool,
+    is_customer: bool,
+    customer_tier: CustomerTier | None,
+) -> "TestSwitchUserOption":
+    return TestSwitchUserOption(
+        id=user.id,
+        full_name=user.full_name,
+        account_name=user.account_name,
+        mobile_number=user.mobile_number,
+        role=user.role,
+        is_accountant=is_accountant,
+        is_customer=is_customer,
+        customer_tier=customer_tier,
+    )
+
+
+def _assert_test_switch_access(
+    raw_request: Request,
+    *,
+    current_user: User | None,
+    token: str | None,
+    dev_key: str | None,
+) -> None:
+    if dev_key and dev_key == settings.dev_api_key:
+        return
+
+    if _is_local_dev_request(raw_request):
+        return
+
+    if current_user and current_user.role == UserRole.SUPER_ADMIN:
+        return
+
+    if _has_test_switch_claim(token):
+        return
+
+    raise HTTPException(
+        status_code=403,
+        detail="سوییچ موقت حساب فقط در محیط توسعه یا نشست‌های سوییچ‌شده مجاز است",
+    )
+
 # --- Schemas ---
 class Token(BaseModel):
     access_token: str
@@ -128,6 +209,17 @@ class RegisterComplete(BaseModel):
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
+
+
+class TestSwitchUserOption(BaseModel):
+    id: int
+    full_name: str | None = None
+    account_name: str
+    mobile_number: str
+    role: UserRole
+    is_accountant: bool = False
+    is_customer: bool = False
+    customer_tier: CustomerTier | None = None
 
 # --- Endpoints ---
 
@@ -370,8 +462,6 @@ async def refresh_access_token(
     تمدید توکن دسترسی با استفاده از refresh token.
     Validates session is still active.
     """
-    from jose import jwt, JWTError
-    
     try:
         payload = jwt.decode(
             req.refresh_token,
@@ -412,13 +502,16 @@ async def refresh_access_token(
         
         # Issue new token
         access_token_expires = timedelta(minutes=60)
-        
-        new_access = create_access_token(
-            subject=user.id,
-            expires_delta=access_token_expires,
-            session_id=str(session.id),
-            server_id=session.home_server or user.home_server or SERVER_FOREIGN,
-        )
+        access_token_kwargs = {
+            "subject": user.id,
+            "expires_delta": access_token_expires,
+            "session_id": str(session.id),
+            "server_id": session.home_server or user.home_server or SERVER_FOREIGN,
+        }
+        if payload.get(TEST_ACCOUNT_SWITCH_CLAIM) is True:
+            access_token_kwargs["data"] = _test_switch_token_data()
+
+        new_access = create_access_token(**access_token_kwargs)
         
         await db.commit()
         
@@ -435,15 +528,9 @@ async def refresh_access_token(
 @router.post("/dev-login")
 async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
     """ورود ویژه‌ی توسعه‌دهنده (بدون نیاز به کد، محدودیت سشن و ... مقدور از روی رزولوشن محلی)"""
-    client_ip = raw_request.client.host if raw_request.client else ""
-    forwarded = raw_request.headers.get("x-forwarded-for", "")
-    real_ip = forwarded.split(",")[0].strip() if forwarded else client_ip
-    
-    is_local = real_ip in ("127.0.0.1", "::1", "localhost")
-    if not is_local:
-        if real_ip.startswith("172.") or real_ip.startswith("192.168.") or real_ip.startswith("10."):
-            is_local = True
-            
+    real_ip = _extract_request_real_ip(raw_request)
+    is_local = _is_local_dev_request(raw_request)
+
     dev_key = raw_request.headers.get("X-DEV-API-KEY")
     if not is_local and (not dev_key or dev_key != settings.dev_api_key):
         raise HTTPException(status_code=403, detail="دسترسی فقط از محیط برنامه‌نویسی یا با کلید امکان‌پذیر است")
@@ -503,6 +590,125 @@ async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
         "token_type": "bearer",
         "user_id": user.id,
         "role": user.role
+    }
+
+
+@router.get("/dev-switch/users", response_model=list[TestSwitchUserOption])
+async def list_test_switch_users(
+    raw_request: Request,
+    search: str | None = Query(default=None, min_length=1, max_length=100),
+    limit: int = Query(default=80, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    dev_key: Optional[str] = Security(api_key_header),
+):
+    _assert_test_switch_access(
+        raw_request,
+        current_user=current_user,
+        token=token,
+        dev_key=dev_key,
+    )
+
+    stmt = select(User).where(User.is_deleted == False).order_by(User.id.desc())
+    if search:
+        pattern = f"%{search.strip()}%"
+        stmt = stmt.where(
+            or_(
+                User.full_name.ilike(pattern),
+                User.account_name.ilike(pattern),
+                User.mobile_number.ilike(pattern),
+            )
+        )
+    stmt = stmt.limit(limit)
+    users = (await db.execute(stmt)).scalars().all()
+
+    result: list[TestSwitchUserOption] = []
+    for listed_user in users:
+        customer_relation = await get_active_customer_relation_for_customer(db, listed_user.id)
+        result.append(
+            _serialize_test_switch_user_option(
+                listed_user,
+                is_accountant=await is_user_accountant(db, listed_user.id),
+                is_customer=customer_relation is not None,
+                customer_tier=customer_relation.customer_tier if customer_relation else None,
+            )
+        )
+
+    return result
+
+
+@router.post("/dev-switch/{target_user_id}", response_model=Token)
+async def switch_test_account(
+    target_user_id: int,
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    dev_key: Optional[str] = Security(api_key_header),
+):
+    _assert_test_switch_access(
+        raw_request,
+        current_user=current_user,
+        token=token,
+        dev_key=dev_key,
+    )
+
+    target_user = await db.get(User, target_user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+
+    if target_user.is_deleted:
+        raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
+
+    if get_user_account_status(target_user).value == "inactive":
+        _raise_inactive_account_error()
+
+    login_home_server = _login_home_server(raw_request)
+    target_user.home_server = login_home_server
+
+    refresh_token = create_refresh_token(subject=target_user.id, data=_test_switch_token_data())
+    device_info = _extract_device_info(raw_request)
+    real_ip = _extract_request_real_ip(raw_request)
+
+    await db.execute(
+        update(UserSession)
+        .where(
+            UserSession.user_id == target_user.id,
+            UserSession.device_name == TEST_ACCOUNT_SWITCH_DEVICE_NAME,
+            UserSession.is_active == True,
+        )
+        .values(is_active=False)
+    )
+
+    session = UserSession(
+        id=uuid.uuid4(),
+        user_id=target_user.id,
+        device_name=TEST_ACCOUNT_SWITCH_DEVICE_NAME,
+        device_ip=real_ip,
+        platform=device_info["platform"],
+        refresh_token_hash=hash_token(refresh_token),
+        home_server=login_home_server,
+        is_primary=False,
+        is_active=True,
+        expires_at=utc_now() + timedelta(days=30),
+    )
+    db.add(session)
+    await ensure_mandatory_channel_membership(db, user=target_user)
+    await db.commit()
+
+    access_token = create_access_token(
+        subject=target_user.id,
+        data=_test_switch_token_data(),
+        expires_delta=timedelta(minutes=60),
+        session_id=str(session.id),
+        server_id=login_home_server,
+    )
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
     }
 
 @router.post("/request-otp", response_model=dict)

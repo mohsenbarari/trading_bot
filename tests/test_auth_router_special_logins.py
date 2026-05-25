@@ -11,7 +11,16 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 from api.routers import auth
-from api.routers.auth import WebAppLogin, dev_login, webapp_login
+from api.routers.auth import (
+    TEST_ACCOUNT_SWITCH_CLAIM,
+    TEST_ACCOUNT_SWITCH_DEVICE_NAME,
+    WebAppLogin,
+    dev_login,
+    list_test_switch_users,
+    switch_test_account,
+    webapp_login,
+)
+from models.customer_relation import CustomerTier
 from models.session import Platform
 from models.user import UserRole
 
@@ -23,19 +32,31 @@ class FakeExecuteResult:
     def scalar_one_or_none(self):
         return self._value
 
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._value
+
 
 class FakeDB:
-    def __init__(self, execute_results=None):
+    def __init__(self, execute_results=None, get_result=None):
         self.execute_results = list(execute_results or [])
         self.commit = AsyncMock()
         self.flush = AsyncMock(side_effect=self._flush)
         self.refresh = AsyncMock(side_effect=self._refresh)
         self.added = []
+        self.get_result = get_result
+        self.executed = []
 
-    async def execute(self, _stmt):
+    async def execute(self, stmt):
+        self.executed.append(stmt)
         if not self.execute_results:
             raise AssertionError("Unexpected execute() call")
         return self.execute_results.pop(0)
+
+    async def get(self, _model, _id):
+        return self.get_result
 
     def add(self, item):
         self.added.append(item)
@@ -70,6 +91,118 @@ def build_webapp_init_data(bot_token, user_payload, auth_date=None, hash_overrid
 
 
 class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
+    async def test_list_test_switch_users_allows_super_admin_and_returns_customer_accountant_flags(self):
+        listed_accountant = SimpleNamespace(
+            id=11,
+            full_name="حسابدار تست",
+            account_name="accountant11",
+            mobile_number="09120000011",
+            role=UserRole.STANDARD,
+        )
+        listed_customer = SimpleNamespace(
+            id=12,
+            full_name="مشتری تست",
+            account_name="customer12",
+            mobile_number="09120000012",
+            role=UserRole.STANDARD,
+        )
+        db = FakeDB([FakeExecuteResult([listed_accountant, listed_customer])])
+
+        with patch(
+            "api.routers.auth.is_user_accountant",
+            new=AsyncMock(side_effect=[True, False]),
+        ), patch(
+            "api.routers.auth.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=[None, SimpleNamespace(customer_tier=CustomerTier.TIER_2)]),
+        ):
+            result = await list_test_switch_users(
+                raw_request=make_request(host="8.8.8.8"),
+                search=None,
+                limit=80,
+                db=db,
+                token="plain-token",
+                current_user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                dev_key=None,
+            )
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0].account_name, "accountant11")
+        self.assertTrue(result[0].is_accountant)
+        self.assertFalse(result[0].is_customer)
+        self.assertEqual(result[1].account_name, "customer12")
+        self.assertFalse(result[1].is_accountant)
+        self.assertTrue(result[1].is_customer)
+        self.assertEqual(result[1].customer_tier, CustomerTier.TIER_2)
+
+    async def test_switch_test_account_issues_switchable_tokens_and_temp_session(self):
+        request = make_request(headers={"x-platform": "web"}, host="8.8.8.8")
+        target_user = SimpleNamespace(id=19, is_deleted=False, home_server="iran")
+        db = FakeDB([FakeExecuteResult(None)], get_result=target_user)
+        now = datetime(2026, 1, 2, tzinfo=timezone.utc)
+
+        with patch(
+            "api.routers.auth.get_user_account_status",
+            return_value=SimpleNamespace(value="active"),
+        ), patch(
+            "api.routers.auth.create_refresh_token",
+            return_value="refresh-token",
+        ) as refresh_mock, patch(
+            "api.routers.auth.hash_token",
+            return_value="hashed-refresh",
+        ), patch(
+            "api.routers.auth.uuid.uuid4",
+            return_value="switch-session",
+        ), patch(
+            "api.routers.auth.utc_now",
+            return_value=now,
+        ), patch(
+            "api.routers.auth.create_access_token",
+            return_value="access-token",
+        ) as access_mock, patch(
+            "api.routers.auth.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ) as mandatory_mock, patch(
+            "api.routers.auth._login_home_server",
+            return_value="foreign",
+        ):
+            result = await switch_test_account(
+                target_user_id=19,
+                raw_request=request,
+                db=db,
+                token="plain-token",
+                current_user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                dev_key=None,
+            )
+
+        self.assertEqual(target_user.home_server, "foreign")
+        self.assertEqual(len(db.added), 1)
+        session = db.added[0]
+        self.assertEqual(session.user_id, 19)
+        self.assertEqual(session.device_name, TEST_ACCOUNT_SWITCH_DEVICE_NAME)
+        self.assertEqual(session.device_ip, "8.8.8.8")
+        self.assertEqual(session.platform, Platform.WEB)
+        self.assertEqual(session.refresh_token_hash, "hashed-refresh")
+        self.assertEqual(session.home_server, "foreign")
+        self.assertEqual(session.expires_at, now + timedelta(days=30))
+        mandatory_mock.assert_awaited_once_with(db, user=target_user)
+        db.commit.assert_awaited_once()
+        refresh_mock.assert_called_once_with(subject=19, data={TEST_ACCOUNT_SWITCH_CLAIM: True})
+        access_mock.assert_called_once_with(
+            subject=19,
+            data={TEST_ACCOUNT_SWITCH_CLAIM: True},
+            expires_delta=timedelta(minutes=60),
+            session_id="switch-session",
+            server_id="foreign",
+        )
+        self.assertEqual(
+            result,
+            {
+                "access_token": "access-token",
+                "refresh_token": "refresh-token",
+                "token_type": "bearer",
+            },
+        )
+
     async def test_dev_login_rejects_remote_requests_without_valid_dev_key(self):
         request = make_request(headers={}, host="8.8.8.8")
 

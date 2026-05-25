@@ -6,6 +6,7 @@ const dashboardViewMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
   apiFetchMock: vi.fn(),
   forceLogoutMock: vi.fn(),
+  locationAssignMock: vi.fn(),
   notificationStore: {
     appNotifications: [] as Array<Record<string, unknown>>,
   },
@@ -33,6 +34,10 @@ function makeJsonResponse(payload: unknown, ok = true) {
   }
 }
 
+function makeToken(payload: Record<string, unknown>) {
+  return `header.${window.btoa(JSON.stringify(payload))}.signature`
+}
+
 async function mountView() {
   const wrapper = mount(DashboardView)
   await flushPromises()
@@ -46,7 +51,13 @@ describe('DashboardView.vue', () => {
     dashboardViewMocks.routerPushMock.mockReset()
     dashboardViewMocks.apiFetchMock.mockReset()
     dashboardViewMocks.forceLogoutMock.mockReset()
+    dashboardViewMocks.locationAssignMock.mockReset()
     dashboardViewMocks.notificationStore.appNotifications = []
+    localStorage.clear()
+    vi.stubGlobal('location', {
+      ...window.location,
+      assign: dashboardViewMocks.locationAssignMock,
+    })
   })
 
   it('loads the current user, shows the unread notification dot, and routes the top-bar actions', async () => {
@@ -192,5 +203,73 @@ describe('DashboardView.vue', () => {
     const eveningWrapper = await mountView()
     expect(eveningWrapper.text()).toContain('عصر بخیر')
     eveningWrapper.unmount()
+  })
+
+  it('shows the temporary account switcher for super admins and swaps tokens on selection', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر ارشد' }))
+    dashboardViewMocks.apiFetchMock
+      .mockResolvedValueOnce(makeJsonResponse({
+        id: 50,
+        full_name: 'مدیر تست',
+        account_name: 'root50',
+        role: 'مدیر ارشد',
+        account_status: 'active',
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
+        trading_restricted_until: null,
+      }))
+      .mockResolvedValueOnce(makeJsonResponse([
+        {
+          id: 61,
+          full_name: 'حسابدار تست',
+          account_name: 'accountant61',
+          mobile_number: '09120000061',
+          role: 'عادی',
+          is_accountant: true,
+          is_customer: false,
+          customer_tier: null,
+        },
+      ]))
+      .mockResolvedValueOnce(makeJsonResponse({
+        access_token: 'switched-access',
+        refresh_token: 'switched-refresh',
+        token_type: 'bearer',
+      }))
+
+    const wrapper = await mountView()
+    await wrapper.get('.switcher-entry-btn').trigger('click')
+    await flushPromises()
+
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenNthCalledWith(2, '/api/auth/dev-switch/users')
+    expect(wrapper.text()).toContain('سوییچ موقت حساب')
+    expect(wrapper.text()).toContain('حسابدار تست')
+
+    await wrapper.get('.switcher-user-row').trigger('click')
+    await flushPromises()
+
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenNthCalledWith(3, '/api/auth/dev-switch/61', { method: 'POST' })
+    expect(localStorage.getItem('auth_token')).toBe('switched-access')
+    expect(localStorage.getItem('refresh_token')).toBe('switched-refresh')
+    expect(localStorage.getItem('current_user_summary')).toBeNull()
+    expect(dashboardViewMocks.locationAssignMock).toHaveBeenCalledWith('/dashboard')
+  })
+
+  it('keeps the temporary account switcher visible for switched non-admin sessions via token claim', async () => {
+    localStorage.setItem('auth_token', makeToken({ dev_account_switch: true }))
+    dashboardViewMocks.apiFetchMock.mockResolvedValueOnce(makeJsonResponse({
+      id: 71,
+      full_name: 'مشتری تست',
+      account_name: 'customer71',
+      role: 'عادی',
+      account_status: 'active',
+      global_lock_grace_expires_at: null,
+      global_web_locked_at: null,
+      trading_restricted_until: null,
+    }))
+
+    const wrapper = await mountView()
+
+    expect(wrapper.find('.switcher-entry-btn').exists()).toBe(true)
+    expect(wrapper.text()).toContain('سوییچ موقت حساب')
   })
 })
