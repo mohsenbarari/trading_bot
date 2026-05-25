@@ -78,7 +78,6 @@ class BotCreateSession:
     def __init__(self, shared_count):
         self.shared_count = shared_count
         self.added = []
-        self._counted = False
 
     def add(self, value):
         if getattr(value, "id", None) is None:
@@ -86,9 +85,7 @@ class BotCreateSession:
         self.added.append(value)
 
     async def commit(self):
-        if self.added and not self._counted:
-            self.shared_count["value"] += 1
-            self._counted = True
+        return None
 
     async def refresh(self, _value):
         return None
@@ -205,9 +202,9 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         create_session.add(existing_offer)
         self.assertEqual(existing_offer.id, 55)
         await create_session.commit()
-        self.assertEqual(shared_count["value"], 2)
+        self.assertEqual(shared_count["value"], 1)
         await create_session.commit()
-        self.assertEqual(shared_count["value"], 2)
+        self.assertEqual(shared_count["value"], 1)
 
         update_session = BotUpdateSession(create_session)
         self.assertIs(await update_session.get(type("Offer", (), {}), 1), existing_offer)
@@ -337,6 +334,10 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
             send_message=AsyncMock(side_effect=[SimpleNamespace(message_id=900), SimpleNamespace(message_id=901)])
         )
 
+        async def fake_incr_active_offer_count(_user_id):
+            shared_count["value"] += 1
+            return shared_count["value"]
+
         with patch("core.utils.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
             "bot.handlers.trade_create._bot_market_is_open",
             new=AsyncMock(return_value=True),
@@ -355,6 +356,9 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.trading_settings._run_async_settings_loader_sync",
             return_value=live_settings,
+        ), patch(
+            "core.cache.incr_active_offer_count",
+            new=AsyncMock(side_effect=fake_incr_active_offer_count),
         ), patch(
             "bot.handlers.trade_create.AsyncSessionLocal",
             side_effect=[
