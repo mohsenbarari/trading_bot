@@ -247,6 +247,9 @@ async def handle_manual_quantity(message: types.Message, state: FSMContext, user
     if not user:
         return
 
+    if await _handoff_stale_wizard_state_to_text_offer(message, state, user):
+        return
+
     from core.trading_settings import get_trading_settings
 
     try:
@@ -329,6 +332,9 @@ async def handle_lot_sizes_input(message: types.Message, state: FSMContext, user
     if not user:
         return
 
+    if await _handoff_stale_wizard_state_to_text_offer(message, state, user):
+        return
+
     data = await state.get_data()
     quantity = data.get("quantity", 1)
     try:
@@ -399,6 +405,9 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
     if not user:
         return
 
+    if await _handoff_stale_wizard_state_to_text_offer(message, state, user, bot):
+        return
+
     price_text = (message.text or "").strip()
     is_valid, price_error = validate_price(price_text)
     if not is_valid:
@@ -435,6 +444,9 @@ async def handle_skip_notes(callback: types.CallbackQuery, state: FSMContext, us
 @router.message(Trade.awaiting_notes)
 async def handle_notes_input(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user:
+        return
+
+    if await _handoff_stale_wizard_state_to_text_offer(message, state, user):
         return
 
     notes = (message.text or "").strip()
@@ -864,6 +876,21 @@ def has_trade_indicator(text: str) -> bool:
     return bool(re.search(pattern, offer_part))
 
 
+async def _handoff_stale_wizard_state_to_text_offer(
+    message: types.Message,
+    state: FSMContext,
+    user: Optional[User],
+    bot: Optional[Bot] = None,
+) -> bool:
+    """اگر کاربر وسط FSM قدیمی یک لفظ متنی کامل فرستاد، همان را پردازش کن."""
+    if not user or not has_trade_indicator(message.text or ""):
+        return False
+
+    await state.clear()
+    await handle_text_offer(message, state, user, bot)
+    return True
+
+
 @router.message(F.text.func(lambda text: text and text.strip() == "نشد"))
 async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user:
@@ -913,7 +940,7 @@ async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext
 
 
 @router.message(F.text.func(has_trade_indicator))
-async def handle_text_offer(message: types.Message, state: FSMContext, user: Optional[User], bot: Bot):
+async def handle_text_offer(message: types.Message, state: FSMContext, user: Optional[User], bot: Optional[Bot] = None):
     """پردازش لفظ متنی (خ/ف)"""
     if not user:
         return
