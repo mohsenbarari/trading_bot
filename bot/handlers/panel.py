@@ -23,6 +23,51 @@ from core.services.user_account_status_service import is_user_global_web_locked
 router = Router()
 
 
+async def handoff_navigation_button(message: types.Message, state: FSMContext, user: Optional[User]) -> bool:
+    """Allow reply-keyboard navigation buttons to escape stale FSM states."""
+    if not user:
+        return False
+
+    text = (message.text or "").strip()
+    if not text:
+        return False
+
+    from bot.handlers.admin import start_invitation_creation
+    from bot.handlers.admin_commodities import handle_manage_commodities
+    from bot.handlers.admin_users import (
+        handle_back_to_admin,
+        handle_users_list_command,
+        handle_users_menu,
+        start_search_user,
+    )
+    from bot.handlers.trade_history import show_my_trade_history
+
+    navigation_actions = {
+        "/panel": lambda: show_my_profile_and_change_keyboard(message, state, user),
+        "👤 پنل کاربر": lambda: show_my_profile_and_change_keyboard(message, state, user),
+        "🔐 پنل مدیریت": lambda: show_admin_panel_and_change_keyboard(message, state, user),
+        "⚙️ تنظیمات کاربری": lambda: handle_user_settings_button(message, state, user),
+        "⚙️ تنظیمات": lambda: handle_simple_settings_button(message, user),
+        "⚙️ تنظیمات سیستم": lambda: handle_admin_settings_button(message, state, user),
+        "📊 تاریخچه معاملات من": lambda: show_my_trade_history(message, state, user),
+        "➕ ارسال لینک دعوت": lambda: start_invitation_creation(message, state, user),
+        "📦 مدیریت کالاها": lambda: handle_manage_commodities(message, user, state),
+        "👥 مدیریت کاربران": lambda: handle_users_menu(message, user, state),
+        "📋 لیست کاربران": lambda: handle_users_list_command(message, user, state),
+        "🔍 جستجوی کاربر": lambda: start_search_user(message, state, user),
+        "🔙 بازگشت": lambda: handle_back_to_main_menu(message, state, user),
+        "🔙 بازگشت به پنل مدیریت": lambda: handle_back_to_admin(message, user, state),
+    }
+
+    action = navigation_actions.get(text)
+    if not action:
+        return False
+
+    await state.clear()
+    await action()
+    return True
+
+
 # --- هندلر پنل کاربر ---
 @router.message(Command("panel"))
 @router.message(F.text == "👤 پنل کاربر")
@@ -221,6 +266,9 @@ from bot.states import TradingSettingsEdit
 @router.message(TradingSettingsEdit.awaiting_value)
 async def handle_settings_new_value(message: types.Message, state: FSMContext, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN:
+        return
+
+    if await handoff_navigation_button(message, state, user):
         return
     
     from core.trading_settings import load_trading_settings_async, save_trading_settings_async, refresh_settings_cache_async

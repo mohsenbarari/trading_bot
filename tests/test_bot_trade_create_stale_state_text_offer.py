@@ -11,6 +11,17 @@ from bot.handlers.trade_create import (
 
 
 class BotTradeCreateStaleStateTextOfferTests(unittest.IsolatedAsyncioTestCase):
+    async def test_navigation_button_handoffs_before_quantity_validation(self):
+        user = SimpleNamespace(id=1)
+        state = SimpleNamespace(clear=AsyncMock(), get_data=AsyncMock(return_value={"quantity": 30}))
+
+        with patch("bot.handlers.panel.handoff_navigation_button", new=AsyncMock(return_value=True)) as nav_handoff:
+            message = SimpleNamespace(text="👤 پنل کاربر", answer=AsyncMock())
+            await handle_manual_quantity(message, state, user=user)
+
+        nav_handoff.assert_awaited_once_with(message, state, user)
+        message.answer.assert_not_awaited()
+
     async def test_offer_like_text_handoffs_from_stale_wizard_states(self):
         user = SimpleNamespace(id=1)
 
