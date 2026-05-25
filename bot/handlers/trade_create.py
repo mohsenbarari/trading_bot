@@ -180,6 +180,10 @@ async def handle_commodity_selection(
         await callback.answer("❌ کالا یافت نشد!", show_alert=True)
         return
 
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+
     data = await state.get_data()
     await state.update_data(commodity_id=commodity.id, commodity_name=commodity.name)
     await callback.message.edit_text(
@@ -188,7 +192,10 @@ async def handle_commodity_selection(
         f"کالا: {commodity.name}\n\n"
         f"تعداد را انتخاب کنید یا عدد دلخواه را وارد کنید:",
         parse_mode="Markdown",
-        reply_markup=get_quantity_keyboard(),
+        reply_markup=get_quantity_keyboard(
+            min_quantity=ts.offer_min_quantity,
+            max_quantity=ts.offer_max_quantity,
+        ),
     )
     await state.set_state(Trade.awaiting_quantity)
     await callback.answer()
@@ -209,7 +216,17 @@ async def handle_quick_quantity(
         await callback.answer()
         return
 
+    from core.trading_settings import get_trading_settings_async
+
     quantity = int(callback_data.value)
+    ts = await get_trading_settings_async()
+    if quantity < ts.offer_min_quantity or quantity > ts.offer_max_quantity:
+        await callback.answer(
+            f"❌ تعداد مجاز باید بین {ts.offer_min_quantity} تا {ts.offer_max_quantity} باشد.",
+            show_alert=True,
+        )
+        return
+
     data = await state.get_data()
     await state.update_data(quantity=quantity)
     await callback.message.edit_text(

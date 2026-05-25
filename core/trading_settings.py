@@ -95,6 +95,8 @@ class TradingSettings(BaseModel):
 # این کش فقط زمانی استفاده می‌شود که Redis در دسترس نباشد
 _fallback_cache: Optional[TradingSettings] = None
 _fallback_timestamp: float = 0
+_sync_redis_client: Any = None
+_sync_engine: Any = None
 
 
 def _load_from_json() -> dict:
@@ -154,6 +156,38 @@ async def _get_from_redis_cache() -> Optional[TradingSettings]:
     return None
 
 
+def _get_sync_redis_client() -> Any:
+    """دسترسی lazy به کلاینت sync Redis برای call siteهای sync."""
+    global _sync_redis_client
+
+    if _sync_redis_client is None:
+        import redis as redis_sync
+        from core.config import settings as app_settings
+
+        _sync_redis_client = redis_sync.Redis.from_url(
+            app_settings.redis_url,
+            decode_responses=True,
+        )
+
+    return _sync_redis_client
+
+
+def _get_from_redis_cache_sync() -> Optional[TradingSettings]:
+    """خواندن تنظیمات از کش Redis در context های sync بدون event-loop bridge."""
+    try:
+        redis_client = _get_sync_redis_client()
+        cached_data = redis_client.get(REDIS_CACHE_KEY)
+
+        if cached_data:
+            data = json.loads(cached_data)
+            return TradingSettings(**data)
+
+    except Exception as e:
+        logger.debug(f"Sync Redis cache miss or error: {e}")
+
+    return None
+
+
 async def _set_redis_cache(settings: TradingSettings) -> None:
     """ذخیره تنظیمات در کش Redis"""
     try:
@@ -169,6 +203,41 @@ async def _set_redis_cache(settings: TradingSettings) -> None:
         
     except Exception as e:
         logger.debug(f"Failed to set Redis cache: {e}")
+
+
+def _get_sync_engine() -> Any:
+    """ساخت lazy engine برای بارگذاری sync تنظیمات از DB."""
+    global _sync_engine
+
+    if _sync_engine is None:
+        from sqlalchemy import create_engine
+        from core.config import settings as app_settings
+
+        _sync_engine = create_engine(app_settings.sync_database_url, pool_pre_ping=True)
+
+    return _sync_engine
+
+
+def _load_from_db_sync() -> dict:
+    """خواندن تنظیمات از دیتابیس در call siteهای sync بدون async bridge."""
+    try:
+        from sqlalchemy import text
+
+        engine = _get_sync_engine()
+        with engine.connect() as connection:
+            rows = connection.execute(text("SELECT key, value FROM trading_settings")).fetchall()
+
+        data = {}
+        for row in rows:
+            try:
+                data[row[0]] = json.loads(row[1])
+            except (json.JSONDecodeError, TypeError):
+                data[row[0]] = row[1]
+        return data
+
+    except Exception as e:
+        logger.warning(f"Failed to load settings from sync DB: {e}")
+        return {}
 
 
 async def load_trading_settings_async() -> TradingSettings:
@@ -234,10 +303,9 @@ def load_trading_settings() -> TradingSettings:
     توجه: این تابع برای سازگاری با کد قدیمی است.
     در کد جدید از get_trading_settings_async() استفاده کنید.
     """
-    try:
-        return _run_async_settings_loader_sync()
-    except Exception as e:
-        logger.warning(f"Failed to load settings via async bridge: {e}")
+    db_data = _load_from_db_sync()
+    if db_data:
+        return TradingSettings(**db_data)
 
     # fallback نهایی برای شرایطی که DB در دسترس نیست
     json_data = _load_from_json()
@@ -283,7 +351,7 @@ def get_trading_settings() -> TradingSettings:
     # اول Redis cache مشترک را بخوان تا workerها و processهای جدا از هم
     # بلافاصله مقدار به‌روز را ببینند و روی fallback محلی stale نمانند.
     try:
-        shared_cached = _run_async_settings_loader_sync(_get_from_redis_cache)
+        shared_cached = _get_from_redis_cache_sync()
         if shared_cached is not None:
             _fallback_cache = shared_cached
             _fallback_timestamp = current_time

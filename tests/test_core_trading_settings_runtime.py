@@ -31,6 +31,8 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         trading_settings._fallback_cache = None
         trading_settings._fallback_timestamp = 0
+        trading_settings._sync_redis_client = None
+        trading_settings._sync_engine = None
 
     async def test_trading_settings_properties(self):
         settings = trading_settings.TradingSettings(invitation_expiry_days=3, offer_min_quantity=7)
@@ -110,6 +112,20 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
             await trading_settings._set_redis_cache(trading_settings.TradingSettings())
         logger.debug.assert_called_once()
 
+        sync_redis_client = MagicMock()
+        sync_redis_client.get.return_value = json.dumps({'offer_min_quantity': 12})
+        with patch('core.trading_settings._get_sync_redis_client', return_value=sync_redis_client):
+            cached_sync = trading_settings._get_from_redis_cache_sync()
+        self.assertEqual(cached_sync.offer_min_quantity, 12)
+
+        invalid_sync_redis = MagicMock()
+        invalid_sync_redis.get.return_value = '{'
+        with patch('core.trading_settings._get_sync_redis_client', return_value=invalid_sync_redis), patch.object(
+            trading_settings, 'logger'
+        ) as logger:
+            self.assertIsNone(trading_settings._get_from_redis_cache_sync())
+        logger.debug.assert_called_once()
+
     async def test_load_and_get_settings_paths(self):
         with patch('core.trading_settings._load_from_db_async', AsyncMock(return_value={'offer_min_quantity': 9})), patch(
             'core.trading_settings._load_from_json', return_value={'offer_min_quantity': 4}
@@ -123,10 +139,9 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
             loaded = await trading_settings.load_trading_settings_async()
         self.assertEqual(loaded.offer_min_quantity, 4)
 
-        with patch(
-            'core.trading_settings.load_trading_settings_async',
-            AsyncMock(return_value=trading_settings.TradingSettings(offer_min_quantity=6))
-        ), patch('core.trading_settings._load_from_json', return_value={'offer_min_quantity': 99}):
+        with patch('core.trading_settings._load_from_db_sync', return_value={'offer_min_quantity': 6}), patch(
+            'core.trading_settings._load_from_json', return_value={'offer_min_quantity': 99}
+        ):
             sync_loaded = trading_settings.load_trading_settings()
         self.assertEqual(sync_loaded.offer_min_quantity, 6)
 
@@ -136,22 +151,23 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
             loaded = await trading_settings.load_trading_settings_async()
         self.assertIsInstance(loaded, trading_settings.TradingSettings)
 
-        with patch(
-            'core.trading_settings.load_trading_settings_async',
-            AsyncMock(return_value=trading_settings.TradingSettings())
-        ), patch('core.trading_settings._load_from_json', return_value={}):
+        with patch('core.trading_settings._load_from_db_sync', return_value={}), patch(
+            'core.trading_settings._load_from_json', return_value={}
+        ):
             sync_loaded = trading_settings.load_trading_settings()
         self.assertIsInstance(sync_loaded, trading_settings.TradingSettings)
 
-        with patch(
-            'core.trading_settings.load_trading_settings_async',
-            AsyncMock(side_effect=RuntimeError('db bridge failed'))
-        ), patch('core.trading_settings._load_from_json', return_value={'offer_min_quantity': 4}), patch.object(
+        with patch('core.trading_settings._get_sync_engine', side_effect=RuntimeError('sync db down')), patch.object(
             trading_settings, 'logger'
         ) as logger:
+            self.assertEqual(trading_settings._load_from_db_sync(), {})
+        logger.warning.assert_called_once()
+
+        with patch('core.trading_settings._load_from_db_sync', return_value={}), patch(
+            'core.trading_settings._load_from_json', return_value={'offer_min_quantity': 4}
+        ):
             sync_loaded = trading_settings.load_trading_settings()
         self.assertEqual(sync_loaded.offer_min_quantity, 4)
-        logger.warning.assert_called()
 
         with patch('core.trading_settings._get_from_redis_cache', AsyncMock(return_value=trading_settings.TradingSettings())), patch(
             'core.trading_settings.load_trading_settings_async', AsyncMock()
@@ -181,7 +197,9 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 raise value
             return value
 
-        with patch('core.trading_settings.load_trading_settings', side_effect=fake_load), patch(
+        with patch('core.trading_settings._get_from_redis_cache_sync', return_value=None), patch(
+            'core.trading_settings.load_trading_settings', side_effect=fake_load
+        ), patch(
             'core.trading_settings.time.time', side_effect=[0, 20, 100]
         ):
             first = trading_settings.get_trading_settings()
@@ -194,7 +212,9 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         trading_settings._fallback_cache = None
         trading_settings._fallback_timestamp = 0
-        with patch('core.trading_settings.load_trading_settings', side_effect=RuntimeError('reload failed')), patch(
+        with patch('core.trading_settings._get_from_redis_cache_sync', return_value=None), patch(
+            'core.trading_settings.load_trading_settings', side_effect=RuntimeError('reload failed')
+        ), patch(
             'core.trading_settings.time.time', return_value=100
         ):
             fallback_loaded = trading_settings.get_trading_settings()
@@ -215,8 +235,8 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(loaded.offer_min_quantity, 17)
 
         with patch(
-            'core.trading_settings._run_async_settings_loader_sync',
-            side_effect=RuntimeError('redis bridge failed'),
+            'core.trading_settings._get_from_redis_cache_sync',
+            side_effect=RuntimeError('redis down'),
         ), patch('core.trading_settings.load_trading_settings', return_value=trading_settings.TradingSettings(offer_min_quantity=13)), patch(
             'core.trading_settings.time.time', return_value=30
         ), patch.object(trading_settings, 'logger') as logger:
@@ -225,9 +245,9 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(loaded.offer_min_quantity, 13)
         logger.debug.assert_called_once()
 
-        with patch('core.trading_settings._run_async_settings_loader_sync', side_effect=RuntimeError('db bridge failed')), patch(
+        with patch('core.trading_settings._load_from_db_sync', return_value={}), patch(
             'core.trading_settings._load_from_json', return_value={}
-        ), patch.object(trading_settings, 'logger'):
+        ):
             loaded = trading_settings.load_trading_settings()
         self.assertIsInstance(loaded, trading_settings.TradingSettings)
 
@@ -238,12 +258,12 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         trading_settings._fallback_timestamp = 10
 
         with patch(
-            'core.trading_settings._run_async_settings_loader_sync',
+            'core.trading_settings._get_from_redis_cache_sync',
             return_value=fresh,
         ) as sync_loader, patch('core.trading_settings.time.time', return_value=20):
             loaded = trading_settings.get_trading_settings()
 
-        sync_loader.assert_called_once_with(trading_settings._get_from_redis_cache)
+        sync_loader.assert_called_once_with()
         self.assertIs(loaded, fresh)
         self.assertIs(trading_settings._fallback_cache, fresh)
         self.assertEqual(trading_settings._fallback_timestamp, 20)

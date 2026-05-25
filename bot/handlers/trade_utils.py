@@ -99,19 +99,36 @@ async def get_commodities_keyboard(trade_type: str, page: int = 1, limit: int = 
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
 
-def get_quantity_keyboard() -> InlineKeyboardMarkup:
-    """کیبورد انتخاب سریع تعداد"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="10", callback_data=QuantityCallback(value="10").pack()),
-            InlineKeyboardButton(text="20", callback_data=QuantityCallback(value="20").pack()),
-            InlineKeyboardButton(text="30", callback_data=QuantityCallback(value="30").pack()),
-            InlineKeyboardButton(text="40", callback_data=QuantityCallback(value="40").pack()),
-            InlineKeyboardButton(text="50", callback_data=QuantityCallback(value="50").pack()),
-        ],
-        [InlineKeyboardButton(text="✏️ ورود دستی", callback_data=QuantityCallback(value="manual").pack())],
-        [InlineKeyboardButton(text="🔙 بازگشت", callback_data=TradeActionCallback(action="back_to_commodity").pack())]
-    ])
+def get_quantity_keyboard(min_quantity: int = 5, max_quantity: int = 50) -> InlineKeyboardMarkup:
+    """کیبورد انتخاب سریع تعداد مطابق بازه تنظیمات سیستم"""
+    if min_quantity > max_quantity:
+        min_quantity, max_quantity = max_quantity, min_quantity
+
+    quick_values: List[int] = []
+    for candidate in [10, 20, 30, 40, 50]:
+        if min_quantity <= candidate <= max_quantity:
+            quick_values.append(candidate)
+
+    if min_quantity <= max_quantity and min_quantity not in quick_values:
+        quick_values.insert(0, min_quantity)
+    if max_quantity not in quick_values:
+        quick_values.append(max_quantity)
+
+    quick_values = sorted(dict.fromkeys(quick_values))
+    keyboard_rows = []
+
+    for idx in range(0, len(quick_values), 5):
+        row_values = quick_values[idx:idx + 5]
+        keyboard_rows.append(
+            [
+                InlineKeyboardButton(text=str(value), callback_data=QuantityCallback(value=str(value)).pack())
+                for value in row_values
+            ]
+        )
+
+    keyboard_rows.append([InlineKeyboardButton(text="✏️ ورود دستی", callback_data=QuantityCallback(value="manual").pack())])
+    keyboard_rows.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data=TradeActionCallback(action="back_to_commodity").pack())])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
 
 def get_confirm_keyboard():
