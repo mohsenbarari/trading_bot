@@ -9,6 +9,7 @@ from jose import JWTError
 from api.routers.auth import (
     RefreshTokenRequest,
     SetupPasswordRequest,
+    TEST_ACCOUNT_SWITCH_CLAIM,
     refresh_access_token,
     setup_admin_password,
 )
@@ -127,6 +128,37 @@ class AuthRouterSessionFlowTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(session.last_active_at, now)
         db.commit.assert_awaited_once()
+        self.assertEqual(result["access_token"], "new-access")
+        self.assertEqual(result["refresh_token"], "good")
+
+    async def test_refresh_access_token_preserves_test_switch_claim(self):
+        req = RefreshTokenRequest(refresh_token="good")
+        payload = {"type": "refresh", "sub": 5, TEST_ACCOUNT_SWITCH_CLAIM: True}
+        user = SimpleNamespace(id=5, is_deleted=False, home_server="foreign")
+        now = datetime.now(timezone.utc)
+        session = SimpleNamespace(
+            id="sess-1",
+            expires_at=now + timedelta(days=1),
+            home_server="iran",
+            last_active_at=None,
+        )
+
+        with patch("jose.jwt.decode", return_value=payload), patch(
+            "api.routers.auth.get_session_by_refresh_token",
+            new=AsyncMock(return_value=session),
+        ), patch("core.utils.utc_now", return_value=now), patch(
+            "api.routers.auth.create_access_token",
+            return_value="new-access",
+        ) as create_mock:
+            result = await refresh_access_token(req, db=FakeDB([FakeExecuteResult(user)]))
+
+        create_mock.assert_called_once_with(
+            subject=5,
+            data={TEST_ACCOUNT_SWITCH_CLAIM: True},
+            expires_delta=timedelta(minutes=60),
+            session_id="sess-1",
+            server_id="iran",
+        )
         self.assertEqual(result["access_token"], "new-access")
         self.assertEqual(result["refresh_token"], "good")
 
