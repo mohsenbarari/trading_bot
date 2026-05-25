@@ -134,9 +134,6 @@ deploy_iran() {
     print_header "🇮🇷 Deploying to Iran Server ($IRAN_HOST)"
 
     cd "$PROJECT_DIR"
-    echo "⏳ Building Docker image for Iran Server explicitly..."
-    DOCKER_BUILDKIT=1 docker build -f Dockerfile.iran -t trading_bot_base_iran .
-
     # 2a. Check for uncommitted changes & push to GitHub
     echo "📤 Syncing code via git..."
     if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -167,9 +164,12 @@ deploy_iran() {
         "$DIST_DIR/" "$IRAN_USER@$IRAN_HOST:$IRAN_PROJECT_DIR/mini_app_dist/"
 
     # 2d. Rebuild Docker containers on Iran
-    echo "🐳 Rebuilding Docker on Iran..."
+    echo "🐳 Building Docker image on Iran explicitly..."
+    ssh_iran "cd $IRAN_PROJECT_DIR && DOCKER_BUILDKIT=1 docker build -f Dockerfile.iran -t trading_bot_base_iran ."
+
+    echo "🐳 Recreating Docker services on Iran..."
     echo "⏳ Waiting for Iran services to become ready..."
-    ssh_iran "cd $IRAN_PROJECT_DIR && docker compose -f docker-compose.iran.yml down && docker compose -f docker-compose.iran.yml up -d --build --wait --wait-timeout 180"
+    ssh_iran "cd $IRAN_PROJECT_DIR && docker compose -f docker-compose.iran.yml up -d --wait --wait-timeout 180"
 
     echo "✅ Iran deployment complete!"
     ssh_iran "cd $IRAN_PROJECT_DIR && docker compose -f docker-compose.iran.yml ps"

@@ -5,6 +5,7 @@
 
 services:
   app:
+    image: trading_bot_base_iran
     container_name: trading_bot_app
     restart: always
     command: uvicorn main:app --host 0.0.0.0 --port 8000
@@ -40,6 +41,7 @@ services:
   #   ...
 
   sync_worker:
+    image: trading_bot_base_iran
     container_name: trading_bot_sync_worker
     restart: always
     command: python -m core.sync_worker
@@ -62,6 +64,7 @@ services:
       - trading_net
 
   migration:
+    image: trading_bot_base_iran
     container_name: trading_bot_migration
     command: [ "python", "manage.py" ]
     volumes:
