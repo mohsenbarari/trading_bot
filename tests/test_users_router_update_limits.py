@@ -5,13 +5,17 @@ from unittest.mock import AsyncMock, patch
 
 import schemas
 from api.routers.users import update_user
+from core.enums import UserRole
 
 
 def make_user(**overrides):
     data = {
         "id": 5,
         "telegram_id": 999,
-        "role": None,
+        "full_name": "Limit Test User",
+        "account_name": "limit-user",
+        "mobile_number": "09120000005",
+        "role": UserRole.STANDARD,
         "is_deleted": False,
         "deleted_at": None,
         "has_bot_access": True,
@@ -24,6 +28,7 @@ def make_user(**overrides):
         "commodities_traded_count": 2,
         "channel_messages_count": 3,
         "max_sessions": 1,
+        "created_at": datetime(2026, 1, 1, 8, 0, 0),
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -62,7 +67,7 @@ class UsersRouterUpdateLimitsTests(unittest.IsolatedAsyncioTestCase):
         mandatory_sync_mock.assert_awaited_once_with(
             db,
             user=user,
-            previous_role=None,
+            previous_role=UserRole.STANDARD,
             previous_is_deleted=False,
             previous_deleted_at=None,
         )
@@ -92,7 +97,7 @@ class UsersRouterUpdateLimitsTests(unittest.IsolatedAsyncioTestCase):
         mandatory_sync_mock.assert_awaited_once_with(
             db,
             user=user,
-            previous_role=None,
+            previous_role=UserRole.STANDARD,
             previous_is_deleted=False,
             previous_deleted_at=None,
         )

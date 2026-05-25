@@ -72,6 +72,9 @@ def make_user(**overrides):
     data = {
         'id': 41,
         'telegram_id': 410,
+        'full_name': 'Test User',
+        'account_name': 'test-user',
+        'mobile_number': '09120000041',
         'role': UserRole.STANDARD,
         'account_status': UserAccountStatus.ACTIVE,
         'deactivated_at': None,
@@ -91,8 +94,10 @@ def make_user(**overrides):
         'channel_messages_count': 0,
         'max_sessions': 1,
         'max_accountants': 3,
+        'max_customers': 5,
         'can_block_users': True,
         'max_blocked_users': 10,
+        'created_at': datetime(2026, 5, 18, 8, 0, 0),
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -130,7 +135,8 @@ class AccountStatusLifecycleSmokeTests(unittest.IsolatedAsyncioTestCase):
                 actor=admin,
             )
 
-        self.assertIs(result, user)
+        self.assertEqual(result.id, user.id)
+        self.assertEqual(result.account_status, UserAccountStatus.INACTIVE)
         self.assertEqual(user.account_status, UserAccountStatus.INACTIVE)
         self.assertEqual(user.deactivated_at, deactivated_at)
         self.assertEqual(
@@ -191,7 +197,8 @@ class AccountStatusLifecycleSmokeTests(unittest.IsolatedAsyncioTestCase):
                 actor=admin,
             )
 
-        self.assertIs(result, user)
+        self.assertEqual(result.id, user.id)
+        self.assertEqual(result.account_status, UserAccountStatus.ACTIVE)
         self.assertEqual(user.account_status, UserAccountStatus.ACTIVE)
         self.assertIsNone(user.deactivated_at)
         self.assertIsNone(user.messenger_grace_expires_at)

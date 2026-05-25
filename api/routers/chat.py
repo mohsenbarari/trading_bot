@@ -1701,6 +1701,7 @@ async def send_message(
         db,
         collect_message_identity_user_ids([response_message]),
     )
+    sender_name = await resolve_direct_sender_display_name(db, user=current_user)
     
     # انتشار پیام برای گیرنده (Real-time update)
     # استفاده از MessageRead برای سریالایز کردن مناسب
@@ -1709,6 +1710,7 @@ async def send_message(
         message=message,
         serializer=_build_direct_message_accountant_serializer(identity_map),
         publisher=publish_user_event,
+        sender_name=sender_name,
     )
 
     return response_message
@@ -2163,6 +2165,7 @@ async def commit_upload_batch_endpoint(
         viewer_user_id=current_user.id,
     )
     serialized_by_id = {message.id: message for message in serialized_messages}
+    sender_name = await resolve_direct_sender_display_name(db, user=current_user)
 
     def _serializer(message: Message) -> MessageRead:
         serialized = serialized_by_id.get(message.id)
@@ -2177,6 +2180,7 @@ async def commit_upload_batch_endpoint(
                 message=message,
                 serializer=_serializer,
                 publisher=publish_user_event,
+                sender_name=sender_name,
             )
     else:
         member_user_ids = await list_active_room_member_user_ids(db, chat_id=commit_result.target.target_id)

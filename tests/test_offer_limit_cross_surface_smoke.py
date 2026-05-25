@@ -226,6 +226,15 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
             shared_count["value"] += 1
 
         with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+            "api.routers.offers.evaluate_current_market_schedule",
+            new=AsyncMock(return_value=SimpleNamespace(is_open=True)),
+        ), patch(
+            "api.routers.offers.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=live_settings,
+        ), patch(
             "core.cache.get_active_offer_count",
             new=AsyncMock(return_value=shared_count["value"]),
         ), patch(
@@ -243,18 +252,15 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.offers.send_offer_to_channel",
             new=AsyncMock(return_value=777),
+        ), patch(
+            "api.routers.offers.register_market_offer_created",
+            new=AsyncMock(),
         ), patch("api.routers.offers.increment_user_counter", new=AsyncMock()), patch(
             "api.routers.realtime.publish_event",
             new=AsyncMock(),
         ), patch(
             "api.routers.offers.offer_to_response",
             return_value={"id": 701, "channel_message_id": 777},
-        ), patch(
-            "core.trading_settings._run_async_settings_loader_sync",
-            return_value=live_settings,
-        ), patch(
-            "core.trading_settings.get_trading_settings_async",
-            new=AsyncMock(return_value=live_settings),
         ):
             result = await create_offer(make_offer(), db=db, current_user=make_user())
 
@@ -283,7 +289,10 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("core.utils.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
-            "core.trading_settings._run_async_settings_loader_sync",
+            "bot.handlers.trade_create._bot_market_is_open",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.trading_settings.get_trading_settings",
             return_value=live_settings,
         ), patch(
             "core.services.trade_service.detect_offer_price_warning",
@@ -329,6 +338,12 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("core.utils.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+            "bot.handlers.trade_create._bot_market_is_open",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.trading_settings.get_trading_settings",
+            return_value=live_settings,
+        ), patch(
             "core.services.trade_service.validate_competitive_price",
             new=AsyncMock(return_value=(True, None)),
         ), patch(
@@ -355,12 +370,18 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("منتشر شد", callback.message.edit_text.await_args.args[0])
 
         with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+            "api.routers.offers.evaluate_current_market_schedule",
+            new=AsyncMock(return_value=SimpleNamespace(is_open=True)),
+        ), patch(
+            "api.routers.offers.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=live_settings,
+        ), patch(
             "core.cache.get_active_offer_count",
             new=AsyncMock(return_value=None),
         ), patch("core.cache.set_active_offer_count", new=AsyncMock()), patch(
-            "core.trading_settings._run_async_settings_loader_sync",
-            return_value=live_settings,
-        ), patch(
             "core.services.trade_service.detect_offer_price_warning",
             new=AsyncMock(return_value=None),
         ):
