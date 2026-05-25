@@ -251,7 +251,7 @@ describe('DashboardView.vue', () => {
     expect(localStorage.getItem('auth_token')).toBe('switched-access')
     expect(localStorage.getItem('refresh_token')).toBe('switched-refresh')
     expect(localStorage.getItem('current_user_summary')).toBeNull()
-    expect(dashboardViewMocks.locationAssignMock).toHaveBeenCalledWith('/dashboard')
+    expect(dashboardViewMocks.locationAssignMock).toHaveBeenCalledWith('/')
   })
 
   it('keeps the temporary account switcher visible for switched non-admin sessions via token claim', async () => {

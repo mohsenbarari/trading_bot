@@ -185,7 +185,7 @@ export async function authGuard(
         return next('/');
     }
     if (meta.requiresAdmin && !(await ensureAdminAccess())) {
-        return next('/dashboard');
+        return next('/');
     }
     next();
 }

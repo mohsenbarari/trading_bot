@@ -201,7 +201,7 @@ describe('auth utils', () => {
     next.mockClear()
     localStorage.setItem('current_user_summary', JSON.stringify({ role: 'عادی' }))
     await authGuard({ path: '/admin', meta: { requiresAdmin: true } } as any, {} as any, next)
-    expect(next).toHaveBeenLastCalledWith('/dashboard')
+    expect(next).toHaveBeenLastCalledWith('/')
 
     next.mockClear()
     localStorage.setItem('current_user_summary', JSON.stringify({ role: 'عادی', account_status: 'inactive' }))
@@ -272,7 +272,7 @@ describe('auth utils', () => {
     const next = vi.fn()
 
     await authGuard({ path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any, {} as any, next)
-    expect(next).toHaveBeenLastCalledWith('/dashboard')
+    expect(next).toHaveBeenLastCalledWith('/')
 
     next.mockClear()
     localStorage.removeItem('current_user_summary')
@@ -283,7 +283,7 @@ describe('auth utils', () => {
     next.mockClear()
     fetchMock.mockRejectedValueOnce(new Error('profile unavailable'))
     await authGuard({ path: '/admin', meta: { requiresAuth: true, requiresAdmin: true } } as any, {} as any, next)
-    expect(next).toHaveBeenLastCalledWith('/dashboard')
+    expect(next).toHaveBeenLastCalledWith('/')
 
     next.mockClear()
     localStorage.removeItem('current_user_summary')
