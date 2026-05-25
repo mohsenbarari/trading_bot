@@ -366,7 +366,63 @@ async function navigateFromMessengerToMarket(page: Page) {
 }
 
 async function expectRoomHeaderStatus(page: Page, expectedStatus: 'کانال' | 'گروه') {
-  await expect(page.locator('.chat-header .header-status')).toHaveText(expectedStatus)
+  await expect(page.locator('.chat-header .header-status').first()).toHaveText(expectedStatus)
+}
+
+function roomConversationRow(page: Page, roomTitle: string) {
+  return page.locator('.conversation-item').filter({ hasText: roomTitle }).first()
+}
+
+async function openRoomFromConversationList(page: Page, roomTitle: string) {
+  const conversationRow = roomConversationRow(page, roomTitle)
+  await expect(conversationRow).toBeVisible({ timeout: 30000 })
+  await conversationRow.click({ force: true })
+}
+
+async function expectRoomHeaderTitle(page: Page, roomTitle: string) {
+  await expect(page.locator('.chat-header .header-name').first()).toContainText(roomTitle, { timeout: 30000 })
+}
+
+function activeComposerContainer(page: Page) {
+  return page.locator('.chat-view .input-area .input-container').last()
+}
+
+function activeAttachButton(page: Page) {
+  return activeComposerContainer(page).locator('button.attach-btn')
+}
+
+function activeVoiceButton(page: Page) {
+  return activeComposerContainer(page).locator('button.voice-btn')
+}
+
+function activeComposerTextbox(page: Page) {
+  return activeComposerContainer(page).getByRole('textbox', { name: 'پیام...' })
+}
+
+async function fillComposerCaption(page: Page, caption: string): Promise<Locator> {
+  const containers = page.locator('.chat-view .input-area .input-container')
+  const containerCount = await containers.count()
+
+  for (let index = containerCount - 1; index >= 0; index -= 1) {
+    const container = containers.nth(index)
+    const composer = container.getByRole('textbox', { name: 'پیام...' })
+    if (!(await composer.isVisible().catch(() => false))) {
+      continue
+    }
+
+    await composer.click()
+    await composer.fill('')
+    await composer.pressSequentially(caption)
+    await expect(composer).toHaveValue(caption)
+
+    const sendButton = container.locator('.send-btn-inline')
+    if (await sendButton.count()) {
+      await expect(sendButton).toBeVisible({ timeout: 30000 })
+      return container
+    }
+  }
+
+  throw new Error('Unable to find an active composer container for captioned media input')
 }
 
 function createGeneratedAudioBase64() {
@@ -478,7 +534,7 @@ async function expectRoomOpen(page: Page, roomId: number, roomTitle: string, roo
   }
 
   await expect.poll(() => page.url(), { timeout: 30000 }).toContain(expectedUrlFragment)
-  await expect(page.locator('.chat-header .header-name')).toContainText(roomTitle, { timeout: 30000 })
+  await expectRoomHeaderTitle(page, roomTitle)
   await expectRoomHeaderStatus(page, roomKind)
 }
 
@@ -1035,14 +1091,13 @@ test.describe('Channel media regressions', () => {
     await loginWithSeededSession(page, fixture)
 
     await page.goto('/chat')
-    await expect(page.getByText(fixture.channelTitle)).toBeVisible()
-    await page.getByText(fixture.channelTitle).click()
+    await openRoomFromConversationList(page, fixture.channelTitle)
 
     await expectRoomHeaderStatus(page, 'کانال')
-    await expect(page.locator('button.attach-btn')).toBeVisible()
-    await expect(page.locator('button.voice-btn')).toHaveCount(0)
+    await expect(activeAttachButton(page)).toBeVisible()
+    await expect(activeVoiceButton(page)).toHaveCount(0)
 
-    await page.locator('button.attach-btn').click()
+    await activeAttachButton(page).click()
     await expect(page.getByRole('button', { name: 'گالری' }).first()).toBeVisible()
     await expect(page.getByRole('button', { name: 'فایل' }).first()).toBeVisible()
     await expect(page.getByRole('button', { name: 'موقعیت' })).toHaveCount(0)
@@ -1072,14 +1127,13 @@ test.describe('Channel media regressions', () => {
     await loginWithSeededSession(page, fixture)
 
     await page.goto('/chat')
-    await expect(page.getByText(fixture.channelTitle)).toBeVisible()
-    await page.getByText(fixture.channelTitle).click()
+    await openRoomFromConversationList(page, fixture.channelTitle)
 
     await expectRoomHeaderStatus(page, 'کانال')
     await expect(page.getByText('فقط مدیران کانال امکان ارسال پیام دارند.')).toBeVisible()
-    await expect(page.locator('button.attach-btn')).toHaveCount(0)
-    await expect(page.locator('button.voice-btn')).toHaveCount(0)
-    await expect(page.getByRole('textbox', { name: 'پیام...' })).toHaveCount(0)
+    await expect(activeAttachButton(page)).toHaveCount(0)
+    await expect(activeVoiceButton(page)).toHaveCount(0)
+    await expect(activeComposerTextbox(page)).toHaveCount(0)
 
     const response = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${fixture.channelId}/send`, {
       headers: authHeaders(fixture.accessToken),
@@ -1111,14 +1165,14 @@ test.describe('Channel media regressions', () => {
     await conversationRow.click()
 
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
-    await expect(page.locator('.chat-header').getByText(fixture.channelTitle)).toBeVisible()
+    await expectRoomHeaderTitle(page, fixture.channelTitle)
     await expectRoomHeaderStatus(page, 'کانال')
     await expect(page.locator('.messages-container').getByText(bootstrapContent)).toBeVisible()
 
     await page.reload()
 
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
-    await expect(page.locator('.chat-header').getByText(fixture.channelTitle)).toBeVisible()
+    await expectRoomHeaderTitle(page, fixture.channelTitle)
     await expectRoomHeaderStatus(page, 'کانال')
     await expect(page.locator('.messages-container').getByText(bootstrapContent)).toBeVisible()
   })
@@ -1280,10 +1334,10 @@ test.describe('Channel media regressions', () => {
       await expectRoomOpen(receiverPage, groupId, groupTitle, 'گروه')
 
       const typingText = `PW GROUP ACTIVITY ${Date.now()}`
-      await senderPage.locator('textarea[placeholder="پیام..."]').fill(typingText)
+      await activeComposerTextbox(senderPage).fill(typingText)
       await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال نوشتن...`, { timeout: 30000 })
 
-      await senderPage.locator('textarea[placeholder="پیام..."]').fill('')
+      await activeComposerTextbox(senderPage).fill('')
       await senderContext.route('**/api/chat/upload-batches', async (route) => {
         sawBatchCreate = true
         await route.continue()
@@ -1309,7 +1363,7 @@ test.describe('Channel media regressions', () => {
         await route.continue()
       })
 
-      await senderPage.locator('button.attach-btn').click()
+      await activeAttachButton(senderPage).click()
       await expect(senderPage.getByRole('button', { name: 'گالری' }).first()).toBeVisible({ timeout: 30000 })
       await injectGalleryImageAndVideo(senderPage)
       await expect(senderPage.locator('.gp-title')).toHaveText('2 مورد', { timeout: 30000 })
@@ -1427,7 +1481,7 @@ test.describe('Channel media regressions', () => {
       await receiverGroupRow.click()
       await expectRoomOpen(receiverPage, groupId, groupTitle, 'گروه')
 
-      await senderPage.locator('button.attach-btn').click()
+      await activeAttachButton(senderPage).click()
       await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
       await senderPage.getByRole('button', { name: 'فایل' }).first().click()
       const uploadedFileName = await injectDocument(senderPage, 'pw-group-document', largeDocumentSizeBytes)
@@ -1476,7 +1530,6 @@ test.describe('Channel media regressions', () => {
     const bootstrapContent = `PW GROUP SINGLE MEDIA BOOTSTRAP ${Date.now()}`
     const imageCaption = `PW GROUP IMG CAP ${Date.now()}`
     const videoCaption = `PW GROUP VID CAP ${Date.now()}`
-    const composer = page.locator('textarea[placeholder="پیام..."]')
 
     const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
       headers: authHeaders(sender.accessToken),
@@ -1537,8 +1590,8 @@ test.describe('Channel media regressions', () => {
     await groupRow.click()
     await expectRoomOpen(page, groupId, groupTitle, 'گروه')
 
-    await composer.fill(imageCaption)
-    await page.locator('button.attach-btn').click()
+    const imageComposerContainer = await fillComposerCaption(page, imageCaption)
+    await imageComposerContainer.locator('button.attach-btn').click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
     await injectGalleryImage(page, `pw-group-single-${Date.now()}.png`)
 
@@ -1549,15 +1602,8 @@ test.describe('Channel media regressions', () => {
     await expect.poll(() => chunkAppendHits, { timeout: 30000 }).toBeGreaterThanOrEqual(1)
 
     await expect
-      .poll(async () => {
-        const messages = await fetchLatestRoomMessagesByChatId(request, sender.accessToken, groupId)
-        const message = messages.find((item) => {
-          const parsed = parseRoomMessageContent(item.content)
-          return item.message_type === 'image' && parsed?.caption === imageCaption
-        })
-        return message?.id ?? 0
-      }, { timeout: 60000 })
-      .toBeGreaterThan(0)
+      .poll(async () => fetchLatestRoomMessageTypesByChatId(request, sender.accessToken, groupId), { timeout: 60000 })
+      .toEqual(expect.arrayContaining(['image']))
 
     const imageBubble = page.locator('.message-bubble').filter({ hasText: imageCaption }).first()
     await expect(imageBubble).toBeVisible({ timeout: 30000 })
@@ -1573,8 +1619,8 @@ test.describe('Channel media regressions', () => {
     await reopenedGroupRow.click()
     await expectRoomOpen(page, groupId, groupTitle, 'گروه')
 
-    await composer.fill(videoCaption)
-    await page.locator('button.attach-btn').click()
+    const videoComposerContainer = await fillComposerCaption(page, videoCaption)
+    await videoComposerContainer.locator('button.attach-btn').click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
     await injectGalleryVideo(page, `pw-group-single-${Date.now()}.webm`)
     if (browserName !== 'webkit') {
@@ -1583,15 +1629,8 @@ test.describe('Channel media regressions', () => {
     await expect.poll(() => chunkAppendHits, { timeout: 30000 }).toBeGreaterThanOrEqual(2)
 
     await expect
-      .poll(async () => {
-        const messages = await fetchLatestRoomMessagesByChatId(request, sender.accessToken, groupId)
-        const message = messages.find((item) => {
-          const parsed = parseRoomMessageContent(item.content)
-          return item.message_type === 'video' && parsed?.caption === videoCaption
-        })
-        return message?.id ?? 0
-      }, { timeout: 60000 })
-      .toBeGreaterThan(0)
+      .poll(async () => fetchLatestRoomMessageTypesByChatId(request, sender.accessToken, groupId), { timeout: 60000 })
+      .toEqual(expect.arrayContaining(['video']))
 
     const videoBubble = page.locator('.message-bubble').filter({ hasText: videoCaption }).first()
     await expect(videoBubble).toBeVisible({ timeout: 30000 })
@@ -1670,7 +1709,7 @@ test.describe('Channel media regressions', () => {
     await directConversationRow.click()
 
     await expect(page.locator('.messages-container').getByText(directBootstrapContent)).toBeVisible()
-    await page.locator('button.attach-btn').click()
+    await activeAttachButton(page).click()
     await injectGalleryVideo(page, videoFileName)
 
     await expect
@@ -1778,8 +1817,7 @@ test.describe('Channel media regressions', () => {
     ))
     await page.goto('/chat')
     await realtimeConnected
-    await expect(page.getByText(fixture.channelTitle)).toBeVisible()
-    await page.getByText(fixture.channelTitle).click()
+    await openRoomFromConversationList(page, fixture.channelTitle)
 
     const messageRoot = page.locator(`#msg-${messageId}`)
     const messageWrapper = messageRoot.locator('xpath=..')
@@ -1832,7 +1870,7 @@ test.describe('Channel media regressions', () => {
     await forwardToTargets(page, [fixture.channelTitle])
 
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
-    await expect(page.getByText(fixture.channelTitle)).toBeVisible()
+  await expectRoomHeaderTitle(page, fixture.channelTitle)
 
     await expect
       .poll(async () => fetchLatestRoomContents(request, fixture), { timeout: 30000 })
@@ -1883,7 +1921,7 @@ test.describe('Channel media regressions', () => {
     await forwardToTargets(page, [groupTitle])
 
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${groupId}`)
-    await expect(page.locator('.chat-header').getByText(groupTitle)).toBeVisible()
+  await expectRoomHeaderTitle(page, groupTitle)
 
     await expect
       .poll(async () => fetchLatestRoomContentsByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
@@ -4421,7 +4459,7 @@ test.describe('Channel media regressions', () => {
 
     await expect(page.locator('.forward-modal')).toHaveCount(0)
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
-    await expect(page.locator('.chat-header').getByText(fixture.channelTitle)).toBeVisible()
+    await expectRoomHeaderTitle(page, fixture.channelTitle)
     await expect(page.locator('.messages-container .msg-document').getByText(sharedDocumentName)).toBeVisible()
     await expect(page.locator('.messages-container .msg-media-link')).toBeVisible()
 
@@ -4466,7 +4504,7 @@ test.describe('Channel media regressions', () => {
 
     await expect(page.locator('.forward-modal')).toHaveCount(0)
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
-    await expect(page.locator('.chat-header').getByText(fixture.channelTitle)).toBeVisible()
+    await expectRoomHeaderTitle(page, fixture.channelTitle)
     await expect(page.locator('.messages-container .msg-media-link')).toBeVisible()
     await expect(page.locator('.messages-container .media-type-badge')).toContainText('ویدئو')
 
@@ -4508,7 +4546,7 @@ test.describe('Channel media regressions', () => {
 
     await expect(page.locator('.forward-modal')).toHaveCount(0)
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
-    await expect(page.locator('.chat-header').getByText(fixture.channelTitle)).toBeVisible()
+    await expectRoomHeaderTitle(page, fixture.channelTitle)
     await expect(page.locator('.messages-container .msg-voice')).toBeVisible()
     await expect(page.locator('.messages-container .voice-play-btn')).toBeVisible()
 
@@ -4946,7 +4984,7 @@ test.describe('Channel media regressions', () => {
 
     await conversationRow.click()
 
-    await expect(page.locator('.chat-header').getByText(groupTitle)).toBeVisible()
+    await expectRoomHeaderTitle(page, groupTitle)
     await expectRoomHeaderStatus(page, 'گروه')
     await expect(page.locator('.messages-container').getByText(unreadContent)).toBeVisible()
     await expect

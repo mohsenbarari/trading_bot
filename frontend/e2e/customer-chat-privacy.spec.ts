@@ -3,11 +3,15 @@
 import { execFileSync } from 'child_process'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
+import { primeAuthSession } from './helpers/auth'
+
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 
 interface SessionUser {
   userId: number
   accountName: string
+  fullName: string
+  mobileNumber: string
   accessToken: string
   refreshToken: string
 }
@@ -110,6 +114,8 @@ async def create_session_bundle(db, user, device_name):
     return {
         'userId': user.id,
         'accountName': user.account_name,
+      'fullName': user.full_name,
+      'mobileNumber': user.mobile_number,
         'accessToken': access_token,
         'refreshToken': refresh_token,
     }
@@ -196,15 +202,7 @@ function authHeaders(accessToken: string) {
 }
 
 async function setAuthTokens(page: Page, session: SessionUser) {
-  await page.goto('/login')
-  await page.evaluate(({ accessToken, refreshToken }) => {
-    localStorage.setItem('auth_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
-    localStorage.removeItem('suspended_refresh_token')
-  }, {
-    accessToken: session.accessToken,
-    refreshToken: session.refreshToken,
-  })
+  await primeAuthSession(page, session.accessToken, session.refreshToken)
 }
 
 async function waitForBackendReady(request: APIRequestContext) {
@@ -228,6 +226,35 @@ async function openMessenger(page: Page) {
 async function openConversationListMenu(page: Page) {
   await page.locator('.chat-header .header-menu-container .header-btn').click()
   await expect(page.locator('.header-dropdown-menu')).toBeVisible({ timeout: 15000 })
+}
+
+async function sendComposerMessage(page: Page, text: string) {
+  const composerContainers = page.locator('.chat-view .input-area .input-container')
+  const containerCount = await composerContainers.count()
+
+  for (let index = containerCount - 1; index >= 0; index -= 1) {
+    const composerContainer = composerContainers.nth(index)
+    const composer = composerContainer.locator('textarea[placeholder="پیام..."]')
+    if (!(await composer.isVisible().catch(() => false))) {
+      continue
+    }
+
+    await composer.click()
+    await composer.fill('')
+    await composer.pressSequentially(text)
+
+    const sendButton = composerContainer.locator('.send-btn-inline')
+    const hasReactiveSend = await sendButton.isVisible({ timeout: 1500 }).catch(() => false)
+    if (!hasReactiveSend) {
+      continue
+    }
+
+    await expect(composer).toHaveValue(text)
+    await sendButton.click()
+    return
+  }
+
+  throw new Error('No reactive composer container became send-ready for the customer privacy message flow')
 }
 
 async function fetchDirectMessages(
@@ -260,15 +287,14 @@ test.describe('Customer chat privacy regressions', () => {
     await expect(page.locator('.new-chat-search-input')).toBeVisible({ timeout: 30000 })
 
     await page.locator('.new-chat-search-input').fill(fixture.owner.accountName)
-    const ownerRow = page.locator('.users-list').getByText(fixture.owner.accountName)
+    const ownerRow = page.locator('.users-list').getByRole('button', {
+      name: new RegExp(`${fixture.owner.fullName}.*${fixture.owner.mobileNumber}`),
+    })
     await expect(ownerRow).toBeVisible({ timeout: 30000 })
     await ownerRow.click()
 
-    await expect(page.locator('.chat-header .header-name')).toContainText(fixture.owner.accountName, { timeout: 30000 })
-    const composer = page.locator('textarea[placeholder="پیام..."]')
-    await expect(composer).toBeVisible({ timeout: 30000 })
-    await composer.fill(message)
-    await composer.press('Enter')
+    await expect(page.locator('.chat-header .header-name')).toContainText(fixture.owner.fullName, { timeout: 30000 })
+    await sendComposerMessage(page, message)
     await expect(page.locator('.message-bubble.sent').filter({ hasText: message })).toBeVisible({ timeout: 30000 })
 
     await expect
@@ -284,15 +310,14 @@ test.describe('Customer chat privacy regressions', () => {
     await expect(page.locator('.new-chat-search-input')).toBeVisible({ timeout: 30000 })
 
     await page.locator('.new-chat-search-input').fill(fixture.unrelated.accountName)
-    const unrelatedRow = page.locator('.users-list').getByText(fixture.unrelated.accountName)
+    const unrelatedRow = page.locator('.users-list').getByRole('button', {
+      name: new RegExp(`${fixture.unrelated.fullName}.*${fixture.unrelated.mobileNumber}`),
+    })
     await expect(unrelatedRow).toBeVisible({ timeout: 30000 })
     await unrelatedRow.click()
 
-    await expect(page.locator('.chat-header .header-name')).toContainText(fixture.unrelated.accountName, { timeout: 30000 })
-    const unrelatedComposer = page.locator('textarea[placeholder="پیام..."]')
-    await expect(unrelatedComposer).toBeVisible({ timeout: 30000 })
-    await unrelatedComposer.fill(blockedMessage)
-    await unrelatedComposer.press('Enter')
+    await expect(page.locator('.chat-header .header-name')).toContainText(fixture.unrelated.fullName, { timeout: 30000 })
+    await sendComposerMessage(page, blockedMessage)
 
     await expect(page.locator('.message-bubble.sent.error').filter({ hasText: blockedMessage })).toBeVisible({ timeout: 30000 })
     await expect

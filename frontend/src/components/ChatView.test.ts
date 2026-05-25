@@ -32,6 +32,7 @@ const chatViewMocks = vi.hoisted(() => ({
   scrollToMessageMock: vi.fn(),
   pushBackStateMock: vi.fn(),
   popBackStateMock: vi.fn(),
+  discardBackStateMock: vi.fn(),
   clearBackStackMock: vi.fn(),
   setConversationMutedMock: vi.fn(),
   seedFileCacheMock: vi.fn(),
@@ -66,6 +67,7 @@ vi.mock('@formkit/auto-animate/vue', () => ({
 vi.mock('../composables/useBackButton', () => ({
   pushBackState: chatViewMocks.pushBackStateMock,
   popBackState: chatViewMocks.popBackStateMock,
+  discardBackState: chatViewMocks.discardBackStateMock,
   clearBackStack: chatViewMocks.clearBackStackMock,
 }))
 
@@ -205,6 +207,7 @@ describe('ChatView.vue', () => {
     chatViewMocks.scrollToMessageMock.mockReset()
     chatViewMocks.pushBackStateMock.mockReset()
     chatViewMocks.popBackStateMock.mockReset()
+    chatViewMocks.discardBackStateMock.mockReset()
     chatViewMocks.clearBackStackMock.mockReset()
     chatViewMocks.setConversationMutedMock.mockReset()
     chatViewMocks.seedFileCacheMock.mockReset()
@@ -2785,6 +2788,47 @@ describe('ChatView.vue', () => {
     wrapper.unmount()
   })
 
+  it('keeps the reserved caption after the attachment sheet closes before delayed media selection', async () => {
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    }, {
+      ChatInputBar: {
+        template: "<button class='toggle-attachment' @click=\"$emit('toggle-attachment', 'کپشن آماده')\">attach</button>",
+      },
+      AttachmentMenu: {
+        props: ['modelValue'],
+        template: "<div><span class='attachment-open'>{{ String(modelValue) }}</span><button class='close-attachment' @click=\"$emit('update:modelValue', false)\">close</button><button class='select-media-after-close' @click='emitMedia'>media</button></div>",
+        methods: {
+          emitMedia(this: { $emit: (event: string, ...args: unknown[]) => void }) {
+            this.$emit('select-media', new File(['img'], 'photo.png', { type: 'image/png' }), null, 0, 1)
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('.toggle-attachment').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.attachment-open').text()).toBe('true')
+
+    await wrapper.get('.close-attachment').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.attachment-open').text()).toBe('false')
+
+    await wrapper.get('.select-media-after-close').trigger('click')
+    await flushPromises()
+
+    expect(chatViewMocks.handleMediaUploadWrapperMock).toHaveBeenCalledTimes(1)
+    const mediaCall = chatViewMocks.handleMediaUploadWrapperMock.mock.calls[0]
+    expect(mediaCall?.[4]).toMatchObject({
+      caption: 'کپشن آماده',
+      roomKindOverride: 'direct',
+    })
+
+    wrapper.unmount()
+  })
+
   it('sends selected files through the document-upload path', async () => {
     const wrapper = await mountChatView({
       targetUserId: 55,
@@ -3984,23 +4028,35 @@ describe('ChatView.vue', () => {
     expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(-88)
 
     chatViewMocks.loadMessagesMock.mockClear()
-    hooks.state.showNewChatModal.value = true
+    hooks.openNewConversation()
+    await flushPromises()
+    expect(chatViewMocks.pushBackStateMock).toHaveBeenCalled()
     hooks.handleNewChatSearch(66, 'گفتگوی تازه')
+    let discardCalls = chatViewMocks.discardBackStateMock.mock.calls.length
+    expect(discardCalls).toBeGreaterThanOrEqual(1)
+    expect(chatViewMocks.popBackStateMock).not.toHaveBeenCalled()
     expect(hooks.state.showNewChatModal.value).toBe(false)
     expect(hooks.state.selectedUserId.value).toBe(66)
     expect(hooks.state.selectedUserName.value).toBe('گفتگوی تازه')
     expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(66)
 
     hooks.openNewConversation()
+    await flushPromises()
     expect(hooks.state.showNewChatModal.value).toBe(true)
 
     hooks.openGroupCreation()
+    expect(chatViewMocks.discardBackStateMock.mock.calls.length).toBeGreaterThanOrEqual(discardCalls)
+    discardCalls = chatViewMocks.discardBackStateMock.mock.calls.length
+    expect(chatViewMocks.popBackStateMock).not.toHaveBeenCalled()
     expect(hooks.state.showNewChatModal.value).toBe(false)
     expect(hooks.state.showGroupManagerModal.value).toBe(true)
     expect(hooks.state.groupManagerChatId.value).toBeNull()
 
-    hooks.state.showNewChatModal.value = true
+    hooks.openNewConversation()
+    await flushPromises()
     hooks.openChannelCreation()
+    expect(chatViewMocks.discardBackStateMock.mock.calls.length).toBeGreaterThanOrEqual(discardCalls)
+    expect(chatViewMocks.popBackStateMock).not.toHaveBeenCalled()
     expect(hooks.state.showNewChatModal.value).toBe(false)
     expect(hooks.state.showChannelManagerModal.value).toBe(true)
     expect(hooks.state.channelManagerChatId.value).toBeNull()
@@ -4065,28 +4121,46 @@ describe('ChatView.vue', () => {
     expect(hooks.state.selectedUserName.value).toBe('گروه به‌روز')
 
     chatViewMocks.loadConversationsMock.mockClear()
+    chatViewMocks.routerReplaceMock.mockClear()
     hooks.state.selectedUserId.value = -99
     hooks.state.selectedUserName.value = 'گروه به‌روز'
     hooks.state.showAttachmentMenu.value = true
     hooks.state.showStickerPicker.value = true
+    chatViewMocks.routeState.query = {
+      user_id: '-99',
+      user_name: 'گروه به‌روز',
+    }
     await hooks.handleGroupLeft(99)
     expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
     expect(hooks.state.selectedUserId.value).toBeNull()
     expect(hooks.state.selectedUserName.value).toBe('')
     expect(hooks.state.showAttachmentMenu.value).toBe(false)
     expect(hooks.state.showStickerPicker.value).toBe(false)
+    expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      path: '/chat',
+      query: {},
+    })
 
     chatViewMocks.loadConversationsMock.mockClear()
+    chatViewMocks.routerReplaceMock.mockClear()
     hooks.state.selectedUserId.value = -23
     hooks.state.selectedUserName.value = 'کانال رفرش‌شده'
     hooks.state.showAttachmentMenu.value = true
     hooks.state.showStickerPicker.value = true
+    chatViewMocks.routeState.query = {
+      user_id: '-23',
+      user_name: 'کانال رفرش‌شده',
+    }
     await hooks.handleChannelLeft(23)
     expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
     expect(hooks.state.selectedUserId.value).toBeNull()
     expect(hooks.state.selectedUserName.value).toBe('')
     expect(hooks.state.showAttachmentMenu.value).toBe(false)
     expect(hooks.state.showStickerPicker.value).toBe(false)
+    expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      path: '/chat',
+      query: {},
+    })
 
     wrapper.unmount()
   })

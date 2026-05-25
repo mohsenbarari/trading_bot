@@ -15,7 +15,7 @@ import ChatGroupManagerModal from './chat/ChatGroupManagerModal.vue'
 import CreateChannelView from './CreateChannelView.vue'
 import AttachmentMenu from './chat/AttachmentMenu.vue'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
-import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
+import { pushBackState, popBackState, clearBackStack, discardBackState } from '../composables/useBackButton'
 import { useWebSocket } from '../composables/useWebSocket'
 
 import type { ChatForwardTarget, Conversation, Message, MessageReaction, PinnedMessageState } from '../types/chat'
@@ -187,7 +187,7 @@ function resolveSelectedConversationName(userId: number | null, fallback = '') {
   return conversations.value.find((conversation) => conversation.other_user_id === userId)?.other_user_name || ''
 }
 
-function syncSelectedConversationRoute(userId: number | null, userName = '') {
+async function syncSelectedConversationRoute(userId: number | null, userName = '') {
   const currentUserId = getRouteQueryValue(route.query.user_id as string | string[] | undefined)
   const currentUserName = getRouteQueryValue(route.query.user_name as string | string[] | undefined)
   const nextUserId = userId == null ? '' : String(userId)
@@ -217,7 +217,7 @@ function syncSelectedConversationRoute(userId: number | null, userName = '') {
     nextQuery.user_name = nextUserName
   }
 
-  void router.replace({ path: route.path, query: nextQuery })
+  await router.replace({ path: route.path, query: nextQuery })
 }
 
 function updateIsMobile() {
@@ -294,7 +294,7 @@ function handleScrollButtonClick() {
 }
 
 watch([selectedUserId, selectedUserName], ([nextUserId, nextUserName]) => {
-  syncSelectedConversationRoute(nextUserId, nextUserName)
+  void syncSelectedConversationRoute(nextUserId, nextUserName)
 })
 
 const messagesLogic = useChatMessages({
@@ -327,7 +327,15 @@ const messagesLogic = useChatMessages({
   },
   adjustTextareaHeight: () => {
     chatInputBarRef.value?.adjustTextareaHeight()
-  }
+  },
+  onNamedRoomUnavailable: async (conversationKey) => {
+    if (selectedUserId.value !== conversationKey) {
+      return
+    }
+    clearActiveConversationState()
+    await syncSelectedConversationRoute(null, '')
+    void loadConversations()
+  },
 })
 
 const {
@@ -1705,9 +1713,19 @@ const showGroupManagerModal = ref(false)
 const showChannelManagerModal = ref(false)
 const groupManagerChatId = ref<number | null>(null)
 const channelManagerChatId = ref<number | null>(null)
+const newChatModalBackStateActive = ref(false)
+let closingNewChatModalFromBack = false
+
+function closeNewChatModalForAction() {
+  if (newChatModalBackStateActive.value) {
+    newChatModalBackStateActive.value = false
+    discardBackState()
+  }
+  showNewChatModal.value = false
+}
 
 const handleNewChatSearch = (userId: number, userName: string) => {
-    showNewChatModal.value = false
+    closeNewChatModalForAction()
     startNewChat(userId, userName)
 }
 
@@ -1728,14 +1746,14 @@ function openGroupCreation() {
     )
     return
   }
-  showNewChatModal.value = false
+  closeNewChatModalForAction()
   groupManagerChatId.value = null
   showGroupManagerModal.value = true
 }
 
 function openChannelCreation() {
   if (!canCreateOptionalChannel.value) return
-  showNewChatModal.value = false
+  closeNewChatModalForAction()
   channelManagerChatId.value = null
   showChannelManagerModal.value = true
 }
@@ -1843,29 +1861,47 @@ async function handleGroupCreated(group: { id: number; title: string }) {
 }
 
 async function handleGroupUpdated(group: { id: number; title: string }) {
-  await loadConversations()
   const conversationKey = resolveRoomConversationKey('group', group.id) ?? -Math.abs(group.id)
-  if (selectedUserId.value === conversationKey) {
+  const shouldRefreshSelectedTitle = selectedUserId.value === conversationKey
+  if (shouldRefreshSelectedTitle) {
+    selectedUserName.value = group.title
+  }
+  await loadConversations()
+  if (shouldRefreshSelectedTitle) {
     selectedUserName.value = group.title
   }
 }
 
 async function handleGroupLeft(chatId: number) {
+  const managedChatId = groupManagerChatId.value
   showGroupManagerModal.value = false
   groupManagerChatId.value = null
-  const conversationKey = resolveRoomConversationKey('group', chatId) ?? -Math.abs(chatId)
-  if (selectedUserId.value === conversationKey) {
+  const explicitConversationKey = resolveRoomConversationKey('group', chatId)
+  const managedConversationKey = resolveRoomConversationKey('group', managedChatId)
+  const routeConversationKey = Number(getRouteQueryValue(route.query.user_id as string | string[] | undefined) || 0)
+  const shouldClearCurrentGroup = [explicitConversationKey, managedConversationKey]
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    .some((conversationKey) => selectedUserId.value === conversationKey || routeConversationKey === conversationKey)
+  if (shouldClearCurrentGroup) {
     clearActiveConversationState()
+    await syncSelectedConversationRoute(null, '')
   }
   await loadConversations()
 }
 
 async function handleChannelLeft(chatId: number) {
+  const managedChatId = channelManagerChatId.value
   showChannelManagerModal.value = false
   channelManagerChatId.value = null
-  const conversationKey = resolveRoomConversationKey('channel', chatId) ?? -Math.abs(chatId)
-  if (selectedUserId.value === conversationKey) {
+  const explicitConversationKey = resolveRoomConversationKey('channel', chatId)
+  const managedConversationKey = resolveRoomConversationKey('channel', managedChatId)
+  const routeConversationKey = Number(getRouteQueryValue(route.query.user_id as string | string[] | undefined) || 0)
+  const shouldClearCurrentChannel = [explicitConversationKey, managedConversationKey]
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    .some((conversationKey) => selectedUserId.value === conversationKey || routeConversationKey === conversationKey)
+  if (shouldClearCurrentChannel) {
     clearActiveConversationState()
+    await syncSelectedConversationRoute(null, '')
   }
   await loadConversations()
 }
@@ -2957,14 +2993,29 @@ watch(() => contextMenu.value.visible, (isVisible) => {
 watch(showAttachmentMenu, (isOpen) => {
   if (isOpen) {
     showStickerPicker.value = false
+  }
+})
+
+watch(showNewChatModal, (isOpen) => {
+  if (isOpen) {
+    if (!newChatModalBackStateActive.value) {
+      newChatModalBackStateActive.value = true
+      pushBackState(() => {
+        newChatModalBackStateActive.value = false
+        closingNewChatModalFromBack = true
+        showNewChatModal.value = false
+        closingNewChatModalFromBack = false
+      })
+    }
     return
   }
 
-  pendingMediaCaptionReservation = null
-})
-
-bindOverlayBackState(() => showNewChatModal.value, () => {
-  showNewChatModal.value = false
+  if (newChatModalBackStateActive.value) {
+    newChatModalBackStateActive.value = false
+    if (!closingNewChatModalFromBack) {
+      popBackState()
+    }
+  }
 })
 
 bindOverlayBackState(() => showForwardModal.value, () => {
@@ -2995,11 +3046,24 @@ bindOverlayBackState(() => Boolean(lightboxMedia.value), () => {
   closeLightbox()
 })
 
-function handleToggleAttachment() {
+function handleToggleAttachment(composerValue?: string) {
   if (selectedRoomKind.value === 'channel' && !canSendToSelectedRoom.value) {
     return
   }
   showStickerPicker.value = false
+  if (!showAttachmentMenu.value) {
+    const nextComposerValue = typeof composerValue === 'string' ? composerValue : messageInput.value
+    if (nextComposerValue !== messageInput.value) {
+      messageInput.value = nextComposerValue
+    }
+    const trimmedComposerValue = nextComposerValue.trim()
+    pendingMediaCaptionReservation = trimmedComposerValue
+      ? {
+          value: trimmedComposerValue,
+          consumed: false,
+        }
+      : null
+  }
   showAttachmentMenu.value = !showAttachmentMenu.value
 }
 

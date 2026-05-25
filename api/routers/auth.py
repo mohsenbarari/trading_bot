@@ -42,7 +42,7 @@ from core.services.user_account_status_service import get_user_account_status, i
 from core.services.avatar_service import resolve_owned_avatar_file_id
 from models.session import Platform, UserSession
 import uuid
-from core.utils import utc_now
+from core.utils import normalize_persian_numerals, utc_now
 from core.server_routing import SERVER_FOREIGN, server_from_request
 from core.services.chat_room_service import ensure_mandatory_channel_membership
 from core.services.accountant_relation_service import (
@@ -327,8 +327,9 @@ async def register_otp_verify(
     redis = await get_redis()
     otp_key = f"reg_otp:{req.token}"
     stored_code = await redis.get(otp_key)
+    submitted_code = normalize_persian_numerals(req.code)
     
-    if not stored_code or stored_code != req.code:
+    if not stored_code or stored_code != submitted_code:
         raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است")
     
     # Delete OTP to prevent replay attacks
@@ -722,7 +723,7 @@ async def request_otp(
     اگر اینترنت وصل باشد -> کد به بات تلگرام ارسال می‌شود.
     اگر اینترنت قطع باشد یا کاربر تلگرام نداشته باشد -> کد SMS می‌شود.
     """
-    mobile = request.mobile_number
+    mobile = normalize_persian_numerals(request.mobile_number)
     # اعتبارسنجی ساده شماره موبایل
     if not mobile.startswith("09") or len(mobile) != 11:
         raise HTTPException(status_code=400, detail="شماره موبایل نامعتبر است")
@@ -814,7 +815,7 @@ async def resend_otp_sms(
     این متد زمانی صدا زده می‌شود که کد قبلاً (مثلاً به تلگرام) ارسال شده
     و هنوز منقضی نشده، اما کاربر می‌خواهد آن را via SMS دریافت کند.
     """
-    mobile = request.mobile_number
+    mobile = normalize_persian_numerals(request.mobile_number)
     redis = await get_redis()
     
     logger.info(f"Resend SMS Request for {mobile}")
@@ -867,8 +868,8 @@ async def verify_otp(
     raw_request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    mobile = request.mobile_number
-    code = request.code
+    mobile = normalize_persian_numerals(request.mobile_number)
+    code = normalize_persian_numerals(request.code)
     
     redis = await get_redis()
     otp_key = f"otp:{mobile}"

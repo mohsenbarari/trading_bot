@@ -295,7 +295,7 @@ const emit = defineEmits<{
   (e: 'reply-selected'): void
   (e: 'copy-selected'): void
   (e: 'forward-selected'): void
-  (e: 'toggle-attachment'): void
+  (e: 'toggle-attachment', composerValue?: string): void
   (e: 'send-text', content: string): void
   (e: 'send-voice', blob: Blob, durationMs: number): void
   (e: 'typing'): void
@@ -1041,11 +1041,15 @@ function prepareStickerToggle() {
 }
 
 function handleToggleAttachment() {
+  const liveComposerValue = messageInputRef.value?.value
+  if (typeof liveComposerValue === 'string' && liveComposerValue !== messageInput.value) {
+    emit('update:modelValue', liveComposerValue)
+  }
   pendingKeyboardReturn.value = false
   lockedComposerInsetHeight.value = 0
   disablePickerTransition.value = false
   setStickerPickerOpen(false)
-  emit('toggle-attachment')
+  emit('toggle-attachment', typeof liveComposerValue === 'string' ? liveComposerValue : messageInput.value)
   captureDebugState('attachment-open')
 }
 

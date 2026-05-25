@@ -187,6 +187,25 @@ describe('ChatInputBar.vue', () => {
     expect(wrapper.emitted('toggle-attachment')).toHaveLength(1)
   })
 
+  it('syncs the live textarea value before opening attachments', async () => {
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      canDeleteSelected: false,
+      canCopySelected: false,
+      modelValue: '',
+    })
+    const hooks = getInputBarTestHooks(wrapper)
+    const textarea = wrapper.get('textarea').element as HTMLTextAreaElement
+
+    textarea.value = 'کپشن تازه'
+    hooks.handleToggleAttachment()
+    await nextTick()
+
+    expect(wrapper.emitted('update:modelValue')).toContainEqual(['کپشن تازه'])
+    expect(wrapper.emitted('toggle-attachment')).toEqual([['کپشن تازه']])
+  })
+
   it('emits cancel events for reply/edit banners and sends trimmed text on enter', async () => {
     const replyingWrapper = mountInputBar({
       isSelectionMode: false,

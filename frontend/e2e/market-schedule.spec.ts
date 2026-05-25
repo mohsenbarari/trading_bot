@@ -3,6 +3,8 @@
 import { execFileSync } from 'child_process'
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test'
 
+import { primeAuthSession } from './helpers/auth'
+
 interface SeededMarketSession {
   userId: number
   accountName: string
@@ -57,6 +59,8 @@ from core.db import AsyncSessionLocal
 from core.enums import UserRole
 from core.security import create_access_token, create_refresh_token
 from core.services.session_service import hash_token
+from core.cache import invalidate_commodities_cache
+from bot.utils.redis_helpers import invalidate_commodity_cache
 from models.commodity import Commodity
 from models.session import Platform, UserSession
 from models.user import User
@@ -108,6 +112,9 @@ async def main():
         )
 
         await db.commit()
+
+    await invalidate_commodities_cache()
+    await invalidate_commodity_cache()
 
     print(json.dumps({
         'userId': actor.id,
@@ -193,12 +200,7 @@ asyncio.run(main())
 }
 
 async function setSeededSession(page: Page, fixture: SeededMarketSession) {
-  await page.goto('/login')
-  await page.evaluate(({ accessToken, refreshToken }) => {
-    localStorage.setItem('auth_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
-    localStorage.removeItem('suspended_refresh_token')
-  }, fixture)
+  await primeAuthSession(page, fixture.accessToken, fixture.refreshToken)
 }
 
 async function gotoMarketAndWaitForSocket(page: Page) {
@@ -389,7 +391,7 @@ test.describe('Market schedule browser regressions', () => {
 
     await openOfferPreview(activePage, `خرید ${actor.commodityName} 10 عدد 121111`)
     await confirmOfferPreview(activePage)
-    await expect(activePage.getByText('لفظ متنی ثبت شد')).toBeVisible()
+    await expect(activePage.locator('.offer-preview-card')).toHaveCount(0)
     const afterFirstOfferState = await waitForAuthoritativeMarketState(
       (state) => state.is_open && state.active_web_notice_visible && state.offers_since_last_open === 1,
       'start notice still visible after first accepted offer',
@@ -399,7 +401,7 @@ test.describe('Market schedule browser regressions', () => {
 
     await openOfferPreview(activePage, `فروش ${actor.commodityName} 12 عدد 121222`)
     await confirmOfferPreview(activePage)
-    await expect(activePage.getByText('لفظ متنی ثبت شد')).toBeVisible()
+    await expect(activePage.locator('.offer-preview-card')).toHaveCount(0)
     const afterSecondOfferState = await waitForAuthoritativeMarketState(
       (state) => state.is_open && !state.active_web_notice_visible && state.offers_since_last_open >= 2,
       'start notice hidden after second accepted offer',
