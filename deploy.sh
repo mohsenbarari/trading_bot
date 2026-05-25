@@ -297,13 +297,16 @@ deploy_iran() {
 # ==========================================
 deploy_foreign() {
     print_header "🌍 Deploying Foreign Server (local)"
+    local core_services=(db redis migration app bot)
 
     cd "$PROJECT_DIR"
     echo "⏳ Building Docker image explicitly to prevent compose parallel export OOM..."
     run_with_local_resource_guard "Foreign Docker image build" env DOCKER_BUILDKIT=1 docker build -t trading_bot_base .
 
-    echo "⏳ Waiting for foreign services to become ready..."
-    run_with_local_resource_guard "Foreign service startup" docker compose up -d --wait --wait-timeout 180
+    echo "ℹ️ Standard foreign deploy only refreshes core services: ${core_services[*]}"
+    echo "ℹ️ Optional support services (tileserver/adminer) are left untouched to avoid a cold-boot CPU spike after crashes or reboots."
+    echo "⏳ Waiting for foreign core services to become ready..."
+    run_with_local_resource_guard "Foreign core service startup" docker compose up -d --wait --wait-timeout 180 "${core_services[@]}"
 
     echo "✅ Foreign deployment complete!"
     docker compose ps
