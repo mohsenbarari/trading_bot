@@ -52,8 +52,8 @@ watch(isFirstRouteReady, (ready) => {
         <div class="w-10 h-10 border-4 border-amber-400 border-t-transparent rounded-full animate-spin"></div>
       </div>
       <RouterView v-else v-slot="{ Component }">
-        <transition name="fade" mode="out-in">
-          <component :is="Component" />
+        <transition name="fade">
+          <component :is="Component" :key="route.fullPath" />
         </transition>
       </RouterView>
     </div>

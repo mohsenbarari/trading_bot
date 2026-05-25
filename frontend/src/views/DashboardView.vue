@@ -172,7 +172,7 @@ async function switchToAccount(targetUser: any) {
     localStorage.setItem('auth_token', payload.access_token)
     localStorage.setItem('refresh_token', payload.refresh_token)
     localStorage.removeItem('current_user_summary')
-    window.location.assign('/dashboard')
+    window.location.assign('/')
   } catch (error: any) {
     switchError.value = error?.message || 'سوییچ حساب انجام نشد'
   } finally {
