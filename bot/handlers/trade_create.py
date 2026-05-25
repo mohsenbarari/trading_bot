@@ -708,6 +708,10 @@ async def _handle_trade_confirm_core(
             if db_user:
                 await increment_user_counter_fn(session, db_user, "channel_message")
 
+        from core.cache import incr_active_offer_count
+
+        await incr_active_offer_count(user.id)
+
         await callback.message.edit_text(success_message_text, parse_mode="Markdown")
         await bot.send_message(
             chat_id=callback.from_user.id,
