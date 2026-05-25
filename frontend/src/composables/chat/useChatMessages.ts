@@ -14,6 +14,7 @@ import {
     buildChatSendBody,
     buildChatSendEndpoint,
     isChannelConversationKey,
+    isRoomConversationKey,
 } from '../../utils/chatRoomRouting'
 import { getConversationPreviewText } from '../../utils/chatMessagePreview'
 import {
@@ -50,6 +51,7 @@ export interface UseChatMessagesOptions {
     forceScrollToBottom: () => void
     focusMessageInput: (options?: { cursorToEnd?: boolean }) => void
     adjustTextareaHeight: () => void
+    onNamedRoomUnavailable?: (conversationKey: number) => void | Promise<void>
 }
 
 export function useChatMessages(options: UseChatMessagesOptions) {
@@ -79,7 +81,8 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         scrollToUnreadOrBottom,
         forceScrollToBottom,
         focusMessageInput,
-        adjustTextareaHeight
+        adjustTextareaHeight,
+        onNamedRoomUnavailable,
     } = options
 
     const notificationStore = useNotificationStore()
@@ -394,6 +397,9 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 void markAsRead()
             }
         } catch (e: any) {
+            if (isRoomConversationKey(userId) && selectedUserId.value === userId && (e?.status === 403 || e?.status === 404)) {
+                await onNamedRoomUnavailable?.(userId)
+            }
             if (!effectiveSilent && isActiveLoadRequest(requestId, userId)) {
                 const message = getUserFacingErrorMessage(e, {
                     surface: 'messenger',

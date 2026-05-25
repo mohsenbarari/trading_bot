@@ -3,6 +3,8 @@
 import { execFileSync } from 'child_process'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
+import { primeAuthSession } from './helpers/auth'
+
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 
 interface SessionUser {
@@ -183,9 +185,9 @@ async def main():
         )
         db.add(relation)
 
-        max_trade_number = (await db.scalar(select(func.max(Trade.trade_number)))) or 9999
+        base_trade_number = 1000000 + (int(uuid.uuid4().hex[:7], 16) % 9000000)
         trade = Trade(
-            trade_number=max_trade_number + 1,
+          trade_number=base_trade_number,
             offer_id=None,
             offer_user_id=counterparty_accountant.id,
             offer_user_mobile=counterparty_accountant.mobile_number,
@@ -439,10 +441,10 @@ async def main():
     db.add_all([viewer, target, other, gold, silver])
     await db.flush()
 
-    max_trade_number = (await db.scalar(select(func.max(Trade.trade_number)))) or 9999
+    base_trade_number = 1000000 + (int(uuid.uuid4().hex[:7], 16) % 9000000)
 
     recent_mutual = Trade(
-      trade_number=max_trade_number + 1,
+      trade_number=base_trade_number,
       offer_id=None,
       offer_user_id=target.id,
       offer_user_mobile=target.mobile_number,
@@ -457,7 +459,7 @@ async def main():
       created_at=now - timedelta(days=10),
     )
     medium_mutual = Trade(
-      trade_number=max_trade_number + 2,
+      trade_number=base_trade_number + 1,
       offer_id=None,
       offer_user_id=viewer.id,
       offer_user_mobile=viewer.mobile_number,
@@ -472,7 +474,7 @@ async def main():
       created_at=now - timedelta(days=70),
     )
     old_mutual = Trade(
-      trade_number=max_trade_number + 3,
+      trade_number=base_trade_number + 2,
       offer_id=None,
       offer_user_id=target.id,
       offer_user_mobile=target.mobile_number,
@@ -487,7 +489,7 @@ async def main():
       created_at=now - timedelta(days=200),
     )
     self_other = Trade(
-      trade_number=max_trade_number + 4,
+      trade_number=base_trade_number + 3,
       offer_id=None,
       offer_user_id=other.id,
       offer_user_mobile=other.mobile_number,
@@ -770,12 +772,7 @@ async function waitForBackendReady(request: APIRequestContext) {
 }
 
 async function loginWithSeededSession(page: Page, session: SessionUser) {
-  await page.goto('/login')
-  await page.evaluate(({ accessToken, refreshToken }) => {
-    localStorage.setItem('auth_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
-    localStorage.removeItem('suspended_refresh_token')
-  }, session)
+  await primeAuthSession(page, session.accessToken, session.refreshToken)
 }
 
 async function executeTrade(request: APIRequestContext, accessToken: string, offerId: number, quantity: number) {
@@ -802,7 +799,7 @@ test.describe('Trade history accountant context', () => {
     await loginWithSeededSession(page, fixture.viewer)
     await page.goto(`/users/${fixture.viewer.userId}?account_name=${encodeURIComponent(fixture.viewer.accountName)}`)
 
-    const profileView = page.locator('.public-profile-view')
+    const profileView = page.locator('.public-profile-view:visible').last()
     await expect(profileView).toContainText(fixture.viewer.accountName)
 
     const historyHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات من' }).first()
@@ -864,7 +861,7 @@ test.describe('Trade history accountant context', () => {
         offer_user_highlight_accountant_relation_display_name: fixture.relationDisplayName,
       })
 
-    const profileView = page.locator('.public-profile-view')
+    const profileView = page.locator('.public-profile-view:visible').last()
     const historyHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات من' }).first()
     await historyHeader.click()
 
@@ -888,7 +885,7 @@ test.describe('Trade history accountant context', () => {
     await loginWithSeededSession(page, fixture.viewer)
     await page.goto(`/users/${fixture.targetUserId}?account_name=${encodeURIComponent(fixture.targetAccountName)}`)
 
-    const profileView = page.locator('.public-profile-view')
+    const profileView = page.locator('.public-profile-view:visible').last()
     await expect(profileView).toContainText(fixture.targetAccountName)
 
     const historyHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات مشترک' }).first()
@@ -944,7 +941,7 @@ test.describe('Trade history accountant context', () => {
     await loginWithSeededSession(page, fixture.viewer)
     await page.goto(`/users/${fixture.viewer.userId}?account_name=${encodeURIComponent(fixture.viewer.accountName)}`)
 
-    const profileView = page.locator('.public-profile-view')
+    const profileView = page.locator('.public-profile-view:visible').last()
     await expect(profileView).toContainText(fixture.viewer.accountName)
 
     const historyHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات من' }).first()

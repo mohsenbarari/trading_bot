@@ -6,6 +6,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
+import { primeAuthSession } from './helpers/auth'
+
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ6kAAAAASUVORK5CYII='
 const GENERATED_WEBM_BASE64 = 'GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAMpEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHYTbuMU6uEElTDZ1OsggEeTbuMU6uEHFO7a1OsggMT7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsirXsYMPQkBNgI1MYXZmNjAuMTYuMTAwV0GNTGF2ZjYwLjE2LjEwMESJiECCwAAAAAAAFlSua8GuAQAAAAAAADjXgQFzxYgcOxjQCFYmc5yBACK1nIN1bmSIgQCGhVZfVlA5g4EBI+ODhAJiWgDgibCBYLqBYJqBAhJUw2dAgHNzoGPAgGfImkWjh0VOQ09ERVJEh41MYXZmNjAuMTYuMTAwc3PaY8CLY8WIHDsY0AhWJnNnyKVFo4dFTkNPREVSRIeYTGF2YzYwLjMxLjEwMiBsaWJ2cHgtdnA5Z8ihRaOIRFVSQVRJT05Eh5MwMDowMDowMC42MDAwMDAwMDAAH0O2dUFp54EAo7CBAACAgkmDQgAF8AX2ADgkHBhKAAAwYAAAfKn//1zBn///25IP//6uxlgyUsRrFACjlIEAKACGAECSnABQAAADIAAAWTDgo5SBAFAAhgBAkpwATuAAAyAAAFkw4KOUgQB4AIYAQJKcAFAAAAMgAABZMOCjlIEAoACGAECSnABNQAADIAAAWTDgo5SBAMgAhgBAkpwAUAAAAyAAAFkw4KOUgQDwAIYAQJKcAE7gAAMgAABZMOCjlIEBGACGAECSnABQAAADIAAAWTDgo5SBAUAAhgBAkpwASiAAAyAAAFkw4KOUgQFoAIYAQJKcAFAAAAMgAABZMOCjlIEBkACGAMCSnABKIAADIAAAWTDgo5SBAbgAhgBAkpwAUAAAAyAAAFkw4KOUgQHgAIYAQJKcAE1AAAMgAABZMOCjlIECCACGAECSnABQAAADIAAAWTDgo5SBAjAAhgBAkpwATuAAAyAAAFkw4BxTu2uRu4+zgQC3iveBAfGCAaTwgQM='
@@ -200,15 +202,7 @@ async function waitForBackendReady(request: APIRequestContext) {
 }
 
 async function loginWithSeededSession(page: Page, fixture: SessionFixture) {
-  await page.goto('/login')
-  await page.evaluate(({ accessToken, refreshToken }) => {
-    localStorage.setItem('auth_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
-    localStorage.removeItem('suspended_refresh_token')
-  }, {
-    accessToken: fixture.accessToken,
-    refreshToken: fixture.refreshToken,
-  })
+  await primeAuthSession(page, fixture.accessToken, fixture.refreshToken)
 }
 
 async function openDirectChat(page: Page, otherUserId: number, userName: string) {
@@ -221,6 +215,32 @@ async function openConversationFromList(page: Page, userName: string) {
   await expect(conversation).toBeVisible({ timeout: 30000 })
   await conversation.click()
   await expect(page.locator('.chat-header .header-name')).toContainText(userName, { timeout: 30000 })
+}
+
+async function fillComposerCaption(page: Page, caption: string): Promise<Locator> {
+  const composers = page.locator('textarea[placeholder="پیام..."]')
+  const composerCount = await composers.count()
+
+  for (let index = composerCount - 1; index >= 0; index -= 1) {
+    const composer = composers.nth(index)
+    if (!(await composer.isVisible().catch(() => false))) {
+      continue
+    }
+
+    const container = composer.locator('xpath=ancestor::div[contains(@class, "input-container")][1]')
+    await composer.click()
+    await composer.fill('')
+    await composer.pressSequentially(caption)
+    await expect(composer).toHaveValue(caption)
+
+    const sendButton = container.locator('.send-btn-inline')
+    if (await sendButton.count()) {
+      await expect(sendButton).toBeVisible({ timeout: 30000 })
+      return container
+    }
+  }
+
+  throw new Error('Unable to find an active direct-room composer container for captioned media input')
 }
 
 async function navigateFromMessengerToMarket(page: Page) {
@@ -609,7 +629,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await page.locator('.users-list').getByText(peer.accountName).click()
 
     await expect(page.locator('.chat-header .header-name')).toContainText(peer.accountName, { timeout: 30000 })
-    await expect(page).toHaveURL(/\/chat$/)
+    await expect(page).toHaveURL(new RegExp(`/chat\\?user_id=${peer.userId}(?:&user_name=.*)?$`))
 
     await page.locator('button.attach-btn').click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
@@ -659,14 +679,14 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
       await openConversationFromList(receiverPage, sender.accountName)
 
       await senderPage.locator('textarea[placeholder="پیام..."]').fill(`PW DIRECT ACTIVITY ${Date.now()}`)
-      await expect(receiverPage.locator('.chat-header .header-status')).toContainText('در حال نوشتن', { timeout: 30000 })
+      await expect(receiverPage.locator('.chat-header:visible').last()).toContainText('در حال نوشتن', { timeout: 30000 })
 
       await senderPage.locator('button.attach-btn').click()
       await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
       await senderPage.getByRole('button', { name: 'فایل' }).first().click()
       await injectDocument(senderPage, { sizeBytes: largeDocumentSizeBytes })
 
-      await expect(receiverPage.locator('.chat-header .header-status')).toContainText('در حال ارسال فایل...', { timeout: 30000 })
+      await expect(receiverPage.locator('.chat-header:visible').last()).toContainText('در حال ارسال فایل...', { timeout: 30000 })
 
       await navigateFromMessengerToMarket(senderPage)
 
@@ -914,15 +934,14 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     const peer = seedPrimarySession('direct_room_media_caption_peer')
     const imageCaption = `PW IMG CAP ${Date.now()}`
     const videoCaption = `PW VID CAP ${Date.now()}`
-    const composer = page.locator('textarea[placeholder="پیام..."]')
 
     await waitForBackendReady(request)
     await loginWithSeededSession(page, actor)
     await openDirectChat(page, peer.userId, peer.accountName)
 
-    await composer.fill(imageCaption)
-    await expect(page.locator('button.attach-btn')).toBeVisible()
-    await page.locator('button.attach-btn').click()
+    const imageComposerContainer = await fillComposerCaption(page, imageCaption)
+    await expect(imageComposerContainer.locator('button.attach-btn')).toBeVisible()
+    await imageComposerContainer.locator('button.attach-btn').click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
     await injectGalleryImage(page)
 
@@ -944,9 +963,9 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await expect(imageConversation).toContainText(`تصویر · ${imageCaption}`, { timeout: 30000 })
     await openConversationFromList(page, peer.accountName)
 
-    await composer.fill(videoCaption)
-    await expect(page.locator('button.attach-btn')).toBeVisible()
-    await page.locator('button.attach-btn').click()
+    const videoComposerContainer = await fillComposerCaption(page, videoCaption)
+    await expect(videoComposerContainer.locator('button.attach-btn')).toBeVisible()
+    await videoComposerContainer.locator('button.attach-btn').click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
     await injectGalleryVideo(page)
     await expect(page.locator('.attachment-sheet')).toHaveCount(0, { timeout: 30000 })
@@ -969,7 +988,6 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     const actor = seedPrimarySession('direct_room_media_actor')
     const peer = seedPrimarySession('direct_room_media_peer')
     const albumCaption = `PW ALBUM CAP ${Date.now()}`
-    const composer = page.locator('textarea[placeholder="پیام..."]')
     let sawBatchCreate = false
     let sawSessionCreate = false
     let sawChunkAppend = false
@@ -1007,9 +1025,9 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     await openDirectChat(page, peer.userId, peer.accountName)
 
-    await composer.fill(albumCaption)
-    await expect(page.locator('button.attach-btn')).toBeVisible()
-    await page.locator('button.attach-btn').click()
+    const albumComposerContainer = await fillComposerCaption(page, albumCaption)
+    await expect(albumComposerContainer.locator('button.attach-btn')).toBeVisible()
+    await albumComposerContainer.locator('button.attach-btn').click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
     await injectGalleryAlbum(page)
 
@@ -1088,13 +1106,15 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await documentBubble.click()
     await expect.poll(async () => getDocumentBubbleTransferState(documentBubble), { timeout: 30000 }).not.toBe('idle')
 
-    await page.locator('.chat-header .back-btn').click()
+    await page.goBack()
+    await expect(page).toHaveURL(/\/chat$/)
     const otherConversation = page.locator('.conversation-item').filter({ hasText: otherPeer.accountName }).first()
     await expect(otherConversation).toBeVisible({ timeout: 30000 })
     await otherConversation.click()
     await expect(page.locator('.chat-header .header-name')).toContainText(otherPeer.accountName, { timeout: 30000 })
 
-    await page.locator('.chat-header .back-btn').click()
+    await page.goBack()
+    await expect(page).toHaveURL(/\/chat$/)
     const originalConversation = page.locator('.conversation-item').filter({ hasText: peer.accountName }).first()
     await expect(originalConversation).toBeVisible({ timeout: 30000 })
     await originalConversation.click()

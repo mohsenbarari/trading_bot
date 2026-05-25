@@ -3,6 +3,8 @@
 import { execFileSync } from 'child_process'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
+import { primeAuthSession } from './helpers/auth'
+
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 
 interface AuthTokens {
@@ -216,6 +218,8 @@ from core.db import AsyncSessionLocal
 from core.enums import UserRole
 from core.security import create_access_token, create_refresh_token
 from core.services.session_service import hash_token
+from core.cache import invalidate_commodities_cache
+from bot.utils.redis_helpers import invalidate_commodity_cache
 from models.commodity import Commodity
 from models.session import Platform, UserSession
 from models.user import User
@@ -268,6 +272,9 @@ async def main():
 
     await db.commit()
 
+  await invalidate_commodities_cache()
+  await invalidate_commodity_cache()
+
   print(json.dumps({
     'userId': actor.id,
     'accountName': account_name,
@@ -293,6 +300,8 @@ from core.db import AsyncSessionLocal
 from core.enums import UserRole
 from core.security import create_access_token, create_refresh_token
 from core.services.session_service import hash_token
+from core.cache import invalidate_commodities_cache
+from bot.utils.redis_helpers import invalidate_commodity_cache
 from models.commodity import Commodity
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.offer import Offer, OfferStatus, OfferType
@@ -426,6 +435,9 @@ async def main():
 
     await db.commit()
 
+  await invalidate_commodities_cache()
+  await invalidate_commodity_cache()
+
   print(json.dumps({
     'owner': owner_bundle,
     'tier1Customer': tier1_bundle,
@@ -452,6 +464,8 @@ from core.db import AsyncSessionLocal
 from core.enums import UserRole
 from core.security import create_access_token, create_refresh_token
 from core.services.session_service import hash_token
+from core.cache import invalidate_commodities_cache
+from bot.utils.redis_helpers import invalidate_commodity_cache
 from models.commodity import Commodity
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.offer import Offer, OfferStatus, OfferType
@@ -578,6 +592,9 @@ async def main():
 
     await db.commit()
 
+  await invalidate_commodities_cache()
+  await invalidate_commodity_cache()
+
   print(json.dumps({
     'owner': owner_bundle,
     'tier2Customer': tier2_bundle,
@@ -696,24 +713,11 @@ function authHeaders(accessToken: string) {
 }
 
 async function setAuthTokens(page: Page, tokens: AuthTokens) {
-  await page.goto('/login')
-  await page.evaluate(({ accessToken, refreshToken }) => {
-    localStorage.setItem('auth_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
-    localStorage.removeItem('suspended_refresh_token')
-  }, {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-  })
+  await primeAuthSession(page, tokens.access_token, tokens.refresh_token)
 }
 
 async function setSeededSession(page: Page, fixture: SeededSessionFixture) {
-  await page.goto('/login')
-  await page.evaluate(({ accessToken, refreshToken }) => {
-    localStorage.setItem('auth_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
-    localStorage.removeItem('suspended_refresh_token')
-  }, fixture)
+  await primeAuthSession(page, fixture.accessToken, fixture.refreshToken)
 }
 
 async function fetchFirstCommodity(request: APIRequestContext): Promise<Commodity> {
@@ -763,7 +767,7 @@ test.describe('Market offer creation regressions', () => {
     await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
     await confirmOfferPreview(page)
 
-    await expect(page.getByText('لفظ متنی ثبت شد')).toBeVisible()
+    await expect(page.locator('.offer-preview-card')).toHaveCount(0)
 
     const offers = await fetchMyOffers(request, actor.accessToken)
     expect(
@@ -787,7 +791,7 @@ test.describe('Market offer creation regressions', () => {
     await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
     await confirmOfferPreview(page)
 
-    await expect(page.getByText('لفظ متنی ثبت شد')).toBeVisible()
+    await expect(page.locator('.offer-preview-card')).toHaveCount(0)
 
     const offers = await fetchMyOffers(request, actor.accessToken)
     expect(
@@ -841,7 +845,7 @@ test.describe('Market offer creation regressions', () => {
     await openOfferPreview(page, `فروش ${fixture.commodityName} 6 عدد ${sellPrice}: ${uniqueNote}`)
     await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
     await confirmOfferPreview(page)
-    await expect(page.getByText('لفظ متنی ثبت شد')).toBeVisible()
+    await expect(page.locator('.offer-preview-card')).toHaveCount(0)
 
     await expect
       .poll(() => fetchPersistedOfferByNotes(uniqueNote), { timeout: 30000 })
@@ -967,7 +971,7 @@ test.describe('Market offer creation regressions', () => {
     await expect(page.locator('.offer-preview-confirm')).toHaveText('با وجود هشدار منتشر کن')
 
     await confirmOfferPreview(page)
-    await expect(page.getByText('لفظ متنی ثبت شد')).toBeVisible()
+    await expect(page.locator('.offer-preview-card')).toHaveCount(0)
 
     await expect
       .poll(() => fetchPersistedOfferByNotes(uniqueNote), { timeout: 30000 })
@@ -1000,7 +1004,7 @@ test.describe('Market offer creation regressions', () => {
     await expect(page.locator('.offer-preview-confirm')).toHaveText('با وجود هشدار منتشر کن')
 
     await confirmOfferPreview(page)
-    await expect(page.getByText('لفظ متنی ثبت شد')).toBeVisible()
+    await expect(page.locator('.offer-preview-card')).toHaveCount(0)
 
     await expect
       .poll(() => fetchPersistedOfferByNotes(uniqueNote), { timeout: 30000 })

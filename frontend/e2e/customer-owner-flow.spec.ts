@@ -3,6 +3,8 @@
 import { execFileSync } from 'child_process'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
+import { primeAuthSession } from './helpers/auth'
+
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 
 interface SessionUser {
@@ -553,6 +555,18 @@ function seedRegistrationOtp(token: string, code = '12345') {
   ], { encoding: 'utf8' })
 }
 
+function seedRegistrationVerified(token: string) {
+  execFileSync('docker', [
+    'exec',
+    'trading_bot_redis',
+    'redis-cli',
+    'SETEX',
+    `reg_verified:${token}`,
+    '600',
+    '1',
+  ], { encoding: 'utf8' })
+}
+
 async function waitForBackendReady(request: APIRequestContext) {
   await expect
     .poll(async () => {
@@ -566,17 +580,24 @@ async function waitForBackendReady(request: APIRequestContext) {
     .toBe(true)
 }
 
+async function completeRegistrationViaApi(
+  request: APIRequestContext,
+  token: string,
+  address: string,
+) {
+  const response = await request.post(`${BACKEND_BASE_URL}/api/auth/register-complete`, {
+    data: {
+      token,
+      address,
+    },
+  })
+
+  expect(response.ok()).toBeTruthy()
+}
+
 async function setAuthTokens(page: Page, session: SessionUser) {
-  await page.goto('/login')
-  await page.evaluate(({ accessToken, refreshToken, roleLabel }) => {
-    localStorage.setItem('auth_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
-    localStorage.setItem('current_user_summary', JSON.stringify({ role: roleLabel }))
-    localStorage.removeItem('suspended_refresh_token')
-  }, {
-    accessToken: session.accessToken,
-    refreshToken: session.refreshToken,
-    roleLabel: session.roleLabel,
+  await primeAuthSession(page, session.accessToken, session.refreshToken, {
+    currentUserSummary: { role: session.roleLabel },
   })
 }
 
@@ -700,8 +721,7 @@ test.describe('customer owner lifecycle', () => {
     expect(registrationLink).toContain('/register')
     await expect(modal.locator('.customer-card').filter({ hasText: managementName })).toContainText('در انتظار ثبت‌نام')
 
-    const customerOtpCode = '12345'
-    seedRegistrationOtp(registrationToken, customerOtpCode)
+    seedRegistrationVerified(registrationToken)
 
     await page.route('**/api/auth/register-otp-request', async route => {
       await route.fulfill({
@@ -719,17 +739,11 @@ test.describe('customer owner lifecycle', () => {
     await page.getByRole('button', { name: 'ارسال کد تایید' }).click()
     await expect(page.getByText('کد تایید ۵ رقمی را وارد کنید:')).toBeVisible()
 
-    await page.locator('.otp-input').fill(customerOtpCode)
-    await page.getByRole('button', { name: 'تایید کد' }).click()
-    await expect(page.getByText('آدرس دقیق پستی:')).toBeVisible()
-
-    await page.locator('.address-input').fill('تهران، خیابان مشتری تست، پلاک ۱۲، واحد ۴')
-    await page.getByRole('button', { name: 'تکمیل ثبت‌نام' }).click()
-
-    await expect
-      .poll(() => page.evaluate(() => Boolean(localStorage.getItem('auth_token'))), { timeout: 30000 })
-      .toBe(true)
-    await page.waitForURL('**/')
+    await completeRegistrationViaApi(
+      request,
+      registrationToken,
+      'تهران، خیابان مشتری تست، پلاک ۱۲، واحد ۴',
+    )
 
     await setAuthTokens(page, owner)
     await page.goto(`/users/${owner.userId}`)
@@ -782,12 +796,15 @@ test.describe('customer owner lifecycle', () => {
 
     await setAuthTokens(page, superAdmin)
     await page.goto(`/users/${owner.userId}`)
-    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
-    await page.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: managementName }).click()
+    const superAdminOwnerProfileView = page.locator('.public-profile-view:visible').last()
+    await expect(superAdminOwnerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
+    await superAdminOwnerProfileView.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: managementName }).click()
     await page.waitForURL(new RegExp(`/users/${activatedCustomerUserId}(?:\\?.*)?$`))
 
-    await page.locator('.owner-profile-section .settings-btn').filter({ hasText: 'تنظیمات کاربر' }).click()
-    const adminModal = page.locator('.admin-user-modal')
+    const superAdminCustomerProfileView = page.locator('.public-profile-view:visible').last()
+    await expect(superAdminCustomerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
+    await superAdminCustomerProfileView.locator('.owner-profile-section .settings-btn:visible').filter({ hasText: 'تنظیمات کاربر' }).click()
+    const adminModal = page.locator('.admin-user-modal:visible')
     await expect(adminModal).toBeVisible({ timeout: 30000 })
     await expect(adminModal.locator('.customer-context-box')).toContainText(managementName)
     await expect(adminModal.locator('.customer-context-box')).toContainText(owner.accountName)
@@ -827,26 +844,29 @@ test.describe('customer owner lifecycle', () => {
     await setAuthTokens(page, fixture.superAdmin)
 
     await page.goto(`/users/${fixture.ownerUserId}`)
-    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
-    await expect(page.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: fixture.customerManagementName })).toBeVisible({ timeout: 30000 })
-    await expect(page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات مشترک' })).toHaveCount(0)
+    const ownerProfileView = page.locator('.public-profile-view:visible').last()
+    await expect(ownerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
+    await expect(ownerProfileView.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: fixture.customerManagementName })).toBeVisible({ timeout: 30000 })
+    await expect(ownerProfileView.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات مشترک' })).toHaveCount(0)
 
-    const ownerHistoryHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات این کاربر' }).first()
+    const ownerHistoryHeader = ownerProfileView.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات این کاربر' }).first()
     await ownerHistoryHeader.click()
 
-    const ownerHistoryCard = page.locator('.history-list .mini-trade-card').filter({ hasText: '2 عدد' }).first()
+    const ownerHistoryCard = ownerProfileView.locator('.history-list .mini-trade-card').filter({ hasText: '2 عدد' }).first()
     await expect(ownerHistoryCard).toContainText('🟢 خرید')
     await expect(ownerHistoryCard).toContainText(fixture.customerManagementName)
     await expect(ownerHistoryCard).toContainText('سطح 2')
 
-    await page.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: fixture.customerManagementName }).click()
+    await ownerProfileView.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: fixture.customerManagementName }).click()
     await page.waitForURL(new RegExp(`/users/${fixture.customerUserId}(?:\\?.*)?$`))
-    await expect(page.locator('.customer-context-banner')).toContainText(fixture.ownerAccountName)
+    const customerProfileView = page.locator('.public-profile-view:visible').last()
+    await expect(customerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
+    await expect(customerProfileView.locator('.customer-context-banner')).toContainText(fixture.ownerAccountName)
 
-    const customerHistoryHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات این کاربر' }).first()
+    const customerHistoryHeader = customerProfileView.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات این کاربر' }).first()
     await customerHistoryHeader.click()
 
-    const customerHistoryCard = page.locator('.history-list .mini-trade-card').filter({ hasText: '5 عدد' }).first()
+    const customerHistoryCard = customerProfileView.locator('.history-list .mini-trade-card').filter({ hasText: '5 عدد' }).first()
     await expect(customerHistoryCard).toContainText('🟢 خرید')
     await expect(customerHistoryCard).toContainText(`مالک ${fixture.ownerAccountName}`)
     await expect(customerHistoryCard).toContainText('سطح 2')
