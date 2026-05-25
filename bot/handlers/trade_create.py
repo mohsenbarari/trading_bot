@@ -883,7 +883,15 @@ async def _handoff_stale_wizard_state_to_text_offer(
     bot: Optional[Bot] = None,
 ) -> bool:
     """اگر کاربر وسط FSM قدیمی یک لفظ متنی کامل فرستاد، همان را پردازش کن."""
-    if not user or not has_trade_indicator(message.text or ""):
+    if not user:
+        return False
+
+    from bot.handlers.panel import handoff_navigation_button
+
+    if await handoff_navigation_button(message, state, user):
+        return True
+
+    if not has_trade_indicator(message.text or ""):
         return False
 
     await state.clear()

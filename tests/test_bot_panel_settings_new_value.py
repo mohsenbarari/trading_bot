@@ -33,6 +33,13 @@ class BotPanelSettingsNewValueTests(unittest.IsolatedAsyncioTestCase):
         await handle_settings_new_value(message, state, user=None)
         message.answer.assert_not_awaited()
 
+        message = SimpleNamespace(text="👤 پنل کاربر", answer=AsyncMock())
+        state = FakeState({"editing_setting": "offer_expiry_minutes"})
+        with patch("bot.handlers.panel.handoff_navigation_button", new=AsyncMock(return_value=True)) as handoff_mock:
+            await handle_settings_new_value(message, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+        handoff_mock.assert_awaited_once_with(message, state, unittest.mock.ANY)
+        message.answer.assert_not_awaited()
+
         message = SimpleNamespace(text="x", answer=AsyncMock())
         state = FakeState({"editing_setting": "offer_expiry_minutes"})
         await handle_settings_new_value(message, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
