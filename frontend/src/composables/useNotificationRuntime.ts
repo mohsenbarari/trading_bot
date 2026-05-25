@@ -61,6 +61,7 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
     const router = useRouter()
     const notificationStore = useNotificationStore()
     let hasBootstrappedAuthenticatedRuntime = false
+    let skipNextReconnectCountsFetch = false
 
     const handleBrowserNotificationClick = (event: Event) => {
         const targetRoute = (event as CustomEvent<BrowserNotificationClickDetail>).detail?.route
@@ -80,6 +81,10 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
     }
 
     const handleReconnect = () => {
+        if (skipNextReconnectCountsFetch) {
+            skipNextReconnectCountsFetch = false
+            return
+        }
         void notificationStore.fetchInitialCounts()
     }
 
@@ -87,9 +92,13 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
         const authToken = localStorage.getItem('auth_token')
         if (!authToken) {
             hasBootstrappedAuthenticatedRuntime = false
+            skipNextReconnectCountsFetch = false
             return
         }
 
+        if (!hasBootstrappedAuthenticatedRuntime) {
+            skipNextReconnectCountsFetch = true
+        }
         connect()
 
         if (hasBootstrappedAuthenticatedRuntime) return

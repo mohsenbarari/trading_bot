@@ -38,6 +38,13 @@ export function useSessionApprovalRuntime() {
         }
     }
 
+    const clearInitialFetchTimeout = () => {
+        if (initialFetchTimeout !== null) {
+            window.clearTimeout(initialFetchTimeout)
+            initialFetchTimeout = null
+        }
+    }
+
     const closeModal = () => {
         pendingRequest.value = null
         pendingRecovery.value = null
@@ -133,6 +140,11 @@ export function useSessionApprovalRuntime() {
         if (!hasRecoveryPrompt) {
             await fetchPendingRequests()
         }
+    }
+
+    const triggerPendingPromptsRefresh = () => {
+        clearInitialFetchTimeout()
+        void fetchPendingPrompts()
     }
 
     const shouldDisplayRealtimeRequest = async () => {
@@ -282,33 +294,31 @@ export function useSessionApprovalRuntime() {
 
     const handleVisibilityChange = () => {
         if (document.visibilityState === 'visible') {
-            void fetchPendingPrompts()
+            triggerPendingPromptsRefresh()
         }
     }
 
     onMounted(() => {
         if (hasAuthToken()) {
             initialFetchTimeout = window.setTimeout(() => {
+                initialFetchTimeout = null
                 void fetchPendingPrompts()
             }, INITIAL_PENDING_FETCH_DELAY_MS)
         }
 
         on(WS_NOTIFICATION_EVENTS.sessionLoginRequest, handleLoginRequest)
         on(WS_NOTIFICATION_EVENTS.sessionRecoveryUpdate, handleRecoveryPrompt)
-        on(WS_NOTIFICATION_EVENTS.wsReconnect, fetchPendingPrompts)
+        on(WS_NOTIFICATION_EVENTS.wsReconnect, triggerPendingPromptsRefresh)
         document.addEventListener('visibilitychange', handleVisibilityChange)
     })
 
     onBeforeUnmount(() => {
         off(WS_NOTIFICATION_EVENTS.sessionLoginRequest, handleLoginRequest)
         off(WS_NOTIFICATION_EVENTS.sessionRecoveryUpdate, handleRecoveryPrompt)
-        off(WS_NOTIFICATION_EVENTS.wsReconnect, fetchPendingPrompts)
+        off(WS_NOTIFICATION_EVENTS.wsReconnect, triggerPendingPromptsRefresh)
         document.removeEventListener('visibilitychange', handleVisibilityChange)
 
-        if (initialFetchTimeout !== null) {
-            window.clearTimeout(initialFetchTimeout)
-            initialFetchTimeout = null
-        }
+        clearInitialFetchTimeout()
 
         clearCountdown()
     })
