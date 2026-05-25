@@ -229,11 +229,8 @@ describe('MarketView.vue', () => {
     expect(wrapper.find('.offers-count').text()).toBe('1')
     expect(wrapper.find('.offers-expiry').text()).toBe('45')
     expect(wrapper.find('.offers-user-id').text()).toBe('77')
-
-    await wrapper.find('.sort-toggle-btn').trigger('click')
-    await flushPromises()
-    await wrapper.findAll('.commodity-btn')[0]!.trigger('click')
-    expect(marketViewMocks.toggleSortMock).toHaveBeenCalledWith('سکه')
+    expect(wrapper.find('.sort-toggle-btn').exists()).toBe(false)
+    expect(wrapper.find('.clear-sort-btn').exists()).toBe(false)
 
     marketViewMocks.fetchOffersMock.mockClear()
     await wrapper.find('.emit-trade-completed').trigger('click')
@@ -435,7 +432,7 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
-  it('renders sort loading and toggles the sort icon/clear button states', async () => {
+  it('does not render the removed sort controls even while commodities are loading', async () => {
     let resolveCommodities: ((value: unknown) => void) | null = null
     marketViewMocks.apiFetchMock.mockImplementation((path: string) => {
       if (path === '/api/commodities/') {
@@ -451,8 +448,9 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await nextTick()
 
-    await wrapper.find('.sort-toggle-btn').trigger('click')
-    expect(wrapper.find('.panel-loading').exists()).toBe(true)
+    expect(wrapper.find('.sort-toggle-btn').exists()).toBe(false)
+    expect(wrapper.find('.clear-sort-btn').exists()).toBe(false)
+    expect(wrapper.find('.panel-loading').exists()).toBe(false)
 
     if (!resolveCommodities) {
       throw new Error('Expected commodities resolver')
@@ -460,14 +458,10 @@ describe('MarketView.vue', () => {
     ;(resolveCommodities as (v: unknown) => void)(responseOf(commoditiesFixture))
     await flushPromises()
 
-    await wrapper.findAll('.commodity-btn')[0]!.trigger('click')
-    await flushPromises()
-    expect(wrapper.html()).toContain('lucide-arrow-up')
-    expect(wrapper.find('.clear-sort-btn').exists()).toBe(true)
-
-    await wrapper.findAll('.commodity-btn')[0]!.trigger('click')
-    await flushPromises()
-    expect(wrapper.html()).toContain('lucide-arrow-down')
+    expect(wrapper.find('.sort-toggle-btn').exists()).toBe(false)
+    expect(wrapper.find('.clear-sort-btn').exists()).toBe(false)
+    expect(marketViewMocks.toggleSortMock).not.toHaveBeenCalled()
+    expect(marketViewMocks.clearSortMock).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })

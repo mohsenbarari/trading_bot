@@ -86,14 +86,14 @@ class ChatRoomServiceRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         ten_tuple = tuple(range(10))
         six_tuple = ('chat', 'admin', 'hello', 'text', 2, 8)
         nine_tuple = ('chat', 'member', True, True, datetime(2026, 5, 10, 10, 0, 0), 'hello', 'text', 1, 3)
-        self.assertEqual(_unpack_conversation_projection_row(ten_tuple), ten_tuple)
+        self.assertEqual(_unpack_conversation_projection_row(ten_tuple), ten_tuple + (0,))
         self.assertEqual(
             _unpack_conversation_projection_row(six_tuple),
-            ('chat', 'admin', False, False, None, None, 'hello', 'text', 2, 8),
+            ('chat', 'admin', False, False, None, None, 'hello', 'text', 2, 8, 0),
         )
         self.assertEqual(
             _unpack_conversation_projection_row(nine_tuple),
-            ('chat', 'member', True, True, nine_tuple[4], None, 'hello', 'text', 1, 3),
+            ('chat', 'member', True, True, nine_tuple[4], None, 'hello', 'text', 1, 3, 0),
         )
         with self.assertRaises(ValueError):
             _unpack_conversation_projection_row((1, 2, 3))

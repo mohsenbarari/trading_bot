@@ -118,19 +118,20 @@ describe('auth utils', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('isAuthenticated suspends the session when refresh fails', async () => {
+  it('isAuthenticated keeps the session on network refresh failures and suspends on auth failures', async () => {
     const expiredExp = Math.floor(Date.now() / 1000) - 60
-    localStorage.setItem('auth_token', makeJwt(expiredExp))
+    const expiredToken = makeJwt(expiredExp)
+    localStorage.setItem('auth_token', expiredToken)
     localStorage.setItem('refresh_token', 'refresh')
     const location = mockLocation()
 
     fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'))
     const { isAuthenticated } = await import(authModulePath)
     await expect(isAuthenticated()).resolves.toBe(false)
-    expect(localStorage.getItem('auth_token')).toBeNull()
-    expect(localStorage.getItem('refresh_token')).toBeNull()
-    expect(localStorage.getItem('suspended_refresh_token')).toBe('refresh')
-    expect(location.href).toBe('/login')
+    expect(localStorage.getItem('auth_token')).toBe(expiredToken)
+    expect(localStorage.getItem('refresh_token')).toBe('refresh')
+    expect(localStorage.getItem('suspended_refresh_token')).toBeNull()
+    expect(location.href).toBe('http://localhost/')
 
     localStorage.setItem('auth_token', makeJwt(expiredExp))
     localStorage.setItem('refresh_token', 'refresh')
@@ -139,6 +140,7 @@ describe('auth utils', () => {
     expect(localStorage.getItem('auth_token')).toBeNull()
     expect(localStorage.getItem('refresh_token')).toBeNull()
     expect(localStorage.getItem('suspended_refresh_token')).toBe('refresh')
+    expect(location.href).toBe('/login')
   })
 
   it('suspendSession and forceLogout clear the expected tokens and redirect to login', async () => {
@@ -368,10 +370,11 @@ describe('auth utils', () => {
     expect(response.status).toBe(403)
   })
 
-  it('setupExpiryTimer refreshes soon-expiring tokens and suspends refresh failures', async () => {
+  it('setupExpiryTimer refreshes soon-expiring tokens and keeps sessions intact on transient refresh failures', async () => {
     vi.useFakeTimers()
     const location = mockLocation()
-    localStorage.setItem('auth_token', makeJwt(Math.floor(Date.now() / 1000) + 30))
+    const expiringToken = makeJwt(Math.floor(Date.now() / 1000) + 30)
+    localStorage.setItem('auth_token', expiringToken)
     localStorage.setItem('refresh_token', 'refresh-token')
     fetchMock.mockResolvedValueOnce({ ok: false, status: 503 })
 
@@ -380,8 +383,10 @@ describe('auth utils', () => {
     await vi.advanceTimersByTimeAsync(30000)
 
     expect(fetchMock).toHaveBeenCalledWith('/api/auth/refresh', expect.objectContaining({ method: 'POST' }))
-    expect(localStorage.getItem('suspended_refresh_token')).toBe('refresh-token')
-    expect(location.href).toBe('/login')
+    expect(localStorage.getItem('auth_token')).toBe(expiringToken)
+    expect(localStorage.getItem('refresh_token')).toBe('refresh-token')
+    expect(localStorage.getItem('suspended_refresh_token')).toBeNull()
+    expect(location.href).toBe('http://localhost/')
   })
 
   it('apiFetch marks the app as reconnecting on network errors and clears it after a successful retry', async () => {

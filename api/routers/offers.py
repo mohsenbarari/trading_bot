@@ -182,7 +182,7 @@ def offer_to_response(
         original_lot_sizes=offer.original_lot_sizes,
         notes=offer.notes,
         status=offer.status.value,
-        expire_reason=offer.expire_reason,
+        expire_reason=getattr(offer, "expire_reason", None),
         channel_message_id=offer.channel_message_id,
         customer_badge_visible=offer_read_model.customer_badge_visible,
         customer_management_name=offer_read_model.customer_management_name,

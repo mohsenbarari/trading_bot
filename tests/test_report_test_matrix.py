@@ -45,7 +45,7 @@ class ReportTestMatrixTests(unittest.TestCase):
                 'python_unittest_files=199 is below minimum 200',
                 'frontend_unit_files=9 is below minimum 10',
                 'frontend_e2e_files=6 is below minimum 7',
-                'manual_non_regression_tools=3 is below minimum 4',
+                'manual_non_regression_tools=3 is below minimum 5',
             ],
         )
 
@@ -142,7 +142,7 @@ class ReportTestMatrixTests(unittest.TestCase):
             python_unittest_files=250,
             frontend_unit_files=20,
             frontend_e2e_files=10,
-            manual_non_regression_tools=4,
+            manual_non_regression_tools=5,
         )
 
         with patch('report_test_matrix.build_summary', return_value=summary), patch('sys.stdout', new_callable=io.StringIO) as stdout:
