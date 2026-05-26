@@ -1,6 +1,6 @@
 # api/routers/offers.py
 """
-API Router for Offer Management - MiniApp Integration
+API Router for Offer Management - Web App Integration
 """
 import logging
 import os
@@ -793,7 +793,7 @@ async def parse_offer_text(
     current_user: User = Depends(get_current_user)
 ):
     """
-    پارس متن لفظ (مثل بات)
+    پارس متن لفظ با parser مشترک بات و وب اپ.
     """
     from bot.utils.offer_parser import parse_offer_text as parser
     

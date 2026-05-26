@@ -35,6 +35,7 @@ PERSIAN_DIGITS = '۰۱۲۳۴۵۶۷۸۹'
 ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩'
 COMMODITY_BOUNDARY_CHARS = r'\u0600-\u06FF\u200C0-9'
 BAHAR_QUALIFIERS = {"ربع", "نیم"}
+IMPLICIT_DEFAULT_COMMODITY_KEYS = ("امام", "امامی", "سکه امام", "سکه امامی")
 
 
 def normalize_digits(text: str) -> str:
@@ -103,6 +104,23 @@ def _match_commodity_name(text: str, name_to_commodity: dict) -> Tuple[Optional[
                 continue
             return name_to_commodity[name]
 
+    return None, "نامشخص"
+
+
+def _extract_residual_commodity_text(text: str) -> str:
+    """Return the leftover commodity text after stripping offer structure."""
+    residual = normalize_digits(text)
+    residual = residual.replace("-", " ").replace("/", " ").replace(",", " ").replace(".", " ")
+    residual = re.sub(r'\d+', ' ', residual)
+    residual = re.sub(r'(?:تا|عدد)', ' ', residual)
+    return _normalize_commodity_phrase(residual)
+
+
+def _resolve_implicit_default_commodity(name_to_commodity: dict) -> Tuple[Optional[int], str]:
+    for key in IMPLICIT_DEFAULT_COMMODITY_KEYS:
+        commodity = name_to_commodity.get(key)
+        if commodity is not None:
+            return commodity
     return None, "نامشخص"
 
 
@@ -272,15 +290,13 @@ async def find_commodity(text: str) -> Tuple[Optional[int], str]:
     commodity_id, commodity_name = _match_commodity_name(text, name_to_commodity)
     if commodity_id is not None:
         return commodity_id, commodity_name
-    
-    # --- تشخیص: کاربر نام کالا ننوشته یا اشتباه نوشته؟ ---
-    # حذف اعداد و کلمات کلیدی از متن
-    remaining = re.sub(r'\d+', '', text)                    # حذف اعداد
-    remaining = re.sub(r'(?:تا|عدد)', '', remaining)        # حذف کلمات کلیدی تعداد
-    remaining = remaining.strip()
-    remaining = ' '.join(remaining.split())                 # حذف فاصله‌های اضافی
-    
-    # نام کالا باید صراحتاً در متن آمده باشد و با نام/alias مجاز دیتابیس تطبیق بخورد.
+
+    residual_commodity_text = _extract_residual_commodity_text(text)
+    if not residual_commodity_text:
+        implicit_commodity_id, implicit_commodity_name = _resolve_implicit_default_commodity(name_to_commodity)
+        if implicit_commodity_id is not None:
+            return implicit_commodity_id, implicit_commodity_name
+
     return None, "نامشخص"
 
 
