@@ -53,21 +53,34 @@ class FakeDB:
 
 
 class CommoditiesRouterDeleteTests(unittest.IsolatedAsyncioTestCase):
-    async def test_delete_commodity_handles_missing_active_offers_and_delete_failure(self):
+    async def test_delete_commodity_handles_missing_references_and_delete_failure(self):
         with self.assertRaises(HTTPException) as exc_info:
             await delete_commodity(1, db=FakeDB([FakeExecuteResult(value=None)]), source="miniapp")
         self.assertEqual(exc_info.exception.status_code, 404)
 
         commodity = SimpleNamespace(id=1, aliases=[])
-        db = FakeDB([FakeExecuteResult(value=commodity), FakeExecuteResult(values=[SimpleNamespace(id=3)])])
+        db = FakeDB(
+            [
+                FakeExecuteResult(value=commodity),
+                FakeExecuteResult(value=1),
+                FakeExecuteResult(value=1),
+                FakeExecuteResult(value=0),
+            ]
+        )
         with self.assertRaises(HTTPException) as exc_info:
             await delete_commodity(1, db=db, source="miniapp")
         self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("1 لفظ فعال", exc_info.exception.detail)
 
         commodity = SimpleNamespace(id=1, aliases=[])
         delete_error = RuntimeError("fk linked")
         db = FakeDB(
-            [FakeExecuteResult(value=commodity), FakeExecuteResult(values=[])],
+            [
+                FakeExecuteResult(value=commodity),
+                FakeExecuteResult(value=0),
+                FakeExecuteResult(value=0),
+                FakeExecuteResult(value=0),
+            ],
             delete_exception=(commodity, delete_error),
         )
         with self.assertRaises(HTTPException) as exc_info:
@@ -75,10 +88,35 @@ class CommoditiesRouterDeleteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 409)
         self.assertEqual(db.rollbacks, 1)
 
+    async def test_delete_commodity_blocks_historical_offer_and_trade_references(self):
+        commodity = SimpleNamespace(id=1, aliases=[])
+        db = FakeDB(
+            [
+                FakeExecuteResult(value=commodity),
+                FakeExecuteResult(value=0),
+                FakeExecuteResult(value=2),
+                FakeExecuteResult(value=3),
+            ]
+        )
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await delete_commodity(1, db=db, source="miniapp")
+
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("2 لفظ تاریخی", exc_info.exception.detail)
+        self.assertIn("3 معامله", exc_info.exception.detail)
+
     async def test_delete_commodity_deletes_aliases_then_commodity_and_invalidates_cache(self):
         aliases = [SimpleNamespace(id=10), SimpleNamespace(id=11)]
         commodity = SimpleNamespace(id=1, aliases=aliases)
-        db = FakeDB([FakeExecuteResult(value=commodity), FakeExecuteResult(values=[])])
+        db = FakeDB(
+            [
+                FakeExecuteResult(value=commodity),
+                FakeExecuteResult(value=0),
+                FakeExecuteResult(value=0),
+                FakeExecuteResult(value=0),
+            ]
+        )
         with patch("bot.utils.redis_helpers.invalidate_commodity_cache", new=AsyncMock()) as invalidate_mock:
             result = await delete_commodity(1, db=db, source="bot")
 
@@ -89,7 +127,14 @@ class CommoditiesRouterDeleteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_delete_commodity_ignores_cache_invalidation_failures(self):
         commodity = SimpleNamespace(id=1, aliases=[])
-        db = FakeDB([FakeExecuteResult(value=commodity), FakeExecuteResult(values=[])])
+        db = FakeDB(
+            [
+                FakeExecuteResult(value=commodity),
+                FakeExecuteResult(value=0),
+                FakeExecuteResult(value=0),
+                FakeExecuteResult(value=0),
+            ]
+        )
         with patch(
             "bot.utils.redis_helpers.invalidate_commodity_cache",
             new=AsyncMock(side_effect=RuntimeError("cache down")),

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from jose import jwt, JWTError
@@ -174,7 +174,7 @@ async def delete_commodity(
 ):
     """
     حذف کامل یک کالا (به همراه تمام نام‌های مستعار آن).
-    اگر لفظ فعالی برای این کالا وجود داشته باشد، حذف مجاز نیست.
+    اگر هر لفظ یا معامله‌ای به این کالا متصل باشد، حذف مجاز نیست.
     """
     logger.info(f"Deleting commodity ID {commodity_id} via source: {source}")
 
@@ -184,17 +184,44 @@ async def delete_commodity(
     if not db_commodity:
         raise HTTPException(status_code=404, detail="کالا یافت نشد")
     
-    # Check for active offers referencing this commodity
+    # Historical offers and trades keep a hard FK to the commodity so the
+    # API should explain that dependency before the DB raises IntegrityError.
     from models.offer import Offer, OfferStatus
-    offer_count_stmt = select(Offer).where(
+    from models.trade import Trade
+
+    active_offer_count_stmt = select(func.count()).select_from(Offer).where(
         Offer.commodity_id == commodity_id,
         Offer.status == OfferStatus.ACTIVE
     )
-    active_offers = (await db.execute(offer_count_stmt)).scalars().all()
-    if active_offers:
+    total_offer_count_stmt = select(func.count()).select_from(Offer).where(
+        Offer.commodity_id == commodity_id
+    )
+    trade_count_stmt = select(func.count()).select_from(Trade).where(
+        Trade.commodity_id == commodity_id
+    )
+
+    active_offer_count = (await db.execute(active_offer_count_stmt)).scalar_one_or_none() or 0
+    total_offer_count = (await db.execute(total_offer_count_stmt)).scalar_one_or_none() or 0
+    trade_count = (await db.execute(trade_count_stmt)).scalar_one_or_none() or 0
+
+    if total_offer_count or trade_count:
+        conflict_parts = []
+        historical_offer_count = max(total_offer_count - active_offer_count, 0)
+
+        if active_offer_count:
+            conflict_parts.append(f"{active_offer_count} لفظ فعال")
+        if historical_offer_count:
+            conflict_parts.append(f"{historical_offer_count} لفظ تاریخی")
+        if trade_count:
+            conflict_parts.append(f"{trade_count} معامله")
+
+        references_text = "، ".join(conflict_parts)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"امکان حذف این کالا وجود ندارد. {len(active_offers)} لفظ فعال برای این کالا وجود دارد. ابتدا لفظ‌ها را لغو یا حذف کنید."
+            detail=(
+                f"امکان حذف این کالا وجود ندارد چون {references_text} به آن متصل است. "
+                "برای حفظ تاریخچه، کالایی که قبلاً در لفظ یا معامله استفاده شده قابل حذف نیست."
+            )
         )
 
     # Delete aliases first (ORM events fire for each), then commodity
