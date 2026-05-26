@@ -136,7 +136,7 @@ const recentOffersFixture = [
     lot_sizes: [3, 2],
     original_lot_sizes: [5, 3],
     notes: null,
-    status: 'active',
+    status: 'expired',
     created_at: '۱۴۰۵/۰۳/۰۱ ۱۲:۱۰',
   },
 ]
@@ -214,7 +214,7 @@ describe('MarketView.vue', () => {
     marketViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
-      if (path === '/api/offers/my?since_hours=1&limit=3') return responseOf(recentOffersFixture)
+      if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') return responseOf(recentOffersFixture)
       if (path === '/api/trading-settings/market-state') {
         return responseOf({
           is_open: true,
@@ -330,7 +330,7 @@ describe('MarketView.vue', () => {
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/my?since_hours=1&limit=3')
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/my?since_hours=1&limit=3&status_filter=expired')
     const recentItems = wrapper.findAll('.recent-offer-item')
     expect(recentItems).toHaveLength(2)
     expect(wrapper.text()).toContain('سکه')
@@ -341,7 +341,7 @@ describe('MarketView.vue', () => {
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
     expect(wrapper.text()).toContain('طلای آب‌شده')
-    expect(wrapper.text()).toContain('5 عدد 222,000')
+    expect(wrapper.text()).toContain('8 عدد 222,000')
 
     await wrapper.find('.offer-preview-confirm').trigger('click')
     await flushPromises()
@@ -353,10 +353,10 @@ describe('MarketView.vue', () => {
     expect(JSON.parse(String(republishCall![1].body))).toEqual({
       offer_type: 'buy',
       commodity_id: 2,
-      quantity: 5,
+      quantity: 8,
       price: 222000,
       is_wholesale: false,
-      lot_sizes: [3, 2],
+      lot_sizes: [5, 3],
       notes: null,
       republished_from_id: 92,
       warning_acknowledged: false,

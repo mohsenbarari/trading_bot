@@ -261,7 +261,7 @@ async function fetchRecentOffers(silent = false) {
   recentOffersError.value = ''
 
   try {
-    const response = await apiFetch('/api/offers/my?since_hours=1&limit=3')
+    const response = await apiFetch('/api/offers/my?since_hours=1&limit=3&status_filter=expired')
     if (!response.ok) {
       throw await createHttpErrorFromResponse(response, {
         surface: 'market',
@@ -591,8 +591,8 @@ onUnmounted(() => {
               aria-label="نمایش لفظ‌های اخیر"
               @click="toggleRecentOffersMenu"
             >
-              <Loader2 v-if="recentOffersLoading" class="animate-spin" :size="16" />
-              <ChevronDown v-else :size="16" />
+              <Loader2 v-if="recentOffersLoading" class="animate-spin" :size="17" />
+              <ChevronDown v-else :size="17" />
             </button>
             <transition name="recent-offers-dropdown">
               <div v-if="recentOffersOpen" class="recent-offers-dropdown">
@@ -884,24 +884,28 @@ onUnmounted(() => {
 
 .recent-offers-toggle {
   position: absolute;
-  left: 0.55rem;
+  left: 0.78rem;
   top: 50%;
   transform: translateY(-50%);
-  width: 2rem;
-  height: 2rem;
+  width: 2.1rem;
+  height: 2.1rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  color: var(--ds-text-secondary);
-  background: transparent;
-  transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease;
+  color: var(--ds-accent, #b45309);
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.14);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+  transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .recent-offers-toggle:hover:not(:disabled),
 .recent-offers-toggle--open {
-  background: var(--ds-bg-card);
+  background: rgba(245, 158, 11, 0.14);
   color: var(--ds-text-primary);
+  border-color: rgba(245, 158, 11, 0.22);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
 }
 
 .recent-offers-toggle--open {
@@ -1004,7 +1008,7 @@ onUnmounted(() => {
 
 .text-offer-input {
   width: 100%;
-  padding: 0.75rem 3.5rem 0.75rem 2.8rem;
+  padding: 0.75rem 3.5rem 0.75rem 3.05rem;
   background: var(--ds-bg-inset);
   border: 1px solid var(--ds-border-light);
   border-radius: var(--ds-radius-lg);
