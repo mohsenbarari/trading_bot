@@ -306,7 +306,10 @@ describe('CommodityManager.vue', () => {
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('duplicate')
+    const createErrorAlert = wrapper.find('.flash-box.error[role="alert"]')
+    expect(createErrorAlert.exists()).toBe(true)
+    expect(createErrorAlert.text()).toContain('خطا در ثبت اطلاعات')
+    expect(createErrorAlert.text()).toContain('duplicate')
     expect(wrapper.text()).toContain('افزودن کالا')
 
     commodityManagerMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
@@ -327,7 +330,9 @@ describe('CommodityManager.vue', () => {
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('too short')
+    const editErrorAlert = wrapper.find('.flash-box.error[role="alert"]')
+    expect(editErrorAlert.exists()).toBe(true)
+    expect(editErrorAlert.text()).toContain('too short')
     expect(wrapper.text()).toContain('ویرایش نام کالا')
 
     wrapper.unmount()
@@ -370,7 +375,9 @@ describe('CommodityManager.vue', () => {
       method: 'POST',
       body: JSON.stringify({ alias: 'خراب' }),
     }))
-    expect(wrapper.text()).toContain('خراب: تکراری')
+    const aliasErrorAlert = wrapper.find('.flash-box.error[role="alert"]')
+    expect(aliasErrorAlert.exists()).toBe(true)
+    expect(aliasErrorAlert.text()).toContain('خراب: تکراری')
     expect(wrapper.text()).toContain('افزودن نام مستعار جدید')
 
     wrapper.unmount()

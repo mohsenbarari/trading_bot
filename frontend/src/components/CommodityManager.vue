@@ -344,10 +344,19 @@ onMounted(fetchCommodities);
 
 <template>
   <div class="commodity-manager ds-page-content">
-    
-    <div v-if="successMessage" class="ds-message success">{{ successMessage }}</div>
-    <div v-if="errorMessage" class="ds-message danger">
-       <pre class="error-pre">{{ errorMessage }}</pre>
+    <div v-if="successMessage" class="flash-box success" role="status" aria-live="polite">
+      <span class="flash-icon" aria-hidden="true">✓</span>
+      <div class="flash-copy">
+        <strong class="flash-title">عملیات موفق</strong>
+        <span class="flash-text">{{ successMessage }}</span>
+      </div>
+    </div>
+    <div v-if="errorMessage" class="flash-box error" role="alert" aria-live="assertive">
+      <span class="flash-icon" aria-hidden="true">!</span>
+      <div class="flash-copy">
+        <strong class="flash-title">خطا در ثبت اطلاعات</strong>
+        <pre class="error-pre flash-text">{{ errorMessage }}</pre>
+      </div>
     </div>
 
     <div v-if="viewMode === 'list'" class="ds-card">
@@ -508,6 +517,58 @@ onMounted(fetchCommodities);
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.flash-box {
+  border-radius: 18px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid transparent;
+  box-shadow: 0 14px 32px -28px rgba(15, 23, 42, 0.55);
+}
+
+.flash-box.error {
+  background: rgba(254, 242, 242, 0.96);
+  color: #b91c1c;
+  border-color: rgba(248, 113, 113, 0.18);
+}
+
+.flash-box.success {
+  background: rgba(236, 253, 245, 0.96);
+  color: #047857;
+  border-color: rgba(52, 211, 153, 0.18);
+}
+
+.flash-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-weight: 900;
+  font-size: 0.95rem;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.flash-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.flash-title {
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.flash-text {
+  font-size: 0.9rem;
+  line-height: 1.75;
 }
 
 .error-pre {
