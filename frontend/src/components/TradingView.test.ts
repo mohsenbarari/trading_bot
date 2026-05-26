@@ -155,6 +155,7 @@ function buildJsonResponse() {
         data: {
           trade_type: 'buy',
           commodity_id: 2,
+          commodity_name: 'طلای آب‌شده',
           quantity: 50,
           price: 222222,
           is_wholesale: true,
@@ -513,6 +514,25 @@ describe('TradingView.vue', () => {
       }),
     }))
     expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('')
+
+    wrapper.unmount()
+  })
+
+  it('returns a parsed preview back into the trading composer when the user chooses edit', async () => {
+    const wrapper = await mountTradingView()
+    await flushPromises()
+
+    await wrapper.find('.text-offer-input').setValue('خرید طلای آب‌شده 50 عدد 222222')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
+
+    await wrapper.find('.offer-preview-edit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('خرید طلای آب‌شده 50 عدد 222222: از متن')
 
     wrapper.unmount()
   })

@@ -236,6 +236,7 @@ describe('MarketView.vue', () => {
           data: {
             trade_type: 'buy',
             commodity_id: 2,
+            commodity_name: 'طلای آب‌شده',
             quantity: 50,
             price: 222222,
             is_wholesale: true,
@@ -315,8 +316,29 @@ describe('MarketView.vue', () => {
         warning_acknowledged: false,
       }),
     }))
-    expect((wrapper.find('.text-offer-input').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('')
     expect(marketViewMocks.fetchOffersMock).toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('returns a parsed preview back into the market chatbox when the user chooses edit', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect(wrapper.find('.text-offer-input').element.tagName).toBe('TEXTAREA')
+
+    await wrapper.find('.text-offer-input').setValue('خرید طلای آب‌شده 50 عدد 222222')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
+
+    await wrapper.find('.offer-preview-edit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('خرید طلای آب‌شده 50 عدد 222222: از متن بازار')
 
     wrapper.unmount()
   })
@@ -335,6 +357,8 @@ describe('MarketView.vue', () => {
     expect(recentItems).toHaveLength(2)
     expect(wrapper.text()).toContain('سکه')
     expect(wrapper.text()).toContain('طلای آب‌شده')
+    expect(wrapper.text()).toContain('توضیح: از لیست اخیر')
+    expect(wrapper.text()).toContain('خرد · پله‌ها: ۵ + ۳')
     expect(wrapper.text()).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۳۰')
     expect(wrapper.text()).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۱۰')
 
@@ -364,6 +388,28 @@ describe('MarketView.vue', () => {
       warning_acknowledged: false,
     })
     expect(marketViewMocks.fetchOffersMock).toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('returns a repeated recent offer back into the market chatbox when the user chooses edit', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    await wrapper.find('.recent-offers-toggle').trigger('click')
+    await flushPromises()
+
+    const recentItems = wrapper.findAll('.recent-offer-item')
+    await recentItems[0]!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
+
+    await wrapper.find('.offer-preview-edit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('فروش سکه 12 عدد 345678: از لیست اخیر')
 
     wrapper.unmount()
   })
@@ -507,7 +553,7 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
-    expect((wrapper.find('.text-offer-input').element as HTMLInputElement).placeholder).toBe('مثال: خرید سکه 30 عدد 125000')
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).placeholder).toBe('مثال: خرید سکه 30 عدد 125000')
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load commodities', expect.any(Error))
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load settings', expect.any(Error))
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load current user', expect.any(Error))
