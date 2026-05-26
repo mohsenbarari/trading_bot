@@ -8,6 +8,7 @@ from typing import List, Optional
 from jose import jwt, JWTError
 import logging
 
+from core.commodity_defaults import is_locked_imam_commodity_name
 from core.db import get_db
 from core.config import settings
 from models.commodity import Commodity, CommodityAlias
@@ -146,6 +147,12 @@ async def update_commodity_name(
     if not db_commodity:
         raise HTTPException(status_code=404, detail="کالا یافت نشد")
 
+    if commodity_update.name != db_commodity.name and is_locked_imam_commodity_name(db_commodity.name):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="نام کالای پیش فرض امام قابل ویرایش نیست. فقط نام های مستعار را مدیریت کنید.",
+        )
+
     # بررسی تکراری بودن نام جدید
     if commodity_update.name != db_commodity.name:
         stmt_check = select(Commodity).where(Commodity.name == commodity_update.name)
@@ -183,6 +190,12 @@ async def delete_commodity(
     
     if not db_commodity:
         raise HTTPException(status_code=404, detail="کالا یافت نشد")
+
+    if is_locked_imam_commodity_name(db_commodity.name):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="کالای پیش فرض امام قابل حذف نیست. فقط نام های مستعار را مدیریت کنید.",
+        )
     
     # Historical offers and trades keep a hard FK to the commodity so the
     # API should explain that dependency before the DB raises IntegrityError.

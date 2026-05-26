@@ -33,20 +33,27 @@ async function mountCommodityManager() {
 }
 
 describe('CommodityManager.vue', () => {
-  let commodityId = 2
-  let aliasId = 20
+  let commodityId = 3
+  let aliasId = 30
   let commoditiesState: Array<{ id: number; name: string; aliases: Array<{ id: number; alias: string; commodity_id: number }> }>
 
   beforeEach(() => {
-    commodityId = 2
-    aliasId = 20
+    commodityId = 3
+    aliasId = 30
     commoditiesState = [
       {
         id: 1,
-        name: 'سکه امامی',
+        name: 'امام',
         aliases: [
           { id: 11, alias: 'امامی', commodity_id: 1 },
           { id: 12, alias: 'سکه جدید', commodity_id: 1 },
+        ],
+      },
+      {
+        id: 2,
+        name: 'بهار',
+        aliases: [
+          { id: 21, alias: 'بهار جدید', commodity_id: 2 },
         ],
       },
     ]
@@ -133,7 +140,8 @@ describe('CommodityManager.vue', () => {
     const wrapper = await mountCommodityManager()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('سکه امامی')
+    expect(wrapper.text()).toContain('امام')
+    expect(wrapper.text()).toContain('بهار')
 
     await wrapper.find('.list-item-btn').trigger('click')
     await flushPromises()
@@ -174,11 +182,26 @@ describe('CommodityManager.vue', () => {
     wrapper.unmount()
   })
 
+  it('keeps alias management available for canonical Imam but hides rename and delete actions', async () => {
+    const wrapper = await mountCommodityManager()
+    await flushPromises()
+
+    await wrapper.findAll('.list-item-btn')[0]!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('کالای پیش فرض امام فقط از مسیر نام های مستعار قابل مدیریت است')
+    expect(wrapper.find('.action-btn.secondary-soft').exists()).toBe(false)
+    expect(wrapper.find('.action-btn.danger-soft').exists()).toBe(false)
+    expect(wrapper.find('.action-btn.primary-soft').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
   it('edits the commodity name and performs alias add, edit, and delete flows', async () => {
     const wrapper = await mountCommodityManager()
     await flushPromises()
 
-    await wrapper.find('.list-item-btn').trigger('click')
+    await wrapper.findAll('.list-item-btn')[1]!.trigger('click')
     await flushPromises()
 
     const actionButtons = wrapper.findAll('.action-btn')
@@ -190,7 +213,7 @@ describe('CommodityManager.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('سکه بهار آزادی')
-    expect(wrapper.text()).not.toContain('سکه امامی')
+    expect(wrapper.text()).not.toContain('>بهار<')
 
     await wrapper.findAll('.action-btn')[0]!.trigger('click')
     await flushPromises()
@@ -225,15 +248,15 @@ describe('CommodityManager.vue', () => {
     const wrapper = await mountCommodityManager()
     await flushPromises()
 
-    await wrapper.find('.list-item-btn').trigger('click')
+    await wrapper.findAll('.list-item-btn')[1]!.trigger('click')
     await flushPromises()
     await wrapper.find('.action-btn.danger-soft').trigger('click')
     await flushPromises()
     await wrapper.find('.ds-btn.danger').trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).not.toContain('سکه امامی')
-    expect(wrapper.text()).toContain('هیچ کالایی ثبت نشده است.')
+    expect(wrapper.text()).not.toContain('بهار')
+    expect(wrapper.text()).toContain('امام')
 
     wrapper.unmount()
   })
@@ -272,7 +295,8 @@ describe('CommodityManager.vue', () => {
       if (path === '/api/commodities/' && method === 'GET') return responseOf(commoditiesState)
       if (path === '/api/commodities/' && method === 'POST') return responseOf({ detail: { name: ['duplicate'] } }, false, 422)
       if (path === '/api/commodities/1' && method === 'GET') return responseOf(commoditiesState[0])
-      if (path === '/api/commodities/1' && method === 'PUT') return responseOf({ detail: { name: ['too short'] } }, false, 422)
+      if (path === '/api/commodities/2' && method === 'GET') return responseOf(commoditiesState[1])
+      if (path === '/api/commodities/2' && method === 'PUT') return responseOf({ detail: { name: ['too short'] } }, false, 422)
       return responseOf({ detail: 'unexpected' }, false, 500)
     })
 
@@ -288,14 +312,14 @@ describe('CommodityManager.vue', () => {
     commodityManagerMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       const method = options?.method || 'GET'
       if (path === '/api/commodities/' && method === 'GET') return responseOf(commoditiesState)
-      if (path === '/api/commodities/1' && method === 'GET') return responseOf(commoditiesState[0])
-      if (path === '/api/commodities/1' && method === 'PUT') return responseOf({ detail: { name: ['too short'] } }, false, 422)
+      if (path === '/api/commodities/2' && method === 'GET') return responseOf(commoditiesState[1])
+      if (path === '/api/commodities/2' && method === 'PUT') return responseOf({ detail: { name: ['too short'] } }, false, 422)
       return responseOf({ detail: 'unexpected' }, false, 500)
     })
 
     await wrapper.find('.ds-btn.secondary').trigger('click')
     await flushPromises()
-    await wrapper.find('.list-item-btn').trigger('click')
+    await wrapper.findAll('.list-item-btn')[1]!.trigger('click')
     await flushPromises()
     await wrapper.findAll('.action-btn')[1]!.trigger('click')
     await flushPromises()
@@ -355,14 +379,14 @@ describe('CommodityManager.vue', () => {
     const wrapper = await mountCommodityManager()
     await flushPromises()
 
-    await wrapper.find('.list-item-btn').trigger('click')
+    await wrapper.findAll('.list-item-btn')[1]!.trigger('click')
     await flushPromises()
 
     commodityManagerMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       const method = options?.method || 'GET'
-      if (path === '/api/commodities/1' && method === 'GET') return responseOf(commoditiesState[0])
-      if (path === '/api/commodities/1' && method === 'DELETE') return responseOf({ detail: 'کالا وابسته است' }, false, 400)
-      if (path === '/api/commodities/aliases/11' && method === 'DELETE') return responseOf({ detail: 'نام مستعار وابسته است' }, false, 400)
+      if (path === '/api/commodities/2' && method === 'GET') return responseOf(commoditiesState[1])
+      if (path === '/api/commodities/2' && method === 'DELETE') return responseOf({ detail: 'کالا وابسته است' }, false, 400)
+      if (path === '/api/commodities/aliases/21' && method === 'DELETE') return responseOf({ detail: 'نام مستعار وابسته است' }, false, 400)
       return responseOf(commoditiesState)
     })
 
@@ -371,16 +395,16 @@ describe('CommodityManager.vue', () => {
     await wrapper.find('.ds-btn.danger').trigger('click')
     await flushPromises()
 
-    expect(commodityManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/1', { method: 'DELETE' })
-    expect(wrapper.text()).toContain('سکه امامی')
+    expect(commodityManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/2', { method: 'DELETE' })
+    expect(wrapper.text()).toContain('بهار')
 
     await wrapper.find('.icon-btn.delete').trigger('click')
     await flushPromises()
     await wrapper.find('.ds-btn.danger').trigger('click')
     await flushPromises()
 
-    expect(commodityManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/aliases/11', { method: 'DELETE' })
-    expect(wrapper.text()).toContain('امامی')
+    expect(commodityManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/aliases/21', { method: 'DELETE' })
+    expect(wrapper.text()).toContain('بهار جدید')
 
     wrapper.unmount()
   })

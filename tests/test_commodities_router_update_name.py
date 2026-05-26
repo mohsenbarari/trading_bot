@@ -46,6 +46,16 @@ class CommoditiesRouterUpdateNameTests(unittest.IsolatedAsyncioTestCase):
             await update_commodity_name(1, commodity_update=schemas.CommodityCreate(name="Taken"), db=db, source="miniapp")
         self.assertEqual(exc_info.exception.status_code, 409)
 
+    async def test_update_commodity_name_blocks_canonical_imam_rename(self):
+        commodity = SimpleNamespace(id=1, name="امام", aliases=[])
+        db = FakeDB([FakeExecuteResult(commodity)])
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await update_commodity_name(1, commodity_update=schemas.CommodityCreate(name="سکه امامی"), db=db, source="miniapp")
+
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("قابل ویرایش نیست", exc_info.exception.detail)
+
     async def test_update_commodity_name_commits_refreshes_and_invalidates_cache(self):
         commodity = SimpleNamespace(id=1, name="Old", aliases=[])
         db = FakeDB([FakeExecuteResult(commodity), FakeExecuteResult(None)])
