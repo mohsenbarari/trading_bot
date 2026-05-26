@@ -38,6 +38,29 @@ class FakeDB:
 
 
 class CommoditiesRouterCreateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_create_commodity_rejects_digits_in_name_or_alias(self):
+        db = FakeDB()
+        with self.assertRaises(HTTPException) as exc_info:
+            await create_commodity(
+                commodity_data=schemas.CommodityCreate(name="نیم86"),
+                aliases=["نیم86"],
+                db=db,
+                source="miniapp",
+            )
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "شما نمیتوانید در نام کالا از اعداد استفاده کنید")
+
+        db = FakeDB()
+        with self.assertRaises(HTTPException) as exc_info:
+            await create_commodity(
+                commodity_data=schemas.CommodityCreate(name="نیم"),
+                aliases=["نیم", "ربع403"],
+                db=db,
+                source="miniapp",
+            )
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "شما نمیتوانید در نام کالا از اعداد استفاده کنید")
+
     async def test_create_commodity_rejects_duplicate_name(self):
         db = FakeDB([FakeExecuteResult(object())])
         with self.assertRaises(HTTPException) as exc_info:

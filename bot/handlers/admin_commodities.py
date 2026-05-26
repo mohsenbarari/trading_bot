@@ -271,6 +271,9 @@ async def handle_alias_edit_name(message: types.Message, state: FSMContext, user
             response = await client.put(f"{ALIASES_API_URL}{alias_id}", json={"alias": new_name}, headers=get_auth_headers())
             response.raise_for_status()
         await status_msg.edit_text(f"✅ ویرایش شد.", parse_mode="Markdown")
+    except httpx.HTTPStatusError as e:
+        detail = get_error_detail(e)
+        await status_msg.edit_text(f"❌ خطا: {detail}", parse_mode="Markdown")
     except Exception as e:
         await status_msg.edit_text(f"❌ خطا: {e}", parse_mode="Markdown")
         
@@ -354,6 +357,9 @@ async def handle_commodity_edit_name(message: types.Message, state: FSMContext, 
             response = await client.put(f"{COMMODITIES_API_URL}{commodity_id}", json={"name": new_name}, headers=get_auth_headers())
             response.raise_for_status()
         await status_msg.edit_text(f"✅ نام کالا تغییر یافت.", parse_mode="Markdown")
+    except httpx.HTTPStatusError as e:
+        detail = get_error_detail(e)
+        await status_msg.edit_text(f"❌ خطا: {detail}", parse_mode="Markdown")
     except Exception as e:
         await status_msg.edit_text(f"❌ خطا: {e}", parse_mode="Markdown")
         

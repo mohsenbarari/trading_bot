@@ -2,6 +2,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx
+
 from bot.handlers.admin_commodities import handle_commodity_edit_name, handle_commodity_edit_start
 from bot.states import CommodityManagement
 from core.enums import UserRole
@@ -83,6 +85,30 @@ class BotAdminCommoditiesCommodityEditTests(unittest.IsolatedAsyncioTestCase):
             await handle_commodity_edit_name(message, state, user=SimpleNamespace(id=1))
 
         self.assertIn("bad", status_msg.edit_text.await_args.args[0])
+
+        status_msg = SimpleNamespace(message_id=32, edit_text=AsyncMock())
+        message = SimpleNamespace(
+            text="نیم86",
+            answer=AsyncMock(return_value=status_msg),
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=1),
+        )
+        state = SimpleNamespace(get_data=AsyncMock(return_value={"commodity_id": 7}))
+        http_error = httpx.HTTPStatusError(
+            "bad",
+            request=SimpleNamespace(),
+            response=SimpleNamespace(text="plain", json=lambda: {"detail": "شما نمیتوانید در نام کالا از اعداد استفاده کنید"}),
+        )
+        with patch("bot.handlers.admin_commodities.delete_user_message", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.update_anchor", new=AsyncMock()
+        ), patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.httpx.AsyncClient", return_value=FakeClient(FakeResponse(error=http_error))
+        ), patch("bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()), patch(
+            "bot.handlers.admin_commodities.show_commodity_list", new=AsyncMock()
+        ):
+            await handle_commodity_edit_name(message, state, user=SimpleNamespace(id=1))
+
+        self.assertIn("شما نمیتوانید در نام کالا از اعداد استفاده کنید", status_msg.edit_text.await_args.args[0])
 
 
 if __name__ == "__main__":
