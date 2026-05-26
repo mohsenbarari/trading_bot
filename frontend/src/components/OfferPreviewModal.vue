@@ -30,6 +30,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'confirm'): void
+  (e: 'edit'): void
   (e: 'cancel'): void
 }>()
 
@@ -93,6 +94,9 @@ const confirmButtonText = computed(() => {
       <div class="offer-preview-actions">
         <button type="button" class="offer-preview-cancel" :disabled="submitting" @click="emit('cancel')">
           انصراف
+        </button>
+        <button type="button" class="offer-preview-edit" :disabled="submitting" @click="emit('edit')">
+          ویرایش
         </button>
         <button type="button" class="offer-preview-confirm" :disabled="submitting" @click="emit('confirm')">
           {{ confirmButtonText }}
@@ -264,6 +268,12 @@ const confirmButtonText = computed(() => {
   background: var(--ds-bg-page, #f8fafc);
   border: 1px solid var(--ds-border-light, rgba(148, 163, 184, 0.25));
   color: var(--ds-text-secondary, #475569);
+}
+
+.offer-preview-edit {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.16);
+  color: #b45309;
 }
 
 .offer-preview-confirm {

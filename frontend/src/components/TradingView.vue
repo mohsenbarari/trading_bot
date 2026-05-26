@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
+import { ref, onMounted, computed, watch, onUnmounted, nextTick } from 'vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import OfferPreviewModal from './OfferPreviewModal.vue'
 import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue'
 import { useWebSocket } from '../composables/useWebSocket'
 import { useTradingSort } from '../composables/useTradingSort'
 import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIdentity'
+import { buildOfferDraftText } from '../utils/offerDraftText'
 import { apiFetch, apiFetchJson } from '../utils/auth'
 
 const { connect: wsConnect, on: wsOn, off: wsOff } = useWebSocket()
@@ -316,6 +317,7 @@ const {
 
 // Text Offer Mode
 const offerText = ref('')
+const offerInputRef = ref<HTMLTextAreaElement | null>(null)
 const parseError = ref('')
 const pendingOfferPreview = ref<ParsedOfferPreview | null>(null)
 const previewError = ref('')
@@ -518,6 +520,24 @@ function cancelOfferPreview() {
   pendingOfferPreview.value = null
   previewError.value = ''
   previewWarning.value = null
+}
+
+function focusOfferInput() {
+  void nextTick(() => {
+    const input = offerInputRef.value
+    if (!input) return
+    input.focus()
+    const end = input.value.length
+    input.setSelectionRange(end, end)
+  })
+}
+
+function editPendingOfferPreview() {
+  if (!pendingOfferPreview.value) return
+  offerText.value = buildOfferDraftText(pendingOfferPreview.value)
+  parseError.value = ''
+  cancelOfferPreview()
+  focusOfferInput()
 }
 
 async function confirmOfferPreview() {
@@ -1157,6 +1177,7 @@ watch(activeTab, (val) => {
             </svg>
           </button>
           <textarea
+            ref="offerInputRef"
             v-model="offerText"
             class="text-offer-input"
             :placeholder="randomPlaceholder"
@@ -1175,6 +1196,7 @@ watch(activeTab, (val) => {
       :error="previewError"
       :warning="previewWarning"
       @confirm="confirmOfferPreview"
+      @edit="editPendingOfferPreview"
       @cancel="cancelOfferPreview"
     />
     

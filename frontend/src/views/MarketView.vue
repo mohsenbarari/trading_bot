@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { ArrowUp, ArrowDown, ArrowUpDown, X, Loader2, Send, ChevronLeft, ChevronDown } from 'lucide-vue-next'
 import { useOffers } from '../composables/useOffers'
 import { useWebSocket } from '../composables/useWebSocket'
@@ -8,6 +8,7 @@ import OffersList from '../components/OffersList.vue'
 import OfferPreviewModal from '../components/OfferPreviewModal.vue'
 import { apiFetch, apiFetchJson } from '../utils/auth'
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy'
+import { buildOfferDraftText } from '../utils/offerDraftText'
 
 interface Commodity {
   id: number
@@ -123,6 +124,7 @@ const recentOffersOpen = ref(false)
 const recentOffersLoading = ref(false)
 const recentOffersError = ref('')
 const recentOffersRef = ref<HTMLElement | null>(null)
+const offerInputRef = ref<HTMLTextAreaElement | null>(null)
 const isTier2Customer = computed(() => currentUserCustomerTier.value === 'tier2')
 const isMarketOpen = computed(() => marketRuntime.value.is_open)
 const showMarketNotice = computed(() => !marketRuntime.value.is_open || marketRuntime.value.active_web_notice_visible)
@@ -248,6 +250,37 @@ function formatRecentOfferQuantity(offer: RecentOfferSummary) {
   return getRecentOfferRepublishQuantity(offer).toLocaleString('fa-IR')
 }
 
+function formatRecentOfferDetails(offer: RecentOfferSummary) {
+  const parts: string[] = []
+
+  if (!offer.is_wholesale) {
+    const lots = getRecentOfferRepublishLots(offer)
+    if (lots?.length) {
+      parts.push(`خرد · پله‌ها: ${lots.map((lot) => lot.toLocaleString('fa-IR')).join(' + ')}`)
+    } else {
+      parts.push('خرد')
+    }
+  }
+
+  const notes = offer.notes?.trim()
+  if (notes) {
+    parts.push(`توضیح: ${notes}`)
+  }
+
+  return parts.join(' • ')
+}
+
+function syncOfferInputHeight() {
+  void nextTick(() => {
+    const input = offerInputRef.value
+    if (!input) return
+    input.style.height = '0px'
+    const nextHeight = Math.min(input.scrollHeight, 160)
+    input.style.height = `${Math.max(nextHeight, 52)}px`
+    input.style.overflowY = input.scrollHeight > 160 ? 'auto' : 'hidden'
+  })
+}
+
 async function fetchRecentOffers(silent = false) {
   if (isTier2Customer.value) {
     recentOffers.value = []
@@ -333,6 +366,24 @@ function cancelOfferPreview() {
   previewError.value = ''
   previewWarning.value = null
   republishedFromOfferId.value = null
+}
+
+function focusOfferInput() {
+  void nextTick(() => {
+    const input = offerInputRef.value
+    if (!input) return
+    input.focus()
+    const end = input.value.length
+    input.setSelectionRange(end, end)
+  })
+}
+
+function editPendingOfferPreview() {
+  if (!pendingOfferPreview.value) return
+  offerText.value = buildOfferDraftText(pendingOfferPreview.value)
+  parseError.value = ''
+  cancelOfferPreview()
+  focusOfferInput()
 }
 
 async function confirmOfferPreview() {
@@ -495,6 +546,10 @@ watch(isTier2Customer, (blocked) => {
   recentOffers.value = []
 })
 
+watch(offerText, () => {
+  syncOfferInputHeight()
+})
+
 onMounted(() => {
     fetchOffers()
     startPolling()
@@ -506,6 +561,7 @@ onMounted(() => {
   wsOn('market:opened', handleMarketOpened)
   wsOn('market:closed', handleMarketClosed)
   wsOn('market:notice_hidden', handleMarketNoticeHidden)
+  syncOfferInputHeight()
 })
 
 onUnmounted(() => {
@@ -568,6 +624,7 @@ onUnmounted(() => {
       :error="previewError"
       :warning="previewWarning"
       @confirm="confirmOfferPreview"
+      @edit="editPendingOfferPreview"
       @cancel="cancelOfferPreview"
     />
 
@@ -616,21 +673,28 @@ onUnmounted(() => {
                     <span class="recent-offer-item-badge" :class="offer.offer_type === 'buy' ? 'recent-offer-item-badge--buy' : 'recent-offer-item-badge--sell'">
                       {{ offer.offer_type === 'buy' ? 'خ' : 'ف' }}
                     </span>
-                    <span class="recent-offer-item-summary">
-                      {{ offer.commodity_name }} · {{ formatRecentOfferQuantity(offer) }} · {{ formatRecentOfferPrice(offer) }}
+                    <span class="recent-offer-item-copy">
+                      <span class="recent-offer-item-summary">
+                        {{ offer.commodity_name }} · {{ formatRecentOfferQuantity(offer) }} · {{ formatRecentOfferPrice(offer) }}
+                      </span>
+                      <span v-if="formatRecentOfferDetails(offer)" class="recent-offer-item-details">
+                        {{ formatRecentOfferDetails(offer) }}
+                      </span>
                     </span>
                   </div>
                 </button>
               </div>
             </transition>
-            <input 
+            <textarea
+              ref="offerInputRef"
               v-model="offerText"
-              type="text" 
               :placeholder="marketInputPlaceholder"
               class="text-offer-input"
+              rows="1"
               :disabled="!isMarketOpen || isSubmitting"
-              @keydown.enter="parseAndSubmitTextOffer"
-            >
+              @input="syncOfferInputHeight"
+              @keydown.enter.prevent="parseAndSubmitTextOffer"
+            ></textarea>
             <button 
               @click="parseAndSubmitTextOffer"
               :disabled="!isMarketOpen || !offerText.trim() || isSubmitting"
@@ -884,8 +948,7 @@ onUnmounted(() => {
 .recent-offers-toggle {
   position: absolute;
   left: 0.94rem;
-  top: 50%;
-  transform: translateY(-50%);
+  bottom: 0.58rem;
   width: 2.1rem;
   height: 2.1rem;
   display: inline-flex;
@@ -908,7 +971,7 @@ onUnmounted(() => {
 }
 
 .recent-offers-toggle--open {
-  transform: translateY(-50%) rotate(180deg);
+  transform: rotate(180deg);
 }
 
 .recent-offers-toggle:disabled {
@@ -963,9 +1026,15 @@ onUnmounted(() => {
 
 .recent-offer-item-main {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   min-width: 0;
+}
+
+.recent-offer-item-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.16rem;
 }
 
 .recent-offer-item-badge {
@@ -992,12 +1061,18 @@ onUnmounted(() => {
 
 .recent-offer-item-summary {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 0.8rem;
   font-weight: 700;
+  line-height: 1.55;
   color: var(--ds-text-primary);
+}
+
+.recent-offer-item-details {
+  min-width: 0;
+  font-size: 0.7rem;
+  line-height: 1.6;
+  color: var(--ds-text-secondary);
+  word-break: break-word;
 }
 
 .recent-offer-item-time {
@@ -1007,13 +1082,29 @@ onUnmounted(() => {
 
 .text-offer-input {
   width: 100%;
-  padding: 0.75rem 3.5rem 0.75rem 3.2rem;
+  min-height: 3.25rem;
+  max-height: 10rem;
+  padding: 0.82rem 3.7rem 0.82rem 3.9rem;
   background: var(--ds-bg-inset);
   border: 1px solid var(--ds-border-light);
   border-radius: var(--ds-radius-lg);
   font-size: 0.9rem;
+  line-height: 1.75;
   outline: none;
+  resize: none;
+  white-space: pre-wrap;
+  word-break: break-word;
   transition: all 0.2s;
+}
+
+.text-offer-input::selection {
+  background: rgba(245, 158, 11, 0.28);
+  color: var(--ds-text-primary, #0f172a);
+}
+
+.text-offer-input::-moz-selection {
+  background: rgba(245, 158, 11, 0.28);
+  color: var(--ds-text-primary, #0f172a);
 }
 
 .text-offer-input:focus {
@@ -1031,8 +1122,7 @@ onUnmounted(() => {
 .send-btn {
   position: absolute;
   right: 0.5rem;
-  top: 50%;
-  transform: translateY(-50%);
+  bottom: 0.5rem;
   padding: 0.5rem;
   background: var(--ds-gradient-primary);
   color: white;
