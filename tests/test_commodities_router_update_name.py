@@ -56,10 +56,18 @@ class CommoditiesRouterUpdateNameTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 404)
 
         commodity = SimpleNamespace(id=1, name="Old", aliases=[])
-        db = FakeDB([FakeExecuteResult(commodity), FakeExecuteResult(SimpleNamespace(id=2))])
+        db = FakeDB([FakeExecuteResult(commodity), FakeExecuteResult(SimpleNamespace(id=2)), FakeExecuteResult(None)])
         with self.assertRaises(HTTPException) as exc_info:
             await update_commodity_name(1, commodity_update=schemas.CommodityCreate(name="Taken"), db=db, source="miniapp")
         self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("نام اصلی یک کالا", exc_info.exception.detail)
+
+        commodity = SimpleNamespace(id=1, name="Old", aliases=[])
+        db = FakeDB([FakeExecuteResult(commodity), FakeExecuteResult(None), FakeExecuteResult(SimpleNamespace(id=4, commodity_id=2))])
+        with self.assertRaises(HTTPException) as exc_info:
+            await update_commodity_name(1, commodity_update=schemas.CommodityCreate(name="TakenAlias"), db=db, source="miniapp")
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("نام مستعار یک کالا", exc_info.exception.detail)
 
     async def test_update_commodity_name_blocks_canonical_imam_rename(self):
         commodity = SimpleNamespace(id=1, name="امام", aliases=[])
@@ -73,7 +81,7 @@ class CommoditiesRouterUpdateNameTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_commodity_name_commits_refreshes_and_invalidates_cache(self):
         commodity = SimpleNamespace(id=1, name="Old", aliases=[])
-        db = FakeDB([FakeExecuteResult(commodity), FakeExecuteResult(None)])
+        db = FakeDB([FakeExecuteResult(commodity), FakeExecuteResult(None), FakeExecuteResult(None)])
         with patch("bot.utils.redis_helpers.invalidate_commodity_cache", new=AsyncMock()) as invalidate_mock:
             result = await update_commodity_name(1, commodity_update=schemas.CommodityCreate(name="New"), db=db, source="bot")
 
@@ -84,7 +92,7 @@ class CommoditiesRouterUpdateNameTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_commodity_name_ignores_cache_invalidation_failures(self):
         commodity = SimpleNamespace(id=1, name="Old", aliases=[])
-        db = FakeDB([FakeExecuteResult(commodity), FakeExecuteResult(None)])
+        db = FakeDB([FakeExecuteResult(commodity), FakeExecuteResult(None), FakeExecuteResult(None)])
         with patch(
             "bot.utils.redis_helpers.invalidate_commodity_cache",
             new=AsyncMock(side_effect=RuntimeError("cache down")),

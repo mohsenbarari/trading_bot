@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
@@ -62,7 +63,7 @@ class CommoditiesRouterCreateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.detail, "شما نمیتوانید در نام کالا از اعداد استفاده کنید")
 
     async def test_create_commodity_rejects_duplicate_name(self):
-        db = FakeDB([FakeExecuteResult(object())])
+        db = FakeDB([FakeExecuteResult(SimpleNamespace(id=2))])
         with self.assertRaises(HTTPException) as exc_info:
             await create_commodity(
                 commodity_data=schemas.CommodityCreate(name="Gold"),
@@ -71,9 +72,44 @@ class CommoditiesRouterCreateTests(unittest.IsolatedAsyncioTestCase):
                 source="miniapp",
             )
         self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("نام اصلی یک کالا", exc_info.exception.detail)
+
+    async def test_create_commodity_rejects_name_or_alias_that_conflicts_across_shared_namespace(self):
+        db = FakeDB([FakeExecuteResult(None), FakeExecuteResult(SimpleNamespace(id=7, commodity_id=3))])
+        with self.assertRaises(HTTPException) as exc_info:
+            await create_commodity(
+                commodity_data=schemas.CommodityCreate(name="Gold"),
+                aliases=["gold"],
+                db=db,
+                source="miniapp",
+            )
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("نام مستعار یک کالا", exc_info.exception.detail)
+
+        db = FakeDB([
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+            FakeExecuteResult(SimpleNamespace(id=9)),
+        ])
+        with self.assertRaises(HTTPException) as exc_info:
+            await create_commodity(
+                commodity_data=schemas.CommodityCreate(name="Silver"),
+                aliases=["Gold"],
+                db=db,
+                source="miniapp",
+            )
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("نام اصلی یک کالا", exc_info.exception.detail)
 
     async def test_create_commodity_adds_unique_aliases_and_invalidates_cache(self):
-        db = FakeDB([FakeExecuteResult(None)])
+        db = FakeDB([
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+        ])
         with patch("bot.utils.redis_helpers.invalidate_commodity_cache", new=AsyncMock()) as invalidate_mock:
             result = await create_commodity(
                 commodity_data=schemas.CommodityCreate(name="Gold"),
@@ -90,7 +126,12 @@ class CommoditiesRouterCreateTests(unittest.IsolatedAsyncioTestCase):
         invalidate_mock.assert_awaited_once()
 
     async def test_create_commodity_ignores_cache_invalidation_failures(self):
-        db = FakeDB([FakeExecuteResult(None)])
+        db = FakeDB([
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+        ])
         with patch(
             "bot.utils.redis_helpers.invalidate_commodity_cache",
             new=AsyncMock(side_effect=RuntimeError("cache down")),

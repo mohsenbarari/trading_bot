@@ -59,6 +59,41 @@ def ensure_commodity_text_has_no_digits(value: str) -> None:
             detail="شما نمیتوانید در نام کالا از اعداد استفاده کنید",
         )
 
+
+async def ensure_commodity_text_is_available(
+    db: AsyncSession,
+    value: str,
+    *,
+    current_commodity_id: Optional[int] = None,
+    current_alias_id: Optional[int] = None,
+    allow_same_commodity_alias: bool = False,
+) -> None:
+    existing_commodity = (
+        await db.execute(select(Commodity).where(Commodity.name == value))
+    ).scalar_one_or_none()
+    if existing_commodity and existing_commodity.id != current_commodity_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"نام «{value}» از قبل به عنوان نام اصلی یک کالا ثبت شده است",
+        )
+
+    existing_alias = (
+        await db.execute(select(CommodityAlias).where(CommodityAlias.alias == value))
+    ).scalar_one_or_none()
+    if not existing_alias:
+        return
+
+    if current_alias_id is not None and existing_alias.id == current_alias_id:
+        return
+
+    if allow_same_commodity_alias and existing_alias.commodity_id == current_commodity_id:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=f"نام «{value}» از قبل به عنوان نام مستعار یک کالا ثبت شده است",
+    )
+
 @router.get("/", response_model=List[schemas.Commodity])
 async def read_all_commodities(db: AsyncSession = Depends(get_db)):
     """
@@ -119,16 +154,13 @@ async def create_commodity(
     for alias_name in set(aliases):
         ensure_commodity_text_has_no_digits(alias_name)
 
-    # بررسی تکراری بودن نام اصلی
-    stmt = select(Commodity).where(Commodity.name == commodity_data.name)
-    existing = (await db.execute(stmt)).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=409, detail=f"کالایی با نام '{commodity_data.name}' از قبل وجود دارد")
+    await ensure_commodity_text_is_available(db, commodity_data.name)
 
     db_commodity = Commodity(name=commodity_data.name)
     
     # افزودن نام‌های مستعار
-    for alias_name in set(aliases): 
+    for alias_name in set(aliases):
+        await ensure_commodity_text_is_available(db, alias_name)
         db_commodity.aliases.append(CommodityAlias(alias=alias_name))
         
     db.add(db_commodity)
@@ -170,12 +202,13 @@ async def update_commodity_name(
             detail="نام کالای پیش فرض امام قابل ویرایش نیست. فقط نام های مستعار را مدیریت کنید.",
         )
 
-    # بررسی تکراری بودن نام جدید
     if commodity_update.name != db_commodity.name:
-        stmt_check = select(Commodity).where(Commodity.name == commodity_update.name)
-        existing = (await db.execute(stmt_check)).scalar_one_or_none()
-        if existing:
-            raise HTTPException(status_code=409, detail=f"کالایی با نام '{commodity_update.name}' از قبل وجود دارد")
+        await ensure_commodity_text_is_available(
+            db,
+            commodity_update.name,
+            current_commodity_id=db_commodity.id,
+            allow_same_commodity_alias=True,
+        )
     
     db_commodity.name = commodity_update.name
     await db.commit()
@@ -294,10 +327,11 @@ async def add_alias_to_commodity(
 
     ensure_commodity_text_has_no_digits(alias.alias)
 
-    stmt_check = select(CommodityAlias).where(CommodityAlias.alias == alias.alias)
-    existing_alias = (await db.execute(stmt_check)).scalar_one_or_none()
-    if existing_alias:
-        raise HTTPException(status_code=409, detail=f"نام مستعار '{alias.alias}' از قبل برای کالای دیگری ثبت شده است")
+    await ensure_commodity_text_is_available(
+        db,
+        alias.alias,
+        current_commodity_id=commodity_id,
+    )
 
     db_alias = CommodityAlias(commodity_id=commodity_id, alias=alias.alias)
     db.add(db_alias)
@@ -340,10 +374,13 @@ async def update_alias(
         raise HTTPException(status_code=404, detail="نام مستعار یافت نشد")
         
     if alias_update.alias != db_alias.alias:
-        stmt_check = select(CommodityAlias).where(CommodityAlias.alias == alias_update.alias)
-        existing = (await db.execute(stmt_check)).scalar_one_or_none()
-        if existing:
-            raise HTTPException(status_code=409, detail=f"نام مستعار '{alias_update.alias}' از قبل ثبت شده است")
+        await ensure_commodity_text_is_available(
+            db,
+            alias_update.alias,
+            current_commodity_id=db_alias.commodity_id,
+            current_alias_id=db_alias.id,
+            allow_same_commodity_alias=True,
+        )
             
     db_alias.alias = alias_update.alias
     await db.commit()

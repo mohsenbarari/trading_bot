@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
@@ -53,19 +54,27 @@ class CommoditiesRouterAliasAddTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.detail, "شما نمیتوانید در نام کالا از اعداد استفاده کنید")
 
     async def test_add_alias_to_commodity_rejects_duplicate_alias(self):
-        db = FakeDB([FakeExecuteResult(object())])
+        db = FakeDB([FakeExecuteResult(None), FakeExecuteResult(object())])
         with self.assertRaises(HTTPException) as exc_info:
             await add_alias_to_commodity(1, alias=schemas.CommodityAliasCreate(alias="gold"), db=db, source="miniapp")
         self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("نام مستعار یک کالا", exc_info.exception.detail)
+
+    async def test_add_alias_to_commodity_rejects_existing_commodity_name(self):
+        db = FakeDB([FakeExecuteResult(SimpleNamespace(id=5))])
+        with self.assertRaises(HTTPException) as exc_info:
+            await add_alias_to_commodity(1, alias=schemas.CommodityAliasCreate(alias="gold"), db=db, source="miniapp")
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("نام اصلی یک کالا", exc_info.exception.detail)
 
     async def test_add_alias_to_commodity_maps_commit_failure_to_404_and_success_refreshes_cache(self):
-        db = FakeDB([FakeExecuteResult(None)], commit_exception=RuntimeError("missing commodity"))
+        db = FakeDB([FakeExecuteResult(None), FakeExecuteResult(None)], commit_exception=RuntimeError("missing commodity"))
         with self.assertRaises(HTTPException) as exc_info:
             await add_alias_to_commodity(1, alias=schemas.CommodityAliasCreate(alias="gold"), db=db, source="miniapp")
         self.assertEqual(exc_info.exception.status_code, 404)
         self.assertEqual(db.rollbacks, 1)
 
-        db = FakeDB([FakeExecuteResult(None)])
+        db = FakeDB([FakeExecuteResult(None), FakeExecuteResult(None)])
         with patch("bot.utils.redis_helpers.invalidate_commodity_cache", new=AsyncMock()) as invalidate_mock:
             result = await add_alias_to_commodity(1, alias=schemas.CommodityAliasCreate(alias="gold"), db=db, source="bot")
 
@@ -75,7 +84,7 @@ class CommoditiesRouterAliasAddTests(unittest.IsolatedAsyncioTestCase):
         invalidate_mock.assert_awaited_once()
 
     async def test_add_alias_to_commodity_ignores_cache_invalidation_failures(self):
-        db = FakeDB([FakeExecuteResult(None)])
+        db = FakeDB([FakeExecuteResult(None), FakeExecuteResult(None)])
         with patch(
             "bot.utils.redis_helpers.invalidate_commodity_cache",
             new=AsyncMock(side_effect=RuntimeError("cache down")),
