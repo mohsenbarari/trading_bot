@@ -335,6 +335,8 @@ describe('MarketView.vue', () => {
     expect(recentItems).toHaveLength(2)
     expect(wrapper.text()).toContain('سکه')
     expect(wrapper.text()).toContain('طلای آب‌شده')
+    expect(wrapper.text()).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۳۰')
+    expect(wrapper.text()).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۱۰')
 
     await recentItems[1]!.trigger('click')
     await flushPromises()
