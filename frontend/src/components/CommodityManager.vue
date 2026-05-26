@@ -25,6 +25,8 @@ interface FormState {
   aliasesText: string;
 }
 
+const LOCKED_IMAM_COMMODITY_NAME = 'امام';
+
 // --- متغیرهای State ---
 type ViewMode = 'list' | 'aliases' | 'add_commodity' | 'edit_commodity_name' | 'add_alias' | 'edit_alias' | 'delete_commodity' | 'delete_alias';
 const viewMode = ref<ViewMode>('list');
@@ -35,6 +37,7 @@ const commodities = ref<Commodity[]>([]);
 const selectedCommodity = ref<Commodity | null>(null);
 const selectedAlias = ref<CommodityAlias | null>(null);
 const form = reactive<FormState>({ name: '', aliasesText: '' });
+const selectedCommodityIsLockedImam = computed(() => selectedCommodity.value?.name === LOCKED_IMAM_COMMODITY_NAME);
 
 // --- توابع کمکی ---
 function resetMessages() {
@@ -143,6 +146,11 @@ async function onAddCommoditySubmit() {
 // --- 4. ویرایش نام اصلی کالا ---
 function onEditCommodityNameStart() {
   if (!selectedCommodity.value) return;
+  if (selectedCommodityIsLockedImam.value) {
+    resetMessages();
+    errorMessage.value = 'نام کالای پیش فرض امام قابل ویرایش نیست. فقط نام های مستعار را مدیریت کنید.';
+    return;
+  }
   resetMessages();
   form.name = selectedCommodity.value.name;
   viewMode.value = 'edit_commodity_name';
@@ -260,6 +268,11 @@ async function onEditAliasSubmit() {
 // --- 7. حذف کالا ---
 function onDeleteCommodityStart() {
   if (!selectedCommodity.value) return;
+  if (selectedCommodityIsLockedImam.value) {
+    resetMessages();
+    errorMessage.value = 'کالای پیش فرض امام قابل حذف نیست. فقط نام های مستعار را مدیریت کنید.';
+    return;
+  }
   resetMessages();
   viewMode.value = 'delete_commodity';
 }
@@ -382,10 +395,13 @@ onMounted(fetchCommodities);
             <button class="action-btn primary-soft" @click="onAddAliasStart">
               ➕ افزودن نام مستعار جدید
             </button>
-            <button class="action-btn secondary-soft" @click="onEditCommodityNameStart">
+            <p v-if="selectedCommodityIsLockedImam" class="locked-commodity-hint">
+              کالای پیش فرض امام فقط از مسیر نام های مستعار قابل مدیریت است و تغییر نام یا حذف کامل ندارد.
+            </p>
+            <button v-if="!selectedCommodityIsLockedImam" class="action-btn secondary-soft" @click="onEditCommodityNameStart">
               ✏️ ویرایش نام اصلی کالا
             </button>
-            <button class="action-btn danger-soft" @click="onDeleteCommodityStart">
+            <button v-if="!selectedCommodityIsLockedImam" class="action-btn danger-soft" @click="onDeleteCommodityStart">
               ❌ حذف کامل این کالا
             </button>
           </div>
@@ -503,6 +519,16 @@ onMounted(fetchCommodities);
   color: var(--ds-text-placeholder);
   padding: 2rem 0;
   font-size: 0.9rem;
+}
+
+.locked-commodity-hint {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--ds-text);
+  line-height: 1.7;
+  font-size: 0.88rem;
 }
 
 /* List Style */

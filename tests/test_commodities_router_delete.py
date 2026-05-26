@@ -58,7 +58,7 @@ class CommoditiesRouterDeleteTests(unittest.IsolatedAsyncioTestCase):
             await delete_commodity(1, db=FakeDB([FakeExecuteResult(value=None)]), source="miniapp")
         self.assertEqual(exc_info.exception.status_code, 404)
 
-        commodity = SimpleNamespace(id=1, aliases=[])
+        commodity = SimpleNamespace(id=1, name="بهار", aliases=[])
         db = FakeDB(
             [
                 FakeExecuteResult(value=commodity),
@@ -72,7 +72,14 @@ class CommoditiesRouterDeleteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 409)
         self.assertIn("1 لفظ فعال", exc_info.exception.detail)
 
-        commodity = SimpleNamespace(id=1, aliases=[])
+        commodity = SimpleNamespace(id=1, name="امام", aliases=[])
+        db = FakeDB([FakeExecuteResult(value=commodity)])
+        with self.assertRaises(HTTPException) as exc_info:
+            await delete_commodity(1, db=db, source="miniapp")
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("قابل حذف نیست", exc_info.exception.detail)
+
+        commodity = SimpleNamespace(id=1, name="بهار", aliases=[])
         delete_error = RuntimeError("fk linked")
         db = FakeDB(
             [
@@ -89,7 +96,7 @@ class CommoditiesRouterDeleteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.rollbacks, 1)
 
     async def test_delete_commodity_blocks_historical_offer_and_trade_references(self):
-        commodity = SimpleNamespace(id=1, aliases=[])
+        commodity = SimpleNamespace(id=1, name="بهار", aliases=[])
         db = FakeDB(
             [
                 FakeExecuteResult(value=commodity),
@@ -108,7 +115,7 @@ class CommoditiesRouterDeleteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_delete_commodity_deletes_aliases_then_commodity_and_invalidates_cache(self):
         aliases = [SimpleNamespace(id=10), SimpleNamespace(id=11)]
-        commodity = SimpleNamespace(id=1, aliases=aliases)
+        commodity = SimpleNamespace(id=1, name="بهار", aliases=aliases)
         db = FakeDB(
             [
                 FakeExecuteResult(value=commodity),
@@ -126,7 +133,7 @@ class CommoditiesRouterDeleteTests(unittest.IsolatedAsyncioTestCase):
         invalidate_mock.assert_awaited_once()
 
     async def test_delete_commodity_ignores_cache_invalidation_failures(self):
-        commodity = SimpleNamespace(id=1, aliases=[])
+        commodity = SimpleNamespace(id=1, name="بهار", aliases=[])
         db = FakeDB(
             [
                 FakeExecuteResult(value=commodity),

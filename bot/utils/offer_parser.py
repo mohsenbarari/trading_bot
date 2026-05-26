@@ -7,6 +7,7 @@ from typing import Optional, Tuple, List
 from sqlalchemy import select
 from models.commodity import Commodity, CommodityAlias
 from core.db import AsyncSessionLocal
+from core.commodity_defaults import IMAM_COMMODITY_NAME
 from core.services.trade_service import validate_price
 from core.trading_settings import get_trading_settings
 
@@ -35,7 +36,6 @@ PERSIAN_DIGITS = '۰۱۲۳۴۵۶۷۸۹'
 ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩'
 COMMODITY_BOUNDARY_CHARS = r'\u0600-\u06FF\u200C0-9'
 BAHAR_QUALIFIERS = {"ربع", "نیم"}
-IMPLICIT_DEFAULT_COMMODITY_KEYS = ("امام", "امامی", "سکه امام", "سکه امامی")
 
 
 def normalize_digits(text: str) -> str:
@@ -117,10 +117,9 @@ def _extract_residual_commodity_text(text: str) -> str:
 
 
 def _resolve_implicit_default_commodity(name_to_commodity: dict) -> Tuple[Optional[int], str]:
-    for key in IMPLICIT_DEFAULT_COMMODITY_KEYS:
-        commodity = name_to_commodity.get(key)
-        if commodity is not None:
-            return commodity
+    commodity = name_to_commodity.get(IMAM_COMMODITY_NAME)
+    if commodity is not None:
+        return commodity
     return None, "نامشخص"
 
 
