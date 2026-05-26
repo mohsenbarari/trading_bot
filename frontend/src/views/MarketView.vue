@@ -620,7 +620,6 @@ onUnmounted(() => {
                       {{ offer.commodity_name }} · {{ formatRecentOfferQuantity(offer) }} · {{ formatRecentOfferPrice(offer) }}
                     </span>
                   </div>
-                  <span class="recent-offer-item-time">{{ offer.created_at }}</span>
                 </button>
               </div>
             </transition>
@@ -884,7 +883,7 @@ onUnmounted(() => {
 
 .recent-offers-toggle {
   position: absolute;
-  left: 0.78rem;
+  left: 0.94rem;
   top: 50%;
   transform: translateY(-50%);
   width: 2.1rem;
@@ -1008,7 +1007,7 @@ onUnmounted(() => {
 
 .text-offer-input {
   width: 100%;
-  padding: 0.75rem 3.5rem 0.75rem 3.05rem;
+  padding: 0.75rem 3.5rem 0.75rem 3.2rem;
   background: var(--ds-bg-inset);
   border: 1px solid var(--ds-border-light);
   border-radius: var(--ds-radius-lg);
