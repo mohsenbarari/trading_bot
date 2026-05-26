@@ -39,6 +39,17 @@ class FakeDB:
 
 
 class CommoditiesRouterAliasMutationsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_update_alias_rejects_digits(self):
+        with self.assertRaises(HTTPException) as exc_info:
+            await update_alias(
+                1,
+                alias_update=schemas.CommodityAliasCreate(alias="تمام1404"),
+                db=FakeDB(),
+                source="miniapp",
+            )
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "شما نمیتوانید در نام کالا از اعداد استفاده کنید")
+
     async def test_update_alias_handles_missing_and_duplicate_alias(self):
         with self.assertRaises(HTTPException) as exc_info:
             await update_alias(1, alias_update=schemas.CommodityAliasCreate(alias="new"), db=FakeDB([FakeExecuteResult(None)]), source="miniapp")

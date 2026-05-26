@@ -45,6 +45,13 @@ class FakeDB:
 
 
 class CommoditiesRouterAliasAddTests(unittest.IsolatedAsyncioTestCase):
+    async def test_add_alias_to_commodity_rejects_digits(self):
+        db = FakeDB()
+        with self.assertRaises(HTTPException) as exc_info:
+            await add_alias_to_commodity(1, alias=schemas.CommodityAliasCreate(alias="ربع403"), db=db, source="miniapp")
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "شما نمیتوانید در نام کالا از اعداد استفاده کنید")
+
     async def test_add_alias_to_commodity_rejects_duplicate_alias(self):
         db = FakeDB([FakeExecuteResult(object())])
         with self.assertRaises(HTTPException) as exc_info:

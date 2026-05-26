@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from jose import jwt, JWTError
 import logging
+import re
 
 from core.commodity_defaults import is_locked_imam_commodity_name
 from core.db import get_db
@@ -19,6 +20,8 @@ import schemas
 
 # تنظیم لاگر
 logger = logging.getLogger(__name__)
+
+COMMODITY_DIGIT_PATTERN = re.compile(r"[0-9۰-۹٠-٩]")
 
 router = APIRouter(
     tags=["Commodities"]
@@ -47,6 +50,14 @@ async def get_request_source(
             
     return "unknown"
 # -------------------------------------------------------
+
+
+def ensure_commodity_text_has_no_digits(value: str) -> None:
+    if COMMODITY_DIGIT_PATTERN.search(value or ""):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="شما نمیتوانید در نام کالا از اعداد استفاده کنید",
+        )
 
 @router.get("/", response_model=List[schemas.Commodity])
 async def read_all_commodities(db: AsyncSession = Depends(get_db)):
@@ -104,6 +115,10 @@ async def create_commodity(
     """
     logger.info(f"Creating commodity '{commodity_data.name}' via source: {source}") # لاگ کردن منبع
 
+    ensure_commodity_text_has_no_digits(commodity_data.name)
+    for alias_name in set(aliases):
+        ensure_commodity_text_has_no_digits(alias_name)
+
     # بررسی تکراری بودن نام اصلی
     stmt = select(Commodity).where(Commodity.name == commodity_data.name)
     existing = (await db.execute(stmt)).scalar_one_or_none()
@@ -146,6 +161,8 @@ async def update_commodity_name(
     
     if not db_commodity:
         raise HTTPException(status_code=404, detail="کالا یافت نشد")
+
+    ensure_commodity_text_has_no_digits(commodity_update.name)
 
     if commodity_update.name != db_commodity.name and is_locked_imam_commodity_name(db_commodity.name):
         raise HTTPException(
@@ -275,6 +292,8 @@ async def add_alias_to_commodity(
     """
     logger.info(f"Adding alias '{alias.alias}' to commodity ID {commodity_id} via source: {source}")
 
+    ensure_commodity_text_has_no_digits(alias.alias)
+
     stmt_check = select(CommodityAlias).where(CommodityAlias.alias == alias.alias)
     existing_alias = (await db.execute(stmt_check)).scalar_one_or_none()
     if existing_alias:
@@ -311,6 +330,8 @@ async def update_alias(
     ویرایش متن یک نام مستعار.
     """
     logger.info(f"Updating alias ID {alias_id} to '{alias_update.alias}' via source: {source}")
+
+    ensure_commodity_text_has_no_digits(alias_update.alias)
 
     stmt = select(CommodityAlias).where(CommodityAlias.id == alias_id)
     db_alias = (await db.execute(stmt)).scalar_one_or_none()

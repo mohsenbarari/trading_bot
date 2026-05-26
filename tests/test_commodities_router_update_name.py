@@ -35,6 +35,21 @@ class FakeDB:
 
 
 class CommoditiesRouterUpdateNameTests(unittest.IsolatedAsyncioTestCase):
+    async def test_update_commodity_name_rejects_digits(self):
+        commodity = SimpleNamespace(id=1, name="نیم", aliases=[])
+        db = FakeDB([FakeExecuteResult(commodity)])
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await update_commodity_name(
+                1,
+                commodity_update=schemas.CommodityCreate(name="نیم86"),
+                db=db,
+                source="miniapp",
+            )
+
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "شما نمیتوانید در نام کالا از اعداد استفاده کنید")
+
     async def test_update_commodity_name_handles_missing_and_duplicate_name(self):
         with self.assertRaises(HTTPException) as exc_info:
             await update_commodity_name(1, commodity_update=schemas.CommodityCreate(name="New"), db=FakeDB([FakeExecuteResult(None)]), source="miniapp")
