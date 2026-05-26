@@ -370,6 +370,7 @@ describe('CommodityManager.vue', () => {
       method: 'POST',
       body: JSON.stringify({ alias: 'خراب' }),
     }))
+    expect(wrapper.text()).toContain('خراب: تکراری')
     expect(wrapper.text()).toContain('افزودن نام مستعار جدید')
 
     wrapper.unmount()

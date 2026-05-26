@@ -81,9 +81,11 @@ async function fetchCommodities() {
 }
 
 // --- 2. جریان مشاهده نام‌های مستعار ---
-async function onManageAliases(commodity: Commodity) {
+async function onManageAliases(commodity: Commodity, preserveMessages = false) {
   isLoading.value = true;
-  resetMessages();
+  if (!preserveMessages) {
+    resetMessages();
+  }
   try {
     const response = await apiFetch(`/api/commodities/${commodity.id}`);
     if (!response.ok) throw new Error('خطا در دریافت اطلاعات کالا');
@@ -223,7 +225,7 @@ async function onAddAliasSubmit() {
       errorMessage.value = failedAliases.join('\n');
     }
 
-    await onManageAliases(selectedCommodity.value);
+    await onManageAliases(selectedCommodity.value, addedAliases.length > 0 || failedAliases.length > 0);
   } catch (e: any) {
     errorMessage.value = getErrorDetail(e, 'خطای ناشناخته');
     viewMode.value = 'add_alias';

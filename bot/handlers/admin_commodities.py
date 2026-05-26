@@ -210,7 +210,6 @@ async def handle_alias_add_name(message: types.Message, state: FSMContext, user:
     # پیام وضعیت ارسال می‌شود و تبدیل به لنگر جدید می‌شود. فرم قبلی ۳۰ ثانیه دیگر پاک می‌شود.
     status_msg = await message.answer(f"⏳ در حال افزودن **'{new_alias_name}'**...", parse_mode="Markdown")
     await update_anchor(state, status_msg.message_id, message.bot, message.chat.id)
-    await clear_state_retain_anchor(state)
     
     try:
         async with httpx.AsyncClient() as client:
@@ -218,12 +217,15 @@ async def handle_alias_add_name(message: types.Message, state: FSMContext, user:
             response.raise_for_status()
         
         await status_msg.edit_text(f"✅ نام مستعار **'{new_alias_name}'** افزوده شد.", parse_mode="Markdown")
+        await clear_state_retain_anchor(state)
         
     except httpx.HTTPStatusError as e:
         detail = get_error_detail(e)
         await status_msg.edit_text(f"❌ خطا: {detail}", parse_mode="Markdown")
+        return
     except Exception as e:
         await status_msg.edit_text(f"❌ خطای سیستمی: {e}", parse_mode="Markdown")
+        return
     
     # کمی مکث برای خواندن پیام موفقیت
     await asyncio.sleep(1.5)
@@ -427,7 +429,6 @@ async def handle_add_aliases_and_create(message: types.Message, state: FSMContex
     
     status_msg = await message.answer(f"⏳ در حال ثبت کالا...", parse_mode="Markdown")
     await update_anchor(state, status_msg.message_id, message.bot, message.chat.id)
-    await clear_state_retain_anchor(state)
     
     aliases_text = message.text.strip()
     final_aliases = [commodity_name.strip()]
@@ -447,11 +448,14 @@ async def handle_add_aliases_and_create(message: types.Message, state: FSMContex
             response = await client.post(COMMODITIES_API_URL, json=payload, headers=get_auth_headers())
             response.raise_for_status()
         await status_msg.edit_text(f"✅ کالا **'{commodity_name}'** ثبت شد.", parse_mode="Markdown")
+        await clear_state_retain_anchor(state)
     except httpx.HTTPStatusError as e:
         detail = get_error_detail(e)
         await status_msg.edit_text(f"❌ خطا: {detail}", parse_mode="Markdown")
+        return
     except Exception as e:
         await status_msg.edit_text(f"❌ خطا: {e}", parse_mode="Markdown")
+        return
     
     await asyncio.sleep(1.5)
     await show_commodity_list(message.bot, message.chat.id, user, state)

@@ -167,7 +167,7 @@ class BotAdminCommoditiesAddCreateTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("bot.handlers.admin_commodities.delete_user_message", new=AsyncMock()), patch(
             "bot.handlers.admin_commodities.update_anchor", new=AsyncMock()
-        ), patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()), patch(
+        ), patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()) as clear_mock, patch(
             "bot.handlers.admin_commodities.httpx.AsyncClient", return_value=client
         ), patch("bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()), patch(
             "bot.handlers.admin_commodities.show_commodity_list", new=AsyncMock()
@@ -177,6 +177,7 @@ class BotAdminCommoditiesAddCreateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["commodity_data"], {"name": "سکه"})
         self.assertEqual(payload["aliases"], ["سکه", "نیم", "ربع"])
         status_msg.edit_text.assert_awaited_once_with("✅ کالا **'سکه'** ثبت شد.", parse_mode="Markdown")
+        clear_mock.assert_awaited_once_with(state)
         show_list_mock.assert_awaited_once_with(message.bot, 1, unittest.mock.ANY, state)
 
         status_msg = SimpleNamespace(message_id=52, edit_text=AsyncMock())
@@ -189,13 +190,15 @@ class BotAdminCommoditiesAddCreateTests(unittest.IsolatedAsyncioTestCase):
         state = SimpleNamespace(get_data=AsyncMock(return_value={"name": "سکه"}))
         with patch("bot.handlers.admin_commodities.delete_user_message", new=AsyncMock()), patch(
             "bot.handlers.admin_commodities.update_anchor", new=AsyncMock()
-        ), patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()), patch(
+        ), patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()) as clear_mock, patch(
             "bot.handlers.admin_commodities.httpx.AsyncClient", return_value=ErrorPostClient()
         ), patch("bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()), patch(
             "bot.handlers.admin_commodities.show_commodity_list", new=AsyncMock()
-        ), patch("bot.handlers.admin_commodities.get_error_detail", return_value="oops"):
+        ) as show_list_mock, patch("bot.handlers.admin_commodities.get_error_detail", return_value="oops"):
             await handle_add_aliases_and_create(message, state, user=SimpleNamespace(id=1))
         self.assertIn("oops", status_msg.edit_text.await_args.args[0])
+        clear_mock.assert_not_awaited()
+        show_list_mock.assert_not_awaited()
 
         status_msg = SimpleNamespace(message_id=53, edit_text=AsyncMock())
         message = SimpleNamespace(
@@ -207,13 +210,15 @@ class BotAdminCommoditiesAddCreateTests(unittest.IsolatedAsyncioTestCase):
         state = SimpleNamespace(get_data=AsyncMock(return_value={"name": "سکه"}))
         with patch("bot.handlers.admin_commodities.delete_user_message", new=AsyncMock()), patch(
             "bot.handlers.admin_commodities.update_anchor", new=AsyncMock()
-        ), patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()), patch(
+        ), patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()) as clear_mock, patch(
             "bot.handlers.admin_commodities.httpx.AsyncClient", side_effect=RuntimeError("broken transport")
         ), patch("bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()), patch(
             "bot.handlers.admin_commodities.show_commodity_list", new=AsyncMock()
-        ):
+        ) as show_list_mock:
             await handle_add_aliases_and_create(message, state, user=SimpleNamespace(id=1))
         self.assertIn("broken transport", status_msg.edit_text.await_args.args[0])
+        clear_mock.assert_not_awaited()
+        show_list_mock.assert_not_awaited()
 
 
 if __name__ == "__main__":
