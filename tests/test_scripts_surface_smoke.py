@@ -14,6 +14,7 @@ PYTHON_SCRIPTS = (
     'scripts/free_deleted_user.py',
     'scripts/report_test_matrix.py',
     'scripts/reset_sessions.py',
+    'scripts/restore_default_commodities.py',
     'scripts/test_invite.py',
     'scripts/test_session_realtime.py',
     'scripts/test_ws_e2e.py',
