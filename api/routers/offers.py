@@ -352,24 +352,23 @@ async def create_offer(
             detail="مشتری سطح 2 مجاز به ثبت لفظ نیست و فقط می‌تواند روی لفظ‌های دیگر درخواست بزند.",
         )
     
-    # بررسی تعداد لفظ‌های فعال (با کش Redis)
+    # بررسی تعداد لفظ‌های فعال
     ts = get_trading_settings()
-    
-    # ===== Redis Cache Check =====
+
+    # Redis count can drift behind cross-surface writes (for example bot-created offers).
+    # Use the DB as the authoritative guard here, then repair the shared cache for fast
+    # readers and later increment/decrement paths.
     from core.cache import get_active_offer_count, set_active_offer_count
-    
-    active_count = await get_active_offer_count(owner_user.id)
-    if active_count is None:
-        # Cache miss - query DB
-        active_count = await db.scalar(
-            select(func.count(Offer.id)).where(
-                Offer.user_id == owner_user.id,
-                Offer.status == OfferStatus.ACTIVE
-            )
+
+    cached_active_count = await get_active_offer_count(owner_user.id)
+    active_count = await db.scalar(
+        select(func.count(Offer.id)).where(
+            Offer.user_id == owner_user.id,
+            Offer.status == OfferStatus.ACTIVE,
         )
-        # Cache the result
+    )
+    if cached_active_count != active_count:
         await set_active_offer_count(owner_user.id, active_count)
-    # =============================
     
     if active_count >= ts.max_active_offers:
         raise HTTPException(

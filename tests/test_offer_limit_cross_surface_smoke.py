@@ -22,9 +22,10 @@ class FakeExecuteResult:
 
 
 class ApiSuccessDB:
-    def __init__(self, *, get_results=None, execute_results=None):
+    def __init__(self, *, get_results=None, execute_results=None, scalar_results=None):
         self.get_results = list(get_results or [])
         self.execute_results = list(execute_results or [])
+        self.scalar_results = list(scalar_results or [])
         self.commit = AsyncMock()
         self.refresh = AsyncMock(side_effect=self._refresh)
         self.added = []
@@ -40,7 +41,9 @@ class ApiSuccessDB:
         return self.execute_results.pop(0)
 
     async def scalar(self, _stmt):
-        raise AssertionError("scalar() should not be used in this success path")
+        if not self.scalar_results:
+            raise AssertionError("Unexpected scalar() call")
+        return self.scalar_results.pop(0)
 
     def add(self, item):
         self.added.append(item)
@@ -178,7 +181,7 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
             await api_db.get(None, 1)
         with self.assertRaisesRegex(AssertionError, "Unexpected execute"):
             await api_db.execute(None)
-        with self.assertRaisesRegex(AssertionError, "should not be used"):
+        with self.assertRaisesRegex(AssertionError, "Unexpected scalar"):
             await api_db.scalar(None)
 
         existing_item = SimpleNamespace(id=800, created_at=datetime(2026, 1, 2, 10, 0, 0))
@@ -217,7 +220,7 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         live_settings = trading_settings.TradingSettings(max_active_offers=15, offer_expiry_minutes=30)
         commodity = SimpleNamespace(id=1)
         reloaded_offer = make_reloaded_offer(offer_id=701)
-        db = ApiSuccessDB(get_results=[commodity], execute_results=[FakeExecuteResult(reloaded_offer)])
+        db = ApiSuccessDB(get_results=[commodity], execute_results=[FakeExecuteResult(reloaded_offer)], scalar_results=[14])
 
         async def fake_incr_active_offer_count(_user_id):
             shared_count["value"] += 1
@@ -373,6 +376,8 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(shared_count["value"], 15)
         self.assertIn("منتشر شد", callback.message.edit_text.await_args.args[0])
 
+        repaired_cache = AsyncMock()
+
         with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
             "api.routers.offers.evaluate_current_market_schedule",
             new=AsyncMock(return_value=SimpleNamespace(is_open=True)),
@@ -384,8 +389,8 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
             return_value=live_settings,
         ), patch(
             "core.cache.get_active_offer_count",
-            new=AsyncMock(return_value=None),
-        ), patch("core.cache.set_active_offer_count", new=AsyncMock()), patch(
+            new=AsyncMock(return_value=4),
+        ), patch("core.cache.set_active_offer_count", new=repaired_cache), patch(
             "core.services.trade_service.detect_offer_price_warning",
             new=AsyncMock(return_value=None),
         ):
@@ -397,6 +402,7 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
             exc_info.exception.detail,
             "شما حداکثر 15 لفظ فعال دارید. لطفاً ابتدا یکی را منقضی کنید.",
         )
+        repaired_cache.assert_awaited_once_with(5, 15)
         self.assertNotIn("4 لفظ فعال", exc_info.exception.detail)
 
 
