@@ -55,15 +55,23 @@ class CommoditiesRouterAliasMutationsTests(unittest.IsolatedAsyncioTestCase):
             await update_alias(1, alias_update=schemas.CommodityAliasCreate(alias="new"), db=FakeDB([FakeExecuteResult(None)]), source="miniapp")
         self.assertEqual(exc_info.exception.status_code, 404)
 
-        alias = SimpleNamespace(id=1, alias="old")
-        db = FakeDB([FakeExecuteResult(alias), FakeExecuteResult(SimpleNamespace(id=2))])
+        alias = SimpleNamespace(id=1, alias="old", commodity_id=1)
+        db = FakeDB([FakeExecuteResult(alias), FakeExecuteResult(None), FakeExecuteResult(SimpleNamespace(id=2, commodity_id=2))])
         with self.assertRaises(HTTPException) as exc_info:
             await update_alias(1, alias_update=schemas.CommodityAliasCreate(alias="taken"), db=db, source="miniapp")
         self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("نام مستعار یک کالا", exc_info.exception.detail)
+
+        alias = SimpleNamespace(id=1, alias="old", commodity_id=1)
+        db = FakeDB([FakeExecuteResult(alias), FakeExecuteResult(SimpleNamespace(id=7)), FakeExecuteResult(None)])
+        with self.assertRaises(HTTPException) as exc_info:
+            await update_alias(1, alias_update=schemas.CommodityAliasCreate(alias="taken-name"), db=db, source="miniapp")
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("نام اصلی یک کالا", exc_info.exception.detail)
 
     async def test_update_alias_and_delete_alias_commit_and_invalidate_cache(self):
-        alias = SimpleNamespace(id=1, alias="old")
-        db = FakeDB([FakeExecuteResult(alias), FakeExecuteResult(None)])
+        alias = SimpleNamespace(id=1, alias="old", commodity_id=1)
+        db = FakeDB([FakeExecuteResult(alias), FakeExecuteResult(None), FakeExecuteResult(None)])
         with patch("bot.utils.redis_helpers.invalidate_commodity_cache", new=AsyncMock()) as invalidate_mock:
             result = await update_alias(1, alias_update=schemas.CommodityAliasCreate(alias="new"), db=db, source="bot")
 
@@ -87,8 +95,8 @@ class CommoditiesRouterAliasMutationsTests(unittest.IsolatedAsyncioTestCase):
         invalidate_mock.assert_awaited_once()
 
     async def test_alias_mutations_ignore_cache_invalidation_failures(self):
-        alias = SimpleNamespace(id=1, alias="old")
-        db = FakeDB([FakeExecuteResult(alias), FakeExecuteResult(None)])
+        alias = SimpleNamespace(id=1, alias="old", commodity_id=1)
+        db = FakeDB([FakeExecuteResult(alias), FakeExecuteResult(None), FakeExecuteResult(None)])
         with patch(
             "bot.utils.redis_helpers.invalidate_commodity_cache",
             new=AsyncMock(side_effect=RuntimeError("cache down")),
