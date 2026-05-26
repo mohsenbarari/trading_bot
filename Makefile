@@ -9,7 +9,7 @@
 IRAN_HOST = root@87.107.110.68
 IRAN_DIR  = /root/trading-bot/trading_bot
 
-.PHONY: help up deploy frontend iran foreign sync-recover down logs logs-iran restart restart-iran status test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix
+.PHONY: help up deploy frontend iran foreign sync-recover restore-default-commodities down logs logs-iran restart restart-iran status test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix
 
 help:
 	@echo ""
@@ -20,6 +20,7 @@ help:
 	@echo "  make iran       - Build frontend + full Iran deploy"
 	@echo "  make foreign    - Rebuild Docker on foreign server only"
 	@echo "  make sync-recover - Catch up both servers after Iran reconnects"
+	@echo "  make restore-default-commodities - Restore canonical default commodities on the current DB"
 	@echo ""
 	@echo "  make down        - Stop foreign containers"
 	@echo "  make logs        - Foreign server logs"
@@ -58,6 +59,9 @@ foreign:
 sync-recover:
 	@chmod +x ./scripts/recover_cross_server_sync.sh
 	@./scripts/recover_cross_server_sync.sh
+
+restore-default-commodities:
+	@docker compose run --rm migration python scripts/restore_default_commodities.py
 
 # --- Management Commands ---
 
