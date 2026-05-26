@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
-import { ArrowUp, ArrowDown, ArrowUpDown, X, Loader2, Send, ChevronLeft } from 'lucide-vue-next'
+import { ArrowUp, ArrowDown, ArrowUpDown, X, Loader2, Send, ChevronLeft, ChevronDown } from 'lucide-vue-next'
 import { useOffers } from '../composables/useOffers'
 import { useWebSocket } from '../composables/useWebSocket'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
@@ -43,6 +43,23 @@ interface OfferPriceWarning {
   reference_price: number
   proposed_price: number
   difference_percent: number
+}
+
+interface RecentOfferSummary {
+  id: number
+  offer_type: 'buy' | 'sell'
+  commodity_id: number
+  commodity_name: string
+  quantity: number
+  remaining_quantity: number
+  raw_price: number
+  price: number
+  is_wholesale: boolean
+  lot_sizes: number[] | null
+  original_lot_sizes: number[] | null
+  notes: string | null
+  status: 'active' | 'completed' | 'cancelled' | 'expired'
+  created_at: string
 }
 
 interface MarketRuntimeState {
@@ -100,6 +117,12 @@ const isSubmitting = ref(false)
 const pendingOfferPreview = ref<ParsedOfferPreview | null>(null)
 const previewError = ref('')
 const previewWarning = ref<OfferPriceWarning | null>(null)
+const republishedFromOfferId = ref<number | null>(null)
+const recentOffers = ref<RecentOfferSummary[]>([])
+const recentOffersOpen = ref(false)
+const recentOffersLoading = ref(false)
+const recentOffersError = ref('')
+const recentOffersRef = ref<HTMLElement | null>(null)
 const isTier2Customer = computed(() => currentUserCustomerTier.value === 'tier2')
 const isMarketOpen = computed(() => marketRuntime.value.is_open)
 const showMarketNotice = computed(() => !marketRuntime.value.is_open || marketRuntime.value.active_web_notice_visible)
@@ -197,10 +220,119 @@ function buildOfferCreatePayload(offer: ParsedOfferPreview) {
   }
 }
 
+function getRecentOfferRepublishQuantity(offer: RecentOfferSummary) {
+  if (offer.status === 'active' && offer.remaining_quantity > 0) {
+    return offer.remaining_quantity
+  }
+  return offer.quantity
+}
+
+function getRecentOfferRepublishLots(offer: RecentOfferSummary) {
+  if (offer.is_wholesale) {
+    return null
+  }
+  if (offer.status === 'active' && offer.lot_sizes?.length) {
+    return [...offer.lot_sizes]
+  }
+  if (offer.original_lot_sizes?.length) {
+    return [...offer.original_lot_sizes]
+  }
+  return offer.lot_sizes ? [...offer.lot_sizes] : null
+}
+
+function formatRecentOfferPrice(offer: RecentOfferSummary) {
+  return (offer.raw_price || offer.price).toLocaleString('fa-IR')
+}
+
+function formatRecentOfferQuantity(offer: RecentOfferSummary) {
+  return getRecentOfferRepublishQuantity(offer).toLocaleString('fa-IR')
+}
+
+async function fetchRecentOffers(silent = false) {
+  if (isTier2Customer.value) {
+    recentOffers.value = []
+    recentOffersError.value = ''
+    return
+  }
+
+  if (!silent) {
+    recentOffersLoading.value = true
+  }
+  recentOffersError.value = ''
+
+  try {
+    const response = await apiFetch('/api/offers/my?since_hours=1&limit=3')
+    if (!response.ok) {
+      throw await createHttpErrorFromResponse(response, {
+        surface: 'market',
+        scope: 'field',
+        operation: 'load-list',
+        preserveExistingData: true,
+        fallbackMessage: 'بارگذاری لفظ‌های اخیر ممکن نشد.',
+      })
+    }
+    const payload = await response.json()
+    recentOffers.value = Array.isArray(payload) ? payload as RecentOfferSummary[] : []
+  } catch (e) {
+    recentOffersError.value = getUserFacingErrorMessage(e, {
+      surface: 'market',
+      scope: 'field',
+      operation: 'load-list',
+      preserveExistingData: true,
+      fallbackMessage: 'بارگذاری لفظ‌های اخیر ممکن نشد.',
+    })
+  } finally {
+    recentOffersLoading.value = false
+  }
+}
+
+function closeRecentOffersMenu() {
+  recentOffersOpen.value = false
+}
+
+function handleRecentOffersPointerDown(event: PointerEvent) {
+  if (!recentOffersOpen.value) {
+    return
+  }
+  const target = event.target as Node | null
+  if (!target || !recentOffersRef.value || recentOffersRef.value.contains(target)) {
+    return
+  }
+  closeRecentOffersMenu()
+}
+
+function toggleRecentOffersMenu() {
+  if (recentOffersOpen.value) {
+    closeRecentOffersMenu()
+    return
+  }
+  recentOffersOpen.value = true
+  void fetchRecentOffers()
+}
+
+function openRecentOfferPreview(offer: RecentOfferSummary) {
+  republishedFromOfferId.value = offer.id
+  pendingOfferPreview.value = {
+    trade_type: offer.offer_type,
+    commodity_id: offer.commodity_id,
+    commodity_name: offer.commodity_name,
+    quantity: getRecentOfferRepublishQuantity(offer),
+    price: offer.raw_price || offer.price,
+    is_wholesale: offer.is_wholesale,
+    lot_sizes: getRecentOfferRepublishLots(offer),
+    notes: offer.notes,
+  }
+  previewError.value = ''
+  previewWarning.value = null
+  parseError.value = ''
+  closeRecentOffersMenu()
+}
+
 function cancelOfferPreview() {
   pendingOfferPreview.value = null
   previewError.value = ''
   previewWarning.value = null
+  republishedFromOfferId.value = null
 }
 
 async function confirmOfferPreview() {
@@ -221,6 +353,7 @@ async function confirmOfferPreview() {
       method: 'POST',
       body: JSON.stringify({
         ...buildOfferCreatePayload(pendingOfferPreview.value),
+        republished_from_id: republishedFromOfferId.value,
         warning_acknowledged: !!previewWarning.value,
       }),
     })
@@ -242,7 +375,9 @@ async function confirmOfferPreview() {
     offerText.value = ''
     pendingOfferPreview.value = null
     previewWarning.value = null
+    republishedFromOfferId.value = null
     fetchOffers()
+    void fetchRecentOffers(true)
   } catch (e: any) {
     previewError.value = getUserFacingErrorMessage(e, {
       surface: 'market',
@@ -270,6 +405,7 @@ function parseAndSubmitTextOffer() {
     cancelAllOffers()
     return
   }
+  republishedFromOfferId.value = null
   isSubmitting.value = true
   parseError.value = ''
   previewError.value = ''
@@ -319,6 +455,7 @@ async function cancelAllOffers() {
     }
     offerText.value = ''
     fetchOffers()
+    void fetchRecentOffers(true)
   } catch (e: any) {
     parseError.value = getUserFacingErrorMessage(e, {
       surface: 'market',
@@ -353,6 +490,9 @@ watch(isTier2Customer, (blocked) => {
   pendingOfferPreview.value = null
   previewWarning.value = null
   previewError.value = ''
+  republishedFromOfferId.value = null
+  closeRecentOffersMenu()
+  recentOffers.value = []
 })
 
 onMounted(() => {
@@ -362,6 +502,7 @@ onMounted(() => {
     fetchTradingSettings()
   fetchMarketState()
     fetchCurrentUser()
+  document.addEventListener('pointerdown', handleRecentOffersPointerDown)
   wsOn('market:opened', handleMarketOpened)
   wsOn('market:closed', handleMarketClosed)
   wsOn('market:notice_hidden', handleMarketNoticeHidden)
@@ -370,6 +511,7 @@ onMounted(() => {
 onUnmounted(() => {
     stopPolling()
     clearBackStack()
+  document.removeEventListener('pointerdown', handleRecentOffersPointerDown)
   wsOff('market:opened', handleMarketOpened)
   wsOff('market:closed', handleMarketClosed)
   wsOff('market:notice_hidden', handleMarketNoticeHidden)
@@ -440,7 +582,48 @@ onUnmounted(() => {
         </template>
         <template v-else>
           <!-- Text Input Row -->
-          <div class="input-wrapper">
+          <div ref="recentOffersRef" class="input-wrapper">
+            <button
+              type="button"
+              class="recent-offers-toggle"
+              :class="{ 'recent-offers-toggle--open': recentOffersOpen }"
+              :disabled="isSubmitting"
+              aria-label="نمایش لفظ‌های اخیر"
+              @click="toggleRecentOffersMenu"
+            >
+              <Loader2 v-if="recentOffersLoading" class="animate-spin" :size="16" />
+              <ChevronDown v-else :size="16" />
+            </button>
+            <transition name="recent-offers-dropdown">
+              <div v-if="recentOffersOpen" class="recent-offers-dropdown">
+                <div v-if="recentOffersLoading" class="recent-offers-state">
+                  در حال بارگذاری...
+                </div>
+                <div v-else-if="recentOffersError" class="recent-offers-state recent-offers-state--error">
+                  {{ recentOffersError }}
+                </div>
+                <div v-else-if="!recentOffers.length" class="recent-offers-state">
+                  در یک ساعت گذشته لفظی نداشتید.
+                </div>
+                <button
+                  v-for="offer in recentOffers"
+                  :key="offer.id"
+                  type="button"
+                  class="recent-offer-item"
+                  @click="openRecentOfferPreview(offer)"
+                >
+                  <div class="recent-offer-item-main">
+                    <span class="recent-offer-item-badge" :class="offer.offer_type === 'buy' ? 'recent-offer-item-badge--buy' : 'recent-offer-item-badge--sell'">
+                      {{ offer.offer_type === 'buy' ? 'خ' : 'ف' }}
+                    </span>
+                    <span class="recent-offer-item-summary">
+                      {{ offer.commodity_name }} · {{ formatRecentOfferQuantity(offer) }} · {{ formatRecentOfferPrice(offer) }}
+                    </span>
+                  </div>
+                  <span class="recent-offer-item-time">{{ offer.created_at }}</span>
+                </button>
+              </div>
+            </transition>
             <input 
               v-model="offerText"
               type="text" 
@@ -699,9 +882,129 @@ onUnmounted(() => {
   position: relative;
 }
 
+.recent-offers-toggle {
+  position: absolute;
+  left: 0.55rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--ds-text-secondary);
+  background: transparent;
+  transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.recent-offers-toggle:hover:not(:disabled),
+.recent-offers-toggle--open {
+  background: var(--ds-bg-card);
+  color: var(--ds-text-primary);
+}
+
+.recent-offers-toggle--open {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.recent-offers-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.recent-offers-dropdown {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.65rem);
+  width: min(19rem, calc(100vw - 2rem));
+  padding: 0.45rem;
+  display: grid;
+  gap: 0.3rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid var(--ds-border-light);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.recent-offers-state {
+  padding: 0.8rem 0.7rem;
+  font-size: 0.76rem;
+  line-height: 1.7;
+  color: var(--ds-text-secondary);
+}
+
+.recent-offers-state--error {
+  color: var(--ds-danger-600);
+}
+
+.recent-offer-item {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.7rem 0.75rem;
+  text-align: right;
+  border-radius: 0.85rem;
+  background: transparent;
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.recent-offer-item:hover {
+  background: var(--ds-bg-page);
+}
+
+.recent-offer-item:active {
+  transform: scale(0.985);
+}
+
+.recent-offer-item-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.recent-offer-item-badge {
+  flex: 0 0 auto;
+  width: 1.45rem;
+  height: 1.45rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.recent-offer-item-badge--buy {
+  background: var(--ds-success-50);
+  color: var(--ds-success-700);
+}
+
+.recent-offer-item-badge--sell {
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-700);
+}
+
+.recent-offer-item-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--ds-text-primary);
+}
+
+.recent-offer-item-time {
+  font-size: 0.68rem;
+  color: var(--ds-text-tertiary, #64748b);
+}
+
 .text-offer-input {
   width: 100%;
-  padding: 0.75rem 3.5rem 0.75rem 1rem;
+  padding: 0.75rem 3.5rem 0.75rem 2.8rem;
   background: var(--ds-bg-inset);
   border: 1px solid var(--ds-border-light);
   border-radius: var(--ds-radius-lg);
@@ -746,6 +1049,17 @@ onUnmounted(() => {
   color: var(--ds-danger-600);
   font-weight: 600;
   padding: 0 0.5rem;
+}
+
+.recent-offers-dropdown-enter-active,
+.recent-offers-dropdown-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.recent-offers-dropdown-enter-from,
+.recent-offers-dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(0.35rem);
 }
 
 .action-buttons {

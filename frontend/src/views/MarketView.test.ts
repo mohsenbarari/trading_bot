@@ -106,6 +106,41 @@ const offersFixture = [
   },
 ]
 
+const recentOffersFixture = [
+  {
+    id: 91,
+    offer_type: 'sell',
+    commodity_id: 1,
+    commodity_name: 'سکه',
+    quantity: 12,
+    remaining_quantity: 12,
+    raw_price: 345678,
+    price: 345678,
+    is_wholesale: true,
+    lot_sizes: null,
+    original_lot_sizes: null,
+    notes: 'از لیست اخیر',
+    status: 'expired',
+    created_at: '۱۴۰۵/۰۳/۰۱ ۱۲:۳۰',
+  },
+  {
+    id: 92,
+    offer_type: 'buy',
+    commodity_id: 2,
+    commodity_name: 'طلای آب‌شده',
+    quantity: 8,
+    remaining_quantity: 5,
+    raw_price: 222000,
+    price: 222000,
+    is_wholesale: false,
+    lot_sizes: [3, 2],
+    original_lot_sizes: [5, 3],
+    notes: null,
+    status: 'active',
+    created_at: '۱۴۰۵/۰۳/۰۱ ۱۲:۱۰',
+  },
+]
+
 const commoditiesFixture = [
   { id: 1, name: 'سکه' },
   { id: 2, name: 'طلای آب‌شده' },
@@ -179,6 +214,7 @@ describe('MarketView.vue', () => {
     marketViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/offers/my?since_hours=1&limit=3') return responseOf(recentOffersFixture)
       if (path === '/api/trading-settings/market-state') {
         return responseOf({
           is_open: true,
@@ -275,10 +311,56 @@ describe('MarketView.vue', () => {
         is_wholesale: true,
         lot_sizes: null,
         notes: 'از متن بازار',
+        republished_from_id: null,
         warning_acknowledged: false,
       }),
     }))
     expect((wrapper.find('.text-offer-input').element as HTMLInputElement).value).toBe('')
+    expect(marketViewMocks.fetchOffersMock).toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('loads recent offers from the dropdown and republishes the selected offer after confirmation', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+    marketViewMocks.apiFetchMock.mockClear()
+    marketViewMocks.fetchOffersMock.mockClear()
+
+    await wrapper.find('.recent-offers-toggle').trigger('click')
+    await flushPromises()
+
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/my?since_hours=1&limit=3')
+    const recentItems = wrapper.findAll('.recent-offer-item')
+    expect(recentItems).toHaveLength(2)
+    expect(wrapper.text()).toContain('سکه')
+    expect(wrapper.text()).toContain('طلای آب‌شده')
+
+    await recentItems[1]!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
+    expect(wrapper.text()).toContain('طلای آب‌شده')
+    expect(wrapper.text()).toContain('5 عدد 222,000')
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    const republishCall = marketViewMocks.apiFetchMock.mock.calls.find(
+      ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
+    )
+    expect(republishCall).toBeTruthy()
+    expect(JSON.parse(String(republishCall![1].body))).toEqual({
+      offer_type: 'buy',
+      commodity_id: 2,
+      quantity: 5,
+      price: 222000,
+      is_wholesale: false,
+      lot_sizes: [3, 2],
+      notes: null,
+      republished_from_id: 92,
+      warning_acknowledged: false,
+    })
     expect(marketViewMocks.fetchOffersMock).toHaveBeenCalled()
 
     wrapper.unmount()
