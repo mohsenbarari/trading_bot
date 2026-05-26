@@ -146,6 +146,8 @@ class ManualOfferValidationTests(unittest.TestCase):
         self.assertEqual(offer_parser.validate_characters("امام 30تا"), (True, None))
         self.assertEqual(offer_parser.validate_characters(""), (False, "کاراکتر غیرمجاز در متن"))
         self.assertEqual(offer_parser.validate_characters("امام 30تا @"), (False, "کاراکتر غیرمجاز: «@»"))
+        self.assertEqual(offer_parser._extract_residual_commodity_text("30تا 75800 15 15"), "")
+        self.assertEqual(offer_parser._extract_residual_commodity_text("ربغ 30تا 75800"), "ربغ")
 
         self.assertEqual(offer_parser.extract_trade_type("سلام"), (None, None))
         self.assertEqual(
@@ -201,7 +203,12 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
                 "ربع بهار": (3, "ربع بهار"),
                 "نیم بهار": (4, "نیم بهار"),
             }
-            return _match_commodity_name(text, mapping)
+            commodity = _match_commodity_name(text, mapping)
+            if commodity[0] is not None:
+                return commodity
+            if not offer_parser._extract_residual_commodity_text(text):
+                return mapping["امام"]
+            return None, "نامشخص"
 
         offer_parser.find_commodity = fake_find_commodity
 
@@ -235,13 +242,21 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.quantity, 60)
 
+    async def test_text_offer_defaults_to_implicit_imam_when_commodity_is_omitted(self):
+        result, error = await offer_parser.parse_offer_text("خ 30تا 75800")
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.commodity_id, 1)
+        self.assertEqual(result.commodity_name, "امام")
+
     async def test_text_offer_rejects_invalid_manual_format(self):
         invalid_samples = [
             "خ امام 51تا 75800",
             "خ امام 30تا 9999",
-            "خ 30تا 75800",
             "خ امام 30 75800",
             "خ امام 30تا 75800 10 10",
+            "خ ربغ 30تا 75800",
             "خ ربع بهار 10تا 75800".replace("ربع بهار", "ربع بهارک"),
         ]
 
@@ -259,6 +274,8 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             "bot.utils.redis_helpers.set_cached_commodities", AsyncMock()
         ) as set_cached:
             self.assertEqual(await self.original_find_commodity("امامی 30تا 75800"), (1, "امام"))
+            self.assertEqual(await self.original_find_commodity("30تا 75800"), (1, "امام"))
+            self.assertEqual(await self.original_find_commodity("ربغ 30تا 75800"), (None, "نامشخص"))
         set_cached.assert_not_awaited()
 
         commodities = [SimpleNamespace(id=1, name="امام"), SimpleNamespace(id=2, name="بهار")]
