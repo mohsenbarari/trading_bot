@@ -229,7 +229,7 @@ def extract_lot_sizes(text: str, quantity: int, price: int) -> Tuple[Optional[Li
     
     for lot in lot_candidates:
         if lot < ts.lot_min_size:
-            return None, False, f"❌ هر بخش باید حداقل {ts.lot_min_size} عدد باشد (بخش نامعتبر: {lot})"
+            return None, False, f"❌ حداقل تعداد باید {ts.lot_min_size} باشد (بخش نامعتبر: {lot})"
     
     if sum(lot_candidates) != quantity:
         return None, False, f"❌ جمع بخش‌ها ({sum(lot_candidates)}) با تعداد کل ({quantity}) برابر نیست"

@@ -187,7 +187,7 @@ class ManualOfferValidationTests(unittest.TestCase):
         with patch("bot.utils.offer_parser.get_trading_settings", return_value=SimpleNamespace(lot_min_size=5, lot_max_count=4)):
             self.assertEqual(
                 offer_parser.extract_lot_sizes("30تا 75800 3 27", 30, 75800),
-                (None, False, "❌ هر بخش باید حداقل 5 عدد باشد (بخش نامعتبر: 3)"),
+                (None, False, "❌ حداقل تعداد باید 5 باشد (بخش نامعتبر: 3)"),
             )
 
 
@@ -265,6 +265,20 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
                 result, error = await offer_parser.parse_offer_text(sample)
                 self.assertIsNone(result)
                 self.assertIsNotNone(error)
+
+    async def test_text_offer_rejects_retail_lot_below_min_with_quantity_style_message(self):
+        offer_parser.get_trading_settings = lambda: SimpleNamespace(
+            offer_min_quantity=7,
+            offer_max_quantity=75,
+            lot_min_size=7,
+            lot_max_count=4,
+        )
+
+        result, error = await offer_parser.parse_offer_text("خ امام 45تا 184000 5 20 20: تک فیش")
+
+        self.assertIsNone(result)
+        self.assertIsNotNone(error)
+        self.assertEqual(error.message, "❌ حداقل تعداد باید 7 باشد (بخش نامعتبر: 5)")
 
     async def test_find_commodity_supports_cached_aliases_and_db_backfill(self):
         cached_items = [
