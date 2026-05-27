@@ -687,7 +687,7 @@ describe('useChatMessages', () => {
     const statuses = [
       { last_seen_at: '2026-05-14T13:55:00' },
       { last_seen_at: '2026-05-14T09:15:00Z' },
-      { last_seen_at: '2026-05-13T20:30:00Z' },
+      { last_seen_at: '2026-05-13T18:30:00Z' },
       { last_seen_at: '2026-05-10T08:00:00Z' },
       {},
     ]
@@ -696,7 +696,7 @@ describe('useChatMessages', () => {
       throw new Error('unexpected')
     })
 
-    for (const expected of ['5 دقیقه پیش', 'امروز 09:15', 'دیروز 20:30', 'آخرین بازدید', 'خیلی وقت پیش']) {
+    for (const expected of ['5 دقیقه پیش', 'امروز ۱۲:۴۵', 'دیروز ۲۲:۰۰', '۱۴۰۵', 'خیلی وقت پیش']) {
       subject.startStatusPolling(12)
       await flushPromises()
       subject.stopStatusPolling()

@@ -96,6 +96,7 @@ jobs:
           python3 -m coverage json -o tmp/backend-coverage.json || status=$?
           python3 -m coverage xml -o tmp/backend-coverage.xml || status=$?
           python3 -m coverage html -d tmp/backend-coverage-html || status=$?
+          echo "suite_exit_code=$status" >> "$GITHUB_OUTPUT"
           exit "$status"
 
       - name: Run frontend unit coverage suite
@@ -113,6 +114,7 @@ jobs:
           if [[ "$command_status" -ne 0 ]]; then
             status=$command_status
           fi
+          echo "suite_exit_code=$status" >> "$GITHUB_OUTPUT"
           exit "$status"
 
       - name: Build repository coverage summary
@@ -135,7 +137,7 @@ jobs:
             echo '- Read the percentages directly in the run **Summary** tab.'
             echo '- Download **repository-coverage-${{ github.run_number }}** from the **Artifacts** section for the backend/frontend HTML reports and raw JSON/XML outputs.'
           } >> "$GITHUB_STEP_SUMMARY"
-          if [[ "${{ steps.backend_coverage.conclusion }}" != 'success' && -f tmp/backend-coverage.log ]]; then
+          if [[ "${{ steps.backend_coverage.outputs.suite_exit_code || '1' }}" != '0' && -f tmp/backend-coverage.log ]]; then
             {
               echo
               echo '## Backend Coverage Failure Tail'
@@ -145,7 +147,7 @@ jobs:
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-          if [[ "${{ steps.frontend_coverage.conclusion }}" != 'success' && -f tmp/frontend-unit-coverage.log ]]; then
+          if [[ "${{ steps.frontend_coverage.outputs.suite_exit_code || '1' }}" != '0' && -f tmp/frontend-unit-coverage.log ]]; then
             {
               echo
               echo '## Frontend Coverage Failure Tail'
@@ -173,10 +175,10 @@ jobs:
           if-no-files-found: warn
 
       - name: Fail coverage job if a covered suite failed
-        if: always() && (steps.backend_coverage.conclusion != 'success' || steps.frontend_coverage.conclusion != 'success')
+        if: always() && (steps.backend_coverage.outputs.suite_exit_code != '0' || steps.frontend_coverage.outputs.suite_exit_code != '0')
         shell: bash
         run: |
-          echo "Backend coverage conclusion: ${{ steps.backend_coverage.conclusion }}"
-          echo "Frontend coverage conclusion: ${{ steps.frontend_coverage.conclusion }}"
+          echo "Backend coverage exit code: ${{ steps.backend_coverage.outputs.suite_exit_code }}"
+          echo "Frontend coverage exit code: ${{ steps.frontend_coverage.outputs.suite_exit_code }}"
           echo 'At least one covered suite failed.' >&2
           exit 1
