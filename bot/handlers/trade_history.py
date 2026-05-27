@@ -8,7 +8,7 @@ from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import joinedload
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from importlib import import_module
 import os
 import tempfile
@@ -52,7 +52,7 @@ def get_trade_history_keyboard(target_user_id: int) -> InlineKeyboardMarkup:
 
 async def get_trade_history(current_user_id: int, target_user_id: int, months: int = 3):
     """دریافت تاریخچه معاملات بین دو کاربر"""
-    from_date = datetime.utcnow() - timedelta(days=months * 30)
+    from_date = datetime.now(timezone.utc) - timedelta(days=months * 30)
     
     async with AsyncSessionLocal() as session:
         # اگر target_user_id == current_user_id باشد، یعنی تاریخچه کل کاربر را می‌خواهد

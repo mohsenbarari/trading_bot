@@ -46,6 +46,23 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Write CI environment file
+        shell: bash
+        run: |
+          cat > .env <<'EOF'
+          SERVER_MODE=foreign
+          BOT_USERNAME=ci_test_bot
+          POSTGRES_DB=trading_bot_db
+          POSTGRES_USER=admin
+          POSTGRES_PASSWORD=strongpassword
+          DATABASE_URL=postgresql+asyncpg://admin:strongpassword@db:5432/trading_bot_db
+          SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
+          REDIS_URL=redis://redis:6379/0
+          FRONTEND_URL=http://127.0.0.1:4173
+          DEV_API_KEY=3f7bc530-b8a8-4125-9b79-256dc46bc530
+          JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
+          EOF
+
       - name: Install backend coverage dependencies
         run: |
           sudo apt-get update
@@ -57,6 +74,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
 
       - name: Run backend coverage suite
         id: backend_coverage
