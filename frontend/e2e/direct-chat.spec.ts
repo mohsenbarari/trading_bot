@@ -2,6 +2,7 @@
 
 import { execFileSync } from 'child_process'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { primeAuthSession } from './helpers/auth'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 
@@ -120,17 +121,16 @@ function authHeaders(accessToken: string) {
 }
 
 async function loginWithSeededSession(page: Page, fixture: SeededSessionFixture) {
-  await page.goto('/login')
-  await page.evaluate(({ accessToken, refreshToken }) => {
-    localStorage.setItem('auth_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
-    localStorage.removeItem('suspended_refresh_token')
-  }, fixture)
+  await primeAuthSession(page, fixture.accessToken, fixture.refreshToken)
+}
+
+function activeComposerTextbox(page: Page) {
+  return page.locator('.chat-view .input-area .input-container').last().locator('textarea[placeholder="پیام..."]').first()
 }
 
 async function openDirectChat(page: Page, otherUserId: number) {
   await page.goto(`/chat?user_id=${otherUserId}`)
-  await expect(page.locator('textarea[placeholder="پیام..."]')).toBeVisible()
+  await expect(activeComposerTextbox(page)).toBeVisible({ timeout: 30000 })
 }
 
 async function sendTextChatMessage(
@@ -180,7 +180,7 @@ test.describe('Direct chat regressions', () => {
     await openDirectChat(page, peer.userId)
     await expect(page.getByText(bootstrapContent)).toBeVisible()
 
-    const composer = page.locator('textarea[placeholder="پیام..."]')
+    const composer = activeComposerTextbox(page)
     await composer.fill(initialContent)
     await composer.press('Enter')
 
@@ -253,7 +253,7 @@ test.describe('Direct chat regressions', () => {
         expect.objectContaining({ emoji: '👍', user_id: actor.userId }),
       ]))
 
-    const composer = page.locator('textarea[placeholder="پیام..."]')
+    const composer = activeComposerTextbox(page)
     await composer.fill(deleteContent)
     await composer.press('Enter')
 
