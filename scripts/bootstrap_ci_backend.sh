@@ -63,8 +63,8 @@ wait_for_app_readiness() {
 echo '== docker compose version =='
 compose version
 
-echo '== build app + migration images =='
-compose build migration app
+echo '== build shared base image =='
+docker build -t trading_bot_base .
 
 echo '== start db + redis =='
 compose up -d db redis

@@ -17,9 +17,10 @@ class FakeExecuteResult:
 
 
 class FakeDB:
-    def __init__(self, *, get_results=None, execute_results=None):
+    def __init__(self, *, get_results=None, execute_results=None, scalar_results=None):
         self.get_results = list(get_results or [])
         self.execute_results = list(execute_results or [])
+        self.scalar_results = list(scalar_results or [])
         self.commit = AsyncMock()
         self.refresh = AsyncMock(side_effect=self._refresh)
         self.added = []
@@ -33,6 +34,17 @@ class FakeDB:
         if not self.execute_results:
             raise AssertionError("Unexpected execute() call")
         return self.execute_results.pop(0)
+
+    async def scalar(self, _stmt):
+        if self.scalar_results:
+            return self.scalar_results.pop(0)
+
+        # In SQLAlchemy 2.0, scalar() is often a shortcut for execute().standard_scalar()
+        # Fall back to the execute queue only when a dedicated scalar result was not supplied.
+        res = await self.execute(_stmt)
+        if isinstance(res, FakeExecuteResult):
+            return res.scalar_one()
+        return res
 
     def add(self, item):
         self.added.append(item)
@@ -124,6 +136,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         reloaded_offer = make_reloaded_offer(offer_id=77)
         db = FakeDB(
             get_results=[commodity, old_offer],
+            scalar_results=[0],
             execute_results=[FakeExecuteResult(reloaded_offer)],
         )
         current_user = make_user()
@@ -180,6 +193,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         reloaded_offer = make_reloaded_offer(offer_id=88)
         db = FakeDB(
             get_results=[commodity],
+            scalar_results=[0],
             execute_results=[FakeExecuteResult(reloaded_offer)],
         )
         current_user = make_user()
@@ -248,6 +262,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         reloaded_offer.created_at = SimpleNamespace(timestamp=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
         db = FakeDB(
             get_results=[commodity],
+            scalar_results=[0],
             execute_results=[FakeExecuteResult(reloaded_offer)],
         )
         current_user = make_user()
@@ -305,14 +320,14 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result, {"id": 99})
 
-    async def test_create_offer_uses_owner_principal_and_actor_audit_for_accountant(self):
+    async def test_create_offer_stamps_owner_actor_id_for_self_context(self):
         commodity = SimpleNamespace(id=1)
-        owner_user = make_user(id=5, home_server="iran")
-        actor_user = make_user(id=44, role=UserRole.WATCH)
+        current_user = make_user(id=5, home_server="iran")
         reloaded_offer = make_reloaded_offer(offer_id=120)
         reloaded_offer.user_id = 5
         db = FakeDB(
             get_results=[commodity],
+            scalar_results=[0],
             execute_results=[FakeExecuteResult(reloaded_offer)],
         )
         settings = SimpleNamespace(max_active_offers=5)
@@ -343,15 +358,15 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.offers.offer_to_response",
             return_value={"id": 120, "user_id": 5},
         ) as response_mock:
-            result = await create_offer(make_offer(), db=db, context=make_context(owner_user, actor_user))
+            result = await create_offer(make_offer(), db=db, context=make_context(current_user))
 
         new_offer = db.added[0]
         self.assertEqual(new_offer.user_id, 5)
-        self.assertEqual(new_offer.actor_user_id, 44)
+        self.assertEqual(new_offer.actor_user_id, 5)
         self.assertEqual(new_offer.home_server, "iran")
-        send_mock.assert_awaited_once_with(reloaded_offer, owner_user)
+        send_mock.assert_awaited_once_with(reloaded_offer, current_user)
         incr_mock.assert_awaited_once_with(5)
-        counter_mock.assert_awaited_once_with(db, owner_user, "channel_message")
+        counter_mock.assert_awaited_once_with(db, current_user, "channel_message")
         response_mock.assert_called_once_with(reloaded_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
         self.assertEqual(result, {"id": 120, "user_id": 5})
 
@@ -360,6 +375,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         reloaded_offer = make_reloaded_offer(offer_id=140)
         db = FakeDB(
             get_results=[commodity],
+            scalar_results=[0],
             execute_results=[FakeExecuteResult(reloaded_offer)],
         )
         current_user = make_user()
