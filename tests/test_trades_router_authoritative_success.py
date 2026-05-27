@@ -207,6 +207,11 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         update_buttons_mock.assert_awaited_once_with(offer)
         self.assertEqual(len(background_tasks.tasks), 2)
         self.assertEqual(notif_mock.await_count, 2)
+        responder_notification_message = notif_mock.await_args_list[0].args[2]
+        self.assertNotIn("|", responder_notification_message)
+        self.assertIn("👤 طرف معامله: seller", responder_notification_message)
+        self.assertIn("🔢 شماره معامله: 10000", responder_notification_message)
+        self.assertIn("🕐 زمان معامله:", responder_notification_message)
         self.assertEqual(
             notif_mock.await_args_list[0].kwargs,
             {
@@ -482,6 +487,16 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                     commission_rate="0.5",
                 )
             ),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(
+                return_value={
+                    customer_user.id: SimpleNamespace(
+                        owner_user_id=9,
+                        customer_tier=CustomerTier.TIER_2,
+                    ),
+                }
+            ),
         ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
             "api.routers.trades.validate_offer_trade_amount",
             return_value=(True, None, 4, []),
@@ -512,7 +527,15 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_trade.responder_user_id, customer_user.id)
         self.assertEqual(new_trade.actor_user_id, customer_user.id)
         self.assertEqual(new_trade.price, 49700)
-        self.assertEqual(notif_mock.await_args_list[0].args[2].split('\n')[1], "💰 فی: 49,700 | 📦 تعداد: 4")
+        tier2_notification_message = notif_mock.await_args_list[0].args[2]
+        owner_notification_message = notif_mock.await_args_list[1].args[2]
+        self.assertIn("💰 فی: 49,700", tier2_notification_message)
+        self.assertIn("📦 تعداد: 4", tier2_notification_message)
+        self.assertIn(f"🔢 شماره معامله: {new_trade.trade_number}", tier2_notification_message)
+        self.assertIn("🕐 زمان معامله:", tier2_notification_message)
+        self.assertNotIn("|", tier2_notification_message)
+        self.assertNotIn("👤 طرف معامله:", tier2_notification_message)
+        self.assertIn("👤 طرف معامله: tier2_customer", owner_notification_message)
         counter_mock.assert_awaited_once_with(db, customer_user, "trade", 4)
         self.assertEqual(publish_mock.await_args_list[0].args[1]["price"], 49700)
         self.assertEqual(result, {"id": 93, "trade_number": 10005})

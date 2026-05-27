@@ -1652,6 +1652,36 @@ async def _execute_trade_authoritatively(
         offer_emoji = "🟢"
         offer_type_fa = "خرید"
 
+    def _recipient_is_tier2_customer(audience_user_id: int | None) -> bool:
+        if audience_user_id is None or not participant_customer_relation_map:
+            return False
+        relation = participant_customer_relation_map.get(audience_user_id)
+        return _normalize_customer_tier_value(getattr(relation, "customer_tier", None)) == CustomerTier.TIER_2.value
+
+    def _build_trade_notification_message(
+        *,
+        trade_emoji: str,
+        trade_type_label: str,
+        trade_price: int,
+        trade_number: int,
+        counterparty_name: str | None,
+        audience_user_id: int | None,
+        trade_path_summary: str | None = None,
+    ) -> str:
+        lines = [
+            f"{trade_emoji} {trade_type_label}",
+            f"💰 فی: {trade_price:,}",
+            f"📦 تعداد: {trade_quantity}",
+            f"🏷️ کالا: {offer.commodity.name}",
+        ]
+        if counterparty_name and not _recipient_is_tier2_customer(audience_user_id):
+            lines.append(f"👤 طرف معامله: {counterparty_name}")
+        lines.append(f"🔢 شماره معامله: {trade_number}")
+        lines.append(f"🕐 زمان معامله: {trade_datetime}")
+        if trade_path_summary:
+            lines.append(f"🧭 مسیر: {trade_path_summary}")
+        return "\n".join(lines)
+
     def _build_trade_message_bundle(
         *,
         trade_price: int,
@@ -1682,34 +1712,53 @@ async def _execute_trade_authoritatively(
             f"{trade_path_line}"
         )
         notif_msg_responder = (
-            f"{respond_emoji} {respond_type_fa}\n"
-            f"💰 فی: {trade_price:,} | 📦 تعداد: {trade_quantity}\n"
-            f"🏷️ کالا: {offer.commodity.name}\n"
-            f"👤 طرف معامله: {offer_user_name}\n"
-            f"🔢 شماره: {trade_number}"
-            f"{trade_path_line}"
+            _build_trade_notification_message(
+                trade_emoji=respond_emoji,
+                trade_type_label=respond_type_fa,
+                trade_price=trade_price,
+                trade_number=trade_number,
+                counterparty_name=offer_user_name,
+                audience_user_id=None,
+                trade_path_summary=trade_path_summary,
+            )
         )
         notif_msg_owner = (
-            f"{offer_emoji} {offer_type_fa}\n"
-            f"💰 فی: {trade_price:,} | 📦 تعداد: {trade_quantity}\n"
-            f"🏷️ کالا: {offer.commodity.name}\n"
-            f"👤 طرف معامله: {responder_user_name}\n"
-            f"🔢 شماره: {trade_number}"
-            f"{trade_path_line}"
+            _build_trade_notification_message(
+                trade_emoji=offer_emoji,
+                trade_type_label=offer_type_fa,
+                trade_price=trade_price,
+                trade_number=trade_number,
+                counterparty_name=responder_user_name,
+                audience_user_id=None,
+                trade_path_summary=trade_path_summary,
+            )
         )
         return responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner
 
     async def _create_trade_notifications_for_leg(
         *,
         audience_user_ids: list[int],
-        message: str,
+        trade_emoji: str,
+        trade_type_label: str,
+        trade_price: int,
+        trade_number: int,
+        counterparty_name: str | None,
+        trade_path_summary: str | None,
         extra_payload: dict[str, object | None],
     ) -> None:
         for audience_user_id in audience_user_ids:
             await create_user_notification(
                 db,
                 audience_user_id,
-                message,
+                _build_trade_notification_message(
+                    trade_emoji=trade_emoji,
+                    trade_type_label=trade_type_label,
+                    trade_price=trade_price,
+                    trade_number=trade_number,
+                    counterparty_name=counterparty_name,
+                    audience_user_id=audience_user_id,
+                    trade_path_summary=trade_path_summary,
+                ),
                 level=NotificationLevel.SUCCESS,
                 category=NotificationCategory.TRADE,
                 extra_payload=extra_payload,
@@ -1793,7 +1842,12 @@ async def _execute_trade_authoritatively(
                 leg_context["offer_audience"] = leg_offer_audience
                 await _create_trade_notifications_for_leg(
                     audience_user_ids=leg_responder_audience,
-                    message=leg_notif_responder,
+                    trade_emoji=respond_emoji,
+                    trade_type_label=respond_type_fa,
+                    trade_price=getattr(leg_trade_obj, "price", offer.price),
+                    trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
+                    counterparty_name=leg_offer_payload.get("offer_user_name") or "نامشخص",
+                    trade_path_summary=leg_trade_path_summary,
                     extra_payload=_build_trade_notification_extra_payload(
                         "offer_user",
                         leg_offer_payload,
@@ -1802,7 +1856,12 @@ async def _execute_trade_authoritatively(
                 )
                 await _create_trade_notifications_for_leg(
                     audience_user_ids=leg_offer_audience,
-                    message=leg_notif_owner,
+                    trade_emoji=offer_emoji,
+                    trade_type_label=offer_type_fa,
+                    trade_price=getattr(leg_trade_obj, "price", offer.price),
+                    trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
+                    counterparty_name=leg_responder_payload.get("responder_user_name") or "نامشخص",
+                    trade_path_summary=leg_trade_path_summary,
                     extra_payload=_build_trade_notification_extra_payload(
                         "responder_user",
                         leg_responder_payload,
@@ -1844,20 +1903,34 @@ async def _execute_trade_authoritatively(
                 trade_number=response_trade_number,
             )
 
-            for audience_user_id in responder_audience:
-                await create_user_notification(
-                    db, audience_user_id, notif_msg_responder,
-                    level=NotificationLevel.SUCCESS,
-                    category=NotificationCategory.TRADE,
-                    extra_payload=responder_notification_payload,
-                )
-            for audience_user_id in offer_owner_audience:
-                await create_user_notification(
-                    db, audience_user_id, notif_msg_owner,
-                    level=NotificationLevel.SUCCESS,
-                    category=NotificationCategory.TRADE,
-                    extra_payload=offer_owner_notification_payload,
-                )
+            await _create_trade_notifications_for_leg(
+                audience_user_ids=responder_audience,
+                trade_emoji=respond_emoji,
+                trade_type_label=respond_type_fa,
+                trade_price=executed_trade_price,
+                trade_number=response_trade_number,
+                counterparty_name=offer_user_display_name,
+                trade_path_summary=_build_trade_path_payload(
+                    offer_user_id=getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
+                    responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
+                    customer_relation_map=participant_customer_relation_map,
+                ).get("trade_path_summary"),
+                extra_payload=responder_notification_payload,
+            )
+            await _create_trade_notifications_for_leg(
+                audience_user_ids=offer_owner_audience,
+                trade_emoji=offer_emoji,
+                trade_type_label=offer_type_fa,
+                trade_price=executed_trade_price,
+                trade_number=response_trade_number,
+                counterparty_name=responder_user_display_name,
+                trade_path_summary=_build_trade_path_payload(
+                    offer_user_id=getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
+                    responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
+                    customer_relation_map=participant_customer_relation_map,
+                ).get("trade_path_summary"),
+                extra_payload=offer_owner_notification_payload,
+            )
         except:
             pass
     
