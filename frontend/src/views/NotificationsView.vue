@@ -26,6 +26,7 @@ type ParsedNotificationLine = {
   label: string
   value: string
   isField: boolean
+  isWide: boolean
 }
 
 const parseNotificationLine = (rawLine: string): ParsedNotificationLine | null => {
@@ -44,15 +45,21 @@ const parseNotificationLine = (rawLine: string): ParsedNotificationLine | null =
       label: '',
       value: '',
       isField: false,
+      isWide: true,
     }
   }
+
+  const label = remainder.slice(0, colonIndex).trim()
+  const value = remainder.slice(colonIndex + 1).trim()
+  const isWide = label === 'زمان معامله' || label === 'مسیر'
 
   return {
     icon,
     text: '',
-    label: remainder.slice(0, colonIndex).trim(),
-    value: remainder.slice(colonIndex + 1).trim(),
+    label,
+    value,
     isField: true,
+    isWide,
   }
 }
 
@@ -147,7 +154,10 @@ onMounted(async () => {
                 v-for="(line, lineIndex) in getNotificationLines(notif)"
                 :key="`${notif.id}-line-${lineIndex}`"
                 class="notif-line"
-                :class="line.isField ? 'notif-line-field' : 'notif-line-plain'"
+                :class="[
+                  line.isField ? 'notif-line-field' : 'notif-line-plain',
+                  { 'notif-line-wide': line.isWide },
+                ]"
               >
                 <span v-if="line.icon" class="notif-line-icon" aria-hidden="true">{{ line.icon }}</span>
                 <template v-if="line.isField">
@@ -298,7 +308,7 @@ onMounted(async () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.35rem;
   padding-left: 1.5rem; /* Space for actions */
   min-width: 0;
 }
@@ -322,21 +332,30 @@ onMounted(async () => {
 .notif-lines {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
+}
+
+.notif-lines.is-trade-lines {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem 0.45rem;
+  align-items: start;
 }
 
 .notif-line {
   display: flex;
   align-items: flex-start;
-  gap: 0.45rem;
+  gap: 0.35rem;
   min-width: 0;
   unicode-bidi: plaintext;
 }
 
 .notif-line-field {
-  flex-wrap: wrap;
-  padding: 0.55rem 0.75rem;
-  border-radius: 14px;
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr);
+  align-items: baseline;
+  padding: 0.32rem 0.5rem;
+  border-radius: 12px;
   background: var(--ds-bg-page);
   border: 1px solid var(--ds-border-light);
 }
@@ -348,7 +367,18 @@ onMounted(async () => {
 }
 
 .notif-lines.is-trade-lines .notif-line-field {
-  background: color-mix(in srgb, var(--ds-bg-page) 84%, var(--ds-primary-50) 16%);
+  background: color-mix(in srgb, var(--ds-bg-page) 90%, var(--ds-primary-50) 10%);
+}
+
+.notif-lines.is-trade-lines .notif-line-plain,
+.notif-lines.is-trade-lines .notif-line-wide {
+  grid-column: 1 / -1;
+}
+
+.notif-lines.is-trade-lines .notif-line-plain {
+  padding-bottom: 0.25rem;
+  margin-bottom: 0.1rem;
+  border-bottom: 1px dashed var(--ds-border-light);
 }
 
 .notif-line-icon {
@@ -370,12 +400,12 @@ onMounted(async () => {
 .notif-line-value,
 .notif-line-text {
   min-width: 0;
-  line-height: 1.6;
+  line-height: 1.45;
   color: var(--ds-text-secondary);
 }
 
 .notif-line-value {
-  font-size: var(--ds-font-sm);
+  font-size: 0.84rem;
 }
 
 .notif-line-text {
@@ -386,23 +416,27 @@ onMounted(async () => {
 .notif-time {
   font-size: var(--ds-font-sm);
   color: var(--ds-text-placeholder);
-  margin-top: 0.25rem;
+  margin-top: 0.15rem;
   font-weight: 500;
   align-self: flex-start;
 }
 
 @media (max-width: 640px) {
   .notif-item {
-    padding: 1rem;
+    padding: 0.95rem;
   }
 
   .notif-body {
     padding-left: 0;
-    padding-top: 2.75rem;
+    padding-top: 2.35rem;
   }
 
   .notif-actions {
     opacity: 1;
+  }
+
+  .notif-lines.is-trade-lines {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>
