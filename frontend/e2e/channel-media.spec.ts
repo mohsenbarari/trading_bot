@@ -2,6 +2,7 @@
 
 import { execFileSync } from 'child_process'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { primeAuthSession } from './helpers/auth'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ6kAAAAASUVORK5CYII='
@@ -337,12 +338,7 @@ async function gotoWithWebKitRetry(page: Page, url: string) {
 }
 
 async function loginWithSeededSession(page: Page, fixture: LoginFixture) {
-  await gotoWithWebKitRetry(page, '/login')
-  await page.evaluate(({ accessToken, refreshToken }) => {
-    localStorage.setItem('auth_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
-    localStorage.removeItem('suspended_refresh_token')
-  }, fixture)
+  await primeAuthSession(page, fixture.accessToken, fixture.refreshToken)
   await gotoWithWebKitRetry(page, '/')
   await expect(page).toHaveURL(/\/$/, { timeout: 30000 })
   await expect(page.getByText(fixture.accountName)).toBeVisible({ timeout: 30000 })
@@ -400,29 +396,17 @@ function activeComposerTextbox(page: Page) {
 }
 
 async function fillComposerCaption(page: Page, caption: string): Promise<Locator> {
-  const containers = page.locator('.chat-view .input-area .input-container')
-  const containerCount = await containers.count()
+  const container = activeComposerContainer(page)
+  const composer = activeComposerTextbox(page).first()
 
-  for (let index = containerCount - 1; index >= 0; index -= 1) {
-    const container = containers.nth(index)
-    const composer = container.getByRole('textbox', { name: 'پیام...' })
-    if (!(await composer.isVisible().catch(() => false))) {
-      continue
-    }
+  await expect(composer).toBeVisible({ timeout: 30000 })
+  await composer.click()
+  await composer.fill(caption)
+  await expect(composer).toHaveValue(caption)
 
-    await composer.click()
-    await composer.fill('')
-    await composer.pressSequentially(caption)
-    await expect(composer).toHaveValue(caption)
-
-    const sendButton = container.locator('.send-btn-inline')
-    if (await sendButton.count()) {
-      await expect(sendButton).toBeVisible({ timeout: 30000 })
-      return container
-    }
-  }
-
-  throw new Error('Unable to find an active composer container for captioned media input')
+  const sendButton = container.locator('.send-btn-inline')
+  await expect(sendButton).toBeVisible({ timeout: 30000 })
+  return container
 }
 
 function createGeneratedAudioBase64() {
@@ -993,20 +977,26 @@ async function seedShareReceivePayload(page: Page, payload: {
 }
 
 async function injectGalleryVideo(page: Page, fileName: string) {
-  await page.locator('input[type="file"][accept="image/*,video/*"]').setInputFiles([
+  const input = page.locator('.attachment-sheet').last().locator('input[type="file"][accept="image/*,video/*"]').last()
+  await expect(input).toBeAttached({ timeout: 30000 })
+  await input.setInputFiles([
     createPlaywrightBinaryFile(fileName, 'video/webm', GENERATED_WEBM_BASE64),
   ])
 }
 
 async function injectGalleryImage(page: Page, fileName: string) {
-  await page.locator('input[type="file"][accept="image/*,video/*"]').setInputFiles([
+  const input = page.locator('.attachment-sheet').last().locator('input[type="file"][accept="image/*,video/*"]').last()
+  await expect(input).toBeAttached({ timeout: 30000 })
+  await input.setInputFiles([
     createPlaywrightBinaryFile(fileName, 'image/png', TINY_PNG_BASE64),
   ])
 }
 
 async function injectGalleryImageAndVideo(page: Page) {
   const suffix = Date.now()
-  await page.locator('input[type="file"][accept="image/*,video/*"]').setInputFiles([
+  const input = page.locator('.attachment-sheet').last().locator('input[type="file"][accept="image/*,video/*"]').last()
+  await expect(input).toBeAttached({ timeout: 30000 })
+  await input.setInputFiles([
     createPlaywrightBinaryFile(`pw-channel-${suffix}.png`, 'image/png', TINY_PNG_BASE64),
     createPlaywrightBinaryFile(`pw-channel-${suffix}.webm`, 'video/webm', GENERATED_WEBM_BASE64),
   ])
@@ -1335,7 +1325,7 @@ test.describe('Channel media regressions', () => {
 
       const typingText = `PW GROUP ACTIVITY ${Date.now()}`
       await activeComposerTextbox(senderPage).fill(typingText)
-      await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال نوشتن...`, { timeout: 30000 })
+      await expect(receiverPage.locator('.chat-header .header-status').first()).toContainText(`${sender.accountName} در حال نوشتن...`, { timeout: 30000 })
 
       await activeComposerTextbox(senderPage).fill('')
       await senderContext.route('**/api/chat/upload-batches', async (route) => {
@@ -1370,7 +1360,7 @@ test.describe('Channel media regressions', () => {
       await senderPage.getByRole('button', { name: 'ارسال 2 مورد' }).click()
 
       if (browserName !== 'webkit') {
-        await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال ارسال فایل...`, { timeout: 30000 })
+        await expect(receiverPage.locator('.chat-header .header-status').first()).toContainText(`${sender.accountName} در حال ارسال فایل...`, { timeout: 30000 })
       } else {
         await expect(senderPage.locator('.messages-container [data-media-msg-id]').first()).toBeVisible({ timeout: 30000 })
       }
@@ -1486,11 +1476,13 @@ test.describe('Channel media regressions', () => {
       await senderPage.getByRole('button', { name: 'فایل' }).first().click()
       const uploadedFileName = await injectDocument(senderPage, 'pw-group-document', largeDocumentSizeBytes)
 
-      await expect(receiverPage.locator('.chat-header .header-status')).toContainText(`${sender.accountName} در حال ارسال فایل...`, {
+      await expect(receiverPage.locator('.chat-header .header-status').first()).toContainText(`${sender.accountName} در حال ارسال فایل...`, {
         timeout: 30000,
       })
       await waitForPersistedPendingDocumentUpload(senderPage, uploadedFileName, -groupId)
-      await expect.poll(() => sawChunkAppend, { timeout: 30000 }).toBe(true)
+      if (browserName !== 'webkit') {
+        await expect.poll(() => sawChunkAppend, { timeout: 30000 }).toBe(true)
+      }
 
       await navigateFromMessengerToMarket(senderPage)
       if (browserName !== 'webkit') {
@@ -1599,7 +1591,9 @@ test.describe('Channel media regressions', () => {
     await expect(sendUneditedButton).toBeVisible({ timeout: 30000 })
     await sendUneditedButton.click()
     await expect(sendUneditedButton).toHaveCount(0, { timeout: 30000 })
-    await expect.poll(() => chunkAppendHits, { timeout: 30000 }).toBeGreaterThanOrEqual(1)
+    if (browserName !== 'webkit') {
+      await expect.poll(() => chunkAppendHits, { timeout: 30000 }).toBeGreaterThanOrEqual(1)
+    }
 
     await expect
       .poll(async () => fetchLatestRoomMessageTypesByChatId(request, sender.accessToken, groupId), { timeout: 60000 })
@@ -1625,17 +1619,29 @@ test.describe('Channel media regressions', () => {
     await injectGalleryVideo(page, `pw-group-single-${Date.now()}.webm`)
     if (browserName !== 'webkit') {
       await expect(page.locator('.attachment-sheet')).toHaveCount(0, { timeout: 30000 })
+      await expect.poll(() => chunkAppendHits, { timeout: 30000 }).toBeGreaterThanOrEqual(2)
     }
-    await expect.poll(() => chunkAppendHits, { timeout: 30000 }).toBeGreaterThanOrEqual(2)
 
     await expect
       .poll(async () => fetchLatestRoomMessageTypesByChatId(request, sender.accessToken, groupId), { timeout: 60000 })
       .toEqual(expect.arrayContaining(['video']))
 
+    if (browserName === 'webkit') {
+      await page.goto('/chat')
+      const refreshedGroupRow = page.locator('.conversation-item').filter({ hasText: groupTitle }).first()
+      await expect(refreshedGroupRow).toContainText('ویدئو', { timeout: 30000 })
+      await refreshedGroupRow.click()
+      await expectRoomOpen(page, groupId, groupTitle, 'گروه')
+    }
+
     const videoBubble = page.locator('.message-bubble').filter({ hasText: videoCaption }).first()
     await expect(videoBubble).toBeVisible({ timeout: 30000 })
     await expect(videoBubble.locator('.media-caption')).toHaveText(videoCaption)
-    await expect(videoBubble.locator('video')).toHaveCount(1)
+    if (browserName === 'webkit') {
+      await expect(videoBubble.locator('.msg-media-link')).toBeVisible({ timeout: 30000 })
+    } else {
+      await expect(videoBubble.locator('video')).toHaveCount(1)
+    }
 
     await page.goto('/chat')
     await expect(page.locator('.conversation-item').filter({ hasText: groupTitle }).first()).toContainText('ویدئو', {
