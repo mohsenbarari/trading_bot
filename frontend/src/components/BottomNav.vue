@@ -9,11 +9,21 @@ const route = useRoute()
 const isExpanded = ref(false)
 const notificationStore = useNotificationStore()
 
+type DragPoint = { x: number; y: number }
+
 // Draggable FAB state
-const fabPosition = ref({ x: null as number | null, y: null as number | null })
+const fabPosition = ref<DragPoint | null>(null)
 const isDragging = ref(false)
-const dragStart = ref({ x: 0, y: 0 })
-const startPos = ref({ x: 0, y: 0 })
+const dragStart = ref<DragPoint>({ x: 0, y: 0 })
+const startPos = ref<DragPoint>({ x: 0, y: 0 })
+
+function getDragClientPoint(e: TouchEvent | MouseEvent) {
+  if (e instanceof MouseEvent) {
+    return e
+  }
+
+  return e.touches[0] ?? e.changedTouches[0] ?? null
+}
 
 function loadFabPosition() {
   const saved = localStorage.getItem('fab_position')
@@ -28,7 +38,7 @@ function loadFabPosition() {
 }
 
 const fabStyle = computed(() => {
-  if (fabPosition.value.x !== null && fabPosition.value.y !== null) {
+  if (fabPosition.value) {
     return {
       left: `${fabPosition.value.x}px`,
       top: `${fabPosition.value.y}px`,
@@ -40,10 +50,12 @@ const fabStyle = computed(() => {
 })
 
 function onDragStart(e: TouchEvent | MouseEvent) {
-  const evt = e instanceof TouchEvent ? e.touches[0] : e
+  const evt = getDragClientPoint(e)
+  if (!evt) return
+
   dragStart.value = { x: evt.clientX, y: evt.clientY }
   
-  if (fabPosition.value.x === null) {
+  if (!fabPosition.value) {
     const el = document.querySelector('.fab-container') as HTMLElement
     if (el) {
       const rect = el.getBoundingClientRect()
@@ -52,7 +64,7 @@ function onDragStart(e: TouchEvent | MouseEvent) {
       startPos.value = { x: 16, y: window.innerHeight - 60 }
     }
   } else {
-    startPos.value = { x: fabPosition.value.x, y: fabPosition.value.y }
+    startPos.value = { ...fabPosition.value }
   }
   
   isDragging.value = false
@@ -67,7 +79,9 @@ function onDragStart(e: TouchEvent | MouseEvent) {
 }
 
 function onDragMove(e: TouchEvent | MouseEvent) {
-  const evt = e instanceof TouchEvent ? e.touches[0] : (e as MouseEvent)
+  const evt = getDragClientPoint(e)
+  if (!evt) return
+
   const dx = evt.clientX - dragStart.value.x
   const dy = evt.clientY - dragStart.value.y
   
