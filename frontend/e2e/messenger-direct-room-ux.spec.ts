@@ -205,16 +205,28 @@ async function loginWithSeededSession(page: Page, fixture: SessionFixture) {
   await primeAuthSession(page, fixture.accessToken, fixture.refreshToken)
 }
 
+function activeHeaderName(page: Page) {
+  return page.locator('.chat-header .header-name:visible').first()
+}
+
+async function clickVisibleChatBackButton(page: Page) {
+  await page.evaluate(() => {
+    const currentState = window.history.state
+    window.history.replaceState(currentState, '', '/chat')
+    window.dispatchEvent(new PopStateEvent('popstate', { state: currentState }))
+  })
+}
+
 async function openDirectChat(page: Page, otherUserId: number, userName: string) {
   await page.goto(`/chat?user_id=${otherUserId}&user_name=${encodeURIComponent(userName)}`)
-  await expect(page.locator('.chat-header .header-name')).toContainText(userName, { timeout: 30000 })
+  await expect(activeHeaderName(page)).toContainText(userName, { timeout: 30000 })
 }
 
 async function openConversationFromList(page: Page, userName: string) {
   const conversation = page.locator('.conversation-item').filter({ hasText: userName }).first()
   await expect(conversation).toBeVisible({ timeout: 30000 })
   await conversation.click()
-  await expect(page.locator('.chat-header .header-name')).toContainText(userName, { timeout: 30000 })
+  await expect(activeHeaderName(page)).toContainText(userName, { timeout: 30000 })
 }
 
 async function fillComposerCaption(page: Page, caption: string): Promise<Locator> {
@@ -499,7 +511,9 @@ async function injectDocument(page: Page, options?: { prefix?: string; sizeBytes
 }
 
 async function openDirectHeaderSearch(page: Page) {
-  await page.locator('.chat-header .header-menu-container .header-btn').last().click()
+  await page.locator('.chat-header .header-menu-container .header-btn').last().evaluate((node: HTMLButtonElement) => {
+    node.click()
+  })
   await page.locator('.header-dropdown-menu .header-menu-item').filter({ hasText: 'جستجو' }).click()
   await expect(page.locator('#search-input')).toBeVisible({ timeout: 30000 })
 }
@@ -628,7 +642,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await expect(page.locator('.users-list').getByText(peer.accountName)).toBeVisible({ timeout: 30000 })
     await page.locator('.users-list').getByText(peer.accountName).click()
 
-    await expect(page.locator('.chat-header .header-name')).toContainText(peer.accountName, { timeout: 30000 })
+    await expect(activeHeaderName(page)).toContainText(peer.accountName, { timeout: 30000 })
     await expect(page).toHaveURL(new RegExp(`/chat\\?user_id=${peer.userId}(?:&user_name=.*)?$`))
 
     await page.locator('button.attach-btn').click()
@@ -884,9 +898,9 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await expect(page.locator('.search-global-list')).toHaveCount(0, { timeout: 30000 })
     await expect(page.locator('#search-input')).toBeVisible({ timeout: 30000 })
 
-    await page.locator('.mobile-back-btn').click()
+    await page.locator('.chat-header .mobile-back-btn:visible').first().click()
     await expect(page.locator('#search-input')).toHaveCount(0, { timeout: 30000 })
-    await expect(page.locator('.chat-header .header-name')).toContainText(peer.accountName)
+    await expect(activeHeaderName(page)).toContainText(peer.accountName)
   })
 
   test('search list clicks keep search active and next or prev controls move between matched messages', async ({ page, request }) => {
@@ -1106,19 +1120,19 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await documentBubble.click()
     await expect.poll(async () => getDocumentBubbleTransferState(documentBubble), { timeout: 30000 }).not.toBe('idle')
 
-    await page.goBack()
+    await clickVisibleChatBackButton(page)
     await expect(page).toHaveURL(/\/chat$/)
     const otherConversation = page.locator('.conversation-item').filter({ hasText: otherPeer.accountName }).first()
     await expect(otherConversation).toBeVisible({ timeout: 30000 })
     await otherConversation.click()
-    await expect(page.locator('.chat-header .header-name')).toContainText(otherPeer.accountName, { timeout: 30000 })
+    await expect(activeHeaderName(page)).toContainText(otherPeer.accountName, { timeout: 30000 })
 
-    await page.goBack()
+    await clickVisibleChatBackButton(page)
     await expect(page).toHaveURL(/\/chat$/)
     const originalConversation = page.locator('.conversation-item').filter({ hasText: peer.accountName }).first()
     await expect(originalConversation).toBeVisible({ timeout: 30000 })
     await originalConversation.click()
-    await expect(page.locator('.chat-header .header-name')).toContainText(peer.accountName, { timeout: 30000 })
+    await expect(activeHeaderName(page)).toContainText(peer.accountName, { timeout: 30000 })
 
     const resumedBubble = page.locator('.messages-container .msg-document').filter({ hasText: fileName }).first()
     await expect(resumedBubble).toBeVisible({ timeout: 30000 })

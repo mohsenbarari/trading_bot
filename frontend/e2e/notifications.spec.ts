@@ -642,6 +642,10 @@ async function loginWithSeededSession(page: Page, fixture: SeededSessionFixture)
   await expect(page.getByRole('button', { name: 'اعلان‌ها' })).toBeVisible()
 }
 
+function chatMessageContent(page: Page, content: string) {
+  return page.locator('.messages-container').getByText(content).first()
+}
+
 async function sendTextChatMessage(
   request: APIRequestContext,
   sender: SeededSessionFixture,
@@ -778,7 +782,7 @@ test.describe('Notification regressions', () => {
     await toast.click()
 
     await expect.poll(() => page.url()).toContain(`/chat?user_id=${sender.userId}`)
-    await expect(page.getByText(content)).toBeVisible()
+    await expect(chatMessageContent(page, content)).toBeVisible()
 
     await expect
       .poll(async () => {
@@ -827,7 +831,7 @@ test.describe('Notification regressions', () => {
         userName: fixture.relationDisplayName,
       })
 
-    await expect(page.getByText(content)).toBeVisible()
+    await expect(chatMessageContent(page, content)).toBeVisible()
   })
 
   test('group room activity status shows relation-aware accountant label in chat header', async ({ page, request }) => {
