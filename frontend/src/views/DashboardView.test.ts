@@ -47,7 +47,7 @@ async function mountView() {
 describe('DashboardView.vue', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date(2026, 4, 14, 9, 0, 0))
+    vi.setSystemTime(new Date(2026, 4, 14, 5, 0, 0))
     dashboardViewMocks.routerPushMock.mockReset()
     dashboardViewMocks.apiFetchMock.mockReset()
     dashboardViewMocks.forceLogoutMock.mockReset()

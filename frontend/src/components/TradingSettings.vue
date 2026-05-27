@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { apiFetch } from '../utils/auth'
 import { Loader2, ChevronLeft, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
+import { formatIranDateTime } from '../utils/iranTime'
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -137,12 +138,11 @@ const marketNoticeLabel = computed(() => {
 })
 const formattedNextTransition = computed(() => {
   if (!marketState.value?.next_transition_at) return 'ثبت نشده'
-  const value = new Date(marketState.value.next_transition_at)
-  if (Number.isNaN(value.getTime())) return 'ثبت نشده'
-  return value.toLocaleString('fa-IR', {
+  const value = formatIranDateTime(marketState.value.next_transition_at, {
     dateStyle: 'short',
     timeStyle: 'short',
   })
+  return value || 'ثبت نشده'
 })
 
 const fetchApi = async (method: string, endpoint: string, body: any = null) => {

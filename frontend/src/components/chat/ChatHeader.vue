@@ -175,6 +175,7 @@ import { computed, ref, watch } from 'vue'
 import { Megaphone, MoreVertical, Search, UsersRound } from 'lucide-vue-next'
 import { discardBackState, popBackState, pushBackState } from '../../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial } from '../../utils/chatFiles'
+import { formatIranDateTime } from '../../utils/iranTime'
 
 const props = defineProps<{
   isSelectionMode: boolean
@@ -323,14 +324,12 @@ const handleTitleClick = () => {
 }
 
 function formatDateForSeparator(dateString: string) {
-  if (!dateString) return ''
-  const date = new Date(dateString)
-  return new Intl.DateTimeFormat('fa-IR', {
+  return formatIranDateTime(dateString, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
-  }).format(date)
+    minute: '2-digit',
+  })
 }
 </script>
 

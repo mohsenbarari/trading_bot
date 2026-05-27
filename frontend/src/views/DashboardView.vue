@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { Bell, Store, LogOut, AlertTriangle, Ban, Users } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
+import { formatIranDateTime, getIranHour, parseIranDisplayDate } from '../utils/iranTime'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
@@ -20,7 +21,8 @@ let switchRequestId = 0
 
 const isRestricted = computed(() => {
   if (!user.value?.trading_restricted_until) return false
-  return new Date(user.value.trading_restricted_until) > new Date()
+  const restrictedUntil = parseIranDisplayDate(user.value.trading_restricted_until)
+  return Boolean(restrictedUntil && restrictedUntil > new Date())
 })
 
 const isInactiveAccount = computed(() => user.value?.account_status === 'inactive')
@@ -29,15 +31,7 @@ const isGloballyLockedAccount = computed(() => Boolean(user.value?.global_web_lo
 
 const globalLockGraceExpiresAtText = computed(() => {
   if (!user.value?.global_lock_grace_expires_at) return ''
-  const value = new Date(user.value.global_lock_grace_expires_at)
-  if (Number.isNaN(value.getTime())) return ''
-  return value.toLocaleDateString('fa-IR', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return formatIranDateTime(user.value.global_lock_grace_expires_at)
 })
 
 const inactiveAccountMessage = computed(() => {
@@ -53,12 +47,11 @@ const inactiveAccountMessage = computed(() => {
 
 const restrictedUntil = computed(() => {
   if (!user.value?.trading_restricted_until) return ''
-  const d = new Date(user.value.trading_restricted_until)
-  return d.toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return formatIranDateTime(user.value.trading_restricted_until)
 })
 
 const greeting = computed(() => {
-  const hour = new Date().getHours()
+  const hour = getIranHour()
   if (hour < 12) return 'صبح بخیر'
   if (hour < 17) return 'ظهر بخیر'
   return 'عصر بخیر'

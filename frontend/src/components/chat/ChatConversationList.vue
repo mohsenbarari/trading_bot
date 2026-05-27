@@ -7,6 +7,7 @@ import { discardBackState, popBackState, pushBackState } from '../../composables
 import { buildChatFileUrl, getAvatarInitial } from '../../utils/chatFiles'
 import { getConversationPreviewText } from '../../utils/chatMessagePreview'
 import { isUserOnline } from '../../utils/userPresence'
+import { formatIranTime } from '../../utils/iranTime'
 import {
   ArrowDown,
   ArrowUp,
@@ -57,8 +58,7 @@ const conversationMenuBackStateActive = ref(false)
 let closingConversationMenuFromBack = false
 
 function formatTime(dateStr: string) {
-  const date = new Date(dateStr)
-  return date.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
+  return formatIranTime(dateStr)
 }
 
 function isChannelConversation(conv: Conversation) {

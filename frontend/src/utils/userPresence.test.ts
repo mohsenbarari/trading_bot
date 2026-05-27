@@ -17,8 +17,8 @@ describe('userPresence', () => {
   it('formats minute, today, yesterday, and older statuses', () => {
     const now = new Date('2026-05-22T12:00:00Z')
     expect(formatLastSeenStatus('2026-05-22T11:55:00Z', { now })).toBe('آخرین بازدید 5 دقیقه پیش')
-    expect(formatLastSeenStatus('2026-05-22T09:15:00Z', { now })).toBe('آخرین بازدید امروز 09:15')
-    expect(formatLastSeenStatus('2026-05-21T20:30:00Z', { now })).toBe('آخرین بازدید دیروز 20:30')
+    expect(formatLastSeenStatus('2026-05-22T09:15:00Z', { now })).toBe('آخرین بازدید امروز ۱۲:۴۵')
+    expect(formatLastSeenStatus('2026-05-21T18:30:00Z', { now })).toBe('آخرین بازدید دیروز ۲۲:۰۰')
     expect(formatLastSeenStatus('2026-05-18T08:00:00Z', { now })).toContain('آخرین بازدید')
   })
 

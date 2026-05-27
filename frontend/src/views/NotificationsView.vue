@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useNotificationStore } from '../stores/notifications'
 import { Bell, ChevronLeft, Trash2, Circle, CheckCircle2, Mail, MailOpen } from 'lucide-vue-next'
 import { getNotificationIconComponent } from '../utils/notificationUi'
+import { formatIranTime } from '../utils/iranTime'
 import type { NormalizedAppNotification } from '../types/notifications'
 
 const router = useRouter()
@@ -15,9 +16,7 @@ const goBack = () => {
 }
 
 const formatTime = (ts: any) => {
-  if (!ts) return ''
-  const date = new Date(ts)
-  return date.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
+  return formatIranTime(ts)
 }
 
 type ParsedNotificationLine = {

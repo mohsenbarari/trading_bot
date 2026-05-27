@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { apiFetch } from '../utils/auth'
+import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -82,14 +83,12 @@ function clearEditState() {
 
 function formatDateTime(value: string | null) {
   if (!value) return '---'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('fa-IR')
+  return formatIranDateTime(value) || value
 }
 
 function getRemainingMs(value: string | null) {
   if (!value) return null
-  const timestamp = new Date(value).getTime()
+  const timestamp = parseIranDisplayDate(value)?.getTime() ?? Number.NaN
   if (Number.isNaN(timestamp)) return null
   return timestamp - currentTimeMs.value
 }
