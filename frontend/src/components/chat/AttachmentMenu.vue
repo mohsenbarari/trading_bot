@@ -416,6 +416,7 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch }
 import 'leaflet/dist/leaflet.css'
 import { LCircle, LCircleMarker, LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
 import { popBackState, pushBackState } from '../../composables/useBackButton'
+import { formatIranTime } from '../../utils/iranTime'
 
 // Lazy-load the image editor so Cropper.js (~40KB) and its CSS are only
 // downloaded when the user actually edits an image. Keeps the main Messenger
@@ -1694,11 +1695,11 @@ function stringifyLocationDebugDetails(details?: string | Record<string, unknown
 function pushLocationDebug(label: string, details?: string | Record<string, unknown>) {
   const entry = {
     id: ++locationDebugSequence,
-    time: new Date().toLocaleTimeString('en-GB', {
+    time: formatIranTime(new Date(), {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
-    }),
+    }, 'en-GB'),
     label,
     details: stringifyLocationDebugDetails(details),
   }

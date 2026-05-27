@@ -6,6 +6,7 @@ import { ArrowRight, ChevronLeft } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
 import { useUserProfileTiming } from '../composables/useUserProfileTiming';
 import { isCachedMiddleManager } from '../utils/adminAccess';
+import { formatIranDateTime } from '../utils/iranTime';
 
 const props = defineProps<{
   user: any;
@@ -280,16 +281,13 @@ const isAccountInactive = computed(() => (props.user?.account_status ?? accountS
 
 function formatAccountStatusDate(value: string | null | undefined) {
   if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toLocaleDateString('fa-IR', {
+  return formatIranDateTime(value, {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-    timeZone: 'Asia/Tehran',
-  });
+  }) || null;
 }
 
 const globalLockGraceExpiresAtText = computed(() => formatAccountStatusDate(props.user?.global_lock_grace_expires_at));
