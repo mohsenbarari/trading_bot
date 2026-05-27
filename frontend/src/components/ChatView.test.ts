@@ -491,7 +491,7 @@ describe('ChatView.vue', () => {
     expect(JSON.parse(hooks.buildForwardContent(albumA, 'forwarded', 3))).toMatchObject({ album_id: 'forwarded', album_index: 3 })
     expect(hooks.prepareForwardBatch([601, 602])).toHaveLength(2)
 
-    expect(hooks.formatTime('2026-05-12T10:15:00Z')).toContain('۱۰')
+    expect(hooks.formatTime('2026-05-12T10:15:00Z')).toContain('۱۳')
     expect(hooks.formatDateForSeparator('')).toBe('')
     expect(hooks.isUserOnline(new Date().toISOString())).toBe(true)
     expect(hooks.isUserOnline(null)).toBe(false)

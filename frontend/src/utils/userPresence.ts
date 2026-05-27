@@ -1,3 +1,11 @@
+import {
+  formatIranDate,
+  getIranHourMinute,
+  isTodayInIran,
+  isYesterdayInIran,
+  parseIranDisplayDate,
+} from './iranTime'
+
 type PresenceStatusOptions = {
   now?: Date
   emptyText?: string | null
@@ -6,10 +14,7 @@ type PresenceStatusOptions = {
 const ONLINE_THRESHOLD_MS = 180_000
 
 export function parseLastSeenAt(lastSeen: string | null | undefined): Date | null {
-  if (!lastSeen) return null
-  const serverStr = lastSeen.endsWith('Z') ? lastSeen : `${lastSeen}Z`
-  const parsed = new Date(serverStr)
-  return Number.isNaN(parsed.getTime()) ? null : parsed
+  return parseIranDisplayDate(lastSeen)
 }
 
 export function isUserOnline(lastSeen: string | null | undefined, now: Date = new Date()): boolean {
@@ -35,21 +40,11 @@ export function formatLastSeenStatus(
   }
 
   const isToday = now.getDate() === parsed.getDate()
-    && now.getMonth() === parsed.getMonth()
-    && now.getFullYear() === parsed.getFullYear()
+  const iranHourMinute = getIranHourMinute(parsed)
 
-  const hours = parsed.getHours().toString().padStart(2, '0')
-  const mins = parsed.getMinutes().toString().padStart(2, '0')
+  if (isTodayInIran(parsed, now)) return `آخرین بازدید امروز ${iranHourMinute}`
 
-  if (isToday) return `آخرین بازدید امروز ${hours}:${mins}`
+  if (isYesterdayInIran(parsed, now)) return `آخرین بازدید دیروز ${iranHourMinute}`
 
-  const yesterday = new Date(now)
-  yesterday.setDate(yesterday.getDate() - 1)
-  const isYesterday = yesterday.getDate() === parsed.getDate()
-    && yesterday.getMonth() === parsed.getMonth()
-    && yesterday.getFullYear() === parsed.getFullYear()
-
-  if (isYesterday) return `آخرین بازدید دیروز ${hours}:${mins}`
-
-  return `آخرین بازدید ${parsed.toLocaleDateString('fa-IR')}`
+  return `آخرین بازدید ${formatIranDate(parsed)}`
 }

@@ -260,6 +260,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
 import { AudioRecorder } from '../../utils/audioRecorder'
+import { formatIranTime } from '../../utils/iranTime'
 import {
   countEmojiStickerOccurrences,
   MAX_STICKERS_PER_MESSAGE,
@@ -646,7 +647,7 @@ function captureDebugState(eventName: string, persistEvent = true) {
 
   if (!persistEvent) return
 
-  const timestamp = new Date().toLocaleTimeString('fa-IR', { hour12: false })
+  const timestamp = formatIranTime(new Date(), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
   const compactEntry = `${timestamp} ${eventName} vv=${nextState.visualViewportHeight} kb=${nextState.keyboardHeight} panel=${nextState.panelHeight} spacer=${nextState.spacerHeight} open=${nextState.isPickerOpen ? 1 : 0} focus=${nextState.hasFocus ? 1 : 0}`
   debugTrail.value = [compactEntry, ...debugTrail.value].slice(0, 10)
 }

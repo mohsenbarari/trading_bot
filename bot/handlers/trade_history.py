@@ -24,17 +24,12 @@ from core.services.trade_history_export_service import (
     generate_trade_history_pdf_file,
     resolve_counterparty_account_name_for_perspective,
 )
-import jdatetime
-from datetime import timezone, timedelta
+from core.utils import to_jalali_str
 
-# تایم‌زون ایران (UTC+3:30)
 from bot.callbacks import (
     TradeHistoryCallback, HistoryPageCallback, 
     ExportHistoryCallback, ProfileCallback
 )
-
-# تایم‌زون ایران (UTC+3:30)
-IRAN_TZ = timezone(timedelta(hours=3, minutes=30))
 
 router = Router()
 
@@ -130,10 +125,7 @@ def format_trade_history(trades, target_user, current_user_id: int) -> str:
         trade_emoji = "🟢" if is_buy else "🔴"
         trade_label = "خرید" if is_buy else "فروش"
         
-        # تبدیل به تاریخ شمسی با تایم‌زون ایران
-        created_at_iran = trade.created_at.astimezone(IRAN_TZ) if trade.created_at.tzinfo else trade.created_at
-        jalali_date = jdatetime.datetime.fromgregorian(datetime=created_at_iran)
-        date_str = jalali_date.strftime("%Y/%m/%d %H:%M")
+        date_str = to_jalali_str(trade.created_at, "%Y/%m/%d %H:%M") if trade.created_at else "نامشخص"
         
         text += (
             f"{trade_emoji} {trade_label} {trade.commodity.name} "

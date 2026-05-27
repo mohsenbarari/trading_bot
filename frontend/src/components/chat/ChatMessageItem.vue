@@ -441,17 +441,13 @@ import {
   seedFileCache,
   useFileCacheRegistry,
 } from '../../composables/chat/useChatFileHandler'
+import { formatIranTime } from '../../utils/iranTime'
 
 const { downloadingFiles: cachedDownloadingFiles } = useChatFileHandler()
 // Subscribe to the reactive cached-file registry so `isDocumentCached`
 // re-evaluates whenever a file id is added to or removed from the cache.
 const cachedFileRegistry = useFileCacheRegistry()
 const supportsFileShare = canShareFiles()
-
-const messageTimeFormatter = new Intl.DateTimeFormat('fa-IR', {
-  hour: '2-digit',
-  minute: '2-digit'
-})
 
 const formatBytes = (bytes: number, decimals = 2) => {
   if (!+bytes) return "0 Bytes"
@@ -1681,7 +1677,7 @@ function getIconStyle() {
 // --- Formatting Helpers ---
 function formatTime(dateString: string) {
   if (!dateString) return ''
-  return messageTimeFormatter.format(new Date(dateString))
+  return formatIranTime(dateString)
 }
 
 function getFileId(content: string, parsedContent?: Record<string, any> | null) {

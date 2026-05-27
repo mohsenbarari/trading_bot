@@ -22,6 +22,7 @@ import type { ChatForwardTarget, Conversation, Message, MessageReaction, PinnedM
 import { WS_NOTIFICATION_EVENTS } from '../types/notifications'
 import { useChatMedia } from '../composables/chat/useChatMedia'
 import { useChatWebSocket } from '../composables/chat/useChatWebSocket'
+import { formatIranDate, formatIranTime, isTodayInIran, isYesterdayInIran } from '../utils/iranTime'
 import { useChatMessages } from '../composables/chat/useChatMessages'
 import { useChatScroll } from '../composables/chat/useChatScroll'
 import { useNotificationStore } from '../stores/notifications'
@@ -1407,19 +1408,14 @@ const groupedMessages = computed(() => {
 })
 
 function formatTime(dateStr: string) {
-  const date = new Date(dateStr)
-  return date.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
+  return formatIranTime(dateStr)
 }
 
 function formatDateForSeparator(dateStr: string): string {
     if (!dateStr) return ''
 
-    const date = new Date(dateStr);
-    const now = new Date();
-    if (date.toDateString() === now.toDateString()) return 'امروز';
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    if (date.toDateString() === yesterday.toDateString()) return 'دیروز';
+    if (isTodayInIran(dateStr)) return 'امروز';
+    if (isYesterdayInIran(dateStr)) return 'دیروز';
 
     // `toLocaleDateString('fa-IR', ...)` is expensive on weak devices and
     // `groupedMessages` re-runs on every reactive tick. For non-today/
@@ -1428,7 +1424,7 @@ function formatDateForSeparator(dateStr: string): string {
     const cached = dateSeparatorLabelCache.get(dateStr)
     if (cached !== undefined) return cached
 
-    const label = date.toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' });
+    const label = formatIranDate(dateStr);
     dateSeparatorLabelCache.set(dateStr, label)
     return label
 }

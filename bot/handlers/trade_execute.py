@@ -10,7 +10,7 @@ from models.trade import Trade, TradeType, TradeStatus
 from core.config import settings
 from core.db import AsyncSessionLocal
 from bot.utils.redis_helpers import check_double_click
-from core.utils import check_user_limits, increment_user_counter, create_user_notification
+from core.utils import check_user_limits, increment_user_counter, create_user_notification, to_jalali_str, utc_now
 from core.enums import NotificationLevel, NotificationCategory, UserRole
 from bot.callbacks import ChannelTradeCallback
 from api.routers.realtime import publish_event
@@ -358,13 +358,7 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
             offer_emoji = "🟢" if offer.offer_type == OfferType.BUY else "🔴"
             respond_emoji = "🔴" if offer.offer_type == OfferType.BUY else "🟢"
             
-            # تاریخ و زمان شمسی
-            import jdatetime
-            from datetime import timezone, timedelta
-            iran_tz = timezone(timedelta(hours=3, minutes=30))
-            now = datetime.now(iran_tz)
-            jalali_dt = jdatetime.datetime.fromgregorian(datetime=now)
-            trade_datetime = jalali_dt.strftime("%Y/%m/%d   %H:%M")
+            trade_datetime = to_jalali_str(new_trade.created_at or utc_now(), "%Y/%m/%d   %H:%M")
             
             # لینک پروفایل طرفین
             responder_profile_link = f"https://t.me/{settings.bot_username}?start=profile_{user.id}"
