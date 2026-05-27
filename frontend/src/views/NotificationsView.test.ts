@@ -86,4 +86,50 @@ describe('NotificationsView.vue', () => {
     await wrapper.get('.notif-item').trigger('click')
     expect(routerPushMock).toHaveBeenCalledWith('/users/19?account_name=owner-19')
   })
+
+  it('renders multiline trade notifications as separate structured rows', async () => {
+    const store = useNotificationStore()
+    const tradeBody = [
+      '🔴 فروش',
+      '💰 فی: 189,000',
+      '📦 تعداد: 10',
+      '🏷️ کالا: امام',
+      '👤 طرف معامله: bahar',
+      '🔢 شماره معامله: 10005',
+      '🕐 زمان معامله: 1405/03/06 11:20',
+      '🧭 مسیر: مالک ↔ مشتری سطح ۱',
+    ].join('\n')
+
+    store.appNotifications = [
+      {
+        id: 13,
+        title: 'اعلان معامله',
+        body: tradeBody,
+        content: tradeBody,
+        message: tradeBody,
+        level: 'success',
+        category: 'trade',
+        is_read: false,
+      },
+    ]
+
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+
+    expect(wrapper.find('.notif-text').exists()).toBe(false)
+    expect(wrapper.find('.notif-line-plain').text()).toContain('فروش')
+    expect(wrapper.findAll('.notif-line-field')).toHaveLength(7)
+    expect(wrapper.findAll('.notif-line-label').map((node) => node.text())).toEqual([
+      'فی',
+      'تعداد',
+      'کالا',
+      'طرف معامله',
+      'شماره معامله',
+      'زمان معامله',
+      'مسیر',
+    ])
+    expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۱')
+  })
 })

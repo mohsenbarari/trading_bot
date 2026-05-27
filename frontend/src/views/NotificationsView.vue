@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useNotificationStore } from '../stores/notifications'
 import { Bell, ChevronLeft, Trash2, Circle, CheckCircle2, Mail, MailOpen } from 'lucide-vue-next'
 import { getNotificationIconComponent } from '../utils/notificationUi'
+import type { NormalizedAppNotification } from '../types/notifications'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
@@ -19,6 +20,55 @@ const formatTime = (ts: any) => {
   return date.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
 }
 
+type ParsedNotificationLine = {
+  icon: string
+  text: string
+  label: string
+  value: string
+  isField: boolean
+}
+
+const parseNotificationLine = (rawLine: string): ParsedNotificationLine | null => {
+  const trimmed = rawLine.trim()
+  if (!trimmed) return null
+
+  const iconMatch = trimmed.match(/^(\S+)\s+(.*)$/)
+  const icon = iconMatch?.[1] || ''
+  const remainder = (iconMatch?.[2] || trimmed).trim()
+  const colonIndex = remainder.indexOf(':')
+
+  if (colonIndex === -1) {
+    return {
+      icon,
+      text: remainder,
+      label: '',
+      value: '',
+      isField: false,
+    }
+  }
+
+  return {
+    icon,
+    text: '',
+    label: remainder.slice(0, colonIndex).trim(),
+    value: remainder.slice(colonIndex + 1).trim(),
+    isField: true,
+  }
+}
+
+const getNotificationLines = (notification: NormalizedAppNotification): ParsedNotificationLine[] => {
+  const body = notification.content || notification.body || ''
+  return body
+    .split(/\r?\n+/)
+    .map(parseNotificationLine)
+    .filter((line): line is ParsedNotificationLine => line !== null)
+}
+
+const shouldUseStructuredLines = (notification: NormalizedAppNotification): boolean => {
+  const body = notification.content || notification.body || ''
+  return body.includes('\n') || notification.category === 'trade'
+}
+
 const clearAll = async () => {
   if (isClearingAll.value || notificationStore.appNotifications.length === 0) return
   isClearingAll.value = true
@@ -29,7 +79,7 @@ const clearAll = async () => {
   }
 }
 
-const openNotificationRoute = (notification: { route?: unknown }) => {
+const openNotificationRoute = (notification: NormalizedAppNotification) => {
   const routePath = typeof notification.route === 'string' ? notification.route.trim() : ''
   if (!routePath) return
   router.push(routePath)
@@ -92,7 +142,23 @@ onMounted(async () => {
           </div>
           <div class="notif-body">
             <h3 class="notif-title">{{ notif.title || 'اعلان جدید' }}</h3>
-            <p class="notif-text">{{ notif.content || notif.body }}</p>
+            <div v-if="shouldUseStructuredLines(notif)" class="notif-lines" :class="{ 'is-trade-lines': notif.category === 'trade' }">
+              <div
+                v-for="(line, lineIndex) in getNotificationLines(notif)"
+                :key="`${notif.id}-line-${lineIndex}`"
+                class="notif-line"
+                :class="line.isField ? 'notif-line-field' : 'notif-line-plain'"
+              >
+                <span v-if="line.icon" class="notif-line-icon" aria-hidden="true">{{ line.icon }}</span>
+                <template v-if="line.isField">
+                  <span class="notif-line-label">{{ line.label }}</span>
+                  <span class="notif-line-separator">:</span>
+                  <bdi class="notif-line-value">{{ line.value }}</bdi>
+                </template>
+                <bdi v-else class="notif-line-text">{{ line.text }}</bdi>
+              </div>
+            </div>
+            <p v-else class="notif-text">{{ notif.content || notif.body }}</p>
             <span class="notif-time">{{ formatTime(notif.created_at || notif.client_received_at) }}</span>
           </div>
         </div>
@@ -232,8 +298,9 @@ onMounted(async () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.45rem;
   padding-left: 1.5rem; /* Space for actions */
+  min-width: 0;
 }
 
 .notif-title {
@@ -248,6 +315,72 @@ onMounted(async () => {
   color: var(--ds-text-secondary);
   margin: 0;
   line-height: 1.5;
+  white-space: pre-line;
+  unicode-bidi: plaintext;
+}
+
+.notif-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.notif-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  min-width: 0;
+  unicode-bidi: plaintext;
+}
+
+.notif-line-field {
+  flex-wrap: wrap;
+  padding: 0.55rem 0.75rem;
+  border-radius: 14px;
+  background: var(--ds-bg-page);
+  border: 1px solid var(--ds-border-light);
+}
+
+.notif-line-plain {
+  font-size: var(--ds-font-base);
+  font-weight: 700;
+  color: var(--ds-text-primary);
+}
+
+.notif-lines.is-trade-lines .notif-line-field {
+  background: color-mix(in srgb, var(--ds-bg-page) 84%, var(--ds-primary-50) 16%);
+}
+
+.notif-line-icon {
+  flex: 0 0 auto;
+  line-height: 1.4;
+}
+
+.notif-line-label {
+  font-size: var(--ds-font-sm);
+  font-weight: 700;
+  color: var(--ds-text-primary);
+}
+
+.notif-line-separator {
+  color: var(--ds-text-muted);
+  font-weight: 700;
+}
+
+.notif-line-value,
+.notif-line-text {
+  min-width: 0;
+  line-height: 1.6;
+  color: var(--ds-text-secondary);
+}
+
+.notif-line-value {
+  font-size: var(--ds-font-sm);
+}
+
+.notif-line-text {
+  font-size: var(--ds-font-base);
+  color: var(--ds-text-primary);
 }
 
 .notif-time {
@@ -255,5 +388,21 @@ onMounted(async () => {
   color: var(--ds-text-placeholder);
   margin-top: 0.25rem;
   font-weight: 500;
+  align-self: flex-start;
+}
+
+@media (max-width: 640px) {
+  .notif-item {
+    padding: 1rem;
+  }
+
+  .notif-body {
+    padding-left: 0;
+    padding-top: 2.75rem;
+  }
+
+  .notif-actions {
+    opacity: 1;
+  }
 }
 </style>
