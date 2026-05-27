@@ -45,7 +45,10 @@ class StaticSurfaceSmokeTests(unittest.TestCase):
         self.assertGreaterEqual(len(mbtiles_files), 2)
         self.assertTrue((map_data_dir / 'sources').is_dir())
         self.assertTrue((pip_packages_dir / '.requirements_hash').exists())
-        self.assertGreaterEqual(len(wheel_files), 20)
+        self.assertTrue(
+            len(wheel_files) >= 20 or (pip_packages_dir / '.gitkeep').exists(),
+            msg='pip_packages should either contain the local wheel cache or the tracked placeholder for CI checkouts',
+        )
 
     def test_root_src_and_optional_generated_artifact_dirs_are_well_formed(self):
         src_dir = REPO_ROOT / 'src'

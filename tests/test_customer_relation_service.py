@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 from fastapi import HTTPException
 
+from core.services import customer_relation_service
 from core.services.customer_relation_service import (
     apply_customer_commission,
     build_allowed_customer_chat_targets,
@@ -228,6 +229,12 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, {invitation.token: invitation})
 
+    async def test_owner_lookup_and_invitation_map_empty_inputs_return_none_or_empty(self):
+        relation_db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=None)])
+
+        self.assertIsNone(await get_owner_for_customer(relation_db, 9))
+        self.assertEqual(await load_customer_relation_invitation_map(FakeDB(), ["", None, "   "]), {})
+
     async def test_unlink_owner_customer_relation_soft_deletes_active_customer_and_marks_relation_deleted(self):
         customer_user = SimpleNamespace(id=81, is_deleted=False)
         relation = SimpleNamespace(
@@ -285,6 +292,96 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once()
         self.assertEqual(db.refresh.await_count, 2)
 
+    async def test_create_owner_customer_relation_rejects_invalid_identity_inputs(self):
+        owner = SimpleNamespace(id=7, max_customers=4)
+
+        with self.assertRaises(HTTPException) as account_exc:
+            await create_owner_customer_relation(
+                FakeDB(),
+                owner_user=owner,
+                account_name="   ",
+                management_name="مشتری",
+                mobile_number="09120000000",
+            )
+        self.assertEqual(account_exc.exception.detail, "نام کاربری نامعتبر است")
+
+        with self.assertRaises(HTTPException) as name_exc:
+            await create_owner_customer_relation(
+                FakeDB(),
+                owner_user=owner,
+                account_name="customer_one",
+                management_name="   ",
+                mobile_number="09120000000",
+            )
+        self.assertEqual(name_exc.exception.detail, "نام مدیریتی مشتری الزامی است")
+
+        with self.assertRaises(HTTPException) as mobile_exc:
+            await create_owner_customer_relation(
+                FakeDB(),
+                owner_user=owner,
+                account_name="customer_one",
+                management_name="مشتری",
+                mobile_number="0912",
+            )
+        self.assertEqual(mobile_exc.exception.detail, "شماره موبایل نامعتبر است")
+
+    async def test_create_owner_customer_relation_rejects_duplicate_user_relation_and_management_name(self):
+        owner = SimpleNamespace(id=7, max_customers=4)
+
+        duplicate_user_db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[]),
+                FakeExecuteResult(scalar_one_value=1),
+                FakeExecuteResult(scalar_one_value=SimpleNamespace(id=90)),
+            ]
+        )
+        with self.assertRaises(HTTPException) as user_exc:
+            await create_owner_customer_relation(
+                duplicate_user_db,
+                owner_user=owner,
+                account_name="customer_one",
+                management_name="مشتری",
+                mobile_number="09120000000",
+            )
+        self.assertEqual(user_exc.exception.detail, "کاربری با این نام کاربری یا موبایل قبلاً ثبت شده است")
+
+        duplicate_relation_db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[]),
+                FakeExecuteResult(scalar_one_value=1),
+                FakeExecuteResult(scalar_one_value=None),
+                FakeExecuteResult(scalar_one_value=SimpleNamespace(id=91)),
+            ]
+        )
+        with self.assertRaises(HTTPException) as relation_exc:
+            await create_owner_customer_relation(
+                duplicate_relation_db,
+                owner_user=owner,
+                account_name="customer_two",
+                management_name="مشتری دوم",
+                mobile_number="09120000001",
+            )
+        self.assertEqual(relation_exc.exception.detail, "یک مشتری pending یا active با این نام کاربری یا موبایل وجود دارد")
+
+        duplicate_management_db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(values=[]),
+                FakeExecuteResult(scalar_one_value=1),
+                FakeExecuteResult(scalar_one_value=None),
+                FakeExecuteResult(scalar_one_value=None),
+                FakeExecuteResult(scalar_one_value=SimpleNamespace(id=92)),
+            ]
+        )
+        with self.assertRaises(HTTPException) as management_exc:
+            await create_owner_customer_relation(
+                duplicate_management_db,
+                owner_user=owner,
+                account_name="customer_three",
+                management_name="مشتری مشترک",
+                mobile_number="09120000002",
+            )
+        self.assertEqual(management_exc.exception.detail, "این نام مدیریتی قبلاً برای یکی از مشتریان این مالک استفاده شده است")
+
     async def test_cancel_pending_customer_relation_revokes_relation_and_marks_invitation_used(self):
         relation = SimpleNamespace(
             id=9,
@@ -309,6 +406,107 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(relation.deleted_at)
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(relation)
+
+    async def test_cancel_unlink_and_update_relation_guard_paths(self):
+        with self.assertRaises(HTTPException) as cancel_missing_exc:
+            await cancel_pending_customer_relation(
+                FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=None)]),
+                owner_user_id=7,
+                relation_id=1,
+            )
+        self.assertEqual(cancel_missing_exc.exception.detail, "رابطه مشتری یافت نشد")
+
+        closed_pending = SimpleNamespace(
+            id=2,
+            owner_user_id=7,
+            status=CustomerRelationStatus.ACTIVE,
+            deleted_at=None,
+        )
+        with self.assertRaises(HTTPException) as cancel_closed_exc:
+            await cancel_pending_customer_relation(
+                FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=closed_pending)]),
+                owner_user_id=7,
+                relation_id=2,
+            )
+        self.assertEqual(cancel_closed_exc.exception.detail, "فقط دعوت مشتری pending قابل لغو است")
+
+        with self.assertRaises(HTTPException) as unlink_missing_exc:
+            await unlink_owner_customer_relation(
+                FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=None)]),
+                owner_user_id=7,
+                relation_id=3,
+            )
+        self.assertEqual(unlink_missing_exc.exception.detail, "رابطه مشتری یافت نشد")
+
+        closed_relation = SimpleNamespace(
+            id=4,
+            owner_user_id=7,
+            status=CustomerRelationStatus.EXPIRED,
+            deleted_at=None,
+            customer_user=None,
+        )
+        with self.assertRaises(HTTPException) as unlink_closed_exc:
+            await unlink_owner_customer_relation(
+                FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=closed_relation)]),
+                owner_user_id=7,
+                relation_id=4,
+            )
+        self.assertEqual(unlink_closed_exc.exception.detail, "این رابطه قبلاً بسته شده است")
+
+        pending_relation = SimpleNamespace(
+            id=5,
+            owner_user_id=7,
+            status=CustomerRelationStatus.PENDING,
+            deleted_at=None,
+            customer_user=None,
+        )
+        pending_db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=pending_relation)])
+        with patch(
+            "core.services.customer_relation_service.cancel_pending_customer_relation",
+            new=AsyncMock(return_value="cancelled"),
+        ) as cancel_mock:
+            result = await unlink_owner_customer_relation(pending_db, owner_user_id=7, relation_id=5)
+        self.assertEqual(result, "cancelled")
+        cancel_mock.assert_awaited_once_with(pending_db, owner_user_id=7, relation_id=5)
+
+        invalid_active_state = SimpleNamespace(
+            id=6,
+            owner_user_id=7,
+            status="unexpected",
+            deleted_at=None,
+            customer_user=None,
+        )
+        with self.assertRaises(HTTPException) as unlink_invalid_exc:
+            await unlink_owner_customer_relation(
+                FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=invalid_active_state)]),
+                owner_user_id=7,
+                relation_id=6,
+            )
+        self.assertEqual(unlink_invalid_exc.exception.detail, "فقط مشتری pending یا active قابل قطع ارتباط است")
+
+        with self.assertRaises(HTTPException) as update_missing_exc:
+            await update_owner_customer_relation(
+                FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=None)]),
+                owner_user_id=7,
+                relation_id=7,
+                update_data={},
+            )
+        self.assertEqual(update_missing_exc.exception.detail, "رابطه مشتری یافت نشد")
+
+        update_closed_relation = SimpleNamespace(
+            id=8,
+            owner_user_id=7,
+            status=CustomerRelationStatus.DELETED,
+            deleted_at=utc_now().replace(tzinfo=None),
+        )
+        with self.assertRaises(HTTPException) as update_closed_exc:
+            await update_owner_customer_relation(
+                FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=update_closed_relation)]),
+                owner_user_id=7,
+                relation_id=8,
+                update_data={},
+            )
+        self.assertEqual(update_closed_exc.exception.detail, "فقط مشتری pending یا active قابل ویرایش است")
 
     async def test_update_owner_customer_relation_updates_limits_and_clears_commission_for_tier1(self):
         relation = SimpleNamespace(
@@ -382,6 +580,57 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             apply_customer_commission(50000, "bad", OfferType.BUY)
         with self.assertRaises(ValueError):
             round_customer_price("50000", "invalid")
+
+    def test_customer_normalizer_helpers_cover_invalid_ranges(self):
+        with self.assertRaises(ValueError):
+            customer_relation_service._normalize_non_negative_int("bad", name="quantity")
+        with self.assertRaises(ValueError):
+            customer_relation_service._normalize_non_negative_int(-1, name="quantity")
+
+        with self.assertRaises(HTTPException) as exc_info:
+            customer_relation_service._normalize_customer_tier_input("bad-tier")
+        self.assertEqual(exc_info.exception.detail, "سطح مشتری نامعتبر است")
+
+        self.assertIsNone(
+            customer_relation_service._normalize_customer_commission_rate(
+                None,
+                customer_tier=CustomerTier.TIER_2,
+            )
+        )
+        self.assertIsNone(
+            customer_relation_service._normalize_customer_commission_rate(
+                "",
+                customer_tier=CustomerTier.TIER_2,
+            )
+        )
+        self.assertIsNone(
+            customer_relation_service._normalize_customer_commission_rate(
+                "1.5",
+                customer_tier=CustomerTier.TIER_1,
+            )
+        )
+
+        with self.assertRaises(HTTPException) as invalid_rate_exc:
+            customer_relation_service._normalize_customer_commission_rate(
+                "bad",
+                customer_tier=CustomerTier.TIER_2,
+            )
+        self.assertEqual(invalid_rate_exc.exception.detail, "نرخ کارمزد مشتری نامعتبر است")
+
+        with self.assertRaises(HTTPException) as range_exc:
+            customer_relation_service._normalize_customer_commission_rate(
+                "101",
+                customer_tier=CustomerTier.TIER_2,
+            )
+        self.assertEqual(range_exc.exception.detail, "نرخ کارمزد مشتری باید بین ۰ تا ۱۰۰ باشد")
+
+        self.assertIsNone(customer_relation_service._normalize_optional_customer_limit("", name="حداکثر"))
+        with self.assertRaises(HTTPException):
+            customer_relation_service._normalize_optional_customer_limit("bad", name="حداکثر")
+        with self.assertRaises(HTTPException):
+            customer_relation_service._normalize_optional_customer_limit(-1, name="حداکثر")
+        with self.assertRaises(HTTPException):
+            customer_relation_service._validate_customer_trade_limit_bounds(min_trade_quantity=5, max_trade_quantity=4)
 
     def test_build_customer_offer_read_model_keeps_tier1_prices_and_owner_only_badge(self):
         owner_relation = SimpleNamespace(
@@ -515,6 +764,19 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(owner_relation_map, {12: owner_relation})
         self.assertIs(resolved_viewer_relation, viewer_relation)
 
+    async def test_load_offer_customer_read_context_skips_invalid_owner_ids(self):
+        owner_relation = SimpleNamespace(customer_user_id=9, owner_user_id=7, status=CustomerRelationStatus.ACTIVE)
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[owner_relation])])
+
+        owner_relation_map, viewer_relation = await load_offer_customer_read_context(
+            db,
+            offer_owner_user_ids=[None, "bad", 0, -1, 9, 9],
+            viewer_user_id=None,
+        )
+
+        self.assertEqual(owner_relation_map, {9: owner_relation})
+        self.assertIsNone(viewer_relation)
+
     def test_validate_customer_trade_limits_accepts_valid_relation(self):
         relation = SimpleNamespace(
             status=CustomerRelationStatus.ACTIVE,
@@ -576,6 +838,24 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             validate_customer_trade_limits(capped_relation, quantity=16, trades_today=1, commodity_volume_today=15, now=now)
         self.assertEqual(exc_info.exception.detail, "Customer has reached the daily commodity volume limit")
 
+    def test_validate_customer_trade_limits_rejects_missing_relation_and_non_positive_quantity(self):
+        now = utc_now().replace(tzinfo=None)
+        with self.assertRaises(HTTPException) as missing_exc:
+            validate_customer_trade_limits(None, quantity=5, now=now)
+        self.assertEqual(missing_exc.exception.detail, "Customer relation is required")
+
+        active_relation = SimpleNamespace(
+            status=CustomerRelationStatus.ACTIVE,
+            trading_restricted_until=None,
+            min_trade_quantity=None,
+            max_trade_quantity=None,
+            max_daily_trades=None,
+            max_daily_commodity_volume=None,
+        )
+        with self.assertRaises(HTTPException) as quantity_exc:
+            validate_customer_trade_limits(active_relation, quantity=0, now=now)
+        self.assertEqual(quantity_exc.exception.detail, "Trade quantity must be positive")
+
     async def test_build_allowed_customer_chat_targets_includes_owner_accountants_and_super_admin_without_customers(self):
         relation = SimpleNamespace(owner_user_id=7)
         db = FakeDB(
@@ -589,6 +869,11 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         result = await build_allowed_customer_chat_targets(db, 9)
 
         self.assertEqual(result, [7, 11, 12, 40])
+
+    async def test_build_allowed_customer_chat_targets_returns_empty_without_relation(self):
+        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=None)])
+
+        self.assertEqual(await build_allowed_customer_chat_targets(db, 9), [])
 
 
 if __name__ == "__main__":

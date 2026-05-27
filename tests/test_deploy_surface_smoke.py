@@ -164,6 +164,10 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         for old, new in replacements.items():
             sanitized_config = sanitized_config.replace(old, new)
 
+        server_name_line = '    server_name coin.362514.ir mini-app.362514.ir;'
+        sanitized_config = sanitized_config.replace(server_name_line, '    server_name coverage-primary.test;', 1)
+        sanitized_config = sanitized_config.replace(server_name_line, '    server_name coverage-secondary.test;', 1)
+
         wrapper_config = f'events {{}}\nhttp {{\n{sanitized_config}\n}}\n'
 
         with tempfile.TemporaryDirectory() as temp_dir:

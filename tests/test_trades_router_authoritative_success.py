@@ -402,9 +402,8 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(str(exc_info.exception), "db boom")
 
-    async def test_execute_trade_authoritatively_stamps_actor_user_id_for_accountant_context(self):
+    async def test_execute_trade_authoritatively_uses_owner_actor_id_for_standard_context(self):
         owner_user = make_user(id=5, account_name="owner", telegram_id=555)
-        actor_user = make_user(id=44, account_name="accountant", telegram_id=444)
         offer = make_offer()
         reloaded_trade = SimpleNamespace(id=91)
         db = FakeDB(
@@ -424,7 +423,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             return_value=(True, None, 4, []),
         ), patch(
             "api.routers.trades.build_trade_notification_audience_user_ids",
-            new=AsyncMock(side_effect=[[owner_user.id, actor_user.id], [offer.user_id]]),
+            new=AsyncMock(side_effect=[[owner_user.id], [offer.user_id]]),
         ), patch(
             "api.routers.trades.load_accountant_chat_identity_map",
             new=AsyncMock(return_value={}),
@@ -442,16 +441,15 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                 TradeCreate(offer_id=7, quantity=4),
                 BackgroundTasks(),
                 db=db,
-                context=make_context(owner_user, actor_user),
+                context=make_context(owner_user),
             )
 
         new_trade = db.added[0]
         self.assertEqual(new_trade.responder_user_id, owner_user.id)
-        self.assertEqual(new_trade.actor_user_id, actor_user.id)
-        self.assertEqual(notif_mock.await_count, 3)
+        self.assertEqual(new_trade.actor_user_id, owner_user.id)
+        self.assertEqual(notif_mock.await_count, 2)
         self.assertEqual(notif_mock.await_args_list[0].args[1], owner_user.id)
-        self.assertEqual(notif_mock.await_args_list[1].args[1], actor_user.id)
-        self.assertEqual(notif_mock.await_args_list[2].args[1], offer.user_id)
+        self.assertEqual(notif_mock.await_args_list[1].args[1], offer.user_id)
         counter_mock.assert_awaited_once_with(db, owner_user, "trade", 4)
         self.assertEqual(publish_mock.await_args_list[0].args[1]["responder_user_id"], owner_user.id)
         self.assertEqual(result, {"id": 91, "trade_number": 10004})
@@ -1848,7 +1846,6 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_execute_trade_authoritatively_fans_out_notifications_to_both_owner_sides(self):
         owner_user = make_user(id=5, account_name="owner_principal", telegram_id=555)
-        actor_user = make_user(id=44, account_name="delegate_actor", telegram_id=444)
         offer = make_offer(user_id=9)
         offer_side_accountant_id = 77
         reloaded_trade = SimpleNamespace(id=92)
@@ -1869,7 +1866,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             return_value=(True, None, 4, []),
         ), patch(
             "api.routers.trades.build_trade_notification_audience_user_ids",
-            new=AsyncMock(side_effect=[[owner_user.id, actor_user.id], [offer.user_id, offer_side_accountant_id]]),
+            new=AsyncMock(side_effect=[[owner_user.id], [offer.user_id, offer_side_accountant_id]]),
         ) as audience_mock, patch(
             "api.routers.trades.load_accountant_chat_identity_map",
             new=AsyncMock(return_value={}),
@@ -1890,18 +1887,17 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                 TradeCreate(offer_id=7, quantity=4),
                 BackgroundTasks(),
                 db=db,
-                context=make_context(owner_user, actor_user),
+                context=make_context(owner_user),
             )
 
         self.assertEqual(audience_mock.await_count, 2)
         self.assertEqual(
             [call.args[1] for call in notif_mock.await_args_list],
-            [owner_user.id, actor_user.id, offer.user_id, offer_side_accountant_id],
+            [owner_user.id, offer.user_id, offer_side_accountant_id],
         )
 
     async def test_execute_trade_authoritatively_keeps_counterpart_payloads_on_owner_principal(self):
         owner_user = make_user(id=5, account_name="owner_principal", telegram_id=555)
-        actor_user = make_user(id=44, account_name="delegate_actor", telegram_id=444)
         offer = make_offer(
             user_id=9,
             user=SimpleNamespace(account_name="seller_principal", mobile_number="09125555555", telegram_id=999),
@@ -1925,7 +1921,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             return_value=(True, None, 4, []),
         ), patch(
             "api.routers.trades.build_trade_notification_audience_user_ids",
-            new=AsyncMock(side_effect=[[owner_user.id, actor_user.id], [offer.user_id]]),
+            new=AsyncMock(side_effect=[[owner_user.id], [offer.user_id]]),
         ), patch(
             "api.routers.trades.load_accountant_chat_identity_map",
             new=AsyncMock(return_value={}),
@@ -1946,22 +1942,19 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                 TradeCreate(offer_id=7, quantity=4),
                 background_tasks,
                 db=db,
-                context=make_context(owner_user, actor_user),
+                context=make_context(owner_user),
             )
 
         notification_messages = {call.args[1]: call.args[2] for call in notif_mock.await_args_list}
         self.assertIn(owner_user.account_name, notification_messages[offer.user_id])
-        self.assertNotIn(actor_user.account_name, notification_messages[offer.user_id])
 
         trade_created_payload = publish_mock.await_args_list[0].args[1]
         self.assertEqual(trade_created_payload["responder_user_id"], owner_user.id)
         self.assertEqual(trade_created_payload["responder_user_name"], owner_user.account_name)
         self.assertNotIn("actor_user_id", trade_created_payload)
-        self.assertNotIn(actor_user.account_name, str(trade_created_payload))
 
         owner_side_telegram_task = next(task for task in background_tasks.tasks if task.args[0] == offer.user.telegram_id)
         self.assertIn(owner_user.account_name, owner_side_telegram_task.args[1])
-        self.assertNotIn(actor_user.account_name, owner_side_telegram_task.args[1])
 
     async def test_execute_trade_authoritatively_uses_relation_aware_counterparty_labels_in_payloads_and_notifications(self):
         owner_user = make_user(id=5, account_name="owner_principal", telegram_id=555)

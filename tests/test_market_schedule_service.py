@@ -1,8 +1,9 @@
 import json
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 import unittest
 
+from core.services import market_schedule_service
 from core.services.market_schedule_service import evaluate_market_schedule
 from core.trading_settings import TradingSettings
 from models.market_schedule_override import MarketScheduleOverride, MarketScheduleOverrideType
@@ -117,6 +118,92 @@ class MarketScheduleServiceTests(unittest.TestCase):
 
         self.assertEqual(dumped["market_timezone"], "Asia/Tehran")
         self.assertEqual(dumped["market_closed_weekdays"], [4, 5])
+
+    def test_timezone_and_parsing_helpers_fall_back_safely(self):
+        self.assertEqual(
+            market_schedule_service.get_market_timezone_name(TradingSettings(market_timezone="   ")),
+            "Asia/Tehran",
+        )
+        self.assertEqual(
+            market_schedule_service.get_market_timezone_name(TradingSettings(market_timezone="Bad/Timezone")),
+            "Asia/Tehran",
+        )
+        self.assertEqual(
+            str(market_schedule_service.get_market_timezone(TradingSettings(market_timezone="Asia/Tehran"))),
+            "Asia/Tehran",
+        )
+        self.assertIsNone(market_schedule_service._parse_local_time(None))
+        self.assertIsNone(market_schedule_service._parse_local_time("   "))
+        self.assertIsNone(market_schedule_service._parse_local_time("not-a-time"))
+        self.assertEqual(market_schedule_service._parse_local_time("08:45"), time(8, 45))
+
+    def test_helper_normalization_and_transition_candidates_cover_invalid_inputs(self):
+        settings = TradingSettings.model_construct(
+            market_schedule_enabled=True,
+            market_open_time_local="09:00",
+            market_close_time_local="17:00",
+            market_closed_weekdays=[0, "2", "bad", -1, 9],
+            market_timezone="Asia/Tehran",
+        )
+        tz = ZoneInfo("Asia/Tehran")
+        valid_override = MarketScheduleOverride(
+            date=date(2026, 5, 26),
+            override_type=MarketScheduleOverrideType.OPEN_ALL_DAY,
+        )
+        overrides_by_date = market_schedule_service._override_mapping(
+            [valid_override, type("NoDateOverride", (), {"date": None})()]
+        )
+
+        self.assertEqual(market_schedule_service._normalize_closed_weekdays(settings), {0, 2})
+        self.assertEqual(overrides_by_date, {date(2026, 5, 26): valid_override})
+        self.assertEqual(
+            market_schedule_service._coerce_local_datetime(datetime(2026, 5, 24, 10, 0), tz),
+            datetime(2026, 5, 24, 10, 0, tzinfo=tz),
+        )
+        aware_utc = datetime(2026, 5, 24, 6, 30, tzinfo=timezone.utc)
+        self.assertEqual(
+            market_schedule_service._coerce_local_datetime(aware_utc, tz),
+            aware_utc.astimezone(tz),
+        )
+
+        candidates = market_schedule_service._candidate_transition_datetimes(
+            datetime(2026, 5, 24, 8, 0, tzinfo=tz),
+            settings,
+            {},
+        )
+        self.assertIn(datetime(2026, 5, 24, 9, 0, tzinfo=tz), candidates)
+        self.assertIn(datetime(2026, 5, 24, 17, 0, tzinfo=tz), candidates)
+        self.assertIn(datetime(2026, 5, 25, 0, 0, tzinfo=tz), candidates)
+
+    def test_reason_and_next_transition_cover_after_close_and_invalid_custom_hours(self):
+        tz = ZoneInfo("Asia/Tehran")
+        settings = TradingSettings(
+            market_schedule_enabled=True,
+            market_open_time_local="09:00",
+            market_close_time_local="17:00",
+        )
+        after_close = datetime(2026, 5, 24, 18, 0, tzinfo=tz)
+        day_rule = market_schedule_service._resolve_day_rule(after_close.date(), settings, {})
+        self.assertEqual(market_schedule_service._reason_for_local_time(after_close, day_rule), "after_daily_window_close")
+        self.assertEqual(
+            market_schedule_service._next_transition_at(after_close, settings, {}),
+            datetime(2026, 5, 25, 9, 0, tzinfo=tz),
+        )
+
+        invalid_custom_rule = market_schedule_service._resolve_day_rule(
+            date(2026, 5, 25),
+            settings,
+            {
+                date(2026, 5, 25): MarketScheduleOverride(
+                    date=date(2026, 5, 25),
+                    override_type=MarketScheduleOverrideType.CUSTOM_HOURS,
+                    open_time_local=time(15, 0),
+                    close_time_local=time(12, 0),
+                )
+            },
+        )
+        self.assertEqual(invalid_custom_rule.source, "invalid_schedule")
+        self.assertFalse(market_schedule_service._is_open_for_rule(after_close, invalid_custom_rule))
 
 
 if __name__ == "__main__":
