@@ -11,6 +11,9 @@ set -e
 PROJECT_DIR="/root/trading-bot/trading_bot"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 DIST_DIR="$PROJECT_DIR/mini_app_dist"
+TIMEZONE_SCRIPT="$PROJECT_DIR/scripts/ensure_host_timezone.sh"
+FOREIGN_HOST_TIMEZONE="${FOREIGN_HOST_TIMEZONE:-UTC}"
+IRAN_HOST_TIMEZONE="${IRAN_HOST_TIMEZONE:-UTC}"
 
 IRAN_HOST="87.107.110.68"
 IRAN_USER="root"
@@ -25,6 +28,16 @@ ssh_iran() {
 
 scp_iran() {
     scp -r -o StrictHostKeyChecking=no "$@"
+}
+
+ensure_local_host_timezone() {
+    print_header "🕒 Ensuring local host timezone (${FOREIGN_HOST_TIMEZONE})"
+    bash "$TIMEZONE_SCRIPT" "$FOREIGN_HOST_TIMEZONE"
+}
+
+ensure_iran_host_timezone() {
+    print_header "🕒 Ensuring Iran host timezone (${IRAN_HOST_TIMEZONE})"
+    ssh_iran "bash -s -- '$IRAN_HOST_TIMEZONE'" < "$TIMEZONE_SCRIPT"
 }
 
 print_header() {
@@ -249,6 +262,8 @@ deploy_iran() {
     print_header "🇮🇷 Deploying to Iran Server ($IRAN_HOST)"
 
     cd "$PROJECT_DIR"
+    ensure_iran_host_timezone
+
     # 2a. Check for uncommitted changes & push to GitHub
     echo "📤 Syncing code via git..."
     if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -300,6 +315,8 @@ deploy_foreign() {
     local core_services=(db redis migration app bot)
 
     cd "$PROJECT_DIR"
+    ensure_local_host_timezone
+
     echo "⏳ Building Docker image explicitly to prevent compose parallel export OOM..."
     run_with_local_resource_guard "Foreign Docker image build" env DOCKER_BUILDKIT=1 docker build -t trading_bot_base .
 
