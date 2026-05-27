@@ -1261,7 +1261,6 @@ async def _execute_trade_authoritatively(
     انجام معامله روی یک لفظ از MiniApp
     """
     from core.enums import UserRole
-    import jdatetime
     owner_user = context.owner_user
     actor_user = context.actor_user
     _ensure_accountant_market_access_allowed(context)
@@ -1646,9 +1645,8 @@ async def _execute_trade_authoritatively(
         logger.error(f"Failed to update channel buttons: {e}")
     
     # ارسال نوتیفیکیشن‌ها
-    now = datetime.utcnow()
-    jalali_dt = jdatetime.datetime.fromgregorian(datetime=now)
-    trade_datetime = jalali_dt.strftime("%Y/%m/%d   %H:%M")
+    trade_timestamp = getattr(response_trade, "created_at", None) or getattr(created_trade, "created_at", None) or datetime.now(timezone.utc)
+    trade_datetime = to_jalali_str(trade_timestamp, "%Y/%m/%d   %H:%M") or ""
     
     # تعیین نوع و ایموجی
     if responder_trade_type == TradeType.BUY:

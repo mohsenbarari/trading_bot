@@ -10,6 +10,7 @@ import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIde
 import { apiFetch } from '../utils/auth';
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
 import { formatLastSeenStatus, isUserOnline as isPresenceOnline } from '../utils/userPresence';
+import { formatIranDate } from '../utils/iranTime';
 
 const props = defineProps<{
   user: { id: number; account_name: string } | null;
@@ -466,9 +467,11 @@ function toDateInputValue(value: Date) {
 
 function formatHistoryDateLabel(value: string) {
   if (!value) return '';
-  const normalized = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(normalized.getTime())) return value;
-  return normalized.toLocaleDateString('fa-IR-u-ca-persian');
+  return formatIranDate(`${value}T00:00:00Z`, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  }, 'fa-IR-u-ca-persian') || value;
 }
 
 function buildHistoryQueryKey() {

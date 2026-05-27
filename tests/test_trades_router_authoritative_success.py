@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -151,7 +152,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         locked_user = make_user()
         context = make_context(locked_user)
         offer = make_offer()
-        reloaded_trade = SimpleNamespace(id=88)
+        reloaded_trade = SimpleNamespace(id=88, created_at=datetime(2026, 5, 27, 12, 0, tzinfo=timezone.utc))
         db = FakeDB(
             get_results=[offer],
             execute_results=[
@@ -211,7 +212,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("|", responder_notification_message)
         self.assertIn("👤 طرف معامله: seller", responder_notification_message)
         self.assertIn("🔢 شماره معامله: 10000", responder_notification_message)
-        self.assertIn("🕐 زمان معامله:", responder_notification_message)
+        self.assertIn("🕐 زمان معامله: 1405/03/06   15:30", responder_notification_message)
         self.assertEqual(
             notif_mock.await_args_list[0].kwargs,
             {

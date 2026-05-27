@@ -1252,7 +1252,7 @@ function hydrateRenderedMedia(item: any) {
 // on each new incoming WebSocket message.
 const albumWrapperCache = new Map<string, { signature: string, wrapper: any }>()
 
-// Per-ISO-string cache for `formatDateForSeparator`. `toLocaleDateString('fa-IR', ...)`
+// Per-ISO-string cache for `formatDateForSeparator`. `formatIranDate(...)`
 // is expensive on weak devices, and `groupedMessages` re-runs on every
 // reactive tick. Same `created_at` string always resolves to the same
 // Persian date label, so memoize by that string.
@@ -1416,7 +1416,7 @@ function formatDateForSeparator(dateStr: string): string {
     if (isTodayInIran(dateStr)) return 'امروز';
     if (isYesterdayInIran(dateStr)) return 'دیروز';
 
-    // `toLocaleDateString('fa-IR', ...)` is expensive on weak devices and
+    // `formatIranDate(...)` is expensive on weak devices and
     // `groupedMessages` re-runs on every reactive tick. For non-today/
     // non-yesterday messages the resulting Persian date string is stable
     // given the same ISO input, so cache by ISO string.
