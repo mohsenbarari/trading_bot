@@ -12,8 +12,10 @@ PROJECT_DIR="/root/trading-bot/trading_bot"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 DIST_DIR="$PROJECT_DIR/mini_app_dist"
 TIMEZONE_SCRIPT="$PROJECT_DIR/scripts/ensure_host_timezone.sh"
+SYNC_RECOVERY_SCRIPT="$PROJECT_DIR/scripts/recover_cross_server_sync.sh"
 FOREIGN_HOST_TIMEZONE="${FOREIGN_HOST_TIMEZONE:-UTC}"
 IRAN_HOST_TIMEZONE="${IRAN_HOST_TIMEZONE:-UTC}"
+AUTO_SYNC_RECOVERY_ON_FULL_DEPLOY="${AUTO_SYNC_RECOVERY_ON_FULL_DEPLOY:-1}"
 
 IRAN_HOST="87.107.110.68"
 IRAN_USER="root"
@@ -331,6 +333,22 @@ deploy_foreign() {
     auto_cleanup_local
 }
 
+run_post_full_deploy_sync_recovery() {
+    if [ "$AUTO_SYNC_RECOVERY_ON_FULL_DEPLOY" = "0" ]; then
+        print_header "⏭️ Skipping automatic sync recovery"
+        echo "AUTO_SYNC_RECOVERY_ON_FULL_DEPLOY=0"
+        return 0
+    fi
+
+    if [ ! -x "$SYNC_RECOVERY_SCRIPT" ]; then
+        echo "❌ Sync recovery script is missing or not executable: $SYNC_RECOVERY_SCRIPT"
+        exit 1
+    fi
+
+    print_header "🔄 Running automatic cross-server sync recovery"
+    "$SYNC_RECOVERY_SCRIPT"
+}
+
 # ==========================================
 # Execute based on target
 # ==========================================
@@ -354,6 +372,7 @@ case "$TARGET" in
         build_frontend
         deploy_iran
         deploy_foreign
+        run_post_full_deploy_sync_recovery
         ;;
     *)
         echo "Usage: ./deploy.sh [all|frontend|iran|foreign]"
