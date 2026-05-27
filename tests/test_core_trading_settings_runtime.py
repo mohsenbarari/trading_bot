@@ -85,6 +85,30 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await trading_settings._load_from_db_async(), {})
         logger.warning.assert_called_once()
 
+    async def test_load_from_db_sync_parses_json_and_plain_values(self):
+        connection = MagicMock()
+        connection.execute.return_value = _ExecuteResult([
+            ('offer_min_quantity', '9'),
+            ('market_closed_weekdays', json.dumps([4, 5])),
+            ('broken', '{'),
+            ('nullable', None),
+        ])
+        engine = MagicMock()
+        engine.connect.return_value.__enter__.return_value = connection
+
+        with patch('core.trading_settings._get_sync_engine', return_value=engine):
+            data = trading_settings._load_from_db_sync()
+
+        self.assertEqual(
+            data,
+            {
+                'offer_min_quantity': 9,
+                'market_closed_weekdays': [4, 5],
+                'broken': '{',
+                'nullable': None,
+            },
+        )
+
     async def test_get_and_set_redis_cache(self):
         redis_client = AsyncMock()
         redis_client.get = AsyncMock(return_value=json.dumps({'offer_min_quantity': 11}))
@@ -250,6 +274,25 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         ):
             loaded = trading_settings.load_trading_settings()
         self.assertIsInstance(loaded, trading_settings.TradingSettings)
+
+    async def test_sync_loader_bridge_uses_default_loader_inside_running_loop(self):
+        settings = trading_settings.TradingSettings(offer_min_quantity=21)
+
+        with patch('core.trading_settings.load_trading_settings_async', AsyncMock(return_value=settings)) as loader_mock:
+            loaded = trading_settings._run_async_settings_loader_sync()
+
+        self.assertIs(loaded, settings)
+        loader_mock.assert_awaited_once()
+
+    async def test_sync_loader_bridge_rethrows_threaded_loader_errors(self):
+        with patch(
+            'core.trading_settings.load_trading_settings_async',
+            AsyncMock(side_effect=RuntimeError('loader failed')),
+        ):
+            with self.assertRaises(RuntimeError) as exc_info:
+                trading_settings._run_async_settings_loader_sync()
+
+        self.assertEqual(str(exc_info.exception), 'loader failed')
 
     async def test_sync_getter_prefers_shared_redis_cache_over_stale_fallback(self):
         stale = trading_settings.TradingSettings(max_active_offers=4)

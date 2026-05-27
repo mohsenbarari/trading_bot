@@ -1,6 +1,8 @@
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from models.commodity import Commodity, CommodityAlias
+from scripts import restore_default_commodities as restore_default_commodities_script
 from scripts.restore_default_commodities import ensure_default_commodities
 
 
@@ -48,6 +50,20 @@ class FakeSession:
 
     async def commit(self):
         self.commits += 1
+
+
+class _AsyncSessionFactory:
+    def __init__(self, session):
+        self._session = session
+
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
 
 
 class RestoreDefaultCommoditiesScriptTests(unittest.IsolatedAsyncioTestCase):
@@ -100,6 +116,92 @@ class RestoreDefaultCommoditiesScriptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["aliases_added"], ["سکه امامی", "سکه جدید", "سکه بانکی"])
         self.assertEqual(session.flushes, 0)
         self.assertEqual(session.commits, 1)
+
+    async def test_main_reports_success_and_invalidates_cache(self):
+        session = FakeSession()
+        stats = {
+            "commodity_id": 11,
+            "commodity_created": True,
+            "aliases_added": ["امامی"],
+            "aliases_existing": ["سکه امام"],
+            "aliases_conflicted": ["سکه بانکی"],
+        }
+
+        with patch.object(
+            restore_default_commodities_script,
+            "AsyncSessionLocal",
+            _AsyncSessionFactory(session),
+        ), patch.object(
+            restore_default_commodities_script,
+            "ensure_default_commodities",
+            AsyncMock(return_value=stats),
+        ) as ensure_mock, patch.object(
+            restore_default_commodities_script,
+            "invalidate_commodity_cache",
+            AsyncMock(),
+        ) as invalidate_mock, patch("builtins.print") as print_mock:
+            exit_code = await restore_default_commodities_script.main()
+
+        self.assertEqual(exit_code, 0)
+        ensure_mock.assert_awaited_once_with(session)
+        invalidate_mock.assert_awaited_once_with()
+        printed_lines = [args[0] for args, _kwargs in print_mock.call_args_list]
+        self.assertIn("✅ کالای پیش فرض امام آماده است (ID: 11)", printed_lines)
+        self.assertIn("   - commodity: created", printed_lines)
+        self.assertIn("   - aliases added: امامی", printed_lines)
+        self.assertIn("   - aliases already present: سکه امام", printed_lines)
+        self.assertIn(
+            "   - aliases skipped (already attached to another commodity): سکه بانکی",
+            printed_lines,
+        )
+        self.assertIn("   - commodity cache invalidated", printed_lines)
+
+    async def test_main_returns_one_when_restore_raises(self):
+        session = FakeSession()
+
+        with patch.object(
+            restore_default_commodities_script,
+            "AsyncSessionLocal",
+            _AsyncSessionFactory(session),
+        ), patch.object(
+            restore_default_commodities_script,
+            "ensure_default_commodities",
+            AsyncMock(side_effect=RuntimeError("db down")),
+        ), patch("builtins.print") as print_mock:
+            exit_code = await restore_default_commodities_script.main()
+
+        self.assertEqual(exit_code, 1)
+        print_mock.assert_called_once_with("❌ خطا در بازسازی کالاهای پیش فرض: db down")
+
+    async def test_main_warns_when_cache_invalidation_fails(self):
+        session = FakeSession()
+        stats = {
+            "commodity_id": 7,
+            "commodity_created": False,
+            "aliases_added": [],
+            "aliases_existing": [],
+            "aliases_conflicted": [],
+        }
+
+        with patch.object(
+            restore_default_commodities_script,
+            "AsyncSessionLocal",
+            _AsyncSessionFactory(session),
+        ), patch.object(
+            restore_default_commodities_script,
+            "ensure_default_commodities",
+            AsyncMock(return_value=stats),
+        ), patch.object(
+            restore_default_commodities_script,
+            "invalidate_commodity_cache",
+            AsyncMock(side_effect=RuntimeError("redis down")),
+        ), patch("builtins.print") as print_mock:
+            exit_code = await restore_default_commodities_script.main()
+
+        self.assertEqual(exit_code, 0)
+        printed_lines = [args[0] for args, _kwargs in print_mock.call_args_list]
+        self.assertIn("   - commodity: already present", printed_lines)
+        self.assertIn("⚠️ پاکسازی cache کالاها ناموفق بود: redis down", printed_lines)
 
 
 if __name__ == "__main__":
