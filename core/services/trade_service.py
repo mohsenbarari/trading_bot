@@ -215,7 +215,7 @@ def validate_lot_sizes(
     
     for lot in lot_sizes:
         if lot < MIN_LOT:
-            return False, f"❌ هر بخش باید حداقل {MIN_LOT} عدد باشد.", None
+            return False, f"❌ حداقل تعداد باید {MIN_LOT} باشد (بخش نامعتبر: {lot})", None
     
     lot_sum = sum(lot_sizes)
     

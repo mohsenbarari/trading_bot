@@ -54,7 +54,7 @@ class TradeServiceLotHelperTests(unittest.TestCase):
 
         valid, error, suggested = validate_lot_sizes(20, [10, 4, 6])
         self.assertFalse(valid)
-        self.assertEqual(error, "❌ هر بخش باید حداقل 5 عدد باشد.")
+        self.assertEqual(error, "❌ حداقل تعداد باید 5 باشد (بخش نامعتبر: 4)")
         self.assertIsNone(suggested)
 
     def test_validate_lot_sizes_returns_fixable_suggestion(self):
