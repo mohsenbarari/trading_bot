@@ -17,10 +17,9 @@
 > 
 > **To Revert when regular internet access resumes:**
 > 1. Remove this warning block from `.github/copilot-instructions.md`.
-> 2. Restart sync worker: `docker compose --profile disabled up -d sync_worker` on Foreign and `docker compose -f docker-compose.iran.yml up -d sync_worker` on Iran.
-> 3. Revert `deploy.sh`: Remove the `build_frontend` line from the `foreign)` case if you don't want the frontend to automatically build on foreign-only deployments.
-> 4. Run full deploy: `make up`.
-> 5. Run `make sync-recover` from the Foreign server to replay `change_log` in both directions until both sides converge.
+> 2. Revert `deploy.sh`: Remove the `build_frontend` line from the `foreign)` case if you don't want the frontend to automatically build on foreign-only deployments.
+> 3. Run full deploy: `make up`.
+> 4. `make up` now auto-starts both `sync_worker` services and runs the cross-server recovery pass. Use `make sync-recover` only as a manual fallback if that automatic phase is interrupted.
 
 ### Two-Server Deployment
 | Server | Location | Services | Domain |
@@ -32,7 +31,7 @@
 - **Backend**: FastAPI 0.111 + SQLAlchemy 2.0 (async, asyncpg) + PostgreSQL 15 + Redis 7
 - **Bot**: aiogram 3.10 (long-polling, FSM)
 - **Frontend**: Vue 3 + TypeScript + Tailwind CSS + Vite (PWA)
-- **Deploy**: `make up` → `deploy.sh all` (builds frontend, rsyncs to Iran, Docker rebuild both)
+- **Deploy**: `make up` → `deploy.sh all` (builds frontend, rsyncs to Iran, Docker rebuild both, auto-starts sync workers, runs cross-server recovery)
 
 ### Docker Services (Foreign)
 `app` (FastAPI:8000), `bot` (aiogram polling), `sync_worker`, `migration` (alembic), `db` (postgres:15), `redis` (redis:7), `adminer` (127.0.0.1:8080)
@@ -421,6 +420,7 @@ make status      # Container status
 | 2026-05-22 11:25 UTC | Copilot | **Global Auth Strictness + Lightweight Search Contract Added**: Tightened frontend auth so expired access tokens require a successful refresh and otherwise suspend to login, migrated protected public-profile/search calls through `apiFetch`, split `/api/users-public/search` onto a lightweight `PublicUserSearchResult` contract, and made the project-users directory explicitly available to owners plus active accountants while denying customers. |
 | 2026-05-22 11:36 UTC | Copilot | **Market Schedule Multi-Worker Hardening Added**: Serialized market open/close runtime transitions and post-open notice counters with a PostgreSQL advisory transaction lock so multi-worker/multi-node app processes cannot duplicate market channel/realtime side effects. Added date-based sync merge for market schedule overrides and repaired legacy bot trade-create tests to mock the market-open guard when exercising unrelated flows. |
 | 2026-05-23 07:24 UTC | Copilot | **Context-Aware Frontend Error Policy Added**: Added a shared `httpErrorPolicy` utility and wired `apiFetchJson`, market offer loading/submit/parse, and messenger conversation/message loading through context-scoped error presentation. Market list failures now preserve existing offers with safe copy, validation details remain visible for field/form errors, and active chat history failures render inside the message pane instead of collapsing the entire messenger. |
+| 2026-05-27 13:28 UTC | Copilot | **Full Deploy Auto-Recovery Added**: Updated `deploy.sh all` so `make up` now automatically runs `scripts/recover_cross_server_sync.sh` after both servers deploy, which starts `sync_worker` on both sides and replays cross-server backlog without any extra operator command. Also aligned `Makefile`, `.github/copilot-instructions.md`, and `docs/TIMEZONE_SYNC_RECONNECT_RUNBOOK.md` so reconnect-day guidance now treats `make sync-recover` as a manual fallback only. |
 | 2026-05-27 13:01 UTC | Copilot | **Runtime UTC Enforcement + Reconnect Runbook Added**: Explicitly pinned runtime service containers and Postgres to `UTC` in both `docker-compose.yml` variants (`TZ=UTC`, `PGTZ=UTC`, `timezone=UTC`, `log_timezone=UTC`) so host timezone drift cannot leak into sync/runtime behavior. Also added `docs/TIMEZONE_SYNC_RECONNECT_RUNBOOK.md` describing the reconnect-day order for host timezone verification, deploy, sync worker restart, `make sync-recover`, and validation while keeping market/user display time in Tehran. |
 | 2026-05-27 12:52 UTC | Copilot | **Deploy-Time Host Timezone Guard Added**: Added `scripts/ensure_host_timezone.sh` to detect and update host timezone only when it differs from the configured target, normalized equivalent UTC aliases like `Etc/UTC`, and wired the guard into both foreign and Iran deploy paths in `deploy.sh` with default `UTC` targets plus per-server override env vars. Revalidated with shell syntax checks, direct and ssh-style dry runs, then exercised the real foreign deploy path. |
 | 2026-05-27 12:03 UTC | Copilot | **Iran Timezone Display Unified Across Web + Bot**: Added `frontend/src/utils/iranTime.ts` to parse naive API timestamps as UTC and format them in `Asia/Tehran`, then routed dashboard, notifications, chat list/header/message/search timestamps, owner relation modals, trading-settings runtime previews, and user-presence “today/yesterday” logic through that shared seam. Also aligned bot trade notification/history timestamps with the shared Jalali helper and revalidated with focused frontend Vitest slices plus focused bot unittests. |
