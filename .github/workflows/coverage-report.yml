@@ -96,7 +96,7 @@ jobs:
           python3 -m coverage json -o tmp/backend-coverage.json || status=$?
           python3 -m coverage xml -o tmp/backend-coverage.xml || status=$?
           python3 -m coverage html -d tmp/backend-coverage-html || status=$?
-          echo "suite_exit_code=$status" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$status" > tmp/backend-coverage.exitcode
           exit "$status"
 
       - name: Run frontend unit coverage suite
@@ -114,13 +114,15 @@ jobs:
           if [[ "$command_status" -ne 0 ]]; then
             status=$command_status
           fi
-          echo "suite_exit_code=$status" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$status" > ../tmp/frontend-unit-coverage.exitcode
           exit "$status"
 
       - name: Build repository coverage summary
         if: always()
         shell: bash
         run: |
+          backend_suite_exit_code="$(cat tmp/backend-coverage.exitcode 2>/dev/null || echo 1)"
+          frontend_suite_exit_code="$(cat tmp/frontend-unit-coverage.exitcode 2>/dev/null || echo 1)"
           python3 ./scripts/build_repo_coverage_summary.py \
             --backend-json tmp/backend-coverage.json \
             --frontend-summary frontend/coverage/coverage-summary.json \
@@ -137,7 +139,7 @@ jobs:
             echo '- Read the percentages directly in the run **Summary** tab.'
             echo '- Download **repository-coverage-${{ github.run_number }}** from the **Artifacts** section for the backend/frontend HTML reports and raw JSON/XML outputs.'
           } >> "$GITHUB_STEP_SUMMARY"
-          if [[ "${{ steps.backend_coverage.outputs.suite_exit_code || '1' }}" != '0' && -f tmp/backend-coverage.log ]]; then
+          if [[ "$backend_suite_exit_code" != '0' && -f tmp/backend-coverage.log ]]; then
             {
               echo
               echo '## Backend Coverage Failure Tail'
@@ -147,7 +149,7 @@ jobs:
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-          if [[ "${{ steps.frontend_coverage.outputs.suite_exit_code || '1' }}" != '0' && -f tmp/frontend-unit-coverage.log ]]; then
+          if [[ "$frontend_suite_exit_code" != '0' && -f tmp/frontend-unit-coverage.log ]]; then
             {
               echo
               echo '## Frontend Coverage Failure Tail'
@@ -165,20 +167,27 @@ jobs:
           name: repository-coverage-${{ github.run_number }}
           path: |
             tmp/backend-coverage-html
+            tmp/backend-coverage.exitcode
             tmp/backend-coverage.log
             tmp/backend-coverage.json
             tmp/backend-coverage.xml
             frontend/coverage
+            tmp/frontend-unit-coverage.exitcode
             tmp/frontend-unit-coverage.log
             tmp/repo-coverage-summary.md
             tmp/repo-coverage-summary.json
           if-no-files-found: warn
 
       - name: Fail coverage job if a covered suite failed
-        if: always() && (steps.backend_coverage.outputs.suite_exit_code != '0' || steps.frontend_coverage.outputs.suite_exit_code != '0')
+        if: always()
         shell: bash
         run: |
-          echo "Backend coverage exit code: ${{ steps.backend_coverage.outputs.suite_exit_code }}"
-          echo "Frontend coverage exit code: ${{ steps.frontend_coverage.outputs.suite_exit_code }}"
+          backend_suite_exit_code="$(cat tmp/backend-coverage.exitcode 2>/dev/null || echo 1)"
+          frontend_suite_exit_code="$(cat tmp/frontend-unit-coverage.exitcode 2>/dev/null || echo 1)"
+          echo "Backend coverage exit code: $backend_suite_exit_code"
+          echo "Frontend coverage exit code: $frontend_suite_exit_code"
+          if [[ "$backend_suite_exit_code" == '0' && "$frontend_suite_exit_code" == '0' ]]; then
+            exit 0
+          fi
           echo 'At least one covered suite failed.' >&2
           exit 1
