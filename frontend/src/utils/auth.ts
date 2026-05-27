@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import type { RouteLocationNormalized, NavigationGuardNext } from 'vue-router';
 import { isAdminRoleValue, readCachedCurrentUserRole } from './adminAccess';
-import { cacheCurrentUserSummary } from './currentUser';
+import { cacheCurrentUserSummary, readCachedCurrentUserSummary } from './currentUser';
 import { createHttpErrorFromResponse, type ErrorPolicyContext } from './httpErrorPolicy';
 
 export const isAppConnecting = ref(false);
@@ -103,15 +103,6 @@ function cacheCurrentUserSummaryFromAuthMe(payload: any) {
     cacheCurrentUserSummary(payload);
 }
 
-function readCachedCurrentUserAccountStatus(): string | null {
-    try {
-        const raw = JSON.parse(localStorage.getItem('current_user_summary') || '{}');
-        return typeof raw.account_status === 'string' ? raw.account_status : null;
-    } catch {
-        return null;
-    }
-}
-
 function isInactiveAccountStatus(status: string | null | undefined): boolean {
     return status === 'inactive';
 }
@@ -141,9 +132,9 @@ async function ensureAdminAccess(): Promise<boolean> {
 }
 
 async function ensureMarketAccess(): Promise<boolean> {
-    const cachedStatus = readCachedCurrentUserAccountStatus();
-    if (cachedStatus) {
-        return !isInactiveAccountStatus(cachedStatus);
+    const cachedSummary = readCachedCurrentUserSummary();
+    if (cachedSummary) {
+        return !isInactiveAccountStatus(cachedSummary.account_status) && cachedSummary.is_accountant !== true;
     }
 
     try {
@@ -154,7 +145,7 @@ async function ensureMarketAccess(): Promise<boolean> {
 
         const data = await response.json();
         cacheCurrentUserSummaryFromAuthMe(data);
-        return !isInactiveAccountStatus(data?.account_status);
+        return !isInactiveAccountStatus(data?.account_status) && data?.is_accountant !== true;
     } catch {
         return true;
     }

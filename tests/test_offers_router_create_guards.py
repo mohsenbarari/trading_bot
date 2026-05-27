@@ -76,6 +76,17 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "شما دسترسی به بخش معاملات را ندارید.")
 
+    async def test_create_offer_rejects_accountant_context(self):
+        with self.assertRaises(HTTPException) as exc_info:
+            await create_offer(
+                make_offer(),
+                db=FakeDB(),
+                context=make_context(make_user(id=5), make_user(id=9)),
+            )
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "حسابدار دسترسی به بازار ندارد.")
+
     async def test_create_offer_rejects_temporarily_restricted_users(self):
         current_user = make_user(trading_restricted_until=datetime.utcnow() + timedelta(hours=2))
 
@@ -325,7 +336,7 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["error_code"], "OFFER_PRICE_WARNING")
         self.assertEqual(payload["warning"]["reference_price"], 100000)
 
-    async def test_create_offer_uses_effective_owner_limits_for_accountant_context(self):
+    async def test_create_offer_blocks_accountant_context_before_owner_limits(self):
         owner_user = make_user(id=5)
         actor_user = make_user(id=44, role=UserRole.WATCH)
 
@@ -336,8 +347,8 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as exc_info:
                 await create_offer(make_offer(), db=FakeDB(), context=make_context(owner_user, actor_user))
 
-        self.assertEqual(exc_info.exception.detail, "owner blocked")
-        self.assertEqual(limits_mock.call_args.args[0], owner_user)
+        self.assertEqual(exc_info.exception.detail, "حسابدار دسترسی به بازار ندارد.")
+        limits_mock.assert_not_called()
 
 
 if __name__ == "__main__":

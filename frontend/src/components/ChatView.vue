@@ -644,10 +644,9 @@ const selectedRoomMemberCount = computed(() => selectedConversation.value?.membe
 const selectedRoomIsMandatory = computed(() => !!selectedConversation.value?.is_mandatory)
 const selectedRoomIsSystem = computed(() => !!selectedConversation.value?.is_system)
 const selectedAvatarFileId = computed(() => selectedConversation.value?.avatar_file_id ?? null)
-const isCurrentUserAccountant = computed(() => props.currentUserIsAccountant === true)
 const isCurrentUserCustomer = computed(() => props.currentUserIsCustomer === true)
-const canStartNewConversation = computed(() => !isCurrentUserAccountant.value)
-const canCreateGroup = computed(() => !isCurrentUserAccountant.value && !isCurrentUserCustomer.value)
+const canStartNewConversation = computed(() => true)
+const canCreateGroup = computed(() => !isCurrentUserCustomer.value)
 const canCreateOptionalChannel = computed(() => (props.currentUserRole ?? null) === 'مدیر ارشد')
 
 const canSendToSelectedRoom = computed(() => {
@@ -1676,10 +1675,6 @@ function openConversationFromRoute(targetId: number, fallbackName = '') {
 
 const startNewChat = (userId: number, userName: string) => {
   const existingConversation = conversations.value.find((conversation) => conversation.other_user_id === userId)
-  if (!existingConversation && isCurrentUserAccountant.value) {
-    showInlineToast('حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد')
-    return
-  }
   if (!existingConversation) {
     conversations.value.unshift({
       id: userId,
@@ -1726,10 +1721,6 @@ const handleNewChatSearch = (userId: number, userName: string) => {
 }
 
 function openNewConversation() {
-  if (!canStartNewConversation.value) {
-    showInlineToast('حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد')
-    return
-  }
   showNewChatModal.value = true
 }
 
@@ -1738,7 +1729,7 @@ function openGroupCreation() {
     showInlineToast(
       isCurrentUserCustomer.value
         ? 'مشتری در این فاز اجازه ساخت گروه جدید را ندارد'
-        : 'حسابدار در این فاز اجازه ساخت گروه جدید را ندارد'
+        : 'اجازه ساخت گروه جدید وجود ندارد'
     )
     return
   }

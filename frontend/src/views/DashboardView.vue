@@ -26,6 +26,7 @@ const isRestricted = computed(() => {
 })
 
 const isInactiveAccount = computed(() => user.value?.account_status === 'inactive')
+const isAccountant = computed(() => user.value?.is_accountant === true)
 
 const isGloballyLockedAccount = computed(() => Boolean(user.value?.global_web_locked_at))
 
@@ -202,7 +203,7 @@ async function logout() {
 }
 
 function openMarket() {
-  if (isInactiveAccount.value) return
+  if (isInactiveAccount.value || isAccountant.value) return
   router.push('/market')
 }
 
@@ -277,7 +278,7 @@ onBeforeUnmount(() => {
       <main class="main-section">
 
         <!-- Market Entry — Hero Button -->
-        <button class="hero-btn" :disabled="isInactiveAccount" @click="openMarket">
+        <button v-if="!isAccountant" class="hero-btn" :disabled="isInactiveAccount" @click="openMarket">
           <div class="hero-btn-bg"></div>
           <div class="hero-btn-content">
             <div class="hero-icon">

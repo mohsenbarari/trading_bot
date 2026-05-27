@@ -790,18 +790,18 @@ describe('ChatView.vue', () => {
     wrapper.unmount()
   })
 
-  it('blocks accountants from starting a brand-new direct chat through startNewChat', async () => {
+  it('allows accountants to start a brand-new direct chat through startNewChat', async () => {
     const wrapper = await mountChatView({ currentUserIsAccountant: true })
     await flushPromises()
 
     await getExposedStartNewChat(wrapper)(55, 'Target User')
 
-    expect(chatViewMocks.loadMessagesMock).not.toHaveBeenCalled()
-    expect(document.body.textContent).toContain('حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد')
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55)
+    expect(document.body.textContent).not.toContain('حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد')
     wrapper.unmount()
   }, 10000)
 
-  it('blocks positive route targets for accountants when no direct conversation exists yet', async () => {
+  it('opens positive route targets for accountants when no direct conversation exists yet', async () => {
     const wrapper = await mountChatView({
       currentUserIsAccountant: true,
       targetUserId: 55,
@@ -809,30 +809,30 @@ describe('ChatView.vue', () => {
     })
     await flushPromises()
 
-    expect(chatViewMocks.loadMessagesMock).not.toHaveBeenCalled()
-    expect(document.body.textContent).toContain('حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد')
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55)
+    expect(document.body.textContent).not.toContain('حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد')
 
     wrapper.unmount()
   })
 
-  it('blocks accountants from opening the new conversation modal from the list entry point', async () => {
+  it('allows accountants to open the new conversation modal from the list entry point', async () => {
     const wrapper = await mountChatView({ currentUserIsAccountant: true })
     await flushPromises()
 
     await wrapper.get('.open-new-conversation').trigger('click')
 
-    expect(document.body.textContent).toContain('حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد')
+    expect(wrapper.find('.chat-new-conversation-modal-stub').exists()).toBe(true)
 
     wrapper.unmount()
   })
 
-  it('blocks accountants from starting group creation from the header action', async () => {
+  it('allows accountants to start group creation from the header action', async () => {
     const wrapper = await mountChatView({ currentUserIsAccountant: true })
     await flushPromises()
 
     await wrapper.get('.open-group-creation').trigger('click')
 
-    expect(document.body.textContent).toContain('حسابدار در این فاز اجازه ساخت گروه جدید را ندارد')
+    expect(wrapper.find('.chat-group-manager-modal-stub').exists()).toBe(true)
 
     wrapper.unmount()
   })

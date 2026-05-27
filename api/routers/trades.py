@@ -58,11 +58,20 @@ logger = logging.getLogger(__name__)
 
 
 MARKET_CLOSED_DETAIL = "بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید."
+ACCOUNTANT_MARKET_BLOCKED_DETAIL = "حسابدار دسترسی به بازار ندارد."
 
 
 router = APIRouter(
     tags=["Trades"],
 )
+
+
+def _ensure_accountant_market_access_allowed(context: EffectiveOwnerActor) -> None:
+    if getattr(context, "is_accountant_context", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ACCOUNTANT_MARKET_BLOCKED_DETAIL,
+        )
 
 
 # --- Pydantic Schemas ---
@@ -1255,6 +1264,7 @@ async def _execute_trade_authoritatively(
     import jdatetime
     owner_user = context.owner_user
     actor_user = context.actor_user
+    _ensure_accountant_market_access_allowed(context)
     
     # بررسی نقش
     if owner_user.role == UserRole.WATCH:
@@ -2013,6 +2023,7 @@ async def create_trade(
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context)
 ):
     edge_received_at = datetime.utcnow()
+    _ensure_accountant_market_access_allowed(context)
     forwarded_response = await _forward_trade_if_remote_home(db, trade_data, context, edge_received_at)
     if forwarded_response is not None:
         return forwarded_response

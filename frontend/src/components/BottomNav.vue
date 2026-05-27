@@ -119,6 +119,7 @@ onMounted(async () => {
 
 const userRole = computed(() => currentUserSummary.value?.role || '')
 const isAdmin = computed(() => isAdminRole(userRole.value))
+const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
 
 const baseItems = [
   { name: 'dashboard', label: 'خانه', icon: Home, path: '/' },
@@ -128,7 +129,7 @@ const baseItems = [
 ]
 
 const navItems = computed(() => {
-  const items = [...baseItems]
+  const items = baseItems.filter(item => item.name !== 'market' || !isAccountant.value)
   if (isAdmin.value) {
     items.push({ name: 'admin', label: 'مدیریت', icon: Shield, path: '/admin', disabled: false })
   }

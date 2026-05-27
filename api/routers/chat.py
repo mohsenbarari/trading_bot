@@ -866,11 +866,6 @@ async def get_group_member_candidates(
     db: AsyncSession = Depends(get_db),
 ):
     """List eligible group member candidates under customer membership rules."""
-    if exclude_chat_id is None and await is_user_accountant(db, current_user.id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="حسابدار در این فاز اجازه ساخت گروه جدید را ندارد",
-        )
     if await is_user_customer(db, current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -913,11 +908,6 @@ async def create_group(
     db: AsyncSession = Depends(get_db),
 ):
     """ساخت گروه جدید با سازنده به‌عنوان admin و اعضای اولیه"""
-    if await is_user_accountant(db, current_user.id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="حسابدار در این فاز اجازه ساخت گروه جدید را ندارد",
-        )
     if await is_user_customer(db, current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
