@@ -111,6 +111,16 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                 trade_data,
                 BackgroundTasks(),
                 db=FakeDB(),
+                context=make_context(make_user(id=5), make_user(id=9)),
+            )
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "حسابدار دسترسی به بازار ندارد.")
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await _execute_trade_authoritatively(
+                trade_data,
+                BackgroundTasks(),
+                db=FakeDB(),
                 context=make_context(make_user(role=UserRole.WATCH)),
             )
         self.assertEqual(exc_info.exception.status_code, 403)

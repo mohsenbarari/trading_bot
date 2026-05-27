@@ -50,7 +50,7 @@ class ChatRouterGroupEndpointTests(unittest.IsolatedAsyncioTestCase):
             active_total=1,
         )
 
-        with patch("api.routers.chat.is_user_accountant", new=AsyncMock(return_value=False)), patch(
+        with patch("api.routers.chat.is_user_accountant", new=AsyncMock(return_value=True)), patch(
             "api.routers.chat.is_user_customer", new=AsyncMock(return_value=False)
         ), patch(
             "api.routers.chat.list_group_member_candidates",
@@ -128,7 +128,7 @@ class ChatRouterGroupEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
         data = SimpleNamespace(title="Alpha", member_ids=[9, 10])
 
-        with patch("api.routers.chat.is_user_accountant", new=AsyncMock(return_value=False)) as accountant_mock, patch(
+        with patch("api.routers.chat.is_user_accountant", new=AsyncMock(return_value=False)), patch(
             "api.routers.chat.is_user_customer", new=AsyncMock(return_value=False)
         ) as customer_mock, patch(
             "api.routers.chat.create_group_chat", new=AsyncMock(return_value=group)
@@ -138,7 +138,6 @@ class ChatRouterGroupEndpointTests(unittest.IsolatedAsyncioTestCase):
         ) as count_mock:
             result = await create_group(data=data, current_user=current_user, db=db)
 
-        accountant_mock.assert_awaited_once_with(db, 5)
         customer_mock.assert_awaited_once_with(db, 5)
         create_mock.assert_awaited_once_with(db, creator=current_user, title="Alpha", member_ids=[9, 10])
         count_mock.assert_awaited_once_with(db, 77)
@@ -147,26 +146,34 @@ class ChatRouterGroupEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.group.member_count, 3)
         self.assertEqual(result.group.current_user_role, "admin")
 
-    async def test_create_group_rejects_accountant_users(self):
+    async def test_create_group_allows_accountant_users(self):
+        now = datetime(2026, 5, 3, 10, 0, 0)
         current_user = SimpleNamespace(id=5)
-
-        with patch("api.routers.chat.is_user_accountant", new=AsyncMock(return_value=True)) as accountant_mock, patch(
-            "api.routers.chat.create_group_chat", new=AsyncMock()
-        ) as create_mock:
-            with self.assertRaises(HTTPException) as exc_info:
-                await create_group(
-                    data=SimpleNamespace(title="Alpha", member_ids=[9, 10]),
-                    current_user=current_user,
-                    db=object(),
-                )
-
-        accountant_mock.assert_awaited_once()
-        create_mock.assert_not_called()
-        self.assertEqual(exc_info.exception.status_code, 403)
-        self.assertEqual(
-            exc_info.exception.detail,
-            "حسابدار در این فاز اجازه ساخت گروه جدید را ندارد",
+        group = SimpleNamespace(
+            id=91,
+            title="Alpha",
+            description=None,
+            created_by_id=5,
+            created_at=now,
+            max_members=60,
         )
+
+        with patch("api.routers.chat.is_user_accountant", new=AsyncMock(return_value=True)), patch(
+            "api.routers.chat.is_user_customer", new=AsyncMock(return_value=False)
+        ), patch(
+            "api.routers.chat.create_group_chat", new=AsyncMock(return_value=group)
+        ) as create_mock, patch(
+            "api.routers.chat.count_active_chat_members",
+            new=AsyncMock(return_value=2),
+        ):
+            result = await create_group(
+                data=SimpleNamespace(title="Alpha", member_ids=[9, 10]),
+                current_user=current_user,
+                db=object(),
+            )
+
+        create_mock.assert_awaited_once_with(unittest.mock.ANY, creator=current_user, title="Alpha", member_ids=[9, 10])
+        self.assertEqual(result.group.id, 91)
 
     async def test_create_group_rejects_customer_users(self):
         current_user = SimpleNamespace(id=5)

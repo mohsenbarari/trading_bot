@@ -114,6 +114,26 @@ describe('DashboardView.vue', () => {
     expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalled()
   })
 
+  it('hides the market entry button for accountants', async () => {
+    dashboardViewMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        id: 18,
+        full_name: 'حسابدار وب',
+        account_name: 'accountant18',
+        account_status: 'active',
+        is_accountant: true,
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
+        trading_restricted_until: null,
+      }),
+    )
+
+    const wrapper = await mountView()
+
+    expect(wrapper.find('.hero-btn').exists()).toBe(false)
+    expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalledWith('/market')
+  })
+
   it('shows the stronger lock copy when the account is already globally locked', async () => {
     dashboardViewMocks.apiFetchMock.mockResolvedValue(
       makeJsonResponse({

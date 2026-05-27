@@ -2,6 +2,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
+
 from api.deps import EffectiveOwnerActor
 from api.routers.offers import ParseOfferRequest, get_active_offers, get_my_offers, parse_offer_text
 
@@ -45,13 +47,13 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_parse_offer_text_handles_error_unrecognized_and_success(self):
-        current_user = SimpleNamespace(id=5)
+        context = self.make_context(owner_id=5)
 
         with patch(
             "bot.utils.offer_parser.parse_offer_text",
             new=AsyncMock(return_value=(None, SimpleNamespace(message="bad format"))),
         ):
-            result = await parse_offer_text(ParseOfferRequest(text="foo"), current_user=current_user)
+            result = await parse_offer_text(ParseOfferRequest(text="foo"), context=context)
         self.assertFalse(result.success)
         self.assertEqual(result.error, "bad format")
 
@@ -59,7 +61,7 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
             "bot.utils.offer_parser.parse_offer_text",
             new=AsyncMock(return_value=(None, None)),
         ):
-            result = await parse_offer_text(ParseOfferRequest(text="foo"), current_user=current_user)
+            result = await parse_offer_text(ParseOfferRequest(text="foo"), context=context)
         self.assertFalse(result.success)
         self.assertEqual(result.error, "متن قابل تشخیص نیست.")
 
@@ -77,7 +79,7 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
             "bot.utils.offer_parser.parse_offer_text",
             new=AsyncMock(return_value=(parsed, None)),
         ):
-            result = await parse_offer_text(ParseOfferRequest(text="foo"), current_user=current_user)
+            result = await parse_offer_text(ParseOfferRequest(text="foo"), context=context)
         self.assertTrue(result.success)
         self.assertEqual(
             result.data,
@@ -93,10 +95,17 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_parse_offer_text_rejects_accountant_context(self):
+        with self.assertRaises(HTTPException) as exc_info:
+            await parse_offer_text(ParseOfferRequest(text="foo"), context=self.make_context(owner_id=5, actor_id=9))
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "حسابدار دسترسی به بازار ندارد.")
+
     async def test_get_active_offers_serializes_rows_for_viewer(self):
         offers = [SimpleNamespace(id=1, user_id=501), SimpleNamespace(id=2, user_id=502)]
         db = FakeDB([FakeExecuteResult(offers)])
-        context = self.make_context(owner_id=77, actor_id=99)
+        context = self.make_context(owner_id=77)
         owner_relation = SimpleNamespace(customer_user_id=501, owner_user_id=77)
         viewer_relation = SimpleNamespace(customer_user_id=77, owner_user_id=900)
 
@@ -129,10 +138,24 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(first_call.kwargs["offer_owner_relation"], owner_relation)
         self.assertIs(first_call.kwargs["viewer_customer_relation"], viewer_relation)
 
+    async def test_get_active_offers_rejects_accountant_context(self):
+        with self.assertRaises(HTTPException) as exc_info:
+            await get_active_offers(
+                offer_type=None,
+                commodity_id=None,
+                skip=0,
+                limit=50,
+                db=FakeDB(),
+                context=self.make_context(owner_id=77, actor_id=99),
+            )
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "حسابدار دسترسی به بازار ندارد.")
+
     async def test_get_my_offers_serializes_rows_with_owner_identity(self):
         offers = [SimpleNamespace(id=5, user_id=88)]
         db = FakeDB([FakeExecuteResult(offers)])
-        context = self.make_context(owner_id=88, actor_id=144)
+        context = self.make_context(owner_id=88)
         owner_relation = SimpleNamespace(customer_user_id=88, owner_user_id=500)
         viewer_relation = SimpleNamespace(customer_user_id=88, owner_user_id=500)
 
@@ -164,31 +187,19 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(call.kwargs["offer_owner_relation"], owner_relation)
         self.assertIs(call.kwargs["viewer_customer_relation"], viewer_relation)
 
-    async def test_get_my_offers_uses_effective_owner_view_when_actor_differs(self):
-        offers = [SimpleNamespace(id=9, user_id=61)]
-        db = FakeDB([FakeExecuteResult(offers)])
-        context = self.make_context(owner_id=61, actor_id=62)
-
-        with patch(
-            "core.trading_settings.get_trading_settings_async",
-            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=30)),
-        ), patch(
-            "api.routers.offers.load_offer_customer_read_context",
-            new=AsyncMock(return_value=({}, None)),
-        ), patch(
-            "api.routers.offers.offer_to_response",
-            return_value={"id": 9, "user_id": 61},
-        ) as response_mock:
+    async def test_get_my_offers_rejects_accountant_context(self):
+        with self.assertRaises(HTTPException) as exc_info:
             await get_my_offers(
                 status_filter=None,
                 since_hours=None,
                 skip=0,
                 limit=50,
-                db=db,
-                context=context,
+                db=FakeDB(),
+                context=self.make_context(owner_id=61, actor_id=62),
             )
 
-        self.assertEqual(response_mock.call_args.kwargs["viewer_user_id"], 61)
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "حسابدار دسترسی به بازار ندارد.")
 
 
 if __name__ == "__main__":

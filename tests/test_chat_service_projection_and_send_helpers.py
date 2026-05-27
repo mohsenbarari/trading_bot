@@ -236,28 +236,21 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
             "core.services.chat_service.get_active_accountant_relation_for_accountant",
             new=AsyncMock(return_value=SimpleNamespace(id=9)),
         ), patch(
-            "core.services.chat_service.get_existing_direct_conversation",
-            new=AsyncMock(return_value=None),
-        ), patch(
-            "core.services.chat_service.get_existing_direct_chat",
-            new=AsyncMock(return_value=None),
+            "core.services.chat_service._resolve_customer_direct_chat_initiation_permission",
+            new=AsyncMock(return_value=False),
         ):
-            with self.assertRaises(HTTPException) as exc_info:
-                await chat_service.prepare_direct_message_send(
-                    SimpleNamespace(
-                        get=AsyncMock(return_value=receiver),
-                        execute=AsyncMock(return_value=scalar_one_or_none_result(None)),
-                    ),
-                    sender=sender,
-                    receiver_id=6,
-                    content="hello",
-                    message_type=MessageType.TEXT,
-                )
-        self.assertEqual(exc_info.exception.status_code, 403)
-        self.assertEqual(
-            exc_info.exception.detail,
-            "حسابدار در این فاز اجازه شروع گفتگوی مستقیم جدید را ندارد",
-        )
+            resolved_receiver, prepared = await chat_service.prepare_direct_message_send(
+                SimpleNamespace(
+                    get=AsyncMock(return_value=receiver),
+                    execute=AsyncMock(return_value=scalar_one_or_none_result(None)),
+                ),
+                sender=sender,
+                receiver_id=6,
+                content="hello",
+                message_type=MessageType.TEXT,
+            )
+        self.assertIs(resolved_receiver, receiver)
+        self.assertEqual(prepared, "hello")
 
         with patch(
             "core.services.chat_service.generate_direct_location_snapshot",

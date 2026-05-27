@@ -209,6 +209,11 @@ describe('auth utils', () => {
     localStorage.setItem('current_user_summary', JSON.stringify({ role: 'عادی', account_status: 'inactive' }))
     await authGuard({ path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any, {} as any, next)
     expect(next).toHaveBeenLastCalledWith('/')
+
+    next.mockClear()
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'عادی', account_status: 'active', is_accountant: true }))
+    await authGuard({ path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any, {} as any, next)
+    expect(next).toHaveBeenLastCalledWith('/')
   })
 
   it('authGuard fetches /api/auth/me when admin cache is missing', async () => {
@@ -261,6 +266,29 @@ describe('auth utils', () => {
       account_status: 'inactive',
       global_lock_grace_expires_at: '2026-05-20T12:00:00Z',
       global_web_locked_at: null,
+    })
+  })
+
+  it('authGuard blocks accountants from market routes when /api/auth/me resolves accountant context', async () => {
+    const token = makeJwt(Math.floor(Date.now() / 1000) + 3600)
+    localStorage.setItem('auth_token', token)
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({
+      id: 11,
+      role: 'عادی',
+      account_name: 'accountant11',
+      account_status: 'active',
+      is_accountant: true,
+    }))
+
+    const { authGuard } = await import(authModulePath)
+    const next = vi.fn()
+
+    await authGuard({ path: '/market', meta: { requiresAuth: true, requiresMarketAccess: true } } as any, {} as any, next)
+
+    expect(next).toHaveBeenLastCalledWith('/')
+    expect(JSON.parse(localStorage.getItem('current_user_summary') || '{}')).toMatchObject({
+      account_status: 'active',
+      is_accountant: true,
     })
   })
 

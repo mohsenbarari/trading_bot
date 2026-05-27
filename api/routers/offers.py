@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 MARKET_CLOSED_DETAIL = "بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید."
+ACCOUNTANT_MARKET_BLOCKED_DETAIL = "حسابدار دسترسی به بازار ندارد."
 
 
 def _resolve_offer_owner_context(
@@ -58,6 +59,14 @@ def _resolve_offer_owner_context(
         relation=None,
         is_accountant_context=False,
     )
+
+
+def _ensure_accountant_market_access_allowed(context: EffectiveOwnerActor) -> None:
+    if getattr(context, "is_accountant_context", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ACCOUNTANT_MARKET_BLOCKED_DETAIL,
+        )
 
 
 router = APIRouter(
@@ -297,6 +306,7 @@ async def create_offer(
     """
     from core.enums import UserRole
     context = _resolve_offer_owner_context(context, current_user)
+    _ensure_accountant_market_access_allowed(context)
     owner_user = context.owner_user
     actor_user = context.actor_user
     
@@ -556,6 +566,10 @@ async def get_active_offers(
     """
     دریافت لیست لفظ‌های فعال
     """
+    context = _resolve_offer_owner_context(context, current_user)
+    _ensure_accountant_market_access_allowed(context)
+    owner_user = context.owner_user
+
     query = select(Offer).options(
         selectinload(Offer.user),
         selectinload(Offer.commodity)
@@ -575,9 +589,6 @@ async def get_active_offers(
     # دریافت تنظیمات برای محاسبه دقیق انقضا
     from core.trading_settings import get_trading_settings_async
     ts = await get_trading_settings_async()
-
-    context = _resolve_offer_owner_context(context, current_user)
-    owner_user = context.owner_user
     
     return await _serialize_offer_responses(
         offers,
@@ -602,6 +613,7 @@ async def get_my_offers(
     دریافت لفظ‌های کاربر
     """
     context = _resolve_offer_owner_context(context, current_user)
+    _ensure_accountant_market_access_allowed(context)
     owner_user = context.owner_user
 
     query = select(Offer).options(
@@ -664,6 +676,7 @@ async def expire_offer(
     """
     منقضی کردن لفظ
     """
+    _ensure_accountant_market_access_allowed(context)
     owner_user = context.owner_user
     ts = get_trading_settings()
 
@@ -747,6 +760,7 @@ async def cancel_all_active_offers(
     """
     منقضی کردن تمام لفظ‌های فعال کاربر (برای دستور نشد)
     """
+    _ensure_accountant_market_access_allowed(context)
     owner_user = context.owner_user
     
     query = select(Offer).where(
@@ -790,11 +804,12 @@ async def cancel_all_active_offers(
 @router.post("/parse", response_model=ParseOfferResponse)
 async def parse_offer_text(
     request: ParseOfferRequest,
-    current_user: User = Depends(get_current_user)
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
 ):
     """
     پارس متن لفظ با parser مشترک بات و وب اپ.
     """
+    _ensure_accountant_market_access_allowed(context)
     from bot.utils.offer_parser import parse_offer_text as parser
     
     result, error = await parser(request.text)

@@ -96,4 +96,30 @@ describe('BottomNav.vue', () => {
 
     wrapper.unmount()
   })
+
+  it('hides the market entry for accountant users from the cached summary', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({
+      id: 9,
+      role: 'عادی',
+      account_name: 'accountant9',
+      is_accountant: true,
+    }))
+    apiFetchMock.mockRejectedValue(new Error('temporary network issue'))
+
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const wrapper = mount(BottomNav, {
+      global: {
+        stubs: {
+          'router-link': {
+            template: '<a><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('بازار')
+    wrapper.unmount()
+  })
 })
