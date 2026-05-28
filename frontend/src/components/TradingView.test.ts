@@ -405,6 +405,116 @@ describe('TradingView.vue', () => {
     wrapper.unmount()
   })
 
+  it('ignores malformed realtime payloads and skips updates when viewer id is invalid', async () => {
+    const wrapper = await mountTradingView({ initialTab: 'my_trades' })
+    await flushPromises()
+
+    const initialTradeCards = wrapper.findAll('.trade-card').length
+    const handlers = new Map<string, (payload: unknown) => void>(tradingViewMocks.wsOnMock.mock.calls as [string, (payload: unknown) => void][])
+
+    handlers.get('trade:created')?.(null)
+    handlers.get('trade:created')?.({
+      id: 'bad-id',
+      trade_number: 21000,
+      trade_type: 'buy',
+      commodity_name: 'سکه',
+      quantity: 1,
+      price: 100000,
+      offer_user_id: 7,
+      responder_user_id: 8,
+      created_at: 'همین الان',
+    })
+    await flushPromises()
+
+    expect(wrapper.findAll('.trade-card')).toHaveLength(initialTradeCards)
+
+    const invalidViewerWrapper = await mountTradingView({
+      initialTab: 'my_trades',
+      user: { id: Number.NaN, account_name: 'invalid-user' } as any,
+    })
+    await flushPromises()
+
+    const invalidViewerHandlers = new Map<string, (payload: unknown) => void>(tradingViewMocks.wsOnMock.mock.calls as [string, (payload: unknown) => void][])
+    invalidViewerHandlers.get('trade:created')?.({
+      id: 22000,
+      trade_number: 22000,
+      trade_type: 'buy',
+      commodity_name: 'سکه',
+      quantity: 1,
+      price: 100000,
+      offer_user_id: 7,
+      responder_user_id: 8,
+      created_at: 'همین الان',
+    })
+    await flushPromises()
+
+    expect(invalidViewerWrapper.findAll('.trade-card')).toHaveLength(initialTradeCards)
+
+    wrapper.unmount()
+    invalidViewerWrapper.unmount()
+  })
+
+  it('merges sparse trade:created updates while preserving existing relation metadata', async () => {
+    const wrapper = await mountTradingView({ initialTab: 'my_trades' })
+    await flushPromises()
+
+    const handlers = new Map<string, (payload: unknown) => void>(tradingViewMocks.wsOnMock.mock.calls as [string, (payload: unknown) => void][])
+    tradingViewMocks.apiFetchJsonMock.mockClear()
+
+    handlers.get('trade:created')?.({
+      id: 301,
+      trade_number: 10001,
+      trade_type: 'buy',
+      commodity_name: 'سکه',
+      quantity: 7,
+      price: 130000,
+      offer_user_id: 9,
+      responder_user_id: 7,
+      offer_user_name: null,
+      counterparty_name: null,
+      customer_context_visible: false,
+      customer_context_management_name: null,
+      customer_context_tier: null,
+      trade_path_summary: null,
+      created_at: 'همین الان',
+    })
+    await flushPromises()
+
+    expect(tradingViewMocks.apiFetchJsonMock).not.toHaveBeenCalledWith('/api/trades/my', {})
+    expect(wrapper.text()).toContain('130,000')
+    expect(wrapper.text()).toContain('حسابدار فروش')
+    expect(wrapper.text()).toContain('مشتری واسط')
+
+    wrapper.unmount()
+  })
+
+  it('shows unknown tier fallback text for non-standard customer tiers', async () => {
+    tradingViewMocks.apiFetchJsonMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/offers/' && (!options?.method || options.method === 'GET')) return offersFixture
+      if (path === '/api/offers/my?since_hours=2') return myOffersFixture
+      if (path === '/api/trades/my') {
+        return [
+          {
+            ...myTradesFixture[0],
+            customer_context_visible: true,
+            customer_context_management_name: 'مشتری ناشناخته',
+            customer_context_tier: 'mystery',
+          },
+        ]
+      }
+      if (path === '/api/commodities/') return commoditiesFixture
+      if (path === '/api/trading-settings/') return tradingSettingsFixture
+      return null
+    })
+
+    const wrapper = await mountTradingView({ initialTab: 'my_trades' })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('سطح نامشخص')
+
+    wrapper.unmount()
+  })
+
   it('renders customer context and viewer-specific display pricing on active offers', async () => {
     tradingViewMocks.apiFetchJsonMock.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/api/offers/' && (!options?.method || options.method === 'GET')) {

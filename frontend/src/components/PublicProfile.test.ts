@@ -113,7 +113,221 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('owner20')
     expect(wrapper.text()).toContain('آنلاین')
   })
+  
+  it('applies preset history ranges and renders partial filter summaries for one-sided dates', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-28T12:00:00Z'))
 
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 50,
+      account_name: 'owner50',
+      avatar_file_id: null,
+      mobile_number: '09121112222',
+      address: 'قم',
+      created_at_jalali: '۱۴۰۵/۰۱/۱۰',
+      trades_count: 3,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: true,
+      can_block_now: true,
+      max_blocked: 10,
+      current_blocked: 0,
+      remaining: 10,
+      reason_code: null,
+      reason_message: null,
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 50, account_name: 'owner50' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
+    expect(historyHeader).toBeTruthy()
+    await historyHeader!.trigger('click')
+    await flushPromises()
+
+    const presetButton = wrapper.findAll('.history-chip').find((node) => node.text().includes('۳ ماه'))
+    expect(presetButton).toBeTruthy()
+    await presetButton!.trigger('click')
+    await flushPromises()
+
+    const presetFetchCalls = fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/with/50?'))
+    expect(presetFetchCalls.length).toBeGreaterThanOrEqual(1)
+    expect(presetFetchCalls.at(-1)?.[0]).toContain('from_date=2026-02-28')
+    expect(presetFetchCalls.at(-1)?.[0]).toContain('to_date=2026-05-28')
+
+    const dateInputs = wrapper.findAll('input[type="date"]')
+    await dateInputs[0]!.setValue('')
+    await dateInputs[1]!.setValue('2026-05-20')
+    await wrapper.get('input[list="public-profile-history-commodities"]').setValue('سکه')
+    const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButton).toBeTruthy()
+    await applyButton!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('تا')
+    expect(wrapper.text()).toContain('کالا: سکه')
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('falls back to generic api error text for malformed block and export responses', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 30,
+      account_name: 'plain30',
+      avatar_file_id: null,
+      mobile_number: '09125555555',
+      address: 'تهران',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۳',
+      trades_count: 4,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ can_block: true, can_block_now: true, max_blocked: 3, current_blocked: 0, remaining: 3, reason_code: null, reason_message: null }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+    fetchMock.mockResolvedValueOnce(new Response('bad gateway', { status: 400, headers: { 'Content-Type': 'text/plain' } }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 30, account_name: 'plain30' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          OwnerCustomerManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const blockButton = wrapper.findAll('button').find((button) => button.text().includes('بلاک کاربر'))
+    expect(blockButton).toBeTruthy()
+    await blockButton!.trigger('click')
+    await flushPromises()
+    expect(vi.mocked(window.alert)).toHaveBeenCalledWith('بلاک کاربر ناموفق بود.')
+
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
+    fetchMock.mockResolvedValueOnce(new Response('server exploded', { status: 400, headers: { 'Content-Type': 'text/plain' } }))
+
+    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
+    expect(historyHeader).toBeTruthy()
+    await historyHeader!.trigger('click')
+    await flushPromises()
+
+    const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
+    expect(pdfButton).toBeTruthy()
+    await pdfButton!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('خطا در دریافت خروجی تاریخچه معاملات')
+  })
+
+  it('falls back to plain counterparty labels when history profile targets are missing', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 50,
+      account_name: 'owner50',
+      avatar_file_id: null,
+      mobile_number: '09121112222',
+      address: 'قم',
+      created_at_jalali: '۱۴۰۵/۰۱/۱۰',
+      trades_count: 3,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: true,
+      can_block_now: true,
+      max_blocked: 10,
+      current_blocked: 0,
+      remaining: 10,
+      reason_code: null,
+      reason_message: null,
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+    fetchMock.mockResolvedValueOnce(makeResponse([
+      {
+        id: 11,
+        trade_number: 10011,
+        created_at: 'امروز',
+        commodity_name: 'سکه',
+        quantity: 1,
+        price: 111000,
+        trade_type: 'SELL',
+        offer_user_id: null,
+        offer_user_name: null,
+        responder_user_id: null,
+        responder_user_name: null,
+        counterparty_name: 'خریدار بیرونی',
+        counterparty_profile_user_id: 'bad-id',
+        counterparty_profile_account_name: '',
+        customer_context_visible: false,
+      },
+    ]))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 50, account_name: 'owner50' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
+    expect(historyHeader).toBeTruthy()
+    await historyHeader!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('خریدار بیرونی')
+    expect(wrapper.find('.mini-trade-card .trade-counterparty .profile-link-btn').exists()).toBe(false)
+  })
   it('shows formatted last-seen text in the profile hero when a timestamp exists', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-05-22T12:00:00Z'))
