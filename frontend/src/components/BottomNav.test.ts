@@ -122,4 +122,89 @@ describe('BottomNav.vue', () => {
     expect(wrapper.text()).not.toContain('بازار')
     wrapper.unmount()
   })
+
+  it('restores the persisted FAB position for messenger and ignores malformed stored coordinates', async () => {
+    routeState.name = 'messenger'
+    localStorage.setItem('fab_position', JSON.stringify({ x: 88, y: 144 }))
+
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const wrapper = mount(BottomNav, {
+      global: {
+        stubs: {
+          'router-link': {
+            template: '<a><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const fabContainer = wrapper.get('.fab-container')
+    expect(fabContainer.attributes('style')).toContain('left: 88px;')
+    expect(fabContainer.attributes('style')).toContain('top: 144px;')
+    expect(fabContainer.attributes('style')).toContain('bottom: auto;')
+    expect(fabContainer.attributes('style')).toContain('right: auto;')
+
+    wrapper.unmount()
+
+    localStorage.setItem('fab_position', '{bad json')
+    const malformedWrapper = mount(BottomNav, {
+      global: {
+        stubs: {
+          'router-link': {
+            template: '<a><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(malformedWrapper.get('.fab-container').attributes('style') || '').not.toContain('left:')
+    malformedWrapper.unmount()
+  })
+
+  it('drags the FAB with mouse events, persists the bounded position, and ignores toggle clicks while dragging', async () => {
+    vi.useFakeTimers()
+    routeState.name = 'market'
+
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const wrapper = mount(BottomNav, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          'router-link': {
+            props: ['to'],
+            template: '<a :href="typeof to === \'string\' ? to : to.path"><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const fabButton = wrapper.get('.fab-btn')
+    await fabButton.trigger('mousedown', { clientX: 10, clientY: 10 })
+    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 4000, clientY: 4000, bubbles: true, cancelable: true }))
+    await nextTick()
+
+    expect(wrapper.find('.fab-nav').exists()).toBe(false)
+
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    await nextTick()
+
+    const storedPosition = JSON.parse(localStorage.getItem('fab_position') || '{}')
+    expect(storedPosition.x).toBe(window.innerWidth - 44)
+    expect(storedPosition.y).toBe(window.innerHeight - 44)
+    expect(wrapper.get('.fab-container').attributes('style')).toContain(`left: ${window.innerWidth - 44}px;`)
+    expect(wrapper.get('.fab-container').attributes('style')).toContain(`top: ${window.innerHeight - 44}px;`)
+
+    await vi.advanceTimersByTimeAsync(60)
+    await fabButton.trigger('click')
+    expect(wrapper.find('.fab-nav').exists()).toBe(true)
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
 })

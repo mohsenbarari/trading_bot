@@ -66,6 +66,7 @@ const searchUsers = async (query: string = '') => {
 }
 
 let debounceTimer: ReturnType<typeof setTimeout>
+let skipNextSearchWatch = false
 const performSearch = (val: string) => {
   clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => {
@@ -74,12 +75,25 @@ const performSearch = (val: string) => {
 }
 
 watch(searchQuery, (newVal) => {
+  if (!props.show) return
+  if (skipNextSearchWatch) {
+    skipNextSearchWatch = false
+    return
+  }
   performSearch(newVal)
 })
 
 watch(() => props.show, (isVisible) => {
+  clearTimeout(debounceTimer)
+  if (!isVisible) {
+    return
+  }
+
   if (isVisible) {
-    searchQuery.value = ''
+    if (searchQuery.value !== '') {
+      skipNextSearchWatch = true
+      searchQuery.value = ''
+    }
     searchUsers()
   }
 })

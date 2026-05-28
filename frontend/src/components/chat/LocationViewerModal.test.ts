@@ -61,4 +61,31 @@ describe('LocationViewerModal.vue', () => {
     await wrapper.get('.external-btn').trigger('click')
     expect(openSpy).toHaveBeenCalledWith('https://www.google.com/maps?q=35.6892,51.389', '_blank')
   })
+
+  it('keeps the map wiring in sync when the location prop changes', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const LocationViewerModal = (await import('./LocationViewerModal.vue')).default
+    const wrapper = mount(LocationViewerModal, {
+      props: {
+        modelValue: true,
+        location: { lat: 35.7, lng: 51.4 },
+      },
+      global: {
+        stubs: {
+          transition: false,
+        },
+      },
+    })
+
+    expect(wrapper.getComponent({ name: 'LMap' }).props('center')).toEqual([35.7, 51.4])
+    expect(wrapper.getComponent({ name: 'LMarker' }).props('latLng')).toEqual([35.7, 51.4])
+
+    await wrapper.setProps({ location: { lat: 36.1, lng: 52.2 } })
+
+    expect(wrapper.getComponent({ name: 'LMap' }).props('center')).toEqual([36.1, 52.2])
+    expect(wrapper.getComponent({ name: 'LMarker' }).props('latLng')).toEqual([36.1, 52.2])
+
+    await wrapper.get('.external-btn').trigger('click')
+    expect(openSpy).toHaveBeenCalledWith('https://www.google.com/maps?q=36.1,52.2', '_blank')
+  })
 })

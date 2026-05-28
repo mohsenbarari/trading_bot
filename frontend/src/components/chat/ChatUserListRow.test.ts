@@ -53,4 +53,41 @@ describe('ChatUserListRow.vue', () => {
     expect(wrapper.find('.tail').exists()).toBe(true)
     expect(wrapper.find('.action').exists()).toBe(true)
   })
+
+  it('falls back to avatar initials and uses slot-driven badges and subtitle content', () => {
+    const wrapper = mount(ChatUserListRow, {
+      props: {
+        tag: 'div',
+        name: 'بهروز',
+        subtitle: 'این متن باید override شود',
+      },
+      slots: {
+        badges: '<span class="custom-badge">owner</span>',
+        subtitle: '<span class="custom-subtitle" dir="ltr">09120000000</span>',
+      },
+    })
+
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.get('.chat-user-row__avatar').text()).toContain('ب')
+    expect(wrapper.find('.custom-badge').exists()).toBe(true)
+    expect(wrapper.find('.chat-user-row__title').classes()).toContain('has-badges')
+    expect(wrapper.get('.chat-user-row__subtitle').attributes('dir')).toBeUndefined()
+    expect(wrapper.get('.custom-subtitle').text()).toBe('09120000000')
+    expect(wrapper.text()).not.toContain('این متن باید override شود')
+  })
+
+  it('applies button-only root attributes when rendered as a disabled button', () => {
+    const wrapper = mount(ChatUserListRow, {
+      props: {
+        tag: 'button',
+        name: 'دکمه غیرفعال',
+        disabled: true,
+      },
+    })
+
+    const button = wrapper.get('button')
+    expect(button.attributes('type')).toBe('button')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(wrapper.classes()).toContain('is-disabled')
+  })
 })

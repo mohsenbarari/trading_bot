@@ -251,6 +251,90 @@ describe('ChatHeader.vue', () => {
     expect(wrapper.emitted('toggle-search')).toHaveLength(1)
   })
 
+  it('renders deleted direct users with avatar images and the inactive status override', async () => {
+    buildChatFileUrlMock.mockReturnValue('/avatars/user-17.png')
+
+    const ChatHeader = (await import('./ChatHeader.vue')).default
+    const wrapper = mount(ChatHeader, {
+      props: {
+        isSelectionMode: false,
+        selectedUserId: 17,
+        selectedUserName: 'deleted-user',
+        selectedAvatarFileId: 'avatar-17',
+        selectedRoomKind: 'direct',
+        apiBaseUrl: '/api',
+        targetUserStatus: 'آنلاین',
+        activityStatusText: 'در حال ارسال فایل...',
+        isTyping: true,
+        totalUnread: 0,
+        isSearchActive: false,
+        searchQuery: '',
+        searchResults: [],
+        currentSearchIndex: 0,
+        selectedMessagesCount: 0,
+        isDeleted: true,
+        roomMemberCount: null,
+        isRoomMandatory: false,
+        isRoomSystem: false,
+        canCreateGroup: true,
+        canCreateChannel: true,
+      },
+      global: {
+        directives: {
+          ripple: {},
+          'click-outside': {},
+        },
+      },
+    })
+
+    expect(buildChatFileUrlMock).toHaveBeenCalledWith('avatar-17', '/api')
+    expect(wrapper.get('.header-avatar-image').attributes('src')).toBe('/avatars/user-17.png')
+    expect(wrapper.text()).toContain('غیرفعال')
+    expect(wrapper.text()).toContain('حساب کاربری غیرفعال است')
+    expect(wrapper.text()).not.toContain('در حال ارسال فایل')
+    expect(wrapper.text()).not.toContain('در حال نوشتن')
+  })
+
+  it('renders the selection header and emits clear-selection', async () => {
+    const ChatHeader = (await import('./ChatHeader.vue')).default
+    const wrapper = mount(ChatHeader, {
+      props: {
+        isSelectionMode: true,
+        selectedUserId: 12,
+        selectedUserName: 'ali-user',
+        selectedAvatarFileId: null,
+        selectedRoomKind: 'direct',
+        apiBaseUrl: '',
+        targetUserStatus: 'آنلاین',
+        isTyping: false,
+        totalUnread: 0,
+        isSearchActive: false,
+        searchQuery: '',
+        searchResults: [],
+        currentSearchIndex: 0,
+        selectedMessagesCount: 3,
+        isDeleted: false,
+        roomMemberCount: null,
+        isRoomMandatory: false,
+        isRoomSystem: false,
+        canCreateGroup: true,
+        canCreateChannel: true,
+      },
+      global: {
+        directives: {
+          ripple: {},
+          'click-outside': {},
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('3')
+    expect(wrapper.find('#search-input').exists()).toBe(false)
+
+    await wrapper.find('.header-btn').trigger('click')
+    expect(wrapper.emitted('clear-selection')).toHaveLength(1)
+  })
+
   it('prefers explicit activity status text, syncs searchQuery props, and formats room member counts', async () => {
     const ChatHeader = (await import('./ChatHeader.vue')).default
 

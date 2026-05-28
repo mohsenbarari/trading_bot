@@ -292,4 +292,129 @@ describe('DashboardView.vue', () => {
     expect(wrapper.find('.switcher-entry-btn').exists()).toBe(true)
     expect(wrapper.text()).toContain('سوییچ موقت حساب')
   })
+
+  it('hides the temporary account switcher when a non-admin session has an invalid token claim payload', async () => {
+    localStorage.setItem('auth_token', 'broken.token.payload')
+    dashboardViewMocks.apiFetchMock.mockResolvedValueOnce(makeJsonResponse({
+      id: 72,
+      full_name: 'کاربر عادی',
+      account_name: 'user72',
+      role: 'عادی',
+      account_status: 'active',
+      global_lock_grace_expires_at: null,
+      global_web_locked_at: null,
+      trading_restricted_until: null,
+    }))
+
+    const wrapper = await mountView()
+
+    expect(wrapper.find('.switcher-entry-btn').exists()).toBe(false)
+  })
+
+  it('debounces account-switch search requests, shows the empty state, and clears the modal on close', async () => {
+    dashboardViewMocks.apiFetchMock
+      .mockResolvedValueOnce(makeJsonResponse({
+        id: 80,
+        full_name: 'مدیر جستجو',
+        account_name: 'root80',
+        role: 'مدیر ارشد',
+        account_status: 'active',
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
+        trading_restricted_until: null,
+      }))
+      .mockResolvedValueOnce(makeJsonResponse([
+        {
+          id: 81,
+          full_name: 'کاربر اول',
+          account_name: 'user81',
+          mobile_number: '09120000081',
+          role: 'عادی',
+          is_accountant: false,
+          is_customer: false,
+          customer_tier: null,
+        },
+      ]))
+      .mockResolvedValueOnce(makeJsonResponse([]))
+
+    const wrapper = await mountView()
+    await wrapper.get('.switcher-entry-btn').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('.switcher-search-box input').setValue('ali')
+    await vi.advanceTimersByTimeAsync(220)
+    await flushPromises()
+
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenNthCalledWith(3, '/api/auth/dev-switch/users?search=ali')
+    expect(wrapper.text()).toContain('کاربری برای سوییچ پیدا نشد.')
+
+    await wrapper.get('.switcher-close-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.switcher-modal-backdrop').exists()).toBe(false)
+  })
+
+  it('shows switch errors when the target account cannot be activated', async () => {
+    dashboardViewMocks.apiFetchMock
+      .mockResolvedValueOnce(makeJsonResponse({
+        id: 90,
+        full_name: 'مدیر خطا',
+        account_name: 'root90',
+        role: 'مدیر ارشد',
+        account_status: 'active',
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
+        trading_restricted_until: null,
+      }))
+      .mockResolvedValueOnce(makeJsonResponse([
+        {
+          id: 91,
+          full_name: 'هدف خطا',
+          account_name: 'target91',
+          mobile_number: '09120000091',
+          role: 'عادی',
+          is_accountant: false,
+          is_customer: true,
+          customer_tier: 'tier2',
+        },
+      ]))
+      .mockResolvedValueOnce(makeJsonResponse({ detail: 'سوییچ حساب انجام نشد' }, false))
+
+    const wrapper = await mountView()
+    await wrapper.get('.switcher-entry-btn').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('.switcher-user-row').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.switcher-error').text()).toBe('سوییچ حساب انجام نشد')
+    expect(dashboardViewMocks.locationAssignMock).not.toHaveBeenCalled()
+  })
+
+  it('forces a local logout even when session lookup fails', async () => {
+    dashboardViewMocks.apiFetchMock
+      .mockResolvedValueOnce(makeJsonResponse({
+        id: 95,
+        full_name: 'کاربر خروج اجباری',
+        account_name: 'logout95',
+        role: 'عادی',
+        account_status: 'active',
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
+        trading_restricted_until: null,
+      }))
+      .mockRejectedValueOnce(new Error('session lookup failed'))
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const wrapper = await mountView()
+
+    await wrapper.get('.logout-btn').trigger('click')
+    await flushPromises()
+
+    expect(consoleErrorSpy).toHaveBeenCalled()
+    expect(dashboardViewMocks.forceLogoutMock).toHaveBeenCalledTimes(1)
+
+    consoleErrorSpy.mockRestore()
+    wrapper.unmount()
+  })
 })

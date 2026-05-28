@@ -137,6 +137,48 @@ describe('ChatConversationList.vue', () => {
     expect(menuText).not.toContain('حذف گفتگو')
   })
 
+  it('emits the optional-channel unfollow action and renders a warning divider before it', async () => {
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const optionalChannel = makeConversation({
+      id: 12,
+      chat_id: 101,
+      other_user_id: -101,
+      other_user_name: 'Optional Channel',
+      room_kind: 'channel',
+      is_mandatory: false,
+      is_muted: true,
+    })
+
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [optionalChannel],
+        selectedUserId: null,
+        typingUsers: {},
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { teleport: true, transition: false },
+      },
+    })
+
+    await wrapper.get('.conversation-item').trigger('contextmenu', { clientX: 48, clientY: 52 })
+    await flushPromises()
+
+    expect(wrapper.findAll('.menu-action-divider')).toHaveLength(1)
+    const unfollowAction = wrapper.findAll('.menu-action').find((button) => button.text().includes('لغو دنبال‌کردن'))
+    expect(unfollowAction).toBeTruthy()
+
+    await unfollowAction!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('conversation-action')?.[0]?.[0]).toMatchObject({
+      action: 'unfollow',
+      conv: expect.objectContaining({ id: optionalChannel.id }),
+    })
+    expect(discardBackStateMock).toHaveBeenCalledTimes(1)
+  })
+
   it('hides the new conversation fab when starting new chats is disabled', async () => {
     const ChatConversationList = (await import('./ChatConversationList.vue')).default
     const wrapper = mount(ChatConversationList, {
@@ -408,6 +450,45 @@ describe('ChatConversationList.vue', () => {
     await groupRow!.trigger('contextmenu', { clientX: 55, clientY: 77 })
     await flushPromises()
     expect(wrapper.get('.conversation-menu-panel').text()).toContain('ترک گروه')
+  })
+
+  it('emits the group leave action and closes the menu through the action path', async () => {
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const groupConversation = makeConversation({
+      id: 13,
+      chat_id: 131,
+      other_user_id: -131,
+      other_user_name: 'Group Action Room',
+      room_kind: 'group',
+    })
+
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [groupConversation],
+        selectedUserId: null,
+        typingUsers: {},
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { teleport: true, transition: false },
+      },
+    })
+
+    await wrapper.get('.conversation-item').trigger('contextmenu', { clientX: 58, clientY: 84 })
+    await flushPromises()
+
+    const leaveAction = wrapper.findAll('.menu-action').find((button) => button.text().includes('ترک گروه'))
+    expect(leaveAction).toBeTruthy()
+
+    await leaveAction!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('conversation-action')?.[0]?.[0]).toMatchObject({
+      action: 'leave',
+      conv: expect.objectContaining({ id: groupConversation.id }),
+    })
+    expect(discardBackStateMock).toHaveBeenCalledTimes(1)
   })
 
   it('runs the registered back-state closer and clears pending long-press timers on unmount', async () => {
