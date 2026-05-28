@@ -173,6 +173,7 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             wrapped_config_path = Path(temp_dir) / 'nginx-wrapper.conf'
             wrapped_config_path.write_text(wrapper_config, encoding='utf-8')
+            pid_path = Path(temp_dir) / 'nginx.pid'
 
             result = run_checked([
                 'nginx',
@@ -181,6 +182,8 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
                 str(wrapped_config_path),
                 '-p',
                 temp_dir,
+                '-g',
+                f'pid {pid_path};',
             ])
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
