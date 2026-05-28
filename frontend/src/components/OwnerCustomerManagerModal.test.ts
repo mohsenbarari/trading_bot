@@ -480,4 +480,178 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     wrapper.unmount()
   })
+
+  it('renders multi-day pending countdowns, revoked copy, and unknown session badges without terminating on cancelled confirm', async () => {
+    vi.setSystemTime(new Date('2026-05-21T12:00:00Z'))
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const longPendingRelation = {
+      ...pendingRelation,
+      id: 21,
+      management_name: 'مشتری چندروزه',
+      expires_at: '2026-05-23T13:02:03Z',
+      created_at: '2026-05-20T13:00:00Z',
+    }
+    const revokedRelation = {
+      ...pendingRelation,
+      id: 22,
+      management_name: 'دعوت لغوشده',
+      status: 'revoked',
+      registration_link: null,
+      expires_at: null,
+    }
+    const activeUnknownSessionRelation = {
+      ...activeRelation,
+      id: 23,
+      management_name: 'مشتری نشست‌دار',
+    }
+
+    apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/customers/owner-relations' && !options?.method) {
+        return makeResponse([longPendingRelation, revokedRelation, activeUnknownSessionRelation])
+      }
+      if (url === '/api/customers/owner-relations/23/sessions' && options?.method === 'GET') {
+        return makeResponse([
+          {
+            id: '33333333-3333-3333-3333-333333333333',
+            device_name: '',
+            device_ip: null,
+            platform: '',
+            home_server: '',
+            is_primary: false,
+            is_active: true,
+            created_at: null,
+            last_active_at: null,
+          },
+        ])
+      }
+      throw new Error(`Unexpected apiFetch call: ${url}`)
+    })
+
+    const wrapper = mountModal()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('2 روز و 01:02:03')
+    expect(wrapper.text()).toContain('این دعوت توسط مالک لغو شده است.')
+
+    await wrapper.get('.toggle-sessions').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('دستگاه ناشناس')
+    expect(wrapper.findAll('.session-badge.neutral').map((node) => node.text())).toEqual(['نامشخص', 'نامشخص'])
+    expect(wrapper.text()).toContain('آخرین فعالیت: ---')
+    expect(wrapper.text()).toContain('شروع نشست: ---')
+
+    await wrapper.get('.terminate-session').trigger('click')
+    expect(confirmMock).toHaveBeenCalledWith('نشست «دستگاه مشتری» پایان یابد؟')
+    expect(apiFetchMock).toHaveBeenCalledTimes(2)
+
+    wrapper.unmount()
+  })
+
+  it('shows the fallback relation-load error when the API returns no usable detail', async () => {
+    apiFetchMock.mockResolvedValue(makeResponse({}, false, 500))
+
+    const wrapper = mountModal()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('دریافت لیست مشتریان ناموفق بود.')
+    expect(wrapper.find('.customer-banner.error').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('resets the create form, clears tier2 commission on tier changes, and reports clipboard failures', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('clipboard denied'))
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+
+    apiFetchMock.mockResolvedValue(makeResponse([pendingRelation]))
+
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await wrapper.get('.create-account-name').setValue('tier2_customer')
+    await wrapper.get('.create-management-name').setValue('مشتری سطح دو')
+    await wrapper.get('.create-mobile-number').setValue('09127770000')
+    await wrapper.get('.create-tier-select').setValue('tier2')
+    await wrapper.get('.create-commission-rate').setValue('1.5')
+    await wrapper.get('.create-tier-select').setValue('tier1')
+    await flushPromises()
+
+    expect(wrapper.find('.create-commission-rate').exists()).toBe(false)
+
+    await wrapper.findAll('.panel-actions .secondary-btn')[0]!.trigger('click')
+
+    expect((wrapper.get('.create-account-name').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('.create-management-name').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('.create-mobile-number').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('.create-tier-select').element as HTMLSelectElement).value).toBe('tier1')
+
+    await wrapper.get('.copy-link').trigger('click')
+    await flushPromises()
+
+    expect(writeText).toHaveBeenCalledWith('https://example.com/register/token-2')
+    expect(wrapper.text()).toContain('کپی لینک ثبت‌نام ممکن نشد.')
+
+    wrapper.unmount()
+  })
+
+  it('surfaces session, create, edit, and unlink failures while keeping the relevant UI state intact', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/customers/owner-relations' && !options?.method) {
+        return makeResponse([activeRelation, pendingRelation])
+      }
+      if (url === '/api/customers/owner-relations/11/sessions' && options?.method === 'GET') {
+        return makeResponse({ detail: 'نشست‌های مشتری در دسترس نیست.' }, false, 500)
+      }
+      if (url === '/api/customers/owner-relations/11' && options?.method === 'PATCH') {
+        return makeResponse({ detail: 'ویرایش مشتری ناموفق بود.' }, false, 400)
+      }
+      if (url === '/api/customers/owner-relations' && options?.method === 'POST') {
+        return makeResponse({ detail: 'ایجاد مشتری ناموفق بود.' }, false, 400)
+      }
+      if (url === '/api/customers/owner-relations/12' && options?.method === 'DELETE') {
+        return makeResponse({}, false, 500)
+      }
+      throw new Error(`Unexpected apiFetch call: ${url}`)
+    })
+
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await wrapper.get('.toggle-sessions').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('نشست‌های مشتری در دسترس نیست.')
+
+    await wrapper.findAll('.start-edit')[1]!.trigger('click')
+    await wrapper.get('.save-edit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('ویرایش مشتری ناموفق بود.')
+    expect(wrapper.find('.edit-panel').exists()).toBe(true)
+
+    await wrapper.get('.edit-panel .secondary-btn').trigger('click')
+    expect(wrapper.find('.edit-panel').exists()).toBe(false)
+
+    await wrapper.get('.create-account-name').setValue('broken_customer')
+    await wrapper.get('.create-management-name').setValue('مشتری خطادار')
+    await wrapper.get('.create-mobile-number').setValue('09129990000')
+    await wrapper.get('.submit-create').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('ایجاد مشتری ناموفق بود.')
+
+    await wrapper.get('.cancel-pending').trigger('click')
+    await flushPromises()
+
+    expect(confirmMock).toHaveBeenCalledWith('دعوت مشتری ویژه لغو شود؟')
+    expect(wrapper.text()).toContain('لغو دعوت مشتری ناموفق بود.')
+    expect(wrapper.findAll('.customer-card h5').map((node) => node.text())).toContain('مشتری ویژه')
+
+    wrapper.unmount()
+  })
 })

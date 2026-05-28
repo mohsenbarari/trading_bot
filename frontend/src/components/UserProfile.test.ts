@@ -25,7 +25,12 @@ vi.mock('lucide-vue-next', () => ({
 }))
 
 vi.mock('vue3-persian-datetime-picker', () => ({
-  default: { template: '<div />' },
+  default: {
+    name: 'MockDatePicker',
+    props: ['modelValue'],
+    emits: ['update:modelValue', 'change'],
+    template: '<button class="mock-date-picker" type="button" @click="$emit(\'update:modelValue\', \'1409/02/03\'); $emit(\'change\', \'1409/02/03\')"></button>',
+  },
 }))
 
 function makeResponse(payload: unknown, ok = true) {
@@ -719,5 +724,157 @@ describe('UserProfile.vue', () => {
         }),
       },
     ])
+  })
+
+  it('drives the custom block and limitation date modals through their UI controls', async () => {
+    const user = makeUser({ id: 35 })
+    userProfileTimingMocks.parseJalaliToIranISOMock
+      .mockReturnValueOnce('2031-03-21T09:30:00.000Z')
+      .mockReturnValueOnce('2031-03-22T10:45:00.000Z')
+    apiFetchMock
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        trading_restricted_until: '2031-03-21T09:30:00.000Z',
+        trading_restricted_until_jalali: '۱۴۰۹/۰۱/۰۱ ۰۹:۳۰',
+      }))
+      .mockResolvedValueOnce(makeResponse({
+        ...user,
+        max_daily_trades: 7,
+        max_active_commodities: 8,
+        max_daily_requests: 9,
+        limitations_expire_at: '2031-03-22T10:45:00.000Z',
+        limitations_expire_at_jalali: '۱۴۰۹/۰۱/۰۲ ۱۰:۴۵',
+      }))
+
+    const UserProfile = (await import('./UserProfile.vue')).default
+    const wrapper = mount(UserProfile, {
+      props: {
+        user,
+        isAdminView: true,
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    await wrapper.get('.settings-btn').trigger('click')
+    await wrapper.get('.block-btn').trigger('click')
+    await wrapper.get('.modal-content .cancel-btn.full-width').trigger('click')
+
+    await wrapper.get('.block-btn').trigger('click')
+    await findButtonByText(wrapper, 'انتخاب زمان دلخواه').trigger('click')
+    await wrapper.get('.custom-date-section .cancel-btn').trigger('click')
+
+    await findButtonByText(wrapper, 'انتخاب زمان دلخواه').trigger('click')
+    await wrapper.get('.custom-date-trigger').trigger('click')
+    await wrapper.get('.date-modal-content .integrated-cancel-btn').trigger('click')
+
+    await wrapper.get('.custom-date-trigger').trigger('click')
+    await wrapper.get('.date-modal-content .mock-date-picker').trigger('click')
+    await wrapper.get('.date-modal-content .integrated-save-btn').trigger('click')
+    await wrapper.get('.date-modal-content .time-input').setValue('09:30')
+    await wrapper.get('.date-modal-content .integrated-save-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.custom-date-trigger').text()).toContain('1409/02/03 09:30')
+
+    await wrapper.get('.custom-date-section .save-btn').trigger('click')
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/users/35', {
+      method: 'PUT',
+      body: JSON.stringify({ trading_restricted_until: '2031-03-21T09:30:00.000Z' }),
+    })
+
+    await findButtonByText(wrapper, 'اعمال محدودیت').trigger('click')
+    const limitInputs = wrapper.findAll('.modal-content .form-input')
+    await limitInputs[0]!.setValue('7')
+    await limitInputs[1]!.setValue('8')
+    await limitInputs[2]!.setValue('9')
+    await wrapper.get('.modal-content .form-select').setValue('-1')
+
+    await wrapper.get('.modal-content .custom-date-trigger').trigger('click')
+    await wrapper.get('.date-modal-content .integrated-cancel-btn').trigger('click')
+    await wrapper.get('.modal-content .custom-date-trigger').trigger('click')
+    await wrapper.get('.date-modal-content .mock-date-picker').trigger('click')
+    await wrapper.get('.date-modal-content .integrated-save-btn').trigger('click')
+    await wrapper.get('.date-modal-content .time-input').setValue('10:45')
+    await wrapper.get('.date-modal-content .integrated-save-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('.modal-content .custom-date-trigger')[0]!.text()).toContain('1409/02/03 10:45')
+
+    await wrapper.get('.modal-content .save-btn').trigger('click')
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/users/35', {
+      method: 'PUT',
+      body: JSON.stringify({
+        max_daily_trades: 7,
+        max_active_commodities: 8,
+        max_daily_requests: 9,
+        limitations_expire_at: '2031-03-22T10:45:00.000Z',
+      }),
+    })
+    expect(userProfileTimingMocks.parseJalaliToIranISOMock).toHaveBeenCalledWith('1409/02/03 09:30')
+    expect(userProfileTimingMocks.parseJalaliToIranISOMock).toHaveBeenCalledWith('1409/02/03 10:45')
+  })
+
+  it('keeps role editing open on save failure, supports admin back actions, and hides settings for ordinary users', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const user = makeUser({ id: 36, role: 'عادی' })
+    apiFetchMock.mockResolvedValueOnce({ ok: false })
+
+    const UserProfile = (await import('./UserProfile.vue')).default
+    const wrapper = mount(UserProfile, {
+      props: {
+        user,
+        isAdminView: true,
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    await wrapper.get('.back-button').trigger('click')
+    await wrapper.get('.main-actions .back-btn').trigger('click')
+    await wrapper.get('.settings-btn').trigger('click')
+    await findButtonByText(wrapper, 'تغییر وضعیت حساب').trigger('click')
+    await findButtonByText(wrapper, 'ویرایش نقش').trigger('click')
+    await wrapper.get('.edit-section .save-btn').trigger('click')
+    await flushPromises()
+
+    expect(confirmMock).toHaveBeenCalledWith('آیا از غیرفعال کردن حساب اطمینان دارید؟')
+    expect(apiFetchMock).toHaveBeenCalledTimes(1)
+    expect(window.alert).toHaveBeenCalledWith('خطا در ذخیره تغییرات')
+    expect(wrapper.find('.edit-section').exists()).toBe(true)
+
+    await wrapper.get('.edit-section .cancel-btn').trigger('click')
+    expect(wrapper.find('.edit-section').exists()).toBe(false)
+    expect(wrapper.emitted('navigate')).toEqual([
+      ['manage_users'],
+      ['manage_users'],
+    ])
+
+    const nonAdminWrapper = mount(UserProfile, {
+      props: {
+        user: makeUser({ role: 'عادی' }),
+        isAdminView: false,
+      },
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    expect(nonAdminWrapper.find('.notification-btn').exists()).toBe(true)
+    expect(nonAdminWrapper.find('.menu-button.settings-btn').exists()).toBe(false)
   })
 })
