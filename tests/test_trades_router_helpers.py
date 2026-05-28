@@ -57,6 +57,141 @@ class _AsyncSessionContext:
 
 
 class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
+    async def test_trade_helper_shortcuts_cover_invalid_inputs_and_projection_fallbacks(self):
+        display_identity = SimpleNamespace(display_name="حسابدار نمایش")
+        self.assertEqual(
+            trades._resolve_trade_participant_name(
+                SimpleNamespace(account_name="fallback-user"),
+                7,
+                {7: display_identity},
+            ),
+            "حسابدار نمایش",
+        )
+        self.assertEqual(
+            trades._resolve_trade_participant_name(
+                SimpleNamespace(account_name="fallback-user"),
+                "not-an-id",
+                {7: display_identity},
+            ),
+            "fallback-user",
+        )
+
+        self.assertIsNone(trades._normalize_customer_tier_value(SimpleNamespace(value=123)))
+        self.assertIsNone(trades._normalize_trade_role_value(SimpleNamespace(value=123)))
+        self.assertFalse(
+            trades._viewer_can_access_customer_history_relation(
+                relation=SimpleNamespace(owner_user_id=None),
+                context=SimpleNamespace(
+                    owner_user=SimpleNamespace(id=9, role=None),
+                    actor_user=SimpleNamespace(id=9, role=None),
+                ),
+            )
+        )
+
+        self.assertEqual(
+            await trades._load_trade_customer_relation_map_for_user_ids(AsyncMock(), []),
+            {},
+        )
+
+        naive_created_relation = SimpleNamespace(
+            customer_user_id=51,
+            owner_user_id=7,
+            status=CustomerRelationStatus.REVOKED,
+            deleted_at=None,
+            updated_at=None,
+            expires_at=None,
+            activated_at=None,
+            created_at=datetime(2025, 1, 3, 9, 30),
+        )
+        naive_deleted_relation = SimpleNamespace(
+            customer_user_id=52,
+            owner_user_id=7,
+            status=CustomerRelationStatus.DELETED,
+            deleted_at=datetime(2025, 1, 4, 10, 15),
+            updated_at=None,
+            expires_at=None,
+            activated_at=None,
+            created_at=None,
+        )
+        timeless_relation = SimpleNamespace(
+            customer_user_id=53,
+            owner_user_id=7,
+            status=CustomerRelationStatus.EXPIRED,
+            deleted_at=None,
+            updated_at=None,
+            expires_at=None,
+            activated_at=None,
+            created_at=None,
+        )
+        db = AsyncMock()
+        db.execute.return_value = SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: [timeless_relation, naive_created_relation, naive_deleted_relation])
+        )
+
+        relation_map = await trades._load_trade_customer_relation_map_for_user_ids(
+            db,
+            [51, 52, 53],
+            include_inactive_historical=True,
+        )
+
+        self.assertIs(relation_map[51], naive_created_relation)
+        self.assertIs(relation_map[52], naive_deleted_relation)
+        self.assertIs(relation_map[53], timeless_relation)
+
+        self.assertEqual(
+            trades._build_trade_path_payload(
+                offer_user_id="bad-user-id",
+                responder_user_id=7,
+                customer_relation_map={7: SimpleNamespace(owner_user_id=9, customer_tier=CustomerTier.TIER_1)},
+            ),
+            {"trade_path_kind": None, "trade_path_summary": None},
+        )
+        self.assertEqual(
+            trades._build_trade_path_payload(
+                offer_user_id=7,
+                responder_user_id=9,
+                customer_relation_map={7: SimpleNamespace(owner_user_id=9, customer_tier="tier3")},
+            ),
+            {"trade_path_kind": None, "trade_path_summary": None},
+        )
+
+        self.assertIsNone(trades._build_trade_history_viewer_context(SimpleNamespace(id=None)))
+        self.assertIsNone(trades._build_trade_profile_route_from_payload("offer_user", {}))
+        self.assertEqual(
+            trades._build_trade_profile_route_from_payload(
+                "offer_user",
+                {"offer_user_profile_user_id": 71},
+            ),
+            "/users/71",
+        )
+
+        actor_offer_trade = SimpleNamespace(offer_user_id=22, responder_user_id=99, actor_user_id=11)
+        actor_responder_trade = SimpleNamespace(offer_user_id=99, responder_user_id=22, actor_user_id=11)
+        relation_map = {11: SimpleNamespace(owner_user_id=22)}
+        self.assertEqual(
+            trades._resolve_trade_history_subject_prefix(
+                trade=actor_offer_trade,
+                history_target_user_id=11,
+                customer_relation_map=relation_map,
+            ),
+            "offer_user",
+        )
+        self.assertEqual(
+            trades._resolve_trade_history_subject_prefix(
+                trade=actor_responder_trade,
+                history_target_user_id=11,
+                customer_relation_map=relation_map,
+            ),
+            "responder_user",
+        )
+        self.assertIsNone(
+            trades._resolve_trade_history_subject_prefix(
+                trade=actor_offer_trade,
+                history_target_user_id=11,
+                customer_relation_map={11: SimpleNamespace(owner_user_id=None)},
+            )
+        )
+
     async def test_load_trade_customer_relation_map_preserves_historical_relations_when_requested(self):
         active_relation = SimpleNamespace(
             customer_user_id=42,

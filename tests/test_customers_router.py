@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 import schemas
 from api.routers.customers import (
+    build_customer_registration_link,
     create_my_customer,
     get_active_customer_session,
     get_active_owner_customer_relation,
@@ -252,6 +253,10 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 403)
 
     async def test_get_active_owner_customer_relation_rejects_inactive_or_deleted_relation(self):
+        with self.assertRaises(HTTPException) as exc_info:
+            await get_active_owner_customer_relation(ExecuteDB(None), owner_user_id=7, relation_id=9)
+        self.assertEqual(exc_info.exception.status_code, 404)
+
         base_relation = SimpleNamespace(
             deleted_at=None,
             status=CustomerRelationStatus.PENDING,
@@ -300,6 +305,32 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             await get_active_customer_session(ExecuteDB(None), customer_user_id=12, session_id=session_id)
 
         self.assertEqual(exc_info.exception.status_code, 404)
+
+    async def test_customer_router_helpers_cover_blank_frontend_and_successful_lookups(self):
+        with patch("api.routers.customers.settings", SimpleNamespace(frontend_url="   ")):
+            self.assertIsNone(build_customer_registration_link("token-1"))
+
+        active_relation = SimpleNamespace(
+            deleted_at=None,
+            status=CustomerRelationStatus.ACTIVE,
+            customer_user_id=12,
+            customer_user=SimpleNamespace(is_deleted=False),
+        )
+        resolved_relation = await get_active_owner_customer_relation(
+            ExecuteDB(active_relation),
+            owner_user_id=7,
+            relation_id=9,
+        )
+        self.assertIs(resolved_relation, active_relation)
+
+        session_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+        active_session = SimpleNamespace(id=session_id)
+        resolved_session = await get_active_customer_session(
+            ExecuteDB(active_session),
+            customer_user_id=12,
+            session_id=session_id,
+        )
+        self.assertIs(resolved_session, active_session)
 
     async def test_terminate_my_customer_session_logs_out_selected_customer_session(self):
         context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
