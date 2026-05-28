@@ -78,6 +78,45 @@ class AccountantsRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(listed), 1)
         self.assertEqual(listed[0]["registration_link"], "https://app.example/register?token=ACCT-token")
 
+    async def test_create_owner_accountant_skips_sms_when_frontend_url_is_blank(self):
+        relation = SimpleNamespace(
+            id=19,
+            owner_user_id=7,
+            accountant_user_id=None,
+            accountant_user=None,
+            global_account_name="acc2",
+            relation_display_name="حسابدار دوم",
+            duty_description=None,
+            mobile_number="09120000001",
+            status="pending",
+            invitation_token="ACCT-no-link",
+            expires_at=datetime.utcnow() + timedelta(days=2),
+            activated_at=None,
+            deleted_at=None,
+            created_at=datetime.utcnow(),
+        )
+        context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
+        payload = schemas.AccountantRelationCreate(
+            account_name="acc2",
+            relation_display_name="حسابدار دوم",
+            mobile_number="09120000001",
+        )
+
+        with patch(
+            "api.routers.accountants.create_owner_accountant_relation",
+            new=AsyncMock(return_value=(relation, SimpleNamespace())),
+        ) as create_mock, patch(
+            "api.routers.accountants.send_accountant_invitation_sms"
+        ) as sms_mock, patch(
+            "api.routers.accountants.settings",
+            SimpleNamespace(frontend_url="   "),
+        ):
+            created = await create_my_accountant(payload, context=context, db=FakeDB())
+
+        create_mock.assert_awaited_once()
+        sms_mock.assert_not_called()
+        self.assertIsNone(created["registration_link"])
+
     async def test_cancel_owner_pending_accountant_returns_serialized_relation(self):
         relation = SimpleNamespace(
             id=9,
