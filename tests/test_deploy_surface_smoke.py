@@ -153,7 +153,8 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         raw_config = (REPO_ROOT / 'nginx.conf').read_text(encoding='utf-8')
         sanitized_config = raw_config
         replacements = {
-            '    listen 443 ssl;': '    listen 443;',
+            '    listen 80;': '    listen 8080;',
+            '    listen 443 ssl;': '    listen 8443;',
             '    ssl_certificate /etc/letsencrypt/live/coin.362514.ir/fullchain.pem;': '',
             '    ssl_certificate_key /etc/letsencrypt/live/coin.362514.ir/privkey.pem;': '',
             '    include /etc/letsencrypt/options-ssl-nginx.conf;': '',
