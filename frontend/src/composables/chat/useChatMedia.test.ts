@@ -782,6 +782,38 @@ describe('useChatMedia', () => {
     await expect(hooks.preprocessVideoPreview('blob:video', abortedVideoController.signal)).rejects.toThrow('UploadCancelled')
   })
 
+  it('covers adaptive preprocess/upload limit helpers for large albums and document media', async () => {
+    const hardwareDescriptor = Object.getOwnPropertyDescriptor(navigator, 'hardwareConcurrency')
+    const memoryDescriptor = Object.getOwnPropertyDescriptor(navigator as object, 'deviceMemory')
+
+    Object.defineProperty(navigator, 'hardwareConcurrency', {
+      configurable: true,
+      value: 16,
+    })
+    Object.defineProperty(navigator as object, 'deviceMemory', {
+      configurable: true,
+      value: 8,
+    })
+
+    preprocessMocks.getRecommendedImagePreprocessParallelism.mockReturnValueOnce(2)
+
+    const { wrapper } = mountHarness([])
+    const hooks = (wrapper.vm as any).__testHooks
+
+    expect(hooks.getAdaptivePreprocessLimit(6, 'image')).toBeGreaterThanOrEqual(1)
+    expect(hooks.getAdaptiveUploadLimit(6, 'image')).toBeGreaterThanOrEqual(1)
+    expect(hooks.getAdaptiveUploadLimit(1, 'document')).toBeGreaterThanOrEqual(1)
+
+    if (hardwareDescriptor) {
+      Object.defineProperty(navigator, 'hardwareConcurrency', hardwareDescriptor)
+    }
+    if (memoryDescriptor) {
+      Object.defineProperty(navigator as object, 'deviceMemory', memoryDescriptor)
+    } else {
+      Reflect.deleteProperty(navigator as object, 'deviceMemory')
+    }
+  })
+
   it('covers weak capability fallback, preprocess timeout, pending media-load reuse, and non-media clicks', async () => {
     vi.useFakeTimers()
 

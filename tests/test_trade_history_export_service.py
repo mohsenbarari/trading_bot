@@ -38,6 +38,10 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
         self.assertEqual(build_trade_history_date_range_label(None, None), "بازه زمانی: همه تاریخ‌ها")
         self.assertIn("بازه زمانی:", build_trade_history_date_range_label(date(2026, 5, 1), date(2026, 5, 31)))
 
+    def test_build_trade_history_date_range_label_single_sided_ranges(self):
+        self.assertIn("از", build_trade_history_date_range_label(date(2026, 5, 1), None))
+        self.assertIn("تا", build_trade_history_date_range_label(None, date(2026, 5, 31)))
+
     def test_build_trade_history_export_rows(self):
         rows = build_trade_history_export_rows([make_trade()], 2)
         self.assertEqual(len(rows), 1)
@@ -52,6 +56,16 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
 
         self.assertEqual(resolve_counterparty_account_name_for_perspective(trade, 2), "offer-side")
         self.assertEqual(resolve_counterparty_account_name_for_perspective(trade, 99), "responder-side")
+
+    def test_trade_type_and_counterparty_fallback_with_invalid_responder_id(self):
+        trade = make_trade()
+        trade.trade_type = object()
+        trade.responder_user_id = "invalid"
+        trade.offer_user = SimpleNamespace(account_name="offer-side")
+        trade.responder_user = SimpleNamespace(account_name="responder-side")
+
+        self.assertEqual(resolve_trade_type_label_for_perspective(trade, 2), "خرید")
+        self.assertEqual(resolve_counterparty_account_name_for_perspective(trade, 2), "responder-side")
 
     def test_generate_trade_history_excel_file_creates_xlsx(self):
         class DummyCell:

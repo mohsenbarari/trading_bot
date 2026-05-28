@@ -461,4 +461,23 @@ describe('ChatLightbox.vue', () => {
 
     expect(image.classes()).toContain('is-zoomed')
   })
+
+  it('navigates to the previous media item on a right swipe over stage', async () => {
+    const wrapper = mount(ChatLightbox, {
+      props: buildLightboxProps({ currentIndex: 1 }),
+      global: {
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    const stage = wrapper.get('.lightbox-stage')
+    await stage.trigger('touchstart', { touches: [{ clientX: 120, clientY: 110 }] })
+    await stage.trigger('touchmove', { touches: [{ clientX: 210, clientY: 114 }] })
+    await stage.trigger('touchend', { changedTouches: [{ clientX: 210, clientY: 114 }], touches: [] })
+
+    expect(wrapper.emitted('navigate')).toContainEqual([0])
+  })
 })

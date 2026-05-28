@@ -33,11 +33,19 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         async def session_expiry_loop():
             return None
 
+        async def user_account_status_loop():
+            return None
+
         def fake_create_task(coro):
             name = getattr(getattr(coro, "cr_code", None), "co_name", "unknown")
             created.append(name)
-            if hasattr(coro, "close"):
-                coro.close()
+            try:
+                coro.send(None)
+            except StopIteration:
+                pass
+            finally:
+                if hasattr(coro, "close"):
+                    coro.close()
             return SimpleNamespace()
 
         session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
@@ -52,6 +60,8 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
             "main.offer_expiry_loop", new=offer_expiry_loop
         ), patch("main.market_schedule_loop", new=market_schedule_loop), patch(
             "main.session_expiry_loop", new=session_expiry_loop
+        ), patch(
+            "main.user_account_status_loop", new=user_account_status_loop
         ), patch("main.asyncio.create_task", side_effect=fake_create_task):
             async with main.lifespan(main.app):
                 pass
@@ -81,11 +91,19 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         async def session_expiry_loop():
             return None
 
+        async def user_account_status_loop():
+            return None
+
         def fake_create_task(coro):
             name = getattr(getattr(coro, "cr_code", None), "co_name", "unknown")
             created.append(name)
-            if hasattr(coro, "close"):
-                coro.close()
+            try:
+                coro.send(None)
+            except StopIteration:
+                pass
+            finally:
+                if hasattr(coro, "close"):
+                    coro.close()
             return SimpleNamespace()
 
         session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
@@ -100,6 +118,8 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
             "main.market_schedule_loop", new=market_schedule_loop
         ), patch(
             "main.session_expiry_loop", new=session_expiry_loop
+        ), patch(
+            "main.user_account_status_loop", new=user_account_status_loop
         ), patch("main.asyncio.create_task", side_effect=fake_create_task):
             async with main.lifespan(main.app):
                 pass

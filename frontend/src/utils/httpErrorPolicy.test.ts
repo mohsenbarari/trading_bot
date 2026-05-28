@@ -174,4 +174,53 @@ describe('httpErrorPolicy', () => {
     expect(generic.kind).toBe('panel-error')
     expect(generic.message).toBe('بارگذاری تنظیمات ممکن نشد.')
   })
+
+  it('covers 404 generic-detail fallback, 500 toast fallback, and item-scope generic fallback', () => {
+    const generic404 = buildErrorPresentation({
+      status: 404,
+      detail: 'raw-404-detail',
+      context: { scope: 'action' },
+    })
+    const serverToast = buildErrorPresentation({
+      status: 500,
+      detail: 'ignored',
+      context: { scope: 'action' },
+    })
+    const itemFallback = buildErrorPresentation({
+      status: null,
+      detail: '',
+      context: { scope: 'item' },
+    })
+
+    expect(generic404.kind).toBe('inline-error')
+    expect(generic404.message).toBe('raw-404-detail')
+    expect(serverToast.kind).toBe('toast-error')
+    expect(serverToast.retry).toBe(true)
+    expect(itemFallback.kind).toBe('item-error')
+  })
+
+  it('uses custom AppHttpError presentation and payload message/code shortcuts', async () => {
+    const customPresentation = {
+      kind: 'toast-error' as const,
+      title: 'عنوان سفارشی',
+      message: 'پیام سفارشی',
+      retry: false,
+      preserveData: false,
+    }
+    const custom = new AppHttpError({
+      status: 418,
+      detail: 'ignored',
+      presentation: customPresentation,
+    })
+    const fromKnownPayload = await createHttpErrorFromResponse(
+      new Response(null, { status: 400, statusText: 'Bad Request' }),
+      { scope: 'action' },
+      { message: 'payload message', code: 'PAYLOAD_CODE' },
+    )
+
+    expect(custom.presentation).toEqual(customPresentation)
+    expect(custom.message).toBe('پیام سفارشی')
+    expect(fromKnownPayload.detail).toBe('payload message')
+    expect(fromKnownPayload.errorCode).toBe('PAYLOAD_CODE')
+  })
 })
