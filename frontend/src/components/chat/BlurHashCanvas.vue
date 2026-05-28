@@ -33,7 +33,7 @@ function render() {
 }
 
 onMounted(render)
-watch(() => props.hash, render)
+watch(() => [props.hash, props.width, props.height, props.punch], render)
 </script>
 
 <template>

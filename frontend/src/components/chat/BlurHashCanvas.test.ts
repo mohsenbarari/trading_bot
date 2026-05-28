@@ -52,6 +52,27 @@ describe('BlurHashCanvas.vue', () => {
     expect(putImageDataMock).toHaveBeenCalledTimes(2)
   })
 
+  it('rerenders when blurhash render dimensions or punch change', async () => {
+    decodeMock.mockImplementation((_hash, width, height) => new Uint8ClampedArray(width * height * 4).fill(7))
+    const BlurHashCanvas = (await import('./BlurHashCanvas.vue')).default
+    const wrapper = mount(BlurHashCanvas, {
+      props: {
+        hash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+        width: 4,
+        height: 3,
+        punch: 1,
+      },
+    })
+
+    expect(decodeMock).toHaveBeenCalledTimes(1)
+
+    await wrapper.setProps({ width: 6, height: 5, punch: 3 })
+
+    expect(decodeMock).toHaveBeenCalledTimes(2)
+    expect(decodeMock).toHaveBeenLastCalledWith('LEHV6nWB2yk8pyo0adR*.7kCMdnj', 6, 5, 3)
+    expect(createImageDataMock).toHaveBeenLastCalledWith(6, 5)
+  })
+
   it('skips rendering for empty hashes and swallows invalid blurhash errors', async () => {
     const BlurHashCanvas = (await import('./BlurHashCanvas.vue')).default
     const wrapper = mount(BlurHashCanvas, {

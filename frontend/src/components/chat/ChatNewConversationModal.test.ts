@@ -107,6 +107,37 @@ describe('ChatNewConversationModal.vue', () => {
     expect(wrapper.emitted('start-chat')).toEqual([[8, 'owner-eight']])
   })
 
+  it('prefers full names for display and emits a generic accountant context label when no relation name exists', async () => {
+    fetchMock.mockResolvedValue(
+      makeResponse([
+        {
+          id: 9,
+          account_name: 'owner-nine',
+          full_name: 'مالک نهم',
+          mobile_number: '09124444444',
+          avatar_file_id: null,
+          resolved_from_accountant_id: 91,
+          highlight_accountant_relation_display_name: null,
+        },
+      ]),
+    )
+
+    const wrapper = buildWrapper({
+      show: true,
+      canStartDirectChat: true,
+      canCreateGroup: true,
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('مالک نهم')
+    expect(wrapper.text()).toContain('از مسیر حسابدار')
+    expect(wrapper.text()).not.toContain('از مسیر حسابدار:')
+
+    await wrapper.get('.user-row').trigger('click')
+    expect(wrapper.emitted('start-chat')).toEqual([[9, 'مالک نهم']])
+  })
+
   it('debounces search queries and calls the public search endpoint with the typed filter', async () => {
     vi.useFakeTimers()
     fetchMock.mockImplementation(() => Promise.resolve(makeResponse([])))
@@ -157,6 +188,94 @@ describe('ChatNewConversationModal.vue', () => {
 
     await wrapper.get('.back-btn').trigger('click')
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('clears stale search text when reopened and refetches the default unfiltered list', async () => {
+    vi.useFakeTimers()
+    fetchMock.mockImplementation(() => Promise.resolve(makeResponse([])))
+
+    const wrapper = buildWrapper({
+      show: true,
+      canStartDirectChat: true,
+      canCreateGroup: true,
+    })
+
+    await flushPromises()
+    fetchMock.mockClear()
+
+    await wrapper.get('.new-chat-search-input').setValue('ali')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('q=ali')
+
+    await wrapper.setProps({ show: false })
+    await flushPromises()
+    fetchMock.mockClear()
+
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect((wrapper.get('.new-chat-search-input').element as HTMLInputElement).value).toBe('')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/users-public/search?limit=50')
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('q=ali')
+  })
+
+  it('does not schedule a duplicate empty-query fetch after reopening from a stale search', async () => {
+    vi.useFakeTimers()
+    fetchMock.mockImplementation(() => Promise.resolve(makeResponse([])))
+
+    const wrapper = buildWrapper({
+      show: true,
+      canStartDirectChat: true,
+      canCreateGroup: true,
+    })
+
+    await flushPromises()
+    fetchMock.mockClear()
+
+    await wrapper.get('.new-chat-search-input').setValue('ali')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await wrapper.setProps({ show: false })
+    await flushPromises()
+    fetchMock.mockClear()
+
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/users-public/search?limit=50')
+  })
+
+  it('cancels a pending debounced search when the modal closes', async () => {
+    vi.useFakeTimers()
+    fetchMock.mockImplementation(() => Promise.resolve(makeResponse([])))
+
+    const wrapper = buildWrapper({
+      show: true,
+      canStartDirectChat: true,
+      canCreateGroup: true,
+    })
+
+    await flushPromises()
+    fetchMock.mockClear()
+
+    await wrapper.get('.new-chat-search-input').setValue('ali')
+    await wrapper.setProps({ show: false })
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('logs failed user searches and keeps the empty state visible', async () => {

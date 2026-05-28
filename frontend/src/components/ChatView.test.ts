@@ -3193,6 +3193,40 @@ describe('ChatView.vue', () => {
     vi.useRealTimers()
   })
 
+  it('falls back to the selected direct conversation profile when additive metadata is missing', async () => {
+    vi.useFakeTimers()
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 55,
+        other_user_id: 55,
+        other_user_name: 'مخاطب مستقیم',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'direct',
+      },
+    ]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'مخاطب مستقیم',
+    })
+    await flushPromises()
+
+    await wrapper.get('.chat-header-view-profile').trigger('click')
+    await vi.runAllTimersAsync()
+
+    expect(chatViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'public-profile',
+      params: { id: '55' },
+      query: { account_name: 'مخاطب مستقیم' },
+    })
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
   it('opens and closes the location modal for valid payloads and ignores invalid ones', async () => {
     chatViewMocks.messagesSeed = [buildMessage({
       message_type: 'location',
@@ -3342,6 +3376,103 @@ describe('ChatView.vue', () => {
 
     confirmSpy.mockRestore()
     wrapper.unmount()
+  })
+
+  it('covers selection helper guards and lightbox/profile fallback branches through exposed hooks', async () => {
+    vi.useFakeTimers()
+    const textMessage = buildCurrentUserMessage(11, 'پیام متنی')
+    const imageMessage = buildImageMessage({
+      id: 12,
+      sender_id: 7,
+      receiver_id: 55,
+      created_at: new Date().toISOString(),
+      content: JSON.stringify({ file_id: 'img-12' }),
+    })
+    chatViewMocks.messagesSeed = [textMessage, imageMessage]
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 55,
+        other_user_id: 55,
+        other_user_name: 'مخاطب مستقیم',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'direct',
+      },
+    ]
+    chatViewMocks.apiFetchMock.mockClear()
+    chatViewMocks.closeLightboxMock.mockClear()
+    chatViewMocks.seedFileCacheMock.mockClear()
+    chatViewMocks.shareFileMock.mockClear()
+    const clipboardWriteText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: clipboardWriteText },
+    })
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'مخاطب مستقیم',
+    }, {
+      ChatInputBar: {
+        props: ['replyingToMessage'],
+        template: '<div class="reply-state">{{ replyingToMessage?.id ?? "none" }}</div>',
+      },
+    })
+    await flushPromises()
+    const hooks = getChatViewTestHooks(wrapper)
+    chatViewMocks.apiFetchMock.mockClear()
+
+    await hooks.handleDeleteSelected()
+    await flushPromises()
+    expect(chatViewMocks.apiFetchMock).not.toHaveBeenCalled()
+
+    hooks.state.selectedMessages.value = [11]
+    await hooks.handleDownloadSelectedAlbumMessages()
+    await flushPromises()
+    expect(hooks.state.selectedMessages.value).toEqual([])
+
+    hooks.state.selectedMessages.value = [12, 11]
+    hooks.handleCopySelected()
+    await flushPromises()
+    expect(clipboardWriteText).toHaveBeenCalledWith('پیام متنی')
+    expect(hooks.state.selectedMessages.value).toEqual([])
+
+    hooks.handleReplySelected()
+    expect(wrapper.get('.reply-state').text()).toBe('none')
+    hooks.state.selectedMessages.value = [11]
+    hooks.handleReplySelected()
+    await flushPromises()
+    expect(wrapper.get('.reply-state').text()).toBe('11')
+    expect(hooks.state.selectedMessages.value).toEqual([])
+
+    hooks.openForwardModal()
+    expect(hooks.state.showForwardModal.value).toBe(false)
+    hooks.state.selectedMessages.value = [12, 11]
+    hooks.openForwardModal()
+    expect(hooks.state.showForwardModal.value).toBe(true)
+    expect(hooks.state.forwardMessageIds.value).toEqual([11, 12])
+    hooks.closeForwardModal()
+
+    chatViewMocks.routerPushMock.mockClear()
+    hooks.openPublicProfile({ id: 0, account_name: 'invalid' })
+    hooks.openPublicProfile(undefined)
+    await vi.runAllTimersAsync()
+    expect(chatViewMocks.routerPushMock).not.toHaveBeenCalled()
+
+    hooks.handleLightboxReply(999)
+    expect(chatViewMocks.closeLightboxMock).not.toHaveBeenCalled()
+    await hooks.handleLightboxShare(999)
+    await flushPromises()
+    expect(chatViewMocks.shareFileMock).not.toHaveBeenCalled()
+    await hooks.handleLightboxShare(11)
+    await flushPromises()
+    expect(chatViewMocks.seedFileCacheMock).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('این پیام قابل اشتراک‌گذاری نیست')
+
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 
   it('covers context-menu share branches for non-shareable, unseeded, and unsupported media', async () => {

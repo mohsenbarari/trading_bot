@@ -934,4 +934,53 @@ describe('CreateChannelView.vue', () => {
     vi.useRealTimers()
   })
 
+  it('guards open-current-channel without an active channel, then discards back state before emitting and keeps back-triggered close from popping again', async () => {
+    apiFetchJsonMock.mockResolvedValue([])
+
+    const CreateChannelView = (await import('./CreateChannelView.vue')).default
+    const wrapper = mount(CreateChannelView, {
+      props: {
+        apiBaseUrl: '',
+        jwtToken: 'token',
+        currentUserId: 1,
+        showCloseButton: true,
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { transition: false },
+      },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as Record<string, any>
+
+    vm.openCurrentChannelInMessenger()
+    expect(wrapper.emitted('open-channel')).toBeUndefined()
+    expect(discardBackStateMock).not.toHaveBeenCalled()
+
+    vm.activeChannel = {
+      id: 44,
+      type: 'channel',
+      title: 'Bridge Channel',
+      description: 'Desc',
+      avatar_file_id: null,
+      created_by_id: 1,
+      is_system: false,
+      is_mandatory: false,
+      member_count: 1,
+      created_at: '2026-05-12T13:00:00',
+    }
+
+    vm.openCurrentChannelInMessenger()
+    expect(discardBackStateMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('open-channel')?.[0]).toEqual([{ chatId: 44, title: 'Bridge Channel' }])
+
+    popBackStateMock.mockClear()
+    vm.pushManagerBackState()
+    vm.requestClose(true)
+
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    expect(popBackStateMock).not.toHaveBeenCalled()
+  })
+
 })

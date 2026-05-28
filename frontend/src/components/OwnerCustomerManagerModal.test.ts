@@ -66,6 +66,16 @@ describe('OwnerCustomerManagerModal.vue', () => {
     vi.useRealTimers()
   })
 
+  function mountModal() {
+    return mount(OwnerCustomerManagerModal, {
+      global: {
+        stubs: {
+          Teleport: true,
+        },
+      },
+    })
+  }
+
   it('loads and terminates customer sessions for an active customer', async () => {
     const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
     let sessionListCallCount = 0
@@ -100,13 +110,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
       throw new Error(`Unexpected apiFetch call: ${url}`)
     })
 
-    const wrapper = mount(OwnerCustomerManagerModal, {
-      global: {
-        stubs: {
-          Teleport: true,
-        },
-      },
-    })
+    const wrapper = mountModal()
 
     await flushPromises()
     await wrapper.get('button.toggle-sessions').trigger('click')
@@ -133,18 +137,251 @@ describe('OwnerCustomerManagerModal.vue', () => {
   it('shows session controls only for active customers', async () => {
     apiFetchMock.mockResolvedValue(makeResponse([pendingRelation]))
 
-    const wrapper = mount(OwnerCustomerManagerModal, {
-      global: {
-        stubs: {
-          Teleport: true,
-        },
-      },
-    })
+    const wrapper = mountModal()
 
     await flushPromises()
 
     expect(wrapper.find('button.toggle-sessions').exists()).toBe(false)
     expect(wrapper.text()).toContain('کپی لینک ثبت‌نام')
+
+    wrapper.unmount()
+  })
+
+  it('creates a tier2 customer invitation, normalizes numeric fields, and resets the form', async () => {
+    const createdRelation = {
+      ...pendingRelation,
+      id: 33,
+      management_name: 'مشتری تازه',
+      customer_tier: 'tier2',
+      commission_rate: 1.25,
+      min_trade_quantity: 2,
+      max_trade_quantity: 22,
+      max_daily_trades: 6,
+      max_daily_commodity_volume: 140,
+    }
+
+    apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/customers/owner-relations' && !options?.method) {
+        return makeResponse([])
+      }
+      if (url === '/api/customers/owner-relations' && options?.method === 'POST') {
+        return makeResponse(createdRelation)
+      }
+      throw new Error(`Unexpected apiFetch call: ${url}`)
+    })
+
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await wrapper.get('.create-account-name').setValue('fresh_customer')
+    await wrapper.get('.create-management-name').setValue('مشتری تازه')
+    await wrapper.get('.create-mobile-number').setValue('09125550000')
+    await wrapper.get('.create-tier-select').setValue('tier2')
+    await wrapper.get('.create-commission-rate').setValue('1.25')
+    await wrapper.get('.create-min-trade').setValue('2')
+    await wrapper.get('.create-max-trade').setValue('22')
+    await wrapper.get('.create-max-daily-trades').setValue('6')
+    await wrapper.get('.create-max-daily-volume').setValue('140')
+
+    await wrapper.get('.submit-create').trigger('click')
+    await flushPromises()
+
+    const postCall = apiFetchMock.mock.calls.find(([url, options]) => url === '/api/customers/owner-relations' && options?.method === 'POST')
+    expect(postCall).toBeTruthy()
+    expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
+      account_name: 'fresh_customer',
+      management_name: 'مشتری تازه',
+      mobile_number: '09125550000',
+      customer_tier: 'tier2',
+      commission_rate: 1.25,
+      min_trade_quantity: 2,
+      max_trade_quantity: 22,
+      max_daily_trades: 6,
+      max_daily_commodity_volume: 140,
+    })
+    expect(wrapper.text()).toContain('دعوت مشتری ثبت شد.')
+    expect(wrapper.text()).toContain('مشتری تازه')
+    expect((wrapper.get('.create-account-name').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.find('.create-commission-rate').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('edits an active customer and clears tier2 commission when switching back to tier1', async () => {
+    const updatedRelation = {
+      ...activeRelation,
+      customer_tier: 'tier1',
+      commission_rate: null,
+      min_trade_quantity: 3,
+      max_trade_quantity: 13,
+      max_daily_trades: 7,
+      max_daily_commodity_volume: 150,
+    }
+
+    apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/customers/owner-relations' && !options?.method) {
+        return makeResponse([activeRelation])
+      }
+      if (url === '/api/customers/owner-relations/11' && options?.method === 'PATCH') {
+        return makeResponse(updatedRelation)
+      }
+      throw new Error(`Unexpected apiFetch call: ${url}`)
+    })
+
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await wrapper.get('.start-edit').trigger('click')
+    expect((wrapper.get('.edit-commission-rate').element as HTMLInputElement).value).toBe('0.5')
+
+    await wrapper.get('.edit-tier-select').setValue('tier1')
+    await flushPromises()
+    expect(wrapper.find('.edit-commission-rate').exists()).toBe(false)
+
+    await wrapper.get('.edit-min-trade').setValue('3')
+    await wrapper.get('.edit-max-trade').setValue('13')
+    await wrapper.get('.edit-max-daily-trades').setValue('7')
+    await wrapper.get('.edit-max-daily-volume').setValue('150')
+    await wrapper.get('.save-edit').trigger('click')
+    await flushPromises()
+
+    const patchCall = apiFetchMock.mock.calls.find(([url, options]) => url === '/api/customers/owner-relations/11' && options?.method === 'PATCH')
+    expect(patchCall).toBeTruthy()
+    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
+      customer_tier: 'tier1',
+      commission_rate: null,
+      min_trade_quantity: 3,
+      max_trade_quantity: 13,
+      max_daily_trades: 7,
+      max_daily_commodity_volume: 150,
+    })
+    expect(wrapper.text()).toContain('اطلاعات مشتری به‌روزرسانی شد.')
+    expect(wrapper.find('.edit-panel').exists()).toBe(false)
+    expect(wrapper.text()).toContain('سطح 1')
+
+    wrapper.unmount()
+  })
+
+  it('copies the registration link for pending customers and lets the copied state expire', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+
+    apiFetchMock.mockResolvedValue(makeResponse([pendingRelation]))
+
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await wrapper.get('.copy-link').trigger('click')
+    await flushPromises()
+
+    expect(writeText).toHaveBeenCalledWith('https://example.com/register/token-2')
+    expect(wrapper.get('.copy-link').text()).toBe('کپی شد')
+
+    await vi.advanceTimersByTimeAsync(1800)
+    await flushPromises()
+
+    expect(wrapper.get('.copy-link').text()).toBe('کپی لینک ثبت‌نام')
+
+    wrapper.unmount()
+  })
+
+  it('cancels a pending invitation and removes it from the visible list', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/customers/owner-relations' && !options?.method) {
+        return makeResponse([pendingRelation])
+      }
+      if (url === '/api/customers/owner-relations/12' && options?.method === 'DELETE') {
+        return makeResponse({ detail: 'ok' })
+      }
+      throw new Error(`Unexpected apiFetch call: ${url}`)
+    })
+
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await wrapper.get('.cancel-pending').trigger('click')
+    await flushPromises()
+
+    expect(confirmMock).toHaveBeenCalledWith('دعوت مشتری ویژه لغو شود؟')
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/customers/owner-relations/12', { method: 'DELETE' })
+    expect(wrapper.text()).toContain('دعوت مشتری لغو شد.')
+    expect(wrapper.text()).toContain('هنوز مشتری فعالی یا دعوت pending ثبت نشده است.')
+
+    wrapper.unmount()
+  })
+
+  it('unlinks an active customer after clearing the open-session state', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/customers/owner-relations' && !options?.method) {
+        return makeResponse([activeRelation])
+      }
+      if (url === '/api/customers/owner-relations/11/sessions' && options?.method === 'GET') {
+        return makeResponse([])
+      }
+      if (url === '/api/customers/owner-relations/11' && options?.method === 'DELETE') {
+        return makeResponse({ detail: 'ok' })
+      }
+      throw new Error(`Unexpected apiFetch call: ${url}`)
+    })
+
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await wrapper.get('.toggle-sessions').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.session-panel').exists()).toBe(true)
+
+    await wrapper.get('.unlink-active').trigger('click')
+    await flushPromises()
+
+    expect(confirmMock).toHaveBeenCalledWith('ارتباط مشتری مشتری ویژه قطع شود؟ این عملیات دسترسی مشتری را کامل غیرفعال می‌کند.')
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/customers/owner-relations/11', { method: 'DELETE' })
+    expect(wrapper.find('.session-panel').exists()).toBe(false)
+    expect(wrapper.text()).toContain('ارتباط مشتری قطع شد و دسترسی او غیرفعال گردید.')
+
+    wrapper.unmount()
+  })
+
+  it('surfaces API detail errors for create and copy-link failures', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('clipboard failed'))
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+
+    apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/customers/owner-relations' && !options?.method) {
+        return makeResponse([pendingRelation])
+      }
+      if (url === '/api/customers/owner-relations' && options?.method === 'POST') {
+        return makeResponse({ detail: 'این نام کاربری قبلاً ثبت شده است.' }, false, 409)
+      }
+      throw new Error(`Unexpected apiFetch call: ${url}`)
+    })
+
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await wrapper.get('.create-account-name').setValue('duplicate_customer')
+    await wrapper.get('.create-management-name').setValue('مشتری تکراری')
+    await wrapper.get('.create-mobile-number').setValue('09121110000')
+    await wrapper.get('.submit-create').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('این نام کاربری قبلاً ثبت شده است.')
+
+    await wrapper.get('.copy-link').trigger('click')
+    await flushPromises()
+
+    expect(writeText).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('کپی لینک ثبت‌نام ممکن نشد.')
 
     wrapper.unmount()
   })

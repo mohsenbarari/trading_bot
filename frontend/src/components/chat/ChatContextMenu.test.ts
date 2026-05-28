@@ -103,4 +103,123 @@ describe('ChatContextMenu.vue', () => {
     await shareAlbumButton!.trigger('click')
     expect(wrapper.emitted('share-album')).toHaveLength(1)
   })
+
+  it('expands overflow reactions and resets the expanded picker when the menu closes', async () => {
+    const ChatContextMenu = (await import('./ChatContextMenu.vue')).default
+    const wrapper = mount(ChatContextMenu, {
+      props: {
+        menuState: {
+          x: 12,
+          y: 18,
+          visible: true,
+          message: {
+            id: 3,
+            message_type: 'text',
+            is_deleted: false,
+            reactions: [{ emoji: '🎯', user_id: 4 }],
+          },
+          messageIds: [3],
+        },
+        isAlbumSelection: false,
+        currentUserId: 4,
+        canEdit: false,
+        canDelete: false,
+        canPin: false,
+        isPinnedMessage: false,
+        availableReactions: ['🔥', '👍', '😂', '❤️', '👏', '🎉', '🎯', '😮'],
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    expect(wrapper.find('.reaction-dropdown-toggle').exists()).toBe(true)
+    expect(wrapper.find('.reaction-dropdown-list').exists()).toBe(false)
+
+    await wrapper.get('.reaction-dropdown-toggle').trigger('click')
+    expect(wrapper.find('.reaction-dropdown-list').exists()).toBe(true)
+
+    const overflowButton = wrapper.findAll('.reaction-dropdown-list .reaction-btn').find((button) => button.text().includes('🎯'))
+    expect(overflowButton).toBeTruthy()
+    await overflowButton!.trigger('click')
+    expect(wrapper.emitted('react')).toContainEqual(['🎯'])
+
+    await wrapper.setProps({
+      menuState: {
+        x: 12,
+        y: 18,
+        visible: false,
+        message: {
+          id: 3,
+          message_type: 'text',
+          is_deleted: false,
+          reactions: [{ emoji: '🎯', user_id: 4 }],
+        },
+        messageIds: [3],
+      },
+    })
+    await wrapper.setProps({
+      menuState: {
+        x: 12,
+        y: 18,
+        visible: true,
+        message: {
+          id: 3,
+          message_type: 'text',
+          is_deleted: false,
+          reactions: [{ emoji: '🎯', user_id: 4 }],
+        },
+        messageIds: [3],
+      },
+    })
+
+    expect(wrapper.find('.reaction-dropdown-list').exists()).toBe(false)
+  })
+
+  it('hides reactions for deleted messages and shows the unpin label for pinned messages', async () => {
+    const ChatContextMenu = (await import('./ChatContextMenu.vue')).default
+    const wrapper = mount(ChatContextMenu, {
+      props: {
+        menuState: {
+          x: 20,
+          y: 30,
+          visible: true,
+          message: {
+            id: 4,
+            message_type: 'document',
+            is_deleted: true,
+            reactions: [{ emoji: '👍', user_id: 7 }],
+          },
+          messageIds: [4],
+        },
+        isAlbumSelection: false,
+        currentUserId: 7,
+        canEdit: false,
+        canDelete: true,
+        canPin: true,
+        isPinnedMessage: true,
+        availableReactions: ['👍', '🔥'],
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    expect(wrapper.find('.reaction-picker-shell').exists()).toBe(false)
+    expect(wrapper.findAll('.reaction-btn')).toHaveLength(0)
+    expect(wrapper.text()).toContain('برداشتن پیام سنجاق‌شده')
+    expect(wrapper.text()).toContain('اشتراک‌گذاری')
+  })
 })
