@@ -392,6 +392,30 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
+  it('closes the recent offers menu when toggled again or when clicking outside it', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    await wrapper.find('.recent-offers-toggle').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(true)
+
+    await wrapper.find('.recent-offers-toggle').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(false)
+
+    await wrapper.find('.recent-offers-toggle').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(true)
+
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    await nextTick()
+
+    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
   it('returns a repeated recent offer back into the market chatbox when the user chooses edit', async () => {
     const wrapper = await mountMarketView()
     await flushPromises()
@@ -506,6 +530,38 @@ describe('MarketView.vue', () => {
     const postCalls = marketViewMocks.apiFetchMock.mock.calls.filter(([path, options]) => path === '/api/offers/' && options?.method === 'POST')
     expect(postCalls).toHaveLength(2)
     expect(JSON.parse(String(postCalls[1]![1].body)).warning_acknowledged).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('blocks preview confirmation while the market is closed and keeps the preview open', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    await wrapper.find('.text-offer-input').setValue('خرید طلای آب‌شده 50 عدد 222222')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
+
+    marketViewMocks.apiFetchMock.mockClear()
+    emitWs('market:closed', {
+      is_open: false,
+      active_web_notice_visible: true,
+      offers_since_last_open: 0,
+    })
+    await nextTick()
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
+    expect(wrapper.find('.offer-preview-error').text()).toBe('بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید.')
+    expect(
+      marketViewMocks.apiFetchMock.mock.calls.find(
+        ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
+      ),
+    ).toBeUndefined()
 
     wrapper.unmount()
   })
@@ -639,6 +695,33 @@ describe('MarketView.vue', () => {
     await wrapper.find('.offer-preview-cancel').trigger('click')
     await flushPromises()
     expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('uses the نشد shortcut to cancel all offers and surfaces cancel-all failures', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+    marketViewMocks.apiFetchMock.mockClear()
+    marketViewMocks.fetchOffersMock.mockClear()
+
+    await wrapper.find('.text-offer-input').setValue('نشد')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/cancel-all', { method: 'POST' })
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('')
+    expect(marketViewMocks.fetchOffersMock).toHaveBeenCalledTimes(1)
+
+    marketViewMocks.apiFetchMock.mockReset()
+    marketViewMocks.apiFetchMock.mockResolvedValueOnce(errorResponse(422, { detail: 'لغو لفظ‌ها ممکن نشد' }))
+
+    await wrapper.find('.text-offer-input').setValue('نشد')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.parse-error').text()).toBe('لغو لفظ‌ها ممکن نشد')
+    expect(marketViewMocks.fetchOffersMock).toHaveBeenCalledTimes(1)
 
     wrapper.unmount()
   })

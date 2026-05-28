@@ -55,6 +55,28 @@ const pendingRelation = {
   activated_at: null,
 }
 
+const expiredRelation = {
+  ...pendingRelation,
+  id: 13,
+  management_name: 'مشتری منقضی',
+  registration_link: null,
+  status: 'expired',
+  expires_at: '2026-05-20T12:00:00Z',
+  created_at: '2026-05-19T12:00:00Z',
+}
+
+const deletedRelation = {
+  ...activeRelation,
+  id: 14,
+  management_name: 'مشتری حذف‌شده',
+  status: 'deleted',
+  customer_user_id: null,
+  customer_account_name: null,
+  invitation_account_name: 'deleted_customer',
+  deleted_at: '2026-05-22T12:00:00Z',
+  created_at: '2026-05-18T12:00:00Z',
+}
+
 describe('OwnerCustomerManagerModal.vue', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -143,6 +165,55 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     expect(wrapper.find('button.toggle-sessions').exists()).toBe(false)
     expect(wrapper.text()).toContain('کپی لینک ثبت‌نام')
+
+    wrapper.unmount()
+  })
+
+  it('orders pending and active relations first, renders status-specific copy, and clears stale open sessions after refresh', async () => {
+    const refreshedPendingForActiveId = {
+      ...pendingRelation,
+      id: 11,
+      management_name: 'مشتری ویژه',
+      invitation_account_name: 'customer18_pending',
+      registration_link: 'https://example.com/register/token-11',
+      created_at: '2026-05-23T12:00:00Z',
+    }
+
+    let relationsCallCount = 0
+    apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/customers/owner-relations' && !options?.method) {
+        relationsCallCount += 1
+        if (relationsCallCount === 1) {
+          return makeResponse([expiredRelation, activeRelation, pendingRelation, deletedRelation])
+        }
+        return makeResponse([refreshedPendingForActiveId, expiredRelation, deletedRelation])
+      }
+      if (url === '/api/customers/owner-relations/11/sessions' && options?.method === 'GET') {
+        return makeResponse([])
+      }
+      throw new Error(`Unexpected apiFetch call: ${url}`)
+    })
+
+    const wrapper = mountModal()
+    await flushPromises()
+
+    const titles = wrapper.findAll('.customer-card h5').map((node) => node.text())
+    expect(titles).toEqual(['مشتری ویژه', 'مشتری ویژه', 'مشتری منقضی', 'مشتری حذف‌شده'])
+    expect(wrapper.text()).toContain('مهلت ثبت نام:')
+    expect(wrapper.text()).toContain('این مشتری با @customer18 در سطح 2 فعال است.')
+    expect(wrapper.text()).toContain('مهلت این دعوت به پایان رسیده است.')
+    expect(wrapper.text()).toContain('این رابطه حذف شده است.')
+
+    await wrapper.findAll('button.toggle-sessions')[0]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.session-panel').exists()).toBe(true)
+
+    await wrapper.get('.ghost-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.session-panel').exists()).toBe(false)
+    expect(wrapper.findAll('.customer-card h5')[0]!.text()).toBe('مشتری ویژه')
+    expect(wrapper.text()).toContain('در انتظار ثبت‌نام')
 
     wrapper.unmount()
   })
@@ -382,6 +453,30 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     expect(writeText).toHaveBeenCalled()
     expect(wrapper.text()).toContain('کپی لینک ثبت‌نام ممکن نشد.')
+
+    wrapper.unmount()
+  })
+
+  it('surfaces session loading errors inside the banner while keeping the active panel open', async () => {
+    apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/customers/owner-relations' && !options?.method) {
+        return makeResponse([activeRelation])
+      }
+      if (url === '/api/customers/owner-relations/11/sessions' && options?.method === 'GET') {
+        return makeResponse({ detail: 'دریافت نشست‌های مشتری شکست خورد.' }, false, 500)
+      }
+      throw new Error(`Unexpected apiFetch call: ${url}`)
+    })
+
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await wrapper.get('.toggle-sessions').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.customer-banner.error').text()).toBe('دریافت نشست‌های مشتری شکست خورد.')
+    expect(wrapper.find('.session-panel').exists()).toBe(true)
+    expect(wrapper.find('.session-empty').text()).toContain('در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.')
 
     wrapper.unmount()
   })

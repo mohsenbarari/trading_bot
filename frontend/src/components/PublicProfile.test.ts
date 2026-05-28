@@ -652,6 +652,70 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('owner20')
   })
 
+  it('shows project-users fetch errors and lets the owner retry with a new search', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 44,
+      account_name: 'owner44',
+      avatar_file_id: null,
+      mobile_number: '09127777777',
+      address: 'اصفهان',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۵',
+      trades_count: 18,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ detail: 'دریافت کاربران پروژه ممکن نشد' }, false))
+    fetchMock.mockResolvedValueOnce(makeResponse([
+      {
+        id: 61,
+        account_name: 'manager61',
+        mobile_number: '09121110000',
+      },
+    ]))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 44, account_name: 'owner44' },
+        viewerUserId: 44,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerCustomerManagerModal: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const directoryHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('کاربران پروژه'))
+    expect(directoryHeader).toBeTruthy()
+    await directoryHeader!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('دریافت کاربران پروژه ممکن نشد')
+    expect(wrapper.text()).not.toContain('manager61')
+
+    await wrapper.get('.project-users-search-input').setValue('manager')
+    await wrapper.get('.project-users-search-submit').trigger('submit')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/users-public/44/project-users?limit=25&q=manager', expect.objectContaining({
+      headers: expect.objectContaining({
+        Authorization: 'Bearer token',
+      }),
+    }))
+    expect(wrapper.text()).not.toContain('دریافت کاربران پروژه ممکن نشد')
+    expect(wrapper.text()).toContain('manager61')
+  })
+
   it('hides the project users directory on customer self profiles', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
@@ -828,6 +892,69 @@ describe('PublicProfile.vue', () => {
     await wrapper.get('.user-profile-stub button').trigger('click')
     await flushPromises()
     expect(wrapper.find('.user-profile-stub').exists()).toBe(false)
+  })
+
+  it('shows an inline admin error when loading user settings fails', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر ارشد' }))
+
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 61,
+      account_name: 'managed61',
+      avatar_file_id: null,
+      mobile_number: '09121110000',
+      address: 'تهران',
+      created_at_jalali: '۱۴۰۵/۰۲/۰۱',
+      trades_count: 1,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: true,
+      can_block_now: true,
+      max_blocked: 10,
+      current_blocked: 0,
+      remaining: 10,
+      reason_code: null,
+      reason_message: null,
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ detail: 'بارگذاری تنظیمات کاربر ممکن نشد' }, false))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 61, account_name: 'managed61' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          UserProfile: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const adminSettingsButton = wrapper.findAll('button').find((button) => button.text().includes('تنظیمات کاربر'))
+    expect(adminSettingsButton).toBeTruthy()
+    await adminSettingsButton!.trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/users/61', expect.objectContaining({
+      headers: expect.objectContaining({
+        Authorization: 'Bearer token',
+      }),
+    }))
+    expect(wrapper.find('.user-profile-stub').exists()).toBe(false)
+    expect(wrapper.text()).toContain('بارگذاری تنظیمات کاربر ممکن نشد')
   })
 
   it('clears the owner avatar through the authenticated avatar endpoint', async () => {
@@ -1387,6 +1514,78 @@ describe('PublicProfile.vue', () => {
     expect(revokeObjectURL).toHaveBeenCalledOnce()
 
     anchorClick.mockRestore()
+  })
+
+  it('blocks invalid history date ranges before refetch or export', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 50,
+      account_name: 'owner50',
+      avatar_file_id: null,
+      mobile_number: '09121112222',
+      address: 'قم',
+      created_at_jalali: '۱۴۰۵/۰۱/۱۰',
+      trades_count: 3,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: true,
+      can_block_now: true,
+      max_blocked: 10,
+      current_blocked: 0,
+      remaining: 10,
+      reason_code: null,
+      reason_message: null,
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
+    fetchMock.mockResolvedValueOnce(makeResponse([{ id: 1, name: 'سکه', aliases: [{ alias: 'امامی' }] }]))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 50, account_name: 'owner50' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
+    expect(historyHeader).toBeTruthy()
+    await historyHeader!.trigger('click')
+    await flushPromises()
+
+    const dateInputs = wrapper.findAll('input[type="date"]')
+    await dateInputs[0]!.setValue('2026-06-01')
+    await dateInputs[1]!.setValue('2026-05-01')
+
+    const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButton).toBeTruthy()
+    await applyButton!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('بازه زمانی انتخاب‌شده معتبر نیست.')
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/50')).toHaveLength(1)
+
+    const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
+    expect(pdfButton).toBeTruthy()
+    await pdfButton!.trigger('click')
+    await flushPromises()
+
+    expect(fetchMock.mock.calls.some(([url]) => typeof url === 'string' && url.includes('/api/trades/with/50/export?'))).toBe(false)
+    expect(wrapper.text()).toContain('بازه زمانی انتخاب‌شده معتبر نیست.')
   })
 
   it('shows network fetch errors and still allows returning home from the back button', async () => {
