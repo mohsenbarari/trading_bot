@@ -29,6 +29,7 @@ const chatViewMocks = vi.hoisted(() => ({
   loadOlderMessagesMock: vi.fn(async () => 0),
   hasOlderMessagesValue: false,
   isLoadingOlderMessagesValue: false,
+  scrollToBottomMock: vi.fn(),
   scrollToMessageMock: vi.fn(),
   pushBackStateMock: vi.fn(),
   popBackStateMock: vi.fn(),
@@ -146,7 +147,7 @@ vi.mock('../composables/chat/useChatScroll', async () => {
   return {
     useChatScroll: () => ({
       isViewingReply: ref(false),
-      scrollToBottom: vi.fn(),
+      scrollToBottom: chatViewMocks.scrollToBottomMock,
       forceScrollToBottom: vi.fn(),
       handleScroll: vi.fn(),
       scrollToUnreadOrBottom: vi.fn(),
@@ -204,6 +205,7 @@ describe('ChatView.vue', () => {
     chatViewMocks.loadOlderMessagesMock.mockResolvedValue(0)
     chatViewMocks.hasOlderMessagesValue = false
     chatViewMocks.isLoadingOlderMessagesValue = false
+    chatViewMocks.scrollToBottomMock.mockReset()
     chatViewMocks.scrollToMessageMock.mockReset()
     chatViewMocks.pushBackStateMock.mockReset()
     chatViewMocks.popBackStateMock.mockReset()
@@ -883,6 +885,52 @@ describe('ChatView.vue', () => {
 
     expect(wrapper.get('.new-chat-modal-state').text()).toBe('false')
     expect(wrapper.get('.group-manager-open-state').text()).toBe('true')
+
+    wrapper.unmount()
+  })
+
+  it('covers named-room unavailable callback and stale missing-room cleanup paths', async () => {
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 55,
+        other_user_id: 55,
+        other_user_name: 'Target User',
+        room_kind: 'direct',
+        unread_count: 0,
+      },
+    ]
+
+    const wrapper = await mountChatView({
+      targetUserId: -88,
+      targetUserName: 'Missing Room',
+    })
+    await flushPromises()
+
+    const hooks = getChatViewTestHooks(wrapper)
+    const onNamedRoomUnavailable = chatViewMocks.messagesLogicOptions?.onNamedRoomUnavailable
+    expect(typeof onNamedRoomUnavailable).toBe('function')
+
+    await onNamedRoomUnavailable?.(-55)
+    expect(hooks.state.selectedUserId.value).toBe(-88)
+
+    await onNamedRoomUnavailable?.(-88)
+    await flushPromises()
+    expect(hooks.state.selectedUserId.value).toBeNull()
+    expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({ path: '/chat', query: {} })
+
+    hooks.state.selectedUserId.value = -777
+    hooks.state.selectedRoomKind.value = 'group'
+    hooks.state.conversations.value = [
+      {
+        id: 55,
+        other_user_id: 55,
+        other_user_name: 'Target User',
+        room_kind: 'direct',
+      },
+    ]
+    hooks.clearMissingNamedRoomSelection()
+    await flushPromises()
+    expect(hooks.state.selectedUserId.value).toBeNull()
 
     wrapper.unmount()
   })
@@ -4126,6 +4174,136 @@ describe('ChatView.vue', () => {
     expect(chatViewMocks.scrollToMessageMock).toHaveBeenCalledWith(503)
 
     vi.useRealTimers()
+    wrapper.unmount()
+  })
+
+  it('routes the scroll button to the oldest unread mention and falls back to bottom without a viewer id', async () => {
+    const mentionByTag = buildMessage({ id: 201, sender_id: 55, receiver_id: 7, mentions: [7] })
+    const mentionAll = buildMessage({ id: 202, sender_id: 56, receiver_id: 7, mention_all: true })
+    const alreadyRead = buildMessage({ id: 203, sender_id: 57, receiver_id: 7, is_read: true, mentions: [7] })
+    const selfMessage = buildMessage({ id: 204, sender_id: 7, receiver_id: 55, mentions: [7] })
+
+    let wrapper = await mountChatView({ currentUserId: 7 })
+    await flushPromises()
+
+    let hooks = getChatViewTestHooks(wrapper)
+    hooks.state.selectedUserId.value = 55
+    hooks.state.selectedUserName.value = 'گفتگو'
+    hooks.state.showScrollButton.value = true
+    hooks.state.messages.value = [selfMessage, alreadyRead, mentionByTag, mentionAll]
+    await flushPromises()
+
+    const scrollButton = wrapper.get('.scroll-bottom-btn')
+    expect(scrollButton.classes()).toContain('has-mention')
+    expect(wrapper.find('.scroll-mention-badge').exists()).toBe(true)
+
+    await scrollButton.trigger('click')
+    expect(chatViewMocks.scrollToMessageMock).toHaveBeenCalledWith(201)
+    expect(chatViewMocks.scrollToBottomMock).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+
+    wrapper = await mountChatView({ currentUserId: 0 as any })
+    await flushPromises()
+
+    hooks = getChatViewTestHooks(wrapper)
+  hooks.state.selectedUserId.value = 55
+  hooks.state.selectedUserName.value = 'گفتگو'
+    hooks.state.showScrollButton.value = true
+    hooks.state.messages.value = [mentionByTag, mentionAll]
+    await flushPromises()
+
+    expect(wrapper.find('.scroll-mention-badge').exists()).toBe(false)
+    await wrapper.get('.scroll-bottom-btn').trigger('click')
+    expect(chatViewMocks.scrollToBottomMock).toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('covers search toggle and empty-query reset paths', async () => {
+    const wrapper = await mountChatView()
+    await flushPromises()
+
+    const hooks = getChatViewTestHooks(wrapper)
+    const focusMock = vi.fn()
+    const getElementByIdSpy = vi.spyOn(document, 'getElementById').mockReturnValue({ focus: focusMock } as any)
+
+    hooks.state.searchResults.value = [{ id: 301 }]
+    hooks.state.currentSearchIndex.value = 4
+    hooks.state.showInChatSearchList.value = true
+    hooks.toggleSearch()
+    await flushPromises()
+
+    expect(hooks.state.isSearchActive.value).toBe(true)
+    expect(hooks.state.searchQuery.value).toBe('')
+    expect(hooks.state.searchResults.value).toEqual([])
+    expect(hooks.state.currentSearchIndex.value).toBe(0)
+    expect(hooks.state.showInChatSearchList.value).toBe(false)
+    expect(focusMock).toHaveBeenCalled()
+
+    hooks.state.searchResults.value = [{ id: 302 }]
+    hooks.state.currentSearchIndex.value = 2
+    hooks.state.searchQuery.value = '   '
+    hooks.performSearch()
+    expect(hooks.state.searchResults.value).toEqual([])
+    expect(hooks.state.currentSearchIndex.value).toBe(0)
+    expect(hooks.state.isSearching.value).toBe(false)
+
+    hooks.state.searchResults.value = [{ id: 303 }]
+    hooks.state.currentSearchIndex.value = 1
+    hooks.state.showInChatSearchList.value = true
+    hooks.toggleSearch()
+    await flushPromises()
+
+    expect(hooks.state.isSearchActive.value).toBe(false)
+    expect(hooks.state.searchResults.value).toEqual([])
+    expect(hooks.state.currentSearchIndex.value).toBe(0)
+    expect(hooks.state.showInChatSearchList.value).toBe(false)
+
+    getElementByIdSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('covers next and previous search result helpers for loaded and unloaded targets', async () => {
+    const wrapper = await mountChatView()
+    await flushPromises()
+
+    const hooks = getChatViewTestHooks(wrapper)
+    const loadedResult = { id: 401, sender_id: 55, receiver_id: 7 }
+    const unloadedResult = { id: 402, sender_id: 55, receiver_id: 7 }
+
+    hooks.state.selectedUserId.value = 55
+    hooks.state.messages.value = [buildMessage({ id: 401, sender_id: 55, receiver_id: 7 })]
+    hooks.state.searchResults.value = [loadedResult, unloadedResult]
+    hooks.state.currentSearchIndex.value = 1
+
+    chatViewMocks.loadMessagesMock.mockClear()
+    chatViewMocks.scrollToMessageMock.mockClear()
+    await hooks.nextSearchResult()
+    await flushPromises()
+    expect(hooks.state.currentSearchIndex.value).toBe(0)
+    expect(chatViewMocks.loadMessagesMock).not.toHaveBeenCalled()
+    expect(chatViewMocks.scrollToMessageMock).toHaveBeenCalledWith(401)
+
+    hooks.state.messages.value = [buildMessage({ id: 401, sender_id: 55, receiver_id: 7 })]
+    hooks.state.currentSearchIndex.value = 0
+    chatViewMocks.loadMessagesMock.mockClear()
+    chatViewMocks.scrollToMessageMock.mockClear()
+    await hooks.prevSearchResult()
+    await flushPromises()
+    expect(hooks.state.currentSearchIndex.value).toBe(1)
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55, false, 402)
+    expect(chatViewMocks.scrollToMessageMock).toHaveBeenCalledWith(402)
+
+    hooks.state.searchResults.value = []
+    hooks.state.currentSearchIndex.value = 0
+    chatViewMocks.loadMessagesMock.mockClear()
+    chatViewMocks.scrollToMessageMock.mockClear()
+    await hooks.nextSearchResult()
+    await hooks.prevSearchResult()
+    expect(chatViewMocks.loadMessagesMock).not.toHaveBeenCalled()
+    expect(chatViewMocks.scrollToMessageMock).not.toHaveBeenCalled()
+
     wrapper.unmount()
   })
 

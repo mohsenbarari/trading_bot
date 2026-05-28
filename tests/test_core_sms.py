@@ -68,6 +68,21 @@ class CoreSmsTests(unittest.TestCase):
         self.assertIn('accountant demo', args[1])
         self.assertIn('https://app.example/accountant-register', args[1])
 
+    def test_send_customer_invitation_sms_formats_message_and_delegates(self):
+        with patch('core.sms.send_sms', return_value=True) as send_sms_mock:
+            self.assertTrue(
+                sms.send_customer_invitation_sms(
+                    '09120000000',
+                    'customer alias',
+                    'https://app.example/customer-register',
+                )
+            )
+
+        args = send_sms_mock.call_args.args
+        self.assertEqual(args[0], '09120000000')
+        self.assertIn('customer alias', args[1])
+        self.assertIn('https://app.example/customer-register', args[1])
+
 
 if __name__ == '__main__':
     unittest.main()

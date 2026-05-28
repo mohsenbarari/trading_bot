@@ -36,6 +36,23 @@ class BotTradeCreateQuickQuantityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(callback.message.edit_text.await_args.kwargs["reply_markup"], "LK")
         callback.answer.assert_awaited_once_with()
 
+    async def test_handle_quick_quantity_rejects_out_of_range_values(self):
+        callback = SimpleNamespace(message=SimpleNamespace(answer=AsyncMock(), edit_text=AsyncMock()), answer=AsyncMock())
+        state = SimpleNamespace(get_data=AsyncMock(return_value={}), update_data=AsyncMock(), set_state=AsyncMock())
+
+        with patch("core.trading_settings.get_trading_settings_async", new=AsyncMock(return_value=SimpleNamespace(offer_min_quantity=5, offer_max_quantity=100))):
+            await handle_quick_quantity(
+                callback,
+                state,
+                user=SimpleNamespace(id=1),
+                callback_data=QuantityCallback(value="3"),
+            )
+
+        callback.answer.assert_awaited_once_with("❌ تعداد مجاز باید بین 5 تا 100 باشد.", show_alert=True)
+        state.update_data.assert_not_awaited()
+        state.set_state.assert_not_awaited()
+        callback.message.edit_text.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()
