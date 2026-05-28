@@ -256,6 +256,174 @@ describe('OffersList.vue', () => {
     vi.useRealTimers()
   })
 
+  it('filters expired offers and renders critical timer styling for near-expiry cards', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-28T09:00:00Z'))
+
+    const nowSec = Date.now() / 1000
+    const wrapper = await mountOffersList({
+      expiryMinutes: 10,
+      offers: [
+        {
+          id: 30,
+          user_id: 50,
+          offer_type: 'sell',
+          commodity_name: 'سکه فعال',
+          quantity: 2,
+          remaining_quantity: 2,
+          price: 52000,
+          viewer_effective_price: 52000,
+          is_wholesale: true,
+          lot_sizes: null,
+          notes: null,
+          created_at: 'امروز',
+          customer_badge_visible: false,
+          customer_management_name: null,
+          customer_tier: null,
+          status: 'active',
+          expires_at_ts: nowSec + 30,
+        },
+        {
+          id: 31,
+          user_id: 51,
+          offer_type: 'buy',
+          commodity_name: 'سکه منقضی',
+          quantity: 1,
+          remaining_quantity: 1,
+          price: 50000,
+          viewer_effective_price: 50000,
+          is_wholesale: true,
+          lot_sizes: null,
+          notes: null,
+          created_at: 'امروز',
+          customer_badge_visible: false,
+          customer_management_name: null,
+          customer_tier: null,
+          status: 'active',
+          expires_at_ts: nowSec - 5,
+        },
+        {
+          id: 32,
+          user_id: 52,
+          offer_type: 'buy',
+          commodity_name: 'طلای بدون تایمر',
+          quantity: 3,
+          remaining_quantity: 3,
+          price: 51000,
+          viewer_effective_price: 51000,
+          is_wholesale: true,
+          lot_sizes: null,
+          notes: null,
+          created_at: 'امروز',
+          customer_badge_visible: false,
+          customer_management_name: null,
+          customer_tier: null,
+          status: 'active',
+          expires_at_ts: null,
+        },
+      ],
+    })
+
+    const cards = wrapper.findAll('.offer-card-wrap')
+    expect(cards).toHaveLength(2)
+    expect(wrapper.text()).toContain('سکه فعال')
+    expect(wrapper.text()).toContain('طلای بدون تایمر')
+    expect(wrapper.text()).not.toContain('سکه منقضی')
+
+    expect(cards[0]!.classes()).toContain('has-timer')
+    expect(cards[0]!.classes()).toContain('timer-critical')
+    expect(cards[0]!.attributes('style')).toContain('--t-pct')
+    expect(cards[1]!.classes()).not.toContain('has-timer')
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('falls back to the generic trade error when the failure response has no JSON body', async () => {
+    vi.useFakeTimers()
+    apiFetchMock.mockResolvedValue({
+      ok: false,
+      json: async () => {
+        throw new Error('broken payload')
+      },
+    })
+
+    const wrapper = await mountOffersList({
+      offers: [
+        {
+          id: 33,
+          user_id: 53,
+          offer_type: 'sell',
+          commodity_name: 'خطای معامله',
+          quantity: 4,
+          remaining_quantity: 4,
+          price: 48000,
+          viewer_effective_price: 48000,
+          is_wholesale: true,
+          lot_sizes: null,
+          notes: null,
+          created_at: 'امروز',
+          customer_badge_visible: false,
+          customer_management_name: null,
+          customer_tier: null,
+          status: 'active',
+        },
+      ],
+    })
+
+    const tradeButton = wrapper.get('.trade-btn')
+    await tradeButton.trigger('click')
+    await tradeButton.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('خطا در انجام معامله')
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('falls back to the generic cancel error when the own-offer failure response has no JSON body', async () => {
+    vi.useFakeTimers()
+    apiFetchMock.mockResolvedValue({
+      ok: false,
+      json: async () => {
+        throw new Error('broken payload')
+      },
+    })
+
+    const wrapper = await mountOffersList({
+      offers: [
+        {
+          id: 34,
+          user_id: 77,
+          offer_type: 'buy',
+          commodity_name: 'خطای لغو',
+          quantity: 6,
+          remaining_quantity: 6,
+          price: 47000,
+          viewer_effective_price: 47000,
+          is_wholesale: true,
+          lot_sizes: null,
+          notes: null,
+          created_at: 'امروز',
+          customer_badge_visible: false,
+          customer_management_name: null,
+          customer_tier: null,
+          status: 'active',
+          is_own_offer: true,
+        },
+      ],
+    })
+
+    await wrapper.get('.cancel-own-offer-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('خطا در منقضی کردن لفظ')
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
   it('shows generic trade failures and network failures without opening the suggestion alert', async () => {
     vi.useFakeTimers()
     apiFetchMock
