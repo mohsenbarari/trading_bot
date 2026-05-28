@@ -416,6 +416,129 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
+  it('shows recent offer load errors, keeps the menu open for inside clicks, and retries successfully', async () => {
+    let recentOffersMode: 'error' | 'success' = 'error'
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
+      if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') {
+        return recentOffersMode === 'error'
+          ? errorResponse(503, { detail: 'بارگذاری لفظ‌های اخیر شکست خورد' })
+          : responseOf(recentOffersFixture.slice(0, 1))
+      }
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    await wrapper.find('.recent-offers-toggle').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.recent-offers-state--error').text()).toContain('بارگذاری لفظ‌های اخیر ممکن نشد.')
+
+    wrapper.get('.recent-offers-dropdown').element.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    await nextTick()
+
+    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(true)
+
+    recentOffersMode = 'success'
+    await wrapper.find('.recent-offers-toggle').trigger('click')
+    await flushPromises()
+    await wrapper.find('.recent-offers-toggle').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('.recent-offer-item')).toHaveLength(1)
+    expect(wrapper.text()).toContain('سکه')
+
+    wrapper.unmount()
+  })
+
+  it('republishes active retail recent offers from remaining quantity and current lot sizes', async () => {
+    const activeRecentOffer = {
+      id: 93,
+      offer_type: 'sell',
+      commodity_id: 3,
+      commodity_name: 'ربع سکه',
+      quantity: 9,
+      remaining_quantity: 5,
+      raw_price: null,
+      price: 111000,
+      is_wholesale: false,
+      lot_sizes: [3, 2],
+      original_lot_sizes: [4, 3, 2],
+      notes: '   ',
+      status: 'active',
+      created_at: '۱۴۰۵/۰۳/۰۱ ۱۳:۱۰',
+    }
+
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
+      if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') {
+        return responseOf([activeRecentOffer])
+      }
+      if (path === '/api/offers/' && options?.method === 'POST') {
+        return responseOf({ success: true, id: 1009 })
+      }
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    await wrapper.find('.recent-offers-toggle').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('خرد · پله‌ها: ۳ + ۲')
+    expect(wrapper.text()).not.toContain('توضیح:')
+
+    await wrapper.find('.recent-offer-item').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    const republishCall = marketViewMocks.apiFetchMock.mock.calls.find(
+      ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
+    )
+
+    expect(republishCall).toBeTruthy()
+    expect(JSON.parse(String(republishCall![1].body))).toEqual({
+      offer_type: 'sell',
+      commodity_id: 3,
+      quantity: 5,
+      price: 111000,
+      is_wholesale: false,
+      lot_sizes: [3, 2],
+      notes: '   ',
+      republished_from_id: 93,
+      warning_acknowledged: false,
+    })
+
+    wrapper.unmount()
+  })
+
   it('returns a repeated recent offer back into the market chatbox when the user chooses edit', async () => {
     const wrapper = await mountMarketView()
     await flushPromises()
@@ -602,6 +725,7 @@ describe('MarketView.vue', () => {
     marketViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
       if (path === '/api/commodities/') throw new Error('commodities failed')
       if (path === '/api/trading-settings/') throw new Error('settings failed')
+      if (path === '/api/trading-settings/market-state') throw new Error('market state failed')
       if (path === '/api/auth/me') throw new Error('me failed')
       return responseOf(null)
     })
@@ -612,7 +736,10 @@ describe('MarketView.vue', () => {
     expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).placeholder).toBe('مثال: خرید سکه 30 عدد 125000')
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load commodities', expect.any(Error))
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load settings', expect.any(Error))
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load market state', expect.any(Error))
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load current user', expect.any(Error))
+    expect(wrapper.find('.market-runtime-notice').exists()).toBe(false)
+    expect(wrapper.find('.text-offer-input').attributes('disabled')).toBeUndefined()
 
     consoleErrorSpy.mockRestore()
     wrapper.unmount()

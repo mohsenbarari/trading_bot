@@ -165,6 +165,81 @@ describe('BottomNav.vue', () => {
     malformedWrapper.unmount()
   })
 
+  it('ignores non-numeric saved FAB coordinates and supports touch dragging with changedTouches fallback', async () => {
+    vi.useFakeTimers()
+    routeState.name = 'market'
+    localStorage.setItem('fab_position', JSON.stringify({ x: '88', y: 144 }))
+
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const wrapper = mount(BottomNav, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          'router-link': {
+            template: '<a><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+    expect(wrapper.get('.fab-container').attributes('style') || '').not.toContain('left:')
+
+    await wrapper.get('.fab-btn').trigger('touchstart', {
+      touches: [{ clientX: 10, clientY: 10 }],
+    })
+
+    const touchMove = new Event('touchmove', { bubbles: true, cancelable: true })
+    Object.defineProperty(touchMove, 'touches', { value: [] })
+    Object.defineProperty(touchMove, 'changedTouches', { value: [{ clientX: 170, clientY: 210 }] })
+    document.dispatchEvent(touchMove)
+    await nextTick()
+
+    const touchEnd = new Event('touchend', { bubbles: true })
+    Object.defineProperty(touchEnd, 'changedTouches', { value: [{ clientX: 170, clientY: 210 }] })
+    document.dispatchEvent(touchEnd)
+    await nextTick()
+
+    const storedPosition = JSON.parse(localStorage.getItem('fab_position') || '{}')
+    expect(storedPosition).toMatchObject({ x: 160, y: 200 })
+
+    await vi.advanceTimersByTimeAsync(60)
+    await wrapper.get('.fab-btn').trigger('click')
+    expect(wrapper.find('.fab-nav').exists()).toBe(true)
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('renders disabled entries inside the expanded FAB menu when a nav item is flagged disabled', async () => {
+    routeState.name = 'market'
+
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const wrapper = mount(BottomNav, {
+      global: {
+        stubs: {
+          'router-link': {
+            template: '<a><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    ;(wrapper.vm as any).navItems[0].disabled = true
+    await nextTick()
+
+    await wrapper.get('.fab-btn').trigger('click')
+    await nextTick()
+
+    const disabledFabItem = wrapper.find('.fab-item.disabled')
+    expect(disabledFabItem.exists()).toBe(true)
+    expect(disabledFabItem.text()).toContain('خانه')
+
+    wrapper.unmount()
+  })
+
   it('drags the FAB with mouse events, persists the bounded position, and ignores toggle clicks while dragging', async () => {
     vi.useFakeTimers()
     routeState.name = 'market'
