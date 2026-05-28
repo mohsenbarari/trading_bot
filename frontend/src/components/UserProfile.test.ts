@@ -1,3 +1,4 @@
+import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
@@ -821,6 +822,161 @@ describe('UserProfile.vue', () => {
     })
     expect(userProfileTimingMocks.parseJalaliToIranISOMock).toHaveBeenCalledWith('1409/02/03 09:30')
     expect(userProfileTimingMocks.parseJalaliToIranISOMock).toHaveBeenCalledWith('1409/02/03 10:45')
+  })
+
+  it('syncs prop-backed admin refs, uses helper fallbacks, and restores body overflow on unmount', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2031-03-21T06:07:00Z'))
+
+    const user = makeUser({
+      id: 37,
+      max_sessions: 2,
+      max_accountants: 3,
+      max_customers: 4,
+      can_block_users: true,
+      max_blocked_users: 9,
+      account_status: 'active',
+    })
+
+    const UserProfile = (await import('./UserProfile.vue')).default
+    const wrapper = mount(UserProfile, {
+      props: {
+        user,
+        isAdminView: true,
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    const vm = wrapper.vm as unknown as {
+      editMaxSessions: number
+      editMaxCustomers: number
+      canBlockUsers: boolean
+      editMaxBlockedUsers: number
+      accountStatus: string
+      showBlockModal: boolean
+      showBlockDateModal: boolean
+      tempDatePart: string
+      tempTimePart: string
+      blockTimePickerRef: { modelValue?: unknown } | null
+      customDate: string
+      handleFinalSubmit: () => void
+      getCustomerTierLabel: (value: string | null | undefined) => string
+    }
+
+    await wrapper.setProps({
+      user: makeUser({
+        id: 37,
+        max_sessions: 8,
+        max_accountants: 3,
+        max_customers: 11,
+        can_block_users: false,
+        max_blocked_users: 15,
+        account_status: 'inactive',
+      }),
+    })
+    await flushPromises()
+
+    expect(vm.editMaxSessions).toBe(8)
+    expect(vm.editMaxCustomers).toBe(11)
+    expect(vm.canBlockUsers).toBe(false)
+    expect(vm.editMaxBlockedUsers).toBe(15)
+    expect(vm.accountStatus).toBe('inactive')
+    expect(vm.getCustomerTierLabel('tier1')).toBe('سطح 1')
+    expect(vm.getCustomerTierLabel('unknown-tier')).toBe('---')
+    expect(wrapper.text()).toContain('⛔ غیرفعال')
+    expect(wrapper.text()).toContain('این حساب از بازار خارج شده و تا فعال‌سازی مجدد، دسترسی معاملاتی ندارد.')
+
+    vm.showBlockModal = true
+    await nextTick()
+    expect(document.body.style.overflow).toBe('hidden')
+
+    vm.showBlockDateModal = true
+    vm.tempDatePart = '1409/01/09'
+    vm.tempTimePart = ''
+    vm.blockTimePickerRef = null
+    vm.handleFinalSubmit()
+    expect(vm.customDate).toMatch(/^1409\/01\/09 \d{2}:\d{2}$/)
+
+    wrapper.unmount()
+    expect(document.body.style.overflow).toBe('')
+    vi.useRealTimers()
+  })
+
+  it('covers session and customer save helpers plus zero-session and delete-failure branches', async () => {
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = makeUser({
+      id: 38,
+      max_sessions: 2,
+      max_customers: 5,
+      can_block_users: true,
+    })
+
+    apiFetchMock
+      .mockResolvedValueOnce(makeResponse({ ...user, max_sessions: 9 }))
+      .mockResolvedValueOnce(makeResponse({ ...user, max_customers: 0 }))
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce(makeResponse({ terminated_sessions: 0 }))
+      .mockResolvedValueOnce({ ok: false })
+
+    const UserProfile = (await import('./UserProfile.vue')).default
+    const wrapper = mount(UserProfile, {
+      props: {
+        user,
+        isAdminView: true,
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    const vm = wrapper.vm as unknown as {
+      editMaxCustomers: number
+      saveMaxCustomers: () => Promise<void>
+      toggleBlockCapability: () => Promise<void>
+      terminateAllSessions: () => Promise<void>
+      deleteUser: () => Promise<void>
+    }
+
+    await wrapper.get('.sessions-config-box .form-select-sm').setValue('3')
+    vm.editMaxCustomers = Number.NaN
+    await vm.saveMaxCustomers()
+    await vm.toggleBlockCapability()
+    await vm.terminateAllSessions()
+    await vm.deleteUser()
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/users/38', {
+      method: 'PUT',
+      body: JSON.stringify({ max_sessions: 3 }),
+    })
+    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/users/38', {
+      method: 'PUT',
+      body: JSON.stringify({ max_customers: 0 }),
+    })
+    expect(apiFetchMock).toHaveBeenNthCalledWith(3, '/api/users/38', {
+      method: 'PUT',
+      body: JSON.stringify({ can_block_users: false }),
+    })
+    expect(apiFetchMock).toHaveBeenNthCalledWith(4, '/api/users/38/sessions/terminate-all', {
+      method: 'POST',
+    })
+    expect(apiFetchMock).toHaveBeenNthCalledWith(5, '/api/users/38', {
+      method: 'DELETE',
+    })
+    expect(vm.editMaxCustomers).toBe(0)
+    expect(window.alert).toHaveBeenCalledWith('خطا در ذخیره مجوز بلاک')
+    expect(window.alert).toHaveBeenCalledWith('نشست فعالی برای پایان دادن وجود نداشت.')
+    expect(window.alert).toHaveBeenCalledWith('خطا در حذف کاربر')
+    expect(confirmMock).toHaveBeenCalledWith('آیا از پایان دادن فوری به همه نشست‌های فعال این کاربر اطمینان دارید؟')
+    expect(confirmMock).toHaveBeenCalledWith('آیا از حذف این کاربر اطمینان دارید؟')
   })
 
   it('keeps role editing open on save failure, supports admin back actions, and hides settings for ordinary users', async () => {

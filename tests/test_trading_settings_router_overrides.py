@@ -7,6 +7,9 @@ from fastapi import HTTPException
 
 from api.routers.trading_settings import (
     MarketScheduleOverrideUpsert,
+    _normalize_closed_weekdays,
+    _parse_local_time,
+    _prepare_override_payload,
     create_market_override,
     delete_market_override,
     list_market_overrides,
@@ -170,6 +173,62 @@ class TradingSettingsRouterOverrideTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as exc_info:
             await delete_market_override(999, db=FakeDB(get_results=[None]), _=SimpleNamespace(id=1))
         self.assertEqual(exc_info.exception.status_code, 404)
+
+    async def test_override_helper_validation_branches_and_duplicate_update(self):
+        with self.assertRaises(HTTPException) as exc_info:
+            _parse_local_time("nope", "ساعت شروع بازار")
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertIn("ساعت شروع بازار نامعتبر است", exc_info.exception.detail)
+
+        with self.assertRaises(HTTPException) as exc_info:
+            _normalize_closed_weekdays(["x"])
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "روزهای بسته بازار نامعتبر هستند")
+
+        with self.assertRaises(HTTPException) as exc_info:
+            _normalize_closed_weekdays([7])
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "روزهای بسته بازار باید بین 0 تا 6 باشند")
+
+        with self.assertRaises(HTTPException) as exc_info:
+            _prepare_override_payload(
+                MarketScheduleOverrideUpsert(
+                    date="bad-date",
+                    override_type=MarketScheduleOverrideType.CLOSED_ALL_DAY,
+                )
+            )
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "تاریخ استثنا نامعتبر است")
+
+        with self.assertRaises(HTTPException) as exc_info:
+            _prepare_override_payload(
+                MarketScheduleOverrideUpsert(
+                    date="2026-05-28",
+                    override_type=MarketScheduleOverrideType.CUSTOM_HOURS,
+                    open_time_local="14:00",
+                    close_time_local="13:00",
+                )
+            )
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "ساعت شروع استثنا باید قبل از ساعت پایان باشد")
+
+        existing = make_override(id=9, date=date(2026, 5, 28))
+        duplicate_db = FakeDB(
+            execute_results=[FakeScalarResult(first_value=make_override(id=10, date=date(2026, 5, 29)))],
+            get_results=[existing],
+        )
+        with self.assertRaises(HTTPException) as exc_info:
+            await update_market_override(
+                9,
+                MarketScheduleOverrideUpsert(
+                    date="2026-05-29",
+                    override_type=MarketScheduleOverrideType.OPEN_ALL_DAY,
+                ),
+                db=duplicate_db,
+                _=SimpleNamespace(id=1),
+            )
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "برای این تاریخ قبلاً استثنا ثبت شده است")
 
 
 if __name__ == "__main__":
