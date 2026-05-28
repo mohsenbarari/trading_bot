@@ -168,7 +168,7 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         sanitized_config = sanitized_config.replace(server_name_line, '    server_name coverage-primary.test;', 1)
         sanitized_config = sanitized_config.replace(server_name_line, '    server_name coverage-secondary.test;', 1)
 
-        wrapper_config = f'events {{}}\nhttp {{\n{sanitized_config}\n}}\n'
+        wrapper_config = f'events {{}}\nhttp {{\n    access_log off;\n    error_log stderr notice;\n{sanitized_config}\n}}\n'
 
         with tempfile.TemporaryDirectory() as temp_dir:
             wrapped_config_path = Path(temp_dir) / 'nginx-wrapper.conf'
