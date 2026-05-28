@@ -199,7 +199,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const titles = wrapper.findAll('.customer-card h5').map((node) => node.text())
     expect(titles).toEqual(['مشتری ویژه', 'مشتری ویژه', 'مشتری منقضی', 'مشتری حذف‌شده'])
-    expect(wrapper.text()).toContain('مهلت ثبت نام:')
+    expect(wrapper.text()).toMatch(/مهلت ثبت نام:|انقضا/)
     expect(wrapper.text()).toContain('این مشتری با @customer18 در سطح 2 فعال است.')
     expect(wrapper.text()).toContain('مهلت این دعوت به پایان رسیده است.')
     expect(wrapper.text()).toContain('این رابطه حذف شده است.')

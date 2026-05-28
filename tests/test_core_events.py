@@ -688,6 +688,88 @@ class CoreEventsTests(unittest.TestCase):
 
         log_change.assert_called_once_with(unittest.mock.ANY, 'commodities', 7, 'INSERT', {'id': 7, 'name': 'Silver'})
 
+    def test_lookup_chat_sync_flags_and_chat_member_payload_fallback_paths(self):
+        mapping_result = SimpleNamespace(mappings=lambda: SimpleNamespace(first=lambda: {'type': 'group', 'is_system': False, 'is_mandatory': False}))
+        connection = SimpleNamespace(execute=MagicMock(return_value=mapping_result))
+        self.assertEqual(events._lookup_chat_sync_flags(connection, 42), ('group', False, False))
+
+        none_result = SimpleNamespace(mappings=lambda: SimpleNamespace(first=lambda: None))
+        none_connection = SimpleNamespace(execute=MagicMock(return_value=none_result))
+        self.assertEqual(events._lookup_chat_sync_flags(none_connection, 42), (None, None, None))
+
+        failing_connection = SimpleNamespace(execute=MagicMock(side_effect=RuntimeError('db failed')))
+        self.assertEqual(events._lookup_chat_sync_flags(failing_connection, 42), (None, None, None))
+
+        target = SimpleNamespace(
+            id=1,
+            chat_id=42,
+            user_id=8,
+            role=None,
+            membership_status=None,
+            joined_at=None,
+            left_at=None,
+            last_read_at=None,
+            is_muted=False,
+            is_marked_unread=False,
+            is_pinned=False,
+            pinned_at=None,
+            pin_order=None,
+            is_hidden=False,
+            hidden_at=None,
+            created_at=None,
+            updated_at=None,
+            chat_type=None,
+            chat_is_system=None,
+            chat_is_mandatory=None,
+        )
+        payload = events._chat_member_sync_payload(none_connection, target)
+        self.assertIsNone(payload['chat_type'])
+        self.assertIsNone(payload['chat_is_system'])
+        self.assertIsNone(payload['chat_is_mandatory'])
+
+    def test_market_schedule_override_and_runtime_state_event_groups(self):
+        registry = {}
+        with patch('core.events.event.listens_for', side_effect=_capture_listeners(registry)), patch.object(events, 'logger') as logger:
+            events.setup_market_schedule_override_events()
+            events.setup_market_runtime_state_events()
+
+        now = datetime(2025, 1, 1, 12, 0, 0)
+        connection = _FakeConnection()
+
+        override_target = SimpleNamespace(
+            id=11,
+            date=None,
+            override_type=None,
+            open_time_local=None,
+            close_time_local=None,
+            note='manual close',
+            created_by_user_id=1,
+            created_at=now,
+            updated_at=now,
+        )
+        runtime_target = SimpleNamespace(
+            id=1,
+            is_open=False,
+            active_web_notice_visible=True,
+            offers_since_last_open=2,
+            last_transition_at=None,
+            created_at=now,
+            updated_at=now,
+        )
+
+        with patch('core.events.log_change') as log_change:
+            registry[('MarketScheduleOverride', 'after_insert')](None, connection, override_target)
+            registry[('MarketScheduleOverride', 'after_update')](None, connection, override_target)
+            registry[('MarketScheduleOverride', 'after_delete')](None, connection, override_target)
+
+            registry[('MarketRuntimeState', 'after_insert')](None, connection, runtime_target)
+            registry[('MarketRuntimeState', 'after_update')](None, connection, runtime_target)
+            registry[('MarketRuntimeState', 'after_delete')](None, connection, runtime_target)
+
+        self.assertEqual(log_change.call_count, 6)
+        logger.info.assert_any_call('✅ MarketScheduleOverride event listeners registered')
+        logger.info.assert_any_call('✅ MarketRuntimeState event listeners registered')
+
 
 if __name__ == '__main__':
     unittest.main()

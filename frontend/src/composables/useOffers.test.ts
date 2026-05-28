@@ -156,4 +156,40 @@ describe('useOffers', () => {
     expect(offersApi.offers.value).toEqual([{ id: 11, price: 350 }])
     expect(offersApi.error.value).toBe('دریافت لیست لفظ‌ها ممکن نشد.')
   })
+
+  it('short-circuits when auth token is missing and does not start loading', async () => {
+    localStorage.removeItem('auth_token')
+    const { useOffers } = await importFreshUseOffers()
+    const offersApi = useOffers()
+
+    await offersApi.fetchOffers()
+
+    expect(useOffersMocks.apiFetch).not.toHaveBeenCalled()
+    expect(offersApi.isLoading.value).toBe(false)
+  })
+
+  it('surfaces list errors on non-ok responses and keeps previous offers during silent refresh failures', async () => {
+    useOffersMocks.apiFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'boom' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'still boom' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+    const { useOffers } = await importFreshUseOffers()
+    const offersApi = useOffers()
+    offersApi.offers.value = [{ id: 25, price: 111 }]
+
+    await offersApi.fetchOffers(false)
+    expect(offersApi.error.value).toBe('دریافت لیست لفظ‌ها ممکن نشد.')
+    expect(offersApi.offers.value).toEqual([{ id: 25, price: 111 }])
+
+    offersApi.error.value = ''
+    await offersApi.fetchOffers(true)
+    expect(offersApi.error.value).toBe('')
+    expect(offersApi.offers.value).toEqual([{ id: 25, price: 111 }])
+  })
 })

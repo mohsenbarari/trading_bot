@@ -95,4 +95,36 @@ describe('TradeLotSuggestionAlert.vue', () => {
 
     wrapper.unmount()
   })
+
+  it('clears the two-tap pending selection after timeout and hides pending confirmation', async () => {
+    const wrapper = await mountAlert({ autoCloseSeconds: 8 })
+
+    const lotButton = wrapper.findAll('.trade-suggestion-lot-btn')[0]
+    await lotButton!.trigger('click')
+    expect(wrapper.text()).toContain('تایید 15 عدد؟')
+
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(wrapper.text()).not.toContain('تایید 15 عدد؟')
+
+    wrapper.unmount()
+  })
+
+  it('clears countdown timers when the alert becomes busy and resets pending on hide', async () => {
+    const wrapper = await mountAlert({ autoCloseSeconds: 5 })
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('بستن خودکار تا 4 ثانیه')
+
+    await wrapper.findAll('.trade-suggestion-lot-btn')[0]!.trigger('click')
+    expect(wrapper.text()).toContain('تایید 15 عدد؟')
+
+    await wrapper.setProps({ busy: true, busyAmount: 15 })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(wrapper.emitted('close')).toBeUndefined()
+
+    await wrapper.setProps({ show: false })
+    expect(wrapper.text()).not.toContain('تایید 15 عدد؟')
+
+    wrapper.unmount()
+  })
 })
