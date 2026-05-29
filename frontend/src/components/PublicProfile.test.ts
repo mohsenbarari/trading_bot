@@ -1209,9 +1209,11 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="profile-avatar-trigger"]').exists()).toBe(true)
+    expect(wrapper.find('.header-spacer [data-test="profile-avatar-trigger"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="profile-avatar-trigger"]').attributes('aria-label')).toBe('تغییر آواتار')
     expect(wrapper.text()).not.toContain('افزودن عکس')
     expect(wrapper.text()).not.toContain('تغییر عکس')
+    expect(wrapper.find('.profile-hero').exists()).toBe(false)
     expect(wrapper.find('.profile-hero-copy').exists()).toBe(false)
     expect(wrapper.find('.profile-presence-status--own').exists()).toBe(true)
   })
