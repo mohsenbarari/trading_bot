@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Smartphone, Lock, Loader2, Download, Clock } from 'lucide-vue-next'
-import { setupExpiryTimer } from '../utils/auth'
+import { apiFetch, setupExpiryTimer } from '../utils/auth'
 import { primeCurrentUserSummary } from '../utils/currentUser'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 
@@ -134,7 +134,7 @@ async function requestOtp() {
   error.value = ''
   
   try {
-    const res = await fetch('/api/auth/request-otp', {
+    const res = await apiFetch('/api/auth/request-otp', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ mobile_number: form.mobile })
@@ -174,7 +174,7 @@ async function resendOtpSms() {
   error.value = ''
   
   try {
-    const res = await fetch('/api/auth/resend-otp-sms', {
+    const res = await apiFetch('/api/auth/resend-otp-sms', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ mobile_number: form.mobile })
@@ -222,7 +222,7 @@ async function verifyOtp() {
   error.value = ''
 
   try {
-    const res = await fetch('/api/auth/verify-otp', {
+    const res = await apiFetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ mobile_number: form.mobile, code: form.code, suspended_refresh_token: localStorage.getItem("suspended_refresh_token") || undefined })

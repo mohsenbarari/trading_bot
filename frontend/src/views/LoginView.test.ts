@@ -58,6 +58,7 @@ describe('LoginView.vue', () => {
     clearBackStackMock.mockReset()
     localStorage.clear()
     vi.stubGlobal('fetch', vi.fn())
+    apiFetchMock.mockImplementation((...args: Parameters<typeof fetch>) => fetch(...args) as any)
     window.matchMedia = vi.fn().mockReturnValue({
       matches: false,
       media: '',
@@ -158,14 +159,19 @@ describe('LoginView.vue', () => {
           token_type: 'bearer',
         }) as any,
       )
-    apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        id: 1,
-        role: 'مدیر ارشد',
-        full_name: 'محسن',
-        account_name: 'mohsen',
-      }) as any,
-    )
+    apiFetchMock.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/auth/me') {
+        return Promise.resolve(
+          makeJsonResponse({
+            id: 1,
+            role: 'مدیر ارشد',
+            full_name: 'محسن',
+            account_name: 'mohsen',
+          }) as any,
+        )
+      }
+      return fetch(url, options) as any
+    })
 
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
@@ -281,9 +287,14 @@ describe('LoginView.vue', () => {
           refresh_token: 'poll-refresh',
         }) as any,
       )
-    apiFetchMock.mockResolvedValue(
-      makeJsonResponse({ id: 30, role: 'عادی', full_name: 'کاربر', account_name: 'user' }) as any,
-    )
+    apiFetchMock.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/auth/me') {
+        return Promise.resolve(
+          makeJsonResponse({ id: 30, role: 'عادی', full_name: 'کاربر', account_name: 'user' }) as any,
+        )
+      }
+      return fetch(url, options) as any
+    })
 
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
@@ -513,14 +524,19 @@ describe('LoginView.vue', () => {
           refresh_token: 'recovery-refresh',
         }) as any,
       )
-    apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        id: 20,
-        role: 'عادی',
-        full_name: 'علی',
-        account_name: 'ali',
-      }) as any,
-    )
+    apiFetchMock.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/auth/me') {
+        return Promise.resolve(
+          makeJsonResponse({
+            id: 20,
+            role: 'عادی',
+            full_name: 'علی',
+            account_name: 'ali',
+          }) as any,
+        )
+      }
+      return fetch(url, options) as any
+    })
 
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
@@ -552,14 +568,19 @@ describe('LoginView.vue', () => {
         refresh_token: 'dev-refresh',
       }) as any,
     )
-    apiFetchMock.mockResolvedValue(
-      makeJsonResponse({
-        id: 10,
-        role: 'مدیر ارشد',
-        full_name: 'دولوپر',
-        account_name: 'dev',
-      }) as any,
-    )
+    apiFetchMock.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/auth/me') {
+        return Promise.resolve(
+          makeJsonResponse({
+            id: 10,
+            role: 'مدیر ارشد',
+            full_name: 'دولوپر',
+            account_name: 'dev',
+          }) as any,
+        )
+      }
+      return fetch(url, options) as any
+    })
     localStorage.setItem('suspended_refresh_token', 'stale-token')
 
     const LoginView = (await import('./LoginView.vue')).default
@@ -834,9 +855,14 @@ describe('LoginView.vue', () => {
     fetchMock
       .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
       .mockResolvedValueOnce(makeJsonResponse({ access_token: 'otp-access', refresh_token: 'otp-refresh' }) as any)
-    apiFetchMock.mockResolvedValue(
-      makeJsonResponse({ id: 40, role: 'عادی', full_name: 'وب', account_name: 'web' }) as any,
-    )
+    apiFetchMock.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/auth/me') {
+        return Promise.resolve(
+          makeJsonResponse({ id: 40, role: 'عادی', full_name: 'وب', account_name: 'web' }) as any,
+        )
+      }
+      return fetch(url, options) as any
+    })
 
     const abortSpy = vi.fn()
     class AbortControllerMock {
