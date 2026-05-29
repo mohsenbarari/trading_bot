@@ -1173,7 +1173,7 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('بارگذاری تنظیمات کاربر ممکن نشد')
   })
 
-  it('clears the owner avatar through the authenticated avatar endpoint', async () => {
+  it('renders the own-profile avatar trigger at the top-right without duplicate hero copy', async () => {
     const fetchMock = vi.mocked(fetch)
     buildChatFileUrlMock.mockImplementation((fileId?: string | null) => fileId ? `/files/${fileId}` : '')
     fetchMock.mockResolvedValueOnce(makeResponse({
@@ -1182,6 +1182,7 @@ describe('PublicProfile.vue', () => {
       avatar_file_id: 'avatar-1',
       mobile_number: '09126666666',
       address: 'تهران',
+      last_seen_at: '2026-05-29T12:00:00Z',
       created_at_jalali: '۱۴۰۵/۰۱/۰۴',
       trades_count: 2,
       resolved_from_accountant_id: null,
@@ -1189,8 +1190,6 @@ describe('PublicProfile.vue', () => {
       highlight_accountant_relation_display_name: null,
       accountant_relations: [],
     }))
-    fetchMock.mockResolvedValueOnce(makeResponse({ avatar_file_id: null }))
-
     const PublicProfile = (await import('./PublicProfile.vue')).default
     const wrapper = mount(PublicProfile, {
       props: {
@@ -1209,20 +1208,12 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const clearAvatarButton = wrapper.findAll('button').find((button) => button.text().includes('حذف عکس'))
-    expect(clearAvatarButton).toBeTruthy()
-    await clearAvatarButton!.trigger('click')
-    await flushPromises()
-
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/auth/me/avatar', expect.objectContaining({
-      method: 'PUT',
-      headers: {
-        Authorization: 'Bearer token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ avatar_file_id: null }),
-    }))
-    expect(wrapper.findAll('button').some((button) => button.text().includes('حذف عکس'))).toBe(false)
+    expect(wrapper.find('[data-test="profile-avatar-trigger"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="profile-avatar-trigger"]').attributes('aria-label')).toBe('تغییر آواتار')
+    expect(wrapper.text()).not.toContain('افزودن عکس')
+    expect(wrapper.text()).not.toContain('تغییر عکس')
+    expect(wrapper.find('.profile-hero-copy').exists()).toBe(false)
+    expect(wrapper.find('.profile-presence-status--own').exists()).toBe(true)
   })
 
   it('opens the avatar picker and uploads a new owner avatar', async () => {
@@ -1262,7 +1253,8 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    await wrapper.get('.profile-avatar-btn.primary').trigger('click')
+    expect(wrapper.text()).not.toContain('افزودن عکس')
+    await wrapper.get('[data-test="profile-avatar-trigger"]').trigger('click')
     expect(inputClickSpy).toHaveBeenCalled()
 
     const input = wrapper.get('.hidden-avatar-input')
@@ -1284,7 +1276,7 @@ describe('PublicProfile.vue', () => {
     inputClickSpy.mockRestore()
   })
 
-  it('surfaces avatar update errors from both upload and clear flows', async () => {
+  it('surfaces avatar upload errors from the owner avatar trigger flow', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 46,
@@ -1299,7 +1291,6 @@ describe('PublicProfile.vue', () => {
       highlight_accountant_relation_display_name: null,
       accountant_relations: [],
     }))
-    fetchMock.mockResolvedValueOnce(makeResponse({ detail: 'حذف عکس ممکن نشد' }, false))
 
     const PublicProfile = (await import('./PublicProfile.vue')).default
     const wrapper = mount(PublicProfile, {
@@ -1318,11 +1309,6 @@ describe('PublicProfile.vue', () => {
     })
 
     await flushPromises()
-
-    const clearAvatarButton = wrapper.findAll('button').find((button) => button.text().includes('حذف عکس'))
-    await clearAvatarButton!.trigger('click')
-    await flushPromises()
-    expect(wrapper.text()).toContain('حذف عکس ممکن نشد')
 
     uploadAvatarImageMock.mockRejectedValueOnce(new Error('آپلود ناموفق بود'))
     const input = wrapper.get('.hidden-avatar-input')
