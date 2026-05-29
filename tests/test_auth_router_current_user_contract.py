@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from api.routers.auth import read_users_me, update_my_avatar
+from api.routers.auth import read_users_me, update_my_address, update_my_avatar
 from models.customer_relation import CustomerTier
 from models.user import UserRole
 
@@ -37,6 +37,7 @@ def make_user(**overrides):
         'max_blocked_users': 10,
         'max_sessions': 1,
         'max_accountants': 3,
+        'max_customers': 5,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -100,6 +101,21 @@ class AuthRouterCurrentUserContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.is_customer)
         self.assertEqual(result.customer_tier, CustomerTier.TIER_2)
         self.assertEqual(result.avatar_file_id, "avatar-1")
+
+    async def test_update_my_address_persists_trimmed_address(self):
+        user = make_user(address="old address")
+        db = SimpleNamespace(commit=AsyncMock(), refresh=AsyncMock())
+
+        result = await update_my_address(
+            payload=SimpleNamespace(address="بازار تهران، پلاک ۱۲"),
+            current_user=user,
+            db=db,
+        )
+
+        db.commit.assert_awaited_once()
+        db.refresh.assert_awaited_once_with(user)
+        self.assertEqual(user.address, "بازار تهران، پلاک ۱۲")
+        self.assertEqual(result.address, "بازار تهران، پلاک ۱۲")
 
 
 if __name__ == "__main__":

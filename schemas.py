@@ -235,6 +235,22 @@ class UserAvatarUpdate(BaseModel):
         return cleaned or None
 
 
+class UserAddressUpdate(BaseModel):
+    address: str = Field(..., min_length=5, max_length=500)
+
+    @field_validator('address')
+    @classmethod
+    def normalize_address(cls, value: str):
+        cleaned = value.strip()
+        if len(cleaned) < 5:
+            raise ValueError('Address must be at least 5 characters long')
+        return cleaned
+
+
+class UserAddressUpdateResponse(BaseModel):
+    address: str
+
+
 class AccountantRelationCreate(BaseModel):
     account_name: str
     relation_display_name: str = Field(..., min_length=1, max_length=120)

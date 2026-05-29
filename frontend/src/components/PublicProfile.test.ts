@@ -143,7 +143,7 @@ describe('PublicProfile.vue', () => {
     }))
     fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
     fetchMock.mockResolvedValueOnce(makeResponse([]))
-    fetchMock.mockResolvedValueOnce(makeResponse([]))
+    fetchMock.mockResolvedValueOnce(makeResponse([{ id: 1, name: 'سکه', aliases: [] }]))
     fetchMock.mockResolvedValueOnce(makeResponse([]))
     fetchMock.mockResolvedValueOnce(makeResponse([]))
 
@@ -183,7 +183,9 @@ describe('PublicProfile.vue', () => {
     const dateInputs = wrapper.findAll('input[type="date"]')
     await dateInputs[0]!.setValue('')
     await dateInputs[1]!.setValue('2026-05-20')
-    await wrapper.get('input[list="public-profile-history-commodities"]').setValue('سکه')
+    const commoditySelect = wrapper.find('.history-filter-field-wide select')
+    expect(commoditySelect.exists()).toBe(true)
+    await commoditySelect.setValue('سکه')
     const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
     expect(applyButton).toBeTruthy()
     await applyButton!.trigger('click')
@@ -506,7 +508,7 @@ describe('PublicProfile.vue', () => {
     const messageButton = wrapper.findAll('button').find((button) => button.text().includes('ارسال پیام'))
     expect(messageButton).toBeTruthy()
 
-    const infoHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('اطلاعات شخصی و آمار'))
+    const infoHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('اطلاعات شخصی'))
     expect(infoHeader).toBeTruthy()
     await infoHeader!.trigger('click')
     await infoHeader!.trigger('click')
@@ -762,7 +764,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const directoryHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('کاربران پروژه'))
+    const directoryHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('لیست همکاران'))
     expect(directoryHeader).toBeTruthy()
     await directoryHeader!.trigger('click')
     await flushPromises()
@@ -855,7 +857,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const directoryHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('کاربران پروژه'))
+    const directoryHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('لیست همکاران'))
     expect(directoryHeader).toBeTruthy()
     await directoryHeader!.trigger('click')
     await flushPromises()
@@ -911,7 +913,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const directoryHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('کاربران پروژه'))
+    const directoryHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('لیست همکاران'))
     expect(directoryHeader).toBeTruthy()
     await directoryHeader!.trigger('click')
     await flushPromises()
@@ -972,7 +974,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).not.toContain('کاربران پروژه')
+    expect(wrapper.text()).not.toContain('لیست همکاران')
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -1325,6 +1327,128 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('آپلود ناموفق بود')
   })
 
+  it('lets the owner edit their address from personal information', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 44,
+      account_name: 'owner44',
+      avatar_file_id: null,
+      mobile_number: '09127777777',
+      address: 'آدرس قبلی',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۵',
+      trades_count: 18,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 44, account_name: 'owner44' },
+        viewerUserId: 44,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerCustomerManagerModal: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const infoHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('اطلاعات شخصی'))
+    expect(infoHeader).toBeTruthy()
+    await infoHeader!.trigger('click')
+
+    await wrapper.get('.inline-edit-btn').trigger('click')
+    await wrapper.get('.address-edit-textarea').setValue('بازار تهران، پلاک ۱۲')
+    fetchMock.mockResolvedValueOnce(makeResponse({ address: 'بازار تهران، پلاک ۱۲' }))
+    await wrapper.get('.address-edit-form').trigger('submit')
+    await flushPromises()
+
+    const addressCall = fetchMock.mock.calls.find(([url]) => url === '/api/auth/me/address')
+    expect(addressCall?.[1]).toEqual(expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ address: 'بازار تهران، پلاک ۱۲' }),
+    }))
+    expect(wrapper.text()).toContain('بازار تهران، پلاک ۱۲')
+    expect(wrapper.find('.address-edit-form').exists()).toBe(false)
+  })
+
+  it('renders meaningful help popovers for owner profile menus and keeps accountant list closed by default', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 44,
+      account_name: 'owner44',
+      avatar_file_id: null,
+      mobile_number: '09127777777',
+      address: 'اصفهان',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۵',
+      trades_count: 18,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [
+        {
+          accountant_user_id: 66,
+          accountant_account_name: 'acct66',
+          relation_display_name: 'حسابدار اصلی',
+          duty_description: null,
+        },
+      ],
+      customer_relations: [
+        {
+          customer_user_id: 77,
+          customer_account_name: 'cust77',
+          management_name: 'مشتری تهران',
+          customer_tier: 'tier1',
+        },
+      ],
+    }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 44, account_name: 'owner44' },
+        viewerUserId: 44,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerCustomerManagerModal: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('لیست همکاران')
+    expect(wrapper.text()).toContain('لیست حسابداران')
+    expect(wrapper.text()).toContain('لیست مشتریان')
+    const accountantAccordion = wrapper.findAll('.ds-accordion').find((node) => node.text().includes('لیست حسابداران'))
+    expect(accountantAccordion?.classes()).not.toContain('open')
+
+    await wrapper.get('[data-test="public-profile-info-help"]').trigger('click')
+    expect(wrapper.text()).toContain('می‌توانید آدرس را مستقیم از همین قسمت ویرایش کنید')
+    await wrapper.get('[data-test="public-profile-project-users-help"]').trigger('click')
+    expect(wrapper.text()).toContain('با انتخاب نام هر همکار')
+    await wrapper.get('[data-test="public-profile-accountants-help"]').trigger('click')
+    expect(wrapper.text()).toContain('عنوان هر ردیف همان نام نمایشی رابطه است')
+    await wrapper.get('[data-test="public-profile-customers-help"]').trigger('click')
+    expect(wrapper.text()).toContain('مشتریان ثبت‌شده زیر این مالک')
+    await wrapper.get('[data-test="public-profile-history-help"]').trigger('click')
+    expect(wrapper.text()).toContain('طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید')
+  })
+
   it('exposes owner actions for settings navigation and owner customer/accountant manager modals', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
@@ -1623,6 +1747,98 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('هنوز هیچ معامله‌ای انجام نداده‌اید.')
   })
 
+  it('filters own trade history by a selected project coworker', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url
+
+      if (url === '/api/users-public/51') {
+        return Promise.resolve(makeResponse({
+          id: 51,
+          account_name: 'owner51',
+          avatar_file_id: null,
+          mobile_number: '09123334444',
+          address: 'کرج',
+          created_at_jalali: '۱۴۰۵/۰۱/۱۱',
+          trades_count: 0,
+          resolved_from_accountant_id: null,
+          highlight_accountant_user_id: null,
+          highlight_accountant_relation_display_name: null,
+          accountant_relations: [],
+        }))
+      }
+      if (url === '/api/trades/my') {
+        return Promise.resolve(makeResponse([]))
+      }
+      if (url === '/api/commodities/') {
+        return Promise.resolve(makeResponse([{ id: 1, name: 'سکه', aliases: [] }]))
+      }
+      if (url === '/api/users-public/51/project-users?limit=100') {
+        return Promise.resolve(makeResponse([
+          { id: 90, account_name: 'partner90', mobile_number: '09120000090' },
+        ]))
+      }
+      if (url.startsWith('/api/trades/with/90')) {
+        return Promise.resolve(makeResponse([
+          {
+            id: 5,
+            trade_number: 10005,
+            created_at: '2026-05-20T09:00:00Z',
+            quantity: 1,
+            commodity_name: 'سکه',
+            price: 101000,
+            trade_type: 'SELL',
+            offer_user_id: 51,
+            offer_user_name: 'owner51',
+            responder_user_id: 90,
+            responder_user_name: 'partner90',
+          },
+        ]))
+      }
+      return defaultFetchResponse(url)
+    })
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 51, account_name: 'owner51' },
+        viewerUserId: 51,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات من'))
+    expect(historyHeader).toBeTruthy()
+    await historyHeader!.trigger('click')
+    await flushPromises()
+
+    const selects = wrapper.findAll('.history-filter-field-wide select')
+    expect(selects).toHaveLength(2)
+    await selects[1]!.setValue('90')
+    const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButton).toBeTruthy()
+    await applyButton!.trigger('click')
+    await flushPromises()
+
+    const filteredCall = fetchMock.mock.calls.find(([url]) => url === '/api/trades/with/90')
+    expect(filteredCall).toBeTruthy()
+    expect(wrapper.text()).toContain('طرف دیگر: partner90 - 09120000090')
+    expect(wrapper.text()).toContain('partner90')
+  })
+
   it('applies history filters and exports with the same query state', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
@@ -1691,7 +1907,9 @@ describe('PublicProfile.vue', () => {
     const dateInputs = wrapper.findAll('input[type="date"]')
     await dateInputs[0]!.setValue('2026-05-01')
     await dateInputs[1]!.setValue('2026-05-31')
-    await wrapper.get('input[list="public-profile-history-commodities"]').setValue('امامی')
+    const commoditySelect = wrapper.find('.history-filter-field-wide select')
+    expect(commoditySelect.exists()).toBe(true)
+    await commoditySelect.setValue('سکه')
 
     const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
     expect(applyButton).toBeTruthy()
@@ -1701,7 +1919,7 @@ describe('PublicProfile.vue', () => {
     const filteredCall = fetchMock.mock.calls.find(([url]) => typeof url === 'string' && url.includes('/api/trades/with/50?'))
     expect(filteredCall?.[0]).toContain('from_date=2026-05-01')
     expect(filteredCall?.[0]).toContain('to_date=2026-05-31')
-    expect(filteredCall?.[0]).toContain('commodity_query=%D8%A7%D9%85%D8%A7%D9%85%DB%8C')
+    expect(filteredCall?.[0]).toContain('commodity_query=%D8%B3%DA%A9%D9%87')
 
     const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
     expect(pdfButton).toBeTruthy()
@@ -1712,7 +1930,7 @@ describe('PublicProfile.vue', () => {
     expect(exportCall?.[0]).toContain('format=pdf')
     expect(exportCall?.[0]).toContain('from_date=2026-05-01')
     expect(exportCall?.[0]).toContain('to_date=2026-05-31')
-    expect(exportCall?.[0]).toContain('commodity_query=%D8%A7%D9%85%D8%A7%D9%85%DB%8C')
+    expect(exportCall?.[0]).toContain('commodity_query=%D8%B3%DA%A9%D9%87')
     expect(createObjectURL).toHaveBeenCalledOnce()
     expect(anchorClick).toHaveBeenCalledOnce()
     expect(revokeObjectURL).toHaveBeenCalledOnce()
