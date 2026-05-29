@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ChevronDown, Megaphone, PencilLine, Pin, PinOff, Radio, SendHorizontal, Users } from 'lucide-vue-next'
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { ChevronDown, Info, Megaphone, PencilLine, Pin, PinOff, SendHorizontal, Users } from 'lucide-vue-next'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { apiFetch } from '../utils/auth'
 
 type AdminMarketMessage = {
@@ -51,6 +51,8 @@ const isPublishingBroadcast = ref(false)
 const isClearingMarketPin = ref(false)
 const isLoading = ref(false)
 const marketComposerInputRef = ref<HTMLTextAreaElement | null>(null)
+const activeMarketHelp = ref<'empty' | 'history' | 'composer' | null>(null)
+const marketHelpTimerId = ref<number | null>(null)
 
 const marketArchive = computed(() => marketHistory.value.filter((message) => message.id !== activeMarketMessage.value?.id))
 const marketRecentHistory = computed(() => marketArchive.value.slice(0, 5))
@@ -68,6 +70,24 @@ function formatDate(value: string | undefined) {
 
 function targetLabel(key: string) {
   return targetOptions.find((option) => option.key === key)?.label || key
+}
+
+function clearMarketHelpTimer() {
+  if (marketHelpTimerId.value !== null) {
+    window.clearTimeout(marketHelpTimerId.value)
+    marketHelpTimerId.value = null
+  }
+}
+
+function showMarketHelp(helpKey: 'empty' | 'history' | 'composer') {
+  activeMarketHelp.value = helpKey
+  clearMarketHelpTimer()
+  marketHelpTimerId.value = window.setTimeout(() => {
+    if (activeMarketHelp.value === helpKey) {
+      activeMarketHelp.value = null
+    }
+    marketHelpTimerId.value = null
+  }, 3600)
 }
 
 async function loadDashboard() {
@@ -196,6 +216,7 @@ function reuseBroadcastMessage(message: AdminBroadcastMessage) {
 }
 
 onMounted(loadDashboard)
+onUnmounted(clearMarketHelpTimer)
 </script>
 
 <template>
@@ -271,27 +292,40 @@ onMounted(loadDashboard)
               <span class="status-pill status-pill--muted">بدون پین فعال</span>
               <p class="status-meta">بازار اکنون پیام سنجاق‌شده‌ای ندارد.</p>
             </div>
+            <button type="button" class="help-trigger" data-test="market-empty-help" aria-label="توضیحات وضعیت پین بازار" @click="showMarketHelp('empty')">
+              <Info :size="18" />
+            </button>
           </div>
-          <p class="status-copy status-copy--muted">در حال حاضر هیچ پیام پین‌شده‌ای برای بازار فعال نیست. از کادر پایین برای انتشار پیام جدید استفاده کن.</p>
+          <div v-if="activeMarketHelp === 'empty'" class="inline-help-note" data-test="market-empty-help-note">
+            در حال حاضر هیچ پیام پین‌شده‌ای برای بازار فعال نیست. از کادر پایین برای انتشار پیام جدید استفاده کن.
+          </div>
         </article>
 
         <section class="history-card history-card--accordion">
-          <button
-            type="button"
-            class="history-toggle"
-            data-test="market-history-toggle"
-            :aria-expanded="isMarketHistoryOpen"
-            @click="isMarketHistoryOpen = !isMarketHistoryOpen"
-          >
-            <div>
+          <div class="history-header history-header--market">
+            <div class="section-title-with-help">
               <h4>۵ پیام آخر بازار</h4>
-              <p>به‌صورت پیش‌فرض بسته است تا تمرکز روی پیام فعال و composer بماند.</p>
+              <button type="button" class="help-trigger" data-test="market-history-help" aria-label="توضیحات تاریخچه بازار" @click="showMarketHelp('history')">
+                <Info :size="18" />
+              </button>
             </div>
-            <span class="history-toggle-meta">
+            <div class="history-toggle-meta">
               <span class="history-badge">{{ marketRecentHistory.length.toLocaleString('fa-IR') }} مورد</span>
-              <ChevronDown :size="18" :class="{ 'history-toggle-icon--open': isMarketHistoryOpen }" />
-            </span>
-          </button>
+              <button
+                type="button"
+                class="history-toggle-button"
+                data-test="market-history-toggle"
+                :aria-expanded="isMarketHistoryOpen"
+                @click="isMarketHistoryOpen = !isMarketHistoryOpen"
+              >
+                <ChevronDown :size="22" class="history-toggle-icon" :class="{ 'history-toggle-icon--open': isMarketHistoryOpen }" />
+              </button>
+            </div>
+          </div>
+
+          <div v-if="activeMarketHelp === 'history'" class="inline-help-note" data-test="market-history-help-note">
+            این بخش فقط ۵ پیام آخر بازار را نشان می‌دهد و به‌صورت پیش‌فرض بسته است تا صفحه خلوت بماند.
+          </div>
 
           <div v-if="isMarketHistoryOpen" class="history-accordion-body" data-test="market-history-list">
             <article v-for="message in marketRecentHistory" :key="message.id" class="history-item history-item--compact">
@@ -316,11 +350,15 @@ onMounted(loadDashboard)
 
         <section class="composer-card" data-test="market-composer-card">
           <div class="composer-header">
-            <div>
+            <div class="section-title-with-help">
               <h4>نوشتن پیام بازار</h4>
-              <p>اگر از تاریخچه روی قلم بزنی، صفحه روی همین کادر می‌آید و متن برای ویرایش اینجا قرار می‌گیرد.</p>
+              <button type="button" class="help-trigger" data-test="market-composer-help" aria-label="توضیحات کادر پیام بازار" @click="showMarketHelp('composer')">
+                <Info :size="18" />
+              </button>
             </div>
-            <span class="composer-counter">{{ marketContent.trim().length.toLocaleString('fa-IR') }} کاراکتر</span>
+          </div>
+          <div v-if="activeMarketHelp === 'composer'" class="inline-help-note" data-test="market-composer-help-note">
+            اگر از تاریخچه روی قلم بزنی، متن برای ویرایش به همین کادر منتقل می‌شود. فقط یک پیام می‌تواند هم‌زمان در بازار پین باشد.
           </div>
           <textarea
             ref="marketComposerInputRef"
@@ -332,11 +370,7 @@ onMounted(loadDashboard)
           ></textarea>
           <div v-if="marketError" class="alert error">{{ marketError }}</div>
           <div v-if="marketSuccess" class="alert success">{{ marketSuccess }}</div>
-          <div class="composer-actions">
-            <div class="composer-hint">
-              <Radio :size="16" />
-              <span>فقط یک پیام می‌تواند هم‌زمان در بازار پین باشد.</span>
-            </div>
+          <div class="composer-actions composer-actions--market">
             <button class="primary-action" :disabled="!marketContent.trim() || isPublishingMarket" @click="publishMarketMessage">
               <Pin :size="16" />
               <span>{{ isPublishingMarket ? 'در حال ثبت...' : 'انتشار در بازار' }}</span>
@@ -539,6 +573,12 @@ onMounted(loadDashboard)
   gap: 0.6rem;
 }
 
+.section-title-with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
 .composer-header h4,
 .history-header h4 {
   margin: 0;
@@ -547,8 +587,6 @@ onMounted(loadDashboard)
   font-weight: 950;
 }
 
-.composer-header p,
-.history-header p,
 .status-meta,
 .status-copy--muted,
 .empty-history,
@@ -599,18 +637,67 @@ onMounted(loadDashboard)
   font-size: 0.8rem;
 }
 
-.history-toggle {
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  text-align: right;
+.history-header--market {
+  align-items: center;
+}
+
+.history-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid rgba(15, 118, 110, 0.14);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.12), rgba(255, 255, 255, 0.94));
+  color: #0f766e;
   cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.history-toggle-button:hover {
+  border-color: rgba(15, 118, 110, 0.28);
+  box-shadow: 0 10px 20px rgba(15, 118, 110, 0.12);
+}
+
+.history-toggle-icon {
+  transition: transform 0.2s ease;
 }
 
 .history-toggle-icon--open {
   transform: rotate(180deg);
+}
+
+.help-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 999px;
+  background: rgba(248, 250, 252, 0.94);
+  color: #475569;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+.help-trigger:hover {
+  color: #0f766e;
+  border-color: rgba(15, 118, 110, 0.24);
+  background: rgba(240, 253, 250, 0.95);
+}
+
+.inline-help-note {
+  margin-top: 0.7rem;
+  padding: 0.72rem 0.85rem;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  background: rgba(240, 253, 250, 0.92);
+  color: #0f4c48;
+  font-size: 0.78rem;
+  line-height: 1.8;
+  box-shadow: 0 10px 20px rgba(15, 118, 110, 0.08);
 }
 
 .history-accordion-body {
@@ -649,8 +736,7 @@ onMounted(loadDashboard)
 
 .date-chip,
 .status-pill,
-.history-badge,
-.composer-counter {
+.history-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -677,8 +763,7 @@ onMounted(loadDashboard)
 }
 
 .status-pill--info,
-.history-badge,
-.composer-counter {
+.history-badge {
   background: rgba(15, 118, 110, 0.1);
   color: #0f766e;
 }
@@ -787,6 +872,10 @@ onMounted(loadDashboard)
   align-items: flex-end;
 }
 
+.composer-actions--market {
+  justify-content: flex-end;
+}
+
 .composer-hint {
   display: inline-flex;
   align-items: center;
@@ -879,6 +968,10 @@ onMounted(loadDashboard)
 }
 
 @media (max-width: 720px) {
+  .message-panel {
+    padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px));
+  }
+
   .message-mode-switcher {
     grid-template-columns: 1fr;
   }
@@ -891,7 +984,7 @@ onMounted(loadDashboard)
   .market-pin-footer,
   .status-card-header,
   .audience-header,
-  .history-toggle {
+  .history-header--market {
     flex-direction: column;
     align-items: stretch;
   }
