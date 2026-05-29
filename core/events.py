@@ -988,6 +988,93 @@ def setup_notification_events():
 
     logger.info("✅ Notification event listeners registered")
 
+
+def setup_admin_message_events():
+    """Setup event listeners for admin management message history models."""
+    from models.admin_message import AdminBroadcastMessage, AdminMarketMessage
+
+    def market_message_payload(target):
+        now_iso = datetime.utcnow().isoformat()
+        return {
+            "id": target.id,
+            "content": target.content,
+            "created_by_id": target.created_by_id,
+            "reused_from_id": target.reused_from_id,
+            "is_active": target.is_active,
+            "notified_recipients_count": target.notified_recipients_count,
+            "published_at": target.published_at.isoformat() if target.published_at else now_iso,
+            "created_at": target.created_at.isoformat() if target.created_at else now_iso,
+            "updated_at": target.updated_at.isoformat() if target.updated_at else None,
+        }
+
+    def broadcast_message_payload(target):
+        now_iso = datetime.utcnow().isoformat()
+        return {
+            "id": target.id,
+            "content": target.content,
+            "created_by_id": target.created_by_id,
+            "target_groups": target.target_groups or [],
+            "recipient_count": target.recipient_count,
+            "published_at": target.published_at.isoformat() if target.published_at else now_iso,
+            "created_at": target.created_at.isoformat() if target.created_at else now_iso,
+        }
+
+    @event.listens_for(AdminMarketMessage, 'after_insert')
+    def on_admin_market_message_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "admin_market_messages", target.id, "INSERT", market_message_payload(target))
+        except Exception as e:
+            logger.error(f"Error in admin_market_message after_insert event: {e}")
+
+    @event.listens_for(AdminMarketMessage, 'after_update')
+    def on_admin_market_message_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "admin_market_messages", target.id, "UPDATE", market_message_payload(target))
+        except Exception as e:
+            logger.error(f"Error in admin_market_message after_update event: {e}")
+
+    @event.listens_for(AdminMarketMessage, 'after_delete')
+    def on_admin_market_message_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "admin_market_messages", target.id, "DELETE", {"id": target.id})
+        except Exception as e:
+            logger.error(f"Error in admin_market_message after_delete event: {e}")
+
+    @event.listens_for(AdminBroadcastMessage, 'after_insert')
+    def on_admin_broadcast_message_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "admin_broadcast_messages", target.id, "INSERT", broadcast_message_payload(target))
+        except Exception as e:
+            logger.error(f"Error in admin_broadcast_message after_insert event: {e}")
+
+    @event.listens_for(AdminBroadcastMessage, 'after_update')
+    def on_admin_broadcast_message_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "admin_broadcast_messages", target.id, "UPDATE", broadcast_message_payload(target))
+        except Exception as e:
+            logger.error(f"Error in admin_broadcast_message after_update event: {e}")
+
+    @event.listens_for(AdminBroadcastMessage, 'after_delete')
+    def on_admin_broadcast_message_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "admin_broadcast_messages", target.id, "DELETE", {"id": target.id})
+        except Exception as e:
+            logger.error(f"Error in admin_broadcast_message after_delete event: {e}")
+
+    logger.info("✅ AdminMessage event listeners registered")
+
 def setup_all_events():
     """Setup all event listeners"""
     setup_user_events()
@@ -1005,6 +1092,7 @@ def setup_all_events():
     setup_market_runtime_state_events()
     setup_user_block_events()
     setup_notification_events()
+    setup_admin_message_events()
     logger.info("🎯 All event listeners initialized")
 
 

@@ -607,6 +607,56 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
+  it('renders and expands the active admin market message and updates it from realtime', async () => {
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (path === '/api/admin-messages/market/current') {
+        return responseOf({
+          id: 4,
+          content: 'خط اول پیام مدیریت\nخط دوم\nخط سوم\nخط چهارم',
+          is_active: true,
+          published_at: '2026-05-29T08:00:00Z',
+        })
+      }
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect(wrapper.find('.admin-market-message').text()).toContain('پیام مدیریت')
+    expect(wrapper.find('.admin-market-message').classes()).toContain('admin-market-message--collapsed')
+    expect(wrapper.find('.admin-market-message-body').text()).toContain('خط چهارم')
+
+    await wrapper.find('.admin-market-message-expand').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.admin-market-message').classes()).not.toContain('admin-market-message--collapsed')
+
+    emitWs('market:admin_message_published', {
+      id: 5,
+      content: 'پیام تازه مدیریت',
+      is_active: true,
+      published_at: '2026-05-29T09:00:00Z',
+    })
+    await nextTick()
+
+    expect(wrapper.find('.admin-market-message').text()).toContain('پیام تازه مدیریت')
+    expect(wrapper.find('.admin-market-message').classes()).toContain('admin-market-message--collapsed')
+
+    wrapper.unmount()
+  })
+
   it('shows a warning and requires a second confirmation for suspicious prices', async () => {
     const wrapper = await mountMarketView()
     await flushPromises()

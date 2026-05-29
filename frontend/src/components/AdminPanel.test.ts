@@ -42,8 +42,9 @@ describe('AdminPanel.vue', () => {
     const wrapper = mount(AdminPanel)
     await flushPromises()
 
-    expect(wrapper.findAll('button')).toHaveLength(4)
+    expect(wrapper.findAll('button')).toHaveLength(5)
     expect(wrapper.text()).toContain('مدیریت کالاها')
+    expect(wrapper.text()).toContain('پیام‌های مدیریت')
     expect(wrapper.text()).toContain('تنظیمات سیستم')
   })
 

@@ -73,6 +73,10 @@ function isRoomConversation(conv: Conversation) {
   return isChannelConversation(conv) || isGroupConversation(conv)
 }
 
+function isManagementConversation(conv: Conversation) {
+  return isGroupConversation(conv) && conv.is_system === true
+}
+
 function isMandatoryPinnedConversation(conv: Conversation) {
   return isChannelConversation(conv) && conv.is_mandatory === true
 }
@@ -138,6 +142,10 @@ function getConversationAvatarUrl(conv: Conversation) {
 }
 
 function getPreviewText(conv: Conversation) {
+  if (isManagementConversation(conv)) {
+    const preview = getConversationPreviewText(conv.last_message_type, conv.last_message_content)
+    return preview ? `پیام مدیریت · ${preview}` : 'پیام مدیریت'
+  }
   return getConversationPreviewText(conv.last_message_type, conv.last_message_content)
 }
 
@@ -325,6 +333,9 @@ const activeMenuActions = computed<ConversationMenuAction[]>(() => {
   }
 
   if (isGroupConversation(conv)) {
+    if (isManagementConversation(conv)) {
+      return actions
+    }
     actions.push({
       key: 'leave',
       label: 'ترک گروه',
@@ -434,6 +445,7 @@ onBeforeUnmount(() => {
                 'conversation-card--active': selectedUserId === conv.other_user_id,
                 'conversation-card--pinned': isConversationPinned(conv),
                 'conversation-card--mandatory': isMandatoryPinnedConversation(conv),
+                'conversation-card--management': isManagementConversation(conv),
                 'conversation-card--unread': conv.unread_count > 0,
               }"
               @click="handleConversationClick(conv)"
@@ -452,9 +464,11 @@ onBeforeUnmount(() => {
                   'room-avatar': isRoomConversation(conv),
                   'channel-avatar': isChannelConversation(conv),
                   'group-avatar': isGroupConversation(conv),
+                  'management-avatar': isManagementConversation(conv),
                 }"
               >
                 <img v-if="getConversationAvatarUrl(conv)" :src="getConversationAvatarUrl(conv)" :alt="conv.other_user_name" class="conv-avatar-image" />
+                <Shield v-else-if="isManagementConversation(conv)" :size="22" />
                 <Megaphone v-else-if="isChannelConversation(conv)" :size="22" />
                 <UsersRound v-else-if="isGroupConversation(conv)" :size="22" />
                 <template v-else>{{ getConversationInitial(conv) }}</template>
@@ -745,6 +759,15 @@ onBeforeUnmount(() => {
   box-shadow: 0 16px 32px rgba(180, 83, 9, 0.11), 0 1px 0 rgba(255, 255, 255, 0.74) inset;
 }
 
+.conversation-card--management {
+  border-color: rgba(15, 118, 110, 0.24);
+  background: linear-gradient(135deg, rgba(236, 253, 245, 0.98), rgba(255, 251, 235, 0.94));
+}
+
+.conversation-card--management .conv-name {
+  color: #0f766e;
+}
+
 .conversation-card--active {
   background: linear-gradient(135deg, #3390ec, #2563eb);
   border-color: rgba(255, 255, 255, 0.28);
@@ -801,6 +824,10 @@ onBeforeUnmount(() => {
 
 .conv-avatar.group-avatar {
   background: linear-gradient(135deg, #2563eb, #38bdf8);
+}
+
+.conv-avatar.management-avatar {
+  background: linear-gradient(135deg, #0f766e, #f59e0b);
 }
 
 .conv-avatar-image {

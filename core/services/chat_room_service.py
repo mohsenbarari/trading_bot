@@ -1161,7 +1161,7 @@ async def list_group_conversations(
                 other_user_last_seen_at=None,
                 room_kind="group",
                 chat_id=chat.id,
-                can_send=True,
+                can_send=not bool(chat.is_system),
                 member_role=member_role.value if member_role is not None else None,
                 member_count=int(member_count or 0),
                 max_members=int(chat.max_members or GROUP_MAX_MEMBERS),
@@ -2445,6 +2445,8 @@ async def send_group_message(
     mention_all: bool = False,
 ) -> Message:
     member = await get_active_group_member_or_403(db, chat=chat, user_id=sender.id)
+    if getattr(chat, "is_system", False):
+        raise HTTPException(status_code=403, detail="System management rooms are read-only")
 
     if reply_to_message_id is not None:
         reply_to_message = await db.get(Message, reply_to_message_id)

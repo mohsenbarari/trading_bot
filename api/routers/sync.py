@@ -22,15 +22,17 @@ TABLE_ORDER = {
     "chats": 3,
     "chat_members": 4,
     "invitations": 5,
-    "notifications": 6,
-    "user_blocks": 7,
-    "commodities": 8,
-    "commodity_aliases": 9,
-    "trading_settings": 10,
-    "market_schedule_overrides": 11,
-    "market_runtime_state": 12,
-    "offers": 13,
-    "trades": 14,
+    "admin_market_messages": 6,
+    "admin_broadcast_messages": 7,
+    "notifications": 8,
+    "user_blocks": 9,
+    "commodities": 10,
+    "commodity_aliases": 11,
+    "trading_settings": 12,
+    "market_schedule_overrides": 13,
+    "market_runtime_state": 14,
+    "offers": 15,
+    "trades": 16,
 }
 
 async def verify_signature(request: Request):
@@ -84,6 +86,7 @@ from models.customer_relation import CustomerRelation
 from models.user import User
 from models.invitation import Invitation
 from models.notification import Notification
+from models.admin_message import AdminBroadcastMessage, AdminMarketMessage
 from models.offer import Offer
 from models.trade import Trade
 from models.commodity import Commodity, CommodityAlias
@@ -117,6 +120,8 @@ SEQUENCE_MAP = {
     "offers": ("offers_id_seq", "offers"),
     "trades": ("trades_id_seq", "trades"),
     "invitations": ("invitations_id_seq", "invitations"),
+    "admin_market_messages": ("admin_market_messages_id_seq", "admin_market_messages"),
+    "admin_broadcast_messages": ("admin_broadcast_messages_id_seq", "admin_broadcast_messages"),
     "notifications": ("notifications_id_seq", "notifications"),
     "commodities": ("commodities_id_seq", "commodities"),
     "commodity_aliases": ("commodity_aliases_id_seq", "commodity_aliases"),
@@ -133,6 +138,8 @@ def get_model_class(table_name: str):
         "chats": Chat,
         "chat_members": ChatMember,
         "invitations": Invitation,
+        "admin_market_messages": AdminMarketMessage,
+        "admin_broadcast_messages": AdminBroadcastMessage,
         "notifications": Notification,
         "offers": Offer,
         "trades": Trade,

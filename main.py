@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from api.routers import (
     auth, invitations, commodities, users, notifications, 
-    trading_settings, offers, trades, realtime, users_public, chat, blocks, sync, sessions
+    trading_settings, offers, trades, realtime, users_public, chat, blocks, sync, sessions, admin_messages
 )
 from api.routers import accountants
 from api.routers import customers
@@ -95,6 +95,7 @@ api_router.include_router(invitations.router, prefix="/invitations", tags=["Invi
 api_router.include_router(commodities.router, prefix="/commodities", tags=["Commodities"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
+api_router.include_router(admin_messages.router, prefix="/admin-messages", tags=["Admin Messages"])
 api_router.include_router(trading_settings.router, prefix="/trading-settings", tags=["Settings"])
 api_router.include_router(offers.router, prefix="/offers", tags=["Offers"])
 api_router.include_router(trades.router, prefix="/trades", tags=["Trades"])

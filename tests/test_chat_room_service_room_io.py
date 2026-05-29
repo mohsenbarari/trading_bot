@@ -209,6 +209,27 @@ class ChatRoomServiceRoomIOTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(member.last_read_message_id, 901)
         reload_mock.assert_awaited_once_with(db, 901)
 
+    async def test_send_group_message_blocks_system_management_rooms(self):
+        member = SimpleNamespace(last_read_message_id=None, last_read_at=None, updated_at=None)
+        chat = SimpleNamespace(id=70, is_system=True, last_message_id=None, last_message_at=None, updated_at=None)
+        sender = SimpleNamespace(id=9)
+
+        with patch(
+            "core.services.chat_room_service.get_active_group_member_or_403",
+            new=AsyncMock(return_value=member),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await send_group_message(
+                    FakeDB(),
+                    chat=chat,
+                    sender=sender,
+                    content="hi",
+                    message_type=MessageType.TEXT,
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "System management rooms are read-only")
+
     async def test_send_group_message_raises_when_reload_fails(self):
         member = SimpleNamespace(last_read_message_id=None, last_read_at=None, updated_at=None)
         chat = SimpleNamespace(id=70, last_message_id=None, last_message_at=None, updated_at=None)
