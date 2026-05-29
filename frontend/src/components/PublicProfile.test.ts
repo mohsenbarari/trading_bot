@@ -637,6 +637,8 @@ describe('PublicProfile.vue', () => {
     const blockButton = wrapper.findAll('button').find((button) => button.text().includes('بلاک کاربر'))
     expect(blockButton).toBeTruthy()
     expect(blockButton!.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).not.toContain('ظرفیت بلاک شما تکمیل است')
+    await wrapper.get('[data-test="public-profile-action-help-block_toggle"]').trigger('click')
     expect(wrapper.text()).toContain('ظرفیت بلاک شما تکمیل است')
     await blockButton!.trigger('click')
     expect(vi.mocked(window.confirm)).not.toHaveBeenCalled()

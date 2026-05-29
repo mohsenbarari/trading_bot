@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ChatUserListRow from './chat/ChatUserListRow.vue'
+import HelpPopover from './HelpPopover.vue'
 import { apiFetch, apiFetchJson } from '../utils/auth'
 import { discardBackState, popBackState, pushBackState } from '../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles'
@@ -859,10 +860,16 @@ onBeforeUnmount(() => {
       <div v-if="successMessage" class="flash-box success">{{ successMessage }}</div>
 
       <template v-if="page === 'home'">
-        <section class="hero-card create-card">
+        <section class="hero-card create-card card-with-help">
+          <HelpPopover
+            floating
+            button-test="channel-home-help"
+            note-test="channel-home-help-note"
+            label="راهنمای ساخت کانال"
+            text="کانال اختیاری را بسازید، اعضا را دعوت کنید و نقش ادمین‌ها را از همین بخش مدیریت کنید."
+          />
           <div class="hero-avatar">{{ getAvatarInitial('کانال') }}</div>
           <div class="hero-title">ساخت کانال جدید</div>
-          <p class="hero-description">کانال اختیاری را بسازید، اعضا را دعوت کنید و نقش ادمین‌ها را از همین بخش مدیریت کنید.</p>
           <button type="button" class="primary-btn" @click="openCreatePage">
             <UsersRound :size="18" />
             <span>کانال جدید</span>
@@ -902,7 +909,14 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else-if="page === 'create'">
-        <section class="hero-card preview">
+        <section class="hero-card preview card-with-help">
+          <HelpPopover
+            floating
+            button-test="channel-create-preview-help"
+            note-test="channel-create-preview-help-note"
+            label="راهنمای پیش‌نمایش کانال"
+            text="نام و توضیح روشن کمک می‌کند صفحه معرفی کانال کامل‌تر باشد. توضیح کانال پس از ثبت به اعضا نمایش داده می‌شود."
+          />
           <div class="hero-avatar">
             <img v-if="channelAvatarUrl" :src="channelAvatarUrl" :alt="title || 'کانال جدید'" class="hero-avatar-image" />
             <template v-else>{{ getAvatarInitial(title || 'کانال') }}</template>
@@ -910,7 +924,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="hero-title">{{ title || 'کانال جدید' }}</div>
           <div class="hero-meta">{{ description.trim() ? 'آماده برای ساخت' : 'بدون توضیحات' }}</div>
-          <p class="hero-description">{{ description.trim() || 'یک نام و توضیح روشن ثبت کنید تا صفحه معرفی کانال کامل باشد.' }}</p>
+          <p v-if="description.trim()" class="hero-description">{{ description.trim() }}</p>
           <div class="avatar-tool-row">
             <button type="button" class="secondary-btn compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
               {{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}
@@ -952,7 +966,7 @@ onBeforeUnmount(() => {
           </button>
           <div class="hero-title">{{ activeChannel.title }}</div>
           <div class="hero-meta">{{ getChannelKindLabel(activeChannel) }} • {{ activeChannel.member_count.toLocaleString('fa-IR') }} عضو</div>
-          <p class="hero-description">{{ activeChannel.description || 'توضیحی برای این کانال ثبت نشده است.' }}</p>
+          <p v-if="activeChannel.description" class="hero-description">{{ activeChannel.description }}</p>
           <div v-if="canEditOverviewAvatar" class="avatar-tool-row compact centered-overview-tools">
             <button type="button" class="secondary-btn compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
               {{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}
@@ -1480,12 +1494,17 @@ onBeforeUnmount(() => {
 }
 
 .hero-card {
+  position: relative;
   padding: 26px 20px 22px;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   gap: 8px;
+}
+
+.hero-card.card-with-help {
+  padding-left: 4rem;
 }
 
 .hero-card.preview,

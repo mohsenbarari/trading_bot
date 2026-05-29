@@ -23,6 +23,7 @@ vi.mock('../composables/useUserProfileTiming', () => ({
 vi.mock('lucide-vue-next', () => ({
   ArrowRight: { template: '<span />' },
   ChevronLeft: { template: '<span />' },
+  Info: { template: '<span />' },
 }))
 
 vi.mock('vue3-persian-datetime-picker', () => ({

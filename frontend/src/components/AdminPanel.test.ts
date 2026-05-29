@@ -25,7 +25,7 @@ describe('AdminPanel.vue', () => {
     const wrapper = mount(AdminPanel)
     await flushPromises()
 
-    const buttons = wrapper.findAll('button')
+    const buttons = wrapper.findAll('.admin-action-btn')
     expect(buttons).toHaveLength(2)
     expect(wrapper.text()).toContain('ارسال لینک دعوت')
     expect(wrapper.text()).toContain('مدیریت کاربران')
@@ -42,7 +42,7 @@ describe('AdminPanel.vue', () => {
     const wrapper = mount(AdminPanel)
     await flushPromises()
 
-    expect(wrapper.findAll('button')).toHaveLength(5)
+    expect(wrapper.findAll('.admin-action-btn')).toHaveLength(5)
     expect(wrapper.text()).toContain('مدیریت کالاها')
     expect(wrapper.text()).toContain('پیام‌های مدیریت')
     expect(wrapper.text()).toContain('تنظیمات سیستم')
@@ -55,7 +55,7 @@ describe('AdminPanel.vue', () => {
     const wrapper = mount(AdminPanel)
     await flushPromises()
 
-    expect(wrapper.findAll('button')).toHaveLength(3)
+    expect(wrapper.findAll('.admin-action-btn')).toHaveLength(3)
     expect(wrapper.text()).not.toContain('تنظیمات سیستم')
   })
 })
