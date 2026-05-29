@@ -224,7 +224,7 @@ onUnmounted(clearMarketHelpTimer)
     <div class="message-mode-switcher" role="tablist" aria-label="نوع پیام مدیریت">
       <button
         type="button"
-        class="message-mode-button"
+        class="message-mode-button message-mode-button--market"
         data-test="message-mode-market"
         :class="{ 'message-mode-button--active': activePanel === 'market' }"
         :aria-selected="activePanel === 'market'"
@@ -235,7 +235,7 @@ onUnmounted(clearMarketHelpTimer)
       </button>
       <button
         type="button"
-        class="message-mode-button"
+        class="message-mode-button message-mode-button--chat"
         data-test="message-mode-chat"
         :class="{ 'message-mode-button--active': activePanel === 'chat' }"
         :aria-selected="activePanel === 'chat'"
@@ -286,22 +286,25 @@ onUnmounted(clearMarketHelpTimer)
           </div>
         </article>
 
-        <article v-else class="status-card status-card--empty">
+        <article v-else class="status-card status-card--empty card-with-help">
+          <button type="button" class="help-trigger help-trigger--floating" data-test="market-empty-help" aria-label="توضیحات وضعیت پین بازار" @click="showMarketHelp('empty')">
+            <Info :size="18" />
+          </button>
           <div class="status-card-header">
             <div>
               <span class="status-pill status-pill--muted">بدون پین فعال</span>
               <p class="status-meta">بازار اکنون پیام سنجاق‌شده‌ای ندارد.</p>
             </div>
-            <button type="button" class="help-trigger" data-test="market-empty-help" aria-label="توضیحات وضعیت پین بازار" @click="showMarketHelp('empty')">
-              <Info :size="18" />
-            </button>
           </div>
           <div v-if="activeMarketHelp === 'empty'" class="inline-help-note" data-test="market-empty-help-note">
             در حال حاضر هیچ پیام پین‌شده‌ای برای بازار فعال نیست. از کادر پایین برای انتشار پیام جدید استفاده کن.
           </div>
         </article>
 
-        <section class="history-card history-card--accordion">
+        <section class="history-card history-card--accordion card-with-help">
+          <button type="button" class="help-trigger help-trigger--floating" data-test="market-history-help" aria-label="توضیحات تاریخچه بازار" @click="showMarketHelp('history')">
+            <Info :size="18" />
+          </button>
           <div class="history-header history-header--market">
             <div class="history-title-row">
               <h4>۵ پیام آخر بازار</h4>
@@ -315,9 +318,6 @@ onUnmounted(clearMarketHelpTimer)
                 <ChevronDown :size="22" class="history-toggle-icon" :class="{ 'history-toggle-icon--open': isMarketHistoryOpen }" />
               </button>
             </div>
-            <button type="button" class="help-trigger" data-test="market-history-help" aria-label="توضیحات تاریخچه بازار" @click="showMarketHelp('history')">
-              <Info :size="18" />
-            </button>
           </div>
 
           <div v-if="activeMarketHelp === 'history'" class="inline-help-note" data-test="market-history-help-note">
@@ -345,14 +345,14 @@ onUnmounted(clearMarketHelpTimer)
           </div>
         </section>
 
-        <section class="composer-card" data-test="market-composer-card">
+        <section class="composer-card card-with-help" data-test="market-composer-card">
+          <button type="button" class="help-trigger help-trigger--floating" data-test="market-composer-help" aria-label="توضیحات کادر پیام بازار" @click="showMarketHelp('composer')">
+            <Info :size="18" />
+          </button>
           <div class="composer-header">
             <div class="section-title-with-help section-title-with-help--single">
               <h4>نوشتن پیام بازار</h4>
             </div>
-            <button type="button" class="help-trigger" data-test="market-composer-help" aria-label="توضیحات کادر پیام بازار" @click="showMarketHelp('composer')">
-              <Info :size="18" />
-            </button>
           </div>
           <div v-if="activeMarketHelp === 'composer'" class="inline-help-note" data-test="market-composer-help-note">
             فقط یک پیام می‌تواند هم‌زمان در بازار پین باشد.
@@ -476,14 +476,29 @@ onUnmounted(clearMarketHelpTimer)
   justify-content: center;
   gap: 0.55rem;
   min-height: 54px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  border: 1px solid transparent;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.78);
-  color: #334155;
+  color: #1f2937;
   font: inherit;
   font-weight: 900;
   cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, color 0.2s ease;
+}
+
+.message-mode-button--market {
+  border-color: rgba(217, 119, 6, 0.16);
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.18), rgba(255, 247, 237, 0.98));
+}
+
+.message-mode-button--chat {
+  border-color: rgba(13, 148, 136, 0.18);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.16), rgba(240, 253, 250, 0.98));
+}
+
+.message-mode-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.11);
 }
 
 .message-mode-button--active {
@@ -492,6 +507,20 @@ onUnmounted(clearMarketHelpTimer)
   background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 255, 255, 0.96));
   box-shadow: 0 14px 28px rgba(15, 118, 110, 0.1);
   transform: translateY(-1px);
+}
+
+.message-mode-button--market.message-mode-button--active {
+  color: #9a3412;
+  border-color: rgba(194, 65, 12, 0.24);
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.28), rgba(255, 237, 213, 0.98));
+  box-shadow: 0 16px 32px rgba(194, 65, 12, 0.14);
+}
+
+.message-mode-button--chat.message-mode-button--active {
+  color: #0f766e;
+  border-color: rgba(13, 148, 136, 0.24);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.24), rgba(240, 253, 250, 0.98));
+  box-shadow: 0 16px 32px rgba(13, 148, 136, 0.14);
 }
 
 .message-workspace {
@@ -532,6 +561,16 @@ onUnmounted(clearMarketHelpTimer)
 .composer-card,
 .history-card {
   padding: 1rem;
+}
+
+.card-with-help {
+  position: relative;
+}
+
+.card-with-help .status-card-header,
+.card-with-help .history-header,
+.card-with-help .composer-header {
+  padding-left: 2.9rem;
 }
 
 .market-pin-card {
@@ -640,12 +679,6 @@ onUnmounted(clearMarketHelpTimer)
 
 .history-header--market {
   align-items: center;
-  direction: rtl;
-}
-
-.message-panel--market .status-card-header,
-.message-panel--market .composer-header {
-  direction: rtl;
 }
 
 .history-toggle-button {
@@ -687,6 +720,13 @@ onUnmounted(clearMarketHelpTimer)
   color: #475569;
   cursor: pointer;
   transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+.help-trigger--floating {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 1;
 }
 
 .help-trigger:hover {
