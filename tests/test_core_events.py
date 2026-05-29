@@ -200,6 +200,26 @@ class CoreEventsTests(unittest.TestCase):
             created_at=now,
         )
         notification = SimpleNamespace(id=5, user_id=1, message='hi', is_read=False, created_at=None, level='INFO', category='SYSTEM')
+        admin_market_message = SimpleNamespace(
+            id=10,
+            content='market notice',
+            created_by_id=3,
+            reused_from_id=None,
+            is_active=True,
+            notified_recipients_count=7,
+            published_at=now,
+            created_at=now,
+            updated_at=None,
+        )
+        admin_broadcast_message = SimpleNamespace(
+            id=11,
+            content='broadcast notice',
+            created_by_id=3,
+            target_groups=['users', 'customers'],
+            recipient_count=9,
+            published_at=now,
+            created_at=now,
+        )
         customer_relation = SimpleNamespace(
             id=9,
             owner_user_id=3,
@@ -258,6 +278,12 @@ class CoreEventsTests(unittest.TestCase):
             ('Notification', 'after_insert'): notification,
             ('Notification', 'after_update'): notification,
             ('Notification', 'after_delete'): notification,
+            ('AdminMarketMessage', 'after_insert'): admin_market_message,
+            ('AdminMarketMessage', 'after_update'): admin_market_message,
+            ('AdminMarketMessage', 'after_delete'): admin_market_message,
+            ('AdminBroadcastMessage', 'after_insert'): admin_broadcast_message,
+            ('AdminBroadcastMessage', 'after_update'): admin_broadcast_message,
+            ('AdminBroadcastMessage', 'after_delete'): admin_broadcast_message,
         }
 
     def test_get_sync_redis_reuses_connection_and_log_change_paths(self):
@@ -454,6 +480,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_trading_settings_events()
             events.setup_invitation_events()
             events.setup_notification_events()
+            events.setup_admin_message_events()
 
         connection = _FakeConnection()
         with patch('core.events.log_change') as log_change:
@@ -598,6 +625,7 @@ class CoreEventsTests(unittest.TestCase):
         logger.info.assert_any_call('✅ TradingSetting event listeners registered')
         logger.info.assert_any_call('✅ Invitation event listeners registered')
         logger.info.assert_any_call('✅ Notification event listeners registered')
+        logger.info.assert_any_call('✅ AdminMessage event listeners registered')
 
         with patch('core.events.setup_user_events') as setup_user_events, patch(
             'core.events.setup_accountant_relation_events'
@@ -615,7 +643,9 @@ class CoreEventsTests(unittest.TestCase):
             'core.events.setup_commodity_alias_events'
         ) as setup_commodity_alias_events, patch('core.events.setup_trading_settings_events') as setup_trading_settings_events, patch(
             'core.events.setup_user_block_events'
-        ) as setup_user_block_events, patch('core.events.setup_notification_events') as setup_notification_events, patch.object(
+        ) as setup_user_block_events, patch('core.events.setup_notification_events') as setup_notification_events, patch(
+            'core.events.setup_admin_message_events'
+        ) as setup_admin_message_events, patch.object(
             events, 'logger'
         ) as logger:
             events.setup_all_events()
@@ -633,6 +663,7 @@ class CoreEventsTests(unittest.TestCase):
         setup_trading_settings_events.assert_called_once()
         setup_user_block_events.assert_called_once()
         setup_notification_events.assert_called_once()
+        setup_admin_message_events.assert_called_once()
         logger.info.assert_called_with('🎯 All event listeners initialized')
         self.assertIs(events.setup_event_listeners, events.setup_all_events)
 
@@ -653,6 +684,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_trading_settings_events()
             events.setup_invitation_events()
             events.setup_notification_events()
+            events.setup_admin_message_events()
 
         targets = self._build_listener_targets(now)
 

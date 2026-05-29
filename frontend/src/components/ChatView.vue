@@ -13,6 +13,7 @@ import ChatConversationList from './chat/ChatConversationList.vue'
 import ChatNewConversationModal from './chat/ChatNewConversationModal.vue'
 import ChatGroupManagerModal from './chat/ChatGroupManagerModal.vue'
 import CreateChannelView from './CreateChannelView.vue'
+import AdminBroadcastModal from './AdminBroadcastModal.vue'
 import AttachmentMenu from './chat/AttachmentMenu.vue'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { pushBackState, popBackState, clearBackStack, discardBackState } from '../composables/useBackButton'
@@ -643,6 +644,7 @@ const pinnedMessage = computed(() => pinnedMessageState.value?.message ?? null)
 const selectedRoomMemberCount = computed(() => selectedConversation.value?.member_count ?? null)
 const selectedRoomIsMandatory = computed(() => !!selectedConversation.value?.is_mandatory)
 const selectedRoomIsSystem = computed(() => !!selectedConversation.value?.is_system)
+const isSelectedManagementRoom = computed(() => selectedRoomKind.value === 'group' && selectedRoomIsSystem.value)
 const selectedAvatarFileId = computed(() => selectedConversation.value?.avatar_file_id ?? null)
 const isCurrentUserCustomer = computed(() => props.currentUserIsCustomer === true)
 const canStartNewConversation = computed(() => true)
@@ -651,6 +653,7 @@ const canCreateOptionalChannel = computed(() => (props.currentUserRole ?? null) 
 
 const canSendToSelectedRoom = computed(() => {
   if (selectedRoomKind.value === 'direct') return true
+  if (isSelectedManagementRoom.value) return false
   return selectedConversation.value?.can_send !== false
 })
 
@@ -660,6 +663,7 @@ const isSelectedRoomReadOnly = computed(() => {
 
 const canManagePinnedMessages = computed(() => {
   if (!selectedUserId.value) return false
+  if (isSelectedManagementRoom.value) return false
   if (selectedRoomKind.value === 'direct') return true
   return selectedConversation.value?.member_role === 'admin'
 })
@@ -681,6 +685,7 @@ const selectedRoomStatusText = computed(() => {
   if (selectedRoomKind.value === 'direct') {
     return targetUserStatus.value
   }
+  if (isSelectedManagementRoom.value) return 'پیام مدیریت'
   return selectedRoomKind.value === 'group' ? 'گروه' : 'کانال'
 })
 
@@ -1702,6 +1707,7 @@ const startNewChat = (userId: number, userName: string) => {
 const showNewChatModal = ref(false)
 const showGroupManagerModal = ref(false)
 const showChannelManagerModal = ref(false)
+const showAdminBroadcastModal = ref(false)
 const groupManagerChatId = ref<number | null>(null)
 const channelManagerChatId = ref<number | null>(null)
 const newChatModalBackStateActive = ref(false)
@@ -1743,6 +1749,12 @@ function openChannelCreation() {
   closeNewChatModalForAction()
   channelManagerChatId.value = null
   showChannelManagerModal.value = true
+}
+
+function openAdminBroadcastModal() {
+  if (!canCreateOptionalChannel.value) return
+  closeNewChatModalForAction()
+  showAdminBroadcastModal.value = true
 }
 
 function closeChannelManager() {
@@ -3147,6 +3159,7 @@ defineExpose({
       showStickerPicker,
       showGroupManagerModal,
       showChannelManagerModal,
+      showAdminBroadcastModal,
       groupManagerChatId,
       channelManagerChatId,
       selectedUserName,
@@ -3293,6 +3306,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :isRoomSystem="selectedRoomIsSystem"
       :canCreateGroup="canCreateGroup"
       :canCreateChannel="canCreateOptionalChannel"
+      :canSendAdminBroadcast="canCreateOptionalChannel"
       @back="goBack"
       @view-profile="viewProfile"
       @toggle-search="toggleSearch"
@@ -3303,6 +3317,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       @manage-room="openSelectedRoomManager"
       @create-group="openGroupCreation"
       @create-channel="openChannelCreation"
+      @admin-broadcast="openAdminBroadcastModal"
       :isDeleted="isSelectedUserDeleted"
     />
 
@@ -3434,6 +3449,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
                 :imageCache="imageCache"
                 :isSelectionMode="isSelectionMode"
                 :searchQuery="searchQuery"
+                :isManagementMessage="isSelectedManagementRoom"
                 @swipe-reply="handleReply"
                 @select="handleGroupedItemSelection(item)"
                 @click-message="handleMessageClick"
@@ -3564,7 +3580,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         :isSending="isSending"
         :isDeleted="isSelectedUserDeleted"
         :isReadOnly="isSelectedRoomReadOnly"
-        :readOnlyBannerText="selectedRoomKind === 'channel' ? 'فقط مدیران کانال امکان ارسال پیام دارند.' : undefined"
+        :readOnlyBannerText="isSelectedManagementRoom ? 'این گفتگوی مدیریتی فقط برای اطلاع‌رسانی است.' : (selectedRoomKind === 'channel' ? 'فقط مدیران کانال امکان ارسال پیام دارند.' : undefined)"
         :disableRichComposer="isSelectedRoomReadOnly"
         :allowVoiceRecording="selectedRoomKind === 'direct'"
         :selectedMessages="selectedMessages"
@@ -3681,6 +3697,11 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
         />
       </div>
     </div>
+    <AdminBroadcastModal
+      v-if="showAdminBroadcastModal"
+      @close="showAdminBroadcastModal = false"
+      @sent="void loadConversations()"
+    />
     </div>
 </template>
 

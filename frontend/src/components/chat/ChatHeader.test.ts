@@ -49,6 +49,7 @@ describe('ChatHeader.vue', () => {
         isRoomSystem: false,
         canCreateGroup: true,
         canCreateChannel: true,
+        canSendAdminBroadcast: true,
       },
       global: {
         directives: {
@@ -102,6 +103,7 @@ describe('ChatHeader.vue', () => {
         isRoomSystem: false,
         canCreateGroup: true,
         canCreateChannel: true,
+        canSendAdminBroadcast: true,
       },
       global: {
         directives: {
@@ -188,6 +190,7 @@ describe('ChatHeader.vue', () => {
         isRoomSystem: false,
         canCreateGroup: true,
         canCreateChannel: true,
+        canSendAdminBroadcast: true,
       },
       global: {
         directives: {
@@ -202,13 +205,60 @@ describe('ChatHeader.vue', () => {
 
     const createChannelItem = visibleWrapper.findAll('.header-menu-item').find((item) => item.text().includes('ساخت کانال'))
     const createGroupItem = visibleWrapper.findAll('.header-menu-item').find((item) => item.text().includes('ساخت گروه جدید'))
+    const adminBroadcastItem = visibleWrapper.findAll('.header-menu-item').find((item) => item.text().includes('ارسال پیام مدیریت'))
     expect(createGroupItem).toBeTruthy()
     expect(createChannelItem).toBeTruthy()
+    expect(adminBroadcastItem).toBeTruthy()
 
     await createGroupItem!.trigger('click')
     await createChannelItem!.trigger('click')
+    await adminBroadcastItem!.trigger('click')
     expect(visibleWrapper.emitted('create-group')).toHaveLength(1)
     expect(visibleWrapper.emitted('create-channel')).toHaveLength(1)
+    expect(visibleWrapper.emitted('admin-broadcast')).toHaveLength(1)
+  })
+
+  it('keeps system management rooms non-manageable from title and menu', async () => {
+    const ChatHeader = (await import('./ChatHeader.vue')).default
+    const wrapper = mount(ChatHeader, {
+      props: {
+        isSelectionMode: false,
+        selectedUserId: -44,
+        selectedUserName: 'پیام مدیریت',
+        selectedAvatarFileId: null,
+        selectedRoomKind: 'group',
+        apiBaseUrl: '',
+        targetUserStatus: 'پیام مدیریت',
+        isTyping: false,
+        totalUnread: 0,
+        isSearchActive: false,
+        searchQuery: '',
+        searchResults: [],
+        currentSearchIndex: 0,
+        selectedMessagesCount: 0,
+        isDeleted: false,
+        roomMemberCount: 1,
+        isRoomMandatory: false,
+        isRoomSystem: true,
+        canCreateGroup: true,
+        canCreateChannel: true,
+      },
+      global: {
+        directives: {
+          ripple: {},
+          'click-outside': {},
+        },
+      },
+    })
+
+    await wrapper.find('.header-user-info').trigger('click')
+    expect(wrapper.emitted('manage-room')).toBeUndefined()
+
+    await wrapper.find('.header-menu-container .header-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('جستجو')
+    expect(wrapper.text()).not.toContain('مدیریت گروه')
   })
 
   it('emits search updates and closes the search overlay from the mobile back button', async () => {

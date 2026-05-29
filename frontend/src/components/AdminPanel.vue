@@ -17,6 +17,7 @@ const actions = computed(() => {
       { key: 'create_invitation', label: '➕ ارسال لینک دعوت', variant: 'primary' },
       { key: 'manage_commodities', label: '📦 مدیریت کالاها', variant: 'secondary' },
       { key: 'manage_users', label: '👥 مدیریت کاربران', variant: 'secondary' },
+      { key: 'admin_messages', label: '📣 پیام‌های مدیریت', variant: 'secondary' },
       { key: 'settings', label: '⚙️ تنظیمات سیستم', variant: 'secondary' },
     ]
   }

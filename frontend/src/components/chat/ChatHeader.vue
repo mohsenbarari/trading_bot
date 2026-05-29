@@ -20,6 +20,7 @@
           @click="handleTitleClick"
         >
           <img v-if="headerAvatarUrl" :src="headerAvatarUrl" :alt="selectedUserName" class="header-avatar-image" />
+          <Shield v-else-if="isManagementRoom" :size="21" />
           <Megaphone v-else-if="selectedRoomKind === 'channel'" :size="21" />
           <UsersRound v-else-if="selectedRoomKind === 'group'" :size="21" />
           <template v-else>{{ getAvatarInitial(selectedUserName) }}</template>
@@ -115,7 +116,7 @@
               <span>جستجو</span>
               <Search :size="18" />
             </div>
-            <div class="header-menu-item" @click="handleMenuManageRoom">
+            <div v-if="!isManagementRoom" class="header-menu-item" @click="handleMenuManageRoom">
               <span>{{ selectedRoomKind === 'group' ? 'مدیریت گروه' : 'تنظیمات کانال' }}</span>
               <UsersRound :size="18" />
             </div>
@@ -149,6 +150,10 @@
               <span>ساخت کانال</span>
               <Megaphone :size="18" />
             </div>
+            <div v-if="canSendAdminBroadcast" class="header-menu-item" @click="handleMenuAdminBroadcast">
+              <span>ارسال پیام مدیریت</span>
+              <Shield :size="18" />
+            </div>
           </div>
           <div v-if="isMenuOpen" class="menu-overlay" @click="closeMenu"></div>
         </div>
@@ -172,7 +177,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Megaphone, MoreVertical, Search, UsersRound } from 'lucide-vue-next'
+import { Megaphone, MoreVertical, Search, Shield, UsersRound } from 'lucide-vue-next'
 import { discardBackState, popBackState, pushBackState } from '../../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial } from '../../utils/chatFiles'
 import { formatIranDateTime } from '../../utils/iranTime'
@@ -199,6 +204,7 @@ const props = defineProps<{
   isRoomSystem?: boolean
   canCreateGroup?: boolean
   canCreateChannel?: boolean
+  canSendAdminBroadcast?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -212,6 +218,7 @@ const emit = defineEmits<{
   (e: 'manage-room'): void
   (e: 'create-group'): void
   (e: 'create-channel'): void
+  (e: 'admin-broadcast'): void
 }>()
 
 const isMenuOpen = ref(false)
@@ -230,6 +237,8 @@ const roomMemberCountText = computed(() => {
 })
 
 const hasActivityStatusText = computed(() => Boolean(props.activityStatusText && props.activityStatusText.trim()))
+
+const isManagementRoom = computed(() => props.selectedRoomKind === 'group' && props.isRoomSystem === true)
 
 const headerAvatarUrl = computed(() => buildChatFileUrl(props.selectedAvatarFileId ?? null, props.apiBaseUrl ?? ''))
 
@@ -295,6 +304,10 @@ const handleMenuViewProfile = () => {
 }
 
 const handleMenuManageRoom = () => {
+  if (isManagementRoom.value) {
+    closeMenuForAction()
+    return
+  }
   closeMenuForAction()
   emit('manage-room')
 }
@@ -313,12 +326,18 @@ const handleMenuCreateChannel = () => {
   emit('create-channel')
 }
 
+const handleMenuAdminBroadcast = () => {
+  closeMenuForAction()
+  emit('admin-broadcast')
+}
+
 const handleTitleClick = () => {
   if (props.selectedRoomKind === 'direct') {
     emit('view-profile')
     return
   }
   if (props.selectedRoomKind === 'group' || props.selectedRoomKind === 'channel') {
+    if (isManagementRoom.value) return
     emit('manage-room')
   }
 }

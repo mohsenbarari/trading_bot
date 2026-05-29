@@ -71,6 +71,13 @@ interface MarketRuntimeState {
   next_transition_at: string | null
 }
 
+interface AdminMarketMessage {
+  id: number
+  content: string
+  is_active: boolean
+  published_at: string
+}
+
 type CustomerTierValue = 'tier1' | 'tier2' | null
 
 const MARKET_CLOSED_DETAIL = 'بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید.'
@@ -125,11 +132,19 @@ const recentOffersLoading = ref(false)
 const recentOffersError = ref('')
 const recentOffersRef = ref<HTMLElement | null>(null)
 const offerInputRef = ref<HTMLTextAreaElement | null>(null)
+const adminMarketMessage = ref<AdminMarketMessage | null>(null)
+const adminMarketMessageExpanded = ref(false)
 const isTier2Customer = computed(() => currentUserCustomerTier.value === 'tier2')
 const isMarketOpen = computed(() => marketRuntime.value.is_open)
 const showMarketNotice = computed(() => !marketRuntime.value.is_open || marketRuntime.value.active_web_notice_visible)
 const marketNoticeText = computed(() => (marketRuntime.value.is_open ? 'شروع فعالیت بازار' : 'پایان فعالیت بازار'))
 const marketInputPlaceholder = computed(() => (isMarketOpen.value ? randomPlaceholder.value : 'بازار بسته است'))
+const shouldCollapseAdminMarketMessage = computed(() => (
+  !!adminMarketMessage.value
+  && isMarketOpen.value
+  && filteredOffers.value.length > 0
+  && !adminMarketMessageExpanded.value
+))
 
 // Computed
 const randomPlaceholder = computed(() => {
@@ -177,6 +192,19 @@ async function fetchMarketState() {
     }
 }
 
+  async function fetchAdminMarketMessage() {
+    try {
+      const res = await apiFetch('/api/admin-messages/market/current')
+      if (res.ok) {
+        const data = await res.json()
+        adminMarketMessage.value = data && typeof data.content === 'string' ? data : null
+        adminMarketMessageExpanded.value = false
+      }
+    } catch (e) {
+      console.error('Failed to load admin market message', e)
+    }
+  }
+
 function applyMarketRuntimePatch(patch: Partial<MarketRuntimeState>) {
   marketRuntime.value = {
     ...marketRuntime.value,
@@ -208,6 +236,16 @@ function handleMarketNoticeHidden(data: Partial<MarketRuntimeState> | undefined)
     offers_since_last_open: data?.offers_since_last_open ?? marketRuntime.value.offers_since_last_open,
     last_transition_at: data?.last_transition_at ?? marketRuntime.value.last_transition_at,
   })
+}
+
+function handleAdminMarketMessagePublished(data: AdminMarketMessage | undefined) {
+  adminMarketMessage.value = data && typeof data.content === 'string' ? data : null
+  adminMarketMessageExpanded.value = false
+}
+
+function toggleAdminMarketMessage() {
+  if (!adminMarketMessage.value || !shouldCollapseAdminMarketMessage.value) return
+  adminMarketMessageExpanded.value = true
 }
 
 function buildOfferCreatePayload(offer: ParsedOfferPreview) {
@@ -556,11 +594,13 @@ onMounted(() => {
     fetchCommodities()
     fetchTradingSettings()
   fetchMarketState()
+    fetchAdminMarketMessage()
     fetchCurrentUser()
   document.addEventListener('pointerdown', handleRecentOffersPointerDown)
   wsOn('market:opened', handleMarketOpened)
   wsOn('market:closed', handleMarketClosed)
   wsOn('market:notice_hidden', handleMarketNoticeHidden)
+    wsOn('market:admin_message_published', handleAdminMarketMessagePublished)
   syncOfferInputHeight()
 })
 
@@ -571,6 +611,7 @@ onUnmounted(() => {
   wsOff('market:opened', handleMarketOpened)
   wsOff('market:closed', handleMarketClosed)
   wsOff('market:notice_hidden', handleMarketNoticeHidden)
+  wsOff('market:admin_message_published', handleAdminMarketMessagePublished)
 })
 </script>
 
@@ -603,6 +644,25 @@ onUnmounted(() => {
         {{ marketNoticeText }}
       </div>
     </transition>
+
+    <section
+      v-if="adminMarketMessage"
+      class="admin-market-message"
+      :class="{ 'admin-market-message--collapsed': shouldCollapseAdminMarketMessage }"
+      role="status"
+      @click="toggleAdminMarketMessage"
+    >
+      <div class="admin-market-message-title">پیام مدیریت</div>
+      <div class="admin-market-message-body">{{ adminMarketMessage.content }}</div>
+      <button
+        v-if="shouldCollapseAdminMarketMessage"
+        type="button"
+        class="admin-market-message-expand"
+        @click.stop="adminMarketMessageExpanded = true"
+      >
+        مشاهده کامل
+      </button>
+    </section>
 
     <!-- Offers List -->
     <div class="market-content">
@@ -881,6 +941,48 @@ onUnmounted(() => {
   background: rgba(185, 28, 28, 0.08);
   color: #b91c1c;
   border-color: rgba(185, 28, 28, 0.16);
+}
+
+.admin-market-message {
+  margin: 0.75rem 1rem 0;
+  padding: 0.9rem 1rem;
+  border-radius: var(--ds-radius-lg);
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.98), rgba(236, 253, 245, 0.95));
+  border: 1px solid rgba(217, 119, 6, 0.22);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  color: var(--ds-text-primary);
+}
+
+.admin-market-message-title {
+  font-size: 0.82rem;
+  font-weight: 950;
+  color: #92400e;
+  margin-bottom: 0.45rem;
+}
+
+.admin-market-message-body {
+  white-space: pre-wrap;
+  line-height: 1.85;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.admin-market-message--collapsed {
+  cursor: pointer;
+}
+
+.admin-market-message--collapsed .admin-market-message-body {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.admin-market-message-expand {
+  margin-top: 0.6rem;
+  color: #0f766e;
+  font-size: 0.78rem;
+  font-weight: 900;
 }
 
 .content-inner {

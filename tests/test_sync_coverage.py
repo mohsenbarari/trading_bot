@@ -6,6 +6,7 @@ from models.accountant_relation import AccountantRelation
 from models.customer_relation import CustomerRelation
 from models.invitation import Invitation
 from models.notification import Notification
+from models.admin_message import AdminBroadcastMessage, AdminMarketMessage
 
 
 class SyncCoverageTests(unittest.TestCase):
@@ -13,6 +14,8 @@ class SyncCoverageTests(unittest.TestCase):
         self.assertIs(sync.get_model_class("accountant_relations"), AccountantRelation)
         self.assertIs(sync.get_model_class("customer_relations"), CustomerRelation)
         self.assertIs(sync.get_model_class("invitations"), Invitation)
+        self.assertIs(sync.get_model_class("admin_market_messages"), AdminMarketMessage)
+        self.assertIs(sync.get_model_class("admin_broadcast_messages"), AdminBroadcastMessage)
         self.assertIs(sync.get_model_class("notifications"), Notification)
         self.assertLess(sync.TABLE_ORDER["users"], sync.TABLE_ORDER["accountant_relations"])
         self.assertLess(sync.TABLE_ORDER["users"], sync.TABLE_ORDER["customer_relations"])
@@ -20,6 +23,8 @@ class SyncCoverageTests(unittest.TestCase):
         self.assertLess(sync.TABLE_ORDER["customer_relations"], sync.TABLE_ORDER["offers"])
         self.assertLess(sync.TABLE_ORDER["users"], sync.TABLE_ORDER["invitations"])
         self.assertLess(sync.TABLE_ORDER["users"], sync.TABLE_ORDER["notifications"])
+        self.assertLess(sync.TABLE_ORDER["users"], sync.TABLE_ORDER["admin_market_messages"])
+        self.assertLess(sync.TABLE_ORDER["users"], sync.TABLE_ORDER["admin_broadcast_messages"])
         self.assertLess(sync.TABLE_ORDER["invitations"], sync.TABLE_ORDER["offers"])
         self.assertLess(sync.TABLE_ORDER["notifications"], sync.TABLE_ORDER["offers"])
 

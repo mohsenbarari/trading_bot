@@ -137,6 +137,49 @@ describe('ChatConversationList.vue', () => {
     expect(menuText).not.toContain('حذف گفتگو')
   })
 
+  it('renders system management conversations distinctly without leave actions', async () => {
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const managementRoom = makeConversation({
+      id: 3,
+      chat_id: 30,
+      other_user_id: -30,
+      other_user_name: 'پیام مدیریت',
+      room_kind: 'group',
+      is_system: true,
+      can_send: false,
+      last_message_content: 'اطلاعیه مهم بازار',
+    })
+
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [managementRoom],
+        selectedUserId: null,
+        typingUsers: {},
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    const card = wrapper.find('.conversation-card')
+    expect(card.classes()).toContain('conversation-card--management')
+    expect(wrapper.text()).toContain('پیام مدیریت · اطلاعیه مهم بازار')
+
+    await wrapper.find('.conversation-item').trigger('contextmenu', { clientX: 48, clientY: 52 })
+    await flushPromises()
+
+    const menuText = wrapper.find('.conversation-menu-panel').text()
+    expect(menuText).not.toContain('ترک گروه')
+    expect(menuText).not.toContain('حذف گفتگو')
+  })
+
   it('emits the optional-channel unfollow action and renders a warning divider before it', async () => {
     const ChatConversationList = (await import('./ChatConversationList.vue')).default
     const optionalChannel = makeConversation({

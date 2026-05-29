@@ -8,6 +8,7 @@ import AdminPanel from '../components/AdminPanel.vue'
 import UserManager from '../components/UserManager.vue'
 import CommodityManager from '../components/CommodityManager.vue'
 import TradingSettings from '../components/TradingSettings.vue'
+import AdminMessagesView from '../components/AdminMessagesView.vue'
 import CreateInvitationView from '../components/CreateInvitationView.vue'
 import CreateChannelView from '../components/CreateChannelView.vue'
 import UserProfile from '../components/UserProfile.vue'
@@ -94,7 +95,7 @@ function goToMenu() {
 function handleNavigate(section: string, data?: any) {
   console.log('Navigate to:', section, data)
 
-  if (section === 'settings' && !canAccessSystemSettings.value) {
+  if ((section === 'settings' || section === 'admin_messages') && !canAccessSystemSettings.value) {
     goToMenu()
     return
   }
@@ -131,7 +132,7 @@ function handleNavigate(section: string, data?: any) {
 watch(
   () => currentSection.value,
   (section) => {
-    if (section === 'settings' && !canAccessSystemSettings.value) {
+    if ((section === 'settings' || section === 'admin_messages') && !canAccessSystemSettings.value) {
       goToMenu()
     }
   }
@@ -163,6 +164,7 @@ onUnmounted(() => clearBackStack())
                  <h2>
                      {{ currentSection === 'manage_users' ? 'مدیریت کاربران' :
                         currentSection === 'manage_commodities' ? 'مدیریت کالاها' :
+                      currentSection === 'admin_messages' ? 'پیام‌های مدیریت' :
                         currentSection === 'settings' ? 'تنظیمات سیستم' : 
                         currentSection === 'user_profile' ? 'پروفایل کاربر' : 
                       currentSection === 'create_channel' ? 'ساخت کانال' :
@@ -210,6 +212,10 @@ onUnmounted(() => clearBackStack())
                    :jwtToken="jwtToken" 
                    @navigate="handleNavigate"
                 />
+
+                 <AdminMessagesView
+                   v-else-if="currentSection === 'admin_messages' && canAccessSystemSettings"
+                 />
 
                 <UserProfile
                     v-else-if="currentSection === 'user_profile' && selectedUserForProfile"

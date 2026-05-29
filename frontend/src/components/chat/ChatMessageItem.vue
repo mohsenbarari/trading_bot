@@ -39,7 +39,8 @@
         'error': isError,
         'selected-message': isSelected,
         'album-bubble': props.isAlbum,
-        'full-width-bubble': isFullWidthBubble
+        'full-width-bubble': isFullWidthBubble,
+        'management-message': props.isManagementMessage
       }"
       @touchstart="handleTouchStart($event)"
       @touchmove="handleTouchMove($event)"
@@ -466,6 +467,7 @@ const props = defineProps<{
   imageCache: Record<string, string>
   isSelectionMode: boolean
   searchQuery?: string
+  isManagementMessage?: boolean
   onLoad?: () => void
   isAlbum?: boolean
   albumItems?: any[]
@@ -1757,6 +1759,24 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .message-bubble.full-width-bubble { width: 100%; max-width: 100%; }
 .message-bubble.full-width-bubble.sent,
 .message-bubble.full-width-bubble.received { align-self: stretch; }
+.message-bubble.management-message {
+  width: 100%;
+  max-width: 100%;
+  align-self: stretch;
+  background: linear-gradient(135deg, rgba(236, 253, 245, 0.98), rgba(255, 251, 235, 0.96));
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  color: #0f172a;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+}
+
+.message-bubble.management-message::before {
+  content: 'پیام مدیریت';
+  display: block;
+  margin-bottom: 6px;
+  color: #0f766e;
+  font-size: 0.76rem;
+  font-weight: 950;
+}
 .message-bubble p { margin: 0; }
 .media-caption {
   margin-top: 8px;
