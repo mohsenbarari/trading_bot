@@ -945,7 +945,7 @@ onUnmounted(() => {
 
 .admin-market-message {
   margin: 0.75rem 1rem 0;
-  padding: 0.9rem 1rem;
+  padding: 0.72rem 0.95rem;
   border-radius: var(--ds-radius-lg);
   background: linear-gradient(135deg, rgba(255, 251, 235, 0.98), rgba(236, 253, 245, 0.95));
   border: 1px solid rgba(217, 119, 6, 0.22);
@@ -954,16 +954,16 @@ onUnmounted(() => {
 }
 
 .admin-market-message-title {
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 950;
   color: #92400e;
-  margin-bottom: 0.45rem;
+  margin-bottom: 0.3rem;
 }
 
 .admin-market-message-body {
   white-space: pre-wrap;
-  line-height: 1.85;
-  font-size: 0.88rem;
+  line-height: 1.65;
+  font-size: 0.86rem;
   font-weight: 700;
 }
 
@@ -980,7 +980,7 @@ onUnmounted(() => {
 }
 
 .admin-market-message-expand {
-  margin-top: 0.6rem;
+  margin-top: 0.45rem;
   color: #0f766e;
   font-size: 0.78rem;
   font-weight: 900;
