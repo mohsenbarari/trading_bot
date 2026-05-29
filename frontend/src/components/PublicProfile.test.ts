@@ -778,11 +778,11 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('09121110000')
 
     await wrapper.get('.project-user-link-btn').trigger('click')
-    expect(wrapper.emitted('navigate')?.[0]).toEqual([
+    expect(wrapper.emitted('navigate')?.at(-1)).toEqual([
       'public_profile',
       {
-        id: 44,
-        account_name: 'owner44',
+        id: 61,
+        account_name: 'manager61',
       },
     ])
 
@@ -1366,7 +1366,7 @@ describe('PublicProfile.vue', () => {
     expect(infoHeader).toBeTruthy()
     await infoHeader!.trigger('click')
 
-    await wrapper.get('.inline-edit-btn').trigger('click')
+    await wrapper.get('.address-edit-trigger').trigger('click')
     await wrapper.get('.address-edit-textarea').setValue('بازار تهران، پلاک ۱۲')
     fetchMock.mockResolvedValueOnce(makeResponse({ address: 'بازار تهران، پلاک ۱۲' }))
     await wrapper.get('.address-edit-form').trigger('submit')

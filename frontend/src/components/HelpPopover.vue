@@ -31,7 +31,7 @@ function showHelp() {
   timerId.value = window.setTimeout(() => {
     isOpen.value = false
     timerId.value = null
-  }, 3600)
+  }, 6000)
 }
 
 onUnmounted(clearTimer)
