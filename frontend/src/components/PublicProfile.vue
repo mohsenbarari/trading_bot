@@ -1643,7 +1643,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
 .profile-hero--own {
   width: 100%;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: flex-end;
   margin-bottom: 2px;
   text-align: right;
@@ -1695,10 +1695,11 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
 .profile-avatar-edit-indicator {
   position: absolute;
-  right: 4px;
-  bottom: 4px;
+  left: 50%;
+  bottom: 3px;
   width: 18px;
   height: 18px;
+  transform: translateX(-50%);
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
