@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
+import HelpPopover from './HelpPopover.vue'
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -509,11 +510,13 @@ onBeforeUnmount(() => {
             <p class="customer-manager-kicker">مدیریت ارتباطات</p>
             <h3>مشتریان مالک</h3>
           </div>
+          <HelpPopover
+            button-test="customer-manager-help"
+            note-test="customer-manager-help-note"
+            label="راهنمای مدیریت مشتریان"
+            text="این لیست فقط مشتریان فعال و در انتظار ثبت‌نام را نشان می‌دهد. نام کاربری، نام مدیریتی و موبایل بعد از ایجاد ثابت می‌مانند و در ویرایش فقط سطح و محدودیت‌های معاملاتی تغییر می‌کند."
+          />
           <button type="button" class="customer-manager-close" @click="emit('close')">بستن</button>
-        </div>
-
-        <div class="customer-manager-note">
-          این لیست فقط مشتریان فعال و در انتظار ثبت‌نام را نشان می‌دهد. نام کاربری، نام مدیریتی و موبایل بعد از ایجاد ثابت می‌مانند و در ویرایش فقط سطح و محدودیت‌های معاملاتی تغییر می‌کند.
         </div>
 
         <div v-if="notice" class="customer-banner success">{{ notice }}</div>
@@ -523,8 +526,13 @@ onBeforeUnmount(() => {
           <div class="panel-title-row">
             <div>
               <h4>افزودن مشتری جدید</h4>
-              <p>دعوت مشتری از همین پنل ثبت می‌شود و در صورت نیاز می‌توانید لینک ثبت‌نام را کپی کنید.</p>
             </div>
+            <HelpPopover
+              button-test="customer-create-help"
+              note-test="customer-create-help-note"
+              label="راهنمای افزودن مشتری"
+              text="دعوت مشتری از همین پنل ثبت می‌شود و در صورت نیاز می‌توانید لینک ثبت‌نام را کپی کنید."
+            />
             <button type="button" class="ghost-btn" :disabled="isRefreshing" @click="loadRelations({ silent: true })">
               {{ isRefreshing ? 'در حال بروزرسانی...' : 'بروزرسانی لیست' }}
             </button>
@@ -584,8 +592,13 @@ onBeforeUnmount(() => {
           <div class="panel-title-row">
             <div>
               <h4>مشتریان فعال و pending</h4>
-              <p>برای مشتری فعال می‌توانید سطح و محدودیت‌ها را به‌روزرسانی یا ارتباط را قطع کنید.</p>
             </div>
+            <HelpPopover
+              button-test="customer-list-help"
+              note-test="customer-list-help-note"
+              label="راهنمای لیست مشتریان"
+              text="برای مشتری فعال می‌توانید سطح و محدودیت‌ها را به‌روزرسانی یا ارتباط را قطع کنید."
+            />
           </div>
 
           <div v-if="isLoading" class="customer-loading">در حال دریافت لیست مشتریان...</div>
@@ -719,8 +732,13 @@ onBeforeUnmount(() => {
                 <div class="session-panel-header">
                   <div>
                     <h6>نشست‌های فعال مشتری</h6>
-                    <p>نشست‌های فعال این مشتری را می‌توانید ببینید و هر نشست را جداگانه خاتمه دهید.</p>
                   </div>
+                  <HelpPopover
+                    button-test="customer-sessions-help"
+                    note-test="customer-sessions-help-note"
+                    label="راهنمای نشست‌های مشتری"
+                    text="نشست‌های فعال این مشتری را می‌توانید ببینید و هر نشست را جداگانه خاتمه دهید."
+                  />
                   <button
                     type="button"
                     class="ghost-btn refresh-sessions"

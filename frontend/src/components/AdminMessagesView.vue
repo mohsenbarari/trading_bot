@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ChevronDown, Info, Megaphone, PencilLine, Pin, PinOff, SendHorizontal, Users } from 'lucide-vue-next'
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { ChevronDown, Megaphone, PencilLine, Pin, PinOff, Users } from 'lucide-vue-next'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { apiFetch } from '../utils/auth'
+import HelpPopover from './HelpPopover.vue'
 
 type AdminMarketMessage = {
   id: number
@@ -51,8 +52,6 @@ const isPublishingBroadcast = ref(false)
 const isClearingMarketPin = ref(false)
 const isLoading = ref(false)
 const marketComposerInputRef = ref<HTMLTextAreaElement | null>(null)
-const activeMarketHelp = ref<'empty' | 'history' | 'composer' | null>(null)
-const marketHelpTimerId = ref<number | null>(null)
 
 const marketArchive = computed(() => marketHistory.value.filter((message) => message.id !== activeMarketMessage.value?.id))
 const marketRecentHistory = computed(() => marketArchive.value.slice(0, 5))
@@ -70,24 +69,6 @@ function formatDate(value: string | undefined) {
 
 function targetLabel(key: string) {
   return targetOptions.find((option) => option.key === key)?.label || key
-}
-
-function clearMarketHelpTimer() {
-  if (marketHelpTimerId.value !== null) {
-    window.clearTimeout(marketHelpTimerId.value)
-    marketHelpTimerId.value = null
-  }
-}
-
-function showMarketHelp(helpKey: 'empty' | 'history' | 'composer') {
-  activeMarketHelp.value = helpKey
-  clearMarketHelpTimer()
-  marketHelpTimerId.value = window.setTimeout(() => {
-    if (activeMarketHelp.value === helpKey) {
-      activeMarketHelp.value = null
-    }
-    marketHelpTimerId.value = null
-  }, 3600)
 }
 
 async function loadDashboard() {
@@ -216,7 +197,6 @@ function reuseBroadcastMessage(message: AdminBroadcastMessage) {
 }
 
 onMounted(loadDashboard)
-onUnmounted(clearMarketHelpTimer)
 </script>
 
 <template>
@@ -287,24 +267,29 @@ onUnmounted(clearMarketHelpTimer)
         </article>
 
         <article v-else class="status-card status-card--empty card-with-help">
-          <button type="button" class="help-trigger help-trigger--floating" data-test="market-empty-help" aria-label="توضیحات وضعیت پین بازار" @click="showMarketHelp('empty')">
-            <Info :size="18" />
-          </button>
+          <HelpPopover
+            floating
+            button-test="market-empty-help"
+            note-test="market-empty-help-note"
+            label="توضیحات وضعیت پین بازار"
+            text="در حال حاضر هیچ پیام پین‌شده‌ای برای بازار فعال نیست. از کادر پایین برای انتشار پیام جدید استفاده کن."
+          />
           <div class="status-card-header">
             <div>
               <span class="status-pill status-pill--muted">بدون پین فعال</span>
               <p class="status-meta">بازار اکنون پیام سنجاق‌شده‌ای ندارد.</p>
             </div>
           </div>
-          <div v-if="activeMarketHelp === 'empty'" class="inline-help-note" data-test="market-empty-help-note">
-            در حال حاضر هیچ پیام پین‌شده‌ای برای بازار فعال نیست. از کادر پایین برای انتشار پیام جدید استفاده کن.
-          </div>
         </article>
 
         <section class="history-card history-card--accordion card-with-help">
-          <button type="button" class="help-trigger help-trigger--floating" data-test="market-history-help" aria-label="توضیحات تاریخچه بازار" @click="showMarketHelp('history')">
-            <Info :size="18" />
-          </button>
+          <HelpPopover
+            floating
+            button-test="market-history-help"
+            note-test="market-history-help-note"
+            label="توضیحات تاریخچه بازار"
+            text="اگر روی آیکن مداد کنار هر پیام بزنی، متن همان پیام به کادر پایین منتقل می‌شود تا همان‌جا ویرایش و دوباره منتشرش کنی."
+          />
           <div class="history-header history-header--market">
             <div class="history-title-row">
               <h4>۵ پیام آخر بازار</h4>
@@ -318,10 +303,6 @@ onUnmounted(clearMarketHelpTimer)
                 <ChevronDown :size="22" class="history-toggle-icon" :class="{ 'history-toggle-icon--open': isMarketHistoryOpen }" />
               </button>
             </div>
-          </div>
-
-          <div v-if="activeMarketHelp === 'history'" class="inline-help-note" data-test="market-history-help-note">
-            اگر روی آیکن مداد کنار هر پیام بزنی، متن همان پیام به کادر پایین منتقل می‌شود تا همان‌جا ویرایش و دوباره منتشرش کنی.
           </div>
 
           <div v-if="isMarketHistoryOpen" class="history-accordion-body" data-test="market-history-list">
@@ -346,16 +327,17 @@ onUnmounted(clearMarketHelpTimer)
         </section>
 
         <section class="composer-card card-with-help" data-test="market-composer-card">
-          <button type="button" class="help-trigger help-trigger--floating" data-test="market-composer-help" aria-label="توضیحات کادر پیام بازار" @click="showMarketHelp('composer')">
-            <Info :size="18" />
-          </button>
+          <HelpPopover
+            floating
+            button-test="market-composer-help"
+            note-test="market-composer-help-note"
+            label="توضیحات کادر پیام بازار"
+            text="فقط یک پیام می‌تواند هم‌زمان در بازار پین باشد."
+          />
           <div class="composer-header">
             <div class="section-title-with-help section-title-with-help--single">
               <h4>نوشتن پیام بازار</h4>
             </div>
-          </div>
-          <div v-if="activeMarketHelp === 'composer'" class="inline-help-note" data-test="market-composer-help-note">
-            فقط یک پیام می‌تواند هم‌زمان در بازار پین باشد.
           </div>
           <textarea
             ref="marketComposerInputRef"
@@ -377,7 +359,14 @@ onUnmounted(clearMarketHelpTimer)
       </section>
 
       <section v-else-if="activePanel === 'chat'" class="message-panel message-panel--chat" data-test="broadcast-panel">
-        <article class="status-card status-card--broadcast">
+        <article class="status-card status-card--broadcast card-with-help">
+          <HelpPopover
+            floating
+            button-test="broadcast-status-help"
+            note-test="broadcast-status-help-note"
+            label="راهنمای مخاطبان پیام چت"
+            text="پیام با عنوان «پیام مدیریت» برای هر کاربر در اتاق مدیریت خودش ثبت می‌شود و هویت واقعی ادمین به گیرنده نشان داده نمی‌شود."
+          />
           <div class="status-card-header">
             <div>
               <span class="status-pill status-pill--info">مخاطبان انتخاب‌شده</span>
@@ -385,14 +374,19 @@ onUnmounted(clearMarketHelpTimer)
             </div>
             <span class="history-badge">{{ selectedBroadcastLabels.join('، ') || 'بدون انتخاب' }}</span>
           </div>
-          <p class="status-copy status-copy--muted">پیام با عنوان «پیام مدیریت» برای هر کاربر در اتاق مدیریت خودش ثبت می‌شود و هویت واقعی ادمین به گیرنده نشان داده نمی‌شود.</p>
         </article>
 
-        <section class="composer-card">
+        <section class="composer-card card-with-help">
+          <HelpPopover
+            floating
+            button-test="broadcast-composer-help"
+            note-test="broadcast-composer-help-note"
+            label="راهنمای نوشتن پیام چت"
+            text="گیرنده‌ها را انتخاب کن و پیام را یک‌بار برای همه آن‌ها در چت ثبت کن. اتاق مقصد فقط‌خواندنی است و unread عادی پیام‌رسان را هم به‌روزرسانی می‌کند."
+          />
           <div class="composer-header">
             <div>
               <h4>نوشتن پیام چت</h4>
-              <p>گیرنده‌ها را انتخاب کن و پیام را یک‌بار برای همه آن‌ها در چت ثبت کن.</p>
             </div>
             <span class="composer-counter">{{ broadcastContent.trim().length.toLocaleString('fa-IR') }} کاراکتر</span>
           </div>
@@ -418,10 +412,7 @@ onUnmounted(clearMarketHelpTimer)
           <div v-if="broadcastSuccess" class="alert success">{{ broadcastSuccess }}</div>
 
           <div class="composer-actions">
-            <div class="composer-hint">
-              <SendHorizontal :size="16" />
-              <span>اتاق مقصد فقط‌خواندنی است و unread عادی پیام‌رسان را هم به‌روزرسانی می‌کند.</span>
-            </div>
+            <span></span>
             <button class="primary-action" :disabled="!broadcastContent.trim() || broadcastTargets.length === 0 || isPublishingBroadcast" @click="publishBroadcastMessage">
               <Megaphone :size="16" />
               <span>{{ isPublishingBroadcast ? 'در حال ارسال...' : 'ارسال در چت' }}</span>
@@ -429,11 +420,17 @@ onUnmounted(clearMarketHelpTimer)
           </div>
         </section>
 
-        <section class="history-card">
+        <section class="history-card card-with-help">
+          <HelpPopover
+            floating
+            button-test="broadcast-history-help"
+            note-test="broadcast-history-help-note"
+            label="راهنمای تاریخچه پیام‌های چت"
+            text="ارسال‌های قبلی برای بازاستفاده و اصلاح سریع اینجا نگه داشته می‌شوند."
+          />
           <div class="history-header">
             <div>
               <h4>تاریخچه پیام‌های چت</h4>
-              <p>ارسال‌های قبلی را برای بازاستفاده و اصلاح سریع می‌بینی.</p>
             </div>
             <span class="history-badge">{{ broadcastHistory.length.toLocaleString('fa-IR') }} مورد</span>
           </div>

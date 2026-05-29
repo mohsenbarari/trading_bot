@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
+import HelpPopover from './HelpPopover.vue'
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -332,11 +333,13 @@ onBeforeUnmount(() => {
             <p class="accountant-manager-kicker">مدیریت ارتباطات</p>
             <h3>حسابداران مالک</h3>
           </div>
+          <HelpPopover
+            button-test="accountant-manager-help"
+            note-test="accountant-manager-help-note"
+            label="راهنمای مدیریت حسابداران"
+            text="این لیست فقط حسابداران فعال و در انتظار ثبت‌نام را نشان می‌دهد. در ویرایش فقط شرح وظیفه قابل تغییر است."
+          />
           <button type="button" class="accountant-manager-close" @click="emit('close')">بستن</button>
-        </div>
-
-        <div class="accountant-manager-note">
-          این لیست فقط حسابداران فعال و در انتظار ثبت‌نام را نشان می‌دهد. در ویرایش فقط شرح وظیفه قابل تغییر است.
         </div>
 
         <div v-if="error" class="accountant-banner error">{{ error }}</div>
@@ -346,8 +349,13 @@ onBeforeUnmount(() => {
           <div class="panel-title-row">
             <div>
               <h4>افزودن حسابدار جدید</h4>
-              <p>پس از ثبت، لینک ثبت‌نام مخصوص همان حسابدار ساخته می‌شود.</p>
             </div>
+            <HelpPopover
+              button-test="accountant-create-help"
+              note-test="accountant-create-help-note"
+              label="راهنمای افزودن حسابدار"
+              text="پس از ثبت، لینک ثبت‌نام مخصوص همان حسابدار ساخته می‌شود."
+            />
             <button type="button" class="ghost-btn" :disabled="isRefreshing" @click="loadRelations({ silent: true })">
               {{ isRefreshing ? 'در حال بروزرسانی...' : 'بروزرسانی لیست' }}
             </button>
@@ -384,8 +392,13 @@ onBeforeUnmount(() => {
           <div class="panel-title-row">
             <div>
               <h4>لیست حسابداران</h4>
-              <p>{{ orderedRelations.length }} مورد فعال یا در انتظار ثبت‌نام</p>
             </div>
+            <HelpPopover
+              button-test="accountant-list-help"
+              note-test="accountant-list-help-note"
+              label="راهنمای لیست حسابداران"
+              :text="`${orderedRelations.length.toLocaleString('fa-IR')} مورد فعال یا در انتظار ثبت‌نام در این لیست وجود دارد.`"
+            />
           </div>
 
           <div v-if="isLoading" class="accountant-loading">در حال دریافت حسابداران...</div>

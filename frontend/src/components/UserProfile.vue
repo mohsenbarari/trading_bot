@@ -7,6 +7,7 @@ import { apiFetch } from '../utils/auth';
 import { useUserProfileTiming } from '../composables/useUserProfileTiming';
 import { isCachedMiddleManager } from '../utils/adminAccess';
 import { formatIranDateTime } from '../utils/iranTime';
+import HelpPopover from './HelpPopover.vue';
 
 const props = defineProps<{
   user: any;
@@ -879,31 +880,67 @@ async function deleteUser() {
       
       <!-- منوی مدیریت (فقط ادمین) -->
       <template v-if="isAdminView">
-        <div v-if="!showSettings" class="main-actions">
-            <button @click="showSettings = true" class="menu-button settings-btn">⚙️ تنظیمات کاربر</button>
-            <button @click="deleteUser" class="menu-button delete-btn">❌ حذف کاربر</button>
-            <button @click="$emit('navigate', 'manage_users')" class="menu-button back-btn">🔙 بازگشت به لیست</button>
+        <div v-if="!showSettings" class="main-actions profile-menu-card card-with-help">
+            <HelpPopover
+              floating
+              button-test="user-profile-admin-menu-help"
+              note-test="user-profile-admin-menu-help-note"
+              label="راهنمای منوی مدیریت کاربر"
+              text="عملیات این بخش فقط روی همین کاربر اعمال می‌شود. حذف کاربر، نشست‌ها و دسترسی‌های فعال او را هم مدیریت می‌کند."
+            />
+            <button @click="showSettings = true" class="menu-button settings-btn">
+              <span class="menu-button-icon">⚙</span>
+              <span class="menu-button-label">تنظیمات کاربر</span>
+            </button>
+            <button @click="deleteUser" class="menu-button delete-btn">
+              <span class="menu-button-icon">✕</span>
+              <span class="menu-button-label">حذف کاربر</span>
+            </button>
+            <button @click="$emit('navigate', 'manage_users')" class="menu-button back-btn">
+              <span class="menu-button-icon">‹</span>
+              <span class="menu-button-label">بازگشت به لیست</span>
+            </button>
         </div>
 
-        <div v-else class="settings-menu">
+        <div v-else class="settings-menu profile-menu-card card-with-help">
+          <HelpPopover
+            floating
+            button-test="user-profile-settings-menu-help"
+            note-test="user-profile-settings-menu-help-note"
+            label="راهنمای زیرمنوی تنظیمات کاربر"
+            text="این زیرمنو برای تغییر وضعیت حساب، نقش، محدودیت و مسدودیت کاربر است. گزینه‌های حذف یا بازگشت در منوی قبلی قرار دارند."
+          />
           <button @click="toggleAccountStatus" class="menu-button">
-            🔁 تغییر وضعیت حساب ({{ isAccountInactive ? 'غیرفعال' : 'فعال' }})
+            <span class="menu-button-icon">↻</span>
+            <span class="menu-button-label">تغییر وضعیت حساب ({{ isAccountInactive ? 'غیرفعال' : 'فعال' }})</span>
             </button>
-            <button v-if="canEditRole" @click="isEditingRole = true" class="menu-button">✏️ ویرایش نقش</button>
+            <button v-if="canEditRole" @click="isEditingRole = true" class="menu-button">
+              <span class="menu-button-icon">✎</span>
+              <span class="menu-button-label">ویرایش نقش</span>
+            </button>
             
-            <button v-if="!hasLimitations" @click="openLimitationsModal" class="menu-button">⚠️ اعمال محدودیت</button>
+            <button v-if="!hasLimitations" @click="openLimitationsModal" class="menu-button">
+              <span class="menu-button-icon">!</span>
+              <span class="menu-button-label">اعمال محدودیت</span>
+            </button>
             <button v-else @click="removeLimitations" class="menu-button unlimit-btn">
-                ✅ رفع محدودیت
+                <span class="menu-button-icon">✓</span>
+                <span class="menu-button-label">رفع محدودیت</span>
             </button>
             
             <button v-if="!isRestricted" @click="showBlockModal = true" class="menu-button block-btn">
-                ⛔ مسدود کردن
+                <span class="menu-button-icon">⊘</span>
+                <span class="menu-button-label">مسدود کردن</span>
             </button>
             <button v-else @click="unblockUser" class="menu-button unblock-btn">
-                🔓 رفع مسدودیت
+                <span class="menu-button-icon">⌁</span>
+                <span class="menu-button-label">رفع مسدودیت</span>
             </button>
 
-            <button @click="showSettings = false" class="menu-button back-btn">🔙 بازگشت</button>
+            <button @click="showSettings = false" class="menu-button back-btn">
+              <span class="menu-button-icon">‹</span>
+              <span class="menu-button-label">بازگشت</span>
+            </button>
         </div>
       </template>
     </div>
@@ -992,8 +1029,17 @@ async function deleteUser() {
     </Teleport>
 
     <template v-if="!isAdminView">
+      <div class="profile-user-actions profile-menu-card card-with-help">
+        <HelpPopover
+          floating
+          button-test="profile-user-actions-help"
+          note-test="profile-user-actions-help-note"
+          label="راهنمای پنل کاربری"
+          text="از این بخش به پیام‌های سیستمی و تنظیمات مجاز همین حساب دسترسی داری. گزینه‌های مدیریتی فقط برای ادمین‌ها نمایش داده می‌شود."
+        />
         <button class="menu-button notification-btn" @click="emit('navigate', 'notifications')">
-          🔔 صندوق پیام‌ها
+          <span class="menu-button-icon">🔔</span>
+          <span class="menu-button-label">صندوق پیام‌ها</span>
         </button>
         <!-- دکمه تنظیمات فقط برای نقش‌های غیر عادی -->
         <button 
@@ -1001,8 +1047,10 @@ async function deleteUser() {
           class="menu-button settings-btn" 
           @click="emit('navigate', 'user_settings')"
         >
-          ⚙️ تنظیمات
+          <span class="menu-button-icon">⚙</span>
+          <span class="menu-button-label">تنظیمات</span>
         </button>
+      </div>
     </template>
   </div>
 
@@ -1428,22 +1476,39 @@ input[type="number"].form-input::-webkit-inner-spin-button {
 }
 .cancel-btn:active { background: #f9fafb; }
 
+.profile-menu-card {
+  position: relative;
+  margin-top: 0.875rem;
+  padding: 1rem;
+  padding-left: 3.8rem;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 1.25rem;
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.72), rgba(255, 255, 255, 0.96));
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+}
+
+.profile-user-actions {
+  margin-top: 1rem;
+}
+
 .menu-button {
   width: 100%;
-  padding: 0.875rem;
+  min-height: 3.15rem;
+  padding: 0.72rem 0.8rem;
   font-size: 0.85rem;
-  font-weight: 700;
-  background: white;
+  font-weight: 850;
+  background: rgba(255, 255, 255, 0.94);
   color: #1f2937;
-  border: 1px solid rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(15, 23, 42, 0.07);
   border-radius: 1rem;
   cursor: pointer;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
+  justify-content: flex-start;
+  gap: 0.72rem;
   transition: all 0.2s;
   margin-bottom: 0.625rem;
+  text-align: right;
   -webkit-tap-highlight-color: transparent;
 }
 .menu-button:hover {
@@ -1457,12 +1522,36 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   margin-bottom: 0;
 }
 
+.menu-button-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.8rem;
+  background: rgba(245, 158, 11, 0.12);
+  color: #92400e;
+  font-size: 0.95rem;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.menu-button-label {
+  flex: 1;
+  min-width: 0;
+}
+
 .text-red { color: #ef4444; font-weight: bold; }
 
 .block-btn {
   background: #fef2f2 !important;
   color: #991b1b !important;
   border-color: #fecaca !important;
+}
+.block-btn .menu-button-icon,
+.delete-btn .menu-button-icon {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
 }
 .unblock-btn {
   background: #f0fdf4 !important;
@@ -1473,6 +1562,11 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   background: #f0fdf4 !important;
   color: #166534 !important;
   border-color: #bbf7d0 !important;
+}
+.unblock-btn .menu-button-icon,
+.unlimit-btn .menu-button-icon {
+  background: rgba(34, 197, 94, 0.14);
+  color: #166534;
 }
 .settings-btn {
   background: linear-gradient(135deg, #fffbeb, #fef3c7) !important;

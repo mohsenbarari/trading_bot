@@ -2,6 +2,7 @@
 import { computed, ref, onMounted } from 'vue';
 import { ChevronDown, ChevronLeft, User as UserIcon, Activity, ArrowRight, ChevronRight } from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
+import HelpPopover from './HelpPopover.vue';
 import OwnerAccountantManagerModal from './OwnerAccountantManagerModal.vue';
 import OwnerCustomerManagerModal from './OwnerCustomerManagerModal.vue';
 import UserProfile from './UserProfile.vue';
@@ -1200,7 +1201,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
           </p>
         </div>
 
-        <div class="ds-accordion mt-4" :class="{ open: openSections.info }">
+        <div class="ds-accordion mt-4 card-with-help" :class="{ open: openSections.info }">
+          <HelpPopover
+            floating
+            button-test="public-profile-info-help"
+            note-test="public-profile-info-help-note"
+            label="راهنمای اطلاعات پروفایل"
+            text="این بخش فقط داده‌های اصلی پروفایل و آمار قابل نمایش همین کاربر را نشان می‌دهد. اقدام‌های مدیریتی یا ارتباطی در کارت‌های جداگانه پایین صفحه قرار دارند."
+          />
           <div class="ds-accordion-header" @click="openSections.info = !openSections.info">
             <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
@@ -1233,7 +1241,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section v-if="showProjectUsersSection" class="profile-section project-users-section">
-        <div class="ds-accordion" :class="{ open: openSections.projectUsers }">
+        <div class="ds-accordion card-with-help" :class="{ open: openSections.projectUsers }">
+          <HelpPopover
+            floating
+            button-test="public-profile-project-users-help"
+            note-test="public-profile-project-users-help-note"
+            label="راهنمای کاربران پروژه"
+            text="این فهرست فقط کاربرانی را نشان می‌دهد که طبق نقش یا رابطه مالک/حسابدار برای این پروفایل قابل مشاهده هستند."
+          />
           <div class="ds-accordion-header" @click="toggleProjectUsersSection">
             <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
@@ -1283,7 +1298,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section v-if="accountantRelations.length > 0" class="profile-section accountant-relations-section">
-        <div class="ds-accordion" :class="{ open: openSections.accountants }">
+        <div class="ds-accordion card-with-help" :class="{ open: openSections.accountants }">
+          <HelpPopover
+            floating
+            button-test="public-profile-accountants-help"
+            note-test="public-profile-accountants-help-note"
+            label="راهنمای حسابداران مالک"
+            text="این بخش حسابدارهای فعال این مالک را با نام نمایشی ثبت‌شده در رابطه نشان می‌دهد، نه لزوماً نام خام حساب کاربری."
+          />
           <div class="ds-accordion-header" @click="openSections.accountants = !openSections.accountants">
             <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
@@ -1315,7 +1337,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section v-if="showCustomerListSection" class="profile-section customer-relations-section">
-        <div class="ds-accordion" :class="{ open: openSections.customers }">
+        <div class="ds-accordion card-with-help" :class="{ open: openSections.customers }">
+          <HelpPopover
+            floating
+            button-test="public-profile-customers-help"
+            note-test="public-profile-customers-help-note"
+            label="راهنمای مشتریان مالک"
+            text="این فهرست فقط برای مالک، حسابدارهای همان مالک و مدیر ارشد قابل نمایش است و نام مدیریتی مشتری را نشان می‌دهد."
+          />
           <div class="ds-accordion-header" @click="openSections.customers = !openSections.customers">
             <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
@@ -1357,18 +1386,30 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
       <section v-if="showVisitorSections && visitorActionCards.length > 0" class="profile-section visitor-profile-section">
         <div class="action-grid" :class="{ 'single-column': visitorActionCards.length === 1 }">
-          <button
+          <div
             v-for="action in visitorActionCards"
             :key="action.key"
+            class="profile-action-item"
+            :class="{ 'profile-action-item--disabled': Boolean(action.disabled) }"
+          >
+          <button
             class="settings-btn visitor-action-btn"
             :disabled="Boolean(action.disabled)"
-            :title="action.description || undefined"
             @click="handleActionClick(action)"
           >
             <span class="stat-icon">{{ action.icon }}</span>
             <span class="stat-label">{{ action.label }}</span>
-            <span v-if="action.description" class="action-description">{{ action.description }}</span>
           </button>
+            <HelpPopover
+              v-if="action.description"
+              floating
+              class="profile-action-help"
+              :button-test="`public-profile-action-help-${action.key}`"
+              :note-test="`public-profile-action-help-note-${action.key}`"
+              :label="`راهنمای ${action.label}`"
+              :text="action.description"
+            />
+          </div>
         </div>
       </section>
 
@@ -1389,7 +1430,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section class="profile-section">
-        <div class="ds-accordion" :class="{ open: openSections.history }">
+        <div class="ds-accordion card-with-help" :class="{ open: openSections.history }">
+          <HelpPopover
+            floating
+            button-test="public-profile-history-help"
+            note-test="public-profile-history-help-note"
+            label="راهنمای تاریخچه معاملات"
+            text="فیلترها و خروجی‌ها فقط روی همین تاریخچه اعمال می‌شوند. نوع معامله از دید کاربری نمایش داده می‌شود که اجازه مشاهده این تاریخچه را دارد."
+          />
           <div class="ds-accordion-header" @click="toggleHistory">
             <div class="ds-accordion-header-info">
               <Activity :size="18" class="text-amber-600" />
@@ -1897,9 +1945,18 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   width: 100%;
 }
 
+.card-with-help {
+  position: relative;
+}
+
+.card-with-help > .ds-accordion-header {
+  padding-left: 3.7rem;
+}
+
 /* If we have 3 buttons, make the first one (Settings) full width 
    and the next two (Customers/Accountants) side-by-side. */
-.action-grid > button:first-child:nth-last-child(3) {
+.action-grid > button:first-child:nth-last-child(3),
+.action-grid > .profile-action-item:first-child:nth-last-child(3) {
   grid-column: span 2;
 }
 
@@ -1909,6 +1966,27 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
 .action-grid.single-column {
   grid-template-columns: 1fr;
+}
+
+.profile-action-item {
+  position: relative;
+  min-width: 0;
+}
+
+.profile-action-item .settings-btn {
+  width: 100%;
+  height: 100%;
+  min-height: 82px;
+  padding-left: 3.25rem;
+}
+
+.profile-action-help {
+  top: 0.55rem;
+  left: 0.55rem;
+}
+
+.profile-action-item--disabled .profile-action-help {
+  opacity: 0.95;
 }
 
 .stat-card {
@@ -1968,15 +2046,6 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   opacity: 0.72;
   transform: none;
   box-shadow: 0 1px 4px rgba(75, 85, 99, 0.16);
-}
-
-.action-description {
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  line-height: 1.45;
-  text-align: center;
-  color: rgba(255, 255, 255, 0.88);
 }
 
 .message-btn .stat-icon, .settings-btn .stat-icon {
