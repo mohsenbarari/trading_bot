@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
-import { ChevronDown, ChevronLeft, User as UserIcon, Activity, ArrowRight, ChevronRight } from 'lucide-vue-next';
+import { ChevronDown, ChevronLeft, User as UserIcon, Activity, ArrowRight, ChevronRight, Pencil } from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import HelpPopover from './HelpPopover.vue';
 import OwnerAccountantManagerModal from './OwnerAccountantManagerModal.vue';
@@ -695,20 +695,6 @@ async function handleAvatarSelected(event: Event) {
   }
 }
 
-async function clearAvatar() {
-  if (!isOwnProfile.value || avatarBusy.value) return
-
-  avatarBusy.value = true
-  error.value = ''
-  try {
-    await updateOwnAvatar(null)
-  } catch (e: any) {
-    error.value = e?.message || 'حذف آواتار ناموفق بود.'
-  } finally {
-    avatarBusy.value = false
-  }
-}
-
 async function toggleHistory() {
   openSections.value.history = !openSections.value.history;
   if (!openSections.value.history) return;
@@ -1161,27 +1147,35 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
     <div v-else-if="profileData" class="profile-content" :class="{ 'profile-content--own': showOwnerSections }">
       <section class="profile-section shared-profile-section">
         <div class="profile-hero" :class="{ 'profile-hero--own': showOwnerSections }">
-          <div class="profile-avatar">
-            <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
-            <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
-            <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
-          </div>
-          <div class="profile-hero-copy" :class="{ 'profile-hero-copy--own': showOwnerSections }">
-            <h3>{{ profileData.account_name }}</h3>
-            <p v-if="profilePresenceStatus" class="profile-presence-status" :class="{ online: profileIsOnline }">{{ profilePresenceStatus }}</p>
-          </div>
-          <div
-            v-if="showOwnerSections"
-            class="profile-avatar-actions"
-            :class="{ 'profile-avatar-actions--own': showOwnerSections }"
-          >
-            <button class="profile-avatar-btn primary" :disabled="avatarBusy" @click="triggerAvatarPicker">
-              {{ profileAvatarUrl ? 'تغییر عکس' : 'افزودن عکس' }}
+          <div v-if="showOwnerSections" class="profile-avatar-stack">
+            <button
+              type="button"
+              class="profile-avatar profile-avatar-button profile-avatar-button--editable"
+              data-test="profile-avatar-trigger"
+              :disabled="avatarBusy"
+              :aria-label="profileAvatarUrl ? 'تغییر آواتار' : 'افزودن آواتار'"
+              @click="triggerAvatarPicker"
+            >
+              <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
+              <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
+              <span class="profile-avatar-edit-indicator" aria-hidden="true">
+                <Pencil :size="12" />
+              </span>
+              <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
             </button>
-            <button v-if="profileAvatarUrl" class="profile-avatar-btn" :disabled="avatarBusy" @click="clearAvatar">
-              حذف عکس
-            </button>
+            <p v-if="profilePresenceStatus" class="profile-presence-status profile-presence-status--own" :class="{ online: profileIsOnline }">{{ profilePresenceStatus }}</p>
           </div>
+          <template v-else>
+            <div class="profile-avatar">
+              <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
+              <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
+              <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
+            </div>
+            <div class="profile-hero-copy">
+              <h3>{{ profileData.account_name }}</h3>
+              <p v-if="profilePresenceStatus" class="profile-presence-status" :class="{ online: profileIsOnline }">{{ profilePresenceStatus }}</p>
+            </div>
+          </template>
         </div>
 
         <div v-if="resolvedAccountantContext" class="accountant-resolution-banner">
@@ -1649,13 +1643,16 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
 .profile-hero--own {
   width: 100%;
-  flex-direction: row-reverse;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 6px 12px;
+  justify-content: flex-end;
   margin-bottom: 2px;
   text-align: right;
+}
+
+.profile-avatar-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
 }
 
 .profile-avatar {
@@ -1675,10 +1672,40 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 }
 
 .profile-hero--own .profile-avatar {
-  order: 1;
   width: 72px;
   height: 72px;
   font-size: 1.55rem;
+}
+
+.profile-avatar-button {
+  border: 0;
+  padding: 0;
+  appearance: none;
+  cursor: pointer;
+}
+
+.profile-avatar-button:disabled {
+  cursor: wait;
+}
+
+.profile-avatar-button--editable {
+  box-shadow: 0 14px 32px rgba(51, 144, 236, 0.18);
+}
+
+.profile-avatar-edit-indicator {
+  position: absolute;
+  left: -2px;
+  bottom: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.86);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.22);
 }
 
 .profile-avatar-image {
@@ -1705,26 +1732,19 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   color: var(--ds-text-primary);
 }
 
-.profile-hero-copy--own {
-  order: 2;
-  flex: 1 1 180px;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 2px;
-}
-
-.profile-hero-copy--own h3 {
-  font-size: 1.02rem;
-}
-
 .profile-presence-status {
   margin: 6px 0 0;
   font-size: 0.84rem;
   font-weight: 700;
   color: var(--ds-text-secondary);
+}
+
+.profile-presence-status--own {
+  margin: 0;
+  min-height: 1.1rem;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  text-align: center;
 }
 
 .profile-presence-status.online {
@@ -1852,48 +1872,6 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   font-size: 0.85rem;
   direction: ltr;
   text-align: left;
-}
-
-.profile-avatar-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.profile-avatar-actions--own {
-  order: 3;
-  width: 100%;
-  justify-content: flex-start;
-  gap: 8px;
-}
-
-.profile-avatar-btn {
-  border: 0;
-  border-radius: var(--ds-radius-full);
-  min-height: 36px;
-  padding: 0 14px;
-  font-size: var(--ds-font-sm);
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-
-.profile-avatar-actions--own .profile-avatar-btn {
-  min-height: 34px;
-  padding: 0 12px;
-  font-size: 0.76rem;
-}
-
-.profile-avatar-btn.primary {
-  background: var(--ds-primary-500);
-  color: #fff;
-}
-
-.profile-avatar-btn.secondary {
-  background: var(--ds-bg-hover);
-  color: var(--ds-danger-500);
 }
 
 .admin-user-error {
