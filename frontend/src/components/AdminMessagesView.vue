@@ -303,14 +303,8 @@ onUnmounted(clearMarketHelpTimer)
 
         <section class="history-card history-card--accordion">
           <div class="history-header history-header--market">
-            <div class="section-title-with-help">
+            <div class="history-title-row">
               <h4>۵ پیام آخر بازار</h4>
-              <button type="button" class="help-trigger" data-test="market-history-help" aria-label="توضیحات تاریخچه بازار" @click="showMarketHelp('history')">
-                <Info :size="18" />
-              </button>
-            </div>
-            <div class="history-toggle-meta">
-              <span class="history-badge">{{ marketRecentHistory.length.toLocaleString('fa-IR') }} مورد</span>
               <button
                 type="button"
                 class="history-toggle-button"
@@ -321,10 +315,13 @@ onUnmounted(clearMarketHelpTimer)
                 <ChevronDown :size="22" class="history-toggle-icon" :class="{ 'history-toggle-icon--open': isMarketHistoryOpen }" />
               </button>
             </div>
+            <button type="button" class="help-trigger" data-test="market-history-help" aria-label="توضیحات تاریخچه بازار" @click="showMarketHelp('history')">
+              <Info :size="18" />
+            </button>
           </div>
 
           <div v-if="activeMarketHelp === 'history'" class="inline-help-note" data-test="market-history-help-note">
-            این بخش فقط ۵ پیام آخر بازار را نشان می‌دهد و به‌صورت پیش‌فرض بسته است تا صفحه خلوت بماند.
+            اگر روی آیکن مداد کنار هر پیام بزنی، متن همان پیام به کادر پایین منتقل می‌شود تا همان‌جا ویرایش و دوباره منتشرش کنی.
           </div>
 
           <div v-if="isMarketHistoryOpen" class="history-accordion-body" data-test="market-history-list">
@@ -350,15 +347,15 @@ onUnmounted(clearMarketHelpTimer)
 
         <section class="composer-card" data-test="market-composer-card">
           <div class="composer-header">
-            <div class="section-title-with-help">
+            <div class="section-title-with-help section-title-with-help--single">
               <h4>نوشتن پیام بازار</h4>
-              <button type="button" class="help-trigger" data-test="market-composer-help" aria-label="توضیحات کادر پیام بازار" @click="showMarketHelp('composer')">
-                <Info :size="18" />
-              </button>
             </div>
+            <button type="button" class="help-trigger" data-test="market-composer-help" aria-label="توضیحات کادر پیام بازار" @click="showMarketHelp('composer')">
+              <Info :size="18" />
+            </button>
           </div>
           <div v-if="activeMarketHelp === 'composer'" class="inline-help-note" data-test="market-composer-help-note">
-            اگر از تاریخچه روی قلم بزنی، متن برای ویرایش به همین کادر منتقل می‌شود. فقط یک پیام می‌تواند هم‌زمان در بازار پین باشد.
+            فقط یک پیام می‌تواند هم‌زمان در بازار پین باشد.
           </div>
           <textarea
             ref="marketComposerInputRef"
@@ -567,7 +564,7 @@ onUnmounted(clearMarketHelpTimer)
 
 .market-pin-card-title-wrap,
 .market-pin-card-actions,
-.history-toggle-meta {
+.history-title-row {
   display: inline-flex;
   align-items: center;
   gap: 0.6rem;
@@ -577,6 +574,10 @@ onUnmounted(clearMarketHelpTimer)
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
+}
+
+.section-title-with-help--single {
+  gap: 0;
 }
 
 .composer-header h4,
@@ -639,17 +640,23 @@ onUnmounted(clearMarketHelpTimer)
 
 .history-header--market {
   align-items: center;
+  direction: rtl;
+}
+
+.message-panel--market .status-card-header,
+.message-panel--market .composer-header {
+  direction: rtl;
 }
 
 .history-toggle-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border: 1px solid rgba(15, 118, 110, 0.14);
-  border-radius: 999px;
-  background: linear-gradient(135deg, rgba(15, 118, 110, 0.12), rgba(255, 255, 255, 0.94));
+  width: 2.15rem;
+  height: 2.15rem;
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  border-radius: 14px;
+  background: rgba(240, 253, 250, 0.92);
   color: #0f766e;
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
@@ -657,7 +664,7 @@ onUnmounted(clearMarketHelpTimer)
 
 .history-toggle-button:hover {
   border-color: rgba(15, 118, 110, 0.28);
-  box-shadow: 0 10px 20px rgba(15, 118, 110, 0.12);
+  box-shadow: 0 8px 16px rgba(15, 118, 110, 0.12);
 }
 
 .history-toggle-icon {

@@ -160,17 +160,19 @@ describe('AdminMessagesView.vue', () => {
     expect(wrapper.text()).toContain('پیام فعال بازار')
     expect(wrapper.text()).toContain('مشاهده همه پیام')
     expect(wrapper.find('[data-test="market-history-list"]').exists()).toBe(false)
+    expect(wrapper.find('.history-header--market .history-badge').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('به‌صورت پیش‌فرض بسته است تا تمرکز روی پیام فعال و composer بماند.')
     expect(wrapper.text()).not.toContain('اگر از تاریخچه روی قلم بزنی، صفحه روی همین کادر می‌آید و متن برای ویرایش اینجا قرار می‌گیرد.')
     expect(wrapper.text()).not.toContain('کاراکتر')
 
     await wrapper.get('[data-test="market-history-help"]').trigger('click')
     await flushPromises()
-    expect(wrapper.get('[data-test="market-history-help-note"]').text()).toContain('این بخش فقط ۵ پیام آخر بازار را نشان می‌دهد')
+    expect(wrapper.get('[data-test="market-history-help-note"]').text()).toContain('متن همان پیام به کادر پایین منتقل می‌شود')
 
     await wrapper.get('[data-test="market-composer-help"]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-test="market-composer-help-note"]').text()).toContain('فقط یک پیام می‌تواند هم‌زمان در بازار پین باشد')
+    expect(wrapper.get('[data-test="market-composer-help-note"]').text()).not.toContain('اگر روی آیکن مداد')
 
     await wrapper.get('[data-test="market-history-toggle"]').trigger('click')
     await flushPromises()
