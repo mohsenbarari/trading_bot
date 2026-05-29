@@ -200,12 +200,6 @@ onMounted(loadDashboard)
 
 <template>
   <div class="admin-messages-view">
-    <section class="admin-messages-hero">
-      <p class="hero-eyebrow">پیام‌های مدیریت</p>
-      <h2>ارسال پیام مدیریت را بر اساس مقصد انتخاب کن</h2>
-      <p>ابتدا مشخص کن پیام باید روی بازار نمایش داده شود یا در چت برای کاربران ارسال شود؛ سپس همان workflow مربوط به همان مقصد را در پایین ادامه بده.</p>
-    </section>
-
     <div class="message-mode-switcher" role="tablist" aria-label="نوع پیام مدیریت">
       <button
         type="button"
@@ -233,14 +227,6 @@ onMounted(loadDashboard)
 
     <div class="message-workspace" :aria-busy="isLoading">
       <section v-if="activePanel === 'market'" class="message-panel message-panel--market" data-test="market-panel">
-        <header class="panel-header">
-          <div>
-            <p class="panel-kicker">پیام بازار</p>
-            <h3>مدیریت پین صفحه بازار</h3>
-            <p>در بالا پین فعال بازار را می‌بینی، در میانه تاریخچه ۵ پیام آخر را داری، و پایین صفحه متن جدید یا ویرایش‌شده را منتشر می‌کنی.</p>
-          </div>
-        </header>
-
         <article v-if="activeMarketMessage" class="market-pin-card" data-test="active-market-message">
           <div class="market-pin-card-header">
             <div class="market-pin-card-title-wrap">
@@ -248,10 +234,6 @@ onMounted(loadDashboard)
               <span class="date-chip">{{ formatDate(activeMarketMessage.published_at) }}</span>
             </div>
             <div class="market-pin-card-actions">
-              <button type="button" class="secondary-action" @click="editMarketMessage(activeMarketMessage)">
-                <PencilLine :size="16" />
-                <span>ویرایش</span>
-              </button>
               <button
                 type="button"
                 class="secondary-action secondary-action--danger"
@@ -364,14 +346,6 @@ onMounted(loadDashboard)
       </section>
 
       <section v-else class="message-panel message-panel--chat" data-test="broadcast-panel">
-        <header class="panel-header">
-          <div>
-            <p class="panel-kicker">پیام در چت</p>
-            <h3>ارسال پیام مدیریت در چت</h3>
-            <p>این پیام‌ها در اتاق مدیریت فقط‌خواندنی هر گیرنده ثبت می‌شوند و مستقل از پیام بازار هستند.</p>
-          </div>
-        </header>
-
         <article class="status-card status-card--broadcast">
           <div class="status-card-header">
             <div>
@@ -456,39 +430,7 @@ onMounted(loadDashboard)
 .admin-messages-view {
   display: flex;
   flex-direction: column;
-  gap: 1.2rem;
-}
-
-.admin-messages-hero {
-  padding: 1.15rem 1.2rem;
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at top left, rgba(245, 158, 11, 0.18), transparent 32%),
-    linear-gradient(135deg, rgba(15, 118, 110, 0.09), rgba(255, 255, 255, 0.92));
-  border: 1px solid rgba(15, 118, 110, 0.12);
-  box-shadow: 0 22px 40px rgba(15, 23, 42, 0.08);
-}
-
-.hero-eyebrow {
-  margin: 0 0 0.35rem;
-  font-size: 0.74rem;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  color: #0f766e;
-}
-
-.admin-messages-hero h2 {
-  margin: 0;
-  color: #0f172a;
-  font-size: 1.35rem;
-  font-weight: 950;
-}
-
-.admin-messages-hero p:last-child {
-  margin: 0.55rem 0 0;
-  color: #475569;
-  line-height: 1.9;
-  font-size: 0.88rem;
+  gap: 0.95rem;
 }
 
 .message-mode-switcher {
@@ -541,42 +483,6 @@ onMounted(loadDashboard)
 
 .message-panel--chat {
   background: linear-gradient(180deg, rgba(236, 253, 245, 0.98), rgba(255, 255, 255, 0.92));
-}
-
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: flex-start;
-}
-
-.panel-kicker {
-  margin: 0 0 0.18rem;
-  color: #64748b;
-  font-size: 0.76rem;
-  font-weight: 900;
-}
-
-.panel-header h3,
-.composer-header h4,
-.history-header h4 {
-  margin: 0;
-  color: #0f172a;
-  font-size: 1rem;
-  font-weight: 950;
-}
-
-.panel-header p,
-.composer-header p,
-.history-header p,
-.status-meta,
-.status-copy--muted,
-.empty-history,
-.composer-hint,
-.target-summary {
-  margin: 0;
-  color: #64748b;
-  line-height: 1.75;
 }
 
 .market-pin-card,
@@ -633,6 +539,26 @@ onMounted(loadDashboard)
   gap: 0.6rem;
 }
 
+.composer-header h4,
+.history-header h4 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.composer-header p,
+.history-header p,
+.status-meta,
+.status-copy--muted,
+.empty-history,
+.composer-hint,
+.target-summary {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.75;
+}
+
 .admin-market-preview {
   margin-top: 0.95rem;
   border-radius: 18px;
@@ -657,6 +583,7 @@ onMounted(loadDashboard)
 
 .admin-market-preview--collapsed .admin-market-preview-body {
   display: -webkit-box;
+  line-clamp: 1;
   -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
@@ -768,6 +695,9 @@ onMounted(loadDashboard)
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
+  font-size: 0.82rem;
+  font-weight: 900;
+  color: #0f172a;
 }
 
 .message-textarea {
@@ -794,12 +724,6 @@ onMounted(loadDashboard)
 .audience-panel {
   margin-top: 0.9rem;
   padding: 0.9rem;
-}
-
-.audience-title {
-  font-size: 0.82rem;
-  font-weight: 900;
-  color: #0f172a;
 }
 
 .target-grid {
@@ -967,8 +891,7 @@ onMounted(loadDashboard)
   .market-pin-footer,
   .status-card-header,
   .audience-header,
-  .history-toggle,
-  .panel-header {
+  .history-toggle {
     flex-direction: column;
     align-items: stretch;
   }
