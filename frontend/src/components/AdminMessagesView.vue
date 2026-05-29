@@ -38,7 +38,7 @@ const broadcastContent = ref('')
 const broadcastTargets = ref<string[]>(targetOptions.map((option) => option.key))
 const activeMarketMessage = ref<AdminMarketMessage | null>(null)
 const marketHistory = ref<AdminMarketMessage[]>([])
-const activePanel = ref<'market' | 'chat'>('market')
+const activePanel = ref<'market' | 'chat' | null>(null)
 const isMarketHistoryOpen = ref(false)
 const isMarketPinExpanded = ref(false)
 const broadcastHistory = ref<AdminBroadcastMessage[]>([])
@@ -210,7 +210,7 @@ onMounted(loadDashboard)
         @click="activePanel = 'market'"
       >
         <Pin :size="16" />
-        <span>ارسال پیام در صفحه بازار</span>
+        <span>ارسال پیام در بازار</span>
       </button>
       <button
         type="button"
@@ -345,7 +345,7 @@ onMounted(loadDashboard)
         </section>
       </section>
 
-      <section v-else class="message-panel message-panel--chat" data-test="broadcast-panel">
+      <section v-else-if="activePanel === 'chat'" class="message-panel message-panel--chat" data-test="broadcast-panel">
         <article class="status-card status-card--broadcast">
           <div class="status-card-header">
             <div>
