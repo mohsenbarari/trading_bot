@@ -440,9 +440,13 @@ async def update_owner_accountant_relation(
     relation_id: int,
     duty_description: str | None = None,
 ) -> AccountantRelation:
-    stmt = select(AccountantRelation).where(
-        AccountantRelation.id == relation_id,
-        AccountantRelation.owner_user_id == owner_user_id,
+    stmt = (
+        select(AccountantRelation)
+        .options(joinedload(AccountantRelation.accountant_user))
+        .where(
+            AccountantRelation.id == relation_id,
+            AccountantRelation.owner_user_id == owner_user_id,
+        )
     )
     relation = (await db.execute(stmt)).scalar_one_or_none()
     if not relation:
@@ -455,5 +459,10 @@ async def update_owner_accountant_relation(
     relation.duty_description = normalized_duty_description
 
     await db.commit()
-    await db.refresh(relation)
-    return relation
+    refreshed_stmt = (
+        select(AccountantRelation)
+        .options(joinedload(AccountantRelation.accountant_user))
+        .where(AccountantRelation.id == relation.id)
+    )
+    refreshed_relation = (await db.execute(refreshed_stmt)).scalar_one()
+    return refreshed_relation
