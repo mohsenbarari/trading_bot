@@ -147,6 +147,11 @@ const historyExportingFormat = ref<'excel' | 'pdf' | null>(null);
 const historyCommodityOptions = ref<CommodityFilterOption[]>([]);
 const historyCommodityOptionsLoading = ref(false);
 const historyCommodityOptionsLoaded = ref(false);
+const historyCounterpartyUserId = ref<number | null>(null);
+const historyCounterpartyOptions = ref<ProjectUserDirectoryEntry[]>([]);
+const historyCounterpartyOptionsLoading = ref(false);
+const historyCounterpartyOptionsLoaded = ref(false);
+const historyCounterpartyError = ref('');
 const openSections = ref({
   info: false,
   history: false,
@@ -156,6 +161,10 @@ const openSections = ref({
 });
 const avatarBusy = ref(false);
 const avatarInput = ref<HTMLInputElement | null>(null);
+const addressEditing = ref(false);
+const addressDraft = ref('');
+const addressBusy = ref(false);
+const addressError = ref('');
 const publicBlockBusy = ref(false);
 const publicBlockState = ref<boolean | null>(null);
 const publicBlockStatus = ref<PublicBlockStatus | null>(null);
@@ -257,7 +266,12 @@ const historyPresetOptions = [
   { label: '۱۲ ماه', months: 12 },
 ];
 const hasActiveHistoryFilters = computed(() => {
-  return Boolean(historyFromDate.value || historyToDate.value || historyCommodityQuery.value.trim());
+  return Boolean(
+    historyFromDate.value
+    || historyToDate.value
+    || historyCommodityQuery.value.trim()
+    || historyCounterpartyUserId.value,
+  );
 });
 const historyCommoditySuggestions = computed(() => {
   const uniqueSuggestions = new Set<string>();
@@ -285,7 +299,15 @@ const historyFilterSummary = computed(() => {
   if (commodityLabel) {
     parts.push(`کالا: ${commodityLabel}`);
   }
+  if (historyCounterpartyLabel.value) {
+    parts.push(`طرف دیگر: ${historyCounterpartyLabel.value}`);
+  }
   return parts.join(' | ');
+});
+const historyCounterpartyLabel = computed(() => {
+  if (!historyCounterpartyUserId.value) return '';
+  const selected = historyCounterpartyOptions.value.find((user) => Number(user.id) === Number(historyCounterpartyUserId.value));
+  return selected ? formatProjectUserLabel(selected) : '';
 });
 const targetCustomerHistoryContext = computed(() => {
   if (isOwnProfile.value || !showTargetTradeHistory.value || !customerProfileContext.value) {
@@ -428,16 +450,17 @@ async function loadProfile() {
     if (!response.ok) throw new Error('خطا در دریافت اطلاعات کاربر');
     
     profileData.value = await response.json();
+    addressDraft.value = profileData.value?.address || '';
     if (showPublicBlockAction.value) {
       await refreshPublicBlockUiState();
     } else {
       publicBlockState.value = null;
       publicBlockStatus.value = null;
     }
-    if (highlightedAccountantUserId.value && accountantRelations.value.length > 0) {
+    if (!isOwnProfile.value && highlightedAccountantUserId.value && accountantRelations.value.length > 0) {
       openSections.value.accountants = true;
     }
-    if (showCustomerListSection.value) {
+    if (!isOwnProfile.value && showCustomerListSection.value) {
       openSections.value.customers = true;
     }
   } catch (e: any) {
@@ -480,6 +503,7 @@ function buildHistoryQueryKey() {
     from_date: historyFromDate.value || null,
     to_date: historyToDate.value || null,
     commodity_query: historyCommodityQuery.value.trim() || null,
+    counterparty_user_id: historyCounterpartyUserId.value || null,
     self: isOwnProfile.value,
     target_id: profileData.value?.id ?? null,
   });
@@ -504,6 +528,11 @@ function buildHistoryQueryParams(format?: 'excel' | 'pdf') {
 }
 
 function buildTradeHistoryEndpoint(isExport = false) {
+  if (isOwnProfile.value && historyCounterpartyUserId.value) {
+    const counterpartyPath = `/api/trades/with/${historyCounterpartyUserId.value}`;
+    return isExport ? `${counterpartyPath}/export` : counterpartyPath;
+  }
+
   const basePath = isOwnProfile.value
     ? '/api/trades/my'
     : `/api/trades/with/${profileData.value?.id}`;
@@ -574,6 +603,49 @@ async function loadHistoryCommodityOptions() {
   }
 }
 
+function formatProjectUserLabel(user: ProjectUserDirectoryEntry) {
+  return user.mobile_number ? `${user.account_name} - ${user.mobile_number}` : user.account_name;
+}
+
+async function loadHistoryCounterpartyOptions() {
+  const targetProfileUserId = Number(profileData.value?.id);
+  if (
+    !isOwnProfile.value
+    || !Number.isInteger(targetProfileUserId)
+    || targetProfileUserId <= 0
+    || !props.jwtToken
+    || historyCounterpartyOptionsLoading.value
+    || historyCounterpartyOptionsLoaded.value
+  ) {
+    return;
+  }
+
+  historyCounterpartyOptionsLoading.value = true;
+  historyCounterpartyError.value = '';
+  try {
+    const params = new URLSearchParams({ limit: '100' });
+    const response = await apiFetch(`/api/users-public/${targetProfileUserId}/project-users?${params.toString()}`);
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(parseApiError(payload, 'خطا در دریافت اعضای پروژه'));
+    }
+
+    historyCounterpartyOptions.value = (Array.isArray(payload) ? payload as ProjectUserDirectoryEntry[] : [])
+      .filter((user) => Number(user.id) !== targetProfileUserId);
+    historyCounterpartyOptionsLoaded.value = true;
+  } catch (e: any) {
+    historyCounterpartyError.value = e?.message || 'خطا در دریافت اعضای پروژه';
+  } finally {
+    historyCounterpartyOptionsLoading.value = false;
+  }
+}
+
+function handleHistoryCounterpartyChange(event: Event) {
+  const value = (event.target as HTMLSelectElement | null)?.value || '';
+  const parsed = Number(value);
+  historyCounterpartyUserId.value = Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function handleHistoryDateInput() {
   historyActivePresetMonths.value = null;
 }
@@ -593,6 +665,7 @@ async function resetHistoryFilters() {
   historyFromDate.value = '';
   historyToDate.value = '';
   historyCommodityQuery.value = '';
+  historyCounterpartyUserId.value = null;
   historyLoadedQueryKey.value = '';
   historyError.value = '';
   if (openSections.value.history) {
@@ -677,6 +750,53 @@ async function updateOwnAvatar(avatarFileId: string | null) {
   }
 }
 
+function startAddressEdit() {
+  if (!isOwnProfile.value || !profileData.value) return;
+  addressDraft.value = profileData.value.address || '';
+  addressError.value = '';
+  addressEditing.value = true;
+}
+
+function cancelAddressEdit() {
+  addressDraft.value = profileData.value?.address || '';
+  addressError.value = '';
+  addressEditing.value = false;
+}
+
+async function saveOwnAddress() {
+  if (!props.jwtToken || !profileData.value || addressBusy.value) return;
+
+  const normalizedAddress = addressDraft.value.trim();
+  if (normalizedAddress.length < 5) {
+    addressError.value = 'آدرس باید حداقل ۵ کاراکتر داشته باشد.';
+    return;
+  }
+
+  addressBusy.value = true;
+  addressError.value = '';
+  try {
+    const response = await apiFetch('/api/auth/me/address', {
+      method: 'PUT',
+      body: JSON.stringify({ address: normalizedAddress }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(parseApiError(payload, 'ذخیره آدرس ناموفق بود.'));
+    }
+
+    const savedAddress = typeof (payload as { address?: unknown } | null)?.address === 'string'
+      ? (payload as { address: string }).address
+      : normalizedAddress;
+    profileData.value.address = savedAddress;
+    addressDraft.value = savedAddress;
+    addressEditing.value = false;
+  } catch (e: any) {
+    addressError.value = e?.message || 'ذخیره آدرس ناموفق بود.';
+  } finally {
+    addressBusy.value = false;
+  }
+}
+
 async function handleAvatarSelected(event: Event) {
   const input = event.target as HTMLInputElement | null
   const file = input?.files?.[0]
@@ -700,6 +820,7 @@ async function toggleHistory() {
   if (!openSections.value.history) return;
   await loadMutualTrades();
   void loadHistoryCommodityOptions();
+  void loadHistoryCounterpartyOptions();
 }
 
 async function loadMutualTrades(force = false) {
@@ -1204,12 +1325,12 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             button-test="public-profile-info-help"
             note-test="public-profile-info-help-note"
             label="راهنمای اطلاعات پروفایل"
-            text="این بخش فقط داده‌های اصلی پروفایل و آمار قابل نمایش همین کاربر را نشان می‌دهد. اقدام‌های مدیریتی یا ارتباطی در کارت‌های جداگانه پایین صفحه قرار دارند."
+            text="در این بخش شماره تماس و آدرس ثبت‌شده نمایش داده می‌شود. در پروفایل خودتان می‌توانید آدرس را مستقیم از همین قسمت ویرایش کنید."
           />
           <div class="ds-accordion-header" @click="openSections.info = !openSections.info">
             <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
-              <h2>اطلاعات شخصی و آمار</h2>
+              <h2>اطلاعات شخصی</h2>
             </div>
             <ChevronLeft :size="20" class="ds-accordion-icon" />
           </div>
@@ -1222,15 +1343,34 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
               </div>
               <div class="info-row address-row">
                   <span class="label">📍 آدرس:</span>
-                  <span class="value">{{ profileData.address }}</span>
+                  <span v-if="!addressEditing" class="value address-value">{{ profileData.address }}</span>
               </div>
-            </div>
-
-            <div class="stats-grid" :class="{ 'single-column': sharedStatCards.length === 1 }">
-              <div v-for="stat in sharedStatCards" :key="stat.key" class="stat-card">
-                  <span class="stat-icon">{{ stat.icon }}</span>
-                  <span class="stat-label">{{ stat.label }}</span>
-                  <span class="stat-value">{{ stat.value }}</span>
+              <div v-if="isOwnProfile" class="address-edit-panel">
+                <button
+                  v-if="!addressEditing"
+                  type="button"
+                  class="inline-edit-btn"
+                  @click.stop="startAddressEdit"
+                >
+                  ویرایش آدرس
+                </button>
+                <form v-else class="address-edit-form" @submit.prevent="saveOwnAddress">
+                  <textarea
+                    v-model="addressDraft"
+                    rows="3"
+                    class="address-edit-textarea"
+                    placeholder="آدرس کامل خود را وارد کنید"
+                  />
+                  <p v-if="addressError" class="error-text address-error-text">{{ addressError }}</p>
+                  <div class="address-edit-actions">
+                    <button type="submit" class="history-action-btn primary" :disabled="addressBusy">
+                      {{ addressBusy ? 'در حال ذخیره...' : 'ذخیره آدرس' }}
+                    </button>
+                    <button type="button" class="history-action-btn" :disabled="addressBusy" @click.stop="cancelAddressEdit">
+                      انصراف
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           </div>
@@ -1243,13 +1383,13 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             floating
             button-test="public-profile-project-users-help"
             note-test="public-profile-project-users-help-note"
-            label="راهنمای کاربران پروژه"
-            text="این فهرست فقط کاربرانی را نشان می‌دهد که طبق نقش یا رابطه مالک/حسابدار برای این پروفایل قابل مشاهده هستند."
+            label="راهنمای لیست همکاران"
+            text="لیست همکاران، اعضای قابل مشاهده پروژه را نشان می‌دهد. با انتخاب نام هر همکار، پروفایل عمومی همان کاربر باز می‌شود."
           />
           <div class="ds-accordion-header" @click="toggleProjectUsersSection">
             <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
-              <h2>کاربران پروژه</h2>
+              <h2>لیست همکاران</h2>
             </div>
             <ChevronLeft :size="20" class="ds-accordion-icon" />
           </div>
@@ -1272,7 +1412,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
               <LoadingSkeleton :count="3" :height="52" />
             </div>
             <p v-else-if="projectUsers.length === 0" class="empty-text">
-              {{ projectUsersQuery.trim() ? 'کاربری با این جستجو پیدا نشد.' : 'کاربر پروژه‌ای برای نمایش وجود ندارد.' }}
+              {{ projectUsersQuery.trim() ? 'همکاری با این جستجو پیدا نشد.' : 'همکاری برای نمایش وجود ندارد.' }}
             </p>
             <div v-else class="project-users-list">
               <article
@@ -1300,13 +1440,13 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             floating
             button-test="public-profile-accountants-help"
             note-test="public-profile-accountants-help-note"
-            label="راهنمای حسابداران مالک"
-            text="این بخش حسابدارهای فعال این مالک را با نام نمایشی ثبت‌شده در رابطه نشان می‌دهد، نه لزوماً نام خام حساب کاربری."
+            label="راهنمای لیست حسابداران"
+            text="این لیست حسابداران فعال مالک را نشان می‌دهد. عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید."
           />
           <div class="ds-accordion-header" @click="openSections.accountants = !openSections.accountants">
             <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
-              <h2>حسابداران این مالک</h2>
+              <h2>{{ showOwnerSections ? 'لیست حسابداران' : 'حسابداران این مالک' }}</h2>
             </div>
             <ChevronLeft :size="20" class="ds-accordion-icon" />
           </div>
@@ -1339,13 +1479,13 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             floating
             button-test="public-profile-customers-help"
             note-test="public-profile-customers-help-note"
-            label="راهنمای مشتریان مالک"
-            text="این فهرست فقط برای مالک، حسابدارهای همان مالک و مدیر ارشد قابل نمایش است و نام مدیریتی مشتری را نشان می‌دهد."
+            label="راهنمای لیست مشتریان"
+            text="این لیست مشتریان ثبت‌شده زیر این مالک را نشان می‌دهد. نمایش آن به مالک، حسابداران همان مالک و مدیر ارشد محدود است."
           />
           <div class="ds-accordion-header" @click="openSections.customers = !openSections.customers">
             <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
-              <h2>مشتریان این مالک</h2>
+              <h2>{{ showOwnerSections ? 'لیست مشتریان' : 'مشتریان این مالک' }}</h2>
             </div>
             <ChevronLeft :size="20" class="ds-accordion-icon" />
           </div>
@@ -1433,7 +1573,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             button-test="public-profile-history-help"
             note-test="public-profile-history-help-note"
             label="راهنمای تاریخچه معاملات"
-            text="فیلترها و خروجی‌ها فقط روی همین تاریخچه اعمال می‌شوند. نوع معامله از دید کاربری نمایش داده می‌شود که اجازه مشاهده این تاریخچه را دارد."
+            text="در تاریخچه خودتان می‌توانید طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید و کالا را از فهرست کالاهای ثبت‌شده محدود کنید. خروجی‌ها همین فیلترها را رعایت می‌کنند."
           />
           <div class="ds-accordion-header" @click="toggleHistory">
             <div class="ds-accordion-header-info">
@@ -1469,16 +1609,32 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                 </label>
                 <label class="history-filter-field history-filter-field-wide">
                   <span>کالا</span>
-                  <input
+                  <select
                     v-model="historyCommodityQuery"
-                    list="public-profile-history-commodities"
-                    type="text"
-                    placeholder="نام یا alias کالا"
-                    @keyup.enter="applyHistoryFilters"
-                  />
-                  <datalist id="public-profile-history-commodities">
-                    <option v-for="suggestion in historyCommoditySuggestions" :key="suggestion" :value="suggestion" />
-                  </datalist>
+                    :disabled="historyCommodityOptionsLoading"
+                    @focus="loadHistoryCommodityOptions"
+                  >
+                    <option value="">همه کالاها</option>
+                    <option v-for="option in historyCommodityOptions" :key="option.id" :value="option.name">
+                      {{ option.name }}
+                    </option>
+                  </select>
+                </label>
+                <label v-if="isOwnProfile" class="history-filter-field history-filter-field-wide">
+                  <span>طرف دیگر معامله</span>
+                  <select
+                    :value="historyCounterpartyUserId ?? ''"
+                    :disabled="historyCounterpartyOptionsLoading"
+                    @focus="loadHistoryCounterpartyOptions"
+                    @change="handleHistoryCounterpartyChange"
+                  >
+                    <option value="">همه همکاران</option>
+                    <option v-for="projectUser in historyCounterpartyOptions" :key="projectUser.id" :value="projectUser.id">
+                      {{ formatProjectUserLabel(projectUser) }}
+                    </option>
+                  </select>
+                  <span v-if="historyCounterpartyOptionsLoading" class="history-filter-hint">در حال دریافت لیست همکاران...</span>
+                  <span v-else-if="historyCounterpartyError" class="history-filter-hint error">{{ historyCounterpartyError }}</span>
                 </label>
               </div>
 
@@ -1627,13 +1783,27 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 }
 
 .profile-content--own {
-  gap: 14px;
+  gap: 7px;
   padding-top: 4px;
+}
+
+.profile-content--own .profile-section {
+  width: 100%;
+}
+
+.profile-content--own .ds-accordion {
+  margin-bottom: 0.35rem;
+}
+
+.profile-content--own .ds-accordion-header {
+  padding-top: 0.74rem;
+  padding-bottom: 0.74rem;
 }
 
 .profile-header-row {
   grid-template-columns: 88px 1fr 88px;
-  align-items: start;
+  align-items: center;
+  padding-bottom: 24px;
 }
 
 .profile-hero {
@@ -1653,8 +1823,10 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 }
 
 .profile-avatar-stack--header {
+  position: relative;
   width: 88px;
-  padding-top: 2px;
+  height: 64px;
+  padding-top: 0;
 }
 
 .profile-avatar {
@@ -1743,6 +1915,10 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 }
 
 .profile-presence-status--own {
+  position: absolute;
+  top: 68px;
+  left: 0;
+  right: 0;
   margin: 0;
   min-height: 1.1rem;
   font-size: 0.76rem;
@@ -1938,6 +2114,53 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
 .profile-section.info-section {
   width: 100%;
+}
+
+.address-value {
+  white-space: pre-wrap;
+}
+
+.address-edit-panel {
+  margin-top: 8px;
+}
+
+.inline-edit-btn {
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  border-radius: 12px;
+  background: rgba(240, 253, 250, 0.92);
+  color: #0f766e;
+  padding: 8px 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.address-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.address-edit-textarea {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  padding: 10px 12px;
+  resize: vertical;
+  min-height: 78px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--ds-text-primary);
+  font: inherit;
+  line-height: 1.8;
+}
+
+.address-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.address-error-text {
+  margin: 0;
 }
 
 .info-row {
@@ -2188,12 +2411,29 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   grid-column: span 2;
 }
 
-.history-filter-field input {
+.history-filter-field input,
+.history-filter-field select {
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 12px;
   padding: 10px 12px;
   background: rgba(255, 255, 255, 0.96);
   color: var(--ds-text-primary);
+  font: inherit;
+}
+
+.history-filter-field select {
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.history-filter-hint {
+  color: var(--ds-text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.history-filter-hint.error {
+  color: #b91c1c;
 }
 
 .history-filter-actions {

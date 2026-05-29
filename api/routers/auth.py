@@ -275,6 +275,18 @@ async def update_my_avatar(
     )
 
 
+@router.put("/me/address", response_model=schemas.UserAddressUpdateResponse)
+async def update_my_address(
+    payload: schemas.UserAddressUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    current_user.address = payload.address
+    await db.commit()
+    await db.refresh(current_user)
+    return schemas.UserAddressUpdateResponse(address=current_user.address)
+
+
 @router.post("/register-otp-request", response_model=dict)
 async def register_otp_request(
     req: RegisterOTPRequest,
