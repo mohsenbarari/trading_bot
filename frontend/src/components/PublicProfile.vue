@@ -1115,8 +1115,27 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 <template>
   <div class="card">
     <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
-    <div class="header-row">
-      <div class="header-spacer"></div>
+    <div class="header-row profile-header-row">
+      <div class="header-spacer">
+        <div v-if="showOwnerSections && profileData" class="profile-avatar-stack profile-avatar-stack--header">
+          <button
+            type="button"
+            class="profile-avatar profile-avatar-button profile-avatar-button--editable"
+            data-test="profile-avatar-trigger"
+            :disabled="avatarBusy"
+            :aria-label="profileAvatarUrl ? 'تغییر آواتار' : 'افزودن آواتار'"
+            @click="triggerAvatarPicker"
+          >
+            <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
+            <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
+            <span class="profile-avatar-edit-indicator" aria-hidden="true">
+              <Pencil :size="12" />
+            </span>
+            <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
+          </button>
+          <p v-if="profilePresenceStatus" class="profile-presence-status profile-presence-status--own" :class="{ online: profileIsOnline }">{{ profilePresenceStatus }}</p>
+        </div>
+      </div>
       <div class="header-title">
          <h2 v-if="profileData">👤 {{ profileData.account_name }}</h2>
          <h2 v-else-if="isLoading" class="skeleton-text-header">
@@ -1146,36 +1165,16 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
     <div v-else-if="profileData" class="profile-content" :class="{ 'profile-content--own': showOwnerSections }">
       <section class="profile-section shared-profile-section">
-        <div class="profile-hero" :class="{ 'profile-hero--own': showOwnerSections }">
-          <div v-if="showOwnerSections" class="profile-avatar-stack">
-            <button
-              type="button"
-              class="profile-avatar profile-avatar-button profile-avatar-button--editable"
-              data-test="profile-avatar-trigger"
-              :disabled="avatarBusy"
-              :aria-label="profileAvatarUrl ? 'تغییر آواتار' : 'افزودن آواتار'"
-              @click="triggerAvatarPicker"
-            >
-              <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
-              <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
-              <span class="profile-avatar-edit-indicator" aria-hidden="true">
-                <Pencil :size="12" />
-              </span>
-              <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
-            </button>
-            <p v-if="profilePresenceStatus" class="profile-presence-status profile-presence-status--own" :class="{ online: profileIsOnline }">{{ profilePresenceStatus }}</p>
+        <div v-if="!showOwnerSections" class="profile-hero">
+          <div class="profile-avatar">
+            <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
+            <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
+            <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
           </div>
-          <template v-else>
-            <div class="profile-avatar">
-              <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
-              <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
-              <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
-            </div>
-            <div class="profile-hero-copy">
-              <h3>{{ profileData.account_name }}</h3>
-              <p v-if="profilePresenceStatus" class="profile-presence-status" :class="{ online: profileIsOnline }">{{ profilePresenceStatus }}</p>
-            </div>
-          </template>
+          <div class="profile-hero-copy">
+            <h3>{{ profileData.account_name }}</h3>
+            <p v-if="profilePresenceStatus" class="profile-presence-status" :class="{ online: profileIsOnline }">{{ profilePresenceStatus }}</p>
+          </div>
         </div>
 
         <div v-if="resolvedAccountantContext" class="accountant-resolution-banner">
@@ -1632,6 +1631,11 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   padding-top: 4px;
 }
 
+.profile-header-row {
+  grid-template-columns: 88px 1fr 88px;
+  align-items: start;
+}
+
 .profile-hero {
   display: flex;
   flex-direction: column;
@@ -1641,19 +1645,16 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   text-align: center;
 }
 
-.profile-hero--own {
-  width: 100%;
-  align-items: flex-start;
-  justify-content: flex-end;
-  margin-bottom: 2px;
-  text-align: right;
-}
-
 .profile-avatar-stack {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 7px;
+}
+
+.profile-avatar-stack--header {
+  width: 88px;
+  padding-top: 2px;
 }
 
 .profile-avatar {
@@ -1672,7 +1673,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   flex-shrink: 0;
 }
 
-.profile-hero--own .profile-avatar {
+.profile-avatar-stack--header .profile-avatar {
   width: 64px;
   height: 64px;
   font-size: 1.35rem;
