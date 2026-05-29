@@ -16,10 +16,33 @@ function responseOf(data: unknown) {
   }
 }
 
+type MarketMessageFixture = {
+  id: number
+  content: string
+  is_active: boolean
+  notified_recipients_count: number
+  published_at: string
+  created_at: string
+  created_by_id: number
+  created_by_name: string
+  reused_from_id: null
+}
+
+type BroadcastMessageFixture = {
+  id: number
+  content: string
+  target_groups: string[]
+  recipient_count: number
+  published_at: string
+  created_at: string
+  created_by_id: number
+  created_by_name: string
+}
+
 describe('AdminMessagesView.vue', () => {
   beforeEach(() => {
     const currentPublishedAt = '2026-05-29T08:00:00Z'
-    let currentMarketMessage: Record<string, unknown> | null = {
+    let currentMarketMessage: MarketMessageFixture | null = {
       id: 1,
       content: 'پیام فعال بازار',
       is_active: true,
@@ -30,8 +53,8 @@ describe('AdminMessagesView.vue', () => {
       created_by_name: 'admin',
       reused_from_id: null,
     }
-    let marketHistory = [
-      { ...(currentMarketMessage as Record<string, unknown>) },
+    let marketHistory: MarketMessageFixture[] = [
+      { ...currentMarketMessage },
       {
         id: 11,
         content: 'پیام قبلی بازار',
@@ -44,7 +67,7 @@ describe('AdminMessagesView.vue', () => {
         reused_from_id: null,
       },
     ]
-    let broadcastHistory = [
+    let broadcastHistory: BroadcastMessageFixture[] = [
       {
         id: 2,
         content: 'پیام قبلی همگانی',
