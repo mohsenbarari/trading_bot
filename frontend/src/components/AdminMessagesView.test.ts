@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const adminMessagesMocks = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
+  scrollIntoViewMock: vi.fn(),
 }))
 
 vi.mock('../utils/auth', () => ({
@@ -41,6 +42,8 @@ type BroadcastMessageFixture = {
 
 describe('AdminMessagesView.vue', () => {
   beforeEach(() => {
+    adminMessagesMocks.scrollIntoViewMock.mockReset()
+    HTMLElement.prototype.scrollIntoView = adminMessagesMocks.scrollIntoViewMock
     const currentPublishedAt = '2026-05-29T08:00:00Z'
     let currentMarketMessage: MarketMessageFixture | null = {
       id: 1,
@@ -140,28 +143,59 @@ describe('AdminMessagesView.vue', () => {
     })
   })
 
-  it('renders split market and messenger lanes, reuses history, and publishes new management messages', async () => {
+  it('shows the two management options and edits a market history message into the composer', async () => {
     const AdminMessagesView = (await import('./AdminMessagesView.vue')).default
     const wrapper = mount(AdminMessagesView)
     await flushPromises()
 
-    expect(wrapper.find('[data-test="market-lane"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="broadcast-lane"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="message-mode-market"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="message-mode-chat"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('پیام فعال بازار')
+    expect(wrapper.text()).toContain('مشاهده همه پیام')
+    expect(wrapper.find('[data-test="market-history-list"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="market-history-toggle"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="market-history-list"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('پیام قبلی بازار')
+
+    await wrapper.get('[data-test="market-history-edit-11"]').trigger('click')
+    await flushPromises()
+
+    const marketTextarea = wrapper.get('[data-test="market-composer-input"]')
+    expect((marketTextarea.element as HTMLTextAreaElement).value).toBe('پیام قبلی بازار')
+    expect(adminMessagesMocks.scrollIntoViewMock).toHaveBeenCalled()
+  })
+
+  it('publishes market and chat management messages through their own tabs', async () => {
+    const AdminMessagesView = (await import('./AdminMessagesView.vue')).default
+    const wrapper = mount(AdminMessagesView)
+    await flushPromises()
+
+    await wrapper.get('[data-test="market-history-toggle"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="market-history-edit-11"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.findAll('.primary-action')[0]!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('پیام بازار برای ۵ نفر اعلان شد')
+
+    await wrapper.get('[data-test="message-mode-chat"]').trigger('click')
+    await flushPromises()
+
     expect(wrapper.text()).toContain('پیام قبلی همگانی')
 
     const reuseButtons = wrapper.findAll('button').filter((button) => button.text().includes('استفاده مجدد'))
     await reuseButtons[0]!.trigger('click')
-    await reuseButtons[1]!.trigger('click')
+    await flushPromises()
 
     const textareas = wrapper.findAll('textarea')
-    expect((textareas[0]!.element as HTMLTextAreaElement).value).toBe('پیام قبلی بازار')
-    expect((textareas[1]!.element as HTMLTextAreaElement).value).toBe('پیام قبلی همگانی')
+    expect((textareas[0]!.element as HTMLTextAreaElement).value).toBe('پیام قبلی همگانی')
 
     await wrapper.findAll('.primary-action')[0]!.trigger('click')
-    await flushPromises()
-    await wrapper.findAll('.primary-action')[1]!.trigger('click')
     await flushPromises()
 
     const marketCall = adminMessagesMocks.apiFetchMock.mock.calls.find(([path]) => path === '/api/admin-messages/market')
@@ -171,7 +205,6 @@ describe('AdminMessagesView.vue', () => {
       content: 'پیام قبلی همگانی',
       target_groups: ['users', 'customers'],
     })
-    expect(wrapper.text()).toContain('پیام بازار برای ۵ نفر اعلان شد')
     expect(wrapper.text()).toContain('پیام برای ۶ نفر ارسال شد')
   })
 
