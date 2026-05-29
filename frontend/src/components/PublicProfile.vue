@@ -890,7 +890,8 @@ async function loadProjectUsersDirectory(force = false) {
       throw new Error(parseApiError(payload, 'خطا در دریافت لیست کاربران پروژه'));
     }
 
-    projectUsers.value = Array.isArray(payload) ? payload as ProjectUserDirectoryEntry[] : [];
+    projectUsers.value = (Array.isArray(payload) ? payload as ProjectUserDirectoryEntry[] : [])
+      .filter((user) => Number(user.id) !== targetProfileUserId);
     projectUsersLoaded.value = true;
     lastLoadedProjectUsersQuery.value = normalizedQuery;
   } catch (e: any) {
@@ -1320,19 +1321,20 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
         </div>
 
         <div class="ds-accordion mt-4 card-with-help" :class="{ open: openSections.info }">
-          <HelpPopover
-            floating
-            button-test="public-profile-info-help"
-            note-test="public-profile-info-help-note"
-            label="راهنمای اطلاعات پروفایل"
-            text="در این بخش شماره تماس و آدرس ثبت‌شده نمایش داده می‌شود. در پروفایل خودتان می‌توانید آدرس را مستقیم از همین قسمت ویرایش کنید."
-          />
           <div class="ds-accordion-header" @click="openSections.info = !openSections.info">
             <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
               <h2>اطلاعات شخصی</h2>
             </div>
-            <ChevronLeft :size="20" class="ds-accordion-icon" />
+            <div class="accordion-header-actions">
+              <ChevronLeft :size="20" class="ds-accordion-icon" />
+              <HelpPopover
+                button-test="public-profile-info-help"
+                note-test="public-profile-info-help-note"
+                label="راهنمای اطلاعات پروفایل"
+                text="در این بخش شماره تماس و آدرس ثبت‌شده نمایش داده می‌شود. در پروفایل خودتان می‌توانید آدرس را مستقیم از همین قسمت ویرایش کنید."
+              />
+            </div>
           </div>
           
           <div v-show="openSections.info" class="ds-accordion-body">
@@ -1343,18 +1345,20 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
               </div>
               <div class="info-row address-row">
                   <span class="label">📍 آدرس:</span>
-                  <span v-if="!addressEditing" class="value address-value">{{ profileData.address }}</span>
-              </div>
-              <div v-if="isOwnProfile" class="address-edit-panel">
-                <button
-                  v-if="!addressEditing"
-                  type="button"
-                  class="inline-edit-btn"
-                  @click.stop="startAddressEdit"
-                >
-                  ویرایش آدرس
-                </button>
-                <form v-else class="address-edit-form" @submit.prevent="saveOwnAddress">
+                  <div v-if="!addressEditing" class="address-display-frame" :class="{ editable: isOwnProfile }">
+                    <span class="value address-value">{{ profileData.address }}</span>
+                    <button
+                      v-if="isOwnProfile"
+                      type="button"
+                      class="address-edit-trigger"
+                      aria-label="ویرایش آدرس"
+                      title="ویرایش آدرس"
+                      @click.stop="startAddressEdit"
+                    >
+                      <Pencil :size="16" />
+                    </button>
+                  </div>
+                <form v-else-if="isOwnProfile" class="address-edit-form" @submit.prevent="saveOwnAddress">
                   <textarea
                     v-model="addressDraft"
                     rows="3"
@@ -1379,19 +1383,20 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
       <section v-if="showProjectUsersSection" class="profile-section project-users-section">
         <div class="ds-accordion card-with-help" :class="{ open: openSections.projectUsers }">
-          <HelpPopover
-            floating
-            button-test="public-profile-project-users-help"
-            note-test="public-profile-project-users-help-note"
-            label="راهنمای لیست همکاران"
-            text="لیست همکاران، اعضای قابل مشاهده پروژه را نشان می‌دهد. با انتخاب نام هر همکار، پروفایل عمومی همان کاربر باز می‌شود."
-          />
           <div class="ds-accordion-header" @click="toggleProjectUsersSection">
             <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
               <h2>لیست همکاران</h2>
             </div>
-            <ChevronLeft :size="20" class="ds-accordion-icon" />
+            <div class="accordion-header-actions">
+              <ChevronLeft :size="20" class="ds-accordion-icon" />
+              <HelpPopover
+                button-test="public-profile-project-users-help"
+                note-test="public-profile-project-users-help-note"
+                label="راهنمای لیست همکاران"
+                text="لیست همکاران، اعضای قابل مشاهده پروژه را نشان می‌دهد. با انتخاب نام هر همکار، پروفایل عمومی همان کاربر باز می‌شود."
+              />
+            </div>
           </div>
 
           <div v-show="openSections.projectUsers" class="ds-accordion-body">
@@ -1436,19 +1441,20 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
       <section v-if="accountantRelations.length > 0" class="profile-section accountant-relations-section">
         <div class="ds-accordion card-with-help" :class="{ open: openSections.accountants }">
-          <HelpPopover
-            floating
-            button-test="public-profile-accountants-help"
-            note-test="public-profile-accountants-help-note"
-            label="راهنمای لیست حسابداران"
-            text="این لیست حسابداران فعال مالک را نشان می‌دهد. عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید."
-          />
           <div class="ds-accordion-header" @click="openSections.accountants = !openSections.accountants">
             <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
               <h2>{{ showOwnerSections ? 'لیست حسابداران' : 'حسابداران این مالک' }}</h2>
             </div>
-            <ChevronLeft :size="20" class="ds-accordion-icon" />
+            <div class="accordion-header-actions">
+              <ChevronLeft :size="20" class="ds-accordion-icon" />
+              <HelpPopover
+                button-test="public-profile-accountants-help"
+                note-test="public-profile-accountants-help-note"
+                label="راهنمای لیست حسابداران"
+                text="این لیست حسابداران فعال مالک را نشان می‌دهد. عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید."
+              />
+            </div>
           </div>
 
           <div v-show="openSections.accountants" class="ds-accordion-body">
@@ -1475,19 +1481,20 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
       <section v-if="showCustomerListSection" class="profile-section customer-relations-section">
         <div class="ds-accordion card-with-help" :class="{ open: openSections.customers }">
-          <HelpPopover
-            floating
-            button-test="public-profile-customers-help"
-            note-test="public-profile-customers-help-note"
-            label="راهنمای لیست مشتریان"
-            text="این لیست مشتریان ثبت‌شده زیر این مالک را نشان می‌دهد. نمایش آن به مالک، حسابداران همان مالک و مدیر ارشد محدود است."
-          />
           <div class="ds-accordion-header" @click="openSections.customers = !openSections.customers">
             <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
               <h2>{{ showOwnerSections ? 'لیست مشتریان' : 'مشتریان این مالک' }}</h2>
             </div>
-            <ChevronLeft :size="20" class="ds-accordion-icon" />
+            <div class="accordion-header-actions">
+              <ChevronLeft :size="20" class="ds-accordion-icon" />
+              <HelpPopover
+                button-test="public-profile-customers-help"
+                note-test="public-profile-customers-help-note"
+                label="راهنمای لیست مشتریان"
+                text="این لیست مشتریان ثبت‌شده زیر این مالک را نشان می‌دهد. نمایش آن به مالک، حسابداران همان مالک و مدیر ارشد محدود است."
+              />
+            </div>
           </div>
 
           <div v-show="openSections.customers" class="ds-accordion-body">
@@ -1568,19 +1575,20 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
       <section class="profile-section">
         <div class="ds-accordion card-with-help" :class="{ open: openSections.history }">
-          <HelpPopover
-            floating
-            button-test="public-profile-history-help"
-            note-test="public-profile-history-help-note"
-            label="راهنمای تاریخچه معاملات"
-            text="در تاریخچه خودتان می‌توانید طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید و کالا را از فهرست کالاهای ثبت‌شده محدود کنید. خروجی‌ها همین فیلترها را رعایت می‌کنند."
-          />
           <div class="ds-accordion-header" @click="toggleHistory">
             <div class="ds-accordion-header-info">
               <Activity :size="18" class="text-amber-600" />
               <h2>{{ tradeHistoryTitle }}</h2>
             </div>
-            <ChevronLeft :size="20" class="ds-accordion-icon" />
+            <div class="accordion-header-actions">
+              <ChevronLeft :size="20" class="ds-accordion-icon" />
+              <HelpPopover
+                button-test="public-profile-history-help"
+                note-test="public-profile-history-help-note"
+                label="راهنمای تاریخچه معاملات"
+                text="در تاریخچه خودتان می‌توانید طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید و کالا را از فهرست کالاهای ثبت‌شده محدود کنید. خروجی‌ها همین فیلترها را رعایت می‌کنند."
+              />
+            </div>
           </div>
 
           <div v-show="openSections.history" class="ds-accordion-body">
@@ -2120,24 +2128,55 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   white-space: pre-wrap;
 }
 
-.address-edit-panel {
-  margin-top: 8px;
+.address-display-frame {
+  position: relative;
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.78);
+  padding: 10px 12px;
 }
 
-.inline-edit-btn {
+.address-display-frame.editable {
+  padding-left: 48px;
+}
+
+.address-edit-trigger {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid rgba(15, 118, 110, 0.18);
-  border-radius: 12px;
-  background: rgba(240, 253, 250, 0.92);
+  border-radius: 999px;
+  background: rgba(240, 253, 250, 0.94);
   color: #0f766e;
-  padding: 8px 12px;
-  font-weight: 800;
   cursor: pointer;
+  box-shadow: 0 8px 16px rgba(15, 118, 110, 0.08);
+  transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.address-edit-trigger:hover,
+.address-edit-trigger:focus-visible {
+  color: #fff;
+  border-color: rgba(15, 118, 110, 0.2);
+  background: #0f766e;
+  box-shadow: 0 10px 20px rgba(15, 118, 110, 0.16);
+  outline: none;
 }
 
 .address-edit-form {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
 }
 
 .address-edit-textarea {
@@ -2206,10 +2245,20 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
 .card-with-help {
   position: relative;
+  overflow: visible;
 }
 
 .card-with-help > .ds-accordion-header {
-  padding-left: 3.7rem;
+  gap: 12px;
+}
+
+.accordion-header-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.45rem;
+  direction: ltr;
+  flex: 0 0 auto;
 }
 
 /* If we have 3 buttons, make the first one (Settings) full width 
@@ -2244,8 +2293,9 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 }
 
 .profile-action-help {
-  top: 0.55rem;
+  top: 50%;
   left: 0.55rem;
+  transform: translateY(-50%);
 }
 
 .profile-action-item--disabled .profile-action-help {
@@ -2473,61 +2523,46 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   margin: 0;
 }
 
-.public-accountant-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
+.public-accountant-list,
 .public-customer-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.public-accountant-card {
-  padding: 14px 16px;
-  border-radius: 18px;
-  border: 1px solid rgba(245, 158, 11, 0.16);
-  background: linear-gradient(180deg, rgba(255, 251, 235, 0.96), rgba(255, 247, 237, 0.98));
-}
-
+.public-accountant-card,
 .public-customer-card {
+  position: relative;
+  overflow: hidden;
   padding: 14px 16px;
   border-radius: 18px;
-  border: 1px solid rgba(59, 130, 246, 0.16);
-  background: linear-gradient(180deg, rgba(239, 246, 255, 0.98), rgba(224, 242, 254, 0.98));
+  border: 1px solid rgba(14, 165, 233, 0.18);
+  background:
+    radial-gradient(circle at top left, rgba(20, 184, 166, 0.12), transparent 42%),
+    linear-gradient(135deg, rgba(240, 249, 255, 0.98), rgba(236, 253, 245, 0.96));
+  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.08);
 }
 
 .public-accountant-card.highlighted {
-  border-color: rgba(217, 119, 6, 0.42);
-  box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.12), 0 16px 34px rgba(180, 83, 9, 0.16);
+  border-color: rgba(20, 184, 166, 0.44);
+  box-shadow: 0 0 0 1px rgba(20, 184, 166, 0.14), 0 16px 34px rgba(15, 118, 110, 0.16);
 }
 
-.public-accountant-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
+.public-accountant-card-head,
 .public-customer-card-head {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
 
-.public-accountant-card-head h4 {
-  margin: 0;
-  font-size: 1rem;
-  color: #7c2d12;
-}
-
+.public-accountant-card-head h4,
 .public-customer-card-head h4 {
   margin: 0;
   font-size: 1rem;
-  color: #1d4ed8;
+  color: #0f766e;
 }
 
 .public-customer-profile-link {
@@ -2541,21 +2576,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 .public-customer-link-title {
   font-size: 1rem;
   font-weight: 800;
-  color: #1d4ed8;
+  color: #0f766e;
 }
 
-.public-accountant-handle {
-  margin: 6px 0 0;
-  font-size: 0.9rem;
-  color: #9a3412;
-  direction: ltr;
-  text-align: right;
-}
-
+.public-accountant-handle,
 .public-customer-handle {
   margin: 6px 0 0;
   font-size: 0.9rem;
-  color: #2563eb;
+  color: #0284c7;
   direction: ltr;
   text-align: right;
 }
@@ -2564,8 +2592,8 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   flex-shrink: 0;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(217, 119, 6, 0.14);
-  color: #9a3412;
+  background: rgba(20, 184, 166, 0.14);
+  color: #0f766e;
   font-size: 0.78rem;
   font-weight: 700;
 }
@@ -2574,15 +2602,17 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   flex-shrink: 0;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(37, 99, 235, 0.12);
-  color: #1d4ed8;
+  background: rgba(14, 165, 233, 0.14);
+  color: #0369a1;
   font-size: 0.78rem;
   font-weight: 700;
 }
 
 .public-accountant-duty {
+  position: relative;
+  z-index: 1;
   margin: 12px 0 0;
-  color: #7c2d12;
+  color: #115e59;
   line-height: 1.7;
 }
 

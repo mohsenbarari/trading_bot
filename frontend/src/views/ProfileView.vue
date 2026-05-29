@@ -18,6 +18,13 @@ function handleNavigate(view: string, payload?: any) {
       name: 'messenger',
       query: { user_id: String(payload.userId), user_name: payload.userName || '' }
     })
+  } else if ((view === 'public_profile' || view === 'profile') && Number.isInteger(Number(payload?.id ?? payload?.user_id))) {
+    const profileId = Number(payload.id ?? payload.user_id)
+    router.push({
+      name: 'public-profile',
+      params: { id: String(profileId) },
+      query: payload?.account_name ? { account_name: payload.account_name } : {},
+    })
   } else if (view === 'home') {
     router.push('/')
   }

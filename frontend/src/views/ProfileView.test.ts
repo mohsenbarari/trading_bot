@@ -86,6 +86,7 @@ describe('ProfileView.vue', () => {
                 <button class="go-settings" @click="$emit('navigate', 'settings')">settings</button>
                 <button class="go-home" @click="$emit('navigate', 'home')">home</button>
                 <button class="go-chat" @click="$emit('navigate', 'chat', { userId: 88, userName: 'peer-user' })">chat</button>
+                <button class="go-public-profile" @click="$emit('navigate', 'public_profile', { id: 99, account_name: 'project-user' })">profile</button>
               </div>
             `,
           },
@@ -96,6 +97,7 @@ describe('ProfileView.vue', () => {
 
     await wrapper.get('.go-settings').trigger('click')
     await wrapper.get('.go-chat').trigger('click')
+    await wrapper.get('.go-public-profile').trigger('click')
     await wrapper.get('.go-home').trigger('click')
 
     expect(routerPushMock).toHaveBeenNthCalledWith(1, { name: 'settings' })
@@ -103,7 +105,12 @@ describe('ProfileView.vue', () => {
       name: 'messenger',
       query: { user_id: '88', user_name: 'peer-user' },
     })
-    expect(routerPushMock).toHaveBeenNthCalledWith(3, '/')
+    expect(routerPushMock).toHaveBeenNthCalledWith(3, {
+      name: 'public-profile',
+      params: { id: '99' },
+      query: { account_name: 'project-user' },
+    })
+    expect(routerPushMock).toHaveBeenNthCalledWith(4, '/')
   })
 
   it('keeps the loading fallback and logs when loading the current profile fails', async () => {
