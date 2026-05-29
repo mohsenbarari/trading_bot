@@ -160,6 +160,17 @@ describe('AdminMessagesView.vue', () => {
     expect(wrapper.text()).toContain('پیام فعال بازار')
     expect(wrapper.text()).toContain('مشاهده همه پیام')
     expect(wrapper.find('[data-test="market-history-list"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('به‌صورت پیش‌فرض بسته است تا تمرکز روی پیام فعال و composer بماند.')
+    expect(wrapper.text()).not.toContain('اگر از تاریخچه روی قلم بزنی، صفحه روی همین کادر می‌آید و متن برای ویرایش اینجا قرار می‌گیرد.')
+    expect(wrapper.text()).not.toContain('کاراکتر')
+
+    await wrapper.get('[data-test="market-history-help"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="market-history-help-note"]').text()).toContain('این بخش فقط ۵ پیام آخر بازار را نشان می‌دهد')
+
+    await wrapper.get('[data-test="market-composer-help"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="market-composer-help-note"]').text()).toContain('فقط یک پیام می‌تواند هم‌زمان در بازار پین باشد')
 
     await wrapper.get('[data-test="market-history-toggle"]').trigger('click')
     await flushPromises()
@@ -234,6 +245,11 @@ describe('AdminMessagesView.vue', () => {
     )
     expect(clearCall).toBeTruthy()
     expect(wrapper.text()).toContain('پین فعال بازار برداشته شد')
-    expect(wrapper.text()).toContain('در حال حاضر هیچ پیام پین‌شده‌ای برای بازار فعال نیست')
+    expect(wrapper.text()).not.toContain('در حال حاضر هیچ پیام پین‌شده‌ای برای بازار فعال نیست')
+
+    await wrapper.get('[data-test="market-empty-help"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="market-empty-help-note"]').text()).toContain('در حال حاضر هیچ پیام پین‌شده‌ای برای بازار فعال نیست')
   })
 })
