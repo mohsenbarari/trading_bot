@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import JalaliDatePicker from './JalaliDatePicker.vue'
 
 const buildChatFileUrlMock = vi.fn(() => '')
 const uploadAvatarImageMock = vi.fn()
@@ -41,6 +42,14 @@ function defaultFetchResponse(input: string): Promise<Response> {
   }
 
   return Promise.reject(new Error(`Unhandled fetch call in PublicProfile.test.ts: ${input}`))
+}
+
+async function setHistoryDate(wrapper: ReturnType<typeof mount>, index: number, value: string) {
+  const pickers = wrapper.findAllComponents(JalaliDatePicker)
+  expect(pickers[index]?.exists()).toBe(true)
+  pickers[index]!.vm.$emit('update:modelValue', value)
+  pickers[index]!.vm.$emit('change', value)
+  await flushPromises()
 }
 
 describe('PublicProfile.vue', () => {
@@ -180,9 +189,8 @@ describe('PublicProfile.vue', () => {
     expect(presetFetchCalls.at(-1)?.[0]).toContain('from_date=2026-02-28')
     expect(presetFetchCalls.at(-1)?.[0]).toContain('to_date=2026-05-28')
 
-    const dateInputs = wrapper.findAll('input[type="date"]')
-    await dateInputs[0]!.setValue('')
-    await dateInputs[1]!.setValue('2026-05-20')
+    await setHistoryDate(wrapper, 0, '')
+    await setHistoryDate(wrapper, 1, '2026-05-20')
     const commoditySelect = wrapper.find('.history-filter-field-wide select')
     expect(commoditySelect.exists()).toBe(true)
     await commoditySelect.setValue('سکه')
@@ -1904,9 +1912,8 @@ describe('PublicProfile.vue', () => {
     await historyHeader!.trigger('click')
     await flushPromises()
 
-    const dateInputs = wrapper.findAll('input[type="date"]')
-    await dateInputs[0]!.setValue('2026-05-01')
-    await dateInputs[1]!.setValue('2026-05-31')
+    await setHistoryDate(wrapper, 0, '2026-05-01')
+    await setHistoryDate(wrapper, 1, '2026-05-31')
     const commoditySelect = wrapper.find('.history-filter-field-wide select')
     expect(commoditySelect.exists()).toBe(true)
     await commoditySelect.setValue('سکه')
@@ -1989,9 +1996,8 @@ describe('PublicProfile.vue', () => {
     await historyHeader!.trigger('click')
     await flushPromises()
 
-    const dateInputs = wrapper.findAll('input[type="date"]')
-    await dateInputs[0]!.setValue('2026-06-01')
-    await dateInputs[1]!.setValue('2026-05-01')
+    await setHistoryDate(wrapper, 0, '2026-06-01')
+    await setHistoryDate(wrapper, 1, '2026-05-01')
 
     const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
     expect(applyButton).toBeTruthy()

@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { apiFetch } from '../utils/auth'
 import { Loader2, ChevronLeft, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
 import { formatIranDateTime } from '../utils/iranTime'
+import JalaliDatePicker from './JalaliDatePicker.vue'
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -620,7 +621,12 @@ onMounted(() => {
           <div class="form-row">
             <div class="ds-form-group">
               <label class="ds-label">تاریخ</label>
-              <input data-testid="override-date" type="date" v-model="overrideForm.date" class="ds-input" />
+              <JalaliDatePicker
+                v-model="overrideForm.date"
+                value-type="gregorian"
+                placeholder="انتخاب تاریخ"
+                trigger-test-id="override-date"
+              />
             </div>
             <div class="ds-form-group">
               <label class="ds-label">نوع استثنا</label>

@@ -1,6 +1,7 @@
 import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import JalaliDatePicker from './JalaliDatePicker.vue'
 
 const apiFetchMock = vi.fn()
 const userProfileTimingMocks = vi.hoisted(() => ({
@@ -24,15 +25,6 @@ vi.mock('lucide-vue-next', () => ({
   ArrowRight: { template: '<span />' },
   ChevronLeft: { template: '<span />' },
   Info: { template: '<span />' },
-}))
-
-vi.mock('vue3-persian-datetime-picker', () => ({
-  default: {
-    name: 'MockDatePicker',
-    props: ['modelValue'],
-    emits: ['update:modelValue', 'change'],
-    template: '<button class="mock-date-picker" type="button" @click="$emit(\'update:modelValue\', \'1409/02/03\'); $emit(\'change\', \'1409/02/03\')"></button>',
-  },
 }))
 
 function makeResponse(payload: unknown, ok = true) {
@@ -67,6 +59,14 @@ function makeUser(overrides: Record<string, unknown> = {}) {
     max_customers: 5,
     ...overrides,
   }
+}
+
+async function setOpenJalaliDate(wrapper: ReturnType<typeof mount>, value: string) {
+  const picker = wrapper.findComponent(JalaliDatePicker)
+  expect(picker.exists()).toBe(true)
+  picker.vm.$emit('update:modelValue', value)
+  picker.vm.$emit('change', value)
+  await nextTick()
 }
 
 function findButtonByText(wrapper: ReturnType<typeof mount>, text: string) {
@@ -775,7 +775,7 @@ describe('UserProfile.vue', () => {
     await wrapper.get('.date-modal-content .integrated-cancel-btn').trigger('click')
 
     await wrapper.get('.custom-date-trigger').trigger('click')
-    await wrapper.get('.date-modal-content .mock-date-picker').trigger('click')
+    await setOpenJalaliDate(wrapper, '1409/02/03')
     await wrapper.get('.date-modal-content .integrated-save-btn').trigger('click')
     await wrapper.get('.date-modal-content .time-input').setValue('09:30')
     await wrapper.get('.date-modal-content .integrated-save-btn').trigger('click')
@@ -801,7 +801,7 @@ describe('UserProfile.vue', () => {
     await wrapper.get('.modal-content .custom-date-trigger').trigger('click')
     await wrapper.get('.date-modal-content .integrated-cancel-btn').trigger('click')
     await wrapper.get('.modal-content .custom-date-trigger').trigger('click')
-    await wrapper.get('.date-modal-content .mock-date-picker').trigger('click')
+    await setOpenJalaliDate(wrapper, '1409/02/03')
     await wrapper.get('.date-modal-content .integrated-save-btn').trigger('click')
     await wrapper.get('.date-modal-content .time-input').setValue('10:45')
     await wrapper.get('.date-modal-content .integrated-save-btn').trigger('click')

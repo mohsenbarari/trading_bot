@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watchEffect, onUnmounted, watch, toRef } from 'vue';
 import moment from 'moment-jalaali';
-import DatePicker from 'vue3-persian-datetime-picker';
 import { ArrowRight, ChevronLeft } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
 import { useUserProfileTiming } from '../composables/useUserProfileTiming';
 import { isCachedMiddleManager } from '../utils/adminAccess';
 import { formatIranDateTime } from '../utils/iranTime';
 import HelpPopover from './HelpPopover.vue';
+import JalaliDatePicker from './JalaliDatePicker.vue';
 
 const props = defineProps<{
   user: any;
@@ -65,9 +65,6 @@ function getCustomerTierLabel(value: string | null | undefined) {
 const showCustomDateInput = ref(false);
 const showBlockDateModal = ref(false);
 const customDate = ref('');
-const tempDateRef = ref(''); // Intermediate ref
-const blockDatePicker = ref<any>(null); // Ref for block date picker
-const limitDatePicker = ref<any>(null); // Ref for limit date picker
 
 const pickerStep = ref(1);
 const tempDatePart = ref('');
@@ -140,10 +137,10 @@ function initDatePicker(currentValue: string) {
     }
 }
 
-// Update temp ref on any change (click day, time, etc)
+// Keep compatibility with existing helper tests and external date-change events.
 function onDateChange(val: any) {
     console.log('Date Change:', val);
-    if (val) tempDateRef.value = val;
+  if (typeof val === 'string' && val) tempDatePart.value = val;
 }
 
 // Final submission handler
@@ -1062,15 +1059,14 @@ async function deleteUser() {
                 
                 <div class="date-picker-wrapper">
                     <!-- Step 1: Date -->
-                    <DatePicker 
+                    <JalaliDatePicker
                         v-if="pickerStep === 1"
-                        v-model="tempDatePart" 
-                        type="date" 
-                        format="jYYYY/jMM/jDD"
-                        inline 
-                        :auto-submit="false" 
-                        :editable="false" 
-                        @change="updateDatePart"
+                      v-model="tempDatePart"
+                      inline
+                      value-type="jalali"
+                      :clearable="false"
+                      :auto-close="false"
+                      @change="updateDatePart"
                     />
                     <!-- Step 2: Time - Using native HTML5 input for reliability -->
                     <div v-if="pickerStep === 2" class="native-time-picker">
@@ -1101,15 +1097,14 @@ async function deleteUser() {
                 
                 <div class="date-picker-wrapper">
                     <!-- Step 1: Date -->
-                    <DatePicker 
+                    <JalaliDatePicker
                         v-if="pickerStep === 1"
-                        v-model="tempDatePart" 
-                        type="date" 
-                        format="jYYYY/jMM/jDD"
-                        inline 
-                        :auto-submit="false" 
-                        :editable="false" 
-                        @change="updateDatePart"
+                      v-model="tempDatePart"
+                      inline
+                      value-type="jalali"
+                      :clearable="false"
+                      :auto-close="false"
+                      @change="updateDatePart"
                     />
                     <!-- Step 2: Time - Using native HTML5 input for reliability -->
                     <div v-if="pickerStep === 2" class="native-time-picker">
