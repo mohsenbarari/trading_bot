@@ -222,6 +222,17 @@ async def set_market_message_recipient_count(
     return message
 
 
+async def deactivate_current_market_management_message(db: AsyncSession) -> AdminMarketMessage | None:
+    message = await get_current_market_management_message(db)
+    if message is None:
+        return None
+    message.is_active = False
+    message.updated_at = _utcnow()
+    await db.commit()
+    await db.refresh(message)
+    return message
+
+
 async def get_current_market_management_message(db: AsyncSession) -> AdminMarketMessage | None:
     result = await db.execute(
         select(AdminMarketMessage)

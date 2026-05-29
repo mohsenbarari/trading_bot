@@ -3,7 +3,13 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from api.routers.admin_messages import AdminBroadcastCreate, AdminMarketMessageCreate, create_broadcast, create_market_message
+from api.routers.admin_messages import (
+    AdminBroadcastCreate,
+    AdminMarketMessageCreate,
+    clear_current_market_message,
+    create_broadcast,
+    create_market_message,
+)
 from core.enums import MessageType
 
 
@@ -47,6 +53,32 @@ class AdminMessagesRouterTests(unittest.IsolatedAsyncioTestCase):
         publish_mock.assert_called_once()
         self.assertEqual(publish_mock.call_args.args[0], "market:admin_message_published")
         self.assertEqual(result.notified_recipients_count, 2)
+
+    async def test_clear_current_market_message_deactivates_pin_and_publishes_empty_event(self):
+        db = object()
+        current_user = SimpleNamespace(id=1)
+        deactivated_message = SimpleNamespace(
+            id=42,
+            content="پیام بازار قبلی",
+            created_by_id=1,
+            created_by=SimpleNamespace(account_name="admin"),
+            reused_from_id=None,
+            is_active=False,
+            notified_recipients_count=2,
+            published_at=datetime(2026, 5, 29, 8, 0, 0),
+            created_at=datetime(2026, 5, 29, 8, 0, 0),
+        )
+
+        with patch(
+            "api.routers.admin_messages.deactivate_current_market_management_message",
+            new=AsyncMock(return_value=deactivated_message),
+        ) as deactivate_mock, patch("api.routers.admin_messages.publish_event_sync") as publish_mock:
+            result = await clear_current_market_message(current_user=current_user, db=db)
+
+        deactivate_mock.assert_awaited_once_with(db)
+        publish_mock.assert_called_once_with("market:admin_message_published", None)
+        self.assertIsNotNone(result)
+        self.assertFalse(result.is_active)
 
     async def test_create_broadcast_creates_system_room_messages_and_management_events(self):
         db = object()

@@ -18,6 +18,7 @@ from core.services.admin_message_service import (
     SUPPORTED_BROADCAST_TARGET_GROUPS,
     create_management_broadcast,
     create_market_management_message,
+    deactivate_current_market_management_message,
     get_current_market_management_message,
     list_broadcast_recipient_user_ids,
     list_management_broadcast_history,
@@ -196,6 +197,17 @@ async def create_market_message(
     )
     payload = _serialize_market_message(message).model_dump(mode="json")
     publish_event_sync("market:admin_message_published", payload)
+    return _serialize_market_message(message)
+
+
+@router.delete("/market/current", response_model=AdminMarketMessageRead | None)
+async def clear_current_market_message(
+    current_user: User = Depends(verify_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    _ = current_user
+    message = await deactivate_current_market_management_message(db)
+    publish_event_sync("market:admin_message_published", None)
     return _serialize_market_message(message)
 
 
