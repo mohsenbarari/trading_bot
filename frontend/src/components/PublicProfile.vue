@@ -1158,19 +1158,23 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       <button class="retry-btn" @click="$emit('navigate', 'home')">بازگشت به خانه</button>
     </div>
 
-    <div v-else-if="profileData" class="profile-content">
+    <div v-else-if="profileData" class="profile-content" :class="{ 'profile-content--own': showOwnerSections }">
       <section class="profile-section shared-profile-section">
-        <div class="profile-hero">
+        <div class="profile-hero" :class="{ 'profile-hero--own': showOwnerSections }">
           <div class="profile-avatar">
             <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
             <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
             <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
           </div>
-          <div class="profile-hero-copy">
+          <div class="profile-hero-copy" :class="{ 'profile-hero-copy--own': showOwnerSections }">
             <h3>{{ profileData.account_name }}</h3>
             <p v-if="profilePresenceStatus" class="profile-presence-status" :class="{ online: profileIsOnline }">{{ profilePresenceStatus }}</p>
           </div>
-          <div v-if="showOwnerSections" class="profile-avatar-actions">
+          <div
+            v-if="showOwnerSections"
+            class="profile-avatar-actions"
+            :class="{ 'profile-avatar-actions--own': showOwnerSections }"
+          >
             <button class="profile-avatar-btn primary" :disabled="avatarBusy" @click="triggerAvatarPicker">
               {{ profileAvatarUrl ? 'تغییر عکس' : 'افزودن عکس' }}
             </button>
@@ -1572,11 +1576,11 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section v-if="showOwnerSections && ownerOnlyActions.length > 0" class="profile-section owner-profile-section">
-        <div class="action-grid" :class="{ 'single-column': ownerOnlyActions.length === 1 }">
+        <div class="action-grid owner-action-grid" :class="{ 'single-column': ownerOnlyActions.length === 1 }">
           <button
             v-for="action in ownerOnlyActions"
             :key="action.key"
-            class="settings-btn"
+            class="settings-btn owner-settings-btn"
             @click="handleActionClick(action)"
           >
               <span class="stat-icon">{{ action.icon }}</span>
@@ -1629,6 +1633,11 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   padding: 10px 0 12rem 0;
 }
 
+.profile-content--own {
+  gap: 14px;
+  padding-top: 4px;
+}
+
 .profile-hero {
   display: flex;
   flex-direction: column;
@@ -1636,6 +1645,17 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   gap: 12px;
   margin-bottom: 8px;
   text-align: center;
+}
+
+.profile-hero--own {
+  width: 100%;
+  flex-direction: row-reverse;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 6px 12px;
+  margin-bottom: 2px;
+  text-align: right;
 }
 
 .profile-avatar {
@@ -1652,6 +1672,13 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   font-size: 2rem;
   font-weight: 900;
   flex-shrink: 0;
+}
+
+.profile-hero--own .profile-avatar {
+  order: 1;
+  width: 72px;
+  height: 72px;
+  font-size: 1.55rem;
 }
 
 .profile-avatar-image {
@@ -1676,6 +1703,21 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   margin: 0;
   font-size: 1.15rem;
   color: var(--ds-text-primary);
+}
+
+.profile-hero-copy--own {
+  order: 2;
+  flex: 1 1 180px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.profile-hero-copy--own h3 {
+  font-size: 1.02rem;
 }
 
 .profile-presence-status {
@@ -1820,6 +1862,13 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   justify-content: center;
 }
 
+.profile-avatar-actions--own {
+  order: 3;
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
 .profile-avatar-btn {
   border: 0;
   border-radius: var(--ds-radius-full);
@@ -1829,6 +1878,12 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.15s;
+}
+
+.profile-avatar-actions--own .profile-avatar-btn {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 0.76rem;
 }
 
 .profile-avatar-btn.primary {
@@ -1968,6 +2023,10 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   grid-template-columns: 1fr;
 }
 
+.owner-action-grid {
+  gap: 8px;
+}
+
 .profile-action-item {
   position: relative;
   min-width: 0;
@@ -2034,6 +2093,20 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(75, 85, 99, 0.3);
   transition: all 0.2s;
+}
+
+.owner-settings-btn {
+  min-height: 70px;
+  padding: 10px;
+  gap: 5px;
+}
+
+.owner-settings-btn .stat-icon {
+  font-size: 18px;
+}
+
+.owner-settings-btn .stat-label {
+  font-size: 12px;
 }
 
 .settings-btn:hover {
