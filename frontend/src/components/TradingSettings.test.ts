@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import JalaliDatePicker from './JalaliDatePicker.vue'
 
 const tradingSettingsMocks = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
@@ -71,6 +72,14 @@ async function mountTradingSettings() {
       jwtToken: 'jwt-token',
     },
   })
+}
+
+async function setJalaliDate(wrapper: Awaited<ReturnType<typeof mountTradingSettings>>, value: string) {
+  const picker = wrapper.findComponent(JalaliDatePicker)
+  expect(picker.exists()).toBe(true)
+  picker.vm.$emit('update:modelValue', value)
+  picker.vm.$emit('change', value)
+  await flushPromises()
 }
 
 describe('TradingSettings.vue', () => {
@@ -237,7 +246,7 @@ describe('TradingSettings.vue', () => {
     await headers[5]!.trigger('click')
     await flushPromises()
 
-    await wrapper.get('[data-testid="override-date"]').setValue('2026-05-30')
+    await setJalaliDate(wrapper, '2026-05-30')
     await wrapper.get('[data-testid="override-type"]').setValue('custom_hours')
     await wrapper.get('[data-testid="override-open-time"]').setValue('12:00')
     await wrapper.get('[data-testid="override-close-time"]').setValue('15:30')

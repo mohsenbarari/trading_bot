@@ -6,6 +6,7 @@ import HelpPopover from './HelpPopover.vue';
 import OwnerAccountantManagerModal from './OwnerAccountantManagerModal.vue';
 import OwnerCustomerManagerModal from './OwnerCustomerManagerModal.vue';
 import UserProfile from './UserProfile.vue';
+import JalaliDatePicker from './JalaliDatePicker.vue';
 import { isAdminRoleValue, readCachedCurrentUserRole, SUPER_ADMIN_ROLE } from '../utils/adminAccess';
 import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIdentity';
 import { apiFetch } from '../utils/auth';
@@ -1609,11 +1610,23 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
               <div class="history-filter-grid">
                 <label class="history-filter-field">
                   <span>از تاریخ</span>
-                  <input v-model="historyFromDate" type="date" @input="handleHistoryDateInput" />
+                  <JalaliDatePicker
+                    v-model="historyFromDate"
+                    value-type="gregorian"
+                    placeholder="انتخاب تاریخ شروع"
+                    trigger-test-id="history-from-date"
+                    @change="handleHistoryDateInput"
+                  />
                 </label>
                 <label class="history-filter-field">
                   <span>تا تاریخ</span>
-                  <input v-model="historyToDate" type="date" @input="handleHistoryDateInput" />
+                  <JalaliDatePicker
+                    v-model="historyToDate"
+                    value-type="gregorian"
+                    placeholder="انتخاب تاریخ پایان"
+                    trigger-test-id="history-to-date"
+                    @change="handleHistoryDateInput"
+                  />
                 </label>
                 <label class="history-filter-field history-filter-field-wide">
                   <span>کالا</span>
