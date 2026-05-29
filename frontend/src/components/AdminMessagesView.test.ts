@@ -143,13 +143,20 @@ describe('AdminMessagesView.vue', () => {
     })
   })
 
-  it('shows the two management options and edits a market history message into the composer', async () => {
+  it('starts with only the two management buttons and opens the market panel on click', async () => {
     const AdminMessagesView = (await import('./AdminMessagesView.vue')).default
     const wrapper = mount(AdminMessagesView)
     await flushPromises()
 
     expect(wrapper.find('[data-test="message-mode-market"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="message-mode-chat"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('ارسال پیام در بازار')
+    expect(wrapper.find('[data-test="market-panel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="broadcast-panel"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="message-mode-market"]').trigger('click')
+    await flushPromises()
+
     expect(wrapper.text()).toContain('پیام فعال بازار')
     expect(wrapper.text()).toContain('مشاهده همه پیام')
     expect(wrapper.find('[data-test="market-history-list"]').exists()).toBe(false)
@@ -171,6 +178,9 @@ describe('AdminMessagesView.vue', () => {
   it('publishes market and chat management messages through their own tabs', async () => {
     const AdminMessagesView = (await import('./AdminMessagesView.vue')).default
     const wrapper = mount(AdminMessagesView)
+    await flushPromises()
+
+    await wrapper.get('[data-test="message-mode-market"]').trigger('click')
     await flushPromises()
 
     await wrapper.get('[data-test="market-history-toggle"]').trigger('click')
@@ -211,6 +221,9 @@ describe('AdminMessagesView.vue', () => {
   it('clears the active market pin from the market lane', async () => {
     const AdminMessagesView = (await import('./AdminMessagesView.vue')).default
     const wrapper = mount(AdminMessagesView)
+    await flushPromises()
+
+    await wrapper.get('[data-test="message-mode-market"]').trigger('click')
     await flushPromises()
 
     await wrapper.get('[data-test="clear-market-pin"]').trigger('click')
