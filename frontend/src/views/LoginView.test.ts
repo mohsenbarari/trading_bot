@@ -13,6 +13,7 @@ const originalOTPCredential = (window as any).OTPCredential
 const originalNavigatorCredentials = navigator.credentials
 const originalNavigatorStandalone = (window.navigator as any).standalone
 const originalNavigatorUserAgent = window.navigator.userAgent
+const originalWindowLocation = window.location
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({
@@ -97,6 +98,7 @@ describe('LoginView.vue', () => {
     }
 
     Object.defineProperty(window.navigator, 'userAgent', { configurable: true, value: originalNavigatorUserAgent })
+    Object.defineProperty(window, 'location', { configurable: true, value: originalWindowLocation })
   })
 
   it('moves to the OTP step after a successful OTP request', async () => {
@@ -667,6 +669,31 @@ describe('LoginView.vue', () => {
     await findButtonByText(wrapper, 'ارسال مجدد کد').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('خطا در ارسال کد')
+
+    wrapper.unmount()
+  })
+
+  it('offers app cache recovery for network-like login errors', async () => {
+    const replaceSpy = vi.fn()
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...originalWindowLocation,
+        href: 'https://coin.362514.ir/login',
+        replace: replaceSpy,
+      },
+    })
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+    const vm = wrapper.vm as any
+
+    vm.error = 'Failed to fetch'
+    await flushPromises()
+
+    const recoveryButton = findButtonByText(wrapper, 'پاک‌سازی کش برنامه و بارگذاری مجدد')
+    await recoveryButton.trigger('click')
+
+    expect(replaceSpy).toHaveBeenCalledWith(expect.stringContaining('app_recovery='))
 
     wrapper.unmount()
   })

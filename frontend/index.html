@@ -124,8 +124,8 @@
     <div id="boot-loader-card">
       <div id="boot-loader-spinner"></div>
       <div id="boot-loader-title">در حال بارگذاری</div>
-      <div id="boot-loader-note">اگر صفحه بالا نیامد، یک بار بارگذاری مجدد را امتحان کنید.</div>
-      <button id="boot-loader-refresh" type="button" onclick="window.location.reload()">بارگذاری مجدد</button>
+      <div id="boot-loader-note">اگر صفحه بالا نیامد، پاک‌سازی کش برنامه و بارگذاری مجدد را امتحان کنید.</div>
+      <button id="boot-loader-refresh" type="button" onclick="window.__startAppRecovery ? window.__startAppRecovery() : window.location.reload()">پاک‌سازی کش و بارگذاری مجدد</button>
     </div>
   </div>
   <div id="app"></div>
@@ -133,6 +133,7 @@
     (function () {
       const root = document.documentElement
       const BOOT_RECOVERY_KEY = 'app_boot_recovery_attempted'
+      const currentUrl = new URL(window.location.href)
 
       async function clearCachesAndServiceWorkers() {
         try {
@@ -148,6 +149,26 @@
         } catch (error) {
           console.warn('Boot recovery cleanup failed', error)
         }
+      }
+
+      async function runManualRecovery() {
+        root.setAttribute('data-app-boot-recovering', '1')
+        await clearCachesAndServiceWorkers()
+        const nextUrl = new URL(window.location.href)
+        nextUrl.searchParams.delete('app_recovery')
+        nextUrl.searchParams.set('app_recovered', Date.now().toString())
+        window.location.replace(nextUrl.toString())
+      }
+
+      window.__startAppRecovery = function () {
+        const nextUrl = new URL(window.location.href)
+        nextUrl.searchParams.set('app_recovery', Date.now().toString())
+        window.location.replace(nextUrl.toString())
+      }
+
+      if (currentUrl.searchParams.has('app_recovery')) {
+        runManualRecovery()
+        return
       }
 
       window.__appBootTimeoutId = window.setTimeout(async function () {

@@ -107,8 +107,26 @@ function formatCountdown(seconds: number) {
 const formattedApprovalTimer = computed(() => formatCountdown(approvalCountdown.value))
 const formattedRecoveryTimer = computed(() => formatCountdown(recoveryCountdown.value))
 const selectedRecoveryFileName = computed(() => recoveryFile.value?.name || '')
+const canOfferAppRecovery = computed(() => {
+  const message = (error.value || '').toLowerCase()
+  if (!message) return false
+  return (
+    message.includes('failed to fetch') ||
+    message.includes('networkerror') ||
+    message.includes('load failed') ||
+    message.includes('connection') ||
+    message.includes('fetch dynamically imported module') ||
+    message.includes('خطا در ارتباط با سرور')
+  )
+})
 
 const lastMethod = ref<'telegram' | 'sms' | null>(null)
+
+function startAppRecovery() {
+  const nextUrl = new URL(window.location.href)
+  nextUrl.searchParams.set('app_recovery', Date.now().toString())
+  window.location.replace(nextUrl.toString())
+}
 
 function goToOtpStep() {
   if (step.value === 'otp') return
@@ -1005,7 +1023,17 @@ function goBackToMobile() {
         <transition name="fade">
           <div v-if="error" class="mt-6 p-4 bg-red-50/80 border border-red-100 text-red-600 text-sm rounded-xl text-center shadow-sm backdrop-blur-sm relative overflow-hidden">
              <div class="absolute top-0 left-0 w-1 h-full bg-red-400"></div>
-             {{ error }}
+             <div>{{ error }}</div>
+             <div v-if="canOfferAppRecovery" class="mt-3 flex flex-col items-center gap-2 text-xs text-red-500">
+               <span>اگر نسخهٔ قدیمی برنامه یا کش PWA گیر کرده، این بازنشانی امن را اجرا کنید.</span>
+               <button
+                 type="button"
+                 class="px-4 py-2 rounded-full bg-white text-red-600 font-bold border border-red-200 hover:bg-red-50 transition-colors"
+                 @click="startAppRecovery"
+               >
+                 پاک‌سازی کش برنامه و بارگذاری مجدد
+               </button>
+             </div>
           </div>
         </transition>
 
