@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Megaphone, Pin, PinOff, Radio, SendHorizontal, Users } from 'lucide-vue-next'
-import { computed, onMounted, ref } from 'vue'
+import { ChevronDown, Megaphone, PencilLine, Pin, PinOff, Radio, SendHorizontal, Users } from 'lucide-vue-next'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { apiFetch } from '../utils/auth'
 
 type AdminMarketMessage = {
@@ -38,6 +38,9 @@ const broadcastContent = ref('')
 const broadcastTargets = ref<string[]>(targetOptions.map((option) => option.key))
 const activeMarketMessage = ref<AdminMarketMessage | null>(null)
 const marketHistory = ref<AdminMarketMessage[]>([])
+const activePanel = ref<'market' | 'chat'>('market')
+const isMarketHistoryOpen = ref(false)
+const isMarketPinExpanded = ref(false)
 const broadcastHistory = ref<AdminBroadcastMessage[]>([])
 const marketError = ref('')
 const broadcastError = ref('')
@@ -47,8 +50,10 @@ const isPublishingMarket = ref(false)
 const isPublishingBroadcast = ref(false)
 const isClearingMarketPin = ref(false)
 const isLoading = ref(false)
+const marketComposerInputRef = ref<HTMLTextAreaElement | null>(null)
 
 const marketArchive = computed(() => marketHistory.value.filter((message) => message.id !== activeMarketMessage.value?.id))
+const marketRecentHistory = computed(() => marketArchive.value.slice(0, 5))
 const selectedBroadcastLabels = computed(() => targetOptions.filter((option) => broadcastTargets.value.includes(option.key)).map((option) => option.label))
 const selectedBroadcastCount = computed(() => selectedBroadcastLabels.value.length)
 
@@ -74,6 +79,7 @@ async function loadDashboard() {
       apiFetch('/api/admin-messages/broadcasts/history?limit=50'),
     ])
     activeMarketMessage.value = currentRes.ok ? await currentRes.json().catch(() => null) : null
+    isMarketPinExpanded.value = false
     if (marketRes.ok) {
       marketHistory.value = await marketRes.json()
     }
@@ -83,6 +89,23 @@ async function loadDashboard() {
   } finally {
     isLoading.value = false
   }
+}
+
+function focusMarketComposer() {
+  const input = marketComposerInputRef.value
+  if (!input) return
+  input.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  input.focus()
+}
+
+async function editMarketMessage(message: AdminMarketMessage) {
+  activePanel.value = 'market'
+  marketContent.value = message.content
+  marketSuccess.value = ''
+  marketError.value = ''
+  isMarketHistoryOpen.value = false
+  await nextTick()
+  focusMarketComposer()
 }
 
 async function publishMarketMessage() {
@@ -179,45 +202,84 @@ onMounted(loadDashboard)
   <div class="admin-messages-view">
     <section class="admin-messages-hero">
       <p class="hero-eyebrow">پیام‌های مدیریت</p>
-      <h2>بازار و پیام‌رسان را جدا اما هم‌زمان مدیریت کن</h2>
-      <p>
-        پیام پین‌شده بازار و پیام‌های همگانی پیام‌رسان دو خروجی متفاوت دارند. این صفحه هر کدام را در lane مستقل نگه می‌دارد تا انتشار، بازبینی تاریخچه،
-        و کنترل وضعیت فعال بدون سردرگمی انجام شود.
-      </p>
+      <h2>ارسال پیام مدیریت را بر اساس مقصد انتخاب کن</h2>
+      <p>ابتدا مشخص کن پیام باید روی بازار نمایش داده شود یا در چت برای کاربران ارسال شود؛ سپس همان workflow مربوط به همان مقصد را در پایین ادامه بده.</p>
     </section>
 
+    <div class="message-mode-switcher" role="tablist" aria-label="نوع پیام مدیریت">
+      <button
+        type="button"
+        class="message-mode-button"
+        data-test="message-mode-market"
+        :class="{ 'message-mode-button--active': activePanel === 'market' }"
+        :aria-selected="activePanel === 'market'"
+        @click="activePanel = 'market'"
+      >
+        <Pin :size="16" />
+        <span>ارسال پیام در صفحه بازار</span>
+      </button>
+      <button
+        type="button"
+        class="message-mode-button"
+        data-test="message-mode-chat"
+        :class="{ 'message-mode-button--active': activePanel === 'chat' }"
+        :aria-selected="activePanel === 'chat'"
+        @click="activePanel = 'chat'"
+      >
+        <Megaphone :size="16" />
+        <span>ارسال پیام در چت</span>
+      </button>
+    </div>
+
     <div class="message-workspace" :aria-busy="isLoading">
-      <section class="message-lane message-lane--market" data-test="market-lane">
-        <header class="lane-header lane-header--market">
-          <span class="lane-icon"><Pin :size="18" /></span>
+      <section v-if="activePanel === 'market'" class="message-panel message-panel--market" data-test="market-panel">
+        <header class="panel-header">
           <div>
-            <p class="lane-kicker">بازار</p>
-            <h3>پیام پین‌شده صفحه بازار</h3>
-            <p>پیام فعال همان چیزی است که بالای صفحه بازار دیده می‌شود. انتشار جدید، پیام قبلی را از پین خارج می‌کند ولی تاریخچه را نگه می‌دارد.</p>
+            <p class="panel-kicker">پیام بازار</p>
+            <h3>مدیریت پین صفحه بازار</h3>
+            <p>در بالا پین فعال بازار را می‌بینی، در میانه تاریخچه ۵ پیام آخر را داری، و پایین صفحه متن جدید یا ویرایش‌شده را منتشر می‌کنی.</p>
           </div>
         </header>
 
-        <article v-if="activeMarketMessage" class="status-card status-card--market-active" data-test="active-market-message">
-          <div class="status-card-header">
-            <div>
-              <span class="status-pill status-pill--active">پین فعال</span>
-              <p class="status-meta">{{ formatDate(activeMarketMessage.published_at) }}</p>
+        <article v-if="activeMarketMessage" class="market-pin-card" data-test="active-market-message">
+          <div class="market-pin-card-header">
+            <div class="market-pin-card-title-wrap">
+              <span class="status-pill status-pill--active">پین فعال بازار</span>
+              <span class="date-chip">{{ formatDate(activeMarketMessage.published_at) }}</span>
             </div>
+            <div class="market-pin-card-actions">
+              <button type="button" class="secondary-action" @click="editMarketMessage(activeMarketMessage)">
+                <PencilLine :size="16" />
+                <span>ویرایش</span>
+              </button>
+              <button
+                type="button"
+                class="secondary-action secondary-action--danger"
+                data-test="clear-market-pin"
+                :disabled="isClearingMarketPin"
+                @click="clearMarketPin"
+              >
+                <PinOff :size="16" />
+                <span>{{ isClearingMarketPin ? 'در حال برداشتن...' : 'برداشتن از بازار' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="admin-market-preview" :class="{ 'admin-market-preview--collapsed': !isMarketPinExpanded }">
+            <div class="admin-market-preview-title">پیام مدیریت</div>
+            <div class="admin-market-preview-body">{{ activeMarketMessage.content }}</div>
+          </div>
+
+          <div class="market-pin-footer">
             <button
               type="button"
-              class="secondary-action secondary-action--danger"
-              data-test="clear-market-pin"
-              :disabled="isClearingMarketPin"
-              @click="clearMarketPin"
+              class="ghost-link"
+              data-test="market-pin-expand"
+              @click="isMarketPinExpanded = !isMarketPinExpanded"
             >
-              <PinOff :size="16" />
-              <span>{{ isClearingMarketPin ? 'در حال برداشتن...' : 'برداشتن پین' }}</span>
+              {{ isMarketPinExpanded ? 'بستن' : 'مشاهده همه پیام' }}
             </button>
-          </div>
-          <p class="status-copy">{{ activeMarketMessage.content }}</p>
-          <div class="status-footer">
             <span>{{ Number(activeMarketMessage.notified_recipients_count || 0).toLocaleString('fa-IR') }} گیرنده اعلان</span>
-            <button type="button" class="ghost-link" @click="reuseMarketMessage(activeMarketMessage)">ویرایش و بازنشر</button>
           </div>
         </article>
 
@@ -228,63 +290,85 @@ onMounted(loadDashboard)
               <p class="status-meta">بازار اکنون پیام سنجاق‌شده‌ای ندارد.</p>
             </div>
           </div>
-          <p class="status-copy status-copy--muted">در حال حاضر هیچ پیام پین‌شده‌ای برای بازار فعال نیست. از فرم زیر برای انتشار پیام جدید استفاده کن.</p>
+          <p class="status-copy status-copy--muted">در حال حاضر هیچ پیام پین‌شده‌ای برای بازار فعال نیست. از کادر پایین برای انتشار پیام جدید استفاده کن.</p>
         </article>
 
-        <section class="composer-card">
+        <section class="history-card history-card--accordion">
+          <button
+            type="button"
+            class="history-toggle"
+            data-test="market-history-toggle"
+            :aria-expanded="isMarketHistoryOpen"
+            @click="isMarketHistoryOpen = !isMarketHistoryOpen"
+          >
+            <div>
+              <h4>۵ پیام آخر بازار</h4>
+              <p>به‌صورت پیش‌فرض بسته است تا تمرکز روی پیام فعال و composer بماند.</p>
+            </div>
+            <span class="history-toggle-meta">
+              <span class="history-badge">{{ marketRecentHistory.length.toLocaleString('fa-IR') }} مورد</span>
+              <ChevronDown :size="18" :class="{ 'history-toggle-icon--open': isMarketHistoryOpen }" />
+            </span>
+          </button>
+
+          <div v-if="isMarketHistoryOpen" class="history-accordion-body" data-test="market-history-list">
+            <article v-for="message in marketRecentHistory" :key="message.id" class="history-item history-item--compact">
+              <div class="history-item-top">
+                <span class="date-chip">{{ formatDate(message.published_at) }}</span>
+                <button
+                  type="button"
+                  class="icon-edit-button"
+                  :data-test="`market-history-edit-${message.id}`"
+                  :aria-label="`ویرایش ${message.content}`"
+                  @click="editMarketMessage(message)"
+                >
+                  <PencilLine :size="16" />
+                </button>
+              </div>
+              <p>{{ message.content }}</p>
+            </article>
+
+            <p v-if="!marketRecentHistory.length" class="empty-history">هنوز پیام قبلی برای بازار ثبت نشده است.</p>
+          </div>
+        </section>
+
+        <section class="composer-card" data-test="market-composer-card">
           <div class="composer-header">
             <div>
               <h4>نوشتن پیام بازار</h4>
-              <p>متنی بنویس که در بالای بازار نمایش داده شود و برای مخاطبان بازار اعلان ایجاد کند.</p>
+              <p>اگر از تاریخچه روی قلم بزنی، صفحه روی همین کادر می‌آید و متن برای ویرایش اینجا قرار می‌گیرد.</p>
             </div>
             <span class="composer-counter">{{ marketContent.trim().length.toLocaleString('fa-IR') }} کاراکتر</span>
           </div>
-          <textarea v-model="marketContent" class="message-textarea" rows="7" placeholder="متن پیام بازار..."></textarea>
+          <textarea
+            ref="marketComposerInputRef"
+            v-model="marketContent"
+            class="message-textarea"
+            data-test="market-composer-input"
+            rows="7"
+            placeholder="متن پیام بازار..."
+          ></textarea>
           <div v-if="marketError" class="alert error">{{ marketError }}</div>
           <div v-if="marketSuccess" class="alert success">{{ marketSuccess }}</div>
           <div class="composer-actions">
             <div class="composer-hint">
               <Radio :size="16" />
-              <span>فقط یک پیام بازار می‌تواند هم‌زمان پین باشد.</span>
+              <span>فقط یک پیام می‌تواند هم‌زمان در بازار پین باشد.</span>
             </div>
             <button class="primary-action" :disabled="!marketContent.trim() || isPublishingMarket" @click="publishMarketMessage">
               <Pin :size="16" />
-              <span>{{ isPublishingMarket ? 'در حال ثبت...' : 'انتشار و پین در بازار' }}</span>
+              <span>{{ isPublishingMarket ? 'در حال ثبت...' : 'انتشار در بازار' }}</span>
             </button>
           </div>
         </section>
-
-        <section class="history-card">
-          <div class="history-header">
-            <div>
-              <h4>آرشیو پیام‌های بازار</h4>
-              <p>پیام‌های قبلی را برای بازنشر یا بازبینی نگه می‌داریم.</p>
-            </div>
-            <span class="history-badge">{{ marketArchive.length.toLocaleString('fa-IR') }} مورد</span>
-          </div>
-
-          <article v-for="message in marketArchive" :key="message.id" class="history-item">
-            <div class="history-meta">
-              <span>{{ formatDate(message.published_at) }}</span>
-              <span>{{ Number(message.notified_recipients_count || 0).toLocaleString('fa-IR') }} اعلان</span>
-            </div>
-            <p>{{ message.content }}</p>
-            <div class="history-footer">
-              <button type="button" class="ghost-link" @click="reuseMarketMessage(message)">استفاده مجدد</button>
-            </div>
-          </article>
-
-          <p v-if="!marketArchive.length" class="empty-history">هنوز آرشیو جداگانه‌ای برای بازار ثبت نشده است.</p>
-        </section>
       </section>
 
-      <section class="message-lane message-lane--broadcast" data-test="broadcast-lane">
-        <header class="lane-header lane-header--broadcast">
-          <span class="lane-icon"><Megaphone :size="18" /></span>
+      <section v-else class="message-panel message-panel--chat" data-test="broadcast-panel">
+        <header class="panel-header">
           <div>
-            <p class="lane-kicker">پیام‌رسان</p>
-            <h3>ارسال همگانی مدیریت</h3>
-            <p>این پیام‌ها در اتاق‌های مدیریتِ فقط‌خواندنی نمایش داده می‌شوند و مستقل از کانال بازار هستند.</p>
+            <p class="panel-kicker">پیام در چت</p>
+            <h3>ارسال پیام مدیریت در چت</h3>
+            <p>این پیام‌ها در اتاق مدیریت فقط‌خواندنی هر گیرنده ثبت می‌شوند و مستقل از پیام بازار هستند.</p>
           </div>
         </header>
 
@@ -302,8 +386,8 @@ onMounted(loadDashboard)
         <section class="composer-card">
           <div class="composer-header">
             <div>
-              <h4>نوشتن پیام همگانی</h4>
-              <p>گیرنده‌ها را انتخاب کن و پیام را یک‌بار برای همه آن‌ها در پیام‌رسان ثبت کن.</p>
+              <h4>نوشتن پیام چت</h4>
+              <p>گیرنده‌ها را انتخاب کن و پیام را یک‌بار برای همه آن‌ها در چت ثبت کن.</p>
             </div>
             <span class="composer-counter">{{ broadcastContent.trim().length.toLocaleString('fa-IR') }} کاراکتر</span>
           </div>
@@ -335,7 +419,7 @@ onMounted(loadDashboard)
             </div>
             <button class="primary-action" :disabled="!broadcastContent.trim() || broadcastTargets.length === 0 || isPublishingBroadcast" @click="publishBroadcastMessage">
               <Megaphone :size="16" />
-              <span>{{ isPublishingBroadcast ? 'در حال ارسال...' : 'ارسال همگانی در پیام‌رسان' }}</span>
+              <span>{{ isPublishingBroadcast ? 'در حال ارسال...' : 'ارسال در چت' }}</span>
             </button>
           </div>
         </section>
@@ -343,8 +427,8 @@ onMounted(loadDashboard)
         <section class="history-card">
           <div class="history-header">
             <div>
-              <h4>آرشیو ارسال‌های همگانی</h4>
-              <p>آخرین پیام‌های ثبت‌شده برای بازاستفاده و بررسی مقصدها.</p>
+              <h4>تاریخچه پیام‌های چت</h4>
+              <p>ارسال‌های قبلی را برای بازاستفاده و اصلاح سریع می‌بینی.</p>
             </div>
             <span class="history-badge">{{ broadcastHistory.length.toLocaleString('fa-IR') }} مورد</span>
           </div>
@@ -407,67 +491,73 @@ onMounted(loadDashboard)
   font-size: 0.88rem;
 }
 
-.message-workspace {
+.message-mode-switcher {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 1rem;
-  align-items: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
 }
 
-.message-lane {
+.message-mode-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  min-height: 54px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #334155;
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.message-mode-button--active {
+  color: #0f766e;
+  border-color: rgba(15, 118, 110, 0.22);
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 255, 255, 0.96));
+  box-shadow: 0 14px 28px rgba(15, 118, 110, 0.1);
+  transform: translateY(-1px);
+}
+
+.message-workspace {
   min-width: 0;
+}
+
+.message-panel {
   display: flex;
   flex-direction: column;
   gap: 1rem;
   padding: 1rem;
   border-radius: 24px;
   border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.82);
   box-shadow: 0 20px 40px rgba(15, 23, 42, 0.07);
 }
 
-.message-lane--market {
+.message-panel--market {
   background: linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(255, 255, 255, 0.92));
 }
 
-.message-lane--broadcast {
+.message-panel--chat {
   background: linear-gradient(180deg, rgba(236, 253, 245, 0.98), rgba(255, 255, 255, 0.92));
 }
 
-.lane-header {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.9rem;
-  align-items: start;
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
 }
 
-.lane-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.4rem;
-  height: 2.4rem;
-  border-radius: 16px;
-  color: #fff;
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.14);
-}
-
-.lane-header--market .lane-icon {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-}
-
-.lane-header--broadcast .lane-icon {
-  background: linear-gradient(135deg, #0f766e, #14b8a6);
-}
-
-.lane-kicker {
+.panel-kicker {
   margin: 0 0 0.18rem;
   color: #64748b;
   font-size: 0.76rem;
   font-weight: 900;
 }
 
-.lane-header h3,
+.panel-header h3,
 .composer-header h4,
 .history-header h4 {
   margin: 0;
@@ -476,7 +566,7 @@ onMounted(loadDashboard)
   font-weight: 950;
 }
 
-.lane-header p,
+.panel-header p,
 .composer-header p,
 .history-header p,
 .status-meta,
@@ -489,46 +579,148 @@ onMounted(loadDashboard)
   line-height: 1.75;
 }
 
+.market-pin-card,
 .status-card,
 .composer-card,
 .history-card,
 .audience-panel {
   border-radius: 20px;
   border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
 }
 
+.market-pin-card,
 .status-card,
 .composer-card,
 .history-card {
   padding: 1rem;
 }
 
-.status-card--market-active {
-  background: linear-gradient(135deg, rgba(255, 247, 237, 0.98), rgba(255, 255, 255, 0.92));
+.market-pin-card {
+  background: linear-gradient(135deg, rgba(255, 247, 237, 0.98), rgba(255, 255, 255, 0.94));
 }
 
+.market-pin-card-header,
 .status-card-header,
 .composer-header,
 .history-header,
 .audience-header,
 .history-meta,
 .history-footer,
-.composer-actions {
+.composer-actions,
+.history-toggle {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.8rem;
 }
 
+.market-pin-card-header,
 .status-card-header,
 .composer-header,
 .history-header,
-.audience-header {
-  align-items: start;
+.audience-header,
+.history-toggle {
+  align-items: flex-start;
 }
 
+.market-pin-card-title-wrap,
+.market-pin-card-actions,
+.history-toggle-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.admin-market-preview {
+  margin-top: 0.95rem;
+  border-radius: 18px;
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 247, 237, 0.9));
+  padding: 0.9rem 0.95rem;
+}
+
+.admin-market-preview-title {
+  margin: 0 0 0.2rem;
+  color: #b45309;
+  font-size: 0.82rem;
+  font-weight: 950;
+}
+
+.admin-market-preview-body {
+  color: #1f2937;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  font-weight: 700;
+}
+
+.admin-market-preview--collapsed .admin-market-preview-body {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.market-pin-footer {
+  margin-top: 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.history-toggle {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
+}
+
+.history-toggle-icon--open {
+  transform: rotate(180deg);
+}
+
+.history-accordion-body {
+  margin-top: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.history-item--compact {
+  padding: 0.9rem;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background: rgba(248, 250, 252, 0.92);
+}
+
+.history-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.icon-edit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+  cursor: pointer;
+}
+
+.date-chip,
 .status-pill,
 .history-badge,
 .composer-counter {
@@ -540,6 +732,11 @@ onMounted(loadDashboard)
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 900;
+}
+
+.date-chip {
+  background: rgba(15, 23, 42, 0.06);
+  color: #475569;
 }
 
 .status-pill--active {
@@ -567,9 +764,8 @@ onMounted(loadDashboard)
   font-weight: 700;
 }
 
-.status-footer,
 .audience-title {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.55rem;
 }
@@ -758,18 +954,21 @@ onMounted(loadDashboard)
   padding-top: 0.2rem;
 }
 
-@media (min-width: 1120px) {
-  .message-workspace {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 @media (max-width: 720px) {
+  .message-mode-switcher {
+    grid-template-columns: 1fr;
+  }
+
   .composer-actions,
   .history-meta,
   .history-footer,
+  .history-item-top,
+  .market-pin-card-header,
+  .market-pin-footer,
   .status-card-header,
-  .audience-header {
+  .audience-header,
+  .history-toggle,
+  .panel-header {
     flex-direction: column;
     align-items: stretch;
   }
@@ -779,7 +978,8 @@ onMounted(loadDashboard)
   }
 
   .primary-action,
-  .secondary-action {
+  .secondary-action,
+  .message-mode-button {
     width: 100%;
   }
 }
