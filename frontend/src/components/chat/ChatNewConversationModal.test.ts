@@ -107,6 +107,29 @@ describe('ChatNewConversationModal.vue', () => {
     expect(wrapper.emitted('start-chat')).toEqual([[8, 'owner-eight']])
   })
 
+  it('allows customer-mode direct starts from backend-filtered rows while hiding group creation', async () => {
+    fetchMock.mockResolvedValue(
+      makeResponse([
+        { id: 20, account_name: 'owner20', full_name: 'مالک مشتری', mobile_number: '09120000020', avatar_file_id: null },
+      ]),
+    )
+
+    const wrapper = buildWrapper({
+      show: true,
+      canStartDirectChat: true,
+      canCreateGroup: false,
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.new-group-action').exists()).toBe(false)
+    expect(wrapper.text()).toContain('مالک مشتری')
+
+    await wrapper.get('.user-row').trigger('click')
+
+    expect(wrapper.emitted('start-chat')).toEqual([[20, 'مالک مشتری']])
+  })
+
   it('prefers full names for display and emits a generic accountant context label when no relation name exists', async () => {
     fetchMock.mockResolvedValue(
       makeResponse([

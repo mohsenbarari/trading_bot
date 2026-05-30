@@ -126,6 +126,36 @@ class ChatServiceDirectInitiationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "کاربر مشتری در این فاز اجازه شروع گفتگوی مستقیم با این کاربر را ندارد")
 
+    async def test_prepare_direct_message_send_denies_customer_to_outside_user_even_with_existing_thread(self):
+        sender = SimpleNamespace(id=9, role=UserRole.STANDARD)
+        receiver = SimpleNamespace(id=99, is_deleted=False)
+        db = SimpleNamespace(get=AsyncMock(return_value=receiver))
+
+        with patch(
+            "core.services.chat_service.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "core.services.chat_service.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=[SimpleNamespace(owner_user_id=7), None]),
+        ), patch(
+            "core.services.chat_service.build_allowed_customer_chat_targets",
+            new=AsyncMock(return_value=[7, 11, 12, 40]),
+        ), patch(
+            "core.services.chat_service.get_existing_direct_conversation",
+            new=AsyncMock(return_value=SimpleNamespace(id=77)),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await chat_service.prepare_direct_message_send(
+                    db,
+                    sender=sender,
+                    receiver_id=99,
+                    content="hello",
+                    message_type=MessageType.TEXT,
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "کاربر مشتری در این فاز اجازه شروع گفتگوی مستقیم با این کاربر را ندارد")
+
     async def test_prepare_direct_message_send_allows_owner_to_customer(self):
         sender = SimpleNamespace(id=7, role=UserRole.STANDARD)
         receiver = SimpleNamespace(id=9, is_deleted=False)
@@ -171,6 +201,30 @@ class ChatServiceDirectInitiationPolicyTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(resolved_receiver, receiver)
         self.assertEqual(prepared, "hello")
+
+    async def test_prepare_direct_message_send_denies_unrelated_accountant_to_customer(self):
+        sender = SimpleNamespace(id=11, role=UserRole.STANDARD)
+        receiver = SimpleNamespace(id=9, is_deleted=False)
+        db = SimpleNamespace(get=AsyncMock(return_value=receiver))
+
+        with patch(
+            "core.services.chat_service.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=SimpleNamespace(owner_user_id=88)),
+        ), patch(
+            "core.services.chat_service.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=[None, SimpleNamespace(owner_user_id=7)]),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await chat_service.prepare_direct_message_send(
+                    db,
+                    sender=sender,
+                    receiver_id=9,
+                    content="hello",
+                    message_type=MessageType.TEXT,
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertEqual(exc_info.exception.detail, "کاربر مشتری در این فاز اجازه شروع گفتگوی مستقیم با این کاربر را ندارد")
 
     async def test_prepare_direct_message_send_allows_super_admin_to_customer(self):
         sender = SimpleNamespace(id=40, role=UserRole.SUPER_ADMIN)

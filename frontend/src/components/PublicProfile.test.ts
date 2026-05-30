@@ -528,6 +528,40 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.emitted('navigate')?.[0]).toEqual(['chat', { userId: 30, userName: 'plain30' }])
   })
 
+  it('shows no visitor actions when a customer viewer is denied an outside public profile', async () => {
+    currentUserSummary.value = {
+      id: 91,
+      role: 'عادی',
+      is_customer: true,
+      customer_tier: 'tier2',
+    }
+
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({ detail: 'User not found' }, false, 404))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 30, account_name: 'plain30' },
+        viewerUserId: 91,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          OwnerCustomerManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('خطا در دریافت اطلاعات کاربر')
+    expect(wrapper.findAll('button').some((button) => button.text().includes('ارسال پیام'))).toBe(false)
+  })
+
   it('shows a block toggle next to the message action for non-customer profiles', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({

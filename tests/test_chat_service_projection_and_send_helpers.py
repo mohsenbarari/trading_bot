@@ -239,18 +239,17 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
             "core.services.chat_service._resolve_customer_direct_chat_initiation_permission",
             new=AsyncMock(return_value=False),
         ):
-            resolved_receiver, prepared = await chat_service.prepare_direct_message_send(
-                SimpleNamespace(
-                    get=AsyncMock(return_value=receiver),
-                    execute=AsyncMock(return_value=scalar_one_or_none_result(None)),
-                ),
-                sender=sender,
-                receiver_id=6,
-                content="hello",
-                message_type=MessageType.TEXT,
-            )
-        self.assertIs(resolved_receiver, receiver)
-        self.assertEqual(prepared, "hello")
+            with self.assertRaises(HTTPException):
+                await chat_service.prepare_direct_message_send(
+                    SimpleNamespace(
+                        get=AsyncMock(return_value=receiver),
+                        execute=AsyncMock(return_value=scalar_one_or_none_result(None)),
+                    ),
+                    sender=sender,
+                    receiver_id=6,
+                    content="hello",
+                    message_type=MessageType.TEXT,
+                )
 
         with patch(
             "core.services.chat_service.generate_direct_location_snapshot",
