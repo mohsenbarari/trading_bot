@@ -4,9 +4,13 @@ import {
     buildChatActivityBody,
     buildChatActivityEndpoint,
     resolveRoomConversationKey,
-    type ChatActivityKind,
 } from '../../utils/chatRoomRouting'
 import { getConversationPreviewText } from '../../utils/chatMessagePreview'
+import {
+    buildMessengerActivityLabel,
+    normalizeMessengerRealtimeActivityPayload,
+    resolveMessengerRealtimeConversationKey,
+} from '../../utils/messengerStage6MediaRealtime'
 
 export interface UseChatWebSocketOptions {
     selectedUserId: Ref<number | null>
@@ -60,12 +64,12 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
             const typingNames = Object.values(typingParticipantNames.value[conversationKey] || {})
 
             if (uploadNames.length > 0) {
-                result[conversationKey] = buildActivityLabel(conversationKey, 'uploading_file', uploadNames)
+                result[conversationKey] = buildMessengerActivityLabel(conversationKey, 'uploading_file', uploadNames)
                 return
             }
 
             if (typingNames.length > 0) {
-                result[conversationKey] = buildActivityLabel(conversationKey, 'typing', typingNames)
+                result[conversationKey] = buildMessengerActivityLabel(conversationKey, 'typing', typingNames)
             }
         })
 
@@ -73,33 +77,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     })
 
     function getConversationKeyFromPayload(data: any): number | null {
-        const roomConversationKey = resolveRoomConversationKey(data?.room_kind, data?.chat_id)
-        if (roomConversationKey !== null) {
-            return roomConversationKey
-        }
-
-        const senderId = Number(data?.sender_id)
-        return Number.isFinite(senderId) ? senderId : null
-    }
-
-    function buildActivityLabel(
-        conversationKey: number,
-        activity: ChatActivityKind,
-        senderNames: string[],
-    ) {
-        const suffix = activity === 'typing' ? 'در حال نوشتن...' : 'در حال ارسال فایل...'
-        if (conversationKey > 0) {
-            return suffix
-        }
-
-        const uniqueNames = Array.from(new Set(senderNames.filter((name) => name && name.trim())))
-        if (uniqueNames.length === 1) {
-            return `${uniqueNames[0]} ${suffix}`
-        }
-        if (uniqueNames.length > 1) {
-            return `${uniqueNames.length.toLocaleString('fa-IR')} نفر ${suffix}`
-        }
-        return `یک نفر ${suffix}`
+        return resolveMessengerRealtimeConversationKey(data)
     }
 
     function setConversationParticipantName(
@@ -186,10 +164,6 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         clearConversationParticipantName(uploadingParticipantNames, conversationKey, senderId)
     }
 
-    function resolveActivityKind(value: unknown): ChatActivityKind | null {
-        return value === 'typing' || value === 'uploading_file' ? value : null
-    }
-
     async function sendTypingSignal() {
         const conversationKey = selectedUserId.value
         if (!conversationKey) return
@@ -222,17 +196,12 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     }
 
     function handleActivityEvent(data: any) {
-        const conversationKey = getConversationKeyFromPayload(data)
-        const senderId = Number(data?.sender_id)
-        const activity = resolveActivityKind(data?.activity)
-        const active = data?.active !== false
-        const senderName = typeof data?.sender_name === 'string' && data.sender_name.trim()
-            ? data.sender_name.trim()
-            : 'کاربر'
-
-        if (conversationKey === null || !Number.isFinite(senderId) || !activity) {
+        const activityPayload = normalizeMessengerRealtimeActivityPayload(data)
+        if (!activityPayload) {
             return
         }
+
+        const { conversationKey, senderId, senderName, activity, active } = activityPayload
 
         if (activity === 'typing') {
             if (active) {

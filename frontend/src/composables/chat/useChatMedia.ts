@@ -5,6 +5,10 @@ import { primeMediaPreprocessTelemetry, recordMediaPreprocessTelemetry } from '.
 import { markMessengerPerformance } from '../../utils/messengerRefactor'
 import { measureMessengerStage2, recordMessengerDomSnapshot } from '../../utils/messengerStage2Metrics'
 import {
+    getMessengerMediaDownloadPatch,
+    isMessengerRuntimeEventForConversation,
+} from '../../utils/messengerStage6MediaRealtime'
+import {
     submitUpload as backgroundSubmitUpload,
     cancelUpload as backgroundCancelUpload,
     subscribeToUploads as backgroundSubscribeToUploads,
@@ -836,8 +840,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const index = messages.value.findIndex(message => message.id === messageId)
         const msg = index !== -1 ? messages.value[index] : null
         if (msg) {
-            msg.is_downloading = false
-            msg.download_progress = 0
+            Object.assign(msg, getMessengerMediaDownloadPatch('reset'))
         }
     }
 
@@ -851,8 +854,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const index = messages.value.findIndex(message => message.id === messageId)
         const msg = index !== -1 ? messages.value[index] : null
         if (msg) {
-            msg.is_downloading = false
-            msg.download_progress = 0
+            Object.assign(msg, getMessengerMediaDownloadPatch('reset'))
         }
     }
 
@@ -1194,8 +1196,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
         const abortController = new AbortController()
         mediaDownloadControllers.set(msg.id, abortController)
-        targetMsg.is_downloading = true
-        targetMsg.download_progress = 0
+        Object.assign(targetMsg, getMessengerMediaDownloadPatch('active'))
 
         try {
             const res = await fetch(`${apiBaseUrl}/api/chat/files/${fileId}?token=${jwtToken}`, {
@@ -1230,7 +1231,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 if (value) {
                     chunks.push(value)
                     received += value.length
-                    targetMsg.download_progress = Math.round((received / total) * 100)
+                    Object.assign(targetMsg, getMessengerMediaDownloadPatch('active', (received / total) * 100))
                 }
             }
 
@@ -1251,8 +1252,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
             alert('خطا در دانلود فایل')
         } finally {
             mediaDownloadControllers.delete(msg.id)
-            targetMsg.is_downloading = false
-            targetMsg.download_progress = 0
+            Object.assign(targetMsg, getMessengerMediaDownloadPatch('reset'))
         }
     }
 
@@ -1994,7 +1994,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         // upload continues in the background and will be grafted back onto
         // the messages list next time the user opens that conversation (via
         // `adoptPendingUploadsForUser`).
-        if (event.userId !== selectedUserId.value) return
+        if (!isMessengerRuntimeEventForConversation(event.userId, selectedUserId.value)) return
 
         const msgs = messages.value
         const index = msgs.findIndex(m => m.id === event.optimisticId)
@@ -2083,7 +2083,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
     })
 
     function applyDocumentDownloadEventToMessages(event: DocumentDownloadEvent) {
-        if (event.userId !== selectedUserId.value) return
+        if (!isMessengerRuntimeEventForConversation(event.userId, selectedUserId.value)) return
 
         const index = messages.value.findIndex(message => message.id === event.messageId)
         const target = index !== -1 ? messages.value[index] : undefined
@@ -2092,20 +2092,17 @@ export function useChatMedia(options: UseChatMediaOptions) {
         switch (event.type) {
             case 'added':
             case 'progress': {
-                target.is_downloading = true
-                target.download_progress = event.progress
+                Object.assign(target, getMessengerMediaDownloadPatch('active', event.progress))
                 break
             }
             case 'completed': {
-                target.is_downloading = false
-                target.download_progress = 100
+                Object.assign(target, getMessengerMediaDownloadPatch('completed'))
                 target.local_blob_url = event.objectUrl
                 break
             }
             case 'error':
             case 'cancelled': {
-                target.is_downloading = false
-                target.download_progress = 0
+                Object.assign(target, getMessengerMediaDownloadPatch('reset'))
                 break
             }
         }
@@ -2132,11 +2129,9 @@ export function useChatMedia(options: UseChatMediaOptions) {
 
             const pending = pendingByMessageId.get(message.id)
             if (pending) {
-                message.is_downloading = true
-                message.download_progress = pending.progress
+                Object.assign(message, getMessengerMediaDownloadPatch('active', pending.progress))
             } else if (message.is_downloading) {
-                message.is_downloading = false
-                message.download_progress = 0
+                Object.assign(message, getMessengerMediaDownloadPatch('reset'))
             }
 
             const fileId = getFileId(message.content)
