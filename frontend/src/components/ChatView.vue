@@ -19,7 +19,7 @@ import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { pushBackState, popBackState, clearBackStack, discardBackState } from '../composables/useBackButton'
 import { useWebSocket } from '../composables/useWebSocket'
 
-import type { ChatForwardTarget, Conversation, Message, MessageReaction, PinnedMessageState } from '../types/chat'
+import type { ChatForwardTarget, ChatSelectionPurpose, Conversation, Message, MessageReaction, PinnedMessageState } from '../types/chat'
 import { WS_NOTIFICATION_EVENTS } from '../types/notifications'
 import { useChatMedia } from '../composables/chat/useChatMedia'
 import { useChatWebSocket } from '../composables/chat/useChatWebSocket'
@@ -44,6 +44,19 @@ import { isAdminRole } from '../utils/currentUser'
 import { isUserOnline } from '../utils/userPresence'
 import { markMessengerPerformance } from '../utils/messengerRefactor'
 import { recordMessengerDomSnapshot, recordMessengerMetric } from '../utils/messengerStage2Metrics'
+import {
+  buildMessengerConversationQuery,
+  clearMessengerTimelineCache,
+  createMessengerTimelineCache,
+  getAlbumMessagesForMessage as getAlbumMessagesForMessageFromController,
+  getAlbumMeta,
+  getContextMenuMessageIds as getContextMenuMessageIdsFromController,
+  getRouteQueryValue,
+  groupMessengerMessages,
+  normalizeMessageIds,
+  sortMessageIdsByMessageOrder,
+  toggleMessageSelectionBatch,
+} from '../utils/messengerStage3Controllers'
 
 // Props
 const props = defineProps<{
@@ -83,7 +96,7 @@ const pinnedMessageState = ref<PinnedMessageState | null>(null)
 // Selection State
 const selectedMessages = ref<number[]>([])
 const forwardMessageIds = ref<number[]>([])
-const selectionModePurpose = ref<'default' | 'album-download' | 'album-forward' | 'album-share'>('default')
+const selectionModePurpose = ref<ChatSelectionPurpose>('default')
 const activeAlbumSelectionId = ref<string | null>(null)
 const isSelectionMode = computed(() => selectedMessages.value.length > 0)
 const selectionMemoKey = computed(() => selectedMessages.value.join('|'))
@@ -170,14 +183,6 @@ let pendingSelectionAnchor: PendingSelectionAnchor | null = null
 // Status
 const targetUserStatus = ref('آخرین بازدید اخیراً')
 
-function getRouteQueryValue(value: string | string[] | null | undefined) {
-  if (Array.isArray(value)) {
-    return value[0] || ''
-  }
-
-  return value || ''
-}
-
 function resolveSelectedConversationName(userId: number | null, fallback = '') {
   if (userId == null) {
     return ''
@@ -201,25 +206,7 @@ async function syncSelectedConversationRoute(userId: number | null, userName = '
     return
   }
 
-  const nextQuery: Record<string, string> = {}
-  Object.entries(route.query).forEach(([key, value]) => {
-    if (key === 'user_id' || key === 'user_name') {
-      return
-    }
-
-    const normalizedValue = getRouteQueryValue(value as string | string[] | undefined)
-    if (normalizedValue) {
-      nextQuery[key] = normalizedValue
-    }
-  })
-
-  if (nextUserId) {
-    nextQuery.user_id = nextUserId
-  }
-
-  if (nextUserName) {
-    nextQuery.user_name = nextUserName
-  }
+  const nextQuery = buildMessengerConversationQuery(route.query as Record<string, string | string[] | null | undefined>, userId, nextUserName)
 
   await router.replace({ path: route.path, query: nextQuery })
 }
@@ -870,19 +857,6 @@ function removeLocalOnlyMessage(msg?: Message | null) {
   }
 }
 
-function normalizeMessageIds(messageIds: number[]) {
-  const seen = new Set<number>()
-  const normalized: number[] = []
-
-  messageIds.forEach((messageId) => {
-    if (!Number.isFinite(messageId) || seen.has(messageId)) return
-    seen.add(messageId)
-    normalized.push(messageId)
-  })
-
-  return normalized
-}
-
 function normalizeMessageReactions(rawReactions: unknown): MessageReaction[] {
   if (!Array.isArray(rawReactions)) {
     return []
@@ -998,57 +972,12 @@ const canCopySelected = computed(() => {
    });
 })
 
-function getAlbumMeta(msg: Message): { albumId: string | null, albumIndex: number } {
-  if (msg.message_type !== 'image' && msg.message_type !== 'video') {
-    return { albumId: null, albumIndex: Number.MAX_SAFE_INTEGER }
-  }
-
-  try {
-    const content = JSON.parse(msg.content)
-    const albumId = typeof content.album_id === 'string' && content.album_id.trim()
-      ? content.album_id.trim()
-      : null
-    const albumIndex = typeof content.album_index === 'number' && Number.isFinite(content.album_index)
-      ? content.album_index
-      : Number.MAX_SAFE_INTEGER
-
-    return { albumId, albumIndex }
-  } catch {
-    return { albumId: null, albumIndex: Number.MAX_SAFE_INTEGER }
-  }
-}
-
 function getAlbumMessagesForMessage(msg: Message) {
-  const albumMeta = getAlbumMeta(msg)
-  if (!albumMeta.albumId) {
-    return [msg]
-  }
-
-  const albumMessages = messages.value
-    .filter(candidate => {
-      if (candidate.message_type !== 'image' && candidate.message_type !== 'video') return false
-      if (candidate.reply_to_message || candidate.is_error) return false
-      if (candidate.sender_id !== msg.sender_id) return false
-      return getAlbumMeta(candidate).albumId === albumMeta.albumId
-    })
-    .sort((left, right) => {
-      const leftMeta = getAlbumMeta(left)
-      const rightMeta = getAlbumMeta(right)
-      const byIndex = leftMeta.albumIndex - rightMeta.albumIndex
-      if (byIndex !== 0) return byIndex
-
-      const byCreatedAt = new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
-      if (byCreatedAt !== 0) return byCreatedAt
-
-      return left.id - right.id
-    })
-
-  return albumMessages.length > 0 ? albumMessages : [msg]
+  return getAlbumMessagesForMessageFromController(msg, messages.value)
 }
 
 function getContextMenuMessageIds(msg: Message) {
-  const albumMessages = getAlbumMessagesForMessage(msg)
-  return normalizeMessageIds(albumMessages.length > 1 ? albumMessages.map(message => message.id) : [msg.id])
+  return getContextMenuMessageIdsFromController(msg, messages.value)
 }
 
 async function toggleMessageReaction(msg: Message, emoji: string) {
@@ -1103,35 +1032,13 @@ function openForwardModalForIds(messageIds: number[]) {
 }
 
 function sortMessageIdsByChatOrder(messageIds: number[]) {
-  const normalized = normalizeMessageIds(messageIds)
-  const positionById = new Map<number, number>()
-
-  messages.value.forEach((message, index) => {
-    positionById.set(message.id, index)
-  })
-
-  return [...normalized].sort((left, right) => {
-    return (positionById.get(left) ?? Number.MAX_SAFE_INTEGER) - (positionById.get(right) ?? Number.MAX_SAFE_INTEGER)
-  })
+  return sortMessageIdsByMessageOrder(messageIds, messages.value)
 }
 
 function toggleSelectionBatch(messageIds: number[]) {
-  const normalized = sortMessageIdsByChatOrder(messageIds)
-  if (normalized.length === 0) return
-
-  const allSelected = normalized.every(messageId => selectedMessages.value.includes(messageId))
-  if (allSelected) {
-    selectedMessages.value = selectedMessages.value.filter(messageId => !normalized.includes(messageId))
-    if (selectedMessages.value.length === 0) {
-      resetSelectionContext()
-    }
-    return
-  }
-
-  selectedMessages.value = sortMessageIdsByChatOrder([
-    ...selectedMessages.value,
-    ...normalized,
-  ])
+  const result = toggleMessageSelectionBatch(selectedMessages.value, messageIds, messages.value)
+  selectedMessages.value = result.selectedMessageIds
+  if (result.cleared) resetSelectionContext()
 }
 
 function buildForwardContent(message: Message, forwardedAlbumId: string | null, forwardedAlbumIndex?: number) {
@@ -1253,11 +1160,7 @@ function hydrateRenderedMedia(item: any) {
   }
 }
 
-// Stable album wrapper cache: returns the same { type: 'album', ... } object
-// across re-runs of `groupedMessages` when the album's composition did not
-// actually change. This avoids re-rendering every album `<ChatMessageItem>`
-// on each new incoming WebSocket message.
-const albumWrapperCache = new Map<string, { signature: string, wrapper: any }>()
+const timelineControllerCache = createMessengerTimelineCache()
 
 // Per-ISO-string cache for `formatDateForSeparator`. `formatIranDate(...)`
 // is expensive on weak devices, and `groupedMessages` re-runs on every
@@ -1265,153 +1168,7 @@ const albumWrapperCache = new Map<string, { signature: string, wrapper: any }>()
 // Persian date label, so memoize by that string.
 const dateSeparatorLabelCache = new Map<string, string>()
 
-// Stable group wrapper cache: preserve the exact group object reference
-// when the group's date label and items list signature haven't changed.
-// This lets a `v-memo` on `.message-group` skip patching untouched
-// older day-groups when only the latest group grows with a new message.
-const groupWrapperCache = new Map<string, { signature: string, group: { label: string, items: any[] } }>()
-
-const groupedMessages = computed(() => {
-  const groups: { label: string, items: any[] }[] = []
-  if (messages.value.length === 0) return groups;
-  
-  const firstMsg = messages.value[0]
-  if (!firstMsg) return groups
-  
-  let currentLabel = formatDateForSeparator(firstMsg.created_at)
-  let currentGroup: any[] = [firstMsg]
-  
-  for (let i = 1; i < messages.value.length; i++) {
-      const msg = messages.value[i]
-      if (!msg) continue;
-      const label = formatDateForSeparator(msg.created_at)
-      if (label !== currentLabel) {
-          groups.push({ label: currentLabel, items: currentGroup })
-          currentLabel = label
-          currentGroup = [msg]
-      } else {
-          currentGroup.push(msg)
-      }
-  }
-  groups.push({ label: currentLabel, items: currentGroup })  // Group only messages that were explicitly sent in the same album batch.
-  groups.forEach(group => {
-    // Single-pass bucketing: compute album meta for every message and
-    // bucket eligible media messages by (senderId + albumId) so we avoid
-    // a nested filter for each album-seed message (previously O(n*k)).
-    const albumMetaByMessageId = new Map<number, { albumId: string | null, albumIndex: number }>()
-    const albumBuckets = new Map<string, any[]>()
-
-    group.items.forEach(msg => {
-      const meta = getAlbumMeta(msg)
-      albumMetaByMessageId.set(msg.id, meta)
-
-      if (!meta.albumId) return
-      const isMedia = msg.message_type === 'image' || msg.message_type === 'video'
-      if (!isMedia || msg.reply_to_message || msg.is_error) return
-
-      const bucketKey = `${msg.sender_id}::${meta.albumId}`
-      const bucket = albumBuckets.get(bucketKey)
-      if (bucket) {
-        bucket.push(msg)
-      } else {
-        albumBuckets.set(bucketKey, [msg])
-      }
-    })
-
-    // Sort each bucket by album_index / created_at / id.
-    albumBuckets.forEach((bucket) => {
-      bucket.sort((left, right) => {
-        const leftMeta = albumMetaByMessageId.get(left.id)
-        const rightMeta = albumMetaByMessageId.get(right.id)
-        const byIndex = (leftMeta?.albumIndex ?? Number.MAX_SAFE_INTEGER) - (rightMeta?.albumIndex ?? Number.MAX_SAFE_INTEGER)
-        if (byIndex !== 0) return byIndex
-        const byCreatedAt = new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
-        if (byCreatedAt !== 0) return byCreatedAt
-        return left.id - right.id
-      })
-    })
-
-    const collapsedItems: any[] = []
-    const consumedAlbumKeys = new Set<string>()
-
-    group.items.forEach(msg => {
-      const isMedia = msg.message_type === 'image' || msg.message_type === 'video'
-      if (!isMedia || msg.reply_to_message || msg.is_error) {
-        collapsedItems.push(msg)
-        return
-      }
-
-      const meta = albumMetaByMessageId.get(msg.id)
-      if (!meta?.albumId) {
-        collapsedItems.push(msg)
-        return
-      }
-
-      const bucketKey = `${msg.sender_id}::${meta.albumId}`
-      if (consumedAlbumKeys.has(bucketKey)) return
-      consumedAlbumKeys.add(bucketKey)
-
-      const bucket = albumBuckets.get(bucketKey) ?? [msg]
-      if (bucket.length > 1) {
-        const signature = bucket.map(m => `${m.id}:${(m as any).is_deleted ? 1 : 0}:${(m as any).content?.length ?? 0}:${JSON.stringify((m as any).reactions ?? [])}`).join('|')
-        const cacheKey = `${msg.sender_id}::${meta.albumId}`
-        const cached = albumWrapperCache.get(cacheKey)
-        if (cached && cached.signature === signature) {
-          collapsedItems.push(cached.wrapper)
-        } else {
-          const wrapper = { type: 'album', id: `album_${meta.albumId}`, sender_id: msg.sender_id, messages: bucket }
-          albumWrapperCache.set(cacheKey, { signature, wrapper })
-          collapsedItems.push(wrapper)
-        }
-      } else {
-        collapsedItems.push(msg)
-      }
-    })
-
-    group.items = collapsedItems
-  })
-
-  // Stable group wrappers: preserve the exact group wrapper reference when
-  // the ordered list of item *references* hasn't changed. This lets a
-  // `v-memo` at the `.message-group` level skip patching older day-groups
-  // entirely when only the latest group grows with a new message.
-  //
-  // NOTE: we compare by reference identity (not by id) because upstream
-  // paths like `messages.value[idx] = serverMsg` replace the message
-  // object while keeping the id stable — if the cached group kept the
-  // stale reference, the child `<ChatMessageItem v-memo="[item, ...]">`
-  // would never invalidate on edits/send-complete.
-  const stableGroups: { label: string, items: any[] }[] = []
-  const seenLabels = new Set<string>()
-  for (const group of groups) {
-    const cacheKey = group.label
-    const cached = groupWrapperCache.get(cacheKey)
-    let reuse = false
-    if (cached && cached.group.items.length === group.items.length) {
-      reuse = true
-      const prevItems = cached.group.items
-      const nextItems = group.items
-      for (let i = 0; i < nextItems.length; i++) {
-        if (prevItems[i] !== nextItems[i]) { reuse = false; break }
-      }
-    }
-    if (reuse && cached) {
-      stableGroups.push(cached.group)
-    } else {
-      const stable = { label: group.label, items: group.items }
-      groupWrapperCache.set(cacheKey, { signature: '', group: stable })
-      stableGroups.push(stable)
-    }
-    seenLabels.add(cacheKey)
-  }
-  if (groupWrapperCache.size > seenLabels.size) {
-    for (const key of groupWrapperCache.keys()) {
-      if (!seenLabels.has(key)) groupWrapperCache.delete(key)
-    }
-  }
-
-  return stableGroups
-})
+const groupedMessages = computed(() => groupMessengerMessages(messages.value, formatDateForSeparator, timelineControllerCache))
 
 function formatTime(dateStr: string) {
   return formatIranTime(dateStr)
@@ -2904,10 +2661,7 @@ const handleTouchEnd = (e: TouchEvent, msg: Message) => {
 
 watch(selectedUserId, (newVal) => {
   pendingSelectionAnchor = null
-  // Clear the album wrapper cache when switching chats so cached wrappers
-  // from other conversations do not leak into memory over time.
-  albumWrapperCache.clear()
-  groupWrapperCache.clear()
+  clearMessengerTimelineCache(timelineControllerCache)
   dateSeparatorLabelCache.clear()
   if (newVal) {
     pinnedMessageState.value = null

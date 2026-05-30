@@ -101,6 +101,22 @@ export interface Message {
     }
 }
 
+export type ChatSelectionPurpose = 'default' | 'album-download' | 'album-forward' | 'album-share'
+
+export interface ChatAlbumTimelineItem {
+    type: 'album'
+    id: string
+    sender_id: number
+    messages: Message[]
+}
+
+export type ChatTimelineItem = Message | ChatAlbumTimelineItem
+
+export interface ChatTimelineGroup {
+    label: string
+    items: ChatTimelineItem[]
+}
+
 export interface PinnedMessageState {
     chat_id?: number | null
     room_kind: ChatKind
