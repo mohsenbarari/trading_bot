@@ -57,6 +57,14 @@ import {
   sortMessageIdsByMessageOrder,
   toggleMessageSelectionBatch,
 } from '../utils/messengerStage3Controllers'
+import {
+  compareMessengerConversationActivity,
+  getNextPinnedConversationOrder,
+  isMandatoryPinnedConversation as isMandatoryPinnedConversationFromStage4,
+  isMessengerConversationPinned,
+  sortMessengerConversations,
+  summarizeTimelineRenderBudget,
+} from '../utils/messengerStage4Performance'
 
 // Props
 const props = defineProps<{
@@ -684,30 +692,19 @@ const selectedConversationActivityText = computed(() => {
 })
 
 function isMandatoryPinnedConversation(conv: Conversation) {
-  return conv.room_kind === 'channel' && conv.is_mandatory === true
+  return isMandatoryPinnedConversationFromStage4(conv)
 }
 
 function isConversationPinned(conv: Conversation) {
-  return isMandatoryPinnedConversation(conv) || conv.is_pinned === true
+  return isMessengerConversationPinned(conv)
 }
 
 function getNextLocalPinOrder() {
-  return conversations.value.reduce((maxOrder, conversation) => {
-    if (isMandatoryPinnedConversation(conversation) || !isConversationPinned(conversation)) {
-      return maxOrder
-    }
-
-    const currentOrder = Number(conversation.pin_order ?? 0)
-    return Number.isFinite(currentOrder) ? Math.max(maxOrder, currentOrder) : maxOrder
-  }, 0) + 1
+  return getNextPinnedConversationOrder(conversations.value)
 }
 
 function compareConversationActivity(a: Conversation, b: Conversation) {
-  if (!a.last_message_at) return 1
-  if (!b.last_message_at) return -1
-  if (b.last_message_at > a.last_message_at) return 1
-  if (b.last_message_at < a.last_message_at) return -1
-  return 0
+  return compareMessengerConversationActivity(a, b)
 }
 
 function isSameConversation(left: Conversation, right: Conversation) {
@@ -799,31 +796,7 @@ async function handlePinnedMessageToggle(targetMessage: Message, pinned: boolean
 }
 
 const sortedConversations = computed(() => {
-  return [...conversations.value].sort((a, b) => {
-    const mandatoryPinDelta = Number(isMandatoryPinnedConversation(b)) - Number(isMandatoryPinnedConversation(a))
-    if (mandatoryPinDelta !== 0) return mandatoryPinDelta
-
-    const pinDelta = Number(isConversationPinned(b)) - Number(isConversationPinned(a))
-    if (pinDelta !== 0) return pinDelta
-
-    if (isConversationPinned(a) && isConversationPinned(b) && !isMandatoryPinnedConversation(a) && !isMandatoryPinnedConversation(b)) {
-      const aPinOrder = Number(a.pin_order ?? 0)
-      const bPinOrder = Number(b.pin_order ?? 0)
-      if (bPinOrder !== aPinOrder) return bPinOrder - aPinOrder
-
-      const aPinnedAt = a.pinned_at || ''
-      const bPinnedAt = b.pinned_at || ''
-      if (bPinnedAt > aPinnedAt) return 1
-      if (bPinnedAt < aPinnedAt) return -1
-    }
-
-    // Lexicographic compare on ISO-8601 strings matches chronological
-    // order for same-timezone suffix strings (the backend emits consistent
-    // `YYYY-MM-DDTHH:MM:SS[.ffffff]` values). This avoids constructing
-    // two `Date` objects in the comparator on every WS-triggered re-sort,
-    // which is O(n log n) object churn on busy chats.
-    return compareConversationActivity(a, b)
-  })
+  return sortMessengerConversations(conversations.value)
 })
 
 const totalUnread = computed(() => {
@@ -1169,6 +1142,7 @@ const timelineControllerCache = createMessengerTimelineCache()
 const dateSeparatorLabelCache = new Map<string, string>()
 
 const groupedMessages = computed(() => groupMessengerMessages(messages.value, formatDateForSeparator, timelineControllerCache))
+const timelineRenderBudget = computed(() => summarizeTimelineRenderBudget(groupedMessages.value))
 
 function formatTime(dateStr: string) {
   return formatIranTime(dateStr)
@@ -2685,6 +2659,14 @@ watch(messagesContainer, (container) => {
   attachMessagesContainerResizeObserver(container)
 })
 
+watch(() => timelineRenderBudget.value.itemCount, (itemCount) => {
+  recordMessengerMetric('timeline-render-item-count', itemCount, 'count', {
+    groupCount: timelineRenderBudget.value.groupCount,
+    mediaItemCount: timelineRenderBudget.value.mediaItemCount,
+    virtualizationCandidate: timelineRenderBudget.value.virtualizationCandidate ? 'true' : 'false',
+  })
+}, { flush: 'post' })
+
 onMounted(async () => {
   isLoading.value = true
   await loadConversations()
@@ -2948,6 +2930,7 @@ defineExpose({
       showInChatSearchList,
       longPressTimer,
       pendingSelectionAnchor: () => pendingSelectionAnchor,
+      timelineRenderBudget,
     },
     normalizeLocationPayload,
     handleLocationClick,

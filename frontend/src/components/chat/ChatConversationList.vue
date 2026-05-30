@@ -11,6 +11,12 @@ import { formatIranTime } from '../../utils/iranTime'
 import { markMessengerPerformance } from '../../utils/messengerRefactor'
 import { recordMessengerDomSnapshot } from '../../utils/messengerStage2Metrics'
 import {
+  MESSENGER_CONVERSATION_INITIAL_WINDOW,
+  MESSENGER_CONVERSATION_WINDOW_BATCH,
+  selectConversationWindow,
+  shouldExpandConversationWindow,
+} from '../../utils/messengerStage4Performance'
+import {
   ArrowDown,
   ArrowUp,
   Bell,
@@ -56,6 +62,7 @@ const menuConversation = ref<Conversation | null>(null)
 const suppressClickConversationId = ref<number | null>(null)
 const longPressTimer = ref<number | null>(null)
 const pointerOrigin = ref({ x: 0, y: 0 })
+const conversationWindowLimit = ref(MESSENGER_CONVERSATION_INITIAL_WINDOW)
 const conversationMenuBackStateActive = ref(false)
 let closingConversationMenuFromBack = false
 let conversationListFirstRenderMarked = false
@@ -163,7 +170,36 @@ function getConversationActivityText(conv: Conversation) {
   return ''
 }
 
-const displayedConversations = computed(() => props.conversations)
+const conversationWindow = computed(() => selectConversationWindow(props.conversations, {
+  limit: conversationWindowLimit.value,
+  selectedUserId: props.selectedUserId,
+}))
+const displayedConversations = computed(() => conversationWindow.value.items)
+
+function expandConversationWindow() {
+  conversationWindowLimit.value = Math.min(
+    props.conversations.length,
+    conversationWindowLimit.value + MESSENGER_CONVERSATION_WINDOW_BATCH,
+  )
+}
+
+function handleConversationListScroll(event: Event) {
+  if (!conversationWindow.value.hasMore) return
+  const target = event.currentTarget as HTMLElement | null
+  if (!target) return
+  if (shouldExpandConversationWindow(target)) {
+    expandConversationWindow()
+  }
+}
+
+watch(() => props.conversations.length, (rowCount) => {
+  if (rowCount <= MESSENGER_CONVERSATION_INITIAL_WINDOW) {
+    conversationWindowLimit.value = MESSENGER_CONVERSATION_INITIAL_WINDOW
+    return
+  }
+
+  conversationWindowLimit.value = Math.min(Math.max(conversationWindowLimit.value, MESSENGER_CONVERSATION_INITIAL_WINDOW), rowCount)
+})
 
 watch(() => displayedConversations.value.length, async (rowCount) => {
   if (conversationListFirstRenderMarked) {
@@ -177,7 +213,11 @@ watch(() => displayedConversations.value.length, async (rowCount) => {
     ? document.querySelector('.conversation-list-wrapper') || document.body
     : null
   if (root) {
-    recordMessengerDomSnapshot('conversation-list-first-render', root, { rowCount })
+    recordMessengerDomSnapshot('conversation-list-first-render', root, {
+      rowCount,
+      totalRowCount: props.conversations.length,
+      windowed: conversationWindow.value.hasMore,
+    })
   }
 }, { immediate: true, flush: 'post' })
 
@@ -437,7 +477,7 @@ onBeforeUnmount(() => {
     <div class="conversation-atmosphere" aria-hidden="true"></div>
 
     <div class="conversation-panel">
-      <div class="conversations-list" v-auto-animate>
+      <div class="conversations-list" v-auto-animate @scroll.passive="handleConversationListScroll">
         <div v-if="conversations.length === 0" class="empty-state">
           <span>💬</span>
           <p>گفتگویی وجود ندارد</p>
@@ -540,6 +580,15 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
+            <button
+              v-if="conversationWindow.hasMore"
+              type="button"
+              class="conversation-window-more"
+              @click="expandConversationWindow"
+            >
+              نمایش بیشتر
+              <span>{{ conversationWindow.hiddenCount.toLocaleString('fa-IR') }}</span>
+            </button>
         </div>
       </div>
     </div>
@@ -770,6 +819,25 @@ onBeforeUnmount(() => {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+}
+
+.conversation-window-more {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(51, 144, 236, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.conversation-window-more span {
+  margin-inline-start: 6px;
+  color: var(--text-muted);
+  font-weight: 800;
 }
 
 .conversation-card:hover {
