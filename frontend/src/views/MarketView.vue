@@ -7,6 +7,7 @@ import { pushBackState, popBackState, clearBackStack } from '../composables/useB
 import OffersList from '../components/OffersList.vue'
 import OfferPreviewModal from '../components/OfferPreviewModal.vue'
 import { apiFetch, apiFetchJson } from '../utils/auth'
+import { cacheCurrentUserSummary, currentUserSummary } from '../utils/currentUser'
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy'
 import { buildOfferDraftText } from '../utils/offerDraftText'
 
@@ -81,12 +82,17 @@ interface AdminMarketMessage {
 type CustomerTierValue = 'tier1' | 'tier2' | null
 type MarketFilterType = 'all' | 'buy' | 'sell' | 'my'
 
+function normalizeCustomerTier(raw: unknown): CustomerTierValue {
+  return raw === 'tier1' || raw === 'tier2' ? raw : null
+}
+
 const MARKET_CLOSED_DETAIL = 'بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید.'
+const initialCurrentUserSummary = currentUserSummary.value
 
 const { offers, isLoading, fetchOffers, startPolling, stopPolling } = useOffers()
 const { on: wsOn, off: wsOff } = useWebSocket()
-const currentUserId = ref<number | undefined>(undefined)
-const currentUserCustomerTier = ref<CustomerTierValue>(null)
+const currentUserId = ref<number | undefined>(initialCurrentUserSummary?.id)
+const currentUserCustomerTier = ref<CustomerTierValue>(normalizeCustomerTier(initialCurrentUserSummary?.customer_tier))
 const marketRuntime = ref<MarketRuntimeState>({
   is_open: true,
   active_web_notice_visible: false,
@@ -566,11 +572,11 @@ async function fetchCurrentUser() {
     try {
         const res = await apiFetch('/api/auth/me')
         if (res.ok) {
-            const data = await res.json()
-            currentUserId.value = data.id
-      currentUserCustomerTier.value = data.customer_tier === 'tier1' || data.customer_tier === 'tier2'
-        ? data.customer_tier
-        : null
+      const data = await res.json()
+      const cachedSummary = cacheCurrentUserSummary(data)
+      currentUserId.value = cachedSummary?.id
+        ?? (typeof data.id === 'number' ? data.id : Number.isFinite(Number(data.id)) ? Number(data.id) : undefined)
+      currentUserCustomerTier.value = cachedSummary?.customer_tier ?? normalizeCustomerTier(data.customer_tier)
         }
     } catch (e) {
         console.error('Failed to load current user', e)

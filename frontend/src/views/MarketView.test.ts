@@ -195,8 +195,10 @@ async function mountMarketView() {
 }
 
 describe('MarketView.vue', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers()
+    const { clearCurrentUserSummary } = await import('../utils/currentUser')
+    clearCurrentUserSummary()
     marketViewMocks.offersRef = ref(offersFixture)
     marketViewMocks.isLoadingRef = ref(false)
     marketViewMocks.fetchOffersMock.mockReset()
@@ -249,7 +251,9 @@ describe('MarketView.vue', () => {
     })
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    const { clearCurrentUserSummary } = await import('../utils/currentUser')
+    clearCurrentUserSummary()
     vi.useRealTimers()
   })
 
@@ -768,6 +772,48 @@ describe('MarketView.vue', () => {
     expect(wrapper.text()).not.toContain('ثبت لفظ برای مشتری سطح 2 غیرفعال است')
     expect(wrapper.text()).not.toContain('شما فقط می‌توانید روی لفظ‌های دیگر درخواست بزنید.')
     expect(wrapper.findAll('.tab-btn').map((btn) => btn.text())).not.toContain('لفظ های شما')
+
+    wrapper.unmount()
+  })
+
+  it('keeps the create-offer bar hidden for cached tier2 users before auth/me resolves', async () => {
+    const { cacheCurrentUserSummary } = await import('../utils/currentUser')
+    cacheCurrentUserSummary({ id: 77, role: 'عادی', account_name: 'tier2-user', customer_tier: 'tier2' })
+
+    let resolveMe: ((value: unknown) => void) | null = null
+    marketViewMocks.apiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/commodities/') return Promise.resolve(responseOf(commoditiesFixture))
+      if (path === '/api/trading-settings/') return Promise.resolve(responseOf(settingsFixture))
+      if (path === '/api/trading-settings/market-state') {
+        return Promise.resolve(responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        }))
+      }
+      if (path === '/api/auth/me') {
+        return new Promise((resolve) => {
+          resolveMe = resolve
+        }) as Promise<any>
+      }
+      return Promise.resolve(responseOf(null))
+    })
+
+    const wrapper = await mountMarketView()
+    await nextTick()
+
+    expect(wrapper.find('.market-action-bar').exists()).toBe(false)
+    expect(wrapper.findAll('.tab-btn').map((btn) => btn.text())).not.toContain('لفظ های شما')
+
+    if (!resolveMe) {
+      throw new Error('Expected auth/me resolver')
+    }
+    ;(resolveMe as (value: unknown) => void)(responseOf({ id: 77, role: 'عادی', account_name: 'tier2-user', customer_tier: 'tier2' }))
+    await flushPromises()
+
+    expect(wrapper.find('.market-action-bar').exists()).toBe(false)
 
     wrapper.unmount()
   })
