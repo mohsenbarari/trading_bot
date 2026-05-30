@@ -24,6 +24,7 @@ from core.services.customer_relation_service import (
     load_offer_customer_read_context,
     load_customer_relation_invitation_map,
     list_active_customers_for_owner,
+    list_shared_group_accountant_ids_for_customer,
     list_owner_customer_relations,
     round_customer_price,
     sweep_expired_pending_customer_relations,
@@ -863,12 +864,35 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
                 FakeExecuteResult(scalar_one_value=relation),
                 FakeExecuteResult(values=[7, 40]),
                 FakeExecuteResult(values=[11, 12]),
+                FakeExecuteResult(values=[]),
             ]
         )
 
         result = await build_allowed_customer_chat_targets(db, 9)
 
         self.assertEqual(result, [7, 11, 12, 40])
+
+    async def test_build_allowed_customer_chat_targets_includes_shared_group_accountants(self):
+        relation = SimpleNamespace(owner_user_id=7)
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(scalar_one_value=relation),
+                FakeExecuteResult(values=[7, 40]),
+                FakeExecuteResult(values=[11, 12]),
+                FakeExecuteResult(values=[55, 12]),
+            ]
+        )
+
+        result = await build_allowed_customer_chat_targets(db, 9)
+
+        self.assertEqual(result, [7, 11, 12, 40, 55])
+
+    async def test_list_shared_group_accountant_ids_for_customer_returns_execute_rows(self):
+        db = FakeDB(execute_results=[FakeExecuteResult(values=[44, 55])])
+
+        result = await list_shared_group_accountant_ids_for_customer(db, 9)
+
+        self.assertEqual(result, [44, 55])
 
     async def test_build_allowed_customer_chat_targets_returns_empty_without_relation(self):
         db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=None)])

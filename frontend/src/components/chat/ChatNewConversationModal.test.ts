@@ -130,6 +130,31 @@ describe('ChatNewConversationModal.vue', () => {
     expect(wrapper.emitted('start-chat')).toEqual([[20, 'مالک مشتری']])
   })
 
+  it('allows direct starts for shared-group accountants without owner-resolution badges', async () => {
+    fetchMock.mockResolvedValue(
+      makeResponse([
+        { id: 44, account_name: 'acct44', full_name: 'حسابدار گروه', mobile_number: '09124444444', avatar_file_id: null },
+      ]),
+    )
+
+    const wrapper = buildWrapper({
+      show: true,
+      canStartDirectChat: true,
+      canCreateGroup: false,
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.new-group-action').exists()).toBe(false)
+    expect(wrapper.text()).toContain('حسابدار گروه')
+    expect(wrapper.text()).not.toContain('مالک')
+    expect(wrapper.text()).not.toContain('از مسیر حسابدار')
+
+    await wrapper.get('.user-row').trigger('click')
+
+    expect(wrapper.emitted('start-chat')).toEqual([[44, 'حسابدار گروه']])
+  })
+
   it('prefers full names for display and emits a generic accountant context label when no relation name exists', async () => {
     fetchMock.mockResolvedValue(
       makeResponse([

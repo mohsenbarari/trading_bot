@@ -11,10 +11,13 @@ import string
 from fastapi import HTTPException
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import aliased, joinedload
 
+from core.enums import ChatMembershipStatus, ChatType
 from core.utils import normalize_account_name, normalize_persian_numerals, utc_now
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
+from models.chat import Chat
+from models.chat_member import ChatMember
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.invitation import Invitation
 from models.offer import OfferType
@@ -804,4 +807,52 @@ async def build_allowed_customer_chat_targets(
     )
     accountant_ids = list((await db.execute(accountant_stmt)).scalars().all())
 
-    return sorted({*allowed_ids, *accountant_ids})
+    shared_group_accountant_ids = await list_shared_group_accountant_ids_for_customer(db, customer_user_id)
+
+    return sorted({*allowed_ids, *accountant_ids, *shared_group_accountant_ids})
+
+
+async def list_shared_group_accountant_ids_for_customer(
+    db: AsyncSession,
+    customer_user_id: int,
+) -> list[int]:
+    current_member = aliased(ChatMember)
+    accountant_member = aliased(ChatMember)
+
+    stmt = (
+        select(AccountantRelation.accountant_user_id)
+        .distinct()
+        .join(User, User.id == AccountantRelation.accountant_user_id)
+        .join(
+            accountant_member,
+            and_(
+                accountant_member.user_id == AccountantRelation.accountant_user_id,
+                accountant_member.membership_status == ChatMembershipStatus.ACTIVE,
+            ),
+        )
+        .join(
+            Chat,
+            and_(
+                Chat.id == accountant_member.chat_id,
+                Chat.type == ChatType.GROUP,
+                Chat.is_deleted.is_(False),
+            ),
+        )
+        .join(
+            current_member,
+            and_(
+                current_member.chat_id == Chat.id,
+                current_member.user_id == customer_user_id,
+                current_member.membership_status == ChatMembershipStatus.ACTIVE,
+            ),
+        )
+        .where(
+            AccountantRelation.status == AccountantRelationStatus.ACTIVE,
+            AccountantRelation.deleted_at.is_(None),
+            AccountantRelation.accountant_user_id.is_not(None),
+            User.is_deleted.is_(False),
+        )
+        .order_by(AccountantRelation.accountant_user_id.asc())
+    )
+
+    return list((await db.execute(stmt)).scalars().all())

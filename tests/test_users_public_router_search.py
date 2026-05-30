@@ -67,6 +67,9 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
         ):
             result = await search_public_users(q=None, limit=25, db=db, current_user=current_user)
 
@@ -86,6 +89,9 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
         ):
             result = await search_public_users(q="ali", limit=10, db=db, current_user=current_user)
@@ -108,14 +114,21 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=SimpleNamespace(owner_user_id=20)),
+        ), patch(
+            "api.routers.users_public.build_allowed_customer_chat_targets",
+            new=AsyncMock(return_value=[20, 1]),
+        ), patch(
+            "api.routers.users_public.list_shared_group_accountant_ids_for_customer",
+            new=AsyncMock(return_value=[]),
         ):
             result = await search_public_users(q=None, limit=25, db=db, current_user=current_user)
 
         self.assertEqual([item.id for item in result], [20, 1])
         stmt_text = str(db.stmts[0]).lower()
-        self.assertIn("customer_relations", stmt_text)
-        self.assertIn("accountant_relations", stmt_text)
-        self.assertIn("users.role", stmt_text)
+        self.assertIn("users.id in", stmt_text)
 
     async def test_search_public_users_resolves_accountants_to_owner_profiles_and_deduplicates(self):
         current_user = SimpleNamespace(id=5, role=UserRole.STANDARD)
@@ -137,6 +150,9 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
         ):
             result = await search_public_users(q="owner", limit=10, db=db, current_user=current_user)
@@ -162,6 +178,9 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
         ):
             result = await search_public_users(q="acct", limit=10, db=db, current_user=current_user)
@@ -189,6 +208,9 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
         ):
             result = await search_public_users(q="customer", limit=10, db=db, current_user=current_user)
 
@@ -214,6 +236,9 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
         ):
             result = await search_public_users(q="customer", limit=10, db=db, current_user=current_user)
@@ -251,6 +276,9 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
             new=AsyncMock(return_value=SimpleNamespace(owner_user_id=20)),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
         ):
             result = await search_public_users(q="customer", limit=10, db=db, current_user=current_user)
 
@@ -264,6 +292,38 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("role", result[0].model_dump())
         self.assertNotIn("address", result[0].model_dump())
         self.assertNotIn("last_seen_at", result[0].model_dump())
+
+    async def test_search_public_users_returns_shared_group_accountant_directly_for_customer_viewer(self):
+        current_user = SimpleNamespace(id=91, role=UserRole.STANDARD)
+        owner_user = make_user(id=20, account_name="owner20")
+        accountant_user = make_user(id=44, account_name="acct44", full_name="حسابدار گروه")
+        db = FakeDB([
+            FakeExecuteResult([accountant_user]),
+            FakeExecuteResult([
+                make_relation(accountant_user_id=44, owner_user=owner_user, relation_display_name="حسابدار گروه"),
+            ]),
+            FakeExecuteResult([]),
+        ])
+
+        with patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=SimpleNamespace(owner_user_id=20)),
+        ), patch(
+            "api.routers.users_public.build_allowed_customer_chat_targets",
+            new=AsyncMock(return_value=[20, 44, 1]),
+        ), patch(
+            "api.routers.users_public.list_shared_group_accountant_ids_for_customer",
+            new=AsyncMock(return_value=[44]),
+        ):
+            result = await search_public_users(q="acct", limit=10, db=db, current_user=current_user)
+
+        self.assertEqual([item.id for item in result], [44])
+        self.assertEqual(result[0].account_name, "acct44")
+        self.assertIsNone(result[0].resolved_from_accountant_id)
+        self.assertIsNone(result[0].highlight_accountant_user_id)
 
 
 if __name__ == "__main__":
