@@ -68,6 +68,13 @@ function parseModelValue(value: string | null | undefined, valueType: CalendarVa
   return parsed.isValid() ? parsed : null
 }
 
+function createVisibleJalaliDate(year: number, monthIndex: number, preferredDay: number) {
+  const monthStart = moment(`${year}/${monthIndex + 1}/1`, 'jYYYY/jM/jD', true)
+  if (!monthStart.isValid()) return visibleMonth.value.clone()
+  const day = Math.min(preferredDay, monthStart.clone().endOf('jMonth').jDate())
+  return monthStart.jDate(day)
+}
+
 const selectedDate = computed(() => parseModelValue(props.modelValue, props.valueType))
 
 const visibleMonthTitle = computed(() => {
@@ -85,6 +92,20 @@ const displayValue = computed(() => {
 
 const selectedKey = computed(() => selectedDate.value?.format('jYYYY/jMM/jDD') ?? '')
 const todayKey = computed(() => moment().format('jYYYY/jMM/jDD'))
+
+const monthOptions = monthNames.map((label, index) => ({ value: String(index), label }))
+const yearOptions = computed(() => {
+  const currentYear = moment().jYear()
+  const visibleYear = visibleMonth.value.jYear()
+  const selectedYear = selectedDate.value?.jYear() ?? visibleYear
+  const minYear = Math.min(currentYear, visibleYear, selectedYear) - 20
+  const maxYear = Math.max(currentYear, visibleYear, selectedYear) + 20
+  const options: Array<{ value: string; label: string }> = []
+  for (let year = minYear; year <= maxYear; year += 1) {
+    options.push({ value: String(year), label: toPersianDigits(year) })
+  }
+  return options
+})
 
 type CalendarCell = {
   key: string
@@ -175,6 +196,18 @@ function goToNextMonth() {
   visibleMonth.value = visibleMonth.value.clone().add(1, 'jMonth')
 }
 
+function updateVisibleMonth(event: Event) {
+  const value = Number((event.target as HTMLSelectElement | null)?.value)
+  if (!Number.isInteger(value) || value < 0 || value > 11) return
+  visibleMonth.value = createVisibleJalaliDate(visibleMonth.value.jYear(), value, visibleMonth.value.jDate())
+}
+
+function updateVisibleYear(event: Event) {
+  const value = Number((event.target as HTMLSelectElement | null)?.value)
+  if (!Number.isInteger(value)) return
+  visibleMonth.value = createVisibleJalaliDate(value, visibleMonth.value.jMonth(), visibleMonth.value.jDate())
+}
+
 function goToToday() {
   visibleMonth.value = moment()
   emitValue(moment())
@@ -230,7 +263,18 @@ watch(isOpen, async (opened) => {
     <div v-if="inline || isOpen" class="jalali-calendar-panel" :class="{ 'is-popover': !inline }" role="dialog" aria-label="تقویم جلالی">
       <div class="jalali-calendar-header">
         <button type="button" class="jalali-calendar-nav" aria-label="ماه قبل" @click="goToPreviousMonth">‹</button>
-        <div class="jalali-calendar-title">{{ visibleMonthTitle }}</div>
+        <div class="jalali-calendar-title" :aria-label="visibleMonthTitle">
+          <select class="jalali-calendar-select" aria-label="انتخاب ماه" :value="visibleMonth.jMonth()" @change="updateVisibleMonth">
+            <option v-for="option in monthOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+          <select class="jalali-calendar-select year-select" aria-label="انتخاب سال" :value="visibleMonth.jYear()" @change="updateVisibleYear">
+            <option v-for="option in yearOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </div>
         <button type="button" class="jalali-calendar-nav" aria-label="ماه بعد" @click="goToNextMonth">›</button>
       </div>
 
@@ -370,10 +414,38 @@ watch(isOpen, async (opened) => {
 
 .jalali-calendar-title {
   min-width: 0;
-  text-align: center;
-  font-weight: 800;
-  font-size: 15px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(82px, 0.72fr);
+  align-items: center;
+  gap: 7px;
+}
+
+.jalali-calendar-select {
+  min-width: 0;
+  width: 100%;
+  height: 36px;
+  border: 1px solid rgba(17, 63, 69, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
   color: #123f46;
+  font: inherit;
+  font-weight: 800;
+  font-size: 13px;
+  text-align: center;
+  text-align-last: center;
+  padding: 0 8px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+.jalali-calendar-select:hover,
+.jalali-calendar-select:focus-visible {
+  border-color: #d69a26;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(214, 154, 38, 0.16);
+}
+
+.jalali-calendar-select.year-select {
+  direction: ltr;
 }
 
 .jalali-calendar-nav {
