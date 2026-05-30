@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 from fastapi import FastAPI, APIRouter, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -62,22 +63,58 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Shutting down...")
     await close_redis()
 
-app = FastAPI(title="Trading Bot API", lifespan=lifespan)
+def _normalize_origin(raw_value: str | None) -> str | None:
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+
+    candidate = value if "://" in value else f"https://{value}"
+    parsed = urlparse(candidate)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _build_allowed_origins() -> list[str]:
+    allowed = {
+        "http://localhost:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:8000",
+        "https://mini-app.362514.ir",
+        "https://coin.362514.ir",
+        "https://coin.gold-trade.ir",
+        "http://87.107.110.68",
+    }
+
+    for raw_candidate in (
+        settings.frontend_url,
+        settings.foreign_server_domain,
+        settings.iran_server_domain,
+    ):
+        normalized = _normalize_origin(raw_candidate)
+        if normalized:
+            allowed.add(normalized)
+
+    return sorted(allowed)
+
+
+app = FastAPI(
+    title="Trading Bot API",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 # -------------------------------------------------------
 # 🔒 CORS Configuration
 # -------------------------------------------------------
-origins = [
-    "http://localhost:5173",
-    "http://localhost:8000",
-    "https://mini-app.362514.ir",
-    "https://coin.gold-trade.ir",
-    "http://87.107.110.68"
-]
+origins = _build_allowed_origins()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # موقت برای توسعه
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
