@@ -43,10 +43,35 @@ describe('JalaliDatePicker.vue', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('خرداد ۱۴۰۵')
+    expect(wrapper.get('.jalali-calendar-title').attributes('aria-label')).toBe('خرداد ۱۴۰۵')
     await findDay(wrapper, '۱۰').trigger('click')
 
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['1405/03/10'])
+  })
+
+  it('lets users jump directly by selecting Jalali month and year', async () => {
+    const wrapper = mount(JalaliDatePicker, {
+      props: {
+        modelValue: '2026-05-30',
+        valueType: 'gregorian',
+        inline: true,
+      },
+    })
+
+    const selects = wrapper.findAll('.jalali-calendar-select')
+    expect(selects).toHaveLength(2)
+
+    await selects[0]!.setValue('6')
+    await selects[1]!.setValue('1410')
+
+    expect(wrapper.text()).toContain('مهر')
+    expect(wrapper.text()).toContain('۱۴۱۰')
+
+    await findDay(wrapper, '۱').trigger('click')
+
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([
+      moment('1410/07/01', 'jYYYY/jMM/jDD').format('YYYY-MM-DD'),
+    ])
   })
 
   it('clears the current value from the footer action', async () => {
