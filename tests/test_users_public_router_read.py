@@ -113,10 +113,13 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=None),
         ), patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
-            new=AsyncMock(side_effect=[None, SimpleNamespace(owner_user_id=20)]),
+                new=AsyncMock(side_effect=lambda _db, user_id: SimpleNamespace(owner_user_id=20) if user_id == 91 else None),
         ), patch(
             "api.routers.users_public.build_allowed_customer_chat_targets",
             new=AsyncMock(return_value=[20, 44, 1]),
+        ), patch(
+            "api.routers.users_public.list_shared_group_accountant_ids_for_customer",
+            new=AsyncMock(return_value=[]),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await read_public_user(
@@ -146,10 +149,13 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=None),
         ), patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
-            new=AsyncMock(side_effect=[None, SimpleNamespace(owner_user_id=20)]),
+                new=AsyncMock(side_effect=lambda _db, user_id: SimpleNamespace(owner_user_id=20) if user_id == 91 else None),
         ), patch(
             "api.routers.users_public.build_allowed_customer_chat_targets",
             new=AsyncMock(return_value=[20, 44, 1]),
+        ), patch(
+            "api.routers.users_public.list_shared_group_accountant_ids_for_customer",
+            new=AsyncMock(return_value=[]),
         ), patch(
             "api.routers.users_public.list_active_accountants_for_owner",
             new=AsyncMock(return_value=[]),
@@ -313,7 +319,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(side_effect=[None, None]),
         ), patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
-            new=AsyncMock(return_value=relation),
+            new=AsyncMock(side_effect=lambda _db, user_id: relation if user_id == 91 else None),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await read_public_user(
@@ -352,7 +358,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(side_effect=[None, None]),
         ), patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
-            new=AsyncMock(return_value=relation),
+            new=AsyncMock(side_effect=lambda _db, user_id: relation if user_id == 91 else None),
         ):
             result = await read_public_user(
                 91,
@@ -395,7 +401,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(side_effect=[viewer_accountant_relation, None]),
         ), patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
-            new=AsyncMock(return_value=relation),
+            new=AsyncMock(side_effect=lambda _db, user_id: relation if user_id == 91 else None),
         ):
             result = await read_public_user(
                 91,
@@ -431,7 +437,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(side_effect=[None, None]),
         ), patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
-            new=AsyncMock(return_value=relation),
+            new=AsyncMock(side_effect=lambda _db, user_id: relation if user_id == 91 else None),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await read_public_user(
@@ -484,6 +490,57 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.customer_relations), 1)
         self.assertEqual(result.customer_relations[0].customer_user_id, 91)
         self.assertEqual(result.customer_relations[0].management_name, "مشتری ویژه")
+
+    async def test_read_public_user_returns_shared_group_accountant_profile_directly_for_customer_viewer(self):
+        accountant_user = SimpleNamespace(
+            id=44,
+            is_deleted=False,
+            account_name="acct44",
+            role=UserRole.STANDARD,
+            mobile_number="09124444444",
+            address="مشهد",
+            avatar_file_id=None,
+            created_at=__import__("datetime").datetime(2026, 1, 2),
+            trades_count=7,
+            last_seen_at=None,
+        )
+        owner_user = SimpleNamespace(
+            id=21,
+            is_deleted=False,
+            account_name="owner_principal",
+            role=UserRole.STANDARD,
+            mobile_number="09120000021",
+            address="تهران",
+            avatar_file_id=None,
+            created_at=__import__("datetime").datetime(2026, 1, 1),
+            trades_count=0,
+            last_seen_at=None,
+        )
+        relation = SimpleNamespace(owner_user=owner_user, relation_display_name="حسابدار گروه")
+
+        with patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(side_effect=[None, relation]),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=SimpleNamespace(owner_user_id=21)),
+        ), patch(
+            "api.routers.users_public.build_allowed_customer_chat_targets",
+            new=AsyncMock(return_value=[21, 44, 1]),
+        ), patch(
+            "api.routers.users_public.list_shared_group_accountant_ids_for_customer",
+            new=AsyncMock(return_value=[44]),
+        ):
+            result = await read_public_user(
+                44,
+                db=FakeDB(accountant_user),
+                current_user=SimpleNamespace(id=91, role=UserRole.STANDARD),
+            )
+
+        self.assertEqual(result.id, 44)
+        self.assertEqual(result.account_name, "acct44")
+        self.assertIsNone(result.resolved_from_accountant_id)
+        self.assertIsNone(result.highlight_accountant_user_id)
 
 
 if __name__ == "__main__":

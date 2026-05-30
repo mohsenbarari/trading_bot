@@ -10,6 +10,7 @@ from core.services.accountant_relation_service import get_active_accountant_rela
 from core.services.customer_relation_service import (
     build_allowed_customer_chat_targets,
     get_active_customer_relation_for_customer,
+    list_shared_group_accountant_ids_for_customer,
     list_active_customers_for_owner,
 )
 from models.customer_relation import CustomerRelation, CustomerRelationStatus
@@ -210,15 +211,20 @@ async def _ensure_customer_viewer_can_access_public_user(
     db: AsyncSession,
     current_user: User,
     target_user_id: int,
+    *,
+    current_customer_relation: CustomerRelation | None = None,
+    allowed_target_ids: set[int] | None = None,
 ) -> None:
     if target_user_id == current_user.id:
         return
 
-    current_customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
+    if current_customer_relation is None:
+        current_customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
     if current_customer_relation is None:
         return
 
-    allowed_target_ids = set(await build_allowed_customer_chat_targets(db, current_user.id))
+    if allowed_target_ids is None:
+        allowed_target_ids = set(await build_allowed_customer_chat_targets(db, current_user.id))
     if target_user_id not in allowed_target_ids:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -290,10 +296,14 @@ async def _resolve_public_search_rows(
     rows: list[User],
     *,
     current_user: User,
+    shared_group_accountant_ids: set[int] | None = None,
 ) -> list[schemas.PublicUserSearchResult]:
     user_ids = [user.id for user in rows if getattr(user, "id", None) is not None]
     if not user_ids:
         return []
+
+    if shared_group_accountant_ids is None:
+        shared_group_accountant_ids = set()
 
     viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
 
@@ -334,6 +344,13 @@ async def _resolve_public_search_rows(
     for user in rows:
         relation = relation_by_accountant_id.get(user.id)
         if relation and relation.owner_user and not relation.owner_user.is_deleted:
+            if user.id in shared_group_accountant_ids:
+                if user.id == current_user.id or user.id in seen_user_ids:
+                    continue
+                serialized_rows.append(_serialize_public_search_result(user))
+                seen_user_ids.add(user.id)
+                continue
+
             owner_user = relation.owner_user
             if owner_user.id == current_user.id or owner_user.id in seen_user_ids:
                 continue
@@ -385,8 +402,18 @@ async def search_public_users(
     current_user: User = Depends(get_current_user)
 ):
     """جستجوی عمومی بین کاربران سیستم بر اساس نام، نام کاربری یا شماره فیلتر شده"""
+    current_customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
+    shared_group_accountant_ids: set[int] = set()
+
     query = select(User).where(User.is_deleted == False, User.id != current_user.id)
-    query = query.where(_build_customer_public_visibility_filter(current_user))
+    if current_customer_relation is not None:
+        allowed_target_ids = await build_allowed_customer_chat_targets(db, current_user.id)
+        if not allowed_target_ids:
+            return []
+        shared_group_accountant_ids = set(await list_shared_group_accountant_ids_for_customer(db, current_user.id))
+        query = query.where(User.id.in_(allowed_target_ids))
+    else:
+        query = query.where(_build_customer_public_visibility_filter(current_user))
 
     if q:
         search_pattern = f"%{q}%"
@@ -402,7 +429,12 @@ async def search_public_users(
     query = query.order_by(User.id.desc()).limit(limit)
     result = await db.execute(query)
     users = result.scalars().all()
-    return await _resolve_public_search_rows(db, users, current_user=current_user)
+    return await _resolve_public_search_rows(
+        db,
+        users,
+        current_user=current_user,
+        shared_group_accountant_ids=shared_group_accountant_ids,
+    )
 
 
 @router.get("/{user_id}/project-users", response_model=List[schemas.ProjectUserDirectoryEntry])
@@ -438,9 +470,32 @@ async def read_public_user(
 ):
     """دریافت اطلاعات عمومی یک کاربر (قابل دسترسی برای همه کاربران لاگین شده)"""
     viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
+    current_customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
+    allowed_target_ids = (
+        set(await build_allowed_customer_chat_targets(db, current_user.id))
+        if current_customer_relation is not None
+        else None
+    )
+    shared_group_accountant_ids = (
+        set(await list_shared_group_accountant_ids_for_customer(db, current_user.id))
+        if current_customer_relation is not None
+        else set()
+    )
     relation = await get_active_accountant_relation_for_accountant(db, user_id)
     if relation and relation.owner_user and not relation.owner_user.is_deleted:
-        await _ensure_customer_viewer_can_access_public_user(db, current_user, user_id)
+        await _ensure_customer_viewer_can_access_public_user(
+            db,
+            current_user,
+            user_id,
+            current_customer_relation=current_customer_relation,
+            allowed_target_ids=allowed_target_ids,
+        )
+        if user_id in shared_group_accountant_ids:
+            accountant_user = await db.get(User, user_id)
+            if accountant_user is None or accountant_user.is_deleted:
+                raise HTTPException(status_code=404, detail="User not found")
+            return _serialize_public_user(accountant_user)
+
         accountant_relations = await _load_public_accountant_relation_summaries(db, relation.owner_user.id)
         customer_relations = []
         if _can_view_owner_customer_list(current_user, relation.owner_user.id):
@@ -478,7 +533,13 @@ async def read_public_user(
     user = await db.get(User, user_id)
     if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
-    await _ensure_customer_viewer_can_access_public_user(db, current_user, user_id)
+    await _ensure_customer_viewer_can_access_public_user(
+        db,
+        current_user,
+        user_id,
+        current_customer_relation=current_customer_relation,
+        allowed_target_ids=allowed_target_ids,
+    )
     accountant_relations = await _load_public_accountant_relation_summaries(db, user.id)
     customer_relations = []
     if _can_view_owner_customer_list(current_user, user.id):
