@@ -39,21 +39,21 @@
     </div>
 
     <!-- Selection Mode Bottom Bar -->
-    <div v-if="isSelectionMode" class="selection-bottom-bar">
-      <button v-if="canDeleteSelected" class="selection-action-btn delete" v-ripple @click="$emit('delete-selected')">
+    <div v-if="composerSurface.mode === 'selection'" class="selection-bottom-bar">
+      <button v-if="composerSurface.showDeleteAction" class="selection-action-btn delete" v-ripple @click="$emit('delete-selected')">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="3 6 5 6 21 6"></polyline>
           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
         </svg>
         <span>حذف</span>
       </button>
-      <button v-if="selectedMessages.length === 1" class="selection-action-btn" v-ripple @click="$emit('reply-selected')">
+      <button v-if="composerSurface.showReplyAction" class="selection-action-btn" v-ripple @click="$emit('reply-selected')">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
         </svg>
         <span>پاسخ</span>
       </button>
-      <button v-if="canCopySelected" class="selection-action-btn" v-ripple @click="$emit('copy-selected')">
+      <button v-if="composerSurface.showCopyAction" class="selection-action-btn" v-ripple @click="$emit('copy-selected')">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -70,15 +70,15 @@
     </div>
 
     <!-- Disabled Banner -->
-    <div v-else-if="isDeleted || isReadOnly" class="input-container disabled-banner">
-      <span class="disabled-text">{{ disabledBannerText }}</span>
+    <div v-else-if="composerSurface.mode === 'disabled'" class="input-container disabled-banner">
+      <span class="disabled-text">{{ composerSurface.disabledText }}</span>
     </div>
 
     <!-- Input Container -->
     <div v-else class="input-container">
       
       <!-- Recording Overlay state -->
-      <template v-if="isRecording">
+      <template v-if="composerSurface.mode === 'recording'">
         <!-- Send Button on the right -->
         <button 
           v-ripple
@@ -112,7 +112,7 @@
 
       <!-- Left side buttons (Only if not recording) -->
       <button 
-        v-if="!messageInput.trim() && !isRecording && !editingMessage && !disableRichComposer && props.allowVoiceRecording !== false"
+        v-if="composerSurface.showVoiceButton"
         v-ripple 
         class="voice-btn"
         @click="startVoiceRecording"
@@ -125,7 +125,7 @@
         </svg>
       </button>
 
-      <button v-if="!isRecording && !editingMessage && !disableRichComposer" v-ripple class="attach-btn" @click="handleToggleAttachment">
+      <button v-if="composerSurface.showAttachmentButton" v-ripple class="attach-btn" @click="handleToggleAttachment">
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
         </svg>
@@ -133,14 +133,14 @@
 
       <!-- Send Button -->
       <button 
-        v-if="!isRecording && (Boolean(messageInput.trim()) || Boolean(editingMessage))"
+        v-if="composerSurface.showSendButton"
         v-ripple
         class="send-btn-inline"
         :class="{ 'edit-mode': !!editingMessage }"
         @click="sendMessage" 
         @mousedown.prevent
         @touchstart.prevent="sendMessage"
-        :disabled="isSending || !canSubmit"
+        :disabled="isSending || !composerSurface.canSubmit"
       >
         <svg v-if="editingMessage" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#3390ec" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="20 6 9 17 4 12"></polyline>
@@ -153,7 +153,7 @@
 
       <!-- Text Input (Hide when recording) -->
       <textarea
-        v-show="!isRecording"
+        v-show="composerSurface.mode !== 'recording'"
         ref="messageInputRef"
         v-model="messageInput"
         rows="1"
@@ -170,7 +170,7 @@
 
       <!-- Emoji/Sticker Toggle -->
       <button
-        v-if="!isRecording"
+        v-if="composerSurface.showEmojiButton"
         class="emoji-btn"
         :class="{ 'is-active': isStickerPickerOpen }"
         v-ripple
@@ -266,6 +266,7 @@ import {
   MAX_STICKERS_PER_MESSAGE,
   splitTextGraphemes,
 } from '../../utils/emojiStickerCatalog'
+import { getMessengerComposerSurface } from '../../utils/messengerStage5ComposerOverlay'
 import EmojiStickerPicker from './EmojiStickerPicker.vue'
 
 const props = defineProps<{
@@ -396,9 +397,22 @@ const messageInput = computed({
   set: (value: string) => emit('update:modelValue', value)
 })
 
-const canSubmit = computed(() => Boolean(messageInput.value.trim()))
 const isStickerPickerOpen = computed(() => Boolean(props.stickerPickerOpen))
 const stickerCount = computed(() => countEmojiStickerOccurrences(messageInput.value))
+const composerSurface = computed(() => getMessengerComposerSurface({
+  text: messageInput.value,
+  isSelectionMode: props.isSelectionMode,
+  selectedMessagesCount: props.selectedMessages.length,
+  canDeleteSelected: props.canDeleteSelected,
+  canCopySelected: props.canCopySelected,
+  isDeleted: props.isDeleted,
+  isReadOnly: props.isReadOnly,
+  readOnlyBannerText: props.readOnlyBannerText,
+  isRecording: isRecording.value,
+  isEditing: Boolean(props.editingMessage),
+  disableRichComposer: props.disableRichComposer,
+  allowVoiceRecording: props.allowVoiceRecording,
+}))
 // Numeric target height for the picker panel (used as the locked keyboard slot size).
 // Prefers the env(keyboard-inset-height) probe value when available — that is the
 // SAME source the browser will animate into the picker via env(), guaranteeing the
@@ -490,13 +504,6 @@ const summarizeMessage = (message: any | null) => {
 
 const replyBannerText = computed(() => summarizeMessage(props.replyingToMessage))
 const editingBannerText = computed(() => summarizeMessage(props.editingMessage))
-const disabledBannerText = computed(() => {
-  if (props.isDeleted) {
-    return 'امکان ارسال پیام به این کاربر وجود ندارد.'
-  }
-  return props.readOnlyBannerText || 'ارسال پیام در این فضا غیرفعال است.'
-})
-
 function clampSelectionToLength(value: string) {
   composerSelectionStart.value = Math.min(composerSelectionStart.value, value.length)
   composerSelectionEnd.value = Math.min(composerSelectionEnd.value, value.length)
@@ -905,6 +912,7 @@ defineExpose({
       isChatDebugEnabled,
       debugTrail,
       debugState,
+      composerSurface,
     },
     captureDebugState,
     syncDebugWindowHandle,
