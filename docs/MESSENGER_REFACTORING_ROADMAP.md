@@ -1,7 +1,7 @@
 # Messenger Refactoring Roadmap
 
 > Date: 2026-05-30  
-> Status: Stage 6 media/realtime polish boundary implemented; legacy Messenger remains the default
+> Status: Stage 7 rollout/readiness gate implemented; legacy Messenger remains the default and refactor preview remains opt-in
 > Scope: In-app Messenger frontend and the minimum backend/runtime seams needed to make it fast, stable, standard, dynamic, and user-friendly.
 
 ## Goal
@@ -16,6 +16,7 @@ Rebuild the Messenger experience into a standard, cohesive, responsive, and poli
 - Stage 4 executive phase is implemented for conversation/timeline performance: conversation ordering and pin-order calculations now live behind a typed helper, the conversation list renders through a bounded progressive window, and timeline render-budget metrics identify future virtualization candidates without changing the risky message DOM contract.
 - Stage 5 executive phase is implemented for composer/overlay UX: composer surface decisions and overlay arbitration now live behind a typed, focused-tested pure helper while the existing `ChatInputBar.vue` and `ChatView.vue` production path remains active.
 - Stage 6 executive phase is implemented for media/realtime polish: realtime activity normalization, relation-safe activity labels, visible-conversation runtime event guards, and media download progress patches now live behind a typed, focused-tested pure helper while the existing `useChatWebSocket.ts` and `useChatMedia.ts` runtime paths remain active.
+- Stage 7 executive phase is implemented for rollout readiness: the Messenger surface now exposes a typed legacy-vs-refactor rollout contract, focused tests prove old-version legacy default and new-version refactor preview routing, and the readiness helper explicitly separates technical rollout safety from legacy retirement approval.
 - No real Messenger UI replacement is active by default. The existing `ChatView.vue` path remains the production path unless `messenger_ui_version=refactor` or `VITE_MESSENGER_REFACTOR_ENABLED=true` explicitly enables the shell.
 
 ## Current Baseline
@@ -93,6 +94,21 @@ The Stage 6 executive slice makes media progress state and realtime activity pol
 - Focused coverage lives in `messengerStage6MediaRealtime.test.ts`, `useChatWebSocket.test.ts`, and `useChatMedia.test.ts`.
 
 Rollback remains local: revert the Stage 6 utility/test plus the small `useChatWebSocket.ts` and `useChatMedia.ts` wiring patches. No backend, API, schema, lightbox component, attachment editor, map, cropper, upload session, cache schema, or notification runtime contract changed.
+
+## Stage 7 Rollout/Production Readiness Contract
+
+The Stage 7 executive slice closes the seven-step refactor track by making rollout state explicit and testable. It does not retire the legacy Messenger, because the roadmap's full Definition of Done still requires measured improvement on target devices and explicit user acceptance before legacy removal.
+
+- `frontend/src/utils/messengerStage7Rollout.ts` owns the rollout surface contract for `legacy-default` versus `refactor-preview`, including the guaranteed rollback target of `legacy`.
+- The same helper evaluates the roadmap gates separately: technical rollout readiness can pass while legacy retirement remains blocked by missing measured-improvement evidence or missing manual acceptance.
+- `MessengerView.vue` now exposes `data-messenger-ui-version` and `data-messenger-rollout-mode` on the Messenger root, giving unit/browser smoke tests a stable old/new version assertion point without changing the visual UI.
+- Focused coverage lives in `messengerStage7Rollout.test.ts`, `messengerRefactor.test.ts`, and `MessengerView.test.ts`. The final Stage 7 old/new test result is:
+  - old version: `legacy` remains the default and mounts the existing `ChatView.vue` path.
+  - new version: explicit `messenger_ui_version=refactor` mounts the reversible `MessengerRefactorShell` preview path.
+
+Seven-step executive track status: complete. Full roadmap status: not yet complete for legacy retirement; legacy must stay available until measured production improvement and explicit user acceptance are recorded.
+
+Rollback remains local and immediate: set `messenger_ui_version=legacy`, clear the refactor flag, or revert the Stage 7 utility/test plus the small `MessengerView.vue` metadata/decision patch. No backend, API, schema, message runtime, upload runtime, or production default changed.
 
 ## Non-Negotiable Safety Rules
 
