@@ -126,8 +126,6 @@ const isAlbumActionSelectionMode = computed(() => isAlbumDownloadSelectionMode.v
 const longPressTimer = ref<any>(null)
 const selectionBackStateActive = ref(false)
 let clearingSelectionFromBack = false
-const contextMenuBackStateActive = ref(false)
-let closingContextMenuFromBack = false
 
 // Search State
 const isSearchActive = ref(false)
@@ -1815,6 +1813,25 @@ const closeContextMenu = () => {
   contextMenu.value = { visible: false, x: 0, y: 0, message: null, messageIds: [] }
 };
 
+function closeCurrentOverlayThen(closeCurrent: () => void, openNext: () => void) {
+  closeCurrent()
+  void nextTick(() => {
+    openNext()
+  })
+}
+
+function closeTransientActionSurfacesForNavigation() {
+  if (contextMenu.value.visible) {
+    closeContextMenu()
+  }
+  if (showForwardModal.value) {
+    closeForwardModal()
+  }
+  if (lightboxMedia.value) {
+    closeLightbox()
+  }
+}
+
 const handleMessageClick = (event: Event, msg: Message) => {
     if (isAlbumActionSelectionMode.value) {
       event.preventDefault()
@@ -2478,13 +2495,15 @@ const handleForwardMessage = () => {
   const messageIds = normalizeMessageIds(contextMenu.value.messageIds)
 
   if (msg && messageIds.length > 1) {
-    startAlbumForwardSelection(msg, messageIds)
-    closeContextMenu()
+    closeCurrentOverlayThen(closeContextMenu, () => {
+      startAlbumForwardSelection(msg, messageIds)
+    })
     return
   }
 
-  openForwardModalForIds(contextMenu.value.messageIds)
-  closeContextMenu()
+  closeCurrentOverlayThen(closeContextMenu, () => {
+    openForwardModalForIds(messageIds)
+  })
 }
 
 function handleForwardSelectedAlbumMessages() {
@@ -2521,13 +2540,15 @@ function handleLightboxReply(msgId: number) {
   const msg = messages.value.find(message => message.id === msgId)
   if (!msg) return
 
-  handleReply(msg)
-  closeLightbox()
+  closeCurrentOverlayThen(closeLightbox, () => {
+    handleReply(msg)
+  })
 }
 
 function handleLightboxForward(msgId: number) {
-  openForwardModalForIds([msgId])
-  closeLightbox()
+  closeCurrentOverlayThen(closeLightbox, () => {
+    openForwardModalForIds([msgId])
+  })
 }
 
 async function handleLightboxShare(msgId: number) {
@@ -2604,6 +2625,8 @@ function navigateToPublicProfile(target?: {
   if (normalizedHighlightRelationDisplayName) {
     query.highlight_accountant_relation_display_name = normalizedHighlightRelationDisplayName
   }
+
+  closeTransientActionSurfacesForNavigation()
 
   window.setTimeout(() => {
     void router.push({
@@ -2777,27 +2800,6 @@ watch(isSelectionMode, (isEnabled) => {
   }
 })
 
-watch(() => contextMenu.value.visible, (isVisible) => {
-  if (isVisible) {
-    if (!contextMenuBackStateActive.value) {
-      contextMenuBackStateActive.value = true
-      pushBackState(() => {
-        closingContextMenuFromBack = true
-        closeContextMenu()
-        closingContextMenuFromBack = false
-      })
-    }
-    return
-  }
-
-  if (contextMenuBackStateActive.value) {
-    contextMenuBackStateActive.value = false
-    if (!closingContextMenuFromBack) {
-      popBackState()
-    }
-  }
-})
-
 watch(showAttachmentMenu, (isOpen) => {
   if (isOpen) {
     applyComposerOverlayAction({ type: 'close_sticker' })
@@ -2828,6 +2830,10 @@ watch(showNewChatModal, (isOpen) => {
 
 bindOverlayBackState(() => showForwardModal.value, () => {
   closeForwardModal()
+})
+
+bindOverlayBackState(() => contextMenu.value.visible, () => {
+  closeContextMenu()
 })
 
 bindOverlayBackState(() => showStickerPicker.value, () => {
@@ -2969,6 +2975,7 @@ defineExpose({
       showScrollButton,
       unreadNewMessagesCount,
       contextMenu,
+      lightboxMedia,
       selectedMessages,
       selectionModePurpose,
       activeAlbumSelectionId,

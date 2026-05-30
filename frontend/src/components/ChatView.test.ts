@@ -23,6 +23,7 @@ const chatViewMocks = vi.hoisted(() => ({
   cancelUploadMock: vi.fn(),
   setLightboxIndexMock: vi.fn(),
   closeLightboxMock: vi.fn(),
+  lightboxMediaRef: null as any,
   cancelDocumentDownloadMock: vi.fn(),
   cancelMediaDownloadMock: vi.fn(),
   cancelTextMessageMock: vi.fn(),
@@ -113,19 +114,30 @@ vi.mock('../composables/chat/useChatMessages', () => ({
 vi.mock('../composables/chat/useChatMedia', async () => {
   const { ref } = await import('vue')
   return {
-    useChatMedia: () => ({
-      imageCache: ref(chatViewMocks.imageCacheState),
-      scheduleMediaHydration: chatViewMocks.scheduleMediaHydrationMock,
-      downloadMedia: chatViewMocks.downloadMediaMock,
-      lightboxMedia: ref(null),
-      cancelUpload: chatViewMocks.cancelUploadMock,
-      cancelDocumentDownload: chatViewMocks.cancelDocumentDownloadMock,
-      cancelMediaDownload: chatViewMocks.cancelMediaDownloadMock,
-      handleMediaClick: chatViewMocks.openMediaLightboxMock,
-      setLightboxIndex: chatViewMocks.setLightboxIndexMock,
-      closeLightbox: chatViewMocks.closeLightboxMock,
-      handleMediaUploadWrapper: chatViewMocks.handleMediaUploadWrapperMock,
-    }),
+    useChatMedia: () => {
+      const lightboxMedia = ref<any>(null)
+      chatViewMocks.lightboxMediaRef = lightboxMedia
+
+      return {
+        imageCache: ref(chatViewMocks.imageCacheState),
+        scheduleMediaHydration: chatViewMocks.scheduleMediaHydrationMock,
+        downloadMedia: chatViewMocks.downloadMediaMock,
+        lightboxMedia,
+        cancelUpload: chatViewMocks.cancelUploadMock,
+        cancelDocumentDownload: chatViewMocks.cancelDocumentDownloadMock,
+        cancelMediaDownload: chatViewMocks.cancelMediaDownloadMock,
+        handleMediaClick: (message: any) => {
+          chatViewMocks.openMediaLightboxMock(message)
+          lightboxMedia.value = { message }
+        },
+        setLightboxIndex: chatViewMocks.setLightboxIndexMock,
+        closeLightbox: () => {
+          chatViewMocks.closeLightboxMock()
+          lightboxMedia.value = null
+        },
+        handleMediaUploadWrapper: chatViewMocks.handleMediaUploadWrapperMock,
+      }
+    },
   }
 })
 
@@ -198,6 +210,7 @@ describe('ChatView.vue', () => {
     chatViewMocks.cancelUploadMock.mockReset()
     chatViewMocks.setLightboxIndexMock.mockReset()
     chatViewMocks.closeLightboxMock.mockReset()
+    chatViewMocks.lightboxMediaRef = null
     chatViewMocks.cancelDocumentDownloadMock.mockReset()
     chatViewMocks.cancelMediaDownloadMock.mockReset()
     chatViewMocks.cancelTextMessageMock.mockReset()
@@ -756,6 +769,84 @@ describe('ChatView.vue', () => {
     expect(hooks.state.showAdminBroadcastModal.value).toBe(false)
 
     wrapper.unmount()
+  })
+
+  it('closes current action surfaces before opening forward flows or leaving for public profile', async () => {
+    vi.useFakeTimers()
+    const message = buildMessage({ id: 77, content: 'forward me' })
+    chatViewMocks.messagesSeed = [message]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    })
+    await flushPromises()
+
+    const hooks = getChatViewTestHooks(wrapper)
+
+    hooks.state.contextMenu.value = {
+      visible: true,
+      message,
+      messageIds: [77],
+      x: 12,
+      y: 18,
+    }
+    await flushPromises()
+
+    chatViewMocks.popBackStateMock.mockClear()
+    chatViewMocks.pushBackStateMock.mockClear()
+    hooks.handleForwardMessage()
+    await flushPromises()
+
+    expect(hooks.state.contextMenu.value.visible).toBe(false)
+    expect(hooks.state.showForwardModal.value).toBe(true)
+    expect(chatViewMocks.popBackStateMock.mock.invocationCallOrder[0]).toBeLessThan(
+      chatViewMocks.pushBackStateMock.mock.invocationCallOrder[0],
+    )
+
+    hooks.closeForwardModal()
+    await flushPromises()
+
+    hooks.state.lightboxMedia.value = { message }
+    await flushPromises()
+
+    chatViewMocks.popBackStateMock.mockClear()
+    chatViewMocks.pushBackStateMock.mockClear()
+    hooks.handleLightboxForward(77)
+    await flushPromises()
+
+    expect(hooks.state.lightboxMedia.value).toBeNull()
+    expect(hooks.state.showForwardModal.value).toBe(true)
+    expect(chatViewMocks.popBackStateMock.mock.invocationCallOrder[0]).toBeLessThan(
+      chatViewMocks.pushBackStateMock.mock.invocationCallOrder[0],
+    )
+
+    hooks.state.contextMenu.value = {
+      visible: true,
+      message,
+      messageIds: [77],
+      x: 0,
+      y: 0,
+    }
+    hooks.state.lightboxMedia.value = { message }
+    await flushPromises()
+
+    chatViewMocks.routerPushMock.mockClear()
+    hooks.openPublicProfile({ id: 91, account_name: 'owner-91' })
+    await vi.runAllTimersAsync()
+    await flushPromises()
+
+    expect(hooks.state.contextMenu.value.visible).toBe(false)
+    expect(hooks.state.showForwardModal.value).toBe(false)
+    expect(hooks.state.lightboxMedia.value).toBeNull()
+    expect(chatViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'public-profile',
+      params: { id: '91' },
+      query: { account_name: 'owner-91' },
+    })
+
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 
   it('rolls back optimistic reactions when the reaction request fails', async () => {

@@ -98,6 +98,10 @@ function seedBenchmarkFixture(scenarios) {
       scenarioId: scenario.id,
       label: scenario.label,
       surfaceIds: scenario.surface_ids,
+      scenarioType: scenario.scenario_type ?? 'direct',
+      searchTerm: typeof scenario.search_term === 'string' ? scenario.search_term : null,
+      searchMatchEvery: Number(scenario.search_match_every ?? 0),
+      switchIterations: Number(scenario.switch_iterations ?? 0),
     }
     return accumulator
   }, {})
@@ -108,10 +112,15 @@ function seedBenchmarkFixture(scenarios) {
     'import uuid',
     'from datetime import datetime, timedelta, timezone',
     '',
+    'from sqlalchemy import select',
+    '',
     'from core.db import AsyncSessionLocal',
-    'from core.enums import MessageType',
+    'from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType, MessageType',
     'from core.security import create_access_token, create_refresh_token',
+    'from core.services.chat_room_service import ensure_mandatory_channel_rollout',
     'from core.services.session_service import hash_token',
+    'from models.chat import Chat',
+    'from models.chat_member import ChatMember',
     'from models.conversation import Conversation',
     'from models.message import Message',
     'from models.session import Platform, UserSession',
@@ -124,13 +133,13 @@ function seedBenchmarkFixture(scenarios) {
     "    seed = (int(run_id[:8], 16) + offset) % 1000000000",
     "    return f\"09{seed:09d}\"",
     '',
-    'async def make_user(db, label, offset):',
+    'async def make_user(db, label, offset, role=UserRole.STANDARD):',
     '    user = User(',
     '        account_name=f"bench_{label}_{run_id}_{offset}",',
     '        mobile_number=make_mobile(offset),',
     '        full_name=f"Benchmark {label} {offset}",',
     "        address='Messenger benchmark fixture',",
-    '        role=UserRole.STANDARD,',
+    '        role=role,',
     '        has_bot_access=True,',
     '        max_sessions=1,',
     '    )',
@@ -155,7 +164,49 @@ function seedBenchmarkFixture(scenarios) {
     '    access_token = create_access_token(subject=str(user.id), session_id=str(session.id))',
     '    return access_token, refresh_token',
     '',
-    'async def create_thread(db, actor, peer, message_count, label, filler_length, minute_offset):',
+    'def build_message_content(label, index, filler, search_term=None, search_match_every=0):',
+    '    content = f"{label} benchmark message {index + 1:04d} {filler}"',
+    '    if search_term and search_match_every > 0 and index % search_match_every == 0:',
+    '        content = f"{content} {search_term}"',
+    '    return content',
+    '',
+    'async def mark_room_members_read(db, chat_id, user_ids, message_id, message_created_at):',
+    '    if not user_ids:',
+    '        return',
+    '    result = await db.execute(select(ChatMember).where(ChatMember.chat_id == chat_id, ChatMember.user_id.in_(list(user_ids))))',
+    '    for member in result.scalars().all():',
+    '        member.last_read_message_id = message_id',
+    '        member.last_read_at = message_created_at',
+    '        member.updated_at = message_created_at',
+    '',
+    'async def append_room_messages(db, *, chat, senders, label, filler_length, minute_offset, message_count, search_term=None, search_match_every=0, mark_read_user_ids=None):',
+    '    if message_count <= 0 or not senders:',
+    '        return None',
+    '    created_base = datetime.now(timezone.utc) - timedelta(days=1, minutes=minute_offset)',
+    "    filler = 'y' * filler_length",
+    '    messages = []',
+    '    for index in range(message_count):',
+    '        sender = senders[index % len(senders)]',
+    '        content = build_message_content(label, index, filler, search_term=search_term, search_match_every=search_match_every)',
+    '        messages.append(Message(',
+    '            chat_id=chat.id,',
+    '            sender_id=sender.id,',
+    '            receiver_id=sender.id,',
+    '            content=content,',
+    '            message_type=MessageType.TEXT,',
+    '            is_read=True,',
+    '            created_at=created_base + timedelta(seconds=index * 15),',
+    '        ))',
+    '    db.add_all(messages)',
+    '    await db.flush()',
+    '    last_message = messages[-1]',
+    '    chat.last_message_id = last_message.id',
+    '    chat.last_message_at = last_message.created_at',
+    '    chat.updated_at = last_message.created_at',
+    '    await mark_room_members_read(db, chat.id, mark_read_user_ids or [], last_message.id, last_message.created_at)',
+    '    return last_message',
+    '',
+    'async def create_thread(db, actor, peer, message_count, label, filler_length, minute_offset, search_term=None, search_match_every=0):',
     '    user1_id, user2_id = sorted([actor.id, peer.id])',
     '    conversation = Conversation(',
     '        user1_id=user1_id,',
@@ -172,7 +223,7 @@ function seedBenchmarkFixture(scenarios) {
     '    for index in range(message_count):',
     '        sender = actor if index % 2 else peer',
     '        receiver = peer if sender.id == actor.id else actor',
-    '        content = f"{label} benchmark message {index + 1:04d} {filler}"',
+    '        content = build_message_content(label, index, filler, search_term=search_term, search_match_every=search_match_every)',
     '        messages.append(Message(',
     '            sender_id=sender.id,',
     '            receiver_id=receiver.id,',
@@ -187,7 +238,61 @@ function seedBenchmarkFixture(scenarios) {
     '    conversation.last_message_at = messages[-1].created_at',
     '    return conversation, messages[-1]',
     '',
-    'async def seed_scenario(db, scenario_key, scenario, offset):',
+    'async def create_room(db, *, chat_type, title, members, admin_ids, label, filler_length, minute_offset, message_count=1, max_members=None, is_system=False, is_mandatory=False, search_term=None, search_match_every=0):',
+    '    creator = members[0] if members else None',
+    '    now = datetime.now(timezone.utc)',
+    '    chat = Chat(',
+    '        type=chat_type,',
+    '        title=title,',
+    "        description='Messenger benchmark room',",
+    '        created_by_id=creator.id if creator is not None else None,',
+    '        is_system=is_system,',
+    '        is_mandatory=is_mandatory,',
+    '        max_members=max_members,',
+    '        updated_at=now,',
+    '    )',
+    '    db.add(chat)',
+    '    await db.flush()',
+    '    seen_user_ids = set()',
+    '    member_ids = []',
+    '    for member in members:',
+    '        if member.id in seen_user_ids:',
+    '            continue',
+    '        seen_user_ids.add(member.id)',
+    '        member_ids.append(member.id)',
+    '        db.add(ChatMember(',
+    '            chat_id=chat.id,',
+    '            user_id=member.id,',
+    '            role=ChatMemberRole.ADMIN if member.id in admin_ids else ChatMemberRole.MEMBER,',
+    '            membership_status=ChatMembershipStatus.ACTIVE,',
+    '            joined_at=now,',
+    '            left_at=None,',
+    '            updated_at=now,',
+    '        ))',
+    '    await db.flush()',
+    '    senders = [member for member in members if member.id in admin_ids] or list(members)',
+    '    last_message = await append_room_messages(',
+    '        db,',
+    '        chat=chat,',
+    '        senders=senders,',
+    '        label=label,',
+    '        filler_length=filler_length,',
+    '        minute_offset=minute_offset,',
+    '        message_count=message_count,',
+    '        search_term=search_term,',
+    '        search_match_every=search_match_every,',
+    '        mark_read_user_ids=member_ids,',
+    '    )',
+    '    return chat, last_message',
+    '',
+    'def room_target(chat, kind):',
+    '    return {',
+    "        'kind': kind,",
+    "        'routeUserId': -chat.id,",
+    "        'title': chat.title,",
+    '    }',
+    '',
+    'async def seed_direct_scenario(db, scenario_key, scenario, offset):',
     '    actor = await make_user(db, f"{scenario_key}_actor", offset)',
     '    access_token, refresh_token = await attach_session(db, actor, scenario_key)',
     '    active_peer = await make_user(db, f"{scenario_key}_active_peer", offset + 1)',
@@ -199,8 +304,9 @@ function seedBenchmarkFixture(scenarios) {
     '        scenario_key,',
     '        int(scenario["fillerLength"]),',
     '        offset,',
+    '        search_term=scenario.get("searchTerm"),',
+    '        search_match_every=int(scenario.get("searchMatchEvery") or 0),',
     '    )',
-    '',
     '    for peer_index in range(max(0, int(scenario["conversationCount"]) - 1)):',
     '        peer = await make_user(db, f"{scenario_key}_peer_{peer_index}", offset + 10 + peer_index)',
     '        await create_thread(',
@@ -212,7 +318,6 @@ function seedBenchmarkFixture(scenarios) {
     '            10,',
     '            offset + 100 + peer_index,',
     '        )',
-    '',
     '    return {',
     "        'actor': {",
     "            'userId': actor.id,",
@@ -220,11 +325,147 @@ function seedBenchmarkFixture(scenarios) {
     "            'accessToken': access_token,",
     "            'refreshToken': refresh_token,",
     '        },',
-    "        'activePeerId': active_peer.id,",
-    "        'activePeerName': active_peer.account_name,",
+    "        'scenarioType': scenario.get('scenarioType', 'direct'),",
+    "        'activeTargetId': active_peer.id,",
+    "        'activeTargetName': active_peer.account_name,",
+    "        'activeMessagesApiPath': f'/api/chat/messages/{active_peer.id}',",
+    "        'conversationCount': int(scenario['conversationCount']),",
+    "        'activeMessageCount': int(scenario['activeMessageCount']),",
+    "        'searchTerm': scenario.get('searchTerm'),",
+    '    }',
+    '',
+    'async def seed_boot_empty_scenario(db, scenario_key, scenario, offset):',
+    '    actor = await make_user(db, f"{scenario_key}_actor", offset)',
+    '    access_token, refresh_token = await attach_session(db, actor, scenario_key)',
+    '    admin = await make_user(db, f"{scenario_key}_admin", offset + 1, role=UserRole.SUPER_ADMIN)',
+    '    await attach_session(db, admin, f"{scenario_key}_admin")',
+    '    mandatory_chat = await ensure_mandatory_channel_rollout(db, users=[admin, actor])',
+    '    await append_room_messages(',
+    '        db,',
+    '        chat=mandatory_chat,',
+    '        senders=[admin],',
+    '        label=f"{scenario_key}_mandatory",',
+    '        filler_length=int(scenario["fillerLength"]),',
+    '        minute_offset=offset,',
+    '        message_count=int(scenario["activeMessageCount"]),',
+    '        mark_read_user_ids=[admin.id, actor.id],',
+    '    )',
+    '    return {',
+    "        'actor': {",
+    "            'userId': actor.id,",
+    "            'accountName': actor.account_name,",
+    "            'accessToken': access_token,",
+    "            'refreshToken': refresh_token,",
+    '        },',
+    "        'scenarioType': 'boot_empty',",
+    "        'activeTargetId': -mandatory_chat.id,",
+    "        'activeTargetName': mandatory_chat.title,",
+    "        'activeMessagesApiPath': f'/api/chat/rooms/{mandatory_chat.id}/messages',",
     "        'conversationCount': int(scenario['conversationCount']),",
     "        'activeMessageCount': int(scenario['activeMessageCount']),",
     '    }',
+    '',
+    'async def seed_room_mix_scenario(db, scenario_key, scenario, offset):',
+    '    actor = await make_user(db, f"{scenario_key}_actor", offset)',
+    '    access_token, refresh_token = await attach_session(db, actor, scenario_key)',
+    '    active_peer = await make_user(db, f"{scenario_key}_active_peer", offset + 1)',
+    '    active_peer_access, _ = await attach_session(db, active_peer, f"{scenario_key}_active_peer")',
+    '    await create_thread(',
+    '        db,',
+    '        actor,',
+    '        active_peer,',
+    '        int(scenario["activeMessageCount"]),',
+    '        scenario_key,',
+    '        int(scenario["fillerLength"]),',
+    '        offset,',
+    '    )',
+    '    mandatory_admin = await make_user(db, f"{scenario_key}_mandatory_admin", offset + 2, role=UserRole.SUPER_ADMIN)',
+    '    await attach_session(db, mandatory_admin, f"{scenario_key}_mandatory_admin")',
+    '    mandatory_chat = await ensure_mandatory_channel_rollout(db, users=[mandatory_admin, actor])',
+    '    await append_room_messages(',
+    '        db,',
+    '        chat=mandatory_chat,',
+    '        senders=[mandatory_admin],',
+    '        label=f"{scenario_key}_mandatory",',
+    '        filler_length=10,',
+    '        minute_offset=offset + 10,',
+    '        message_count=2,',
+    '        mark_read_user_ids=[mandatory_admin.id, actor.id],',
+    '    )',
+    '    group_sender = await make_user(db, f"{scenario_key}_group_sender", offset + 3)',
+    '    group_sender_access, _ = await attach_session(db, group_sender, f"{scenario_key}_group_sender")',
+    '    group_room, _ = await create_room(',
+    '        db,',
+    '        chat_type=ChatType.GROUP,',
+    '        title=f"{scenario_key} group room",',
+    '        members=[actor, active_peer, group_sender],',
+    '        admin_ids={actor.id, group_sender.id},',
+    '        label=f"{scenario_key}_group",',
+    '        filler_length=12,',
+    '        minute_offset=offset + 20,',
+    '        message_count=5,',
+    '        max_members=200,',
+    '    )',
+    '    channel_admin = await make_user(db, f"{scenario_key}_channel_admin", offset + 4)',
+    '    channel_admin_access, _ = await attach_session(db, channel_admin, f"{scenario_key}_channel_admin")',
+    '    channel_room, _ = await create_room(',
+    '        db,',
+    '        chat_type=ChatType.CHANNEL,',
+    '        title=f"{scenario_key} channel room",',
+    '        members=[channel_admin, actor, active_peer],',
+    '        admin_ids={channel_admin.id},',
+    '        label=f"{scenario_key}_channel",',
+    '        filler_length=12,',
+    '        minute_offset=offset + 30,',
+    '        message_count=4,',
+    '    )',
+    '    base_conversation_count = 4',
+    '    for peer_index in range(max(0, int(scenario["conversationCount"]) - base_conversation_count)):',
+    '        peer = await make_user(db, f"{scenario_key}_peer_{peer_index}", offset + 50 + peer_index)',
+    '        await create_thread(',
+    '            db,',
+    '            actor,',
+    '            peer,',
+    '            1,',
+    '            f"{scenario_key}_list_{peer_index}",',
+    '            10,',
+    '            offset + 100 + peer_index,',
+    '        )',
+    '    return {',
+    "        'actor': {",
+    "            'userId': actor.id,",
+    "            'accountName': actor.account_name,",
+    "            'accessToken': access_token,",
+    "            'refreshToken': refresh_token,",
+    '        },',
+    "        'scenarioType': scenario.get('scenarioType', 'realtime_stress'),",
+    "        'activeTargetId': active_peer.id,",
+    "        'activeTargetName': active_peer.account_name,",
+    "        'activeMessagesApiPath': f'/api/chat/messages/{active_peer.id}',",
+    "        'conversationCount': int(scenario['conversationCount']),",
+    "        'activeMessageCount': int(scenario['activeMessageCount']),",
+    "        'realtimeBurst': {",
+    "            'directSenderToken': active_peer_access,",
+    "            'groupSenderToken': group_sender_access,",
+    "            'groupChatId': group_room.id,",
+    "            'channelSenderToken': channel_admin_access,",
+    "            'channelChatId': channel_room.id,",
+    '        },',
+    "        'switchTargets': [",
+    "            {'kind': 'direct', 'routeUserId': active_peer.id, 'title': active_peer.account_name},",
+    "            room_target(group_room, 'group'),",
+    "            room_target(channel_room, 'channel'),",
+    "            room_target(mandatory_chat, 'channel'),",
+    '        ],',
+    '    }',
+    '',
+    'async def seed_scenario(db, scenario_key, scenario, offset):',
+    '    scenario_type = scenario.get("scenarioType") or "direct"',
+    '    if scenario_type == "boot_empty":',
+    '        return await seed_boot_empty_scenario(db, scenario_key, scenario, offset)',
+    '    if scenario_type in {"realtime_stress", "long_session"}:',
+    '        return await seed_room_mix_scenario(db, scenario_key, scenario, offset)',
+    '    return await seed_direct_scenario(db, scenario_key, scenario, offset)',
     '',
     'async def main():',
     '    async with AsyncSessionLocal() as session:',
@@ -296,6 +537,12 @@ function serveDist(version, backendHost, backendPort) {
         headers: req.headers,
       })
       proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => {
+        const closeSockets = () => {
+          if (!socket.destroyed) socket.destroy()
+          if (!proxySocket.destroyed) proxySocket.destroy()
+        }
+        proxySocket.on('error', closeSockets)
+        socket.on('error', closeSockets)
         socket.write(
           `HTTP/1.1 101 Switching Protocols\r\n${Object.entries(proxyRes.headers)
             .map(([key, value]) => `${key}: ${value}`)
@@ -387,7 +634,247 @@ function summarizeApiTimings(timings, matcher) {
   return Number((total / matches.length).toFixed(1))
 }
 
-async function runScenario(browser, version, scenario, fixture, browserConfig) {
+async function postJson(url, token, body) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`${response.status} ${text}`)
+  }
+  const responseContentType = response.headers.get('content-type') ?? ''
+  if (responseContentType.includes('application/json')) {
+    return response.json()
+  }
+  return response.text()
+}
+
+async function waitForConversationList(page) {
+  await page.locator('.conversation-list-wrapper').waitFor({ timeout: 60000 })
+  await page.locator('.conversation-card, .conversation-item').first().waitFor({ timeout: 60000 })
+}
+
+async function waitForConversationListReady(page, timeoutMs = 15000) {
+  const wrapperReady = await page
+    .locator('.conversation-list-wrapper')
+    .waitFor({ timeout: timeoutMs })
+    .then(() => true)
+    .catch(() => false)
+  if (!wrapperReady) {
+    return false
+  }
+  return page
+    .locator('.conversation-card, .conversation-item')
+    .first()
+    .waitFor({ timeout: timeoutMs })
+    .then(() => true)
+    .catch(() => false)
+}
+
+async function waitForRoomReady(page) {
+  await page.locator('.messages-container').waitFor({ timeout: 60000 })
+  await page.locator('.message-bubble, .message-row').first().waitFor({ timeout: 60000 })
+}
+
+async function waitForCountAtLeast(page, selector, minimum, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const count = await page.locator(selector).count().catch(() => 0)
+    if (count >= minimum) {
+      return true
+    }
+    await page.waitForTimeout(250).catch(() => null)
+  }
+  return false
+}
+
+async function backToConversationList(page, baseUrl) {
+  const backButton = page.locator('.chat-header .back-btn').first()
+  if (await backButton.count()) {
+    await backButton.click().catch(() => null)
+    const listReady = await waitForConversationListReady(page, 10000)
+    if (listReady && !page.url().includes('/chat?user_id=')) {
+      return
+    }
+  }
+  await page.goto(`${baseUrl}/chat`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await waitForConversationListReady(page, 15000).catch(() => null)
+}
+
+async function openConversationFromList(page, baseUrl, target) {
+  const locator = page
+    .locator('.conversation-card, .conversation-item')
+    .filter({ hasText: target.title })
+    .first()
+  if (await locator.count()) {
+    await locator.scrollIntoViewIfNeeded().catch(() => null)
+    await locator.click({ timeout: 30000 }).catch(() => null)
+    if (page.url().includes('/chat?user_id=')) {
+      const ready = await waitForRoomReady(page).then(() => true).catch(() => false)
+      if (ready) {
+        return true
+      }
+    }
+  }
+  const navigated = await page
+    .goto(
+      `${baseUrl}/chat?user_id=${target.routeUserId}&user_name=${encodeURIComponent(target.title ?? '')}`,
+      { waitUntil: 'domcontentloaded', timeout: 60000 },
+    )
+    .then(() => true)
+    .catch(() => false)
+  if (!navigated) {
+    return false
+  }
+  return waitForRoomReady(page).then(() => true).catch(() => false)
+}
+
+async function waitForUnreadBadges(page, expectedBadges) {
+  return waitForCountAtLeast(
+    page,
+    '.conversation-card .unread-badge, .conversation-item .unread-badge',
+    expectedBadges,
+    15000,
+  )
+}
+
+async function runHeaderMenuProbe(page) {
+  const menuButton = page.locator('.chat-header .header-menu-container .header-btn').first()
+  if (!(await menuButton.count())) {
+    return null
+  }
+  const menuStart = performance.now()
+  await menuButton.click({ timeout: 30000 }).catch(() => null)
+  const opened = await page.locator('.header-dropdown-menu').first().waitFor({ timeout: 10000 }).then(() => true).catch(() => false)
+  if (!opened) {
+    return null
+  }
+  const durationMs = performance.now() - menuStart
+  const overlay = page.locator('.menu-overlay').first()
+  if (await overlay.count()) {
+    await overlay.click({ timeout: 10000 }).catch(() => null)
+  } else {
+    await page.keyboard.press('Escape').catch(() => null)
+  }
+  return durationMs
+}
+
+async function runSearchProbe(page, seeded) {
+  if (!seeded.searchTerm) return null
+  const menuButton = page.locator('.chat-header .header-menu-container .header-btn').first()
+  if (!(await menuButton.count())) return null
+  const start = performance.now()
+  await menuButton.click({ timeout: 30000 })
+  await page.getByText('جستجو', { exact: true }).first().click({ timeout: 30000 })
+  await page.locator('#search-input').waitFor({ timeout: 30000 })
+  await page.locator('#search-input').fill(seeded.searchTerm)
+  await page.waitForFunction(
+    (term) => document.querySelectorAll('mark').length > 0 || Array.from(document.querySelectorAll('.message-bubble, .message-row')).some((node) => (node.textContent || '').includes(term)),
+    seeded.searchTerm,
+    { timeout: 30000 },
+  ).catch(() => null)
+  const readyMs = performance.now() - start
+  const resultCount = await page.locator('mark').count().catch(() => 0)
+  const closeButton = page.locator('.search-bar-container .mobile-back-btn').first()
+  if (await closeButton.count()) {
+    await closeButton.click().catch(() => null)
+  }
+  return {
+    readyMs: Number(readyMs.toFixed(1)),
+    resultCount,
+  }
+}
+
+async function triggerRealtimeBurst(page, seeded, backendConfig, baseUrl) {
+  if (!seeded.realtimeBurst) return null
+  const backendBaseUrl = `http://${backendConfig.host}:${backendConfig.port}`
+  console.log('[benchmark] realtime burst: posting events')
+  await Promise.all([
+    postJson(`${backendBaseUrl}/api/chat/send`, seeded.realtimeBurst.directSenderToken, {
+      receiver_id: seeded.actor.userId,
+      content: `realtime direct burst ${Date.now()}`,
+      message_type: 'text',
+    }),
+    postJson(`${backendBaseUrl}/api/chat/rooms/${seeded.realtimeBurst.groupChatId}/send`, seeded.realtimeBurst.groupSenderToken, {
+      content: `group burst ${Date.now()}`,
+      message_type: 'text',
+    }),
+    postJson(`${backendBaseUrl}/api/chat/rooms/${seeded.realtimeBurst.channelChatId}/send`, seeded.realtimeBurst.channelSenderToken, {
+      content: `channel burst ${Date.now()}`,
+      message_type: 'text',
+    }),
+  ])
+  console.log('[benchmark] realtime burst: events posted')
+  const directAppendMs = null
+  await backToConversationList(page, baseUrl).catch(() => null)
+  const unreadStart = performance.now()
+  await waitForUnreadBadges(page, 2)
+  const unreadBadgeCount = await page.locator('.conversation-card .unread-badge, .conversation-item .unread-badge').count().catch(() => 0)
+  return {
+    directAppendMs: directAppendMs !== null ? Number(directAppendMs.toFixed(1)) : null,
+    unreadRefreshMs: Number((performance.now() - unreadStart).toFixed(1)),
+    unreadBadgeCount,
+  }
+}
+
+async function runLongSessionProbe(page, seeded, baseUrl, scenario) {
+  const targets = Array.isArray(seeded.switchTargets) ? seeded.switchTargets : []
+  if (!targets.length) return null
+  const durations = []
+  const menuDurations = []
+  const iterations = Math.max(1, Number(scenario.switch_iterations ?? seeded.switchIterations ?? 1))
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    await backToConversationList(page, baseUrl)
+    for (const target of targets) {
+      const roomStart = performance.now()
+      const opened = await openConversationFromList(page, baseUrl, target).catch(() => false)
+      if (!opened) {
+        continue
+      }
+      durations.push(performance.now() - roomStart)
+      const menuDuration = await runHeaderMenuProbe(page)
+      if (menuDuration !== null) {
+        menuDurations.push(menuDuration)
+      }
+    }
+  }
+  return {
+    iterations,
+    switchCount: durations.length,
+    averageSwitchMs: Number((durations.reduce((sum, value) => sum + value, 0) / Math.max(durations.length, 1)).toFixed(1)),
+    maxSwitchMs: Number(Math.max(...durations, 0).toFixed(1)),
+    averageMenuMs: menuDurations.length
+      ? Number((menuDurations.reduce((sum, value) => sum + value, 0) / menuDurations.length).toFixed(1))
+      : null,
+  }
+}
+
+async function applyScenarioEmulation(client, scenario) {
+  const cpuThrottleRate = Number(scenario.cpu_throttle_rate ?? 0)
+  if (cpuThrottleRate > 1) {
+    await client.send('Emulation.setCPUThrottlingRate', { rate: cpuThrottleRate }).catch(() => null)
+  }
+  const latencyMs = Number(scenario.network_latency_ms ?? 0)
+  const downloadKbps = Number(scenario.download_kbps ?? 0)
+  const uploadKbps = Number(scenario.upload_kbps ?? 0)
+  if (latencyMs > 0 || downloadKbps > 0 || uploadKbps > 0) {
+    await client.send('Network.enable').catch(() => null)
+    await client.send('Network.emulateNetworkConditions', {
+      offline: false,
+      latency: latencyMs,
+      downloadThroughput: downloadKbps > 0 ? (downloadKbps * 1024) / 8 : -1,
+      uploadThroughput: uploadKbps > 0 ? (uploadKbps * 1024) / 8 : -1,
+      connectionType: 'cellular3g',
+    }).catch(() => null)
+  }
+}
+
+async function runScenario(browser, version, scenario, fixture, browserConfig, backendConfig) {
   const seeded = fixture[scenario.runner_key]
   const baseUrl = `http://127.0.0.1:${version.port}`
   const timings = []
@@ -396,10 +883,12 @@ async function runScenario(browser, version, scenario, fixture, browserConfig) {
     viewport: browserConfig.viewport,
     locale: browserConfig.locale,
     colorScheme: browserConfig.color_scheme,
+    reducedMotion: scenario.reduced_motion ? 'reduce' : 'no-preference',
   })
   const page = await context.newPage()
   const client = await context.newCDPSession(page)
   await client.send('Performance.enable').catch(() => null)
+  await applyScenarioEmulation(client, scenario)
 
   page.on('request', (request) => {
     if (request.url().includes('/api/')) requestStarts.set(request, performance.now())
@@ -433,21 +922,36 @@ async function runScenario(browser, version, scenario, fixture, browserConfig) {
 
   const listStart = performance.now()
   await page.goto(`${baseUrl}/chat`, { waitUntil: 'domcontentloaded', timeout: 60000 })
-  await page.locator('.conversation-list-wrapper').waitFor({ timeout: 60000 })
-  await page.locator('.conversation-card, .conversation-item').first().waitFor({ timeout: 60000 })
+  await waitForConversationList(page)
   const listReadyMs = performance.now() - listStart
   await page.waitForTimeout(700)
   const listSnapshot = await collectDomSnapshot(page)
 
   const chatStart = performance.now()
-  await page.goto(`${baseUrl}/chat?user_id=${seeded.activePeerId}&user_name=${encodeURIComponent(seeded.activePeerName ?? '')}`, { waitUntil: 'domcontentloaded', timeout: 60000 })
-  await page.locator('.messages-container').waitFor({ timeout: 60000 })
-  await page.locator('.message-bubble, .message-row').first().waitFor({ timeout: 60000 })
+  await page.goto(`${baseUrl}/chat?user_id=${seeded.activeTargetId}&user_name=${encodeURIComponent(seeded.activeTargetName ?? '')}`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await waitForRoomReady(page)
   const chatReadyMs = performance.now() - chatStart
   await page.waitForTimeout(900)
   const chatSnapshot = await collectDomSnapshot(page)
+  console.log(`[benchmark] ${version.key}/${scenario.id}: search probe start`)
+  const search = await runSearchProbe(page, seeded)
+  console.log(`[benchmark] ${version.key}/${scenario.id}: search probe done`)
   const scroll = await runScrollProbe(page)
+  console.log(`[benchmark] ${version.key}/${scenario.id}: scroll probe done`)
   const contextMenuMs = await runContextMenuProbe(page)
+  console.log(`[benchmark] ${version.key}/${scenario.id}: context probe done`)
+  console.log(`[benchmark] ${version.key}/${scenario.id}: realtime probe start`)
+  const realtime = await triggerRealtimeBurst(page, seeded, backendConfig, baseUrl)
+  console.log(`[benchmark] ${version.key}/${scenario.id}: realtime probe done`)
+  if (realtime) {
+    await openConversationFromList(page, baseUrl, {
+      routeUserId: seeded.activeTargetId,
+      title: seeded.activeTargetName,
+    }).catch(() => null)
+  }
+  console.log(`[benchmark] ${version.key}/${scenario.id}: long-session probe start`)
+  const longSession = await runLongSessionProbe(page, seeded, baseUrl, scenario)
+  console.log(`[benchmark] ${version.key}/${scenario.id}: long-session probe done`)
   const counters = await collectBrowserCounters(client)
   const finalUrl = page.url()
 
@@ -465,16 +969,19 @@ async function runScenario(browser, version, scenario, fixture, browserConfig) {
     seededActiveMessages: seeded.activeMessageCount,
     listReadyMs: Number(listReadyMs.toFixed(1)),
     chatReadyMs: Number(chatReadyMs.toFixed(1)),
+    search,
     listConversationCards: listSnapshot.conversationCards,
     chatMessageBubbles: chatSnapshot.messageBubbles,
     chatDomNodes: chatSnapshot.totalNodes,
     contextMenuMs: Number(contextMenuMs.toFixed(1)),
+    realtime,
+    longSession,
     scroll,
     counters,
     api: {
       authMeMs: summarizeApiTimings(timings, (url) => url.includes('/api/auth/me')),
       conversationsMs: summarizeApiTimings(timings, (url) => url.includes('/api/chat/conversations')),
-      messagesMs: summarizeApiTimings(timings, (url) => url.includes(`/api/chat/messages/${seeded.activePeerId}`)),
+      messagesMs: summarizeApiTimings(timings, (url) => url.includes(seeded.activeMessagesApiPath)),
       totalRequests: timings.length,
     },
     stage2MetricCount: chatSnapshot.metrics.length,
@@ -530,7 +1037,7 @@ async function main() {
         for (const version of versions) {
           for (const scenario of performance.scenarios) {
             console.log(`Warming ${version.key} / ${scenario.id} (${runIndex + 1}/${performance.warmup_runs})...`)
-            await runScenario(browser, version, scenario, fixture, performance.browser)
+            await runScenario(browser, version, scenario, fixture, performance.browser, performance.backend)
           }
         }
       }
@@ -539,7 +1046,7 @@ async function main() {
       for (const version of versions) {
         for (const scenario of performance.scenarios) {
           console.log(`Running ${version.key} / ${scenario.id} (${runIndex + 1}/${performance.measured_runs})...`)
-          results.push(await runScenario(browser, version, scenario, fixture, performance.browser))
+          results.push(await runScenario(browser, version, scenario, fixture, performance.browser, performance.backend))
         }
       }
     }
