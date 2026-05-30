@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { apiFetch } from '../utils/auth'
 import ChatView from '../components/ChatView.vue'
 import MessengerRefactorShell from '../components/messenger-v2/MessengerRefactorShell.vue'
+import '../styles/messenger-design-tokens.css'
 import {
   markMessengerPerformance,
-  measureMessengerPerformance,
   resolveMessengerUiVersion,
 } from '../utils/messengerRefactor'
+import {
+  measureMessengerStage2,
+  recordMessengerDomSnapshot,
+  startMessengerFrameBudgetProbe,
+} from '../utils/messengerStage2Metrics'
 
 const router = useRouter()
 const route = useRoute()
@@ -48,6 +53,17 @@ watch([loading, user, messengerUiVersion], () => {
 
   messengerSurfaceMarked = true
   markMessengerPerformance(`${messengerUiVersion.value}-surface-ready`)
+  nextTick(() => {
+    const root = typeof document !== 'undefined'
+      ? document.querySelector('.messenger-page') || document.body
+      : null
+    if (root) {
+      recordMessengerDomSnapshot(`${messengerUiVersion.value}-surface-ready`, root, {
+        uiVersion: messengerUiVersion.value,
+      })
+    }
+    startMessengerFrameBudgetProbe(`${messengerUiVersion.value}-surface-ready`, { frameCount: 30 })
+  })
 })
 
 async function fetchUser() {
@@ -61,7 +77,9 @@ async function fetchUser() {
     console.error(e)
   } finally {
     markMessengerPerformance('current-user-fetch-end')
-    measureMessengerPerformance('current-user-fetch', 'current-user-fetch-start', 'current-user-fetch-end')
+    measureMessengerStage2('current-user-fetch', 'current-user-fetch-start', 'current-user-fetch-end', {
+      uiVersion: messengerUiVersion.value,
+    })
     loading.value = false
   }
 }
@@ -130,7 +148,7 @@ function handleBack() {
   /* Messenger takes up the full screen height (or what's left behind the nav) */
   height: 100dvh;
   width: 100%;
-  background-color: #fceceb; /* Match chat background or app background */
+  background-color: var(--messenger-surface-page, #fceceb); /* Match chat background or app background */
 }
 
 .loading-container {
@@ -142,7 +160,7 @@ function handleBack() {
 .loading-spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid #f59e0b;
+  border: 3px solid var(--messenger-accent, #f59e0b);
   border-top-color: transparent;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;

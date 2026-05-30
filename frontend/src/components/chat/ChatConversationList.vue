@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { type Conversation } from '../../types/chat'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
@@ -8,6 +8,8 @@ import { buildChatFileUrl, getAvatarInitial } from '../../utils/chatFiles'
 import { getConversationPreviewText } from '../../utils/chatMessagePreview'
 import { isUserOnline } from '../../utils/userPresence'
 import { formatIranTime } from '../../utils/iranTime'
+import { markMessengerPerformance } from '../../utils/messengerRefactor'
+import { recordMessengerDomSnapshot } from '../../utils/messengerStage2Metrics'
 import {
   ArrowDown,
   ArrowUp,
@@ -56,6 +58,7 @@ const longPressTimer = ref<number | null>(null)
 const pointerOrigin = ref({ x: 0, y: 0 })
 const conversationMenuBackStateActive = ref(false)
 let closingConversationMenuFromBack = false
+let conversationListFirstRenderMarked = false
 
 function formatTime(dateStr: string) {
   return formatIranTime(dateStr)
@@ -162,6 +165,22 @@ function getConversationActivityText(conv: Conversation) {
 
 const displayedConversations = computed(() => props.conversations)
 
+watch(() => displayedConversations.value.length, async (rowCount) => {
+  if (conversationListFirstRenderMarked) {
+    return
+  }
+
+  conversationListFirstRenderMarked = true
+  markMessengerPerformance('conversation-list-first-render')
+  await nextTick()
+  const root = typeof document !== 'undefined'
+    ? document.querySelector('.conversation-list-wrapper') || document.body
+    : null
+  if (root) {
+    recordMessengerDomSnapshot('conversation-list-first-render', root, { rowCount })
+  }
+}, { immediate: true, flush: 'post' })
+
 function cancelLongPress() {
   if (longPressTimer.value !== null) {
     window.clearTimeout(longPressTimer.value)
@@ -173,6 +192,15 @@ function openConversationMenu(conv: Conversation) {
   cancelLongPress()
   suppressClickConversationId.value = conv.id
   menuConversation.value = conv
+  markMessengerPerformance('conversation-menu-open')
+  nextTick(() => {
+    const root = typeof document !== 'undefined'
+      ? document.querySelector('.conversation-list-wrapper') || document.body
+      : null
+    if (root) {
+      recordMessengerDomSnapshot('conversation-menu-open', root, { conversationId: conv.id })
+    }
+  })
   try { navigator.vibrate?.(10) } catch { /* noop */ }
 }
 

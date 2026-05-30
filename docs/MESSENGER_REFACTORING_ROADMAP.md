@@ -1,7 +1,7 @@
 # Messenger Refactoring Roadmap
 
 > Date: 2026-05-30  
-> Status: Stage 1 safety harness implemented; legacy Messenger remains the default  
+> Status: Stage 2 frontend baseline instrumentation and design budget implemented; legacy Messenger remains the default
 > Scope: In-app Messenger frontend and the minimum backend/runtime seams needed to make it fast, stable, standard, dynamic, and user-friendly.
 
 ## Goal
@@ -11,6 +11,7 @@ Rebuild the Messenger experience into a standard, cohesive, responsive, and poli
 ## Implementation Progress
 
 - Stage 1 executive phase is implemented: the reversible feature-flag shell, baseline performance mark utility, legacy-default route switch, and focused Vitest coverage are in place.
+- Stage 2 executive phase is implemented for the frontend refactor surface: additive baseline metrics, Messenger-local design tokens, reduced-motion guardrails, build-size baseline capture, and focused Vitest coverage are in place.
 - No real Messenger UI replacement is active by default. The existing `ChatView.vue` path remains the production path unless `messenger_ui_version=refactor` or `VITE_MESSENGER_REFACTOR_ENABLED=true` explicitly enables the shell.
 
 ## Current Baseline
@@ -20,8 +21,27 @@ Verified during the planning review:
 - Current chat API latency on the development server is acceptable at idle: conversations around 108 ms, poll around 88 ms, room messages around 39 ms.
 - The development server is limited, but app and DB were not the dominant idle bottleneck during the snapshot. The tile server can still compete for CPU.
 - The Messenger frontend is large and complex: `ChatView.vue` is the central orchestrator, `ChatMessageItem.vue` renders many message types and gestures, and the Messenger build chunk is large.
+- Stage 2 build baseline from `npm run build` on 2026-05-30: Vite transformed 1970 modules in 22.22s; `mini_app_dist` is 4.3M; `MessengerView-DlRMZph0.js` is 633.97 kB minified / 143.17 kB gzip; `MessengerView-B72QOB6q.css` is 141.55 kB / 29.82 kB gzip; `chatDocumentDownloadBackground-DwxR8CUz.js` is 38.52 kB / 11.10 kB gzip; `useChatFileHandler-x1Bi-bFv.js` is 36.48 kB / 11.82 kB gzip. The largest lazy helper remains `heic2any-C-2qH2Cj.js` at 1,352.97 kB / 341.28 kB gzip.
 - `@tanstack/vue-virtual` is installed but not used in `frontend/src`, so the message timeline and conversation list are not truly virtualized.
 - Existing optimizations such as pagination, `v-memo`, stable wrapper caches, deferred media hydration, background uploads, and shared visibility observers must be preserved unless replaced by measured better behavior.
+
+## Stage 2 Baseline Contract
+
+The Stage 2 instrumentation is intentionally additive and removable. It stores bounded runtime entries on `window.__messengerStage2Metrics` and keeps the legacy Messenger path as the default UI. Current instrumented surfaces:
+
+- Route/current-user bootstrap: `MessengerView.vue` measures authenticated current-user fetches, records a route-ready DOM snapshot, and starts a short frame-budget probe after the Messenger surface is ready.
+- Conversation list: first rendered list count, DOM snapshot, and conversation long-press/menu open marks.
+- Chat opening: message-history request duration, first-paint mark from either warm cache or server response, DOM snapshot, and scoped load-error count.
+- Timeline movement: scroll-to-bottom requested distance, scroll-to-message duration, and scroll-to-message distance.
+- Action surfaces: message context-menu open, selection-mode enter/exit, and selected-count metrics.
+- Media surfaces: lightbox open duration plus post-overlay DOM snapshot.
+- Upload pipeline: background-upload handoff persistence duration, upload bytes, and first-progress timing.
+
+The Stage 2 design budget is also local to Messenger:
+
+- `frontend/src/styles/messenger-design-tokens.css` defines Messenger-only colors, density, radii, touch-target sizes, shadows, semantic states, z-indexes, and motion durations under `.messenger-page` and `.messenger-refactor-shell`.
+- `prefers-reduced-motion: reduce` disables expensive transitions and smooth scrolling inside the Messenger surface.
+- No global reset, backend contract, database shape, or production default path changed in this phase.
 
 ## Non-Negotiable Safety Rules
 

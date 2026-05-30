@@ -37,6 +37,8 @@ import {
     buildChatSendBody,
     buildChatSendEndpoint,
 } from '../utils/chatRoomRouting'
+import { markMessengerPerformance } from '../utils/messengerRefactor'
+import { measureMessengerStage2, recordMessengerMetric } from '../utils/messengerStage2Metrics'
 
 // -----------------------------------------------------------------------------
 // Types
@@ -179,6 +181,7 @@ const uploadActivityCounts = new Map<number, number>()
 const serviceWorkerOwnedUploads = new Set<number>()
 const serviceWorkerHandoffAbortIds = new Set<number>()
 const serviceWorkerHandoffResolvers = new Map<number, () => void>()
+const firstProgressMetricUploadIds = new Set<number>()
 
 // -----------------------------------------------------------------------------
 // Concurrency gate
@@ -760,6 +763,23 @@ async function idbGetAll(): Promise<PendingUpload[]> {
 // -----------------------------------------------------------------------------
 
 function emit(event: UploadEvent) {
+    if (event.type === 'progress' && !firstProgressMetricUploadIds.has(event.optimisticId)) {
+        firstProgressMetricUploadIds.add(event.optimisticId)
+        const firstProgressMark = `upload-handoff-${event.optimisticId}-first-progress`
+        markMessengerPerformance(firstProgressMark)
+        measureMessengerStage2('upload-handoff-to-first-progress', `upload-handoff-${event.optimisticId}-start`, firstProgressMark, {
+            userId: event.userId,
+            optimisticId: event.optimisticId,
+        })
+        recordMessengerMetric('upload-first-progress-percent', event.progress, 'count', {
+            userId: event.userId,
+            optimisticId: event.optimisticId,
+        })
+    }
+    if (event.type === 'sent' || event.type === 'error' || event.type === 'cancelled') {
+        firstProgressMetricUploadIds.delete(event.optimisticId)
+    }
+
     for (const handler of subscribers) {
         try {
             handler(event)
@@ -2229,6 +2249,10 @@ export async function submitUpload(params: SubmitUploadParams): Promise<void> {
         throw new Error('[uploadService] not initialized')
     }
 
+    const handoffStartMark = `upload-handoff-${params.optimisticId}-start`
+    const handoffQueuedMark = `upload-handoff-${params.optimisticId}-queued`
+    markMessengerPerformance(handoffStartMark)
+
     const upload: PendingUpload = {
         id: params.optimisticId,
         userId: params.userId,
@@ -2269,6 +2293,19 @@ export async function submitUpload(params: SubmitUploadParams): Promise<void> {
     }
 
     await idbPut(upload)
+    markMessengerPerformance(handoffQueuedMark)
+    measureMessengerStage2('upload-handoff-to-persisted', handoffStartMark, handoffQueuedMark, {
+        userId: upload.userId,
+        optimisticId: upload.id,
+        roomKind: upload.roomKind,
+        msgType: upload.msgType,
+    })
+    recordMessengerMetric('upload-handoff-bytes', upload.file.size, 'bytes', {
+        userId: upload.userId,
+        optimisticId: upload.id,
+        roomKind: upload.roomKind,
+        msgType: upload.msgType,
+    })
 
     // Emit 'added' so any subscriber that may have been mounted AFTER the
     // optimistic push (e.g. on resume) can render it.

@@ -17,6 +17,12 @@ import {
     isRoomConversationKey,
 } from '../../utils/chatRoomRouting'
 import { getConversationPreviewText } from '../../utils/chatMessagePreview'
+import { markMessengerPerformance } from '../../utils/messengerRefactor'
+import {
+    measureMessengerStage2,
+    recordMessengerDomSnapshot,
+    recordMessengerMetric,
+} from '../../utils/messengerStage2Metrics'
 import {
     getPendingForUser as backgroundGetPendingForUser,
     buildOptimisticMessageFromUpload,
@@ -95,6 +101,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     const hasOlderMessages = ref(true)
     const isLoadingOlderMessages = ref(false)
     let latestLoadRequestId = 0
+    let chatLoadMetricSequence = 0
 
     function cloneMessage(message: Message): Message {
         return {
@@ -288,8 +295,42 @@ export function useChatMessages(options: UseChatMessagesOptions) {
 
     async function loadMessages(userId: number, silent = false, aroundId?: number) {
         const requestId = ++latestLoadRequestId
+        const metricId = ++chatLoadMetricSequence
+        const shouldMeasureChatOpen = !silent && !aroundId
+        const chatOpenStartMark = `chat-open-${metricId}-start`
+        const chatOpenResponseMark = `chat-open-${metricId}-response`
+        let firstMessagePaintMarked = false
         let effectiveSilent = silent
         const isChannelRoom = isChannelConversationKey(userId)
+
+        function markFirstMessagePaint(source: 'cache' | 'server') {
+            if (!shouldMeasureChatOpen || firstMessagePaintMarked) {
+                return
+            }
+
+            firstMessagePaintMarked = true
+            const paintMark = `chat-open-${metricId}-first-message-paint`
+            markMessengerPerformance(paintMark)
+            measureMessengerStage2('chat-open-to-first-message-paint', chatOpenStartMark, paintMark, {
+                userId,
+                source,
+                messageCount: messages.value.length,
+            })
+            const root = typeof document !== 'undefined'
+                ? document.querySelector('.messages-container') || document.body
+                : null
+            if (root) {
+                recordMessengerDomSnapshot('chat-first-message-paint', root, {
+                    userId,
+                    source,
+                    messageCount: messages.value.length,
+                })
+            }
+        }
+
+        if (shouldMeasureChatOpen) {
+            markMessengerPerformance(chatOpenStartMark)
+        }
 
         if (!effectiveSilent) isLoadingMessages.value = true
 
@@ -310,6 +351,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                     unreadNewMessagesCount.value = 0
                     isLoadingMessages.value = false
                     await nextTick()
+                    markFirstMessagePaint('cache')
                     if (selectedUserId.value === userId) {
                         scrollToUnreadOrBottom()
                         void markAsRead()
@@ -328,6 +370,13 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 resourceLabel: 'گفتگو',
                 fallbackMessage: 'دریافت پیام‌های این گفتگو ممکن نشد.',
             })
+            if (shouldMeasureChatOpen) {
+                markMessengerPerformance(chatOpenResponseMark)
+                measureMessengerStage2('chat-open-request', chatOpenStartMark, chatOpenResponseMark, {
+                    userId,
+                    resultCount: Array.isArray(loadedMessages) ? loadedMessages.length : 0,
+                })
+            }
             if (!isActiveLoadRequest(requestId, userId)) {
                 return
             }
@@ -393,6 +442,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                     isLoadingMessages.value = false
                 }
                 await nextTick()
+                markFirstMessagePaint('server')
                 scrollToUnreadOrBottom()
                 void markAsRead()
             }
@@ -413,6 +463,12 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 else error.value = message
             }
             if (!effectiveSilent && isLatestLoadRequest(requestId)) isLoadingMessages.value = false
+            if (shouldMeasureChatOpen) {
+                recordMessengerMetric('chat-open-error', 1, 'count', {
+                    userId,
+                    status: typeof e?.status === 'number' ? e.status : null,
+                })
+            }
         } finally {
             if (!effectiveSilent && isLatestLoadRequest(requestId) && isLoadingMessages.value) {
                 isLoadingMessages.value = false
