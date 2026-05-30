@@ -85,8 +85,6 @@ async def _resolve_customer_direct_chat_initiation_permission(
 
     if sender.id == receiver_customer_relation.owner_user_id:
         return True
-    if getattr(sender, "role", None) == UserRole.SUPER_ADMIN:
-        return True
     if accountant_relation is not None and accountant_relation.owner_user_id == receiver_customer_relation.owner_user_id:
         return True
     return False

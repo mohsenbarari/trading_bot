@@ -125,7 +125,11 @@ from core.services.chat_room_service import (
 )
 from core.services.avatar_service import resolve_owned_avatar_file_id
 from core.services.accountant_relation_service import is_user_accountant
-from core.services.customer_relation_service import is_user_customer
+from core.services.customer_relation_service import (
+    build_allowed_customer_chat_targets,
+    get_active_customer_relation_for_customer,
+    is_user_customer,
+)
 from core.services.accountant_chat_contract import (
     apply_accountant_identity_to_direct_conversation_row,
     apply_accountant_identity_to_message_payload,
@@ -388,6 +392,45 @@ async def _serialize_pinned_message_state(
     )
 
 
+async def _get_customer_visible_direct_target_ids(
+    db: AsyncSession,
+    *,
+    current_user: User,
+) -> set[int] | None:
+    if not hasattr(db, "execute"):
+        return None
+    relation = await get_active_customer_relation_for_customer(db, current_user.id)
+    if relation is None:
+        return None
+    return set(await build_allowed_customer_chat_targets(db, current_user.id))
+
+
+async def _ensure_customer_can_access_direct_target(
+    db: AsyncSession,
+    *,
+    current_user: User,
+    target_user_id: int,
+    allowed_target_ids: set[int] | None = None,
+) -> set[int] | None:
+    if allowed_target_ids is None:
+        allowed_target_ids = await _get_customer_visible_direct_target_ids(db, current_user=current_user)
+    if allowed_target_ids is None:
+        return None
+    if target_user_id not in allowed_target_ids:
+        raise HTTPException(status_code=404, detail="User not found")
+    return allowed_target_ids
+
+
+def _get_direct_message_counterparty_id(message: Message | object, *, viewer_user_id: int) -> int | None:
+    sender_id = getattr(message, "sender_id", None)
+    receiver_id = getattr(message, "receiver_id", None)
+    if sender_id == viewer_user_id:
+        return receiver_id
+    if receiver_id == viewer_user_id:
+        return sender_id
+    return None
+
+
 # ===== Endpoints =====
 
 @router.get("/conversations", response_model=List[ConversationRead])
@@ -396,9 +439,14 @@ async def get_conversations(
     db: AsyncSession = Depends(get_db)
 ):
     """لیست مکالمات کاربر"""
+    allowed_direct_target_ids = await _get_customer_visible_direct_target_ids(db, current_user=current_user)
     stmt = build_direct_conversation_list_stmt(current_user.id)
     result = await db.execute(stmt)
     direct_conversations = [ConversationRead(**row) for row in result.mappings().all()]
+    if allowed_direct_target_ids is not None:
+        direct_conversations = [
+            row for row in direct_conversations if row.other_user_id in allowed_direct_target_ids
+        ]
     group_conversations = [
         ConversationRead(
             id=row.id,
@@ -595,6 +643,15 @@ async def search_messages(
     """
     Search messages.
     """
+    allowed_direct_target_ids = await _get_customer_visible_direct_target_ids(db, current_user=current_user)
+    if chat_id is not None:
+        await _ensure_customer_can_access_direct_target(
+            db,
+            current_user=current_user,
+            target_user_id=chat_id,
+            allowed_target_ids=allowed_direct_target_ids,
+        )
+
     query = await build_direct_message_search_stmt(
         db,
         current_user_id=current_user.id,
@@ -604,6 +661,12 @@ async def search_messages(
     )
     result = await db.execute(query)
     messages = result.scalars().all()
+    if allowed_direct_target_ids is not None and chat_id is None:
+        messages = [
+            message
+            for message in messages
+            if _get_direct_message_counterparty_id(message, viewer_user_id=current_user.id) in allowed_direct_target_ids
+        ]
     return await _serialize_direct_messages_with_accountant_contract(
         db,
         messages,
@@ -625,6 +688,12 @@ async def get_messages(
     target = await db.get(User, user_id)
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
+
+    await _ensure_customer_can_access_direct_target(
+        db,
+        current_user=current_user,
+        target_user_id=user_id,
+    )
 
     stmt_older, stmt_newer = await build_direct_message_history_statements(
         db,
@@ -670,6 +739,11 @@ async def send_typing_signal(
     db: AsyncSession = Depends(get_db),
 ):
     """ارسال سیگنال تایپ کردن به گیرنده"""
+    await _ensure_customer_can_access_direct_target(
+        db,
+        current_user=current_user,
+        target_user_id=data.receiver_id,
+    )
     await publish_direct_typing_event(
         receiver_id=data.receiver_id,
         sender_id=current_user.id,
@@ -686,6 +760,11 @@ async def send_direct_activity_signal(
     db: AsyncSession = Depends(get_db),
 ):
     """ارسال سیگنال activity برای گفتگو مستقیم."""
+    await _ensure_customer_can_access_direct_target(
+        db,
+        current_user=current_user,
+        target_user_id=data.receiver_id,
+    )
     await publish_direct_activity_event(
         receiver_id=data.receiver_id,
         sender_id=current_user.id,
@@ -1831,12 +1910,17 @@ async def mark_messages_read(
     db: AsyncSession = Depends(get_db)
 ):
     """علامت‌گذاری تمام پیام‌های یک کاربر به عنوان خوانده شده"""
+    await _ensure_customer_can_access_direct_target(
+        db,
+        current_user=current_user,
+        target_user_id=user_id,
+    )
     await commit_direct_read_state(
         db,
         reader=current_user,
         other_user_id=user_id,
     )
-    
+
     # Notify sender that messages are read
     await publish_direct_read_event(
         other_user_id=user_id,
@@ -1853,12 +1937,12 @@ async def poll_messages(
     db: AsyncSession = Depends(get_db)
 ):
     """پولینگ برای پیام‌های جدید"""
+    allowed_direct_target_ids = await _get_customer_visible_direct_target_ids(db, current_user=current_user)
     conv_stmt = build_direct_conversation_list_stmt(current_user.id)
     result = await db.execute(conv_stmt)
     direct_convs = result.mappings().all()
     group_convs = await list_group_conversations(db, current_user_id=current_user.id)
     channel_convs = await list_channel_conversations(db, current_user_id=current_user.id)
-    all_convs = [*direct_convs, *group_convs, *channel_convs]
 
     def read_field(row, key, default=None):
         if hasattr(row, key):
@@ -1866,6 +1950,15 @@ async def poll_messages(
         if isinstance(row, dict):
             return row.get(key, default)
         return default
+
+    if allowed_direct_target_ids is not None:
+        direct_convs = [
+            row
+            for row in direct_convs
+            if int(read_field(row, "other_user_id", 0) or 0) in allowed_direct_target_ids
+        ]
+
+    all_convs = [*direct_convs, *group_convs, *channel_convs]
 
     unread_convs = [
         row for row in all_convs

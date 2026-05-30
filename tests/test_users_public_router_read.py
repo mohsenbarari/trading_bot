@@ -116,7 +116,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(side_effect=lambda _db, user_id: SimpleNamespace(owner_user_id=20) if user_id == 91 else None),
         ), patch(
             "api.routers.users_public.build_allowed_customer_chat_targets",
-            new=AsyncMock(return_value=[20, 44, 1]),
+            new=AsyncMock(return_value=[20, 44]),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await read_public_user(
