@@ -1,13 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
-from sqlalchemy.orm import joinedload
+from sqlalchemy import and_, select, or_
+from sqlalchemy.orm import aliased, joinedload
 from typing import List, Optional
 
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from core.db import get_db
 from core.services.accountant_relation_service import get_active_accountant_relation_for_accountant, list_active_accountants_for_owner
-from core.services.customer_relation_service import get_active_customer_relation_for_customer, list_active_customers_for_owner
+from core.services.customer_relation_service import (
+    build_allowed_customer_chat_targets,
+    get_active_customer_relation_for_customer,
+    list_active_customers_for_owner,
+)
 from models.customer_relation import CustomerRelation, CustomerRelationStatus
 from models.user import User, UserRole
 from api.deps import get_current_user
@@ -147,6 +151,76 @@ def _can_view_customer_profile(
         viewer_accountant_relation is not None
         and getattr(viewer_accountant_relation, "owner_user_id", None) == relation.owner_user_id
     )
+
+
+def _build_customer_public_visibility_filter(current_user: User):
+    current_customer_owner_rel = aliased(CustomerRelation)
+    current_customer_exists_rel = aliased(CustomerRelation)
+    target_customer_rel = aliased(CustomerRelation)
+    target_accountant_rel = aliased(AccountantRelation)
+
+    current_customer_owner_id = (
+        select(current_customer_owner_rel.owner_user_id)
+        .where(
+            current_customer_owner_rel.customer_user_id == current_user.id,
+            current_customer_owner_rel.status == CustomerRelationStatus.ACTIVE,
+            current_customer_owner_rel.deleted_at.is_(None),
+        )
+        .limit(1)
+        .scalar_subquery()
+    )
+    current_customer_exists = (
+        select(current_customer_exists_rel.id)
+        .where(
+            current_customer_exists_rel.customer_user_id == current_user.id,
+            current_customer_exists_rel.status == CustomerRelationStatus.ACTIVE,
+            current_customer_exists_rel.deleted_at.is_(None),
+        )
+        .exists()
+    )
+    target_customer_exists = (
+        select(target_customer_rel.id)
+        .where(
+            target_customer_rel.customer_user_id == User.id,
+            target_customer_rel.status == CustomerRelationStatus.ACTIVE,
+            target_customer_rel.deleted_at.is_(None),
+        )
+        .exists()
+    )
+    target_same_owner_accountant_exists = (
+        select(target_accountant_rel.id)
+        .where(
+            target_accountant_rel.accountant_user_id == User.id,
+            target_accountant_rel.owner_user_id == current_customer_owner_id,
+            target_accountant_rel.status == AccountantRelationStatus.ACTIVE,
+            target_accountant_rel.deleted_at.is_(None),
+        )
+        .exists()
+    )
+
+    return or_(
+        ~current_customer_exists,
+        User.id == current_customer_owner_id,
+        and_(User.role == UserRole.SUPER_ADMIN, ~target_customer_exists),
+        target_same_owner_accountant_exists,
+    )
+
+
+async def _ensure_customer_viewer_can_access_public_user(
+    db: AsyncSession,
+    current_user: User,
+    target_user_id: int,
+) -> None:
+    if target_user_id == current_user.id:
+        return
+
+    current_customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
+    if current_customer_relation is None:
+        return
+
+    allowed_target_ids = set(await build_allowed_customer_chat_targets(db, current_user.id))
+    if target_user_id not in allowed_target_ids:
+        raise HTTPException(status_code=404, detail="User not found")
 
 
 def _build_project_user_directory_stmt(
@@ -312,6 +386,7 @@ async def search_public_users(
 ):
     """جستجوی عمومی بین کاربران سیستم بر اساس نام، نام کاربری یا شماره فیلتر شده"""
     query = select(User).where(User.is_deleted == False, User.id != current_user.id)
+    query = query.where(_build_customer_public_visibility_filter(current_user))
 
     if q:
         search_pattern = f"%{q}%"
@@ -365,6 +440,7 @@ async def read_public_user(
     viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
     relation = await get_active_accountant_relation_for_accountant(db, user_id)
     if relation and relation.owner_user and not relation.owner_user.is_deleted:
+        await _ensure_customer_viewer_can_access_public_user(db, current_user, user_id)
         accountant_relations = await _load_public_accountant_relation_summaries(db, relation.owner_user.id)
         customer_relations = []
         if _can_view_owner_customer_list(current_user, relation.owner_user.id):
@@ -402,6 +478,7 @@ async def read_public_user(
     user = await db.get(User, user_id)
     if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
+    await _ensure_customer_viewer_can_access_public_user(db, current_user, user_id)
     accountant_relations = await _load_public_accountant_relation_summaries(db, user.id)
     customer_relations = []
     if _can_view_owner_customer_list(current_user, user.id):

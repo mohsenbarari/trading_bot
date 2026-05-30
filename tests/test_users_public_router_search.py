@@ -97,6 +97,26 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("lower(users.username) like lower", stmt_text)
         self.assertIn("lower(users.mobile_number) like lower", stmt_text)
 
+    async def test_search_public_users_scopes_customer_discovery_query_to_allowed_tree(self):
+        current_user = SimpleNamespace(id=91, role=UserRole.STANDARD)
+        rows = [
+            make_user(id=20, account_name="owner20"),
+            make_user(id=1, account_name="admin1", role=UserRole.SUPER_ADMIN),
+        ]
+        db = FakeDB([FakeExecuteResult(rows), FakeExecuteResult([]), FakeExecuteResult([])])
+
+        with patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await search_public_users(q=None, limit=25, db=db, current_user=current_user)
+
+        self.assertEqual([item.id for item in result], [20, 1])
+        stmt_text = str(db.stmts[0]).lower()
+        self.assertIn("customer_relations", stmt_text)
+        self.assertIn("accountant_relations", stmt_text)
+        self.assertIn("users.role", stmt_text)
+
     async def test_search_public_users_resolves_accountants_to_owner_profiles_and_deduplicates(self):
         current_user = SimpleNamespace(id=5, role=UserRole.STANDARD)
         owner_user = make_user(id=20, account_name="owner20")

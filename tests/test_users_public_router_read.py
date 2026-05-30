@@ -94,6 +94,75 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("role", result.model_dump())
         self.assertEqual(db.calls[0][1], 7)
 
+    async def test_read_public_user_denies_customer_viewer_for_outside_public_profile(self):
+        user = SimpleNamespace(
+            id=30,
+            is_deleted=False,
+            account_name="outside30",
+            role=UserRole.STANDARD,
+            mobile_number="09120000030",
+            address="تهران",
+            avatar_file_id=None,
+            created_at=__import__("datetime").datetime(2026, 1, 1),
+            trades_count=0,
+            last_seen_at=None,
+        )
+
+        with patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=[None, SimpleNamespace(owner_user_id=20)]),
+        ), patch(
+            "api.routers.users_public.build_allowed_customer_chat_targets",
+            new=AsyncMock(return_value=[20, 44, 1]),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await read_public_user(
+                    30,
+                    db=FakeDB(user),
+                    current_user=SimpleNamespace(id=91, role=UserRole.STANDARD),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 404)
+
+    async def test_read_public_user_allows_customer_viewer_for_owner_public_profile(self):
+        owner = SimpleNamespace(
+            id=20,
+            is_deleted=False,
+            account_name="owner20",
+            role=UserRole.STANDARD,
+            mobile_number="09120000020",
+            address="تهران",
+            avatar_file_id=None,
+            created_at=__import__("datetime").datetime(2026, 1, 1),
+            trades_count=0,
+            last_seen_at=None,
+        )
+
+        with patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=[None, SimpleNamespace(owner_user_id=20)]),
+        ), patch(
+            "api.routers.users_public.build_allowed_customer_chat_targets",
+            new=AsyncMock(return_value=[20, 44, 1]),
+        ), patch(
+            "api.routers.users_public.list_active_accountants_for_owner",
+            new=AsyncMock(return_value=[]),
+        ):
+            result = await read_public_user(
+                20,
+                db=FakeDB(owner),
+                current_user=SimpleNamespace(id=91, role=UserRole.STANDARD),
+            )
+
+        self.assertEqual(result.id, 20)
+        self.assertEqual(result.account_name, "owner20")
+
     async def test_read_public_user_raises_404_for_missing_or_deleted_user(self):
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",

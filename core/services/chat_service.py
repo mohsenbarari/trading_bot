@@ -47,9 +47,6 @@ async def _ensure_direct_chat_initiation_allowed(
     receiver_id: int,
 ) -> None:
     accountant_relation = await get_active_accountant_relation_for_accountant(db, sender.id)
-    if accountant_relation is not None:
-        return
-
     customer_permission = await _resolve_customer_direct_chat_initiation_permission(
         db,
         sender=sender,
@@ -59,27 +56,11 @@ async def _ensure_direct_chat_initiation_allowed(
     if customer_permission is True:
         return
 
-    has_existing_thread = await _has_existing_direct_thread(db, sender.id, receiver_id)
     if customer_permission is False:
-        if has_existing_thread:
-            return
         raise HTTPException(
             status_code=403,
             detail="کاربر مشتری در این فاز اجازه شروع گفتگوی مستقیم با این کاربر را ندارد",
         )
-
-
-async def _has_existing_direct_thread(
-    db: AsyncSession,
-    user1_id: int,
-    user2_id: int,
-) -> bool:
-    existing_conversation = await get_existing_direct_conversation(db, user1_id, user2_id)
-    if existing_conversation is not None:
-        return True
-
-    existing_chat = await get_existing_direct_chat(db, user1_id, user2_id)
-    return existing_chat is not None
 
 
 async def _resolve_customer_direct_chat_initiation_permission(
