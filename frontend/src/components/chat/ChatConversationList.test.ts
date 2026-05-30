@@ -340,6 +340,37 @@ describe('ChatConversationList.vue', () => {
     expect(wrapper.emitted('new-conversation')).toHaveLength(1)
   })
 
+  it('renders long conversation lists through a bounded progressive window', async () => {
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const conversations = Array.from({ length: 95 }, (_, index) => makeConversation({
+      id: index + 1,
+      other_user_id: index + 1,
+      other_user_name: `User ${index + 1}`,
+      last_message_at: `2026-05-12T10:${String(index % 60).padStart(2, '0')}:00`,
+    }))
+
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations,
+        selectedUserId: 95,
+        typingUsers: {},
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { teleport: true, transition: false },
+      },
+    })
+
+    expect(wrapper.findAll('.conversation-item')).toHaveLength(81)
+    expect(wrapper.text()).toContain('User 95')
+    expect(wrapper.get('.conversation-window-more').text()).toContain('۱۴')
+
+    await wrapper.get('.conversation-window-more').trigger('click')
+    expect(wrapper.findAll('.conversation-item')).toHaveLength(95)
+    expect(wrapper.find('.conversation-window-more').exists()).toBe(false)
+  })
+
   it('suppresses the immediate post-menu click and then restores normal conversation selection after closing', async () => {
     vi.useFakeTimers()
     const ChatConversationList = (await import('./ChatConversationList.vue')).default

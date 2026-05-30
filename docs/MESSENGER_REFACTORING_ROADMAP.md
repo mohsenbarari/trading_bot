@@ -1,7 +1,7 @@
 # Messenger Refactoring Roadmap
 
 > Date: 2026-05-30  
-> Status: Stage 3 controller contracts implemented; legacy Messenger remains the default
+> Status: Stage 4 conversation/timeline performance boundary implemented; legacy Messenger remains the default
 > Scope: In-app Messenger frontend and the minimum backend/runtime seams needed to make it fast, stable, standard, dynamic, and user-friendly.
 
 ## Goal
@@ -13,6 +13,7 @@ Rebuild the Messenger experience into a standard, cohesive, responsive, and poli
 - Stage 1 executive phase is implemented: the reversible feature-flag shell, baseline performance mark utility, legacy-default route switch, and focused Vitest coverage are in place.
 - Stage 2 executive phase is implemented for the frontend refactor surface: additive baseline metrics, Messenger-local design tokens, reduced-motion guardrails, build-size baseline capture, and focused Vitest coverage are in place.
 - Stage 3 executive phase is implemented for the first controller boundary: route query normalization, selection batch handling, album context resolution, and grouped timeline shaping now live behind typed, focused-tested pure helpers while `ChatView.vue` still owns runtime side effects.
+- Stage 4 executive phase is implemented for conversation/timeline performance: conversation ordering and pin-order calculations now live behind a typed helper, the conversation list renders through a bounded progressive window, and timeline render-budget metrics identify future virtualization candidates without changing the risky message DOM contract.
 - No real Messenger UI replacement is active by default. The existing `ChatView.vue` path remains the production path unless `messenger_ui_version=refactor` or `VITE_MESSENGER_REFACTOR_ENABLED=true` explicitly enables the shell.
 
 ## Current Baseline
@@ -55,6 +56,18 @@ The Stage 3 slice reduces `ChatView.vue` without changing rendering behavior or 
 - The slice intentionally leaves websocket, media, composer, overlay back-stack, pinned-message, and search side effects in the legacy orchestrator until their focused controller tests are added in later phases.
 
 Rollback remains local: revert the Stage 3 utility/tests and the small `ChatView.vue` delegation patch; no backend, API, schema, or feature-flag default changed.
+
+## Stage 4 Conversation/Timeline Performance Contract
+
+The Stage 4 executive slice targets the list/timeline performance boundary without enabling high-risk message virtualization by default. It intentionally does not perform the later roadmap Phase 4 message-renderer split.
+
+- `frontend/src/utils/messengerStage4Performance.ts` owns pure conversation ordering, mandatory/pinned detection, next pin-order calculation, progressive conversation-window selection, near-bottom expansion detection, and timeline render-budget summarization.
+- `ChatView.vue` delegates conversation sorting and pin-order helper behavior to the Stage 4 utility while preserving the existing `sortedConversations` contract for conversation list, search, forward modal, and room managers.
+- `ChatConversationList.vue` now renders large conversation lists through an initial bounded window and progressively expands as the user scrolls or taps the explicit load-more affordance. The active row is kept visible even when it would otherwise fall outside the initial window.
+- `ChatView.vue` records a timeline render-budget metric for loaded message groups, media items, and virtualization-candidate status. This gives the next stages a measurable gate without breaking sticky dates, scroll-to-message, album highlighting, selection anchors, or deferred media hydration.
+- Focused coverage lives in `messengerStage4Performance.test.ts`, `ChatConversationList.test.ts`, and the existing `ChatView.test.ts` wiring suite.
+
+Rollback remains local: revert the Stage 4 utility/tests plus the small `ChatView.vue` and `ChatConversationList.vue` wiring patches. No backend, API, schema, or feature-flag default changed.
 
 ## Non-Negotiable Safety Rules
 
