@@ -316,9 +316,8 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
                     suspendSession();
                     throw new Error('نشست شما منقضی شده است. لطفا مجددا وارد شوید');
                 }
-                
-                    suspendSession();
-                    throw new Error('نشست شما منقضی شده است. لطفا مجددا وارد شوید');
+
+                throw new Error('NetworkError');
             }
 
             if (response.status >= 500) {

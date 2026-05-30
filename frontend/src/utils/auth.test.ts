@@ -456,7 +456,7 @@ describe('auth utils', () => {
     expect(location.href).toBe('/login')
   })
 
-  it('apiFetch suspends the session when refresh returns a network_error and retries direct 5xx responses', async () => {
+  it('apiFetch keeps the session intact when refresh returns a network_error and retries once refresh succeeds', async () => {
     vi.useFakeTimers()
     localStorage.setItem('auth_token', 'expired-auth')
     localStorage.setItem('refresh_token', 'refresh-token')
@@ -465,13 +465,25 @@ describe('auth utils', () => {
     fetchMock
       .mockResolvedValueOnce(makeJsonResponse({}, 401, false))
       .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce(makeJsonResponse({}, 401, false))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ access_token: 'fresh-auth', refresh_token: 'fresh-refresh' }),
+      })
+      .mockResolvedValueOnce(makeJsonResponse({ recovered: true }))
 
     const { apiFetch, isAppConnecting } = await import(authModulePath)
-    await expect(apiFetch('/api/refresh-retry')).rejects.toThrow('نشست شما منقضی شده است. لطفا مجددا وارد شوید')
-    expect(localStorage.getItem('auth_token')).toBeNull()
-    expect(localStorage.getItem('refresh_token')).toBeNull()
-    expect(localStorage.getItem('suspended_refresh_token')).toBe('refresh-token')
-    expect(location.href).toBe('/login')
+    const responsePromise = apiFetch('/api/refresh-retry')
+
+    await vi.advanceTimersByTimeAsync(1500)
+    const response = await responsePromise
+    expect(response.ok).toBe(true)
+    expect(localStorage.getItem('auth_token')).toBe('fresh-auth')
+    expect(localStorage.getItem('refresh_token')).toBe('fresh-refresh')
+    expect(localStorage.getItem('suspended_refresh_token')).toBeNull()
+    expect(location.href).toBe('http://localhost/')
+    expect(isAppConnecting.value).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
 
     fetchMock.mockReset()
     localStorage.setItem('auth_token', 'auth-token')
