@@ -1,7 +1,7 @@
 # Messenger Refactoring Roadmap
 
 > Date: 2026-05-30  
-> Status: Stage 4 conversation/timeline performance boundary implemented; legacy Messenger remains the default
+> Status: Stage 5 composer/overlay UX boundary implemented; legacy Messenger remains the default
 > Scope: In-app Messenger frontend and the minimum backend/runtime seams needed to make it fast, stable, standard, dynamic, and user-friendly.
 
 ## Goal
@@ -14,6 +14,7 @@ Rebuild the Messenger experience into a standard, cohesive, responsive, and poli
 - Stage 2 executive phase is implemented for the frontend refactor surface: additive baseline metrics, Messenger-local design tokens, reduced-motion guardrails, build-size baseline capture, and focused Vitest coverage are in place.
 - Stage 3 executive phase is implemented for the first controller boundary: route query normalization, selection batch handling, album context resolution, and grouped timeline shaping now live behind typed, focused-tested pure helpers while `ChatView.vue` still owns runtime side effects.
 - Stage 4 executive phase is implemented for conversation/timeline performance: conversation ordering and pin-order calculations now live behind a typed helper, the conversation list renders through a bounded progressive window, and timeline render-budget metrics identify future virtualization candidates without changing the risky message DOM contract.
+- Stage 5 executive phase is implemented for composer/overlay UX: composer surface decisions and overlay arbitration now live behind a typed, focused-tested pure helper while the existing `ChatInputBar.vue` and `ChatView.vue` production path remains active.
 - No real Messenger UI replacement is active by default. The existing `ChatView.vue` path remains the production path unless `messenger_ui_version=refactor` or `VITE_MESSENGER_REFACTOR_ENABLED=true` explicitly enables the shell.
 
 ## Current Baseline
@@ -68,6 +69,18 @@ The Stage 4 executive slice targets the list/timeline performance boundary witho
 - Focused coverage lives in `messengerStage4Performance.test.ts`, `ChatConversationList.test.ts`, and the existing `ChatView.test.ts` wiring suite.
 
 Rollback remains local: revert the Stage 4 utility/tests plus the small `ChatView.vue` and `ChatConversationList.vue` wiring patches. No backend, API, schema, or feature-flag default changed.
+
+## Stage 5 Composer/Overlay UX Contract
+
+The Stage 5 executive slice makes composer and overlay state explicit without rewriting the visual composer, keyboard logic, attachment sheet, or media pipeline.
+
+- `frontend/src/utils/messengerStage5ComposerOverlay.ts` owns pure composer surface decisions for selection mode, disabled/read-only state, recording state, editing state, text submit state, voice availability, attachment availability, emoji visibility, and send-button enablement.
+- The same helper owns mutually exclusive overlay arbitration for sticker picker, attachment sheet, forward modal, selection mode, and search mode. Opening attachment now always closes sticker state through the shared transition helper; opening search or selection closes composer overlays predictably.
+- `ChatInputBar.vue` now consumes the composer surface state for button/banner visibility while preserving the existing keyboard/sticker `env(keyboard-inset-height)` implementation, edit prefill, reply banner, voice recording, sticker insertion, and read-only channel behavior.
+- `ChatView.vue` now applies overlay transitions through a small adapter around existing refs. This keeps the current back-stack and modal components intact while making the transition policy testable and reversible.
+- Focused coverage lives in `messengerStage5ComposerOverlay.test.ts`, `ChatInputBar.test.ts`, and the existing `ChatView.test.ts` wiring suite.
+
+Rollback remains local: revert the Stage 5 utility/test plus the small `ChatInputBar.vue` and `ChatView.vue` wiring patches. No backend, API, schema, heavy attachment editor, map, cropper, or upload pipeline changed.
 
 ## Non-Negotiable Safety Rules
 

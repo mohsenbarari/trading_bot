@@ -19,7 +19,7 @@ import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { pushBackState, popBackState, clearBackStack, discardBackState } from '../composables/useBackButton'
 import { useWebSocket } from '../composables/useWebSocket'
 
-import type { ChatForwardTarget, ChatSelectionPurpose, Conversation, Message, MessageReaction, PinnedMessageState } from '../types/chat'
+import type { ChatAlbumTimelineItem, ChatForwardTarget, ChatSelectionPurpose, ChatTimelineGroup, ChatTimelineItem, Conversation, Message, MessageReaction, PinnedMessageState } from '../types/chat'
 import { WS_NOTIFICATION_EVENTS } from '../types/notifications'
 import { useChatMedia } from '../composables/chat/useChatMedia'
 import { useChatWebSocket } from '../composables/chat/useChatWebSocket'
@@ -65,6 +65,11 @@ import {
   sortMessengerConversations,
   summarizeTimelineRenderBudget,
 } from '../utils/messengerStage4Performance'
+import {
+  reduceMessengerOverlayState,
+  type MessengerOverlayAction,
+  type MessengerOverlayState,
+} from '../utils/messengerStage5ComposerOverlay'
 
 // Props
 const props = defineProps<{
@@ -248,6 +253,26 @@ function bindOverlayBackState(source: () => boolean, onBack: () => void) {
       }
     }
   })
+}
+
+function getComposerOverlayState(): MessengerOverlayState {
+  return {
+    attachmentOpen: showAttachmentMenu.value,
+    stickerOpen: showStickerPicker.value,
+    forwardOpen: showForwardModal.value,
+    searchActive: isSearchActive.value,
+    inChatSearchList: showInChatSearchList.value,
+  }
+}
+
+function applyComposerOverlayAction(action: MessengerOverlayAction) {
+  const nextState = reduceMessengerOverlayState(getComposerOverlayState(), action)
+  showAttachmentMenu.value = nextState.attachmentOpen
+  showStickerPicker.value = nextState.stickerOpen
+  showForwardModal.value = nextState.forwardOpen
+  isSearchActive.value = nextState.searchActive
+  showInChatSearchList.value = nextState.inChatSearchList
+  return nextState
 }
 
 const {
@@ -1001,7 +1026,7 @@ function openForwardModalForIds(messageIds: number[]) {
   if (normalized.length === 0) return
 
   forwardMessageIds.value = normalized
-  showForwardModal.value = true
+  applyComposerOverlayAction({ type: 'open_forward' })
 }
 
 function sortMessageIdsByChatOrder(messageIds: number[]) {
@@ -1144,6 +1169,24 @@ const dateSeparatorLabelCache = new Map<string, string>()
 const groupedMessages = computed(() => groupMessengerMessages(messages.value, formatDateForSeparator, timelineControllerCache))
 const timelineRenderBudget = computed(() => summarizeTimelineRenderBudget(groupedMessages.value))
 
+function isAlbumTimelineItem(item: ChatTimelineItem): item is ChatAlbumTimelineItem {
+  return 'type' in item && item.type === 'album'
+}
+
+function getTimelineItemMessage(item: ChatTimelineItem): Message {
+  return isAlbumTimelineItem(item) ? item.messages[0]! : item
+}
+
+function getTimelineItemAlbumItems(item: ChatTimelineItem): Message[] {
+  return isAlbumTimelineItem(item) ? item.messages : []
+}
+
+function scrollToTimelineGroup(group: ChatTimelineGroup) {
+  const firstItem = group.items[0]
+  if (!firstItem) return
+  scrollToMessage(getTimelineItemMessage(firstItem).id)
+}
+
 function formatTime(dateStr: string) {
   return formatIranTime(dateStr)
 }
@@ -1198,22 +1241,22 @@ const performSearch = () => {
 }
 
 const toggleSearch = () => {
-    isSearchActive.value = !isSearchActive.value
-    if (isSearchActive.value) {
-        searchQuery.value = ''
-        searchResults.value = []
-        currentSearchIndex.value = 0
-        showInChatSearchList.value = false
-        nextTick(() => {
-            const input = document.getElementById('search-input')
-            if (input) input.focus()
-        })
-    } else {
-        searchQuery.value = ''
-        searchResults.value = []
-        currentSearchIndex.value = 0
-      showInChatSearchList.value = false
-    }
+  const willOpenSearch = !isSearchActive.value
+  if (willOpenSearch) {
+    applyComposerOverlayAction({ type: 'enter_search' })
+    searchQuery.value = ''
+    searchResults.value = []
+    currentSearchIndex.value = 0
+    nextTick(() => {
+      const input = document.getElementById('search-input')
+      if (input) input.focus()
+    })
+  } else {
+    applyComposerOverlayAction({ type: 'close_search' })
+    searchQuery.value = ''
+    searchResults.value = []
+    currentSearchIndex.value = 0
+  }
 }
 
 const nextSearchResult = async () => {
@@ -1258,8 +1301,7 @@ const handleToggleInChatList = () => {
 }
 const handleSearchResultClick = async (msg: any) => {
     if (!selectedUserId.value) {
-        isSearchActive.value = false
-        showInChatSearchList.value = false
+    applyComposerOverlayAction({ type: 'close_search' })
         searchResults.value = []
         currentSearchIndex.value = 0
         const otherId = msg.sender_id === props.currentUserId ? msg.receiver_id : msg.sender_id;
@@ -2161,7 +2203,7 @@ function openForwardModal() {
   const normalized = sortMessageIdsByChatOrder(selectedMessages.value)
   if (normalized.length === 0) return
   forwardMessageIds.value = normalized
-  showForwardModal.value = true
+  applyComposerOverlayAction({ type: 'open_forward' })
 }
 
 async function handleSendVoice(blob: Blob, durationMs: number) {
@@ -2203,7 +2245,7 @@ async function handleSendLocation(lat: number, lng: number) {
 
 function closeForwardModal() {
   forwardMessageIds.value = []
-  showForwardModal.value = false
+  applyComposerOverlayAction({ type: 'close_forward' })
 }
 
 async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardTarget[]) {
@@ -2257,7 +2299,7 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
   // Sending happens in parallel in the background.
   selectedMessages.value = []
   forwardMessageIds.value = []
-  showForwardModal.value = false
+  applyComposerOverlayAction({ type: 'close_forward' })
 
   // Build flat (target, item) send tasks so we can parallelize across
   // both targets and items, not sequentially per-target then per-item.
@@ -2447,7 +2489,7 @@ function handleForwardSelectedAlbumMessages() {
   selectionModePurpose.value = 'default'
   activeAlbumSelectionId.value = null
   forwardMessageIds.value = orderedIds
-  showForwardModal.value = true
+  applyComposerOverlayAction({ type: 'open_forward' })
 }
 
 function handleAlbumReplyItem(msg: Message) {
@@ -2701,7 +2743,7 @@ watch(isSelectionMode, (isEnabled) => {
     recordMessengerMetric('selection-selected-count', selectedMessages.value.length, 'count', {
       purpose: selectionModePurpose.value,
     })
-    showStickerPicker.value = false
+    applyComposerOverlayAction({ type: 'enter_selection' })
     if (!selectionBackStateActive.value) {
       selectionBackStateActive.value = true
       pushBackState(() => {
@@ -2749,7 +2791,7 @@ watch(() => contextMenu.value.visible, (isVisible) => {
 
 watch(showAttachmentMenu, (isOpen) => {
   if (isOpen) {
-    showStickerPicker.value = false
+    applyComposerOverlayAction({ type: 'close_sticker' })
   }
 })
 
@@ -2780,12 +2822,11 @@ bindOverlayBackState(() => showForwardModal.value, () => {
 })
 
 bindOverlayBackState(() => showStickerPicker.value, () => {
-  showStickerPicker.value = false
+  applyComposerOverlayAction({ type: 'close_sticker' })
 })
 
 bindOverlayBackState(() => isSearchActive.value, () => {
-  isSearchActive.value = false
-  showInChatSearchList.value = false
+  applyComposerOverlayAction({ type: 'close_search' })
   searchQuery.value = ''
   searchResults.value = []
   currentSearchIndex.value = 0
@@ -2804,10 +2845,10 @@ bindOverlayBackState(() => Boolean(lightboxMedia.value), () => {
 })
 
 function handleToggleAttachment(composerValue?: string) {
-  if (selectedRoomKind.value === 'channel' && !canSendToSelectedRoom.value) {
+  const canOpenAttachment = !(selectedRoomKind.value === 'channel' && !canSendToSelectedRoom.value)
+  if (!canOpenAttachment) {
     return
   }
-  showStickerPicker.value = false
   if (!showAttachmentMenu.value) {
     const nextComposerValue = typeof composerValue === 'string' ? composerValue : messageInput.value
     if (nextComposerValue !== messageInput.value) {
@@ -2821,7 +2862,7 @@ function handleToggleAttachment(composerValue?: string) {
         }
       : null
   }
-  showAttachmentMenu.value = !showAttachmentMenu.value
+  applyComposerOverlayAction({ type: 'toggle_attachment', canOpen: canOpenAttachment })
 }
 
 function claimComposerCaptionForMedia(albumId?: string | null, albumIndex?: number) {
@@ -2946,6 +2987,8 @@ defineExpose({
     isMandatoryPinnedConversation,
     isConversationPinned,
     getNextLocalPinOrder,
+    getComposerOverlayState,
+    applyComposerOverlayAction,
     compareConversationActivity,
     isSameConversation,
     patchConversationState,
@@ -3191,15 +3234,15 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
           
           <div v-for="group in groupedMessages" :key="group.label" class="message-group" v-auto-animate v-memo="[group, searchQuery, isSelectionMode, activeAlbumSelectionId, selectionMemoKey]">
             <div class="date-separator sticky-date">
-              <span @click="scrollToMessage(group.items[0].id)">{{ group.label }}</span>
+              <span @click="scrollToTimelineGroup(group)">{{ group.label }}</span>
             </div>
 
             <template v-for="(item, index) in group.items" :key="item.id">
               <ChatMessageItem
                 v-memo="[item, searchQuery, isSelectionMode, isAlbumInDownloadSelection(item), selectionMemoKey]"
-                :msg="item.type === 'album' ? item.messages[0] : item"
-                :isAlbum="item.type === 'album'"
-                :albumItems="item.type === 'album' ? item.messages : []"
+                :msg="getTimelineItemMessage(item)"
+                :isAlbum="isAlbumTimelineItem(item)"
+                :albumItems="getTimelineItemAlbumItems(item)"
                 :isAlbumDownloadMode="isAlbumInDownloadSelection(item)"
                 :selectedAlbumDownloadMessageIds="selectedMessages"
                 :currentUserId="props.currentUserId"
