@@ -800,9 +800,11 @@ describe('ChatView.vue', () => {
 
     expect(hooks.state.contextMenu.value.visible).toBe(false)
     expect(hooks.state.showForwardModal.value).toBe(true)
-    expect(chatViewMocks.popBackStateMock.mock.invocationCallOrder[0]).toBeLessThan(
-      chatViewMocks.pushBackStateMock.mock.invocationCallOrder[0],
-    )
+    const forwardPopOrder = chatViewMocks.popBackStateMock.mock.invocationCallOrder.at(0)
+    const forwardPushOrder = chatViewMocks.pushBackStateMock.mock.invocationCallOrder.at(0)
+    expect(forwardPopOrder).toBeDefined()
+    expect(forwardPushOrder).toBeDefined()
+    expect(forwardPopOrder!).toBeLessThan(forwardPushOrder!)
 
     hooks.closeForwardModal()
     await flushPromises()
@@ -817,9 +819,11 @@ describe('ChatView.vue', () => {
 
     expect(hooks.state.lightboxMedia.value).toBeNull()
     expect(hooks.state.showForwardModal.value).toBe(true)
-    expect(chatViewMocks.popBackStateMock.mock.invocationCallOrder[0]).toBeLessThan(
-      chatViewMocks.pushBackStateMock.mock.invocationCallOrder[0],
-    )
+    const lightboxPopOrder = chatViewMocks.popBackStateMock.mock.invocationCallOrder.at(0)
+    const lightboxPushOrder = chatViewMocks.pushBackStateMock.mock.invocationCallOrder.at(0)
+    expect(lightboxPopOrder).toBeDefined()
+    expect(lightboxPushOrder).toBeDefined()
+    expect(lightboxPopOrder!).toBeLessThan(lightboxPushOrder!)
 
     hooks.state.contextMenu.value = {
       visible: true,
