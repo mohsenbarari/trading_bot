@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { MESSENGER_UI_VERSION_STORAGE_KEY } from '../utils/messengerRefactor'
 import MessengerView from './MessengerView.vue'
 
 const {
@@ -59,6 +60,7 @@ describe('MessengerView.vue', () => {
   beforeEach(() => {
     apiFetchMock.mockReset()
     routerPushMock.mockReset()
+    vi.unstubAllEnvs()
     localStorage.clear()
     localStorage.setItem('auth_token', 'jwt-token')
     routeState.query = {
@@ -80,12 +82,33 @@ describe('MessengerView.vue', () => {
 
     expect(apiFetchMock).toHaveBeenCalledWith('/api/auth/me')
     expect(wrapper.find('.chat-view-stub').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="messenger-refactor-shell"]').exists()).toBe(false)
     expect(wrapper.get('.stub-user-id').text()).toBe('42')
     expect(wrapper.get('.stub-role').text()).toBe('عادی')
     expect(wrapper.get('.stub-accountant').text()).toBe('true')
     expect(wrapper.get('.stub-customer').text()).toBe('false')
     expect(wrapper.get('.stub-target-id').text()).toBe('18')
     expect(wrapper.get('.stub-target-name').text()).toBe('peer-user')
+  })
+
+  it('mounts the reversible refactor shell only when explicitly enabled', async () => {
+    localStorage.setItem(MESSENGER_UI_VERSION_STORAGE_KEY, 'refactor')
+    apiFetchMock.mockResolvedValue(makeResponse({
+      id: 42,
+      role: 'عادی',
+      is_accountant: false,
+      is_customer: false,
+    }))
+
+    const wrapper = mount(MessengerView)
+    await flushPromises()
+
+    expect(wrapper.find('.chat-view-stub').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="messenger-refactor-shell"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('peer-user')
+
+    await wrapper.get('.shell-back').trigger('click')
+    expect(routerPushMock).toHaveBeenCalledWith('/')
   })
 
   it('keeps direct-target props undefined and does not mount ChatView when auth me is not ok', async () => {
