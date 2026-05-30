@@ -130,10 +130,18 @@ describe('ChatNewConversationModal.vue', () => {
     expect(wrapper.emitted('start-chat')).toEqual([[20, 'مالک مشتری']])
   })
 
-  it('allows direct starts for shared-group accountants without owner-resolution badges', async () => {
+  it('keeps shared-group accountants owner-resolved in messenger discovery', async () => {
     fetchMock.mockResolvedValue(
       makeResponse([
-        { id: 44, account_name: 'acct44', full_name: 'حسابدار گروه', mobile_number: '09124444444', avatar_file_id: null },
+        {
+          id: 20,
+          account_name: 'owner20',
+          full_name: 'مالک حسابدار گروه',
+          mobile_number: '09124444444',
+          avatar_file_id: null,
+          resolved_from_accountant_id: 44,
+          highlight_accountant_relation_display_name: 'حسابدار گروه',
+        },
       ]),
     )
 
@@ -146,13 +154,13 @@ describe('ChatNewConversationModal.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.new-group-action').exists()).toBe(false)
-    expect(wrapper.text()).toContain('حسابدار گروه')
-    expect(wrapper.text()).not.toContain('مالک')
-    expect(wrapper.text()).not.toContain('از مسیر حسابدار')
+    expect(wrapper.text()).toContain('مالک حسابدار گروه')
+    expect(wrapper.text()).toContain('مالک')
+    expect(wrapper.text()).toContain('از مسیر حسابدار: حسابدار گروه')
 
     await wrapper.get('.user-row').trigger('click')
 
-    expect(wrapper.emitted('start-chat')).toEqual([[44, 'حسابدار گروه']])
+    expect(wrapper.emitted('start-chat')).toEqual([[20, 'مالک حسابدار گروه']])
   })
 
   it('prefers full names for display and emits a generic accountant context label when no relation name exists', async () => {
