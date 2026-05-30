@@ -42,6 +42,8 @@ import {
 import { resolveConversationProfileTarget } from '../utils/accountantChatIdentity'
 import { isAdminRole } from '../utils/currentUser'
 import { isUserOnline } from '../utils/userPresence'
+import { markMessengerPerformance } from '../utils/messengerRefactor'
+import { recordMessengerDomSnapshot, recordMessengerMetric } from '../utils/messengerStage2Metrics'
 
 // Props
 const props = defineProps<{
@@ -2013,6 +2015,18 @@ const showContextMenu = (event: Event, msg: Message) => {
     message: msg,
     messageIds,
   }
+  markMessengerPerformance('message-context-menu-open')
+  nextTick(() => {
+    const root = typeof document !== 'undefined'
+      ? document.querySelector('.chat-view') || document.body
+      : null
+    if (root) {
+      recordMessengerDomSnapshot('message-context-menu-open', root, {
+        selectedUserId: selectedUserId.value,
+        messageCount: messages.value.length,
+      })
+    }
+  })
 };
 
 const closeContextMenu = () => {
@@ -2947,6 +2961,10 @@ watch(conversations, () => {
 
 watch(isSelectionMode, (isEnabled) => {
   if (isEnabled) {
+    markMessengerPerformance('selection-mode-enter')
+    recordMessengerMetric('selection-selected-count', selectedMessages.value.length, 'count', {
+      purpose: selectionModePurpose.value,
+    })
     showStickerPicker.value = false
     if (!selectionBackStateActive.value) {
       selectionBackStateActive.value = true
@@ -2958,6 +2976,11 @@ watch(isSelectionMode, (isEnabled) => {
     }
     return
   }
+
+  markMessengerPerformance('selection-mode-exit')
+  recordMessengerMetric('selection-selected-count', 0, 'count', {
+    purpose: selectionModePurpose.value,
+  })
 
   if (selectionBackStateActive.value) {
     selectionBackStateActive.value = false

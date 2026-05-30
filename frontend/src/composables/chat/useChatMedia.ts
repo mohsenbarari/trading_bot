@@ -2,6 +2,8 @@ import { ref, type Ref, nextTick, onUnmounted, watch } from 'vue'
 import type { Message } from '../../types/chat'
 import { canUseImagePreprocessWorker, getRecommendedImagePreprocessParallelism, processImageInWorker } from '../../utils/imagePreprocessClient'
 import { primeMediaPreprocessTelemetry, recordMediaPreprocessTelemetry } from '../../utils/chatMediaTelemetry'
+import { markMessengerPerformance } from '../../utils/messengerRefactor'
+import { measureMessengerStage2, recordMessengerDomSnapshot } from '../../utils/messengerStage2Metrics'
 import {
     submitUpload as backgroundSubmitUpload,
     cancelUpload as backgroundCancelUpload,
@@ -34,6 +36,7 @@ const HEIC_MIME_TYPES = new Set([
 ])
 
 let optimisticUploadSequence = 0
+let lightboxOpenMetricSequence = 0
 const mediaDownloadControllers = new Map<number, AbortController>()
 
 function formatFileSizeMb(bytes: number) {
@@ -1261,6 +1264,11 @@ export function useChatMedia(options: UseChatMediaOptions) {
             return
         }
 
+        const metricId = ++lightboxOpenMetricSequence
+        const lightboxStartMark = `lightbox-open-${metricId}-start`
+        const lightboxEndMark = `lightbox-open-${metricId}-end`
+        markMessengerPerformance(lightboxStartMark)
+
         const albumMessages = getAlbumMessages(msg)
         const items = (await Promise.all(albumMessages.map(buildLightboxMediaItem)))
             .filter((item): item is LightboxMediaItem => !!item)
@@ -1277,6 +1285,22 @@ export function useChatMedia(options: UseChatMediaOptions) {
             currentIndex,
             albumId,
         }
+        void nextTick().then(() => {
+            markMessengerPerformance(lightboxEndMark)
+            measureMessengerStage2('lightbox-open', lightboxStartMark, lightboxEndMark, {
+                messageType: msg.message_type,
+                itemCount: items.length,
+            })
+            const root = typeof document !== 'undefined'
+                ? document.querySelector('.lightbox-overlay') || document.body
+                : null
+            if (root) {
+                recordMessengerDomSnapshot('lightbox-open', root, {
+                    messageType: msg.message_type,
+                    itemCount: items.length,
+                })
+            }
+        })
     }
 
     function setLightboxIndex(index: number) {

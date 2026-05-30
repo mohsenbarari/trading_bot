@@ -1,0 +1,31 @@
+.messenger-page,
+.messenger-refactor-shell {
+  --messenger-surface-page: #fceceb;
+  --messenger-surface-panel: rgba(255, 255, 255, 0.92);
+  --messenger-surface-muted: #f8fafc;
+  --messenger-border-subtle: rgba(148, 163, 184, 0.32);
+  --messenger-text-strong: #1f2937;
+  --messenger-text-muted: #64748b;
+  --messenger-accent: #f59e0b;
+  --messenger-accent-strong: #b45309;
+  --messenger-danger: #dc2626;
+  --messenger-warning: #d97706;
+  --messenger-success: #16a34a;
+  --messenger-radius-control: 8px;
+  --messenger-touch-target: 44px;
+  --messenger-list-row-min-height: 64px;
+  --messenger-motion-fast: 120ms;
+  --messenger-motion-standard: 180ms;
+  --messenger-motion-overlay: 220ms;
+  --messenger-shadow-panel: 0 18px 50px rgba(15, 23, 42, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .messenger-page *,
+  .messenger-refactor-shell * {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}

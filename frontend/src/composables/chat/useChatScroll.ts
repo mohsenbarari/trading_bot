@@ -1,5 +1,7 @@
 import { ref, type Ref, nextTick } from 'vue'
 import type { Message } from '../../types/chat'
+import { markMessengerPerformance } from '../../utils/messengerRefactor'
+import { measureMessengerStage2, recordMessengerMetric } from '../../utils/messengerStage2Metrics'
 
 export interface UseChatScrollOptions {
     messagesContainer: Ref<HTMLElement | null>
@@ -23,8 +25,18 @@ export function useChatScroll(options: UseChatScrollOptions) {
     } = options
 
     const isViewingReply = ref(false)
+    let scrollMetricSequence = 0
 
     function scrollToBottom() {
+        const el = messagesContainer.value
+        if (el) {
+            const distance = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight)
+            recordMessengerMetric('scroll-to-bottom-requested-distance', Math.round(distance), 'count', {
+                unreadCount: unreadNewMessagesCount.value,
+            })
+        }
+        markMessengerPerformance('scroll-to-bottom-requested')
+
         if (unreadNewMessagesCount.value > 0) {
             markAsRead()
             unreadNewMessagesCount.value = 0
@@ -114,6 +126,10 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const scrollToMessage = (msgId: number) => {
         const el = document.getElementById(`msg-${msgId}`) || document.getElementById(`album-item-${msgId}`)
         const container = messagesContainer.value
+        const metricId = ++scrollMetricSequence
+        const startMark = `scroll-to-message-${metricId}-start`
+        const endMark = `scroll-to-message-${metricId}-end`
+        markMessengerPerformance(startMark)
 
         if (el && container) {
             const safeContainer = container
@@ -139,6 +155,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
 
             const scrollBy = relativeTop - (containerHeight / 2) + (elHeight / 2)
             const targetScrollTop = safeContainer.scrollTop + scrollBy
+            recordMessengerMetric('scroll-to-message-distance', Math.round(Math.abs(scrollBy)), 'count', { msgId })
 
             const startScrollTop = safeContainer.scrollTop
             const distance = targetScrollTop - startScrollTop
@@ -154,6 +171,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
 
                 if (progress < 1) {
                     requestAnimationFrame(step)
+                } else {
+                    markMessengerPerformance(endMark)
+                    measureMessengerStage2('scroll-to-message', startMark, endMark, { msgId })
                 }
             }
 
