@@ -24,7 +24,6 @@ from core.services.admin_message_service import (
     list_management_broadcast_history,
     list_market_management_history,
     list_market_management_recipient_user_ids,
-    set_market_message_recipient_count,
 )
 from core.utils import create_user_notification, publish_user_event
 from models.admin_message import AdminBroadcastMessage, AdminMarketMessage
@@ -176,13 +175,16 @@ async def create_market_message(
     current_user: User = Depends(verify_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    recipient_ids = await list_market_management_recipient_user_ids(db, exclude_user_ids=[current_user.id])
     message = await create_market_management_message(
         db,
         actor=current_user,
         content=data.content,
         reused_from_id=data.reused_from_id,
+        notified_recipients_count=len(recipient_ids),
     )
-    recipient_ids = await list_market_management_recipient_user_ids(db, exclude_user_ids=[current_user.id])
+    payload = _serialize_market_message(message).model_dump(mode="json")
+    publish_event_sync("market:admin_message_published", payload)
     await _notify_users(
         db,
         user_ids=recipient_ids,
@@ -190,13 +192,6 @@ async def create_market_message(
         route="/market",
         extra_payload={"admin_message_type": "market", "admin_message_id": message.id},
     )
-    message = await set_market_message_recipient_count(
-        db,
-        message_id=message.id,
-        recipient_count=len(recipient_ids),
-    )
-    payload = _serialize_market_message(message).model_dump(mode="json")
-    publish_event_sync("market:admin_message_published", payload)
     return _serialize_market_message(message)
 
 

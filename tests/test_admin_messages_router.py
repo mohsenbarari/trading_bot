@@ -24,11 +24,10 @@ class AdminMessagesRouterTests(unittest.IsolatedAsyncioTestCase):
             created_by=SimpleNamespace(account_name="admin"),
             reused_from_id=None,
             is_active=True,
-            notified_recipients_count=0,
+            notified_recipients_count=2,
             published_at=datetime(2026, 5, 29, 8, 0, 0),
             created_at=datetime(2026, 5, 29, 8, 0, 0),
         )
-        counted_message = SimpleNamespace(**{**market_message.__dict__, "notified_recipients_count": 2})
 
         with patch("api.routers.admin_messages.create_market_management_message", new=AsyncMock(return_value=market_message)) as create_mock, patch(
             "api.routers.admin_messages.list_market_management_recipient_user_ids",
@@ -36,20 +35,22 @@ class AdminMessagesRouterTests(unittest.IsolatedAsyncioTestCase):
         ) as recipients_mock, patch(
             "api.routers.admin_messages.create_user_notification",
             new=AsyncMock(),
-        ) as notification_mock, patch(
-            "api.routers.admin_messages.set_market_message_recipient_count",
-            new=AsyncMock(return_value=counted_message),
-        ) as count_mock, patch("api.routers.admin_messages.publish_event_sync") as publish_mock:
+        ) as notification_mock, patch("api.routers.admin_messages.publish_event_sync") as publish_mock:
             result = await create_market_message(
                 data=AdminMarketMessageCreate(content=market_message.content),
                 current_user=current_user,
                 db=db,
             )
 
-        create_mock.assert_awaited_once_with(db, actor=current_user, content=market_message.content, reused_from_id=None)
+        create_mock.assert_awaited_once_with(
+            db,
+            actor=current_user,
+            content=market_message.content,
+            reused_from_id=None,
+            notified_recipients_count=2,
+        )
         recipients_mock.assert_awaited_once_with(db, exclude_user_ids=[1])
         self.assertEqual(notification_mock.await_count, 2)
-        count_mock.assert_awaited_once_with(db, message_id=42, recipient_count=2)
         publish_mock.assert_called_once()
         self.assertEqual(publish_mock.call_args.args[0], "market:admin_message_published")
         self.assertEqual(result.notified_recipients_count, 2)

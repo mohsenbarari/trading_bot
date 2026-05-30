@@ -179,6 +179,7 @@ async def create_market_management_message(
     actor: User,
     content: str,
     reused_from_id: int | None = None,
+    notified_recipients_count: int = 0,
 ) -> AdminMarketMessage:
     cleaned_content = _clean_content(content)
     if reused_from_id is not None:
@@ -197,6 +198,7 @@ async def create_market_management_message(
         created_by_id=actor.id,
         reused_from_id=reused_from_id,
         is_active=True,
+        notified_recipients_count=max(0, int(notified_recipients_count)),
         published_at=now,
         updated_at=now,
     )
