@@ -11,6 +11,7 @@ import { isAdminRoleValue, readCachedCurrentUserRole, SUPER_ADMIN_ROLE } from '.
 import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIdentity';
 import { apiFetch } from '../utils/auth';
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles';
+import { currentUserSummary } from '../utils/currentUser';
 import { formatLastSeenStatus, isUserOnline as isPresenceOnline } from '../utils/userPresence';
 import { formatIranDate } from '../utils/iranTime';
 
@@ -191,6 +192,9 @@ const viewerIsSuperAdmin = computed(() => viewerRole.value === SUPER_ADMIN_ROLE)
 const showVisitorSections = computed(() => !isOwnProfile.value);
 const showOwnerSections = computed(() => isOwnProfile.value);
 const showAdminSections = computed(() => !isOwnProfile.value && viewerIsAdmin.value);
+const viewerIsCustomer = computed(() => {
+  return currentUserSummary.value?.is_customer === true || (isOwnProfile.value && customerProfileContext.value !== null);
+});
 const profileAvatarUrl = computed(() => buildChatFileUrl(profileData.value?.avatar_file_id ?? null, props.apiBaseUrl));
 const profilePresenceStatus = computed(() => formatLastSeenStatus(profileData.value?.last_seen_at, { emptyText: null }));
 const profileIsOnline = computed(() => isPresenceOnline(profileData.value?.last_seen_at));
@@ -321,7 +325,7 @@ const targetCustomerHistoryContext = computed(() => {
   };
 });
 const showCustomerListSection = computed(() => {
-  return customerRelations.value.length > 0 && (showOwnerSections.value || viewerIsSuperAdmin.value);
+  return customerProfileContext.value === null && customerRelations.value.length > 0 && (showOwnerSections.value || viewerIsSuperAdmin.value);
 });
 const viewerIsDisplayedOwnerAccountant = computed(() => {
   const viewerUserId = Number(props.viewerUserId);
@@ -344,7 +348,7 @@ const showProjectUsersSection = computed(() => {
   return isOwnProfile.value || viewerIsDisplayedOwnerAccountant.value;
 });
 const showPublicBlockAction = computed(() => {
-  return showVisitorSections.value && !!profileData.value && customerProfileContext.value === null;
+  return showVisitorSections.value && !!profileData.value && customerProfileContext.value === null && !viewerIsCustomer.value;
 });
 const publicBlockActionDisabled = computed(() => {
   if (publicBlockState.value === true) return false;
@@ -409,23 +413,27 @@ const visitorActionCards = computed<ProfileActionCard[]>(() => {
 });
 const ownerOnlyActions = computed<ProfileActionCard[]>(() => {
   if (!showOwnerSections.value) return [];
-  return [
+  const actions: ProfileActionCard[] = [
     {
       key: 'settings',
       icon: '⚙️',
       label: 'تنظیمات کاربری',
     },
-    {
+  ];
+
+  if (customerProfileContext.value === null && !viewerIsCustomer.value) {
+    actions.push({
       key: 'add_customer',
       icon: '👥',
       label: 'مشتریان',
-    },
-    {
+    }, {
       key: 'add_accountant',
       icon: '💼',
       label: 'حسابداران',
-    }
-  ];
+    });
+  }
+
+  return actions;
 });
 const adminActionCards = computed<ProfileActionCard[]>(() => {
   if (!showAdminSections.value) return [];
@@ -1307,17 +1315,6 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             <span v-if="resolvedAccountantContext.relationDisplayName">
               عنوان این رابطه: «{{ resolvedAccountantContext.relationDisplayName }}»
             </span>
-          </p>
-        </div>
-
-        <div v-if="customerProfileContext" class="customer-context-banner">
-          <div class="customer-context-title">نمای مشتری</div>
-          <p class="customer-context-copy">
-            این کاربر با عنوان «{{ customerProfileContext.managementName }}»
-            <span v-if="customerProfileContext.ownerAccountName">
-              زیرمجموعه مالک «{{ customerProfileContext.ownerAccountName }}»
-            </span>
-            ثبت شده و در {{ getCustomerTierLabel(customerProfileContext.customerTier) }} قرار دارد.
           </p>
         </div>
 

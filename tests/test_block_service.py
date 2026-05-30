@@ -41,6 +41,20 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["reason_code"], block_service.BLOCK_STATUS_REASON_CAPABILITY_DISABLED)
         db.scalar.assert_not_awaited()
 
+    async def test_can_user_block_returns_customer_delegated_status(self):
+        user = SimpleNamespace(can_block_users=True, max_blocked_users=5)
+        db = SimpleNamespace(get=AsyncMock(return_value=user), execute=AsyncMock(), scalar=AsyncMock())
+
+        with patch("core.services.block_service.is_user_customer", AsyncMock(return_value=True)):
+            can_block, error, status = await block_service.can_user_block(db, 11)
+
+        self.assertFalse(can_block)
+        self.assertIn("مالک", error)
+        self.assertFalse(status["can_block"])
+        self.assertFalse(status["can_block_now"])
+        self.assertEqual(status["reason_code"], block_service.BLOCK_STATUS_REASON_CUSTOMER_DELEGATED)
+        db.scalar.assert_not_awaited()
+
     async def test_can_user_block_returns_limit_reached_status(self):
         user = SimpleNamespace(can_block_users=True, max_blocked_users=2)
         db = SimpleNamespace(get=AsyncMock(return_value=user), scalar=AsyncMock(return_value=2))
@@ -178,6 +192,14 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         disabled_status = await block_service.get_block_status(disabled_db, 52)
         self.assertFalse(disabled_status["can_block_now"])
         self.assertEqual(disabled_status["reason_code"], block_service.BLOCK_STATUS_REASON_CAPABILITY_DISABLED)
+
+        customer_user = SimpleNamespace(can_block_users=True, max_blocked_users=4)
+        customer_db = SimpleNamespace(get=AsyncMock(return_value=customer_user), execute=AsyncMock(), scalar=AsyncMock())
+        with patch("core.services.block_service.is_user_customer", AsyncMock(return_value=True)):
+            customer_status = await block_service.get_block_status(customer_db, 54)
+        self.assertFalse(customer_status["can_block"])
+        self.assertEqual(customer_status["reason_code"], block_service.BLOCK_STATUS_REASON_CUSTOMER_DELEGATED)
+        customer_db.scalar.assert_not_awaited()
 
         full_user = SimpleNamespace(can_block_users=True, max_blocked_users=2)
         full_db = SimpleNamespace(get=AsyncMock(return_value=full_user), scalar=AsyncMock(return_value=2))

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import JalaliDatePicker from './JalaliDatePicker.vue'
+import { currentUserSummary } from '../utils/currentUser'
 
 const buildChatFileUrlMock = vi.fn(() => '')
 const uploadAvatarImageMock = vi.fn()
@@ -66,6 +67,7 @@ describe('PublicProfile.vue', () => {
     }))
     vi.stubGlobal('alert', vi.fn())
     vi.stubGlobal('confirm', vi.fn(() => true))
+    currentUserSummary.value = null
     localStorage.clear()
     localStorage.setItem('auth_token', 'token')
   })
@@ -983,6 +985,54 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('لیست همکاران')
+    expect(wrapper.findAll('button').some((button) => button.text().includes('حسابداران'))).toBe(false)
+    expect(wrapper.findAll('button').some((button) => button.text().includes('مشتریان'))).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides the public block action when the viewer is a customer', async () => {
+    currentUserSummary.value = {
+      id: 91,
+      role: 'عادی',
+      is_customer: true,
+      customer_tier: 'tier1',
+    }
+
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 30,
+      account_name: 'plain30',
+      avatar_file_id: null,
+      mobile_number: '09125555555',
+      address: 'تهران',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۳',
+      trades_count: 4,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 30, account_name: 'plain30' },
+        viewerUserId: 91,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          OwnerCustomerManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.findAll('button').some((button) => button.text().includes('بلاک'))).toBe(false)
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -2107,7 +2157,7 @@ describe('PublicProfile.vue', () => {
     expect(accountantAccordion!.classes()).toContain('open')
   })
 
-  it('shows customer context when the public profile belongs to a customer', async () => {
+  it('does not render the customer context banner on customer profiles', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 91,
@@ -2146,10 +2196,9 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('نمای مشتری')
-    expect(wrapper.text()).toContain('owner20')
-    expect(wrapper.text()).toContain('مشتری ویژه')
-    expect(wrapper.text()).toContain('سطح 2')
+    expect(wrapper.text()).not.toContain('نمای مشتری')
+    expect(wrapper.text()).not.toContain('زیرمجموعه مالک')
+    expect(wrapper.text()).not.toContain('مشتری ویژه')
   })
 
   it('shows owner customer list for super-admin viewers', async () => {
