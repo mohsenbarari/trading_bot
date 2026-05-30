@@ -81,6 +81,8 @@ describe('MessengerView.vue', () => {
     await flushPromises()
 
     expect(apiFetchMock).toHaveBeenCalledWith('/api/auth/me')
+    expect(wrapper.get('.messenger-page').attributes('data-messenger-ui-version')).toBe('legacy')
+    expect(wrapper.get('.messenger-page').attributes('data-messenger-rollout-mode')).toBe('legacy-default')
     expect(wrapper.find('.chat-view-stub').exists()).toBe(true)
     expect(wrapper.find('[data-testid="messenger-refactor-shell"]').exists()).toBe(false)
     expect(wrapper.get('.stub-user-id').text()).toBe('42')
@@ -103,6 +105,8 @@ describe('MessengerView.vue', () => {
     const wrapper = mount(MessengerView)
     await flushPromises()
 
+    expect(wrapper.get('.messenger-page').attributes('data-messenger-ui-version')).toBe('refactor')
+    expect(wrapper.get('.messenger-page').attributes('data-messenger-rollout-mode')).toBe('refactor-preview')
     expect(wrapper.find('.chat-view-stub').exists()).toBe(false)
     expect(wrapper.find('[data-testid="messenger-refactor-shell"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('peer-user')

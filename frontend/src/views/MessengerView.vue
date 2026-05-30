@@ -9,6 +9,7 @@ import {
   markMessengerPerformance,
   resolveMessengerUiVersion,
 } from '../utils/messengerRefactor'
+import { getMessengerRolloutSurface } from '../utils/messengerStage7Rollout'
 import {
   measureMessengerStage2,
   recordMessengerDomSnapshot,
@@ -44,7 +45,8 @@ const targetUserName = computed(() => {
   return route.query.user_name as string | undefined
 })
 
-const isMessengerRefactorShellEnabled = computed(() => messengerUiVersion.value === 'refactor')
+const messengerRolloutSurface = computed(() => getMessengerRolloutSurface(messengerUiVersion.value))
+const isMessengerRefactorShellEnabled = computed(() => messengerRolloutSurface.value.isRefactorShellEnabled)
 
 watch([loading, user, messengerUiVersion], () => {
   if (loading.value || !user.value || messengerSurfaceMarked) {
@@ -108,7 +110,11 @@ function handleBack() {
 </script>
 
 <template>
-  <div class="messenger-page">
+  <div
+    class="messenger-page"
+    :data-messenger-ui-version="messengerRolloutSurface.uiVersion"
+    :data-messenger-rollout-mode="messengerRolloutSurface.rolloutMode"
+  >
     <div v-if="loading" class="loading-container">
       <div class="loading-spinner"></div>
     </div>
