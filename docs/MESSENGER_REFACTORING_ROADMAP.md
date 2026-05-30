@@ -1,7 +1,7 @@
 # Messenger Refactoring Roadmap
 
 > Date: 2026-05-30  
-> Status: Post-Stage-7 reset in progress; Phase 8 overlay/action standardization has started with the first production slice, legacy Messenger remains the default, refactor preview remains opt-in, and the next program is benchmark-driven around full-surface UX parity plus measurable performance gains
+> Status: Post-Stage-7 reset in progress; Phase 8 overlay/action standardization now has a second production slice in `ChatView.vue`, the official benchmark runner now executes `S00`/`S04`/`S07`/`S10`/`S11`, legacy Messenger remains the default, refactor preview remains opt-in, and readiness is still benchmark-instrumented because runner coverage is still missing `S03`/`S05`/`S06`/`S08`/`S09`
 > Scope: In-app Messenger frontend and the minimum backend/runtime seams needed to make it fast, stable, standard, dynamic, and user-friendly.
 
 ## Goal
@@ -135,7 +135,7 @@ The post-Stage-7 program is done only when all of the following are true:
 - Stage 5 executive phase is implemented for composer/overlay UX: composer surface decisions and overlay arbitration now live behind a typed, focused-tested pure helper while the existing `ChatInputBar.vue` and `ChatView.vue` production path remains active.
 - Stage 6 executive phase is implemented for media/realtime polish: realtime activity normalization, relation-safe activity labels, visible-conversation runtime event guards, and media download progress patches now live behind a typed, focused-tested pure helper while the existing `useChatWebSocket.ts` and `useChatMedia.ts` runtime paths remain active.
 - Stage 7 executive phase is implemented for rollout readiness: the Messenger surface now exposes a typed legacy-vs-refactor rollout contract, focused tests prove old-version legacy default and new-version refactor preview routing, and the readiness helper explicitly separates technical rollout safety from legacy retirement approval.
-- Phase 8 roadmap work has started in the production `ChatView.vue` path: room-manager and admin-broadcast overlays now use the shared overlay back-stack binding, their close paths are explicit, and focused `ChatView` coverage locks browser/device back behavior for those surfaces.
+- Phase 8 roadmap work is active in the production `ChatView.vue` path: room-manager and admin-broadcast overlays use the shared overlay back-stack binding, context-menu/forward/lightbox/public-profile transitions now close current action surfaces before opening the next one, and focused `ChatView` coverage locks browser/device back behavior plus the new close-order contract.
 - No real Messenger UI replacement is active by default. The existing `ChatView.vue` path remains the production path unless `messenger_ui_version=refactor` or `VITE_MESSENGER_REFACTOR_ENABLED=true` explicitly enables the shell.
 
 ## Current Baseline
@@ -560,8 +560,10 @@ Make context menus, forward modal, room managers, profile drawers, and lightbox 
 
 ### Current Slice Status
 
-- Started in `ChatView.vue` with shared back-stack binding for group manager, channel manager, and admin broadcast overlays.
-- Locked with focused `ChatView.test.ts` coverage before rerunning the official old-vs-current benchmark pipeline.
+- The production `ChatView.vue` path now standardizes close-order across context menu, forward flow, lightbox reply/forward actions, and public-profile navigation by closing transient action surfaces before opening the next overlay or route.
+- Focused `ChatView.test.ts` coverage locks the new close-order and shared back-stack behavior for those action surfaces.
+- The official benchmark harness now runs `S00`, `S04`, `S07`, `S10`, and `S11` end-to-end and refreshes the comparison artifacts successfully.
+- Benchmark readiness remains `instrumented`, not `benchmark-complete`, because the remaining runner gaps are now concentrated on `S03`, `S05`, `S06`, `S08`, and `S09` rather than the newly-added `S00`/`S04`/`S07`/`S10`/`S11` pack.
 
 ### Rollback
 

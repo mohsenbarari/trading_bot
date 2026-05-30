@@ -48,6 +48,21 @@
     ],
     "scenarios": [
       {
+        "id": "S00",
+        "runner_key": "fresh_boot",
+        "label": "Fresh boot and mandatory room only",
+        "scenario_type": "boot_empty",
+        "conversation_count": 1,
+        "active_message_count": 6,
+        "filler_length": 20,
+        "surface_ids": [
+          "M01",
+          "M02",
+          "M05",
+          "M14"
+        ]
+      },
+      {
         "id": "S01",
         "runner_key": "light",
         "label": "Light direct chat",
@@ -73,6 +88,79 @@
           "M02",
           "M03",
           "M07",
+          "M14"
+        ]
+      },
+      {
+        "id": "S04",
+        "runner_key": "search_stress",
+        "label": "Search/viewer stress",
+        "scenario_type": "search_stress",
+        "conversation_count": 18,
+        "active_message_count": 320,
+        "filler_length": 28,
+        "search_term": "search_probe_hit",
+        "search_match_every": 11,
+        "surface_ids": [
+          "M03",
+          "M09",
+          "M14"
+        ]
+      },
+      {
+        "id": "S07",
+        "runner_key": "realtime_stress",
+        "label": "Notification and realtime stress",
+        "scenario_type": "realtime_stress",
+        "conversation_count": 16,
+        "active_message_count": 160,
+        "filler_length": 24,
+        "surface_ids": [
+          "M02",
+          "M03",
+          "M04",
+          "M05",
+          "M13",
+          "M14"
+        ]
+      },
+      {
+        "id": "S10",
+        "runner_key": "weak_device",
+        "label": "Weak-device performance",
+        "scenario_type": "weak_device",
+        "conversation_count": 20,
+        "active_message_count": 220,
+        "filler_length": 24,
+        "cpu_throttle_rate": 4,
+        "network_latency_ms": 180,
+        "download_kbps": 1800,
+        "upload_kbps": 900,
+        "reduced_motion": true,
+        "surface_ids": [
+          "M01",
+          "M02",
+          "M03",
+          "M06",
+          "M07",
+          "M14"
+        ]
+      },
+      {
+        "id": "S11",
+        "runner_key": "long_session",
+        "label": "Long-session soak",
+        "scenario_type": "long_session",
+        "conversation_count": 24,
+        "active_message_count": 180,
+        "filler_length": 24,
+        "switch_iterations": 2,
+        "surface_ids": [
+          "M02",
+          "M03",
+          "M10",
+          "M11",
+          "M13",
           "M14"
         ]
       }
@@ -145,6 +233,22 @@
       ],
       "covers": [
         "M02"
+      ]
+    },
+    {
+      "id": "chat-view-vitest",
+      "layer": "L2",
+      "kind": "vitest",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:unit:run",
+        "--",
+        "src/components/ChatView.test.ts"
+      ],
+      "covers": [
+        "M03"
       ]
     },
     {
