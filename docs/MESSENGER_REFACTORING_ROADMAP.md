@@ -1,12 +1,130 @@
 # Messenger Refactoring Roadmap
 
 > Date: 2026-05-30  
-> Status: Stage 7 rollout/readiness gate implemented; legacy Messenger remains the default and refactor preview remains opt-in
+> Status: Post-Stage-7 reset in progress; Phase 8 overlay/action standardization has started with the first production slice, legacy Messenger remains the default, refactor preview remains opt-in, and the next program is benchmark-driven around full-surface UX parity plus measurable performance gains
 > Scope: In-app Messenger frontend and the minimum backend/runtime seams needed to make it fast, stable, standard, dynamic, and user-friendly.
 
 ## Goal
 
 Rebuild the Messenger experience into a standard, cohesive, responsive, and polished product surface while preserving every existing business feature. The refactor must be reversible at each phase, test-gated, and isolated from unrelated areas such as Market, Profile, Admin, trading flows, customer/accountant rules, and bot behavior unless a phase explicitly lists that surface as an integration point.
+
+## Post-Stage-7 Reset (2026-05-30)
+
+The seven-stage executive track is complete. The refactor is now safe, typed, reversible, and rollout-aware, but the warmed Chromium benchmark between `85402f8` (pre-refactor baseline) and `31a7a24` (Stage 7) shows that the current state is not yet a uniform runtime win.
+
+### Verified Benchmark Findings
+
+| Metric | Pre-refactor | Stage 7 | Direction |
+|---|---:|---:|---|
+| Light list ready | 561 ms | 611 ms | worse |
+| Light chat first paint | 1251 ms | 1194 ms | better |
+| Heavy list ready | 688 ms | 704 ms | worse |
+| Heavy chat first paint | 1216 ms | 1298 ms | worse |
+| Heavy scroll FPS | 51.8 | 48.5 | worse |
+| Heavy context menu | 164 ms | 147 ms | better |
+| Messenger JS gzip | 138.3 KB | 141.8 KB | worse |
+
+### Decision
+
+- Continue the refactor, but switch from generic phase completion to targeted UX/performance work.
+- Keep legacy Messenger available; do not retire it yet.
+- Stop taking repeated broad benchmark snapshots without code changes in between.
+- Make the next roadmap authoritative over the entire Messenger surface, not only the slices already extracted into helpers.
+- Make a full two-version comparison plan a first-class deliverable before deeper UI replacement begins.
+
+## Canonical Messenger Surface Map
+
+This surface map is now the authority for roadmap phases, test coverage, and release gating. Every new refactor slice and every version-comparison test must map back to one or more surface ids below.
+
+| Surface ID | Area | Must include |
+|---|---|---|
+| `M01` | Shell, bootstrap, and navigation | Messenger route mount, feature flag/version gate, auth bootstrap, loading states, route-query restore, device/browser back stack, PWA install/boot interactions, session/account-status redirects |
+| `M02` | Conversation list | Ordering, pin reorder, mandatory-room ordering, mute/unmute, manual unread, hide/unfollow, unread mention badge, search entry, long-press menu, progressive rendering, empty/loading/error states |
+| `M03` | Direct room core | Open room, send/edit/delete text, read state, reply, forward, reactions, mentions, pinned messages, selection mode, draft/edit state, route restore |
+| `M04` | Group room | Room open, membership rules, admin/member behavior, send/read/react flows, mentions, room activity labels, unread counters, forwarding to/from groups |
+| `M05` | Channel room | Admin/member composer gating, optional/mandatory channel behavior, room open, unread/read reset, reactions, forwarding to/from channels, channel-specific room management |
+| `M06` | Composer and overlays | Text area, emoji/sticker picker, attachment sheet, reply/edit banners, voice state, read-only banners, selection action bar, search mode, overlay arbitration, keyboard transitions |
+| `M07` | Message rendering | Text, sticker, emoji-rich text, image, album, video, voice, document, file, location, forwarded metadata, reply preview, mention highlight, selection highlight, pinned indicator |
+| `M08` | Actions and batch operations | Context menu, selection mode, copy, reply, forward, delete, share, album actions, pin/unpin, browser-back exit behavior, destructive confirmations |
+| `M09` | Search, history navigation, and viewer flows | In-chat search, global search list, result navigation, scroll-to-target, scroll-to-reply, date separators, search/list toggle, lightbox, album viewer, location viewer |
+| `M10` | Media, upload, download, and cache pipeline | Background uploads, resumable uploads, upload progress, cancellation, download progress, document cache, media cache, share/open/download flows, reload/route-leave survival |
+| `M11` | Room/profile management | New conversation, group create/manage, channel create/manage, avatar upload/remove, member/admin mutation flows, public profile opens from messenger, owner/self profile entry points |
+| `M12` | Identity, permission, and business rules | Accountant/customer identity resolution, public-profile routing, block state, owner/customer visibility restrictions, room access rules, notification label correctness |
+| `M13` | Realtime and notification runtime | WebSocket/SSE message delivery, typing/upload activity, read receipts, reaction fanout, unread counters, browser notifications, toasts, deep-link routing, muted-room suppression |
+| `M14` | Reliability, accessibility, localization, and performance | RTL/Jalali/Tehran timestamps, reduced motion, weak-device behavior, reconnect/offline recovery, browser compatibility, bundle size, heap, DOM count, jank, responsiveness |
+
+## Full Two-Version Comparison Program
+
+The next program must compare the Messenger as a product, not only as code organization. The detailed plan lives in `docs/MESSENGER_VERSION_COMPARISON_TEST_PLAN.md` and becomes the execution contract for:
+
+- historical regression comparison: pre-refactor legacy vs current legacy,
+- live parity comparison: current legacy vs current refactor on completed surfaces,
+- release gating comparison: rollout candidate refactor vs current production legacy across the full Messenger surface map.
+
+The version-comparison plan is mandatory before any legacy-retirement decision.
+
+## Post-Stage-7 Program (Phase 8 Onward)
+
+### Phase 8 - Surface Manifest And Comparison Harness
+
+- Convert the Messenger surface map into an executable coverage manifest.
+- Promote the current temporary benchmark work into a committed comparison harness.
+- Add one authoritative comparison report format spanning parity, UX, and performance deltas.
+- Exit gate: every `M01`-`M14` surface is mapped to at least one deterministic test layer and one release owner.
+
+### Phase 9 - Shell, Navigation, And Conversation List Unification
+
+- Unify shell/loading/error states so legacy and refactor share the same navigation semantics.
+- Simplify conversation-row rendering and reduce list-specific reactive churn.
+- Preserve pin/mute/unread/mandatory rules while making the list visually and behaviorally consistent.
+- Exit gate: conversation list behavior is parity-complete and list-ready time is no worse than the pre-refactor baseline.
+
+### Phase 10 - Timeline Renderer Split And Heavy-Room Performance
+
+- Split message rendering by message family instead of keeping one oversized runtime path.
+- Isolate timeline orchestration from per-message rendering.
+- Introduce true heavy-room optimization for long histories, large media mixes, and scroll stability.
+- Exit gate: heavy-room first paint and scroll FPS both improve beyond the current Stage 7 baseline.
+
+### Phase 11 - Composer, Search, Selection, And Viewer Standardization
+
+- Unify composer states, search surfaces, selection-mode actions, and viewer overlays under one interaction system.
+- Eliminate duplicate overlay logic and back-stack inconsistencies.
+- Standardize direct/group/channel behavior where the business rules allow it.
+- Exit gate: no surface-specific UI drift remains for core composer/search/selection/viewer flows.
+
+### Phase 12 - Media Pipeline, Cache, And Reliability Hardening
+
+- Finish the upload/download/cache pipeline as one coherent runtime instead of parallel legacy branches.
+- Reduce main-thread work during image/video/document heavy scenarios.
+- Recheck weak-device behavior, route-leave survival, reload persistence, and background ownership semantics.
+- Exit gate: media-heavy scenarios stop being a top contributor to jank, failure, or user-visible inconsistency.
+
+### Phase 13 - Realtime, Notification, Identity, And Manager Convergence
+
+- Align room activity labels, profile opens, notification routing, and room-manager UI semantics across all room types.
+- Remove the remaining identity-resolution drift between direct rooms, groups/channels, trade/history consumers, and public-profile entry points.
+- Exit gate: realtime labels, notification routes, and room/profile managers behave as one product surface across all room types.
+
+### Phase 14 - Rollout, Performance Gate, And Legacy Retirement Decision
+
+- Run the full comparison plan on Chromium first, then browser matrix, then targeted manual UX review.
+- Only move the default to refactor after parity closure and measured wins.
+- Remove legacy only after explicit acceptance, not merely after feature-complete status.
+- Exit gate: every release criterion below is green.
+
+## Reset Release Criteria
+
+The post-Stage-7 program is done only when all of the following are true:
+
+- No Severity 1 or Severity 2 parity gaps remain across `M01`-`M14`.
+- The refactor default path passes the complete version-comparison plan.
+- Median Chromium runs show a real win on heavy scenarios, not only isolated light-room improvements.
+- Conversation list and heavy-room performance are both at least back to pre-refactor baseline and measurably better than Stage 7.
+- Messenger JS/CSS payload growth is justified and controlled.
+- Browser matrix is green on Chromium, Firefox, and WebKit.
+- Manual UX review confirms the UI feels unified rather than a mix of legacy and new interaction models.
+- The user explicitly approves the legacy-retirement decision.
 
 ## Implementation Progress
 
@@ -17,6 +135,7 @@ Rebuild the Messenger experience into a standard, cohesive, responsive, and poli
 - Stage 5 executive phase is implemented for composer/overlay UX: composer surface decisions and overlay arbitration now live behind a typed, focused-tested pure helper while the existing `ChatInputBar.vue` and `ChatView.vue` production path remains active.
 - Stage 6 executive phase is implemented for media/realtime polish: realtime activity normalization, relation-safe activity labels, visible-conversation runtime event guards, and media download progress patches now live behind a typed, focused-tested pure helper while the existing `useChatWebSocket.ts` and `useChatMedia.ts` runtime paths remain active.
 - Stage 7 executive phase is implemented for rollout readiness: the Messenger surface now exposes a typed legacy-vs-refactor rollout contract, focused tests prove old-version legacy default and new-version refactor preview routing, and the readiness helper explicitly separates technical rollout safety from legacy retirement approval.
+- Phase 8 roadmap work has started in the production `ChatView.vue` path: room-manager and admin-broadcast overlays now use the shared overlay back-stack binding, their close paths are explicit, and focused `ChatView` coverage locks browser/device back behavior for those surfaces.
 - No real Messenger UI replacement is active by default. The existing `ChatView.vue` path remains the production path unless `messenger_ui_version=refactor` or `VITE_MESSENGER_REFACTOR_ENABLED=true` explicitly enables the shell.
 
 ## Current Baseline
@@ -123,6 +242,8 @@ Rollback remains local and immediate: set `messenger_ui_version=legacy`, clear t
 - Persian/Jalali, RTL, account-status, customer, accountant, group/channel, notification, and upload contracts are part of the Messenger feature surface and must not regress.
 
 ## Existing Feature Inventory To Preserve
+
+The short list below remains valid, but the canonical surface inventory for planning and testing is now the `M01`-`M14` map above.
 
 The refactor must preserve at least these current capabilities:
 
@@ -436,6 +557,11 @@ Make context menus, forward modal, room managers, profile drawers, and lightbox 
 - Context menu, forward, room-manager, pinned-message, lightbox, and public-profile Playwright slices pass.
 - Back button closes overlays in the correct order.
 - No native browser long-press menu appears over message surfaces.
+
+### Current Slice Status
+
+- Started in `ChatView.vue` with shared back-stack binding for group manager, channel manager, and admin broadcast overlays.
+- Locked with focused `ChatView.test.ts` coverage before rerunning the official old-vs-current benchmark pipeline.
 
 ### Rollback
 

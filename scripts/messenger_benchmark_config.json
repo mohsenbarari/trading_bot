@@ -1,0 +1,486 @@
+{
+  "manifest_path": "docs/messenger-surface-manifest.json",
+  "surface_report_path": "docs/messenger-surface-report.md",
+  "artifacts_dir": "tmp/messenger-benchmark",
+  "comparison_summary_markdown": "tmp/messenger-benchmark/comparison-summary.md",
+  "comparison_summary_json": "tmp/messenger-benchmark/comparison-summary.json",
+  "surface_status_json": "tmp/messenger-benchmark/surface-status.json",
+  "performance": {
+    "backend": {
+      "host": "127.0.0.1",
+      "port": 8000
+    },
+    "output_file": "tmp/messenger-benchmark/performance-results.json",
+    "warmup_runs": 1,
+    "measured_runs": 1,
+    "browser": {
+      "engine": "chromium",
+      "locale": "fa-IR",
+      "color_scheme": "light",
+      "viewport": {
+        "width": 1365,
+        "height": 768
+      }
+    },
+    "worktree": {
+      "path": "../messenger-bench-pre",
+      "commit": "85402f8"
+    },
+    "versions": [
+      {
+        "key": "pre-refactor",
+        "label": "قبل از refactor",
+        "commit_ref": "85402f8",
+        "git_root": "../messenger-bench-pre",
+        "ui_version": "legacy",
+        "dist_dir": "../messenger-bench-pre/mini_app_dist",
+        "port": 4181
+      },
+      {
+        "key": "current-legacy",
+        "label": "نسخه فعلی",
+        "commit_ref": "HEAD",
+        "git_root": ".",
+        "ui_version": "legacy",
+        "dist_dir": "mini_app_dist",
+        "port": 4182
+      }
+    ],
+    "scenarios": [
+      {
+        "id": "S01",
+        "runner_key": "light",
+        "label": "Light direct chat",
+        "conversation_count": 8,
+        "active_message_count": 40,
+        "filler_length": 24,
+        "surface_ids": [
+          "M02",
+          "M03",
+          "M06",
+          "M07",
+          "M08"
+        ]
+      },
+      {
+        "id": "S02",
+        "runner_key": "heavy",
+        "label": "Heavy direct chat",
+        "conversation_count": 120,
+        "active_message_count": 700,
+        "filler_length": 28,
+        "surface_ids": [
+          "M02",
+          "M03",
+          "M07",
+          "M14"
+        ]
+      }
+    ]
+  },
+  "suite_catalog": [
+    {
+      "id": "messenger-view-vitest",
+      "layer": "L2",
+      "kind": "vitest",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:unit:run",
+        "--",
+        "src/views/MessengerView.test.ts"
+      ],
+      "covers": [
+        "M01"
+      ]
+    },
+    {
+      "id": "auth-shell-playwright",
+      "layer": "L3",
+      "kind": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e",
+        "--",
+        "e2e/auth.spec.ts",
+        "--reporter=line"
+      ],
+      "covers": [
+        "M01"
+      ]
+    },
+    {
+      "id": "account-status-playwright",
+      "layer": "L3",
+      "kind": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e",
+        "--",
+        "e2e/account-status.spec.ts",
+        "--reporter=line"
+      ],
+      "covers": [
+        "M01",
+        "M11",
+        "M13"
+      ]
+    },
+    {
+      "id": "chat-conversation-list-vitest",
+      "layer": "L2",
+      "kind": "vitest",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:unit:run",
+        "--",
+        "src/components/chat/ChatConversationList.test.ts"
+      ],
+      "covers": [
+        "M02"
+      ]
+    },
+    {
+      "id": "conversation-actions-playwright",
+      "layer": "L3",
+      "kind": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e",
+        "--",
+        "e2e/messenger-conversation-actions.spec.ts",
+        "--reporter=line"
+      ],
+      "covers": [
+        "M02",
+        "M06",
+        "M11"
+      ]
+    },
+    {
+      "id": "direct-chat-playwright",
+      "layer": "L3",
+      "kind": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e",
+        "--",
+        "e2e/direct-chat.spec.ts",
+        "--reporter=line"
+      ],
+      "covers": [
+        "M03",
+        "M08",
+        "M13"
+      ]
+    },
+    {
+      "id": "direct-room-ux-playwright",
+      "layer": "L3",
+      "kind": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e",
+        "--",
+        "e2e/messenger-direct-room-ux.spec.ts",
+        "--reporter=line"
+      ],
+      "covers": [
+        "M03",
+        "M07",
+        "M09",
+        "M10",
+        "M14"
+      ]
+    },
+    {
+      "id": "pinned-message-playwright",
+      "layer": "L3",
+      "kind": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e",
+        "--",
+        "e2e/messenger-pinned-message.spec.ts",
+        "--reporter=line"
+      ],
+      "covers": [
+        "M03",
+        "M04",
+        "M05"
+      ]
+    },
+    {
+      "id": "group-channel-media-playwright",
+      "layer": "L3",
+      "kind": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e",
+        "--",
+        "e2e/channel-media.spec.ts",
+        "--reporter=line"
+      ],
+      "covers": [
+        "M04",
+        "M05",
+        "M07",
+        "M08",
+        "M10",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "id": "mandatory-channel-playwright",
+      "layer": "L3",
+      "kind": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e",
+        "--",
+        "e2e/mandatory-channel.spec.ts",
+        "--reporter=line"
+      ],
+      "covers": [
+        "M05",
+        "M13"
+      ]
+    },
+    {
+      "id": "chat-input-bar-vitest",
+      "layer": "L2",
+      "kind": "vitest",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:unit:run",
+        "--",
+        "src/components/chat/ChatInputBar.test.ts"
+      ],
+      "covers": [
+        "M06",
+        "M08"
+      ]
+    },
+    {
+      "id": "chat-message-item-vitest",
+      "layer": "L2",
+      "kind": "vitest",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:unit:run",
+        "--",
+        "src/components/chat/ChatMessageItem.test.ts"
+      ],
+      "covers": [
+        "M07",
+        "M09",
+        "M13"
+      ]
+    },
+    {
+      "id": "use-chat-media-vitest",
+      "layer": "L2",
+      "kind": "vitest",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:unit:run",
+        "--",
+        "src/composables/chat/useChatMedia.test.ts"
+      ],
+      "covers": [
+        "M08",
+        "M10",
+        "M14"
+      ]
+    },
+    {
+      "id": "chat-lightbox-vitest",
+      "layer": "L2",
+      "kind": "vitest",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:unit:run",
+        "--",
+        "src/components/chat/ChatLightbox.test.ts"
+      ],
+      "covers": [
+        "M09"
+      ]
+    },
+    {
+      "id": "group-manager-vitest",
+      "layer": "L2",
+      "kind": "vitest",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:unit:run",
+        "--",
+        "src/components/chat/ChatGroupManagerModal.test.ts"
+      ],
+      "covers": [
+        "M04",
+        "M05",
+        "M11"
+      ]
+    },
+    {
+      "id": "room-manager-profile-playwright",
+      "layer": "L3",
+      "kind": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e",
+        "--",
+        "e2e/messenger-room-manager-profile.spec.ts",
+        "--reporter=line"
+      ],
+      "covers": [
+        "M04",
+        "M05",
+        "M11",
+        "M12"
+      ]
+    },
+    {
+      "id": "public-profile-vitest",
+      "layer": "L2",
+      "kind": "vitest",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:unit:run",
+        "--",
+        "src/components/PublicProfile.test.ts",
+        "src/views/PublicProfileView.test.ts"
+      ],
+      "covers": [
+        "M12"
+      ]
+    },
+    {
+      "id": "customer-chat-privacy-playwright",
+      "layer": "L3",
+      "kind": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e",
+        "--",
+        "e2e/customer-chat-privacy.spec.ts",
+        "--reporter=line"
+      ],
+      "covers": [
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "id": "notifications-playwright",
+      "layer": "L3",
+      "kind": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e",
+        "--",
+        "e2e/notifications.spec.ts",
+        "--reporter=line"
+      ],
+      "covers": [
+        "M03",
+        "M04",
+        "M05",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "id": "notification-runtime-vitest",
+      "layer": "L2",
+      "kind": "vitest",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:unit:run",
+        "--",
+        "src/composables/useNotificationRuntime.test.ts"
+      ],
+      "covers": [
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "id": "accountant-owner-flow-playwright",
+      "layer": "L3",
+      "kind": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e",
+        "--",
+        "e2e/accountant-owner-flow.spec.ts",
+        "--reporter=line"
+      ],
+      "covers": [
+        "M11",
+        "M12"
+      ]
+    },
+    {
+      "id": "customer-owner-flow-playwright",
+      "layer": "L3",
+      "kind": "playwright",
+      "cwd": "frontend",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e",
+        "--",
+        "e2e/customer-owner-flow.spec.ts",
+        "--reporter=line"
+      ],
+      "covers": [
+        "M11",
+        "M12"
+      ]
+    }
+  ]
+}

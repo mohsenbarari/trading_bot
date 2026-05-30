@@ -5,6 +5,9 @@ check-dns
 docs/*
 !docs/AUTOMATED_TEST_CHECKLIST.md
 !docs/MESSENGER_REFACTORING_ROADMAP.md
+!docs/MESSENGER_VERSION_COMPARISON_TEST_PLAN.md
+!docs/messenger-surface-manifest.json
+!docs/messenger-surface-report.md
 .env
 .env.iran
 # Environments
