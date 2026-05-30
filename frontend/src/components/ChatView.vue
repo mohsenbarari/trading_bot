@@ -2763,17 +2763,16 @@ async function handleLightboxDelete(msgId: number) {
   }
 }
 
-function goBack() {
+async function goBack() {
   if (contextMenu.value.visible) {
     closeContextMenu()
     return
   }
 
   if (selectedUserId.value) {
-    selectedUserId.value = null
-    selectedUserName.value = ''
-    messages.value = []
-    popBackState()
+    clearActiveConversationState()
+    discardBackState()
+    await syncSelectedConversationRoute(null, '')
   } else {
     emit('back')
   }

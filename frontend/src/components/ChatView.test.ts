@@ -2318,11 +2318,24 @@ describe('ChatView.vue', () => {
     await flushPromises()
 
     expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55)
+    expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      path: '/chat',
+      query: {
+        user_id: '55',
+        user_name: 'Target User',
+      },
+    })
 
+    chatViewMocks.routerReplaceMock.mockClear()
     await wrapper.get('.chat-header-back').trigger('click')
     await flushPromises()
 
-    expect(chatViewMocks.popBackStateMock).toHaveBeenCalled()
+    expect(chatViewMocks.discardBackStateMock).toHaveBeenCalled()
+    expect(chatViewMocks.popBackStateMock).not.toHaveBeenCalled()
+    expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({
+      path: '/chat',
+      query: {},
+    })
     expect(wrapper.find('.select-conversation-action').exists()).toBe(true)
 
     wrapper.unmount()
