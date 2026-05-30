@@ -323,7 +323,7 @@ deploy_foreign() {
     run_with_local_resource_guard "Foreign Docker image build" env DOCKER_BUILDKIT=1 docker build -t trading_bot_base .
 
     echo "ℹ️ Standard foreign deploy only refreshes core services: ${core_services[*]}"
-    echo "ℹ️ Optional support services (tileserver/adminer) are left untouched to avoid a cold-boot CPU spike after crashes or reboots."
+    echo "ℹ️ Optional support services (tileserver) are left untouched to avoid a cold-boot CPU spike after crashes or reboots."
     echo "⏳ Waiting for foreign core services to become ready..."
     run_with_local_resource_guard "Foreign core service startup" docker compose up -d --wait --wait-timeout 180 "${core_services[@]}"
 

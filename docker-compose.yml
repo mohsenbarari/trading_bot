@@ -21,7 +21,7 @@ services:
       - ./trading_settings.json:/app/trading_settings.json
       - uploads_data:/app/uploads
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       - .env
     depends_on:
@@ -113,18 +113,6 @@ services:
       timeout: 5s
       retries: 5
 
-  adminer:
-    image: adminer
-    container_name: trading_bot_adminer
-    restart: always
-    environment:
-      TZ: UTC
-    ports:
-      - "127.0.0.1:8080:8080"
-    networks:
-      - trading_net
-    depends_on:
-      - db
   redis:
     image: redis:7-alpine
     container_name: trading_bot_redis
