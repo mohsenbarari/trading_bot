@@ -92,6 +92,22 @@
         ]
       },
       {
+        "id": "S03",
+        "runner_key": "media_heavy",
+        "label": "Media-heavy direct room",
+        "scenario_type": "media_direct",
+        "conversation_count": 14,
+        "active_message_count": 72,
+        "filler_length": 20,
+        "surface_ids": [
+          "M06",
+          "M07",
+          "M09",
+          "M10",
+          "M14"
+        ]
+      },
+      {
         "id": "S04",
         "runner_key": "search_stress",
         "label": "Search/viewer stress",
@@ -105,6 +121,38 @@
           "M03",
           "M09",
           "M14"
+        ]
+      },
+      {
+        "id": "S05",
+        "runner_key": "group_matrix",
+        "label": "Group admin/member matrix",
+        "scenario_type": "group_matrix",
+        "conversation_count": 10,
+        "active_message_count": 54,
+        "filler_length": 18,
+        "switch_iterations": 2,
+        "surface_ids": [
+          "M04",
+          "M06",
+          "M11",
+          "M13"
+        ]
+      },
+      {
+        "id": "S06",
+        "runner_key": "channel_matrix",
+        "label": "Channel admin/member matrix",
+        "scenario_type": "channel_matrix",
+        "conversation_count": 10,
+        "active_message_count": 48,
+        "filler_length": 18,
+        "switch_iterations": 2,
+        "surface_ids": [
+          "M05",
+          "M06",
+          "M11",
+          "M13"
         ]
       },
       {

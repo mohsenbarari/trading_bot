@@ -1,7 +1,7 @@
 # Messenger Refactoring Roadmap
 
 > Date: 2026-05-30  
-> Status: Post-Stage-7 reset in progress; Phase 8 overlay/action standardization now has a second production slice in `ChatView.vue`, the official benchmark runner now executes `S00`/`S04`/`S07`/`S10`/`S11`, legacy Messenger remains the default, refactor preview remains opt-in, and readiness is still benchmark-instrumented because runner coverage is still missing `S03`/`S05`/`S06`/`S08`/`S09`
+> Status: Post-Stage-7 reset in progress; Phase 8 overlay/action standardization now has a second production slice in `ChatView.vue`, the official benchmark runner now executes `S00`/`S03`/`S04`/`S05`/`S06`/`S07`/`S10`/`S11`, legacy Messenger remains the default, refactor preview remains opt-in, and readiness is still benchmark-instrumented because runner coverage is now concentrated on `S08`/`S09`
 > Scope: In-app Messenger frontend and the minimum backend/runtime seams needed to make it fast, stable, standard, dynamic, and user-friendly.
 
 ## Goal
@@ -562,8 +562,17 @@ Make context menus, forward modal, room managers, profile drawers, and lightbox 
 
 - The production `ChatView.vue` path now standardizes close-order across context menu, forward flow, lightbox reply/forward actions, and public-profile navigation by closing transient action surfaces before opening the next overlay or route.
 - Focused `ChatView.test.ts` coverage locks the new close-order and shared back-stack behavior for those action surfaces.
-- The official benchmark harness now runs `S00`, `S04`, `S07`, `S10`, and `S11` end-to-end and refreshes the comparison artifacts successfully.
-- Benchmark readiness remains `instrumented`, not `benchmark-complete`, because the remaining runner gaps are now concentrated on `S03`, `S05`, `S06`, `S08`, and `S09` rather than the newly-added `S00`/`S04`/`S07`/`S10`/`S11` pack.
+- The official benchmark harness now runs `S00`, `S03`, `S04`, `S05`, `S06`, `S07`, `S10`, and `S11` end-to-end and refreshes the comparison artifacts successfully.
+- The refreshed official benchmark artifacts now include `20` performance samples, and `surface-status` confirms the Step 1 runner gaps for `S03`/`S05`/`S06` are closed.
+- Benchmark readiness remains `instrumented`, not `benchmark-complete`, because the remaining runner gaps are now concentrated on `S08` and `S09`.
+- Benchmark completion is now explicitly staged into five scenario closures across two delivery steps:
+  1. `S03` media-heavy direct room.
+  2. `S05` group admin/member matrix.
+  3. `S06` channel admin/member matrix.
+  4. `S08` identity, permission, and room-visibility matrix.
+  5. `S09` media resilience, cache recovery, and failure-path matrix.
+- Step 1 closes stages `S03`/`S05`/`S06` and rebuilds the official benchmark artifacts.
+- Step 2 closes stages `S08`/`S09`, then re-runs the comparison/report path to judge whether readiness can move beyond `benchmark-instrumented`.
 
 ### Rollback
 
