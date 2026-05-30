@@ -33,10 +33,12 @@ import schemas
 
 from core.services.session_service import (
     ACCOUNT_INACTIVE_BLOCK_REASON,
+    deactivate_session,
     get_active_sessions,
     get_session_by_refresh_token,
     handle_login_session,
     hash_token,
+    publish_session_revocation,
 )
 from core.services.user_account_status_service import get_user_account_status, is_user_global_web_locked
 from core.services.avatar_service import resolve_owned_avatar_file_id
@@ -97,6 +99,36 @@ def _extract_device_info(request) -> dict:
 
     ip = request.client.host if hasattr(request, 'client') and request.client else None
     return {"device_name": device_name, "device_ip": ip, "platform": platform}
+
+
+def _dev_bypass_requires_single_session(user: User | object) -> bool:
+    role = getattr(user, "role", None)
+    if role in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER):
+        return True
+
+    raw_max_sessions = getattr(user, "max_sessions", 1)
+    try:
+        max_sessions = int(raw_max_sessions)
+    except (TypeError, ValueError):
+        max_sessions = 1
+    return min(max(max_sessions, 1), 3) == 1
+
+
+async def _clear_dev_bypass_sessions(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    clear_all_active: bool,
+) -> None:
+    revoked_sessions = []
+    active_sessions = await get_active_sessions(db, user_id)
+    for session in active_sessions:
+        if clear_all_active or session.device_name in {TEST_ACCOUNT_SWITCH_DEVICE_NAME, "Dev Bypass Terminal"}:
+            await deactivate_session(db, session)
+            revoked_sessions.append(session)
+
+    if revoked_sessions:
+        await publish_session_revocation(user_id, revoked_sessions)
 
 
 def _login_home_server(raw_request: Request, *, is_telegram: bool = False) -> str:
@@ -570,6 +602,12 @@ async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
     else:
         user.home_server = login_home_server
         await ensure_mandatory_channel_membership(db, user=user)
+
+    await _clear_dev_bypass_sessions(
+        db,
+        user_id=user.id,
+        clear_all_active=True,
+    )
         
     refresh_token = create_refresh_token(subject=user.id)
     device_info = _extract_device_info(raw_request)
@@ -582,7 +620,7 @@ async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
         platform=device_info["platform"],
         refresh_token_hash=hash_token(refresh_token),
         home_server=login_home_server,
-        is_primary=False,
+        is_primary=True,
         is_active=True,
         expires_at=utc_now() + timedelta(days=365)
     )
@@ -680,19 +718,15 @@ async def switch_test_account(
     login_home_server = _login_home_server(raw_request)
     target_user.home_server = login_home_server
 
+    await _clear_dev_bypass_sessions(
+        db,
+        user_id=target_user.id,
+        clear_all_active=_dev_bypass_requires_single_session(target_user),
+    )
+
     refresh_token = create_refresh_token(subject=target_user.id, data=_test_switch_token_data())
     device_info = _extract_device_info(raw_request)
     real_ip = _extract_request_real_ip(raw_request)
-
-    await db.execute(
-        update(UserSession)
-        .where(
-            UserSession.user_id == target_user.id,
-            UserSession.device_name == TEST_ACCOUNT_SWITCH_DEVICE_NAME,
-            UserSession.is_active == True,
-        )
-        .values(is_active=False)
-    )
 
     session = UserSession(
         id=uuid.uuid4(),
@@ -702,7 +736,7 @@ async def switch_test_account(
         platform=device_info["platform"],
         refresh_token_hash=hash_token(refresh_token),
         home_server=login_home_server,
-        is_primary=False,
+        is_primary=_dev_bypass_requires_single_session(target_user),
         is_active=True,
         expires_at=utc_now() + timedelta(days=30),
     )

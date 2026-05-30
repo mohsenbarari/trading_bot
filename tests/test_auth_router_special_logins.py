@@ -136,13 +136,19 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_switch_test_account_issues_switchable_tokens_and_temp_session(self):
         request = make_request(headers={"x-platform": "web"}, host="8.8.8.8")
-        target_user = SimpleNamespace(id=19, is_deleted=False, home_server="iran")
-        db = FakeDB([FakeExecuteResult(None)], get_result=target_user)
+        target_user = SimpleNamespace(id=19, is_deleted=False, home_server="iran", role=UserRole.STANDARD, max_sessions=3)
+        db = FakeDB(get_result=target_user)
         now = datetime(2026, 1, 2, tzinfo=timezone.utc)
 
         with patch(
             "api.routers.auth.get_user_account_status",
             return_value=SimpleNamespace(value="active"),
+        ), patch(
+            "api.routers.auth.get_active_sessions",
+            new=AsyncMock(return_value=[]),
+        ), patch(
+            "api.routers.auth.publish_session_revocation",
+            new=AsyncMock(),
         ), patch(
             "api.routers.auth.create_refresh_token",
             return_value="refresh-token",
@@ -183,6 +189,7 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.platform, Platform.WEB)
         self.assertEqual(session.refresh_token_hash, "hashed-refresh")
         self.assertEqual(session.home_server, "foreign")
+        self.assertFalse(session.is_primary)
         self.assertEqual(session.expires_at, now + timedelta(days=30))
         mandatory_mock.assert_awaited_once_with(db, user=target_user)
         db.commit.assert_awaited_once()
@@ -226,6 +233,12 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.auth.ensure_mandatory_channel_membership",
             new=AsyncMock(),
         ) as mandatory_mock, patch(
+            "api.routers.auth.get_active_sessions",
+            new=AsyncMock(return_value=[]),
+        ), patch(
+            "api.routers.auth.publish_session_revocation",
+            new=AsyncMock(),
+        ), patch(
             "api.routers.auth.hash_token",
             return_value="hashed-refresh",
         ), patch("api.routers.auth.uuid.uuid4", return_value="session-uuid"), patch(
@@ -255,6 +268,7 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.platform, Platform.WEB)
         self.assertEqual(session.refresh_token_hash, "hashed-refresh")
         self.assertEqual(session.home_server, "foreign")
+        self.assertTrue(session.is_primary)
         self.assertEqual(session.expires_at, now + timedelta(days=365))
         self.assertEqual(db.commit.await_count, 2)
         refresh_mock.assert_called_once_with(subject=77)
@@ -280,6 +294,10 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.auth.uuid.uuid4", return_value="session-uuid"
         ), patch("api.routers.auth.utc_now", return_value=datetime(2026, 1, 1, tzinfo=timezone.utc)), patch(
             "api.routers.auth._login_home_server", return_value="foreign"
+        ), patch(
+            "api.routers.auth.get_active_sessions", new=AsyncMock(return_value=[])
+        ), patch(
+            "api.routers.auth.publish_session_revocation", new=AsyncMock()
         ), patch("api.routers.auth.create_access_token", return_value="access-token"):
             result = await dev_login(request, db=db)
 
@@ -287,6 +305,58 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
         mandatory_mock.assert_awaited_once_with(db, user=existing_user)
         self.assertEqual(db.commit.await_count, 1)
         self.assertEqual(result["user_id"], 7)
+
+    async def test_switch_test_account_clears_all_active_sessions_for_single_session_users(self):
+        request = make_request(headers={"x-platform": "web"}, host="8.8.8.8")
+        target_user = SimpleNamespace(id=21, is_deleted=False, home_server="iran", role=UserRole.SUPER_ADMIN)
+        active_session = SimpleNamespace(id="live-session", device_name="Mobile Browser")
+        db = FakeDB(get_result=target_user)
+
+        with patch(
+            "api.routers.auth.get_user_account_status",
+            return_value=SimpleNamespace(value="active"),
+        ), patch(
+            "api.routers.auth.get_active_sessions",
+            new=AsyncMock(return_value=[active_session]),
+        ), patch(
+            "api.routers.auth.deactivate_session",
+            new=AsyncMock(),
+        ) as deactivate_mock, patch(
+            "api.routers.auth.publish_session_revocation",
+            new=AsyncMock(),
+        ) as publish_mock, patch(
+            "api.routers.auth.create_refresh_token",
+            return_value="refresh-token",
+        ), patch(
+            "api.routers.auth.hash_token",
+            return_value="hashed-refresh",
+        ), patch(
+            "api.routers.auth.uuid.uuid4",
+            return_value="switch-session",
+        ), patch(
+            "api.routers.auth.utc_now",
+            return_value=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        ), patch(
+            "api.routers.auth.create_access_token",
+            return_value="access-token",
+        ), patch(
+            "api.routers.auth.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.auth._login_home_server",
+            return_value="foreign",
+        ):
+            await switch_test_account(
+                target_user_id=21,
+                raw_request=request,
+                db=db,
+                token="plain-token",
+                current_user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                dev_key=None,
+            )
+
+        deactivate_mock.assert_awaited_once_with(db, active_session)
+        publish_mock.assert_awaited_once()
 
     async def test_webapp_login_requires_bot_token_and_invalid_payload_returns_auth_failed(self):
         request = make_request(headers={"user-agent": "Telegram"}, host="10.0.0.8")
