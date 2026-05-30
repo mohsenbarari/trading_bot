@@ -161,6 +161,11 @@ async def get_public_config():
 # -------------------------------------------------------
 # مسیر بیلد شده Frontend (dist)
 static_dir = Path("mini_app_dist")
+blocked_frontend_probe_paths = {
+    "openapi.json",
+    "docs",
+    "redoc",
+}
 
 if static_dir.exists():
     
@@ -169,7 +174,10 @@ if static_dir.exists():
     async def serve_frontend(full_path: str):
         # اگر درخواست API بود و هندل نشده بود -> 404 بده (به index.html نفرست)
         if full_path.startswith("api/"):
-             return JSONResponse({"detail": "Not Found"}, status_code=404)
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+
+        if full_path in blocked_frontend_probe_paths or full_path.startswith("docs/") or full_path.startswith("redoc/"):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
              
         # اگر فایل استاتیک بود و وجود داشت -> سرو کن (تمام asset ها و عکس ها)
         file_path = static_dir / full_path

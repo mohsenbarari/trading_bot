@@ -13,6 +13,14 @@ class MainFrontendServingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, JSONResponse)
         self.assertEqual(result.status_code, 404)
 
+    async def test_serve_frontend_returns_404_for_blocked_docs_probe_paths(self):
+        for path in ("openapi.json", "docs", "redoc", "docs/index.html"):
+            with self.subTest(path=path):
+                result = await main.serve_frontend(path)
+
+                self.assertIsInstance(result, JSONResponse)
+                self.assertEqual(result.status_code, 404)
+
     async def test_serve_frontend_serves_existing_static_file_and_index_fallback(self):
         static_result = await main.serve_frontend("index.html")
         fallback_result = await main.serve_frontend("chat/thread/123")
