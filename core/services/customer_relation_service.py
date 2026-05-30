@@ -770,24 +770,10 @@ async def build_allowed_customer_chat_targets(
     owner_user_id = relation.owner_user_id
     stmt = (
         select(User.id)
-        .outerjoin(
-            CustomerRelation,
-            and_(
-                CustomerRelation.customer_user_id == User.id,
-                CustomerRelation.status == CustomerRelationStatus.ACTIVE,
-                CustomerRelation.deleted_at.is_(None),
-            ),
-        )
         .where(
             User.is_deleted.is_(False),
             User.id != customer_user_id,
-            (
-                (User.id == owner_user_id)
-                | (
-                    (User.role == UserRole.SUPER_ADMIN)
-                    & CustomerRelation.id.is_(None)
-                )
-            ),
+            User.id == owner_user_id,
         )
         .order_by(User.id.asc())
     )

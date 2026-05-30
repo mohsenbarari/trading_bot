@@ -857,12 +857,12 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             validate_customer_trade_limits(active_relation, quantity=0, now=now)
         self.assertEqual(quantity_exc.exception.detail, "Trade quantity must be positive")
 
-    async def test_build_allowed_customer_chat_targets_includes_owner_accountants_and_super_admin_without_customers(self):
+    async def test_build_allowed_customer_chat_targets_includes_only_owner_and_accountants(self):
         relation = SimpleNamespace(owner_user_id=7)
         db = FakeDB(
             execute_results=[
                 FakeExecuteResult(scalar_one_value=relation),
-                FakeExecuteResult(values=[7, 40]),
+                FakeExecuteResult(values=[7]),
                 FakeExecuteResult(values=[11, 12]),
                 FakeExecuteResult(values=[]),
             ]
@@ -870,14 +870,14 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
         result = await build_allowed_customer_chat_targets(db, 9)
 
-        self.assertEqual(result, [7, 11, 12, 40])
+        self.assertEqual(result, [7, 11, 12])
 
     async def test_build_allowed_customer_chat_targets_includes_shared_group_accountants(self):
         relation = SimpleNamespace(owner_user_id=7)
         db = FakeDB(
             execute_results=[
                 FakeExecuteResult(scalar_one_value=relation),
-                FakeExecuteResult(values=[7, 40]),
+                FakeExecuteResult(values=[7]),
                 FakeExecuteResult(values=[11, 12]),
                 FakeExecuteResult(values=[55, 12]),
             ]
@@ -885,7 +885,7 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
         result = await build_allowed_customer_chat_targets(db, 9)
 
-        self.assertEqual(result, [7, 11, 12, 40, 55])
+        self.assertEqual(result, [7, 11, 12, 55])
 
     async def test_list_shared_group_accountant_ids_for_customer_returns_execute_rows(self):
         db = FakeDB(execute_results=[FakeExecuteResult(values=[44, 55])])

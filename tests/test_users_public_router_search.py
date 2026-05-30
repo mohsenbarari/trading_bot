@@ -107,7 +107,6 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         current_user = SimpleNamespace(id=91, role=UserRole.STANDARD)
         rows = [
             make_user(id=20, account_name="owner20"),
-            make_user(id=1, account_name="admin1", role=UserRole.SUPER_ADMIN),
         ]
         db = FakeDB([FakeExecuteResult(rows), FakeExecuteResult([]), FakeExecuteResult([])])
 
@@ -119,11 +118,11 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=SimpleNamespace(owner_user_id=20)),
         ), patch(
             "api.routers.users_public.build_allowed_customer_chat_targets",
-            new=AsyncMock(return_value=[20, 1]),
+            new=AsyncMock(return_value=[20]),
         ):
             result = await search_public_users(q=None, limit=25, db=db, current_user=current_user)
 
-        self.assertEqual([item.id for item in result], [20, 1])
+        self.assertEqual([item.id for item in result], [20])
         stmt_text = str(db.stmts[0]).lower()
         self.assertIn("users.id in", stmt_text)
 
